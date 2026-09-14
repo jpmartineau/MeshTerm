@@ -48,7 +48,7 @@ jobs:
       # The one job that needs it: creating a release writes to the repository.
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -129,12 +129,12 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
           path: meshterm
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: jpmartineau/meshterm.net
           ssh-key: ${{ secrets.SITE_DEPLOY_KEY }}
