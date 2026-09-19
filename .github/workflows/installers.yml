@@ -90,7 +90,7 @@ jobs:
           # via `find`, the release assets built from it) is three plain files.
           cp packaging/build/meshterm/THIRD-PARTY-NOTICES.txt .
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: matrix.label == 'linux-x64'
         with:
           name: meshterm-licenses
@@ -139,7 +139,7 @@ jobs:
       - name: Hand the Windows binary to SignPath
         id: unsigned
         if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           # Deliberately not `meshterm-*`: the release workflow attaches every artifact
           # matching that prefix, and this one is the unsigned draft.
@@ -176,7 +176,7 @@ jobs:
           fi
           cat "$out.sha256"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: meshterm-${{ matrix.label }}
           path: |
