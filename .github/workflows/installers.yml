@@ -57,7 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           # Oldest supported version on purpose: a binary built against an older glibc
           # and an older Python runs on more machines than one built against the newest.
