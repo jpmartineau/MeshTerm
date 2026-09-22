@@ -803,3 +803,27 @@ def test_help_is_plain_and_names_every_exit_status(run) -> None:  # noqa: ANN001
     assert not set(result.output) & set("─│╭╮╰╯")
     for code in exitcodes.MEANINGS:
         assert f"{code} " in result.output
+
+def test_every_command_help_is_plain_english(run) -> None:  # noqa: ANN001
+    """No Sphinx or source-path markup in any ``--help`` page.
+
+    ``platform`` and ``specimen`` used to dump their developer notes (backticks,
+    ``:func:`` / ``:mod:`` roles) into the terminal. Every command's help should
+    read like the others: a short plain description.
+    """
+    from meshterm.cli import app
+
+    markup = re.compile(r":(?:func|mod|class|meth|attr|data|exc|obj):`")
+    source_ticks = re.compile(r"``[^`]+``")
+    pages = [("--help", run("--help"))]
+    for cmd in app.registered_commands:
+        name = cmd.name or cmd.callback.__name__
+        pages.append((f"{name} --help", run(name, "--help")))
+    for label, result in pages:
+        assert result.exit_code == 0, label
+        text = result.stdout
+        assert not markup.search(text), f"{label} still has Sphinx roles:\n{text}"
+        assert not source_ticks.search(text), f"{label} still has double-backtick markup:\n{text}"
+        assert "meshterm/platforms.py" not in text
+        assert "meshterm.ui.termfont" not in text
+        assert "meshterm.ui.specimen" not in text
