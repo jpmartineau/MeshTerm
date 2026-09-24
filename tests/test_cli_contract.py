@@ -583,6 +583,23 @@ def test_a_value_outside_a_closed_set_is_refused_rather_than_ignored(run, args, 
     assert flag in result.stderr
 
 
+@pytest.mark.parametrize("width", ["-1", "0", "3", "8"])
+@pytest.mark.parametrize("json_output", [False, True])
+def test_records_rejects_unsupported_widths(run, width, json_output) -> None:  # noqa: ANN001
+    """Invalid hash widths are usage errors, including the formerly ignored zero."""
+    prefix = ("--json",) if json_output else ()
+    result = run(*prefix, "records", "--width", width)
+    assert result.exit_code == exitcodes.USAGE
+    assert result.stdout == ""
+    assert "--width must be one of: 1, 2, 4" in result.stderr
+
+
+@pytest.mark.parametrize("width", ["1", "2", "4"])
+def test_records_accepts_supported_widths(run, width) -> None:  # noqa: ANN001
+    """A valid filter on an empty database still means nothing to report."""
+    assert run("records", "--width", width).exit_code == exitcodes.NO_RESULT
+
+
 def test_a_profile_that_names_nothing_is_refused_before_anything_transmits(run) -> None:  # noqa: ANN001
     """``--profile`` is a claim about *which* radio, and an unkeepable one is not a default.
 
