@@ -274,7 +274,6 @@ en_pins = [27]   # the AIO v2 needs this
 | `en_pins` | `[]` | Power-enable lines to raise before the chip is touched. The **AIO v2 needs `[27]`.** |
 | `use_dio2_rf`, `use_dio3_tcxo` | `true`, `true` | Whether DIO2 drives the RF switch and DIO3 a TCXO (both on for the AIO). |
 | `is_waveshare` | `false` | The Waveshare HAT's wiring quirks, which the radio library knows about. |
-| `preamble_length` | `12` | LoRa preamble symbols. |
 | `python` | `""` (empty) | An interpreter to run the node under, when the one MeshTerm would find on its own isn't the one you want. Empty lets MeshTerm look. |
 
 An unknown key, or one of the wrong type, stops MeshTerm at startup with the profile
@@ -561,7 +560,7 @@ Then `systemctl --user restart meshterm-spi-bridge.service`.
 | `MESHCORE_SPREADING_FACTOR`, `MESHCORE_BANDWIDTH`, `MESHCORE_CODING_RATE` | the modem preset — all three must match the mesh you are joining. Whole numbers only: bandwidth in Hz (`62500`), coding rate as the denominator (`5` for 4/5). A decimal or `4/5` stops the bridge at startup. |
 | `MESHCORE_TXEN_PIN`, `MESHCORE_RXEN_PIN`, `MESHCORE_EN_PINS` | the RF-switch and power-enable lines a board may need (`-1` for none; `EN_PINS` is a comma list — the AIO v2 wants `27`) |
 | `MESHCORE_USE_DIO2_RF`, `MESHCORE_USE_DIO3_TCXO`, `MESHCORE_IS_WAVESHARE` | whether DIO2 drives the RF switch and DIO3 the TCXO (both on for the AIO), and a flag for a different vendor's wiring the runtime knows about |
-| `MESHCORE_GPIO_CHIP`, `MESHCORE_USE_GPIOD_BACKEND`, `MESHCORE_PREAMBLE_LENGTH` | which gpiochip, whether to drive it through `gpiod`, and the LoRa preamble |
+| `MESHCORE_GPIO_CHIP`, `MESHCORE_USE_GPIOD_BACKEND`, `MESHCORE_PREAMBLE_LENGTH` | which gpiochip, whether to drive it through `gpiod`, and the LoRa preamble (leave it unset: the bridge follows MeshCore, 32 symbols up to SF8 and 16 above, and a shorter one leaves the radio deaf to most of the mesh) |
 | `MESHTERM_PYMC_PYTHON` | force a specific interpreter instead of letting the bridge discover one |
 
 The bridge passes a knob only when the runtime's radio constructor accepts it, so the same

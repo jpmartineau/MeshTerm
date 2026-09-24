@@ -474,7 +474,6 @@ async def start_node(wiring: SpiWiring, state: Path, *, node_name: str) -> NodeP
             "use_dio2_rf": wiring.use_dio2_rf,
             "use_dio3_tcxo": wiring.use_dio3_tcxo,
             "is_waveshare": wiring.is_waveshare,
-            "preamble_length": wiring.preamble_length,
         },
         "seed": {"node_name": node_name, **DEFAULT_SEED},
     }

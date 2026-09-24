@@ -223,6 +223,20 @@ def saved_channels(saved: Any) -> list[tuple[int, str, bytes]]:
 # --- the node ------------------------------------------------------------------------------
 
 
+def preamble_for_sf(spreading_factor: int) -> int:
+    """The LoRa preamble, in symbols, MeshCore uses at a spreading factor: 32 up to SF8, else 16.
+
+    This is MeshCore's own rule (``RadioLibWrapper::preambleLengthForSF``), and the receiver
+    has to follow it, not only the transmitter. The SX1262 waits for the sync word only about
+    as long as the preamble it was told to expect, so a node listening for 12 symbols against
+    a mesh sending 32 locks on, gives up, and locks on again further along the same preamble
+    — and decodes a packet only when it happens to lock on near the end. That was the whole
+    of "the uConsole misses replies other radios hear": the preamble was a fixed 12, the
+    library's default, and at SF7 the mesh sends 32.
+    """
+    return 32 if spreading_factor <= 8 else 16
+
+
 def radio_kwargs(signature_params, wiring: dict, prefs: Any) -> dict:  # noqa: ANN001
     """The ``SX1262Radio`` constructor arguments: the board's wiring plus the saved radio.
 
@@ -231,6 +245,7 @@ def radio_kwargs(signature_params, wiring: dict, prefs: Any) -> dict:  # noqa: A
     """
     wanted = dict(wiring)
     wanted.update(
+        preamble_length=preamble_for_sf(prefs.spreading_factor),
         frequency=prefs.frequency_hz,
         bandwidth=prefs.bandwidth_hz,
         spreading_factor=prefs.spreading_factor,
@@ -415,6 +430,28 @@ async def run_node(config: dict, report) -> int:  # noqa: ANN001 - (dict) -> Non
     return 0
 
 
+def apply_preamble(radio: Any, symbols: int) -> None:
+    """Give a running radio a new preamble length, for both what it sends and what it hears.
+
+    The driver reads ``preamble_length`` afresh for every transmission, but reception keeps
+    the packet parameters it was last given, so those are re-sent from standby and the chip
+    put back to listening.
+    """
+    if getattr(radio, "preamble_length", symbols) == symbols:
+        return
+    radio.preamble_length = symbols
+    lora = getattr(radio, "lora", None)
+    if lora is None:
+        return
+    try:
+        lora.setStandby(lora.STANDBY_RC)
+        lora.setPacketParamsLoRa(symbols, lora.HEADER_EXPLICIT, 64, lora.CRC_ON, lora.IQ_STANDARD)
+        lora.request(lora.RX_CONTINUOUS)
+        log.info("preamble set to %d symbols", symbols)
+    except Exception as exc:  # noqa: BLE001 - the next transmission sets it regardless
+        log.warning("could not apply the new preamble while listening: %s", exc)
+
+
 def _persistent_companion(base: type, state: Path) -> type:
     """``CompanionRadio`` with its preferences written to ``prefs.json`` on every change.
 
@@ -423,6 +460,17 @@ def _persistent_companion(base: type, state: Path) -> type:
     """
 
     class PersistentCompanion(base):  # type: ignore[misc, valid-type]
+        def set_radio_params(self, freq_hz: int, bw_hz: int, sf: int, cr: int) -> bool:
+            """Retune, and bring the preamble along when the spreading factor moves it.
+
+            The library retunes the modulation but leaves the packet parameters alone, and
+            the preamble is one of them (see :func:`preamble_for_sf`).
+            """
+            ok = super().set_radio_params(freq_hz, bw_hz, sf, cr)
+            if ok:
+                apply_preamble(self._radio, preamble_for_sf(sf))
+            return ok
+
         def _save_prefs(self) -> None:
             try:
                 _write_json(state / "prefs.json", prefs_to_json(self.prefs))

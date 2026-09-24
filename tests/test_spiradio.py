@@ -58,6 +58,12 @@ def test_a_wiring_mistake_is_refused_not_ignored(table: dict, complaint: str) ->
         SpiWiring.from_toml(table)
 
 
+def test_the_retired_preamble_key_is_refused_with_its_reason() -> None:
+    """A config still carrying the old fixed preamble is told why, not left deaf."""
+    with pytest.raises(ValueError, match="preamble_length is no longer a wiring key"):
+        SpiWiring.from_toml({"preamble_length": 12})
+
+
 def test_a_profile_with_an_spi_table_is_an_spi_profile(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

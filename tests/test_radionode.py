@@ -134,3 +134,51 @@ def test_an_identity_is_minted_once_and_then_kept(tmp_path: Path) -> None:
     again = radionode.load_identity_seed(tmp_path, lambda: next(minted))
     assert first == again == b"\x11" * 32
     assert (tmp_path / "identity.key").read_bytes() == first
+
+
+@pytest.mark.parametrize(("sf", "symbols"), [(5, 32), (7, 32), (8, 32), (9, 16), (12, 16)])
+def test_the_preamble_follows_meshcore(sf: int, symbols: int) -> None:
+    """MeshCore sends 32 symbols up to SF8 and 16 above, and the receiver must expect it."""
+    assert radionode.preamble_for_sf(sf) == symbols
+
+
+def test_the_radio_is_built_with_the_meshcore_preamble() -> None:
+    """The chip comes up expecting the preamble the mesh sends, never the library's 12."""
+    prefs = type(
+        "P",
+        (),
+        {
+            "frequency_hz": 910_525_000,
+            "bandwidth_hz": 62_500,
+            "spreading_factor": 7,
+            "coding_rate": 5,
+            "tx_power_dbm": 22,
+        },
+    )()
+    kwargs = radionode.radio_kwargs({"preamble_length", "spreading_factor"}, {}, prefs)
+    assert kwargs == {"preamble_length": 32, "spreading_factor": 7}
+
+
+class _Chip:
+    """The calls ``apply_preamble`` makes on the driver, recorded in order."""
+
+    STANDBY_RC, HEADER_EXPLICIT, CRC_ON, IQ_STANDARD, RX_CONTINUOUS = 0, 0, 1, 0, 0xFFFFFF
+
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    def __getattr__(self, name: str):  # noqa: ANN204
+        return lambda *args: self.calls.append((name, *args))
+
+
+def test_a_retune_resends_the_preamble_to_the_listening_chip() -> None:
+    """Reception keeps its last packet parameters, so a new preamble must be sent to it."""
+    chip = _Chip()
+    radio = type("R", (), {"preamble_length": 32, "lora": chip})()
+    radionode.apply_preamble(radio, 16)
+    assert radio.preamble_length == 16
+    assert [c[0] for c in chip.calls] == ["setStandby", "setPacketParamsLoRa", "request"]
+    assert chip.calls[1][1] == 16
+    chip.calls.clear()
+    radionode.apply_preamble(radio, 16)  # unchanged: the chip is left listening undisturbed
+    assert chip.calls == []

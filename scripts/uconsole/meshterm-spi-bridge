@@ -1043,6 +1043,11 @@ def run_bridge(host: str, port: int, node_name: str) -> int:
         hw = load_hardware_config_from_env()
         log.info("radio config %s", hw.to_log_string())
         radio = create_radio(SX1262Radio, hw, log.info)
+        # The same preamble rule as the direct path below: unless the environment
+        # names one, follow MeshCore (32 symbols up to SF8, 16 above) so the radio
+        # hears the mesh; begin() reads it, so this is in time.
+        if "MESHCORE_PREAMBLE_LENGTH" not in os.environ and hasattr(radio, "preamble_length"):
+            radio.preamble_length = 32 if hw.spreading_factor <= 8 else 16
         key_path = identity_key_path()
         if key_path.exists():
             identity = LocalIdentity(key_path.read_bytes())
@@ -1094,7 +1099,14 @@ def run_bridge(host: str, port: int, node_name: str) -> int:
             "spreading_factor": _int("MESHCORE_SPREADING_FACTOR", 7),
             "bandwidth": _int("MESHCORE_BANDWIDTH", 62_500),
             "coding_rate": _int("MESHCORE_CODING_RATE", 5),
-            "preamble_length": _int("MESHCORE_PREAMBLE_LENGTH", 12),
+            # MeshCore's own rule (RadioLibWrapper::preambleLengthForSF): 32 symbols up
+            # to SF8, 16 above. The receiver must match it, not just the sender — the
+            # SX1262 waits for the sync word only about as long as the preamble it expects,
+            # so the old fixed 12 against a mesh sending 32 decoded almost nothing.
+            "preamble_length": _int(
+                "MESHCORE_PREAMBLE_LENGTH",
+                32 if _int("MESHCORE_SPREADING_FACTOR", 7) <= 8 else 16,
+            ),
             "is_waveshare": _bool("MESHCORE_IS_WAVESHARE", False),
             "use_dio2_rf": _bool("MESHCORE_USE_DIO2_RF", True),
             "use_dio3_tcxo": _bool("MESHCORE_USE_DIO3_TCXO", True),

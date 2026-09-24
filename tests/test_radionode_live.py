@@ -27,6 +27,7 @@ class _FakeRadio:
 
     def __init__(self, **kwargs: object) -> None:
         self.kwargs = kwargs
+        self.preamble_length = kwargs.get("preamble_length", 12)
         self.cleaned = False
         _FakeRadio.instances.append(self)
 
@@ -64,9 +65,23 @@ class _FakeRadio:
         return 5.0
 
 
-def _fake_init(self, bus_id=1, reset_pin=25, frequency=0, tx_power=0, **kwargs):  # noqa: ANN001, ANN202
+def _fake_init(  # noqa: ANN202
+    self,  # noqa: ANN001
+    bus_id=1,  # noqa: ANN001
+    reset_pin=25,  # noqa: ANN001
+    frequency=0,  # noqa: ANN001
+    tx_power=0,  # noqa: ANN001
+    preamble_length=12,  # noqa: ANN001 - the library's own default, which must never survive
+    **kwargs,  # noqa: ANN003
+):
     _FakeRadio.__init__(
-        self, bus_id=bus_id, reset_pin=reset_pin, frequency=frequency, tx_power=tx_power, **kwargs
+        self,
+        bus_id=bus_id,
+        reset_pin=reset_pin,
+        frequency=frequency,
+        tx_power=tx_power,
+        preamble_length=preamble_length,
+        **kwargs,
     )
 
 
@@ -145,8 +160,10 @@ async def test_channels_name_and_radio_survive_a_restart(
     assert channel is not None and channel.get("channel_name") == "Lakeside ops"
     assert bytes(channel.get("channel_secret") or b"")[:16] == secret
     assert info.get("name") == "Lakeside"
-    # The chip is brought up on the saved radio, not the seed.
+    # The chip is brought up on the saved radio, not the seed — and at SF11 with the
+    # preamble MeshCore sends there.
     assert _FakeRadio.instances[-1].kwargs["frequency"] == 869_525_000
+    assert _FakeRadio.instances[-1].preamble_length == 16
 
 
 @pytest.mark.asyncio

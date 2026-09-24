@@ -20,7 +20,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -93,7 +93,6 @@ class SpiWiring:
         use_dio2_rf: Whether DIO2 drives the RF switch.
         use_dio3_tcxo: Whether DIO3 powers a TCXO.
         is_waveshare: The Waveshare HAT's wiring quirks, which the radio library knows.
-        preamble_length: LoRa preamble symbols.
         python: An interpreter to run the node under, when the one MeshTerm would find
             is not the one you want. Empty to let MeshTerm look.
     """
@@ -112,8 +111,13 @@ class SpiWiring:
     use_dio2_rf: bool = True
     use_dio3_tcxo: bool = True
     is_waveshare: bool = False
-    preamble_length: int = 12
     python: str = ""
+
+    #: Keys this table once took and must never take again under another meaning (see
+    #: :data:`meshterm.core.preferences.RETIRED`). ``preamble_length`` was never wiring: it is
+    #: protocol, and a fixed 12 against a mesh sending 32 is what left the node deaf to
+    #: most traffic; the node now derives it from the spreading factor as MeshCore does.
+    RETIRED: ClassVar[frozenset[str]] = frozenset({"preamble_length"})
 
     @classmethod
     def from_toml(cls, table: dict[str, Any]) -> SpiWiring:
@@ -127,6 +131,12 @@ class SpiWiring:
             ValueError: On an unknown key or a value of the wrong type.
         """
         known = {f.name: f for f in cls.__dataclass_fields__.values()}
+        retired = sorted(set(table) & cls.RETIRED)
+        if retired:
+            raise ValueError(
+                f"{', '.join(retired)} is no longer a wiring key — the node sets the "
+                "preamble from the spreading factor, as MeshCore does; delete the line"
+            )
         unknown = sorted(set(table) - set(known))
         if unknown:
             raise ValueError(f"unknown SPI wiring key(s): {', '.join(unknown)}")
