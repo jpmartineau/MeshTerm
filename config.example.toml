@@ -58,3 +58,10 @@ host = "192.168.1.50"
 # tcp_port = 5000
 # transport = "tcp"
 description = "Basestation over WiFi"
+
+# A radio on this machine's own SPI bus (the uConsole AIO): MeshTerm runs its node.
+# The pins default to the AIO v1's; a `spi` table states only what differs.
+[profiles.aio]
+transport = "spi"
+# [profiles.aio.spi]
+# en_pins = [27]   # the AIO v2 powers its radio from pin 27

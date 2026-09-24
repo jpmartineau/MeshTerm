@@ -67,6 +67,94 @@ def default_config_dir() -> Path:
     return Path.home() / ".meshterm"
 
 
+@dataclass(frozen=True, slots=True)
+class SpiWiring:
+    """How a LoRa chip on the host's SPI bus is wired, for a ``transport = "spi"`` profile.
+
+    The defaults are the hackergadgets uConsole AIO v1's wiring, so that board needs no
+    ``[profiles.<name>.spi]`` table at all; any other board states only what differs. These
+    are facts about the *board*, which is why they live in ``config.toml`` with the profile
+    and not among the radio's settings: the frequency, bandwidth and power are the node's
+    own, saved by the node and edited on Device config like any companion's.
+
+    Attributes:
+        bus_id: SPI bus (``/dev/spidev<bus_id>.<cs_id>``).
+        cs_id: SPI chip-select device on that bus.
+        cs_pin: A GPIO driven as chip select by hand, or ``-1`` for the bus's own.
+        gpio_chip: Which ``/dev/gpiochip<n>`` the pins below are on.
+        use_gpiod_backend: Drive the pins through ``gpiod`` instead of ``python-periphery``.
+        reset_pin: The chip's reset line.
+        busy_pin: The chip's busy line.
+        irq_pin: The chip's interrupt line (DIO1).
+        txen_pin: A transmit-enable line for an external RF switch, or ``-1``.
+        rxen_pin: A receive-enable line for an external RF switch, or ``-1``.
+        en_pins: Power-enable lines raised before the chip is touched (the AIO v2 wants
+            ``[27]``); empty for none.
+        use_dio2_rf: Whether DIO2 drives the RF switch.
+        use_dio3_tcxo: Whether DIO3 powers a TCXO.
+        is_waveshare: The Waveshare HAT's wiring quirks, which the radio library knows.
+        preamble_length: LoRa preamble symbols.
+        python: An interpreter to run the node under, when the one MeshTerm would find
+            is not the one you want. Empty to let MeshTerm look.
+    """
+
+    bus_id: int = 1
+    cs_id: int = 0
+    cs_pin: int = -1
+    gpio_chip: int = 0
+    use_gpiod_backend: bool = False
+    reset_pin: int = 25
+    busy_pin: int = 24
+    irq_pin: int = 26
+    txen_pin: int = -1
+    rxen_pin: int = -1
+    en_pins: tuple[int, ...] = ()
+    use_dio2_rf: bool = True
+    use_dio3_tcxo: bool = True
+    is_waveshare: bool = False
+    preamble_length: int = 12
+    python: str = ""
+
+    @classmethod
+    def from_toml(cls, table: dict[str, Any]) -> SpiWiring:
+        """Build the wiring from a ``[profiles.<name>.spi]`` table, defaults for the rest.
+
+        A key this dataclass doesn't know is refused rather than ignored: a misspelt
+        ``irq_pn = 22`` would otherwise leave the default in force and a deaf radio with
+        nothing to say why.
+
+        Raises:
+            ValueError: On an unknown key or a value of the wrong type.
+        """
+        known = {f.name: f for f in cls.__dataclass_fields__.values()}
+        unknown = sorted(set(table) - set(known))
+        if unknown:
+            raise ValueError(f"unknown SPI wiring key(s): {', '.join(unknown)}")
+        values: dict[str, Any] = {}
+        for key, raw in table.items():
+            default = getattr(cls(), key)
+            if isinstance(default, bool):
+                ok = isinstance(raw, bool)
+            elif isinstance(default, int):
+                ok = isinstance(raw, int) and not isinstance(raw, bool)
+            elif isinstance(default, tuple):
+                ok = isinstance(raw, list) and all(
+                    isinstance(p, int) and not isinstance(p, bool) for p in raw
+                )
+                raw = tuple(raw) if ok else raw
+            else:
+                ok = isinstance(raw, str)
+            if not ok:
+                raise ValueError(f"SPI wiring {key} = {raw!r} is not a {type(default).__name__}")
+            values[key] = raw
+        return cls(**values)
+
+    @property
+    def spidev(self) -> str:
+        """The SPI device node this wiring opens."""
+        return f"/dev/spidev{self.bus_id}.{self.cs_id}"
+
+
 @dataclass(slots=True)
 class DeviceProfile:
     """Connection defaults for one physical companion device.
@@ -88,6 +176,8 @@ class DeviceProfile:
         host: Hostname or IP of a network companion (e.g. ``"192.168.1.50"``); TCP profiles.
         tcp_port: TCP port the network companion listens on; TCP profiles (defaults to
             :data:`~meshterm.core.discovery.DEFAULT_TCP_PORT` when a host is given without one).
+        spi: How the radio is wired, for ``transport = "spi"`` — a LoRa chip on the host's
+            own SPI bus, run by a node MeshTerm starts itself (:mod:`meshterm.core.spiradio`).
     """
 
     name: str
@@ -100,6 +190,12 @@ class DeviceProfile:
     ble_pin: str | None = None
     host: str | None = None
     tcp_port: int | None = None
+    spi: SpiWiring | None = None
+
+    @property
+    def is_spi(self) -> bool:
+        """Whether this profile addresses a radio on the host's own SPI bus."""
+        return self.transport == "spi"
 
     @property
     def is_ble(self) -> bool:
@@ -191,9 +287,21 @@ class Settings:
             # keeps port-only profiles working untouched while a bare ``host``/``address`` is
             # enough to declare a network/Bluetooth one.
             transport = pdata.get("transport") or (
-                "tcp" if pdata.get("host") else "ble" if pdata.get("address") else "serial"
+                "spi"
+                if "spi" in pdata
+                else "tcp"
+                if pdata.get("host")
+                else "ble"
+                if pdata.get("address")
+                else "serial"
             )
             tcp_port = pdata.get("tcp_port")
+            spi = None
+            if transport == "spi":
+                try:
+                    spi = SpiWiring.from_toml(pdata.get("spi") or {})
+                except ValueError as exc:
+                    raise ValueError(f"[profiles.{pname}.spi]: {exc}") from exc
             profiles[pname] = DeviceProfile(
                 name=pname,
                 port=pdata.get("port"),
@@ -205,6 +313,7 @@ class Settings:
                 ble_pin=pdata.get("ble_pin"),
                 host=pdata.get("host"),
                 tcp_port=int(tcp_port) if tcp_port is not None else None,
+                spi=spi,
             )
 
         return cls(

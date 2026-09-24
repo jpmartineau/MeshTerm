@@ -59,6 +59,14 @@ dev = [
     # not a gate: 0.16 formats Python inside Markdown and 0.15 does not, so an
     # unpinned `ruff>=0.4` had CI and a laptop disagreeing about a clean tree.
     "ruff>=0.16.6,<0.17",
+    # The SPI radio's node, run for real in tests/test_radionode_live.py on a fake radio.
+    # The bare library is pure Python everywhere; only the `hardware` extra is Linux-bound.
+    "openhop-core>=1.1.3",
+]
+# A LoRa chip on this machine's own SPI bus (the uConsole AIO), driven by a node MeshTerm
+# runs itself — see meshterm/core/spiradio.py. Linux only, and nowhere else worth carrying.
+spi = [
+    "openhop-core[hardware]>=1.1.3",
 ]
 
 [project.urls]

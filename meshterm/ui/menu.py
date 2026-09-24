@@ -363,6 +363,8 @@ def _device_label(ctx: AppContext, cache: dict) -> tuple[str, str]:
         where = "BLE"
     elif ctx.active_transport == "tcp":
         where = ctx.active_endpoint or "TCP"
+    elif ctx.active_transport == "spi":
+        where = "SPI"
     else:
         where = ctx.active_port or (sel.port if sel is not None else "") or ""
     cache["key"], cache["value"] = key, (name, where)
@@ -730,6 +732,7 @@ async def _startup(ctx: AppContext) -> bool:
     if not (ctx.mock or ctx.explicit_selection):
         from ..core.connection import probe_device
         from ..core.discovery import DiscoveredDevice, discover_all
+        from ..core.spiradio import state_dir
         from .device_picker import prompt_device
         from .logo import load_logo
 
@@ -750,7 +753,12 @@ async def _startup(ctx: AppContext) -> bool:
             # ``pin`` is what the picker's PIN dialog collected on a retry; fall back to any
             # ``--ble-pin`` supplied on the CLI for the first attempt.
             used = pin if pin is not None else ctx.ble_pin
-            result = await probe_device(device, baudrate=baudrate, pin=used)
+            spi_state = (
+                state_dir(ctx.settings.config_dir, device.spi or ctx.spi_wiring_for(device.port))
+                if device.is_spi
+                else None
+            )
+            result = await probe_device(device, baudrate=baudrate, pin=used, spi_state=spi_state)
             if result is None:
                 return None
             connection, info = result
@@ -770,7 +778,14 @@ async def _startup(ctx: AppContext) -> bool:
         if chosen is None:
             return False  # the user quit at the splash — exit without opening the menu
         ctx.selected_device = chosen
-        if chosen.is_tcp:
+        if chosen.is_spi:
+            # A reconnect rebuilds the device from the context, so it has to know which radio.
+            # An SPI profile names its own; a bare row is the AIO's, which ``--spi`` resolves.
+            ctx.spi_override = True
+            ctx.tcp_override = None
+            ctx.ble_override = None
+            ctx.port_override = None
+        elif chosen.is_tcp:
             ctx.tcp_override = chosen.target
             ctx.ble_override = None
             ctx.port_override = None

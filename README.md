@@ -199,7 +199,7 @@ surveys kept as a historical record. The short version:
 | **[What MeshTerm does](docs/features.md)** | Every screen the menu offers, and the command that does the same job without it. |
 | [The CLI cookbook](docs/cookbook.md) | Common one-liners, by the thing you're trying to do. |
 | [Configuring MeshTerm](docs/configuration.md) | Preferences, device profiles, and everything kept under `~/.meshterm`. |
-| [MeshTerm on hardware](docs/hardware.md) | Which handheld manual is yours — the [PicoCalc](docs/picocalc.md) build, or the [uConsole](docs/uconsole.md) bridge. |
+| [MeshTerm on hardware](docs/hardware.md) | Which handheld manual is yours — the [PicoCalc](docs/picocalc.md) build, or the [uConsole](docs/uconsole.md), whose LoRa chip MeshTerm can drive directly. |
 | [How the code is laid out](docs/architecture.md) | The layering, and where a new feature goes. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | The development setup and the house rules. |
 | [CHANGELOG.md](CHANGELOG.md) | What changed, newest first. |
@@ -229,8 +229,9 @@ meshterm specimen
 Putting MeshTerm on a handheld has its own manuals. **[MeshTerm on the
 PicoCalc](docs/picocalc.md)** takes a stock PicoCalc from the shopping list to a Linux
 handheld with a LoRa radio soldered inside; **[MeshTerm on the uConsole](docs/uconsole.md)**
-connects a uConsole's SPI LoRa board through a small bridge. The device-side scripts both
-manuals run are in [`scripts/`](scripts/); not sure which manual is yours?
+drives a uConsole's SPI LoRa board directly with `--spi`, or through a small bridge if you
+want the node on the mesh all the time. The device-side scripts both manuals run are in
+[`scripts/`](scripts/); not sure which manual is yours?
 [`docs/hardware.md`](docs/hardware.md) says.
 
 ## What it does

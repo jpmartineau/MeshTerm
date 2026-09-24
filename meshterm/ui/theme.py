@@ -700,6 +700,7 @@ _GLYPH_MAP: dict[str, str] = {
     "🎧": "≈",   # monitor — listening to the waveform
     "🗼": "▲",   # repeater admin — the repeater mark itself
     "🔌": "~",   # serial port — the cable
+    "📍": "╨",   # a radio on the host's SPI bus — the antenna on its board
     "👤": "%",   # a person (two-circle silhouette)
     "👥": "%",   # contacts — people
     "👋": "",    # a wave in prose — the words carry it

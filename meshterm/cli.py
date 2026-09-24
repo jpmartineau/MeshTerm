@@ -179,6 +179,11 @@ def main_callback(
         "--tcp",
         help="Network address host[:port] of a TCP companion (selects the TCP transport)",
     ),
+    spi: bool = typer.Option(
+        False,
+        "--spi",
+        help="Run a node on the LoRa radio on this machine's SPI bus (selects the SPI transport)",
+    ),
     mock: bool = typer.Option(False, "--mock", help="Use the built-in simulator"),
     db_path: Path | None = typer.Option(
         None, "--db", help="SQLite database path (--mock records to meshterm-mock.db)"
@@ -204,6 +209,7 @@ def main_callback(
         ble: Explicit Bluetooth address, selecting the BLE transport.
         ble_pin: Optional BLE pairing PIN for the Bluetooth companion.
         tcp: Explicit network address ``host[:port]``, selecting the TCP transport.
+        spi: Select the radio on this machine's SPI bus, whose node MeshTerm runs itself.
         mock: Whether to use the simulator instead of real hardware.
         db_path: Override the database location. Without it, a ``--mock`` run records to
             the simulator's own database rather than the real history.
@@ -229,13 +235,20 @@ def main_callback(
         active = without_emoji(active)
     set_platform(active)
 
-    if mock and (port or ble or tcp):
+    named_radios = [
+        flag
+        for flag, given in (("--port", port), ("--ble", ble), ("--tcp", tcp), ("--spi", spi))
+        if given
+    ]
+    if spi and len(named_radios) > 1:
+        # The SPI radio is on this machine and every other flag names a radio that isn't.
+        raise typer.BadParameter(f"--spi and {named_radios[0]} name different devices; pass one")
+    if mock and named_radios:
         # One flag says "pretend", the other names one exact radio, and `--mock` used to
         # win silently — so a scheduled `--port COM7 --mock info` reported on a simulator
         # while reading as though it had reached the radio. Two contradictory claims about
         # which device to talk to is a bad command line, not a precedence question.
-        named = "--port" if port else ("--ble" if ble else "--tcp")
-        raise typer.BadParameter(f"--mock and {named} name different devices; pass one")
+        raise typer.BadParameter(f"--mock and {named_radios[0]} name different devices; pass one")
 
     settings = Settings.load()
     if db_path is not None:
@@ -304,13 +317,14 @@ def main_callback(
         port_override=port,
         ble_override=ble,
         tcp_override=tcp,
+        spi_override=spi,
         ble_pin=ble_pin,
         output=OutputFormat.JSON if json_output else OutputFormat.PLAIN,
         # Whether a tool may stop and ask, which is a different question from what its
         # output looks like. A pipe on stdin means nobody is there to answer.
         interactive=_stdin_is_a_person(),
         explicit_selection=(
-            profile is not None or port is not None or ble is not None or tcp is not None
+            profile is not None or port is not None or ble is not None or tcp is not None or spi
         ),
     )
     _state = app_ctx

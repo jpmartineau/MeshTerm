@@ -14,7 +14,7 @@ its own step-by-step manual, and this page only tells you which one is yours.
 | --- | --- |
 | a ClockworkPi **PicoCalc**, stock or already running Calculinux on a Luckfox Lyra, and I want MeshTerm on its own screen | **[MeshTerm on the PicoCalc](picocalc.md)** — from the shopping list to a working machine |
 | …and I want a **radio** inside it | the same manual, [Phase 3](picocalc.md#phase-3--add-the-radio) — a XIAO nRF52840 + Wio-SX1262 soldered to the Lyra's UART |
-| a ClockworkPi **uConsole** with the hackergadgets AIO board — an SX1262 on the host's own SPI bus | **[MeshTerm on the uConsole](uconsole.md)** — the bridge that fronts that chip as a companion |
+| a ClockworkPi **uConsole** with the hackergadgets AIO board — an SX1262 on the host's own SPI bus | **[MeshTerm on the uConsole](uconsole.md)** — MeshTerm drives it directly with `--spi`, or a bridge service fronts it as a companion if you want it always on |
 | a MeshCore companion on USB, BLE or Wi-Fi | nothing here — the [README](../README.md) |
 
 The two targets have nothing in common but MeshTerm itself. The device-side scripts each
@@ -28,7 +28,9 @@ script before you run it; most run as root and change the machine they run on.
 [`picocalc/`](../scripts/picocalc/) for the PicoCalc — bringing up Calculinux on the Lyra,
 building its console font, and (under [`xiao-radio/`](../scripts/picocalc/xiao-radio/))
 giving it a MeshCore radio over UART — and [`uconsole/`](../scripts/uconsole/) for the
-bridge that fronts the uConsole's SPI-attached LoRa chip as a companion. The manual is the
+always-on bridge that fronts the uConsole's SPI-attached LoRa chip as a companion (MeshTerm
+can also drive that chip directly, with no script at all — the uConsole manual covers
+both). The manual is the
 walkthrough; each script's own header says what it assumes about the machine and why each
 step is the way it is. On the Lyra, only one program may hold `/dev/ttyS1` — MeshTerm
 directly, or a pump in front of it, never both.
@@ -46,7 +48,7 @@ directly, or a pump in front of it, never both.
 | [`xiao-radio/meshcore-uart1.patch`](../scripts/picocalc/xiao-radio/meshcore-uart1.patch) | — | The two firmware hunks: the companion on nRF52 `Serial1`, and I²C moved off the UART pads. Not upstream yet. |
 | [`xiao-radio/lyra-setup.sh`](../scripts/picocalc/xiao-radio/lyra-setup.sh) | the Lyra (root) | Boot-persistent UART1 → GP4/GP5 mux service, `dialout` membership, and a default MeshTerm serial profile for `/dev/ttyS1`. |
 | [`xiao-radio/uart1-mux.py`](../scripts/picocalc/xiao-radio/uart1-mux.py) | the Lyra (root) | The matrix-IO register poke that routes UART1 to the header pads, run once per boot by the service above. |
-| [`uconsole/meshterm-spi-bridge`](../scripts/uconsole/meshterm-spi-bridge) | the radio host (your user) | Runs a mesh node in software over an SPI-attached SX1262 (uConsole AIO, Waveshare HATs) and serves the companion protocol on `127.0.0.1:5000`. Setup menu, preflight, optional `systemd --user` service. Runs on `openhop_core` (preferred) or its predecessor `pymc_core`; see the manual for the venv it wants on a bookworm uConsole. |
+| [`uconsole/meshterm-spi-bridge`](../scripts/uconsole/meshterm-spi-bridge) | the radio host (your user) | The **always-on** option: runs a mesh node in software over an SPI-attached SX1262 (uConsole AIO, Waveshare HATs) and serves the companion protocol on `127.0.0.1:5000`, so the node stays on the mesh while MeshTerm is closed. Setup menu, preflight, optional `systemd --user` service. Runs on `openhop_core` (preferred) or its predecessor `pymc_core`; see the manual for the venv it wants on a bookworm uConsole. Most people should reach for `meshterm --spi` instead — no script, no service, MeshTerm drives the chip itself while it runs. |
 
 ## The regular and picocalc platforms
 

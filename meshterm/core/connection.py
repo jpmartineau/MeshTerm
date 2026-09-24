@@ -22,6 +22,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import transmit_gate
@@ -45,6 +46,7 @@ from .models import (
 from .tracing import path_hash_flags, trace_timeout
 
 if TYPE_CHECKING:
+    from .config import SpiWiring
     from .discovery import DiscoveredDevice
 
 #: Module logger; enable DEBUG on ``meshterm.core.connection`` to trace the message pump.
@@ -4033,6 +4035,8 @@ def make_device(
     ble_device: object | None = None,
     host: str | None = None,
     tcp_port: int | None = None,
+    spi: SpiWiring | None = None,
+    state: Path | None = None,
 ) -> Device:
     """Construct the appropriate :class:`Device` for the current invocation.
 
@@ -4042,7 +4046,7 @@ def make_device(
             unless ``mock`` is set.
         baudrate: Serial baud rate for a real serial device.
         mock_optimal_tx: Peak TX power for the simulator.
-        transport: ``"serial"`` (default), ``"ble"``, or ``"tcp"``.
+        transport: ``"serial"`` (default), ``"ble"``, ``"tcp"``, or ``"spi"``.
         address: Bluetooth address for the BLE transport. Required when ``transport="ble"``.
         pin: Optional BLE pairing PIN (BLE only).
         ble_device: The scanned ``bleak.BLEDevice`` for ``address``, when this session's
@@ -4050,6 +4054,9 @@ def make_device(
             peripheral by address (see :class:`MeshCoreDevice`).
         host: Hostname/IP for the TCP transport. Required when ``transport="tcp"``.
         tcp_port: TCP port for the TCP transport. Required when ``transport="tcp"``.
+        spi: How the radio is wired, for the SPI transport. Required when ``transport="spi"``.
+        state: The SPI radio's state directory (see :func:`meshterm.core.spiradio.state_dir`).
+            Required when ``transport="spi"``.
 
     Returns:
         A connected-on-enter :class:`Device` instance.
@@ -4073,6 +4080,14 @@ def make_device(
                 "pick a device at startup, or use --mock."
             )
         return MeshCoreDevice(transport="tcp", host=host, tcp_port=tcp_port)
+    if transport == "spi":
+        if spi is None or state is None:
+            raise ValueError(
+                "No SPI radio configured. Pass --spi, set an SPI profile, or use --mock."
+            )
+        from .spiradio import SpiRadioDevice  # imports this module, so not at the top
+
+        return SpiRadioDevice(spi, state)
     if not port:
         raise ValueError("No serial port configured. Pass --port, set a profile, or use --mock.")
     return MeshCoreDevice(port=port, baudrate=baudrate)
@@ -4093,7 +4108,11 @@ _PROBE_TIMEOUT_TCP_S = 10.0
 
 
 async def probe_device(
-    device: DiscoveredDevice, *, baudrate: int = 115200, pin: str | None = None
+    device: DiscoveredDevice,
+    *,
+    baudrate: int = 115200,
+    pin: str | None = None,
+    spi_state: Path | None = None,
 ) -> tuple[MeshCoreDevice, dict] | None:
     """Open a discovered device, confirm a MeshCore companion answers, and keep it connected.
 
@@ -4113,6 +4132,8 @@ async def probe_device(
         device: The discovered device to probe (serial or BLE).
         baudrate: Serial baud rate (serial transport only).
         pin: Optional BLE pairing PIN (BLE transport only).
+        spi_state: The radio's state directory (SPI transport only) — probing an SPI radio
+            starts its node, and the node needs somewhere to keep its identity.
 
     Returns:
         ``(device, self_info)`` with a connected :class:`MeshCoreDevice` on success (the
@@ -4143,6 +4164,16 @@ async def probe_device(
             tcp_port=device.tcp_port,
             connect_timeout=timeout,
         )
+    elif device.is_spi:
+        from .config import SpiWiring
+        from .spiradio import READY_TIMEOUT_S, SpiRadioDevice
+
+        if spi_state is None:
+            raise ValueError("probing an SPI radio needs its state directory")
+        # The window covers starting the node, not just the handshake: the radio library's
+        # import and the chip's bring-up come first, and a board this small is slow at both.
+        timeout = READY_TIMEOUT_S
+        probe = SpiRadioDevice(device.spi or SpiWiring(), spi_state)  # type: ignore[arg-type]
     else:
         timeout = _PROBE_TIMEOUT_SERIAL_S
         probe = MeshCoreDevice(port=device.port, baudrate=baudrate, connect_timeout=timeout)

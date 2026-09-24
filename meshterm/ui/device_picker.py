@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING
 from rich.cells import cell_len
 from rich.text import Text
 
-from ..core.config import DeviceProfile
+from ..core.config import DeviceProfile, SpiWiring
 from ..core.connection import DeviceAuthenticationError, DeviceCommandError
 from ..core.device_store import DeviceStore, RememberedDevice
 from ..core.discovery import (
@@ -45,8 +45,10 @@ from ..core.discovery import (
     discover_devices,
     parse_tcp_endpoint,
     serial_device,
+    spi_device,
     tcp_device,
 )
+from ..core.spiradio import spi_present
 from ..platforms import get_platform
 from .logo import load_logo
 from .menus import Lane, align_icons, column_header, fit_cells
@@ -90,6 +92,10 @@ _SERIAL_ICON = "🔌"
 #: rather than a wired or Bluetooth link. Two cells like the serial plug, so it aligns the same.
 _TCP_ICON = "🌐"
 
+#: TYPE-column glyph for a radio on the host's own SPI bus — a pin, because the radio is
+#: right here, on this machine. Two cells, aligning with the plug and the globe.
+_SPI_ICON = "📍"
+
 #: Half-block glyphs that taper the Bluetooth badge: ``▐`` fills a cell's right half (so it
 #: hugs the rune's left edge) and ``▌`` its left half (hugging the right edge). Drawn in the
 #: badge's blue over the terminal background, they widen the blue by half a cell on each side.
@@ -110,6 +116,8 @@ def _type_cell(device: DiscoveredDevice) -> Text:
     """
     if device.is_tcp:
         return Text(" " + _TCP_ICON)
+    if device.is_spi:
+        return Text(" " + _SPI_ICON)
     if not device.is_ble:
         return Text(" " + _SERIAL_ICON)
     cell = Text()
@@ -130,6 +138,8 @@ def _hardware_name(device: DiscoveredDevice) -> str:
         return device.name or device.product or device.description or "Network device"
     if device.is_ble:
         return device.name or device.product or device.description or "Bluetooth device"
+    if device.is_spi:
+        return device.name or "SPI radio"
     name = device.product or device.description or device.vendor_label or "Serial device"
     suffix = f"({device.port})"
     if name.endswith(suffix):
@@ -281,6 +291,11 @@ async def _smoke_test(
                     "Check the host and port — it may be unreachable, powered off, already "
                     "connected elsewhere, or busy."
                 )
+            elif chosen.is_spi:
+                reason = (
+                    "Its node started but never answered — its log is node.log in "
+                    "MeshTerm's radio folder."
+                )
             elif chosen.is_ble:
                 reason = (
                     "It may be out of range, powered off, already connected elsewhere, or busy."
@@ -385,6 +400,9 @@ async def prompt_device(
         # produced by the scan, so fold those in too — after the scanned set, so a port
         # pyserial *does* enumerate keeps its richer scanned row rather than the bare profile.
         listed += _profile_serial_devices(listed, profiles)
+        # A radio on the SPI bus answers nothing until MeshTerm starts its node, so it is
+        # listed from the device node's presence, the way a serial port is.
+        listed += _spi_devices(listed, profiles)
         # Devices the user has told this splash to stop showing (h). Read each pass, so a
         # row hidden a moment ago is gone the next time the list is drawn — which is the
         # only feedback hiding needs.
@@ -676,6 +694,42 @@ def _profile_serial_devices(
         seen_ports.add(profile.port)
         rebuilt.append(serial_device(profile.port, name=profile.name))
     return rebuilt
+
+
+def _spi_devices(
+    listed: list[DiscoveredDevice],
+    profiles: Mapping[str, DeviceProfile] | None,
+) -> list[DiscoveredDevice]:
+    """The radios on this machine's own SPI bus, as picker rows.
+
+    One row per ``transport = "spi"`` profile whose ``/dev/spidev*`` node exists, named by
+    the profile; and, where no profile covers it, one for the uConsole AIO's device node when
+    it exists, wired with the defaults. Nothing is probed to list them — a radio on the bus
+    has no node running until one is chosen — so a row appears exactly when there is a device
+    node to open. A device node already listed is not listed twice.
+
+    Args:
+        listed: The devices already gathered, for de-duplication.
+        profiles: The configured profiles, or ``None`` when none are loaded.
+
+    Returns:
+        One SPI :class:`DiscoveredDevice` per radio not already listed.
+    """
+    seen = {d.stable_id for d in listed}
+    rows: list[DiscoveredDevice] = []
+    wirings = [(p.spi or SpiWiring(), p.name) for p in (profiles or {}).values() if p.is_spi]
+    covered = {wiring.spidev for wiring, _name in wirings}
+    if SpiWiring().spidev not in covered:
+        wirings.append((SpiWiring(), ""))
+    for wiring, name in wirings:
+        if not spi_present(wiring):
+            continue
+        device = spi_device(wiring, name=name)
+        if device.stable_id in seen:
+            continue
+        seen.add(device.stable_id)
+        rows.append(device)
+    return rows
 
 
 async def _add_network_device(

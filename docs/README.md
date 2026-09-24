@@ -23,7 +23,7 @@ USB, Bluetooth or Wi-Fi needs none of this.
 | --- | --- |
 | **[MeshTerm on hardware](hardware.md)** | Start here — which of the two manuals below is yours, and what the device-side scripts do. |
 | [MeshTerm on the PicoCalc](picocalc.md) | A stock ClockworkPi PicoCalc to a Linux handheld with a LoRa radio soldered inside: the shopping list, the Lyra swap, Calculinux, and the radio. |
-| [MeshTerm on the uConsole](uconsole.md) | A uConsole with the hackergadgets AIO LoRa board, whose SX1262 sits on the host's own SPI bus, fronted as a companion by a small bridge. |
+| [MeshTerm on the uConsole](uconsole.md) | A uConsole with the hackergadgets AIO LoRa board, whose SX1262 sits on the host's own SPI bus — MeshTerm drives it directly with `--spi`, or a small bridge fronts it as a companion for an always-on node. |
 
 ## Reading the code
 

@@ -36,6 +36,9 @@ _log = logging.getLogger(__name__)
 TRANSPORT_SERIAL = "serial"
 TRANSPORT_BLE = "ble"
 TRANSPORT_TCP = "tcp"
+#: A LoRa chip on the host's own SPI bus, run by a node MeshTerm starts itself
+#: (:mod:`meshterm.core.spiradio`). Found by its ``/dev/spidev*`` node, like a serial port.
+TRANSPORT_SPI = "spi"
 #: The built-in simulator, as a device inventory reports it under ``--mock``. Never
 #: discovered — there is nothing to find — but a session that promised no real hardware
 #: still has exactly one device, and this is what it is called.
@@ -127,7 +130,7 @@ class DiscoveredDevice:
         serial_number: USB serial number, if exposed by the device.
         manufacturer: USB manufacturer string, if available.
         product: USB product string, if available.
-        transport: ``"serial"``, ``"ble"``, or ``"tcp"`` — the connection layer for this device.
+        transport: ``"serial"``, ``"ble"``, ``"tcp"``, or ``"spi"`` — the connection layer.
         address: Bluetooth address for a BLE device (e.g. ``AA:BB:CC:DD:EE:FF``).
         name: Advertised BLE local name (e.g. ``"MeshCore-Basestation"``); BLE only.
         ble_device: The live ``bleak.BLEDevice`` the scan produced; BLE only, and only for
@@ -139,6 +142,10 @@ class DiscoveredDevice:
             persisted.
         host: Hostname or IP of a TCP companion (e.g. ``"192.168.1.50"``); TCP only.
         tcp_port: TCP port the companion listens on (e.g. ``5000``); TCP only.
+        spi: The :class:`~meshterm.core.config.SpiWiring` of a radio on the host's SPI bus;
+            SPI only. Its ``port`` is the SPI device node (``/dev/spidev1.0``), which is what
+            such a radio is named and remembered by. Typed ``object`` to keep this module
+            free of the config import.
     """
 
     port: str = ""
@@ -155,6 +162,12 @@ class DiscoveredDevice:
     ble_device: object | None = None
     host: str | None = None
     tcp_port: int | None = None
+    spi: object | None = None
+
+    @property
+    def is_spi(self) -> bool:
+        """Whether this device is a radio on the host's own SPI bus, run by MeshTerm's node."""
+        return self.transport == TRANSPORT_SPI
 
     @property
     def is_ble(self) -> bool:
@@ -194,6 +207,8 @@ class DiscoveredDevice:
             return f"tcp:{self.host}:{self.tcp_port}"
         if self.transport == TRANSPORT_MOCK:
             return "mock:simulator"
+        if self.is_spi:
+            return f"spi:{self.port}"
         if self.is_ble:
             return f"ble:{(self.address or self.name or '').lower()}"
         if self.serial_number:
@@ -212,8 +227,8 @@ class DiscoveredDevice:
             ``"bridge"`` for a generic USB-UART chip (a weak hint — could be anything), or
             ``"unknown"`` for an unrecognized adapter.
         """
-        if self.is_ble or self.is_tcp:
-            return "board"  # a MeshCore BLE advert / a user-named TCP endpoint is confident
+        if self.is_ble or self.is_tcp or self.is_spi:
+            return "board"  # a MeshCore advert / a named endpoint / a wired radio is confident
         if self.vid in NATIVE_LORA_VIDS:
             return "board"
         if self.vid in UART_BRIDGE_VIDS:
@@ -236,7 +251,7 @@ class DiscoveredDevice:
         its USB vendor ID to a friendly name, falling back to the driver's manufacturer
         string.
         """
-        if self.is_ble or self.is_tcp:
+        if self.is_ble or self.is_tcp or self.is_spi:
             return self.manufacturer or ""
         if self.vid in KNOWN_LORA_VIDS:
             return KNOWN_LORA_VIDS[self.vid]
@@ -255,6 +270,8 @@ class DiscoveredDevice:
         if self.is_ble:
             name = self.name or self.product or self.description or "Bluetooth device"
             return f"{name} (BLE)"
+        if self.is_spi:
+            return f"{self.name or 'SPI radio'} ({self.port})"
         name = self.product or self.description or self.vendor_label or "Serial device"
         suffix = f"({self.port})"
         if name.endswith(suffix):  # avoid "… (COM11) (COM11)"
@@ -529,3 +546,27 @@ async def discover_all(
     # (USB serial number vs BLE address), so no cross-transport dedup is needed here.
     ble_devices = await discover_ble_devices(ble_timeout)
     return serial + ble_devices
+
+
+def spi_device(wiring: object, *, name: str = "") -> DiscoveredDevice:
+    """Build the :class:`DiscoveredDevice` for a radio on the host's own SPI bus.
+
+    Such a radio is "found" the way a serial port is — its ``/dev/spidev*`` node exists —
+    but nothing answers on it until MeshTerm starts a node, so it is listed from its wiring
+    (a profile's, or the AIO's defaults) rather than probed.
+
+    Args:
+        wiring: The radio's :class:`~meshterm.core.config.SpiWiring`.
+        name: Optional friendly name for display (a profile's description, a node name).
+
+    Returns:
+        An SPI :class:`DiscoveredDevice` ready to select or connect.
+    """
+    return DiscoveredDevice(
+        transport=TRANSPORT_SPI,
+        port=wiring.spidev,  # type: ignore[attr-defined]
+        spi=wiring,
+        name=name or None,
+        description=name or "SPI radio",
+        product=name or None,
+    )

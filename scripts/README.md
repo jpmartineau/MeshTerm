@@ -6,7 +6,7 @@ Repo-side tools. None of these ship in the wheel.
 |---|---|
 | `basemap-doctor.py` | Why a user's map has no basemap — certificates, DNS, proxy, or colour depth |
 | `picocalc/` | Calculinux device setup: console font, palette, Wi-Fi; `xiao-radio/` is the XIAO radio kit (firmware build, flashing, UART setup) |
-| `uconsole/` | The uConsole SPI bridge service |
+| `uconsole/` | The uConsole's always-on SPI bridge service (MeshTerm can also drive that radio directly, with no script at all — see `docs/uconsole.md`) |
 
 ## basemap-doctor.py
 

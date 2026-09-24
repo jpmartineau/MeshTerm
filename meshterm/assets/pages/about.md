@@ -21,7 +21,7 @@ I wanted something I could run from my computer. I wanted it to run on Windows, 
 In addition to a generic terminal setup, I wanted it to run on two devices I had lying around in my nerdcave.
 
 ### ClockworkPi uConsole
-MeshTerm is compatible with the **HackerGadgets AIO board (v1 or v2)**. The **AIO** board has just a raw LoRa radio, meaning it can't run MeshCore firmware. MeshTerm includes a script to run the mesh node in software, and expose it using a TCP port which MeshTerm can connect to.
+MeshTerm is compatible with the **HackerGadgets AIO board (v1 or v2)**. The **AIO** board has just a raw LoRa radio, meaning it can't run MeshCore firmware. MeshTerm can run the mesh node in software itself, straight over the board's SPI bus, for as long as MeshTerm is running — no separate service needed. If you'd rather the node stayed on the mesh while MeshTerm is closed, an optional bridge service can run it all the time instead.
 
 MeshTerm feels right at home on the **uConsole**. Running MeshTerm on it makes it feel like a piece of gear straight out of a William Gibson novel.
 

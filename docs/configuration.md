@@ -23,6 +23,8 @@ delete a line and the default takes over again.
 — it discovers attached serial devices and nearby Bluetooth companions, lets you pick one,
 and remembers the last good default. A network (TCP) companion isn't discoverable, so reach
 it with `--tcp host:port`, a TCP profile, or the picker's "add a network device" prompt.
+A LoRa radio on this machine's own SPI bus is listed on the picker when its device node
+exists, or reached with `--spi`; see [the uConsole manual](uconsole.md).
 Write a config file only to give your hardware stable aliases.
 
 Copy [`config.example.toml`](../config.example.toml) to `~/.meshterm/config.toml`:
@@ -46,6 +48,13 @@ description = "Pocket handheld over Bluetooth"
 [profiles.wifi]
 host = "192.168.1.50"
 description = "Basestation over WiFi"
+
+# A radio on this machine's own SPI bus (the uConsole AIO): MeshTerm runs its node.
+# The pins default to the AIO v1's; a `spi` table states only what differs.
+[profiles.aio]
+transport = "spi"
+# [profiles.aio.spi]
+# en_pins = [27]   # the AIO v2 powers its radio from pin 27
 ```
 
 Both live in `~/.meshterm`, along with everything else MeshTerm remembers: the SQLite

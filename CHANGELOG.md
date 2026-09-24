@@ -9,6 +9,26 @@ one caveat SemVer makes for a leading zero: while the major version is still `0`
 
 ## [Unreleased]
 
+### Added
+
+- **MeshTerm drives the uConsole's LoRa radio itself, without the bridge service.** A radio
+  on this machine's own SPI bus is now a connection like USB, Bluetooth, or TCP: pick
+  **SPI radio** on the device screen, or run `meshterm --spi`. MeshTerm starts the node when
+  it connects and ends it when it quits, so the radio's pins are free for other programs
+  whenever MeshTerm is closed — even after a crash. The node keeps its identity, name,
+  radio settings, channels, and contacts in `~/.meshterm/radio/`, and the first time it
+  runs it takes over the bridge's identity and contacts, so it stays the node everyone
+  already knows. It needs the radio library (`pipx inject mesh-term
+  'openhop-core[hardware]'`); a board wired differently from the AIO v1 states its pins in
+  a profile's `spi` table. The bridge is still there for a node that stays on the mesh
+  while MeshTerm is closed. ([#21](https://github.com/jpmartineau/MeshTerm/issues/21))
+
+### Fixed
+
+- **The SPI bridge remembers its channels across restarts.** It kept them only in memory,
+  so after every reboot the Channels page came up empty while mute settings, which
+  MeshTerm keeps itself, survived. Update the service (menu option 2) to get the fix.
+
 ### Changed
 
 - **MeshTerm now sends at most one automatic advert a week, and none unless you ask.** A

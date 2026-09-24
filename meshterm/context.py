@@ -16,7 +16,7 @@ from rich.console import Console
 from .core.admin_store import AdminStore
 from .core.advert_store import AdvertStore
 from .core.channel_store import ChannelStore
-from .core.config import DeviceProfile, Settings
+from .core.config import DeviceProfile, Settings, SpiWiring
 from .core.connection import Device, make_device
 from .core.contact_store import ContactStore
 from .core.courier_store import CourierStore
@@ -129,6 +129,7 @@ class AppContext:
     port_override: str | None = None
     ble_override: str | None = None
     tcp_override: str | None = None
+    spi_override: bool = False
     ble_pin: str | None = None
     output: OutputFormat = OutputFormat.PLAIN
     interactive: bool = True
@@ -210,7 +211,7 @@ class AppContext:
         serial port). Falls back to an explicit ``--port`` override when a connection hasn't
         recorded one yet.
         """
-        if self.mock or self.active_transport in ("ble", "tcp"):
+        if self.mock or self.active_transport in ("ble", "tcp", "spi"):
             return None
         return self._active_port or self.port_override
 
@@ -242,15 +243,17 @@ class AppContext:
     def active_transport(self) -> str | None:
         """Which transport the current or selected connection uses.
 
-        One of ``"serial"``, ``"ble"``, ``"tcp"``, or ``None`` for the simulator. For a
-        real device it reflects the open connection when one exists, otherwise the
+        One of ``"serial"``, ``"ble"``, ``"tcp"``, ``"spi"``, or ``None`` for the simulator.
+        For a real device it reflects the open connection when one exists, otherwise the
         transport implied by the pending selection (an explicit ``--tcp`` selects TCP,
-        ``--ble`` selects BLE), defaulting to serial.
+        ``--ble`` selects BLE, ``--spi`` the SPI radio), defaulting to serial.
         """
         if self.mock:
             return None
         if self._active_transport is not None:
             return self._active_transport
+        if self.spi_override or (self.profile is not None and self.profile.is_spi):
+            return "spi"
         if self.tcp_override:
             return "tcp"
         return "ble" if self.ble_override else "serial"
@@ -520,6 +523,27 @@ class AppContext:
             await self._open("the simulator")
             return self._device
 
+        # A radio on the host's own SPI bus (``--spi``, an SPI profile, or the remembered
+        # default) has nothing to find: MeshTerm starts the node that answers on it.
+        spi = self._resolve_spi()
+        if spi is not None:
+            from .core.spiradio import state_dir
+
+            self._device = make_device(
+                mock=False,
+                port=None,
+                transport="spi",
+                spi=spi,
+                state=state_dir(self.settings.config_dir, spi),
+            )
+            self._active_transport = "spi"
+            self._active_endpoint = spi.spidev
+            self._active_port = None
+            self._active_address = None
+            await self._open(f"SPI radio {spi.spidev}")
+            await self._settle_connection()
+            return self._device
+
         # A network endpoint (an explicit ``--tcp``, a TCP profile, a device picked at startup,
         # or the remembered TCP default) is opened directly by host:port — TCP companions
         # aren't discoverable, so this remembered/explicit endpoint is the only way to reach one.
@@ -615,8 +639,10 @@ class AppContext:
         explicit_other = (
             bool(self.port_override)
             or bool(self.ble_override)
+            or self.spi_override
             or (
-                self.profile is not None and (bool(self.profile.port) or bool(self.profile.address))
+                self.profile is not None
+                and (bool(self.profile.port) or bool(self.profile.address) or self.profile.is_spi)
             )
         )
         if explicit_other:
@@ -630,6 +656,45 @@ class AppContext:
             self.selected_device = None  # remembered, not freshly discovered this session
             return host, port
         return None, None
+
+    def _resolve_spi(self) -> SpiWiring | None:
+        """The wiring of the SPI radio to open, or ``None`` when another transport is meant.
+
+        In priority order: an SPI profile, the radio picked on the startup splash, ``--spi``
+        (the first SPI profile's wiring, else the AIO's), then the remembered default when it
+        was an SPI radio and nothing else was named. Anything else named explicitly — a port,
+        an address, a host, another kind of profile — means this session is not about the SPI
+        radio.
+        """
+        if self.profile is not None and self.profile.is_spi:
+            return self.profile.spi or SpiWiring()
+        chosen = self.selected_device
+        if chosen is not None and chosen.is_spi:
+            return chosen.spi or self.spi_wiring_for(chosen.port)  # type: ignore[return-value]
+        if self.spi_override:
+            return next(
+                (p.spi or SpiWiring() for p in self.settings.profiles.values() if p.is_spi),
+                SpiWiring(),
+            )
+        if self.port_override or self.ble_override or self.tcp_override or self.profile:
+            return None
+        remembered = self.device_store.load()
+        if remembered is None or remembered.transport != "spi" or not remembered.target:
+            return None
+        self.selected_device = None  # remembered, not freshly discovered this session
+        return self.spi_wiring_for(remembered.target)
+
+    def spi_wiring_for(self, spidev: str) -> SpiWiring:
+        """The wiring for the radio on ``spidev``: a profile's that names it, else the AIO's.
+
+        A remembered or listed SPI radio is known by its device node alone, so its pins come
+        from whichever SPI profile is on that node; with none, the defaults are the only
+        wiring there is (and the right one for the board they describe).
+        """
+        for profile in self.settings.profiles.values():
+            if profile.is_spi and (profile.spi or SpiWiring()).spidev == spidev:
+                return profile.spi or SpiWiring()
+        return SpiWiring()
 
     def _resolve_ble_endpoint(self) -> tuple[str | None, str | None]:
         """Return the ``(address, pin)`` to open over Bluetooth, or ``(None, None)`` for serial.

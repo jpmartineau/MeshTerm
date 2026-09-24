@@ -39,6 +39,10 @@ third_party_notices = notices.write_third_party_notices(
 # the bundle exactly as it does in a checkout.
 datas = [
     ("../meshterm/assets", "meshterm/assets"),
+    # The SPI radio's node is run by path under *another* Python — the one with the radio
+    # library, which this build doesn't carry — so it has to exist as a source file, beside
+    # where `spiradio.node_script()` looks for it, not only as bytecode in the archive.
+    ("../meshterm/core/radionode.py", "meshterm/core"),
     # A one-file build is a *copy* of MeshTerm, and Apache-2.0 §4(a)/(d) want MeshTerm's
     # own LICENSE and NOTICE distributed with every copy — not folded into the app's own
     # assets, but sitting at the bundle root the way they sit at the repository root.
