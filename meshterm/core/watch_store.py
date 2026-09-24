@@ -23,6 +23,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import ClassVar
 
 from .models import utcnow
 
@@ -73,6 +74,10 @@ class WatchedNode:
     silent_since: datetime | None = None
     node_type: int | None = None
 
+    #: Fields this record once held and must never hold again under another meaning (see
+    #: :data:`meshterm.core.preferences.RETIRED` for why a name is never reused).
+    RETIRED: ClassVar[frozenset[str]] = frozenset()
+
 
 @dataclass(slots=True)
 class Alert:
@@ -94,6 +99,10 @@ class Alert:
     message: str
     acked: bool = False
 
+    #: Fields this record once held and must never hold again under another meaning (see
+    #: :data:`meshterm.core.preferences.RETIRED` for why a name is never reused).
+    RETIRED: ClassVar[frozenset[str]] = frozenset()
+
 
 @dataclass(slots=True)
 class _State:
@@ -104,6 +113,10 @@ class _State:
     known: set[str] = field(default_factory=set)
     new_node_alerts: bool = True
     next_id: int = 1
+
+    #: Fields this record once held and must never hold again under another meaning (see
+    #: :data:`meshterm.core.preferences.RETIRED` for why a name is never reused).
+    RETIRED: ClassVar[frozenset[str]] = frozenset()
 
 
 class WatchStore:

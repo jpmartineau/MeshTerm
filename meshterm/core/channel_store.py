@@ -29,7 +29,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from .atomicwrite import write_atomically
 from .channels import (
@@ -51,6 +51,10 @@ class RememberedChannel:
     idx: int
     name: str
     secret: bytes
+
+    #: Fields this record once held and must never hold again under another meaning (see
+    #: :data:`meshterm.core.preferences.RETIRED` for why a name is never reused).
+    RETIRED: ClassVar[frozenset[str]] = frozenset()
 
     @property
     def identity(self) -> str:

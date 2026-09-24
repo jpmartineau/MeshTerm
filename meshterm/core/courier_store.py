@@ -19,6 +19,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import ClassVar
 
 from .atomicwrite import write_atomically
 from .models import utcnow
@@ -65,6 +66,10 @@ class QueuedMessage:
     last_attempt: datetime | None = None
     status: str = QUEUED
     finished: datetime | None = None
+
+    #: Fields this record once held and must never hold again under another meaning (see
+    #: :data:`meshterm.core.preferences.RETIRED` for why a name is never reused).
+    RETIRED: ClassVar[frozenset[str]] = frozenset()
 
 
 class CourierStore:

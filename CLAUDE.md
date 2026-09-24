@@ -86,8 +86,9 @@ not in `config.toml`: a code constant a reader can't reach is a preference nobod
 
 What MeshTerm writes, it writes from what it knows: a store reads its file into typed
 records and writes back out of *them*, never the raw document it read, so a field no
-record knows (retired, or invented by a hand edit) is gone at the next write —
-`preferences.toml` already works this way, `adverts.json` is the store-side model. And
+record knows (retired, or invented by a hand edit) is gone at the next write — every
+`*_store.py` and `preferences.toml` work this way, and the settings store keeps only
+keys `device_config` still registers, since it offers them back to the radio. And
 **a name that leaves is retired for good**, never reused with another meaning, because a
 value can outlive its key in a file nobody saved since, and an old `30` that passes a new
 spec means something else undetectably. A preference key goes in `preferences.RETIRED`

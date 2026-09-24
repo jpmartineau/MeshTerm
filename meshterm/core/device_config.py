@@ -795,6 +795,18 @@ DEVICE_SETTINGS: list[SettingSpec] = [
 
 _BY_KEY: dict[str, SettingSpec] = {s.key: s for s in DEVICE_SETTINGS}
 
+#: Every key that was once a device setting and no longer is — none yet. A retired key is
+#: never reused, for the reason :data:`meshterm.core.preferences.RETIRED` gives, and with
+#: more at stake here: the settings store remembers values to *restore onto the radio*, so a
+#: key that came back meaning something else would offer to write the old value's number
+#: into the new setting. ``tests/test_retired.py`` fails a registry that takes one back.
+RETIRED: frozenset[str] = frozenset()
+
+
+def is_setting_key(key: str) -> bool:
+    """Whether ``key`` names a device setting in the registry (and not a retired one)."""
+    return key in _BY_KEY
+
 
 def get_spec(key: str) -> SettingSpec:
     """Return the spec for ``key``.

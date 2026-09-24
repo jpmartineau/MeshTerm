@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import ClassVar
 
 from .atomicwrite import write_atomically
 from .discovery import (
@@ -74,6 +75,10 @@ class RememberedDevice:
     hardware_model: str = ""
     host: str = ""
     tcp_port: int = 0
+
+    #: Fields this record once held and must never hold again under another meaning (see
+    #: :data:`meshterm.core.preferences.RETIRED` for why a name is never reused).
+    RETIRED: ClassVar[frozenset[str]] = frozenset()
 
     @property
     def is_ble(self) -> bool:

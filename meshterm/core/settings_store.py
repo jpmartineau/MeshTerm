@@ -34,7 +34,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .atomicwrite import write_atomically
-from .device_config import DeviceConfigError, format_value, get_spec, parse_value
+from .device_config import (
+    DeviceConfigError,
+    format_value,
+    get_spec,
+    is_setting_key,
+    parse_value,
+)
 
 if TYPE_CHECKING:
     from .connection import Device
@@ -86,9 +92,14 @@ class SettingsStore:
         for pubkey, entries in (data.get("devices") or {}).items():
             if not isinstance(entries, dict):
                 continue
-            # Keep only plain scalar values; a container or null is a malformed entry.
+            # Keep only plain scalar values of settings the registry knows: a container or
+            # null is a malformed entry, and a key that is no longer a setting (or a typo)
+            # is not something to offer to write back onto the radio. Whatever is left out
+            # here is gone from the file at its next save.
             values = {
-                str(key): value for key, value in entries.items() if isinstance(value, _SCALARS)
+                str(key): value
+                for key, value in entries.items()
+                if isinstance(value, _SCALARS) and is_setting_key(str(key))
             }
             if values:
                 devices[_norm(str(pubkey))] = values

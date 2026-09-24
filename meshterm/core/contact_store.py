@@ -56,6 +56,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import ClassVar
 
 from .atomicwrite import write_atomically
 from .models import Contact, advert_time
@@ -117,6 +118,10 @@ class RememberedContact:
     lon: float | None = None
     archived_at: int | None = None
     locked: bool = False
+
+    #: Fields this record once held and must never hold again under another meaning (see
+    #: :data:`meshterm.core.preferences.RETIRED` for why a name is never reused).
+    RETIRED: ClassVar[frozenset[str]] = frozenset()
 
     @property
     def archived(self) -> bool:
