@@ -695,3 +695,61 @@ def test_the_last_column_preference_overrules_the_platform() -> None:
         assert _reclaim_last_column() is False
     finally:
         install(Preferences())
+
+
+# -- the weekly advert's status line ---------------------------------------------------
+
+
+def _advert_rows(prefs: Preferences, pending: dict, status) -> list[str]:
+    """The page's lines with a stub scheduler status."""
+    from meshterm.ui.tui import SelectScreen
+
+    title, items = _menu_items(prefs, pending, lambda: status)
+    screen = SelectScreen(title, items)
+    screen.note_viewport(len(items) + 4)
+    return [line.strip() for line in _plain(screen.render_body(_WIDE)).splitlines()]
+
+
+def test_no_status_line_while_the_weekly_advert_is_off() -> None:
+    """Off by default, the row stands alone."""
+    rows = _advert_rows(Preferences(), {}, None)
+    assert not any("advert in" in row or "due —" in row for row in rows)
+
+
+def test_staged_on_says_the_week_starts_on_apply() -> None:
+    """Before it is saved, no week is running yet."""
+    rows = _advert_rows(Preferences(), {"weekly_flood_advert": True}, None)
+    assert "the week starts on Apply" in rows
+
+
+def test_the_status_line_reads_the_scheduler() -> None:
+    """Counting shows the time left; due says what the advert is waiting for."""
+    from datetime import timedelta
+
+    from meshterm.core.models import utcnow
+    from meshterm.services.advert_scheduler import (
+        COUNTING,
+        LISTENING,
+        OFFLINE,
+        QUIET,
+        AdvertStatus,
+    )
+
+    prefs = Preferences()
+    prefs.set("weekly_flood_advert", True)
+    soon = AdvertStatus(COUNTING, utcnow() + timedelta(days=4, hours=2))
+    assert "next advert in 4d" in _advert_rows(prefs, {}, soon)
+    assert "no device connected" in _advert_rows(prefs, {}, AdvertStatus(OFFLINE))
+    assert "due — waiting for a packet" in _advert_rows(prefs, {}, AdvertStatus(LISTENING))
+    assert "due — after 30 s of quiet" in _advert_rows(prefs, {}, AdvertStatus(QUIET))
+
+
+def test_the_status_line_sits_under_its_row() -> None:
+    """The line follows the Weekly advert row directly, so it reads as that row's."""
+    from meshterm.services.advert_scheduler import QUIET, AdvertStatus
+
+    prefs = Preferences()
+    prefs.set("weekly_flood_advert", True)
+    rows = _advert_rows(prefs, {}, AdvertStatus(QUIET))
+    at = next(i for i, row in enumerate(rows) if row.startswith("Weekly advert"))
+    assert rows[at + 1].startswith("due —")

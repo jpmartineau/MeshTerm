@@ -957,6 +957,21 @@ def _preferences(cols: int, rows: int) -> Screen:
     )
 
 
+def _preferences_weekly_advert(cols: int, rows: int) -> Screen:
+    """The Preferences page with the weekly advert on and its longest status line drawn."""
+    from meshterm.services.advert_scheduler import QUIET, AdvertStatus
+
+    prefs = Preferences()
+    prefs.set("weekly_flood_advert", True)
+    prefs.set("advert_quiet_s", 60)
+    title, items = _preference_items(prefs, {}, lambda: AdvertStatus(QUIET))
+    return SelectScreen(
+        title,
+        items,
+        footer_hint="↑↓ move · type to filter · Enter select · Esc back",
+    )
+
+
 def _cooldown_countdown(cols: int, rows: int) -> Screen:
     """The transmit-cooldown countdown at its widest: a flood advert's wait and its reason.
 
@@ -1106,6 +1121,7 @@ _ENTRIES: list[_Entry] = [
     _Entry("config_editor_revealed", _config_editor_revealed),
     _Entry("repeater_admin", _repeater_admin),
     _Entry("preferences", _preferences),
+    _Entry("preferences-weekly-advert", _preferences_weekly_advert),
     _Entry("cooldown_countdown", _cooldown_countdown),
     _Entry("about_meshterm", _about_meshterm),
     _Entry("about_author", _about_author),

@@ -8,6 +8,7 @@ week: a flood advert sent by hand, and the preference being switched on.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import random
@@ -394,3 +395,41 @@ async def test_switching_the_preference_records_the_switch(ctx: AppContext) -> N
 async def _record(sent: list[bool], flood: bool) -> None:
     """Stand-in ``send_advert`` recording each transmission's type."""
     sent.append(flood)
+
+
+# -- the status a screen reads -------------------------------------------------------
+
+
+async def test_status_follows_the_wait(ctx: AppContext) -> None:
+    """Counting, then due and listening, then due and waiting for quiet."""
+    from meshterm.services.advert_scheduler import COUNTING, LISTENING, QUIET
+
+    scheduler, clock, _sent = await _due_scheduler(ctx, 0.0)
+    scheduler._task = asyncio.get_running_loop().create_future()  # reads as running
+    try:
+        await scheduler._pass()
+        assert scheduler.status().state == LISTENING  # type: ignore[union-attr]
+        scheduler._on_event(None)  # type: ignore[arg-type]
+        await scheduler._pass()
+        assert scheduler.status().state == QUIET  # type: ignore[union-attr]
+        clock.t = 40.0
+        await scheduler._pass()  # sent: a new week begins
+        clock.t = 80.0
+        await scheduler._pass()
+        status = scheduler.status()
+        assert status is not None and status.state == COUNTING
+        assert status.due_at is not None and status.due_at > utcnow() + WEEK - timedelta(minutes=1)
+    finally:
+        scheduler._task.cancel()
+
+
+async def test_status_is_silent_while_off_or_stopped(ctx: AppContext) -> None:
+    """Nothing to report while the preference is off, or before the loop runs."""
+    scheduler, _clock, _sent = await _due_scheduler(ctx, 0.0)
+    assert scheduler.status() is None  # not running
+    scheduler._task = asyncio.get_running_loop().create_future()
+    try:
+        ctx.preferences.set("weekly_flood_advert", False)
+        assert scheduler.status() is None
+    finally:
+        scheduler._task.cancel()

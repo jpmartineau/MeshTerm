@@ -45,6 +45,8 @@ import asyncio
 import random
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from ..core import transmit_gate
@@ -65,6 +67,32 @@ JITTER_S = 5.0
 #: is days long, so a coarse check costs nothing in accuracy and spares the file a read on
 #: every tick.
 DUE_CHECK_S = 30.0
+
+
+#: :attr:`AdvertStatus.state` while no device is connected: no week to count, nothing to send.
+OFFLINE = "offline"
+
+#: :attr:`AdvertStatus.state` while the connected device's week is still running.
+COUNTING = "counting"
+
+#: :attr:`AdvertStatus.state` once due, while this connection has yet to hear a packet.
+LISTENING = "listening"
+
+#: :attr:`AdvertStatus.state` once due and heard, while the air has yet to go quiet.
+QUIET = "quiet"
+
+
+@dataclass(frozen=True, slots=True)
+class AdvertStatus:
+    """Where the weekly advert stands, for a screen to say so.
+
+    Attributes:
+        state: :data:`OFFLINE`, :data:`COUNTING`, :data:`LISTENING`, or :data:`QUIET`.
+        due_at: When the connected device's advert falls due, while :data:`COUNTING`.
+    """
+
+    state: str
+    due_at: datetime | None = None
 
 
 class AdvertScheduler:
@@ -102,6 +130,7 @@ class AdvertScheduler:
         self._device: Device | None = None
         self._key = ""
         self._due = False
+        self._due_at: datetime | None = None
         self._checked_at: float | None = None
         # Which connection last heard a packet, and when anything was last heard.
         self._heard_on: Device | None = None
@@ -141,6 +170,34 @@ class AdvertScheduler:
         """Stop the loop at session end (an alias for :meth:`stop`)."""
         await self.stop()
 
+    def status(self) -> AdvertStatus | None:
+        """Where the weekly advert stands right now, or ``None`` when there is nothing to say.
+
+        ``None`` while the scheduler is not running, while the preference is off, and in
+        the second between a connection and the first look at it. Read from what the loop
+        already keeps, so a screen can ask on every paint without touching the file; a
+        :meth:`recheck` pending leaves the last reading standing until the tick replaces it.
+        """
+        ctx = self._ctx
+        if not self.active or not ctx.preferences.weekly_flood_advert:
+            return None
+        device = ctx._device
+        if device is None:
+            return AdvertStatus(OFFLINE)
+        if device is not self._device:
+            return None
+        if not self._due:
+            return AdvertStatus(COUNTING, self._due_at) if self._due_at is not None else None
+        return AdvertStatus(LISTENING if self._heard_on is not device else QUIET)
+
+    def recheck(self) -> None:
+        """Re-read the preference and the store on the next tick, not the next due check.
+
+        For a screen about to report :meth:`status`, which would otherwise show what the
+        loop last read up to :data:`DUE_CHECK_S` ago — before a switch just applied.
+        """
+        self._checked_at = None
+
     def _on_event(self, _event: MeshEvent) -> None:
         """Note a packet heard: it breaks the silence, and proves this connection is live."""
         self._last_heard = self._clock()
@@ -166,6 +223,7 @@ class AdvertScheduler:
             return
         if device is not self._device:
             self._device, self._key, self._due, self._checked_at = device, "", False, None
+            self._due_at = None
         if not self._key:
             self._key = await self._public_key()
             if not self._key:
@@ -192,6 +250,7 @@ class AdvertScheduler:
             raise
         ctx.advert_store.mark_flood(self._key)
         self._due = False
+        self._checked_at = None  # the next tick reads the new week in
         ctx.log.info("advert scheduler: sent the weekly flood advert")
 
     def _check_due(self) -> None:
@@ -199,6 +258,7 @@ class AdvertScheduler:
         ctx = self._ctx
         on = bool(ctx.preferences.weekly_flood_advert)
         ctx.advert_store.sync_enabled(on)
+        self._due_at = ctx.advert_store.due_at(self._key) if on else None
         due = on and ctx.advert_store.due(self._key)
         if due and not self._due:
             ctx.log.info(

@@ -26,6 +26,7 @@ ever written by the one action at the bottom.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from rich import box
@@ -33,6 +34,7 @@ from rich.cells import cell_len
 from rich.table import Table
 from rich.text import Text
 
+from ..core.models import utcnow
 from ..core.preferences import (
     PREFERENCES,
     PreferenceError,
@@ -57,6 +59,10 @@ from .tui import Choice, Separator
 
 if TYPE_CHECKING:
     from ..context import AppContext
+    from ..services.advert_scheduler import AdvertStatus
+
+#: The preference whose row carries a live status line under it (see :func:`_advert_line`).
+_WEEKLY_ADVERT = "weekly_flood_advert"
 
 #: Menu action sentinels, distinct from the plain-string preference keys the rows carry.
 _RESET = "__reset__"
@@ -102,11 +108,16 @@ async def edit_preferences(ctx: AppContext) -> dict[str, Any] | None:
         if want != shown and consolefont.apply(want):
             shown = want
 
+    # The weekly advert's status line reads the scheduler on every paint; ask it to re-read
+    # the store now, so the first paint does not report a week from before the last Apply.
+    ctx.adverts.recheck()
+    advert_status = ctx.adverts.status
+
     # The rows *are* the data — each carries its own staged ``current → new`` value and
     # the title counts what is staged — so they refresh in place after every round
     # (``replace_items``) rather than being rebuilt as a new screen. One screen for the
     # whole visit means the typed filter survives editing a preference, not just the cursor.
-    title, items = _menu_items(prefs, pending)
+    title, items = _menu_items(prefs, pending, advert_status)
     menu = SelectScreen(
         title,
         items,
@@ -131,7 +142,7 @@ async def edit_preferences(ctx: AppContext) -> dict[str, Any] | None:
             else:  # a preference key
                 await _stage_preference(ctx, prefs, choice, pending)
             preview()
-            title, items = _menu_items(prefs, pending)
+            title, items = _menu_items(prefs, pending, advert_status)
             menu.replace_items(items, title=title)
 
 
@@ -200,11 +211,19 @@ def _preference_value(prefs: Preferences, spec: PrefSpec, pending: dict[str, Any
     return value
 
 
-def _menu_items(prefs: Preferences, pending: dict[str, Any]) -> tuple[str, list]:
+def _menu_items(
+    prefs: Preferences,
+    pending: dict[str, Any],
+    advert_status: Callable[[], AdvertStatus | None] | None = None,
+) -> tuple[str, list]:
     """Build the page's title and rows for the current values plus whatever is staged.
 
     The rows sit in three aligned lanes — preference, current value (and any staged new
     value), description — under one pinned header, so the page reads as the editor it is.
+
+    ``advert_status`` is the scheduler's :meth:`~meshterm.services.advert_scheduler.
+    AdvertScheduler.status`; while the weekly advert is on (or staged on) its row gets a
+    muted line under it saying where the week stands (see :func:`_advert_line`).
     """
     sections: list[tuple[str, list[tuple[str, Text, str, Any]]]] = []
     for group, specs in _page_groups():
@@ -268,6 +287,21 @@ def _menu_items(prefs: Preferences, pending: dict[str, Any]) -> tuple[str, list]
                     hscroll_from=description_at,
                 )
             )
+            if key == _WEEKLY_ADVERT and _effective(prefs, key, pending):
+                # A timer you cannot see is one you cannot trust: say where the week is. A
+                # callable, so every paint reads the scheduler afresh and the line counts
+                # down (and flips to "due") while the page is open. Set in the value lane,
+                # under the "on" it explains; drawn — even blank — for as long as the
+                # preference is on, so the rows below never move when the reading arrives.
+                # A separator has no "❯ " pointer column, so it pays those two cells itself.
+                indent = 2 + label_w + 2
+                items.append(
+                    Separator(
+                        lambda width, indent=indent: _advert_line(
+                            prefs, pending, advert_status, indent, width
+                        )
+                    )
+                )
 
     # Nothing at all while the page is clean — Esc leaves. With changes staged the pair
     # appears below one blank line: Apply is the save action, and Back spells out what
@@ -276,6 +310,46 @@ def _menu_items(prefs: Preferences, pending: dict[str, Any]) -> tuple[str, list]
 
     title = "Preferences" + (f" — {len(pending)} staged" if pending else "")
     return title, items
+
+
+def _advert_line(
+    prefs: Preferences,
+    pending: dict[str, Any],
+    advert_status: Callable[[], AdvertStatus | None] | None,
+    indent: int,
+    width: int,
+) -> Text:
+    """The weekly advert's status, muted and set in the value lane, fitted to ``width``.
+
+    Staged on but not yet saved, the week has not started, and the line says when it will.
+    Otherwise it reads the scheduler: how long until the connected device's advert is due,
+    and once it is, what the advert is waiting for. Blank when there is nothing to report.
+    """
+    from ..services.advert_scheduler import COUNTING, LISTENING, OFFLINE, QUIET
+    from .widgets import format_age
+
+    if not prefs.weekly_flood_advert:
+        words = "the week starts on Apply"
+    else:
+        status = advert_status() if advert_status is not None else None
+        if status is None:
+            words = ""
+        elif status.state == OFFLINE:
+            words = "no device connected"
+        elif status.state == COUNTING and status.due_at is not None:
+            left = (status.due_at - utcnow()).total_seconds()
+            words = "next advert in " + (
+                "under a minute" if left < 60 else format_age(max(0.0, left))
+            )
+        elif status.state == LISTENING:
+            words = "due — waiting for a packet"
+        elif status.state == QUIET:
+            words = f"due — after {prefs.advert_quiet_s} s of quiet"
+        else:
+            words = ""
+    line = Text(" " * indent + words, style="muted")
+    line.truncate(max(0, width), overflow="ellipsis")
+    return line
 
 
 #: Widest terminal that still can't hold the DESCRIPTION lane. The three lanes the table
