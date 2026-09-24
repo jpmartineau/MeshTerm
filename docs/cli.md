@@ -55,6 +55,7 @@ With no command, MeshTerm launches the interactive menu instead.
 | `--ble ADDRESS` | Bluetooth address of a companion; selects the BLE transport. |
 | `--ble-pin PIN` | Pairing PIN, if the Bluetooth companion asks for one. |
 | `--tcp HOST[:PORT]` | Network address of a TCP companion; selects the TCP transport. Default port 5000. |
+| `--spi` | The LoRa radio on this machine's own SPI bus; selects the SPI transport. MeshTerm runs the node for the length of the command. Uses the first SPI profile's wiring, else the uConsole AIO's — see [Adding a radio on the SPI bus](configuration.md#adding-a-radio-on-the-spi-bus). Linux only. |
 | `--mock` | Use the built-in simulator instead of real hardware. Nothing transmits, and the run records to `meshterm-mock.db` rather than your real history. |
 | `--db PATH` | Use this SQLite database instead of `~/.meshterm/meshterm.db` (or `meshterm-mock.db`, under `--mock`). **It moves the database and nothing else** — see [Where MeshTerm keeps its state](#where-meshterm-keeps-its-state). |
 | `--json` | Print the answer as JSON instead of aligned text. |
@@ -104,6 +105,7 @@ of two directories from the same shell.
 | `contacts.json`, `channels.json`, `settings.json` | Per-device caches of what the radio last told us, so a screen opens without a round-trip. |
 | `adverts.json` | The weekly flood advert's clock: when it was switched on, and when each device's week began. |
 | `mutes.json`, `watchtower.json`, `remote.json` | Muted channels; watched nodes and their alerts; per-node remote-admin cache and CLI history. |
+| `radio/<spidev>/` | An SPI radio's node, one folder per device node (`radio/spidev1.0/`): its identity key, settings, channels, and contacts, and its log, `node.log`. What firmware would keep in flash. |
 | `tilecache/` | Downloaded basemap tiles. |
 | `meshterm.log` | The log file. |
 | `.lock` | The single-instance lock. |

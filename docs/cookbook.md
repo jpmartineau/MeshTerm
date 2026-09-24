@@ -53,7 +53,7 @@ meshterm preferences set weekly_flood_advert on   # flood an advert once a week,
 meshterm monitor --seconds 60
 ```
 
-Global options — `--profile/-p`, `--port`, `--ble`, `--ble-pin`, `--tcp`, `--mock`,
+Global options — `--profile/-p`, `--port`, `--ble`, `--ble-pin`, `--tcp`, `--spi`, `--mock`,
 `--db`, `--json`, `--absolute`, `--quiet/-q`, `--platform` — may be typed **before or
 after** the subcommand: `meshterm contacts --json` and `meshterm --json contacts` are the
 same run.

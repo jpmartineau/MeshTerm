@@ -253,7 +253,10 @@ same two commands.
 ## Board wiring
 
 The defaults match the hackergadgets uConsole AIO **v1**, which needs no `spi` table at
-all. State only what differs, under `[profiles.<name>.spi]`:
+all. State only what differs, under `[profiles.<name>.spi]`. For a board that isn't an
+AIO — a LoRa HAT on a Raspberry Pi, say — [Adding a radio on the SPI
+bus](configuration.md#adding-a-radio-on-the-spi-bus) walks through a whole profile, including
+how to read the pins off the board's `meshtasticd` configuration:
 
 ```toml
 [profiles.aio2]

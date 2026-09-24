@@ -216,6 +216,9 @@ meshterm --ble AA:BB:CC:DD:EE:FF info
 # Connect over the network to a TCP companion (host[:port], port defaults to 5000)
 meshterm --tcp 192.168.1.50 info
 
+# Drive a LoRa radio on this machine's own SPI bus (the uConsole AIO; Linux only)
+meshterm --spi info
+
 # No radio attached? Use the built-in simulator for development.
 meshterm --mock
 
@@ -253,7 +256,7 @@ does, and its scripted equivalent where one exists.
 ## Scripting it
 
 Nearly every command speaks `--json`, and the global options — `--profile/-p`, `--port`,
-`--ble`, `--ble-pin`, `--tcp`, `--mock`, `--db`, `--json`, `--absolute`, `--quiet/-q`,
+`--ble`, `--ble-pin`, `--tcp`, `--spi`, `--mock`, `--db`, `--json`, `--absolute`, `--quiet/-q`,
 `--platform` — may be typed before or after the subcommand.
 
 ```bash

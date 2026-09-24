@@ -59,9 +59,25 @@ host = "192.168.1.50"
 # transport = "tcp"
 description = "Basestation over WiFi"
 
-# A radio on this machine's own SPI bus (the uConsole AIO): MeshTerm runs its node.
-# The pins default to the AIO v1's; a `spi` table states only what differs.
+# A radio on this machine's own SPI bus: MeshTerm runs its node while it is connected.
+# The pins default to the uConsole AIO v1's, which needs nothing more than this (and is
+# listed on the device screen anyway, whenever /dev/spidev1.0 exists).
 [profiles.aio]
 transport = "spi"
 # [profiles.aio.spi]
 # en_pins = [27]   # the AIO v2 powers its radio from pin 27
+
+# Any other board states its whole wiring — every pin and both switches, because a key
+# left out keeps the AIO's value. Read them off the board's meshtasticd config; the
+# values here are an illustration only. docs/configuration.md has the key-by-key mapping.
+# [profiles.hat.spi]
+# bus_id = 0              # /dev/spidev0.0
+# cs_id = 0
+# reset_pin = 18
+# busy_pin = 20
+# irq_pin = 16
+# txen_pin = 6
+# rxen_pin = -1
+# use_dio2_rf = false
+# use_dio3_tcxo = false
+# python = "/opt/radio/bin/python"   # only to pick the Python that has openhop-core
