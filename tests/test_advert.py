@@ -13,6 +13,7 @@ import io
 import json
 import random
 import time
+from collections.abc import Sequence
 from datetime import timedelta
 from pathlib import Path
 
@@ -174,8 +175,8 @@ def ctx(tmp_path: Path) -> AppContext:
 class _Rng(random.Random):
     """A random source whose ``uniform`` hands out a fixed sequence, and counts the draws."""
 
-    def __init__(self, *draws: float) -> None:
-        super().__init__()
+    def __init__(self, draws: Sequence[float]) -> None:
+        super().__init__()  # one argument: 3.10's Random.__new__ refuses more
         self.draws = list(draws)
         self.calls = 0
 
@@ -207,7 +208,7 @@ async def _due_scheduler(ctx: AppContext, *draws: float) -> tuple[AdvertSchedule
     ctx.advert_store.set_enabled(True, when=week_ago)
     ctx.advert_store.arm(KEY, when=week_ago)
     clock = _Clock()
-    scheduler = AdvertScheduler(ctx, rng=_Rng(*draws or (0.0,)), clock=clock)
+    scheduler = AdvertScheduler(ctx, rng=_Rng(draws or (0.0,)), clock=clock)
     sent: list[bool] = []
     device.send_advert = lambda flood=False: _record(sent, flood)  # type: ignore[method-assign]
     return scheduler, clock, sent
@@ -322,7 +323,7 @@ async def test_first_connection_arms_without_sending(ctx: AppContext) -> None:
     ctx.preferences.set("weekly_flood_advert", True)
     ctx.advert_store.set_enabled(True, when=utcnow() - timedelta(days=30))
     clock = _Clock()
-    scheduler = AdvertScheduler(ctx, rng=_Rng(0.0), clock=clock)
+    scheduler = AdvertScheduler(ctx, rng=_Rng((0.0,)), clock=clock)
     sent: list[bool] = []
     (await ctx.device()).send_advert = lambda flood=False: _record(sent, flood)  # type: ignore[method-assign]
     scheduler._on_event(None)  # type: ignore[arg-type]
