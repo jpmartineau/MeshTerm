@@ -125,7 +125,28 @@ def test_an_old_shaped_file_reads_empty(tmp_path: Path) -> None:
     store = AdvertStore(path)
     assert store.week_began(KEY) is None
     store.arm(KEY)
-    assert set(json.loads(path.read_text())) == {"devices"}
+    written = json.loads(path.read_text())
+    assert set(written) == {"enabled_since", "devices"}
+    assert KEY not in written  # the old top-level record is gone
+
+
+def test_a_write_keeps_only_the_fields_the_store_knows(tmp_path: Path) -> None:
+    """Unknown fields — retired or invented — do not survive the next write."""
+    path = tmp_path / "adverts.json"
+    path.write_text(
+        json.dumps(
+            {
+                "enabled_since": None,
+                "stray": 1,
+                "devices": {KEY: {"since": utcnow().isoformat(), "flood_hours": 24}},
+            }
+        )
+    )
+    store = AdvertStore(path)
+    store.mark_flood(OTHER)
+    written = json.loads(path.read_text())
+    assert "stray" not in written
+    assert written["devices"][KEY].keys() == {"since"}
 
 
 # -- the scheduler against the simulator ---------------------------------------------

@@ -40,6 +40,7 @@ Two access paths, deliberately:
 
 from __future__ import annotations
 
+import logging
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -474,6 +475,28 @@ PREFERENCES: tuple[PrefSpec, ...] = (
 
 _BY_KEY: dict[str, PrefSpec] = {spec.key: spec for spec in PREFERENCES}
 
+#: Every key that was once a preference and no longer is. A retired key is never reused:
+#: a value can outlive its key in a file nobody saved since, and if the name came back
+#: with a new meaning — seconds become minutes, a range moves — an old ``30`` that still
+#: passes the new spec would load cleanly and mean something else, which no validation
+#: can catch. So a preference that returns changed returns under a new name (a unit in the
+#: key makes that the natural move: ``_s`` to ``_min``), and ``tests/test_retired.py``
+#: fails any registry that takes one of these back. Loading refuses them outright.
+RETIRED: frozenset[str] = frozenset(
+    {
+        # Per-device background advert cadences, moved to Device config and since replaced
+        # by the weekly flood advert (``weekly_flood_advert``).
+        "advert_direct_hours",
+        "advert_flood_hours",
+    }
+)
+
+#: The reason :attr:`Preferences.dropped` gives for a key found in :data:`RETIRED`.
+DROPPED_RETIRED = "retired"
+
+#: The reason :attr:`Preferences.dropped` gives for a key the registry has never held.
+DROPPED_UNKNOWN = "unknown"
+
 
 def get_spec(key: str) -> PrefSpec:
     """Look up one preference's spec.
@@ -490,6 +513,8 @@ def get_spec(key: str) -> PrefSpec:
     try:
         return _BY_KEY[key]
     except KeyError:
+        if key in RETIRED:
+            raise PreferenceError(f"{key!r} is no longer a preference") from None
         raise PreferenceError(f"unknown preference: {key!r}") from None
 
 
@@ -680,8 +705,9 @@ class Preferences:
         """
         self._path = path
         self._values: dict[str, Any] = {}
+        self._dropped: dict[str, str] = {}
         if values:
-            self.update(values)
+            self._absorb(values)
 
     @classmethod
     def load(cls, path: Path) -> Preferences:
@@ -693,6 +719,12 @@ class Preferences:
 
         Args:
             path: The TOML file to read.
+
+        Nothing the file holds that the registry cannot take survives the next
+        :meth:`save`, which writes only the overrides in force: a retired key, a key
+        never registered (a typo, most likely), and a value its spec refuses are all
+        left out, and :attr:`dropped` says which and why, for the caller to log once
+        logging is configured (see :func:`report_dropped`).
 
         Returns:
             The loaded preferences, bound to ``path`` for a later :meth:`save`.
@@ -706,6 +738,27 @@ class Preferences:
         except tomllib.TOMLDecodeError:
             data = _salvage(text)
         return cls(path, data)
+
+    def _absorb(self, values: Mapping[str, Any]) -> None:
+        """Take in a file's entries, recording in :attr:`dropped` each one refused."""
+        for raw_key, value in values.items():
+            key = str(raw_key)
+            if key in RETIRED:
+                self._dropped[key] = DROPPED_RETIRED
+                continue
+            try:
+                self.set(key, value)
+            except PreferenceError as exc:
+                self._dropped[key] = str(exc) if key in _BY_KEY else DROPPED_UNKNOWN
+
+    @property
+    def dropped(self) -> dict[str, str]:
+        """What loading refused, key by key (a copy).
+
+        The reason is :data:`DROPPED_RETIRED`, :data:`DROPPED_UNKNOWN`, or — for a key
+        that is registered but whose value its spec refused — the refusal itself.
+        """
+        return dict(self._dropped)
 
     @property
     def path(self) -> Path | None:
@@ -836,6 +889,27 @@ class Preferences:
 _current: Preferences = Preferences()
 
 
+def report_dropped(preferences: Preferences, log: logging.Logger) -> None:
+    """Log what loading the file refused: the entries its next save will leave out.
+
+    A retired key is expected — it was written by an older MeshTerm — so it is noted at
+    INFO. Anything else was probably typed by hand and is not doing what its author
+    meant, so it is a WARNING, and the line names it so the typo can be found.
+
+    Args:
+        preferences: A set built by :meth:`Preferences.load`.
+        log: Where to report.
+    """
+    name = preferences.path.name if preferences.path else PREFERENCES_FILENAME
+    for key, why in preferences.dropped.items():
+        if why == DROPPED_RETIRED:
+            log.info("%s: ignoring retired preference %r; the next save drops it", name, key)
+        elif why == DROPPED_UNKNOWN:
+            log.warning("%s: ignoring unknown preference %r; the next save drops it", name, key)
+        else:
+            log.warning("%s: ignoring %s; the next save drops it", name, why)
+
+
 def current() -> Preferences:
     """The preferences in force for this process.
 
@@ -857,6 +931,7 @@ def install(preferences: Preferences) -> None:
 __all__ = [
     "GROUPS",
     "PREFERENCES",
+    "RETIRED",
     "PrefSpec",
     "PreferenceError",
     "Preferences",
@@ -867,4 +942,5 @@ __all__ = [
     "install",
     "parse_value",
     "range_hint",
+    "report_dropped",
 ]

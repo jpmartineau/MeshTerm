@@ -23,7 +23,7 @@ from .core.courier_store import CourierStore
 from .core.device_store import DeviceStore
 from .core.discovery import DiscoveredDevice, discover_devices
 from .core.mute_store import MuteStore
-from .core.preferences import PREFERENCES_FILENAME, Preferences
+from .core.preferences import PREFERENCES_FILENAME, Preferences, report_dropped
 from .core.preferences import install as install_preferences
 from .core.remote_store import RemoteStore
 from .core.selection import resolve_device
@@ -172,6 +172,7 @@ class AppContext:
         """
         if self.preferences is None:
             self.preferences = Preferences.load(self.settings.config_dir / PREFERENCES_FILENAME)
+            report_dropped(self.preferences, self.log)
         install_preferences(self.preferences)
         if self.advert_store is None:
             self.advert_store = AdvertStore(self.settings.config_dir / "adverts.json")

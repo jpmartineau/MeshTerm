@@ -84,6 +84,18 @@ machine setup — paths and device profiles (`core/config.py`, `config.toml`, a 
 only). A behaviour value belongs in the preference registry, not as a module constant and
 not in `config.toml`: a code constant a reader can't reach is a preference nobody has.
 
+What MeshTerm writes, it writes from what it knows: a store reads its file into typed
+records and writes back out of *them*, never the raw document it read, so a field no
+record knows (retired, or invented by a hand edit) is gone at the next write —
+`preferences.toml` already works this way, `adverts.json` is the store-side model. And
+**a name that leaves is retired for good**, never reused with another meaning, because a
+value can outlive its key in a file nobody saved since, and an old `30` that passes a new
+spec means something else undetectably. A preference key goes in `preferences.RETIRED`
+(loading refuses it; `report_dropped` logs what the next save will drop); a stored field
+goes in its record dataclass's own `RETIRED` set — the record is the path, not the leaf.
+`tests/test_retired.py` fails any live name found in either. Units live in the name
+(`_s`, `_hours`, `_db`), so a changed unit is a new name by construction.
+
 Relative ages: `format_ago` for prose ("now", "5m ago", "never" — never "now ago"),
 `format_age` for aligned columns ("now", "5m").
 

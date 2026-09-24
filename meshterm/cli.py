@@ -27,7 +27,12 @@ from .core.connection import DeviceCommandError, is_connection_lost
 from .core.device_config import DeviceConfigError
 from .core.device_store import DeviceStore
 from .core.instancelock import InstanceBusy, hold_instance_lock
-from .core.preferences import PREFERENCES_FILENAME, PreferenceError, Preferences
+from .core.preferences import (
+    PREFERENCES_FILENAME,
+    PreferenceError,
+    Preferences,
+    report_dropped,
+)
 from .core.selection import DeviceSelectionError
 from .persistence.logging import configure_logging, get_logger, level_from_name, log_path
 from .persistence.repository import Repository
@@ -275,6 +280,9 @@ def main_callback(
         file_level=level_from_name(prefs.log_level),
         quiet=quiet or json_output,
     )
+    # What the file held that no preference now takes — reported only now, since the file
+    # was read before there was a log to say so in.
+    report_dropped(prefs, get_logger())
 
     if profile is not None and settings.resolve_profile(profile) is None:
         # Falling through to ordinary discovery would pick whichever radio is attached, so
