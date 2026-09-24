@@ -746,6 +746,68 @@ def _wire_contact_persistence(companion, log) -> None:
     log.info("contact persistence at %s", path)
 
 
+def _wire_channel_persistence(companion, log) -> None:
+    """Keep the node's channel table across bridge restarts.
+
+    The runtime's ChannelStore is memory-only, like its contacts: every restart
+    came up with no channels, and MeshTerm's Channels page was empty until each
+    one was added again. Reload the last snapshot at startup and re-snapshot
+    after every set or clear, which the frame server makes through
+    ``set_channel`` / ``remove_channel`` on the companion.
+    """
+    import json
+
+    store = getattr(companion, "channels", None)
+    if store is None or not hasattr(companion, "set_channel"):
+        log.warning("channel persistence not wired (no channel store)")
+        return
+
+    path = HOME / ".local" / "share" / APP_NAME / "channels.json"
+
+    def snapshot() -> list:
+        out = []
+        for idx in range(getattr(store, "max_channels", 40)):
+            ch = store.get(idx)
+            if ch is not None and ch.name:
+                out.append({"idx": idx, "name": ch.name, "secret": bytes(ch.secret).hex()})
+        return out
+
+    def save() -> None:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(path.name + ".tmp")
+            tmp.write_text(json.dumps(snapshot()))
+            tmp.replace(path)
+        except Exception as exc:
+            log.warning("could not save channels (%s)", exc)
+
+    if path.exists():
+        try:
+            restored = 0
+            for entry in json.loads(path.read_text()):
+                if entry.get("name"):
+                    companion.set_channel(
+                        int(entry["idx"]), entry["name"], bytes.fromhex(entry["secret"])
+                    )
+                    restored += 1
+            log.info("restored %d channel(s) from %s", restored, path)
+        except Exception as exc:
+            log.warning("could not restore channels (%s)", exc)
+
+    for name in ("set_channel", "remove_channel"):
+        orig = getattr(companion, name, None)
+        if orig is None:
+            continue
+
+        def wrapped(*args, _orig=orig, **kwargs):
+            result = _orig(*args, **kwargs)
+            save()
+            return result
+
+        setattr(companion, name, wrapped)
+    log.info("channel persistence at %s", path)
+
+
 def _wire_trace_push(rt: str, companion, server, log) -> None:
     """Forward over-the-air trace replies to the client as PUSH_CODE_TRACE_DATA.
 
@@ -1098,6 +1160,7 @@ def run_bridge(host: str, port: int, node_name: str) -> int:
         companion = CompanionRadio(radio, identity, node_name=node_name, radio_config=radio_config)
         await companion.start()
         _wire_contact_persistence(companion, log)
+        _wire_channel_persistence(companion, log)
         pub = companion.get_public_key()
         log.info("node identity %s… (hash 0x%02x, name %r)", pub.hex()[:16], pub[0], node_name)
 
