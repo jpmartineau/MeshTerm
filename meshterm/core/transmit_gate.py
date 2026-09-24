@@ -63,6 +63,15 @@ class TransmitGate:
         if flood_advert:
             self._last_flood_advert = now
 
+    @property
+    def last_sent(self) -> float | None:
+        """When anything last went out, on :func:`time.monotonic`'s clock; ``None`` if never.
+
+        For a listener that treats our own transmissions as breaking the air's silence
+        (the weekly advert's wait for a quiet spell) rather than as a cooldown to wait out.
+        """
+        return self._last_sent
+
     def remaining(self, *, flood_advert: bool = False) -> float:
         """Seconds a caller should wait before transmitting; ``0.0`` when it may go now.
 

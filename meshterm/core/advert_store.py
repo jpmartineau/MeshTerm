@@ -1,105 +1,54 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Persistence for the background-advert schedule.
+"""Persistence for the weekly flood advert: when each device's week began.
 
-MeshTerm announces the connected node on a cadence — a zero-hop (direct) advert for the
-immediate neighbourhood and a flood advert for the wider mesh — so the node stays fresh in
-other nodes' contact lists without anyone thinking about it. This store remembers, per
-device (keyed by its public key), the chosen cadence for each advert type and when one was
-last sent, so the countdown survives restarts and *every* advert counts: a manual send from
-the advert menu resets the same clock the scheduler reads (see
-:class:`~meshterm.services.advert_scheduler.AdvertScheduler`).
+A MeshCore companion never advertises by itself — no timer, not even at boot; only an app
+asking (``CMD_SEND_SELF_ADVERT``) or a press on the device's own menu puts one on the air.
+So a node that nobody remembers to advertise slowly drops out of everyone else's contact
+list. The ``weekly_flood_advert`` preference is MeshTerm's answer, and deliberately a
+frugal one: at most one flood advert a week from any one device, and only once that device
+has gone a full week without one (see
+:class:`~meshterm.services.advert_scheduler.AdvertScheduler`, which sends it).
+
+This store remembers what that rule needs, and nothing else:
+
+* **when the preference was turned on** — turning it on starts the week rather than
+  sending, so a week has to pass before the first automatic advert from any device;
+* **per device** (keyed by its public key), **when its week began** — the last flood
+  advert that went out from it, whoever asked for it, or failing that the first time
+  MeshTerm connected to it.
+
+A device's advert is due one week after the *latest* of those instants. The clock is real
+time rather than run time, so a week with the app closed counts, and a due advert that the
+app did not live to send is still due the next time that device connects.
 
 Like the remembered devices (:mod:`meshterm.core.device_store`), this is global machine
 state in a small JSON file (``<config_dir>/adverts.json``) rather than the per-invocation
-SQLite database.
+SQLite database. A file in an older shape (the per-device cadences this replaced) reads as
+empty: every device simply starts its week again.
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from .atomicwrite import write_atomically
 from .models import utcnow
 
-#: The direct (zero-hop) cadence choices offered in the editor, in hours.
-DIRECT_CADENCE_HOURS = (1, 2, 3, 4)
+#: How long a device must go without a flood advert before the weekly one is due.
+WEEK = timedelta(days=7)
 
-#: The flood cadence choices offered in the editor, in hours (3 h .. 1 week).
-FLOOD_CADENCE_HOURS = (3, 6, 12, 24, 48, 168)
+#: The quiet spells the ``advert_quiet_s`` preference offers, in seconds: how long the air
+#: must go without a packet, heard or sent, before the due advert goes out.
+QUIET_CHOICES_S = (5, 15, 30, 60)
 
-#: Defaults applied when a device has no stored policy: announce to neighbours hourly,
-#: flood the wider mesh daily.
-DEFAULT_DIRECT_HOURS = 1
-DEFAULT_FLOOD_HOURS = 24
-
-#: The stored cadence meaning "this advert type is off" (0 hours).
-OFF = 0
-
-
-@dataclass(slots=True)
-class AdvertPolicy:
-    """One device's background-advert schedule and its last-sent marks.
-
-    Attributes:
-        direct_hours: Hours between zero-hop adverts (:data:`OFF` disables them).
-        flood_hours: Hours between flood adverts (:data:`OFF` disables them).
-        last_direct: When a zero-hop advert (scheduled *or* manual) last went out.
-        last_flood: When a flood advert last went out.
-    """
-
-    direct_hours: int = DEFAULT_DIRECT_HOURS
-    flood_hours: int = DEFAULT_FLOOD_HOURS
-    last_direct: datetime | None = None
-    last_flood: datetime | None = None
-
-    def cadence(self, flood: bool) -> int:
-        """The cadence in hours for one advert type (:data:`OFF` when disabled)."""
-        return self.flood_hours if flood else self.direct_hours
-
-    def last_sent(self, flood: bool) -> datetime | None:
-        """When an advert of one type last went out, or ``None`` if never recorded."""
-        return self.last_flood if flood else self.last_direct
-
-    def due(self, flood: bool, now: datetime | None = None) -> bool:
-        """Whether an advert of one type is due at ``now``.
-
-        Never-sent is *not* due: the scheduler arms the clock by recording "now" on its
-        first look (see :meth:`AdvertStore.arm`), so a fresh install waits a full cadence
-        instead of transmitting the moment it starts — adverts are routine, not urgent,
-        and the quiet default is the polite one on a shared mesh.
-
-        Args:
-            flood: ``True`` for the flood clock, ``False`` for the zero-hop one.
-            now: The current time (defaults to :func:`~meshterm.core.models.utcnow`).
-
-        Returns:
-            ``True`` when the type is enabled, armed, and its cadence has elapsed.
-        """
-        hours = self.cadence(flood)
-        last = self.last_sent(flood)
-        if hours == OFF or last is None:
-            return False
-        return ((now or utcnow()) - last).total_seconds() >= hours * 3600
-
-
-def cadence_label(hours: int) -> str:
-    """Render a cadence for display: ``"off"``, ``"every hour"``, ``"every 2 h"``, ``"weekly"``."""
-    if hours == OFF:
-        return "off"
-    if hours == 1:
-        return "every hour"
-    if hours == 24:
-        return "daily"
-    if hours == 168:
-        return "weekly"
-    return f"every {hours} h"
+#: The quiet spell waited for by default, in seconds.
+DEFAULT_QUIET_S = 30
 
 
 class AdvertStore:
-    """Reads and writes per-device background-advert schedules."""
+    """Reads and writes the weekly-advert clock: the switch-on instant, and each device's."""
 
     def __init__(self, path: Path) -> None:
         """Open the store against a JSON file location.
@@ -114,94 +63,114 @@ class AdvertStore:
         """Normalize a device public key into the storage key."""
         return public_key.lower().removeprefix("0x")
 
-    def _load_all(self) -> dict[str, dict]:
-        """Return the raw key -> record mapping, or empty on missing/corrupt file."""
+    def _load(self) -> dict:
+        """Return the file's document, or an empty one when missing, corrupt or outdated."""
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return {}
-        return data if isinstance(data, dict) else {}
+        if not isinstance(data, dict) or not isinstance(data.get("devices"), dict):
+            return {}
+        return data
 
-    def load(self, public_key: str) -> AdvertPolicy:
-        """Return the stored policy for a device, or the on-by-default policy.
+    def _write(self, data: dict) -> None:
+        """Persist ``data`` atomically (a crash mid-write keeps the previous file)."""
+        write_atomically(self._path, json.dumps(data, indent=2))
+
+    # -- the switch ---------------------------------------------------------------------
+
+    def enabled_since(self) -> datetime | None:
+        """When the weekly advert was last turned on, or ``None`` while it is off."""
+        return _as_time(self._load().get("enabled_since"))
+
+    def set_enabled(self, on: bool, when: datetime | None = None) -> None:
+        """Record the preference being turned on (starting the week) or off.
+
+        Turning it on always restarts the clock, even when it was already recorded as on:
+        the call means "it was switched on just now", and switching on never sends.
 
         Args:
-            public_key: The device's public key (hex).
-
-        Returns:
-            The device's :class:`AdvertPolicy`; defaults apply for anything unset.
+            on: Whether the weekly advert is now on.
+            when: The switch-on instant (defaults to now); ignored when turning off.
         """
-        record = self._load_all().get(self._key(public_key))
-        if not isinstance(record, dict):
-            return AdvertPolicy()
-        return AdvertPolicy(
-            direct_hours=_as_hours(record.get("direct_hours"), DEFAULT_DIRECT_HOURS),
-            flood_hours=_as_hours(record.get("flood_hours"), DEFAULT_FLOOD_HOURS),
-            last_direct=_as_time(record.get("last_direct")),
-            last_flood=_as_time(record.get("last_flood")),
-        )
+        data = self._load()
+        data.setdefault("devices", {})
+        if on:
+            data["enabled_since"] = (when or utcnow()).isoformat()
+        elif "enabled_since" in data:
+            del data["enabled_since"]
+        else:
+            return  # already off; nothing to write
+        self._write(data)
 
-    def set_cadence(self, public_key: str, *, flood: bool, hours: int) -> None:
-        """Store one advert type's cadence for a device.
+    def sync_enabled(self, on: bool) -> None:
+        """Bring the recorded switch into line with the preference, where they disagree.
 
-        Args:
-            public_key: The device's public key (hex).
-            flood: ``True`` to set the flood cadence, ``False`` for the zero-hop one.
-            hours: The new cadence in hours (:data:`OFF` disables the type).
+        The Preferences page and ``preferences set`` record the switch as it happens (see
+        :meth:`set_enabled`); this catches the one path neither sees, a hand edit of
+        ``preferences.toml``, so a preference found on with no switch-on instant starts its
+        week now instead of never.
         """
-        self._update(public_key, {"flood_hours" if flood else "direct_hours": int(hours)})
+        recorded = self.enabled_since() is not None
+        if on != recorded:
+            self.set_enabled(on)
 
-    def mark_sent(self, public_key: str, *, flood: bool, when: datetime | None = None) -> None:
-        """Record that an advert went out, resetting that type's countdown.
+    # -- the devices ----------------------------------------------------------------------
 
-        Called for scheduled *and* manual sends alike, so the next background advert
-        counts from the most recent announcement of that type, whoever triggered it.
+    def week_began(self, public_key: str) -> datetime | None:
+        """When a device's own week began, or ``None`` if MeshTerm has never marked it."""
+        record = self._load().get("devices", {}).get(self._key(public_key))
+        return _as_time(record.get("since")) if isinstance(record, dict) else None
+
+    def arm(self, public_key: str, when: datetime | None = None) -> None:
+        """Start a device's week on its first connection, without sending anything.
+
+        Only writes for a device with no mark yet, so it is safe to call on every connect.
 
         Args:
             public_key: The device's public key (hex).
-            flood: Which advert type went out.
+            when: The week's start (defaults to now).
+        """
+        if self.week_began(public_key) is None:
+            self.mark_flood(public_key, when=when)
+
+    def mark_flood(self, public_key: str, when: datetime | None = None) -> None:
+        """Record a flood advert from a device, restarting its week.
+
+        Called for the weekly advert and for a flood advert sent by hand alike, so the
+        next automatic one is never less than a week after the last of either.
+
+        Args:
+            public_key: The device's public key (hex).
             when: The send time (defaults to now).
         """
-        stamp = (when or utcnow()).isoformat()
-        self._update(public_key, {"last_flood" if flood else "last_direct": stamp})
+        data = self._load()
+        devices = data.setdefault("devices", {})
+        devices[self._key(public_key)] = {"since": (when or utcnow()).isoformat()}
+        self._write(data)
 
-    def arm(self, public_key: str, *, flood: bool, when: datetime | None = None) -> None:
-        """Start a never-sent advert type's countdown from ``when`` without sending.
+    # -- the verdict ----------------------------------------------------------------------
 
-        Only writes when no last-sent mark exists, so it is safe to call on every
-        scheduler pass.
+    def due_at(self, public_key: str) -> datetime | None:
+        """When a device's weekly advert falls due, or ``None`` while it cannot.
+
+        ``None`` while the weekly advert is off, and for a device not yet armed.
 
         Args:
             public_key: The device's public key (hex).
-            flood: Which advert type to arm.
-            when: The countdown start (defaults to now).
         """
-        if self.load(public_key).last_sent(flood) is None:
-            self.mark_sent(public_key, flood=flood, when=when)
+        data = self._load()
+        enabled = _as_time(data.get("enabled_since"))
+        record = data.get("devices", {}).get(self._key(public_key))
+        began = _as_time(record.get("since")) if isinstance(record, dict) else None
+        if enabled is None or began is None:
+            return None
+        return max(enabled, began) + WEEK
 
-    def _update(self, public_key: str, fields: dict) -> None:
-        """Merge ``fields`` into a device's record and persist the store."""
-        records = self._load_all()
-        key = self._key(public_key)
-        record = records.get(key)
-        if not isinstance(record, dict):
-            record = {}
-        record.update(fields)
-        records[key] = record
-        self._write(records)
-
-    def _write(self, records: dict[str, dict]) -> None:
-        """Persist ``records`` atomically (crash mid-write keeps the previous file)."""
-        write_atomically(self._path, json.dumps(records, indent=2))
-
-
-def _as_hours(value: object, default: int) -> int:
-    """Coerce a stored cadence to a non-negative int, falling back to ``default``."""
-    try:
-        hours = int(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return default
-    return hours if hours >= 0 else default
+    def due(self, public_key: str, now: datetime | None = None) -> bool:
+        """Whether a device's weekly advert is due at ``now`` (defaults to now)."""
+        at = self.due_at(public_key)
+        return at is not None and (now or utcnow()) >= at
 
 
 def _as_time(value: object) -> datetime | None:

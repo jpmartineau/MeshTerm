@@ -1,14 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for the background advert.
+"""Tests for the weekly flood advert.
 
-The store's schedule arithmetic, the scheduler's one-send-per-pass discipline, and
-the editor/executor integration that lets manual adverts and staged cadence changes
-share one clock.
+The store's week arithmetic (switch-on, per-device marks, the latest of them winning), the
+scheduler's wait for a live link and a quiet spell, and the manual paths that restart the
+week: a flood advert sent by hand, and the preference being switched on.
 """
 
 from __future__ import annotations
 
 import io
+import json
+import random
+import time
 from datetime import timedelta
 from pathlib import Path
 
@@ -16,15 +19,11 @@ import pytest
 from rich.console import Console
 
 from meshterm.context import AppContext
+from meshterm.core import transmit_gate
 from meshterm.core.admin_store import AdminStore
-from meshterm.core.advert_store import (
-    DEFAULT_DIRECT_HOURS,
-    DEFAULT_FLOOD_HOURS,
-    OFF,
-    AdvertStore,
-    cadence_label,
-)
+from meshterm.core.advert_store import WEEK, AdvertStore
 from meshterm.core.config import Settings
+from meshterm.core.connection import make_device
 from meshterm.core.device_store import DeviceStore
 from meshterm.core.models import utcnow
 from meshterm.persistence.repository import Repository
@@ -32,84 +31,110 @@ from meshterm.services.advert_scheduler import AdvertScheduler
 from meshterm.tools.config import apply_ops
 
 KEY = "00" * 32  # the simulator's public key
+OTHER = "ab" * 32
 
 
 # -- the store -----------------------------------------------------------------------
 
 
-def test_store_defaults_are_on(tmp_path: Path) -> None:
-    """An unknown device gets the on-by-default policy: hourly direct, daily flood."""
-    policy = AdvertStore(tmp_path / "adverts.json").load(KEY)
-    assert policy.direct_hours == DEFAULT_DIRECT_HOURS
-    assert policy.flood_hours == DEFAULT_FLOOD_HOURS
-    assert policy.last_direct is None and policy.last_flood is None
-
-
-def test_store_round_trips_cadence_and_marks(tmp_path: Path) -> None:
-    """Cadences and last-sent marks persist per device and per advert type."""
+def test_nothing_is_due_while_off(tmp_path: Path) -> None:
+    """With the preference never switched on, an armed device is never due."""
     store = AdvertStore(tmp_path / "adverts.json")
-    store.set_cadence(KEY, flood=True, hours=48)
-    store.set_cadence(KEY, flood=False, hours=OFF)
-    when = utcnow()
-    store.mark_sent(KEY, flood=True, when=when)
-
-    policy = store.load(KEY)
-    assert policy.flood_hours == 48
-    assert policy.direct_hours == OFF
-    assert policy.last_flood == when
-    assert policy.last_direct is None
-    # A different device is untouched.
-    assert AdvertStore(tmp_path / "adverts.json").load("ff" * 32).flood_hours == 24
+    store.arm(KEY, when=utcnow() - timedelta(days=60))
+    assert store.enabled_since() is None
+    assert store.due_at(KEY) is None
+    assert not store.due(KEY)
 
 
-def test_never_sent_is_not_due_and_arm_starts_the_clock(tmp_path: Path) -> None:
-    """A fresh device is silent until armed; arming never overwrites a real mark."""
+def test_switching_on_starts_the_week(tmp_path: Path) -> None:
+    """A device armed long ago still waits a full week from the switch-on."""
     store = AdvertStore(tmp_path / "adverts.json")
-    assert not store.load(KEY).due(flood=False)
-
-    armed_at = utcnow() - timedelta(hours=2)
-    store.arm(KEY, flood=False, when=armed_at)
-    assert store.load(KEY).due(flood=False)  # armed 2 h ago, hourly cadence — due
-
-    store.arm(KEY, flood=False)  # already armed: a no-op, not a reset to "now"
-    assert store.load(KEY).last_direct == armed_at
+    t0 = utcnow()
+    store.arm(KEY, when=t0 - timedelta(days=30))
+    store.set_enabled(True, when=t0)
+    assert store.due_at(KEY) == t0 + WEEK
+    assert not store.due(KEY, now=t0 + WEEK - timedelta(seconds=1))
+    assert store.due(KEY, now=t0 + WEEK)
 
 
-def test_due_respects_off_and_cadence(tmp_path: Path) -> None:
-    """The clock honours OFF and only fires once the full cadence has elapsed."""
+def test_switching_on_again_restarts_the_week(tmp_path: Path) -> None:
+    """Every switch-on is a fresh start, even over one already recorded."""
     store = AdvertStore(tmp_path / "adverts.json")
-    store.mark_sent(KEY, flood=True, when=utcnow() - timedelta(hours=25))
-    assert store.load(KEY).due(flood=True)  # daily default, 25 h elapsed
-
-    store.mark_sent(KEY, flood=True, when=utcnow() - timedelta(hours=23))
-    assert not store.load(KEY).due(flood=True)
-
-    store.set_cadence(KEY, flood=True, hours=OFF)
-    assert not store.load(KEY).due(flood=True)  # overdue but switched off
+    t0 = utcnow()
+    store.arm(KEY, when=t0 - timedelta(days=30))
+    store.set_enabled(True, when=t0 - timedelta(days=10))
+    store.set_enabled(True, when=t0)
+    assert store.due_at(KEY) == t0 + WEEK
 
 
-def test_store_tolerates_corrupt_file(tmp_path: Path) -> None:
-    """A mangled state file reads as the defaults instead of raising."""
+def test_a_flood_advert_pushes_the_week_out(tmp_path: Path) -> None:
+    """The next weekly advert is a full week after the last flood advert."""
+    store = AdvertStore(tmp_path / "adverts.json")
+    t0 = utcnow()
+    store.set_enabled(True, when=t0)
+    store.arm(KEY, when=t0)
+    store.mark_flood(KEY, when=t0 + timedelta(days=3))
+    assert store.due_at(KEY) == t0 + timedelta(days=3) + WEEK
+
+
+def test_each_device_keeps_its_own_week(tmp_path: Path) -> None:
+    """Using another device neither resets nor borrows this one's week."""
+    store = AdvertStore(tmp_path / "adverts.json")
+    t0 = utcnow() - timedelta(days=20)
+    store.set_enabled(True, when=t0)
+    store.arm(KEY, when=t0)
+    store.arm(OTHER, when=t0 + timedelta(days=2))
+    store.mark_flood(OTHER, when=t0 + timedelta(days=9))
+    assert store.due_at(KEY) == t0 + WEEK
+    assert store.due_at(OTHER) == t0 + timedelta(days=9) + WEEK
+
+
+def test_arming_never_moves_an_existing_mark(tmp_path: Path) -> None:
+    """Arm is first-connection only: reconnecting does not restart the week."""
+    store = AdvertStore(tmp_path / "adverts.json")
+    t0 = utcnow() - timedelta(days=5)
+    store.arm(KEY, when=t0)
+    store.arm(KEY)
+    assert store.week_began(KEY) == t0
+
+
+def test_switching_off_clears_the_switch(tmp_path: Path) -> None:
+    """Off forgets the switch-on instant, so the next on starts a new week."""
+    store = AdvertStore(tmp_path / "adverts.json")
+    store.set_enabled(True)
+    store.set_enabled(False)
+    assert store.enabled_since() is None
+
+
+def test_sync_catches_a_hand_edit(tmp_path: Path) -> None:
+    """A preference found on with no switch-on instant starts its week now, and off clears it."""
+    store = AdvertStore(tmp_path / "adverts.json")
+    store.sync_enabled(True)
+    first = store.enabled_since()
+    assert first is not None
+    store.sync_enabled(True)
+    assert store.enabled_since() == first  # agreement writes nothing
+    store.sync_enabled(False)
+    assert store.enabled_since() is None
+
+
+def test_an_old_shaped_file_reads_empty(tmp_path: Path) -> None:
+    """The per-device cadence records this store replaced are simply ignored."""
     path = tmp_path / "adverts.json"
-    path.write_text("{not json", encoding="utf-8")
-    assert AdvertStore(path).load(KEY).direct_hours == DEFAULT_DIRECT_HOURS
+    path.write_text(json.dumps({KEY: {"flood_hours": 24, "last_flood": utcnow().isoformat()}}))
+    store = AdvertStore(path)
+    assert store.week_began(KEY) is None
+    store.arm(KEY)
+    assert set(json.loads(path.read_text())) == {"devices"}
 
 
-def test_cadence_labels() -> None:
-    """The display labels read naturally at every offered cadence."""
-    assert cadence_label(OFF) == "off"
-    assert cadence_label(1) == "every hour"
-    assert cadence_label(3) == "every 3 h"
-    assert cadence_label(24) == "daily"
-    assert cadence_label(168) == "weekly"
-
-
-# -- the scheduler and executor against the simulator --------------------------------
+# -- the scheduler against the simulator ---------------------------------------------
 
 
 @pytest.fixture()
 def ctx(tmp_path: Path) -> AppContext:
     """A mock-backed application context for scheduler/executor tests."""
+    transmit_gate.current().reset()
     settings = Settings(config_dir=tmp_path, db_path=tmp_path / "adv.db")
     context = AppContext(
         console=Console(file=io.StringIO()),
@@ -121,6 +146,178 @@ def ctx(tmp_path: Path) -> AppContext:
     )
     yield context
     context.repo.close()
+    transmit_gate.current().reset()
+
+
+class _Rng(random.Random):
+    """A random source whose ``uniform`` hands out a fixed sequence, and counts the draws."""
+
+    def __init__(self, *draws: float) -> None:
+        super().__init__()
+        self.draws = list(draws)
+        self.calls = 0
+
+    def uniform(self, a: float, b: float) -> float:  # noqa: D102
+        self.calls += 1
+        return self.draws[min(self.calls, len(self.draws)) - 1]
+
+
+class _Clock:
+    """A monotonic clock the test advances, on the transmit gate's own timeline.
+
+    Anchored well in the past, so an instant the test stamps on the gate is behind the
+    real clock too, and never reads as a cooldown still running.
+    """
+
+    def __init__(self) -> None:
+        self.base = time.monotonic() - 100_000.0
+        self.t = 0.0
+
+    def __call__(self) -> float:
+        return self.base + self.t
+
+
+async def _due_scheduler(ctx: AppContext, *draws: float) -> tuple[AdvertScheduler, _Clock, list]:
+    """A scheduler over a connected simulator whose weekly advert is already due."""
+    device = await ctx.device()
+    ctx.preferences.set("weekly_flood_advert", True)
+    week_ago = utcnow() - WEEK - timedelta(hours=1)
+    ctx.advert_store.set_enabled(True, when=week_ago)
+    ctx.advert_store.arm(KEY, when=week_ago)
+    clock = _Clock()
+    scheduler = AdvertScheduler(ctx, rng=_Rng(*draws or (0.0,)), clock=clock)
+    sent: list[bool] = []
+    device.send_advert = lambda flood=False: _record(sent, flood)  # type: ignore[method-assign]
+    return scheduler, clock, sent
+
+
+async def test_a_due_advert_waits_to_hear_the_mesh(ctx: AppContext) -> None:
+    """However long the air is silent, nothing goes out until a packet has been heard."""
+    scheduler, clock, sent = await _due_scheduler(ctx)
+    clock.t = 3600.0
+    await scheduler._pass()
+    assert sent == []
+
+
+async def test_a_due_advert_goes_out_after_the_quiet_spell(ctx: AppContext) -> None:
+    """Heard, then quiet for the preference's spell plus the random extension: it sends."""
+    scheduler, clock, sent = await _due_scheduler(ctx, 2.0)
+    scheduler._on_event(None)  # type: ignore[arg-type]  # a packet at t=0
+    clock.t = 31.9  # 30 s default + 2 s drawn
+    await scheduler._pass()
+    assert sent == []
+    clock.t = 32.0
+    await scheduler._pass()
+    assert sent == [True]
+    assert not ctx.advert_store.due(KEY)  # the send restarted the week
+    clock.t = 100.0
+    await scheduler._pass()
+    assert sent == [True]  # once, not once per tick
+
+
+async def test_the_quiet_spell_follows_the_preference(ctx: AppContext) -> None:
+    """A 5 s preference sends five seconds (plus the draw) after the last packet."""
+    scheduler, clock, sent = await _due_scheduler(ctx, 0.0)
+    ctx.preferences.set("advert_quiet_s", 5)
+    scheduler._on_event(None)  # type: ignore[arg-type]
+    clock.t = 5.0
+    await scheduler._pass()
+    assert sent == [True]
+
+
+async def test_every_break_in_the_silence_redraws_the_extension(ctx: AppContext) -> None:
+    """A packet mid-wait restarts the spell and draws a fresh random part for it."""
+    rng_draws = (1.0, 4.0)
+    scheduler, clock, sent = await _due_scheduler(ctx, *rng_draws)
+    scheduler._on_event(None)  # type: ignore[arg-type]  # t=0
+    clock.t = 20.0
+    await scheduler._pass()
+    scheduler._on_event(None)  # type: ignore[arg-type]  # the silence breaks at t=20
+    clock.t = 20.0 + 31.0  # would have done for the first draw, not for the second
+    await scheduler._pass()
+    assert sent == []
+    clock.t = 20.0 + 34.0
+    await scheduler._pass()
+    assert sent == [True]
+    assert scheduler._rng.calls == 2  # type: ignore[attr-defined]
+
+
+async def test_our_own_transmission_breaks_the_silence(ctx: AppContext) -> None:
+    """Something we sent counts like something heard: the spell runs from it."""
+    scheduler, clock, sent = await _due_scheduler(ctx, 0.0)
+    scheduler._on_event(None)  # type: ignore[arg-type]  # t=0
+    transmit_gate.current()._last_sent = clock.base + 10.0  # we sent at t=10
+    clock.t = 35.0
+    await scheduler._pass()
+    assert sent == []
+    clock.t = 40.0
+    await scheduler._pass()
+    assert sent == [True]
+
+
+async def test_a_reconnect_must_hear_the_mesh_again(ctx: AppContext) -> None:
+    """A packet heard on the old link proves nothing about the new one."""
+    scheduler, clock, sent = await _due_scheduler(ctx, 0.0)
+    scheduler._on_event(None)  # type: ignore[arg-type]
+    await scheduler._pass()
+    fresh = make_device(mock=True, port=None)
+    fresh.send_advert = lambda flood=False: _record(sent, flood)  # type: ignore[method-assign]
+    ctx._device = fresh  # the reconnect flow's new Device
+    clock.t = 3600.0
+    await scheduler._pass()
+    assert sent == []
+    scheduler._on_event(None)  # type: ignore[arg-type]  # heard on the new link at t=3600
+    clock.t = 3630.0
+    await scheduler._pass()
+    assert sent == [True]
+
+
+async def test_nothing_goes_out_while_the_preference_is_off(ctx: AppContext) -> None:
+    """Switched off, a device a week overdue stays silent, and the switch is cleared."""
+    scheduler, clock, sent = await _due_scheduler(ctx, 0.0)
+    ctx.preferences.set("weekly_flood_advert", False)
+    scheduler._on_event(None)  # type: ignore[arg-type]
+    clock.t = 3600.0
+    await scheduler._pass()
+    assert sent == []
+    assert ctx.advert_store.enabled_since() is None
+
+
+async def test_a_hand_sent_flood_advert_mid_wait_restarts_the_week(ctx: AppContext) -> None:
+    """The file is re-read just before sending, so a manual flood since the check wins."""
+    scheduler, clock, sent = await _due_scheduler(ctx, 0.0)
+    scheduler._on_event(None)  # type: ignore[arg-type]
+    await scheduler._pass()  # due, and waiting for quiet
+    ctx.advert_store.mark_flood(KEY)
+    clock.t = 40.0
+    await scheduler._pass()
+    assert sent == []
+
+
+async def test_first_connection_arms_without_sending(ctx: AppContext) -> None:
+    """A device never seen starts its week on connect; nothing is transmitted."""
+    await ctx.device()
+    ctx.preferences.set("weekly_flood_advert", True)
+    ctx.advert_store.set_enabled(True, when=utcnow() - timedelta(days=30))
+    clock = _Clock()
+    scheduler = AdvertScheduler(ctx, rng=_Rng(0.0), clock=clock)
+    sent: list[bool] = []
+    (await ctx.device()).send_advert = lambda flood=False: _record(sent, flood)  # type: ignore[method-assign]
+    scheduler._on_event(None)  # type: ignore[arg-type]
+    clock.t = 3600.0
+    await scheduler._pass()
+    assert sent == []
+    assert ctx.advert_store.week_began(KEY) is not None
+
+
+async def test_scheduler_skips_quietly_when_disconnected(ctx: AppContext) -> None:
+    """A pass with no device connected does nothing (and records nothing)."""
+    scheduler = AdvertScheduler(ctx)
+    await scheduler._pass()
+    assert ctx.advert_store.week_began(KEY) is None
+
+
+# -- the manual paths ----------------------------------------------------------------
 
 
 class _NoteUi:
@@ -137,71 +334,40 @@ class _NoteUi:
         self.note(markup)
 
 
-async def test_scheduler_first_pass_arms_without_sending(ctx: AppContext) -> None:
-    """The first look at a fresh device starts the countdown; nothing is transmitted."""
-    await ctx.device()
-    scheduler = AdvertScheduler(ctx)
-    sent: list[bool] = []
-    (await ctx.device()).send_advert = lambda flood=False: _record(sent, flood)  # type: ignore[method-assign]
-
-    await scheduler._pass()
-    policy = ctx.advert_store.load(KEY)
-    assert sent == []
-    assert policy.last_direct is not None and policy.last_flood is not None
-
-
-async def test_scheduler_sends_at_most_one_advert_per_pass(ctx: AppContext) -> None:
-    """With both types overdue, one pass sends only the direct; the next sends the flood."""
-    await ctx.device()
-    store = ctx.advert_store
-    store.mark_sent(KEY, flood=False, when=utcnow() - timedelta(hours=2))
-    store.mark_sent(KEY, flood=True, when=utcnow() - timedelta(hours=48))
-
-    scheduler = AdvertScheduler(ctx)
-    sent: list[bool] = []
-    (await ctx.device()).send_advert = lambda flood=False: _record(sent, flood)  # type: ignore[method-assign]
-
-    await scheduler._pass()
-    assert sent == [False]  # direct first, flood held for the next pass
-    assert not store.load(KEY).due(flood=False)
-    assert store.load(KEY).due(flood=True)
-
-    await scheduler._pass()
-    assert sent == [False, True]
-    assert not store.load(KEY).due(flood=True)
-
-
-async def test_scheduler_skips_quietly_when_disconnected(ctx: AppContext) -> None:
-    """A pass with no device connected does nothing (and records nothing)."""
-    scheduler = AdvertScheduler(ctx)
-    await scheduler._pass()
-    assert ctx.advert_store.load(KEY).last_direct is None
-
-
-async def test_manual_advert_resets_the_background_clock(ctx: AppContext) -> None:
-    """An advert sent through apply_ops (any manual flow) re-marks its type's clock."""
+async def test_a_manual_flood_advert_restarts_the_week(ctx: AppContext) -> None:
+    """A flood advert through apply_ops (any manual flow) re-marks the device's week."""
     device = await ctx.device()
-    ctx.advert_store.mark_sent(KEY, flood=False, when=utcnow() - timedelta(hours=5))
-    assert ctx.advert_store.load(KEY).due(flood=False)
+    ctx.advert_store.set_enabled(True, when=utcnow() - timedelta(days=30))
+    ctx.advert_store.arm(KEY, when=utcnow() - timedelta(days=30))
+    assert ctx.advert_store.due(KEY)
+
+    ctx._ui = _NoteUi()  # type: ignore[assignment]
+    snapshot = dict(await device.get_self_info())
+    await apply_ops(ctx, device, snapshot, [("advert", True)])
+    assert not ctx.advert_store.due(KEY)
+
+
+async def test_a_zero_hop_advert_leaves_the_week_alone(ctx: AppContext) -> None:
+    """A zero-hop advert reaches only the neighbours, and resets nothing."""
+    device = await ctx.device()
+    ctx.advert_store.set_enabled(True, when=utcnow() - timedelta(days=30))
+    ctx.advert_store.arm(KEY, when=utcnow() - timedelta(days=30))
 
     ctx._ui = _NoteUi()  # type: ignore[assignment]
     snapshot = dict(await device.get_self_info())
     await apply_ops(ctx, device, snapshot, [("advert", False)])
-    assert not ctx.advert_store.load(KEY).due(flood=False)
+    assert ctx.advert_store.due(KEY)
 
 
-async def test_advert_cadence_op_writes_the_store(ctx: AppContext) -> None:
-    """The editor's staged cadence change lands in the store via its op."""
-    device = await ctx.device()
-    ctx._ui = _NoteUi()  # type: ignore[assignment]
-    snapshot = dict(await device.get_self_info())
-    changes, _artifacts, _report = await apply_ops(
-        ctx, device, snapshot, [("advert_cadence", True, 168), ("advert_cadence", False, OFF)]
-    )
-    assert changes == 2
-    policy = ctx.advert_store.load(KEY)
-    assert policy.flood_hours == 168
-    assert policy.direct_hours == OFF
+async def test_switching_the_preference_records_the_switch(ctx: AppContext) -> None:
+    """The preferences tool records on and off as they happen, from the page or a shell."""
+    from meshterm.tools.preferences import PreferencesTool
+
+    tool = PreferencesTool()
+    await tool.run(ctx, {"ops": [("set", "weekly_flood_advert", "on")]})
+    assert ctx.advert_store.enabled_since() is not None
+    await tool.run(ctx, {"ops": [("set", "weekly_flood_advert", "off")]})
+    assert ctx.advert_store.enabled_since() is None
 
 
 async def _record(sent: list[bool], flood: bool) -> None:

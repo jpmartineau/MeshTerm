@@ -127,6 +127,11 @@ class PreferencesTool(Tool):
 
         if changes:
             prefs.save()
+        if any(c["key"] == "weekly_flood_advert" for c in applied):
+            # Switching the weekly advert on starts its week rather than sending, so the
+            # instant is recorded as it happens — from the page and a shell alike — and
+            # not whenever the scheduler next looks (see meshterm.core.advert_store).
+            ctx.advert_store.set_enabled(bool(prefs.weekly_flood_advert))
         if not scripted and any(c["key"] == consolefont.PREFERENCE_KEY for c in applied):
             # The one preference whose effect is outside the app: the console's font is
             # the console's, so it takes hold now rather than next launch. The kernel

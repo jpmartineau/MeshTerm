@@ -9,6 +9,20 @@ one caveat SemVer makes for a leading zero: while the major version is still `0`
 
 ## [Unreleased]
 
+### Changed
+
+- **MeshTerm now sends at most one automatic advert a week, and none unless you ask.** A
+  MeshCore companion never advertises by itself, so the hourly zero-hop and daily flood
+  adverts MeshTerm sent by default were the only automatic adverts on the air, and more
+  than a companion needs. They are gone from Device config, along with
+  `config advert-cadence`. In their place is one preference, **Weekly advert** (off by
+  default): once a device has gone a week without a flood advert, MeshTerm floods one —
+  after it has heard the mesh, and then waited for **Advert quiet** seconds of silence
+  (5, 15, 30, or 60; 30 by default) plus a random 0–5 s, so two waiting radios do not
+  collide. Switching it on starts the week rather than sending; a flood advert sent by hand
+  restarts it; each device keeps its own week, and one that falls due while MeshTerm is
+  closed goes out the next time that device connects.
+
 ## [0.9.0] — 2026-09-22
 
 **The first public release.** Everything in MeshTerm is new today, so instead of a list of

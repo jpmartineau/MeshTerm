@@ -20,7 +20,6 @@ from rich.console import Console
 
 from meshterm.context import AppContext
 from meshterm.core.admin_store import AdminStore
-from meshterm.core.advert_store import AdvertPolicy
 from meshterm.core.config import Settings
 from meshterm.core.device_store import DeviceStore
 from meshterm.persistence.repository import Repository
@@ -285,7 +284,7 @@ def _editor(snapshot: dict, pending: dict | None = None) -> _ConfigMenu:
     pending = {} if pending is None else pending
     return _ConfigMenu(
         _StubSession(),
-        lambda reveal: _menu_items(snapshot, pending, len(pending), AdvertPolicy(), reveal),
+        lambda reveal: _menu_items(snapshot, pending, len(pending), reveal),
         conceals=has_pin(snapshot),
         footer_hint="↑↓ move · type to filter · Enter select · Esc back",
     )
@@ -870,38 +869,6 @@ async def test_editor_restaging_the_current_value_clears_the_stage(ctx: AppConte
     assert await edit_config(ctx) is None
 
 
-async def test_editor_stages_background_advert_cadence(
-    ctx: AppContext, applied_ops: list[tuple]
-) -> None:
-    """Picking a cadence stages it under its sentinel; Apply maps it to its own op."""
-    _install(
-        ctx,
-        [
-            ("select", "__advert_flood__"),
-            ("select", 48),  # every 48 h
-            ("select", "__apply__"),
-            ("select", None),
-        ],
-    )
-    await edit_config(ctx)
-    assert applied_ops == [("advert_cadence", True, 48)]
-
-
-async def test_editor_repicking_the_cadence_in_force_clears_the_stage(ctx: AppContext) -> None:
-    """Choosing the cadence already in force un-stages the row (nothing to apply)."""
-    _install(
-        ctx,
-        [
-            ("select", "__advert_direct__"),
-            ("select", 4),
-            ("select", "__advert_direct__"),
-            ("select", 1),  # back to the default in force
-            ("select", None),  # nothing staged now — Esc closes without a discard dialog
-        ],
-    )
-    assert await edit_config(ctx) is None
-
-
 async def test_editor_asks_before_discarding_staged_changes(
     ctx: AppContext, applied_ops: list[tuple]
 ) -> None:
@@ -950,14 +917,14 @@ async def test_editor_menu_pins_the_column_header_over_the_category(ctx: AppCont
     menu = ui.session.pushed[0]
     # Re-open the same rows highlighting a row in the last category, so the list scrolls
     # past both the column header and the earlier headings.
-    deep = SelectScreen(menu.title, menu._items, default="__advert_flood__")
+    deep = SelectScreen(menu.title, menu._items, default="__custom__")
     visible, above, _below = frame._visible_slice(deep, deep.render_body(100), 6)
     top = [_ANSI.sub("", row).strip() for row in visible[:2]]
     assert top[0].startswith("SETTING") and top[0].endswith("DESCRIPTION")
     # Whichever section the window's top row fell in, its heading pins under the lanes.
     assert top[1].startswith("── ") and top[1].endswith(" ──")
     assert above is True
-    assert any("Flood advert" in _ANSI.sub("", row) for row in visible)
+    assert any("Set by name" in _ANSI.sub("", row) for row in visible)
 
 
 async def test_editor_latitude_and_longitude_are_rows_of_their_own(
@@ -1032,7 +999,7 @@ async def test_editor_map_pick_opens_on_the_staged_position_and_can_be_backed_ou
 
 def test_the_map_pick_row_heads_the_coordinates_it_sets() -> None:
     """``Pick location on map…`` sits directly above Latitude and Longitude."""
-    _title, items = _menu_items(_SNAPSHOT, {}, 0, AdvertPolicy())
+    _title, items = _menu_items(_SNAPSHOT, {}, 0)
     rows = _row_texts(items)
     at = next(i for i, row in enumerate(rows) if row.startswith("Pick location on map…"))
     assert rows[at + 1].startswith("Latitude")
@@ -1059,7 +1026,7 @@ async def test_send_advert_sends_zero_hop_and_flood_immediately(ctx: AppContext)
 
 def test_the_page_leaves_sending_an_advert_to_its_own_menu_entry() -> None:
     """The box's actions moved onto the page; sending an advert stayed a main-menu popup."""
-    _title, items = _menu_items(_SNAPSHOT, {}, 0, AdvertPolicy())
+    _title, items = _menu_items(_SNAPSHOT, {}, 0)
     assert not any("Send advert" in row for row in _row_texts(items))
 
 
@@ -1287,8 +1254,8 @@ def test_the_page_ends_long_rows_at_the_edge_despite_its_actions() -> None:
 
 def test_the_title_names_the_device_and_counts_what_is_staged() -> None:
     """``Feature — subject · status``: the node's name, then the staged count as an atom."""
-    assert _menu_items(_SNAPSHOT, {}, 0, AdvertPolicy())[0] == "Device config — Homestead-Hub"
-    staged_title, _items = _menu_items(_SNAPSHOT, {"tx_power": 14}, 1, AdvertPolicy())
+    assert _menu_items(_SNAPSHOT, {}, 0)[0] == "Device config — Homestead-Hub"
+    staged_title, _items = _menu_items(_SNAPSHOT, {"tx_power": 14}, 1)
     assert staged_title == "Device config — Homestead-Hub · 1 staged"
 
 
@@ -1300,7 +1267,7 @@ def test_the_actions_close_the_page_every_label_in_the_same_cell() -> None:
     """
     from rich.cells import cell_len
 
-    _title, items = _menu_items(_SNAPSHOT, {}, 0, AdvertPolicy())
+    _title, items = _menu_items(_SNAPSHOT, {}, 0)
     rows = _row_texts(items)
     labels = (
         "Read settings",
@@ -1325,7 +1292,6 @@ def test_custom_variables_are_rows_of_their_own() -> None:
         _SNAPSHOT,
         {},
         1,
-        AdvertPolicy(),
         custom={"gps": "1", "probe": ""},
         custom_pending={"gps": "0"},
     )

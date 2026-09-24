@@ -36,7 +36,6 @@ import pytest
 from rich.cells import cell_len
 from rich.text import Text
 
-from meshterm.core.advert_store import AdvertPolicy
 from meshterm.core.channels import DEFAULT_PUBLIC_SECRET, derive_secret
 from meshterm.core.courier_store import CourierStore
 from meshterm.core.models import (
@@ -920,7 +919,7 @@ def _config_editor(cols: int, rows: int) -> Screen:
     """The Device config editor: every setting staged from one grouped list."""
     return _ConfigMenu(
         _GallerySession(cols, rows),
-        lambda reveal: _menu_items(_DEVICE_SNAPSHOT, {"tx_power": 14}, 1, AdvertPolicy(), reveal),
+        lambda reveal: _menu_items(_DEVICE_SNAPSHOT, {"tx_power": 14}, 1, reveal),
         conceals=has_pin(_DEVICE_SNAPSHOT),
         footer_hint="↑↓ move · type to filter · Enter select · Esc back",
     )

@@ -46,6 +46,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .advert_store import DEFAULT_QUIET_S, QUIET_CHOICES_S
 from .atomicwrite import write_atomically
 from .courier_store import DONE_CAP
 from .geo import DEFAULT_VIEW_FRACTION
@@ -151,6 +152,10 @@ _SILENCE_CHOICES: dict[int, str] = {
     OFF: "off",
 }
 
+#: How long the air must stay quiet before the weekly flood advert goes out, drawn from the
+#: scheduler's own choices so the two never drift.
+_QUIET_CHOICES: dict[int, str] = {s: f"{s} s" for s in QUIET_CHOICES_S}
+
 #: How the terminal-width reclaim can be asked for: follow the platform's own verdict, or
 #: overrule it in either direction. The row's description asks a yes/no question ("use the
 #: column ... ?"), so the values answer it in those words rather than naming the mechanism
@@ -240,6 +245,26 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         minimum=5.0,  # every repeater in range rebroadcasts one; five seconds is the floor
         maximum=3600.0,
         unit="s",
+    ),
+    PrefSpec(
+        key="weekly_flood_advert",
+        label="Weekly advert",
+        help="Flood an advert after a week without one",
+        group="Sending",
+        value_type="bool",
+        # Off: a companion never advertises on its own, so this is the only advert MeshTerm
+        # would ever send unasked, and every repeater in range rebroadcasts it. Turning it
+        # on starts the week rather than sending — see meshterm.services.advert_scheduler.
+        default=False,
+    ),
+    PrefSpec(
+        key="advert_quiet_s",
+        label="Advert quiet",
+        help="Silence to wait for before the weekly advert",
+        group="Sending",
+        value_type="enum",
+        default=DEFAULT_QUIET_S,
+        choices=_QUIET_CHOICES,
     ),
     PrefSpec(
         key="direct_message_soft_retries",

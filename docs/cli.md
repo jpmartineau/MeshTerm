@@ -102,7 +102,7 @@ of two directories from the same shell.
 | `admin.json` | Remembered repeater-admin passwords. |
 | `devices.json` | The remembered default companion, and every device proven to speak the protocol. |
 | `contacts.json`, `channels.json`, `settings.json` | Per-device caches of what the radio last told us, so a screen opens without a round-trip. |
-| `adverts.json` | Per-device background-advert schedules (`config advert-cadence` writes here). |
+| `adverts.json` | The weekly flood advert's clock: when it was switched on, and when each device's week began. |
 | `mutes.json`, `watchtower.json`, `remote.json` | Muted channels; watched nodes and their alerts; per-node remote-admin cache and CLI history. |
 | `tilecache/` | Downloaded basemap tiles. |
 | `meshterm.log` | The log file. |
@@ -709,7 +709,6 @@ View and change every device setting. With no subcommand it runs `show`.
 | `custom KEY VALUE` | Set an experimental custom variable. |
 | `channel INDEX NAME [--secret HEX]` | Configure a channel slot (see also the `channels` group). |
 | `advert [--flood]` | Broadcast an advertisement. Zero-hop unless `--flood`. |
-| `advert-cadence HOURS [--flood]` | How often to auto-advertise in the background. `0` disables. |
 | `share` | Print this node's contact card as a `meshcore://` URI. |
 | `sync-clock` | Set the device clock from this computer. |
 | `export-key [--out PATH]` | Export the private key. **Sensitive.** |
@@ -789,8 +788,6 @@ $ meshterm config channel 2 brigade --json
 {"changes":1,"channel":{"slot":2,"name":"brigade","public":true,"hash":"b5"}}
 $ meshterm config advert --json
 {"sent":true,"flood":false}
-$ meshterm config advert-cadence 6 --json
-{"changes":1,"flood":false,"hours":6}
 $ meshterm config sync-clock --json
 {"changes":1,"set_at":"2026-09-08T08:29:27Z","drift_s":-125}
 $ meshterm config backup node.toml --json
@@ -1414,6 +1411,8 @@ PREFERENCE                   VALUE                                 DEFAULT      
 set_clock_on_connect         off                                   off                                   Set the device clock from this computer when it connects
 trace_cooldown_s             5                                     5                                     Wait this long before transmitting again
 flood_advert_cooldown_s      60                                    60                                    Extra wait before another mesh-wide advert
+weekly_flood_advert          off                                   off                                   Flood an advert after a week without one
+advert_quiet_s               30                                    30                                    Silence to wait for before the weekly advert
 direct_message_soft_retries  0                                     0                                     Times to resend a message that gets no reply
 tx_opt_min                   18                                    18                                    Weakest power it will try
 tx_opt_max                   28                                    28                                    Strongest power it will try
@@ -1747,18 +1746,20 @@ for i in $(seq 5); do
 done
 ```
 
-**Let MeshTerm advertise, rather than cron.** Background adverts are MeshTerm's own job,
-not the firmware's, and the cadence is a policy you set once:
+**Let MeshTerm advertise, rather than cron.** A companion never advertises by itself, so
+MeshTerm can do it for you — once a week, and only when the air is quiet:
 
 ```bash
-meshterm config advert-cadence 3            # zero-hop, to neighbours, every 3 h
-meshterm config advert-cadence 6 --flood    # mesh-wide, every 6 h
+meshterm preferences set weekly_flood_advert on   # starts the week; sends nothing now
+meshterm preferences set advert_quiet_s 60         # wait for a minute of silence first
 ```
 
-A running MeshTerm session sends them on that schedule. **Do not put `config advert
---flood` in a tight cron slot**: the cadence picker's floor for a flood is 3 h, and a
-`*/30` line would be six times tighter than the app will ever let a person choose. A
-repeater that decides you are bursting can blacklist you.
+A running MeshTerm session then floods one advert from a device once it has gone a full
+week without one — a flood advert you send by hand restarts that device's week — and only
+after it has heard the mesh and then heard nothing for the quiet spell plus a random 0–5 s.
+**Do not put `config advert --flood` in a cron slot instead**: every repeater in range
+rebroadcasts a flood advert, and a repeater that decides you are bursting can blacklist
+you.
 
 **Cron-friendly quiet.** `--quiet` suppresses console logging entirely, leaving only the
 command's own output and any error line. Cron's `PATH` is nearly empty, so give it the

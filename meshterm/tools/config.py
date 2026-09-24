@@ -159,20 +159,6 @@ class ConfigTool(Tool):
         def _share_cmd() -> None:
             run_tool_command(self, {"ops": [("share",)]})
 
-        @config_app.command(
-            "advert-cadence",
-            help="Set how often this node auto-advertises in the background (0 = off)",
-        )
-        def _advert_cadence_cmd(
-            hours: int = typer.Argument(
-                ..., min=0, help="Cadence in hours between background adverts (0 disables)"
-            ),
-            flood: bool = typer.Option(
-                False, "--flood", help="Set the flood cadence (else the zero-hop / direct one)"
-            ),
-        ) -> None:
-            run_tool_command(self, {"ops": [("advert_cadence", flood, hours)]})
-
         @config_app.command("export-key", help="Export the private key (sensitive)")
         def _export_key_cmd(
             out: Path | None = typer.Option(None, "--out", help="Write to file instead of stdout"),
@@ -278,32 +264,15 @@ async def apply_ops(
         elif kind == "advert":
             flood = len(op) > 1 and bool(op[1])
             await device.send_advert(flood)
-            # A manual advert resets the background scheduler's countdown for its type,
-            # so the next scheduled send counts from this one (see AdvertScheduler).
+            # A flood advert, however it was asked for, restarts this device's week: the
+            # weekly one only ever goes out a full week after the last (see
+            # AdvertScheduler). A zero-hop reaches only the neighbours, and resets nothing.
             public_key = str(snapshot.get("public_key") or "")
-            if public_key:
-                ctx.advert_store.mark_sent(public_key, flood=flood)
+            if flood and public_key:
+                ctx.advert_store.mark_flood(public_key)
             kind_label = "flood" if flood else "zero-hop"
             ctx.ui.ack(f"[ok]✓[/ok] {kind_label} advertisement sent")
             report.append(_acted("advert", sent=True, flood=flood))
-        elif kind == "advert_cadence":
-            from ..core.advert_store import cadence_label
-
-            flood, hours = bool(op[1]), int(op[2])
-            public_key = str(snapshot.get("public_key") or "")
-            if public_key:
-                ctx.advert_store.set_cadence(public_key, flood=flood, hours=hours)
-                kind_label = "flood" if flood else "zero-hop"
-                ctx.ui.ack(
-                    f"[ok]✓[/ok] background {kind_label} advert: "
-                    f"[brand]{cadence_label(hours)}[/brand]"
-                )
-                changes += 1
-                report.append(_acted("cadence", changes=1, flood=flood, hours=hours))
-            else:  # pragma: no cover - SELF_INFO always carries the key on real firmware
-                raise DeviceCommandError(
-                    "the device reported no public key — the advert cadence was not saved"
-                )
         elif kind == "share":
             report.append(await _share_contact(ctx, snapshot))
         elif kind == "sync_clock":

@@ -9,10 +9,10 @@ radio in your hand reads exactly like configuring one over the mesh.
 
 * **Settings** — every value the companion firmware lets an app read and write (see
   :data:`~meshterm.core.device_config.DEVICE_SETTINGS`), each custom variable the device
-  reports, and MeshTerm's own background-advert cadences. Editing a row *stages* the new
-  value and nothing touches the radio until *Apply*, which sends the staged values one at a
-  time and stays on the page: one the device refuses stays staged with its reason, as on
-  the remote page. Backing out with changes staged asks before discarding them.
+  reports. Editing a row *stages* the new value and nothing touches the radio until
+  *Apply*, which sends the staged values one at a time and stays on the page: one the
+  device refuses stays staged with its reason, as on the remote page. Backing out with
+  changes staged asks before discarding them.
 * **Actions** — the operations on the box itself rather than on a value: re-read, clock
   sync, backup/restore, the identity key, reboot, and factory reset. These *run
   immediately*, each behind its own confirmation (destructive ones behind typing a word),
@@ -42,13 +42,6 @@ from rich.markup import escape
 from rich.table import Table
 from rich.text import Text
 
-from ..core.advert_store import (
-    DIRECT_CADENCE_HOURS,
-    FLOOD_CADENCE_HOURS,
-    OFF,
-    AdvertPolicy,
-    cadence_label,
-)
 from ..core.device_config import (
     DEVICE_SETTINGS,
     DeviceConfigError,
@@ -89,8 +82,6 @@ _PRESETS = "__presets__"
 _CUSTOM = "__custom__"
 #: Prefix of a custom variable's row value; the variable's name follows it.
 _CUSTOM_VAR = "__custom_var__:"
-_ADVERT_DIRECT = "__advert_direct__"
-_ADVERT_FLOOD = "__advert_flood__"
 _READ = "__read__"
 _SYNC_CLOCK = "__sync_clock__"
 _REBOOT = "__reboot__"
@@ -158,15 +149,11 @@ async def edit_config(ctx: AppContext) -> dict[str, Any] | None:
     device = await ctx.device()
     snapshot = await cached_snapshot(ctx, device)
     custom = await device.get_custom_vars()
-    # The background-advert cadences are app-side settings (MeshTerm sends the adverts,
-    # not the firmware), but they're staged and applied exactly like device values so
-    # the page stays one coherent surface.
-    policy = ctx.advert_store.load(str(snapshot.get("public_key") or ""))
 
     session = getattr(ctx.ui, "session", None)
     if session is None:  # pragma: no cover - guarded by the menu-only caller
         raise RuntimeError("the config editor is only available in the menu")
-    pending: dict[str, Any] = {}  # setting key (or cadence sentinel) -> staged new value
+    pending: dict[str, Any] = {}  # setting key -> staged new value
     custom_pending: dict[str, str] = {}  # custom variable name -> staged new value
     applied = 0
 
@@ -176,15 +163,14 @@ async def edit_config(ctx: AppContext) -> dict[str, Any] | None:
     def summary() -> dict[str, Any] | None:
         return {"applied": applied} if applied else None
 
-    # The rows read ``snapshot``, ``custom`` and ``policy`` through this closure, so a
-    # re-read that rebinds them is exactly what the next refresh draws.
+    # The rows read ``snapshot`` and ``custom`` through this closure, so a re-read that
+    # rebinds them is exactly what the next refresh draws.
     menu = _ConfigMenu(
         session,
         lambda reveal: _menu_items(
             snapshot,
             pending,
             staged(),
-            policy,
             reveal,
             custom=custom,
             custom_pending=custom_pending,
@@ -205,7 +191,6 @@ async def edit_config(ctx: AppContext) -> dict[str, Any] | None:
             if choice == _APPLY:
                 applied += await _apply(ctx, device, snapshot, pending, custom_pending)
                 snapshot, custom = await _reread(ctx, device)
-                policy = ctx.advert_store.load(str(snapshot.get("public_key") or ""))
             elif choice == _READ:
                 snapshot, custom = await _reread(ctx, device)
                 _unstage_held(snapshot, custom, pending, custom_pending)
@@ -236,8 +221,6 @@ async def edit_config(ctx: AppContext) -> dict[str, Any] | None:
                     pending.clear()
                     custom_pending.clear()
                     snapshot, custom = await _reread(ctx, device)
-            elif choice in (_ADVERT_DIRECT, _ADVERT_FLOOD):
-                await _stage_advert_cadence(ctx, choice == _ADVERT_FLOOD, policy, pending)
             elif choice == _LOCATION:
                 await _stage_location(ctx, snapshot, pending)
             elif choice == _PRESETS:
@@ -578,7 +561,6 @@ def _menu_items(
     snapshot: dict,
     pending: dict,
     staged: int,
-    policy: AdvertPolicy,
     reveal_pin: bool = False,
     *,
     custom: dict[str, str] | None = None,
@@ -588,9 +570,9 @@ def _menu_items(
 
     The settings sit in three aligned lanes — setting, current value (and any staged new
     value), description — under one header line, grouped by category; the device's custom
-    variables and MeshTerm's own advert cadences follow in the same lanes; and the
-    **Actions** close the list. The same shape as the repeater-admin page (see
-    :func:`meshterm.ui.repeater_admin._menu_items`), so the two read as one editor.
+    variables follow in the same lanes; and the **Actions** close the list. The same shape
+    as the repeater-admin page (see :func:`meshterm.ui.repeater_admin._menu_items`), so
+    the two read as one editor.
 
     ``reveal_pin`` is :class:`_ConfigMenu`'s toggle, passed straight through to the PIN's
     value lane. ``custom`` holds the variables the device reports and ``custom_pending``
@@ -637,29 +619,6 @@ def _menu_items(
         var_rows.append((label, value, help_text, _CUSTOM_VAR + name))
     var_rows.append(("Set by name…", Text(), "Set a raw firmware variable by name", _CUSTOM))
     sections.append(("Custom variables", var_rows))
-
-    # App-side rows: the background-advert cadences MeshTerm itself runs (see the
-    # advert scheduler). They stage and apply like device settings, so they sit in the
-    # same lanes under their own heading.
-    sections.append(
-        (
-            "Background adverts",
-            [
-                (
-                    "Direct advert",
-                    _cadence_value(policy, False, pending),
-                    "Scheduled zero-hop announce; any manual send resets it",
-                    _ADVERT_DIRECT,
-                ),
-                (
-                    "Flood advert",
-                    _cadence_value(policy, True, pending),
-                    "Scheduled mesh-wide announce via repeaters",
-                    _ADVERT_FLOOD,
-                ),
-            ],
-        )
-    )
 
     label_w = max(cell_len(label) for _, rows in sections for label, _, _, _ in rows)
     value_w = max(cell_len(value.plain) for _, rows in sections for _, value, _, _ in rows)
@@ -713,15 +672,6 @@ def _menu_items(
     if staged:
         title += f" · {staged} staged"
     return title, items
-
-
-def _cadence_value(policy: AdvertPolicy, flood: bool, pending: dict) -> Text:
-    """One background-advert row's VALUE lane: ``current [→ staged]``."""
-    key = _ADVERT_FLOOD if flood else _ADVERT_DIRECT
-    value = Text(cadence_label(policy.cadence(flood)))
-    if key in pending:
-        value.append(f" → {cadence_label(pending[key])}", style="warn")
-    return value
 
 
 # --- staging individual changes ----------------------------------------------
@@ -818,44 +768,6 @@ async def _prompt_value(ctx: AppContext, spec: SettingSpec, current: Any, snapsh
         help_text=_range_hint(spec, snapshot),
     )
     return None if raw is None else parse_value(spec, raw, snapshot)
-
-
-async def _stage_advert_cadence(
-    ctx: AppContext, flood: bool, policy: AdvertPolicy, pending: dict[str, Any]
-) -> None:
-    """Pick one background-advert type's cadence and stage it.
-
-    Staged under the type's sentinel key; Apply turns it into an ``advert_cadence`` op
-    (see :func:`~meshterm.tools.config.apply_ops`). Picking the value already in force
-    un-stages the row, matching :func:`_stage_setting`.
-    """
-    key = _ADVERT_FLOOD if flood else _ADVERT_DIRECT
-    in_force = policy.cadence(flood)
-    current = pending.get(key, in_force)
-    hours_choices = FLOOD_CADENCE_HOURS if flood else DIRECT_CADENCE_HOURS
-    items: list = [
-        Choice(
-            title=cadence_label(hours).capitalize() + ("  (current)" if hours == current else ""),
-            value=hours,
-        )
-        for hours in (*hours_choices, OFF)
-    ]
-    if flood:
-        prompt = "How often repeaters rebroadcast this node across the mesh:"
-    else:
-        prompt = "How often this node announces itself to neighbours in range:"
-    selected = await ctx.ui.select(
-        "Flood advert" if flood else "Direct advert",
-        items,
-        prompt=prompt,
-        default=current,
-    )
-    if selected is None:
-        return
-    if selected == in_force:
-        pending.pop(key, None)  # set back to the value in force — nothing to change
-    else:
-        pending[key] = selected
 
 
 async def _stage_location(ctx: AppContext, snapshot: dict, pending: dict[str, Any]) -> None:
@@ -1042,25 +954,16 @@ def _staged_ops(pending: dict[str, Any], custom_pending: dict[str, str]) -> list
     """The staged values as ``(stage key, op)`` pairs, in the order they should be sent.
 
     Settings go in the registry's order rather than the order they were staged in, so a
-    retuned frequency lands before relaying is switched on for it; the advert cadences and
-    the custom variables follow.
+    retuned frequency lands before relaying is switched on for it; the custom variables
+    follow.
     """
     order = {spec.key: i for i, spec in enumerate(DEVICE_SETTINGS)}
     ops = [
         (key, ("set", key, pending[key]))
         for key in sorted((k for k in pending if k in order), key=order.__getitem__)
     ]
-    ops += [
-        (key, ("advert_cadence", key == _ADVERT_FLOOD, pending[key]))
-        for key in (_ADVERT_DIRECT, _ADVERT_FLOOD)
-        if key in pending
-    ]
     ops += [(name, ("set_custom", name, value)) for name, value in custom_pending.items()]
     return ops
-
-
-#: What the result window calls a staged value whose stage key is a sentinel.
-_STAGE_NAMES = {_ADVERT_DIRECT: "direct advert", _ADVERT_FLOOD: "flood advert"}
 
 
 async def _apply(
@@ -1087,7 +990,7 @@ async def _apply(
     from ..tools.config import apply_ops
 
     batch = _staged_ops(pending, custom_pending)
-    names = [_STAGE_NAMES.get(key, key) for key, _op in batch]
+    names = [key for key, _op in batch]
     run_id = ctx.repo.start_run("config", {"mode": "apply", "settings": names}, ctx.profile_name)
     accepted = 0
     for (key, op), name in zip(batch, names, strict=True):
@@ -1132,7 +1035,7 @@ def _unstage_held(
     snapshot: dict, custom: dict[str, str], pending: dict[str, Any], custom_pending: dict[str, str]
 ) -> None:
     """Unstage every value the device turns out to hold already — a re-read can settle one."""
-    for key in [k for k in pending if k not in _STAGE_NAMES]:
+    for key in list(pending):
         if get_spec(key).getter(snapshot) == pending[key]:
             del pending[key]
     for name in [n for n, value in custom_pending.items() if custom.get(n) == value]:

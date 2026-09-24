@@ -47,8 +47,7 @@ meshterm config get name              # just the value, ready for $(...)
 meshterm config set radio_sf 9        # change one setting
 meshterm config backup node.toml      # archive every setting to TOML
 meshterm config restore node.toml --dry-run
-meshterm config advert-cadence 2      # auto-advert to neighbours every 2 h (0 = off)
-meshterm config advert-cadence 24 --flood   # flood the wider mesh daily
+meshterm preferences set weekly_flood_advert on   # flood an advert once a week, when quiet
 
 # Passive capture window (records to history; transmits nothing)
 meshterm monitor --seconds 60
