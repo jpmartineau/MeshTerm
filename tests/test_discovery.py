@@ -112,6 +112,14 @@ def test_label_does_not_repeat_the_port() -> None:
     assert DiscoveredDevice("COM5", product="Wio SX1262").label == "Wio SX1262 (COM5)"
 
 
+def test_mock_device_label_has_no_empty_port_suffix() -> None:
+    """The simulator has no serial port to append to its description."""
+    dev = DiscoveredDevice(
+        transport="mock", description="the built-in simulator (nothing transmits)"
+    )
+    assert dev.label == "the built-in simulator (nothing transmits)"
+
+
 def test_stable_id_precedence() -> None:
     """stable_id prefers serial number, then vid:pid, then the port name."""
     assert DiscoveredDevice("COM5", serial_number="SN1", vid=1, pid=2).stable_id == "sn:SN1"
