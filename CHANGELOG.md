@@ -9,6 +9,10 @@ one caveat SemVer makes for a leading zero: while the major version is still `0`
 
 ## [Unreleased]
 
+### Fixed
+
+- The built-in simulator's device label no longer ends in empty port parentheses.
+
 ### Changed
 
 - **MeshTerm now sends at most one automatic advert a week, and none unless you ask.** A

@@ -256,6 +256,8 @@ class DiscoveredDevice:
             name = self.name or self.product or self.description or "Bluetooth device"
             return f"{name} (BLE)"
         name = self.product or self.description or self.vendor_label or "Serial device"
+        if not self.port:
+            return name
         suffix = f"({self.port})"
         if name.endswith(suffix):  # avoid "… (COM11) (COM11)"
             name = name[: -len(suffix)].rstrip()
