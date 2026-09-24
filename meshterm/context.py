@@ -525,7 +525,7 @@ class AppContext:
 
         # A radio on the host's own SPI bus (``--spi``, an SPI profile, or the remembered
         # default) has nothing to find: MeshTerm starts the node that answers on it.
-        spi = self._resolve_spi()
+        spi = self.resolve_spi()
         if spi is not None:
             from .core.spiradio import state_dir
 
@@ -657,7 +657,7 @@ class AppContext:
             return host, port
         return None, None
 
-    def _resolve_spi(self) -> SpiWiring | None:
+    def resolve_spi(self) -> SpiWiring | None:
         """The wiring of the SPI radio to open, or ``None`` when another transport is meant.
 
         In priority order: an SPI profile, the radio picked on the startup splash, ``--spi``

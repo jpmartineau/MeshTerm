@@ -147,8 +147,8 @@ def test_spi_flag_takes_the_spi_profile_wiring(contexts) -> None:  # noqa: ANN00
     """``--spi`` means the radio on this machine, wired as its profile says when there is one."""
     wired = SpiWiring(en_pins=(27,))
     profiles = {"aio2": DeviceProfile(name="aio2", transport="spi", spi=wired)}
-    assert contexts(spi_override=True, profiles=profiles)._resolve_spi() == wired
-    assert contexts(spi_override=True)._resolve_spi() == SpiWiring()
+    assert contexts(spi_override=True, profiles=profiles).resolve_spi() == wired
+    assert contexts(spi_override=True).resolve_spi() == SpiWiring()
     assert contexts(spi_override=True).active_transport == "spi"
 
 
@@ -159,7 +159,7 @@ def test_another_named_radio_is_not_the_spi_radio(contexts) -> None:  # noqa: AN
         {"tcp_override": "10.0.0.2"},
         {"ble_override": "AA"},
     ):
-        assert contexts(**override)._resolve_spi() is None
+        assert contexts(**override).resolve_spi() is None
 
 
 def test_a_listed_radio_is_wired_by_the_profile_on_its_node(contexts) -> None:  # noqa: ANN001
@@ -410,27 +410,25 @@ async def test_the_device_ends_its_node_when_the_connection_fails(
 # --- where it shows up ---------------------------------------------------------------------
 
 
-def test_the_picker_lists_each_radio_whose_device_node_exists(
+def test_each_radio_whose_device_node_exists_is_listed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A profile's radio by its name; the AIO's node on its own when no profile covers it."""
-    from meshterm.ui import device_picker
-
     present = {"/dev/spidev1.0", "/dev/spidev0.0"}
-    monkeypatch.setattr(device_picker, "spi_present", lambda w: w.spidev in present)
+    monkeypatch.setattr(spiradio, "spi_present", lambda w: w.spidev in present)
     hat = SpiWiring(bus_id=0, reset_pin=17)
     profiles = {
         "hat": DeviceProfile(name="hat", transport="spi", spi=hat),
         "gone": DeviceProfile(name="gone", transport="spi", spi=SpiWiring(bus_id=3)),
     }
-    rows = device_picker._spi_devices([], profiles)
+    rows = spiradio.spi_radios(profiles)
     assert [(r.port, r.name) for r in rows] == [("/dev/spidev0.0", "hat"), ("/dev/spidev1.0", None)]
     # A profile on the AIO's own node takes that row instead of a nameless one.
     profiles["aio"] = DeviceProfile(name="aio", transport="spi")
-    rows = device_picker._spi_devices([], profiles)
+    rows = spiradio.spi_radios(profiles)
     assert [r.name for r in rows] == ["hat", "aio"]
     # And a radio already in the list is not listed twice.
-    assert device_picker._spi_devices(rows, profiles) == []
+    assert spiradio.spi_radios(profiles, rows) == []
 
 
 def test_spi_and_another_radio_on_one_command_line_is_a_usage_error() -> None:
@@ -442,3 +440,23 @@ def test_spi_and_another_radio_on_one_command_line_is_a_usage_error() -> None:
     result = CliRunner().invoke(app, ["--spi", "--port", "COM7", "info"])
     assert result.exit_code == 2
     assert "--spi and --port name different devices" in result.output
+
+
+def test_meshterm_devices_lists_the_spi_radio(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The CLI inventory shows the radio the device screen shows, marked active under --spi."""
+    from typer.testing import CliRunner
+
+    from meshterm.cli import app
+    from meshterm.tools import devices
+
+    monkeypatch.setenv("MESHTERM_HOME", str(tmp_path))
+    monkeypatch.setattr(devices, "discover_devices", list)
+    monkeypatch.setattr(spiradio, "spi_present", lambda w: w.spidev == "/dev/spidev1.0")
+    result = CliRunner().invoke(app, ["--spi", "--json", "devices", "--no-ble"])
+    assert result.exit_code == 0, result.output
+    rows = json.loads(result.stdout)
+    assert [(r["target"], r["transport"], r["active"]) for r in rows] == [
+        ("/dev/spidev1.0", "spi", True)
+    ]

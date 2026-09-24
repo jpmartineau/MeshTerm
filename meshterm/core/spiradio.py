@@ -39,11 +39,13 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import SpiWiring
+from .config import DeviceProfile, SpiWiring
 from .connection import DeviceCommandError, MeshCoreDevice
+from .discovery import DiscoveredDevice, spi_device
 
 _log = logging.getLogger(__name__)
 
@@ -135,6 +137,42 @@ def _xdg_data_home() -> Path:
 def spi_present(wiring: SpiWiring) -> bool:
     """Whether ``wiring``'s SPI device node exists on this machine (Linux only)."""
     return _on_linux() and os.path.exists(wiring.spidev)
+
+
+def spi_radios(
+    profiles: Mapping[str, DeviceProfile] | None, listed: Iterable[DiscoveredDevice] = ()
+) -> list[DiscoveredDevice]:
+    """The radios on this machine's own SPI bus, as devices — THE one answer to "which are here".
+
+    One per ``transport = "spi"`` profile whose ``/dev/spidev*`` node exists, named by the
+    profile; and, where no profile covers it, one for the uConsole AIO's device node when it
+    exists, wired with the defaults. Nothing is probed — a radio on the bus has no node
+    running until one is chosen — so a radio is listed exactly when there is a device node
+    to open. The device screen and ``meshterm devices`` both list from here, so the two can
+    never disagree about what is attached.
+
+    Args:
+        profiles: The configured profiles, or ``None`` when none are loaded.
+        listed: Devices already gathered; a radio among them is not listed twice.
+
+    Returns:
+        One SPI :class:`~meshterm.core.discovery.DiscoveredDevice` per radio not in ``listed``.
+    """
+    seen = {d.stable_id for d in listed}
+    wirings = [(p.spi or SpiWiring(), p.name) for p in (profiles or {}).values() if p.is_spi]
+    covered = {wiring.spidev for wiring, _name in wirings}
+    if SpiWiring().spidev not in covered:
+        wirings.append((SpiWiring(), ""))
+    radios: list[DiscoveredDevice] = []
+    for wiring, name in wirings:
+        if not spi_present(wiring):
+            continue
+        device = spi_device(wiring, name=name)
+        if device.stable_id in seen:
+            continue
+        seen.add(device.stable_id)
+        radios.append(device)
+    return radios
 
 
 # --- finding a Python with the radio library -----------------------------------------------

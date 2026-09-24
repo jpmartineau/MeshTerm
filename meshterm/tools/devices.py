@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The ``devices`` tool: enumerate attached serial and in-range Bluetooth companions.
+"""The ``devices`` tool: enumerate attached serial, SPI, and in-range Bluetooth companions.
 
 Discovery never opens the radio — it only lists what is attached or advertising. This is a
 CLI-only, read-only inventory (``menu_visible = False``): by the time the interactive menu is
@@ -25,6 +25,7 @@ from ..core.discovery import (
     discover_all,
     discover_devices,
 )
+from ..core.spiradio import spi_radios
 from .base import Tool, ToolResult, register
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -39,11 +40,11 @@ _MAYBE: dict[str, str] = {"board": "maybe", "bridge": "maybe", "unknown": "no"}
 
 @register
 class DevicesTool(Tool):
-    """List attached serial + in-range Bluetooth companions, flag likely LoRa, mark the default."""
+    """List attached serial, SPI, and in-range Bluetooth companions; mark likely and active."""
 
     name = "devices"
     title = "Devices"
-    help = "List attached serial and Bluetooth devices, flagging likely companions"
+    help = "List attached serial, SPI, and Bluetooth devices, flagging likely companions"
     category = "This node"
     order = 5
     menu_visible = False  # CLI-only: a startup diagnostic with no place in a connected session
@@ -74,10 +75,23 @@ class DevicesTool(Tool):
         else:
             scan_ble = params.get("ble", True)
             devices = await discover_all(ble=scan_ble) if scan_ble else discover_devices()
+            # A radio on the SPI bus is attached the way a serial port is, but nothing
+            # enumerates it: it is listed from its device node, as the device screen lists it.
+            devices += spi_radios(ctx.settings.profiles, devices)
         known = ctx.device_store.load_all()
         remembered = ctx.device_store.load()
         active = ctx.selected_device
-        active_target = ctx.ble_override or ctx.port_override or (active.target if active else None)
+        spi = (
+            ctx.resolve_spi()
+            if ctx.spi_override or (ctx.profile is not None and ctx.profile.is_spi)
+            else None
+        )
+        active_target = (
+            ctx.ble_override
+            or ctx.port_override
+            or (spi.spidev if spi is not None else None)
+            or (active.target if active else None)
+        )
 
         # A refused Bluetooth scan is not the same as a quiet one, and the difference is
         # invisible in the listing — both simply lack BLE rows. Say so whether or not
@@ -125,7 +139,7 @@ class DevicesTool(Tool):
             # The listing used to close with a line explaining its own markers and how to
             # act on a row. That is help, and this is where help goes.
             epilog="Select a device with --port TARGET or --ble TARGET, using the "
-            "TARGET column verbatim.",
+            "TARGET column verbatim; an SPI radio with --spi, or -p and its profile.",
         )
         def _devices(
             ble: bool = typer.Option(

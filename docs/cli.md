@@ -585,8 +585,11 @@ repeat](#the-shapes-that-repeat), the table names the shape rather than restatin
 
 #### `meshterm devices`
 
-List every attached serial device and in-range Bluetooth companion. Opens no radio — it
-only enumerates what is attached or advertising. Under `--mock` it enumerates nothing at
+List every attached serial device, every radio on this machine's SPI bus, and every
+in-range Bluetooth companion. Opens no radio — it only enumerates what is attached or
+advertising. An SPI radio is listed when its `/dev/spidev*` node exists, exactly as the
+device screen lists it: one per SPI profile, plus the uConsole AIO's `/dev/spidev1.0` when
+no profile covers it. Under `--mock` it enumerates nothing at
 all: the simulator is the one device, listed with `--mock` as its target, and neither the
 serial ports nor the Bluetooth radio are touched — a session that promised no real
 hardware keeps the promise here too.
@@ -604,7 +607,8 @@ COM26   serial     USB Serial Device (COM26)   Espressif              maybe     
 COM1    serial     Communications Port (COM1)  (Standard port types)  no        -                 no
 ```
 
-`TARGET` is what `--port` and `--ble` take, verbatim. `MESHCORE` is three-valued and stays
+`TARGET` is what `--port` and `--ble` take, verbatim; an SPI radio's is its device node,
+reached with `--spi` or its profile's `-p`. `MESHCORE` is three-valued and stays
 that way: `yes` only once a connection has proved the device speaks the protocol, `maybe`
 for a USB vendor ID that suggests a LoRa board or a bridge chip, `no` for anything else —
 a vendor ID is a hint, and the column would be lying if it rounded one up.

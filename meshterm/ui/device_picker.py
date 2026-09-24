@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING
 from rich.cells import cell_len
 from rich.text import Text
 
-from ..core.config import DeviceProfile, SpiWiring
+from ..core.config import DeviceProfile
 from ..core.connection import DeviceAuthenticationError, DeviceCommandError
 from ..core.device_store import DeviceStore, RememberedDevice
 from ..core.discovery import (
@@ -45,10 +45,9 @@ from ..core.discovery import (
     discover_devices,
     parse_tcp_endpoint,
     serial_device,
-    spi_device,
     tcp_device,
 )
-from ..core.spiradio import spi_present
+from ..core.spiradio import spi_radios
 from ..platforms import get_platform
 from .logo import load_logo
 from .menus import Lane, align_icons, column_header, fit_cells
@@ -402,7 +401,7 @@ async def prompt_device(
         listed += _profile_serial_devices(listed, profiles)
         # A radio on the SPI bus answers nothing until MeshTerm starts its node, so it is
         # listed from the device node's presence, the way a serial port is.
-        listed += _spi_devices(listed, profiles)
+        listed += spi_radios(profiles, listed)
         # Devices the user has told this splash to stop showing (h). Read each pass, so a
         # row hidden a moment ago is gone the next time the list is drawn — which is the
         # only feedback hiding needs.
@@ -694,42 +693,6 @@ def _profile_serial_devices(
         seen_ports.add(profile.port)
         rebuilt.append(serial_device(profile.port, name=profile.name))
     return rebuilt
-
-
-def _spi_devices(
-    listed: list[DiscoveredDevice],
-    profiles: Mapping[str, DeviceProfile] | None,
-) -> list[DiscoveredDevice]:
-    """The radios on this machine's own SPI bus, as picker rows.
-
-    One row per ``transport = "spi"`` profile whose ``/dev/spidev*`` node exists, named by
-    the profile; and, where no profile covers it, one for the uConsole AIO's device node when
-    it exists, wired with the defaults. Nothing is probed to list them — a radio on the bus
-    has no node running until one is chosen — so a row appears exactly when there is a device
-    node to open. A device node already listed is not listed twice.
-
-    Args:
-        listed: The devices already gathered, for de-duplication.
-        profiles: The configured profiles, or ``None`` when none are loaded.
-
-    Returns:
-        One SPI :class:`DiscoveredDevice` per radio not already listed.
-    """
-    seen = {d.stable_id for d in listed}
-    rows: list[DiscoveredDevice] = []
-    wirings = [(p.spi or SpiWiring(), p.name) for p in (profiles or {}).values() if p.is_spi]
-    covered = {wiring.spidev for wiring, _name in wirings}
-    if SpiWiring().spidev not in covered:
-        wirings.append((SpiWiring(), ""))
-    for wiring, name in wirings:
-        if not spi_present(wiring):
-            continue
-        device = spi_device(wiring, name=name)
-        if device.stable_id in seen:
-            continue
-        seen.add(device.stable_id)
-        rows.append(device)
-    return rows
 
 
 async def _add_network_device(
