@@ -183,7 +183,9 @@ class TrophyCaseTool(Tool):
                         f"--category must be one of: {choices} (got {category!r})"
                     )
                 tool_params["category"] = category
-            if width:
+            if width is not None:
+                if width not in (1, 2, 4):
+                    raise typer.BadParameter(f"--width must be one of: 1, 2, 4 (got {width!r})")
                 tool_params["width"] = width
             run_tool_command(self, tool_params)
 

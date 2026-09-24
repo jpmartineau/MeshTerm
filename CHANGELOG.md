@@ -9,6 +9,11 @@ one caveat SemVer makes for a leading zero: while the major version is still `0`
 
 ## [Unreleased]
 
+### Fixed
+
+- `records --width` now rejects unsupported hash widths with a usage error instead
+  of treating them as empty results or ignoring zero. Supported widths remain 1, 2, and 4.
+
 ### Changed
 
 - **MeshTerm now sends at most one automatic advert a week, and none unless you ask.** A
