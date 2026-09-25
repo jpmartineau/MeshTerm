@@ -45,6 +45,7 @@ from .models import (
     advert_time,
     utcnow,
 )
+from .region_sim import SimulatedRegionMap
 from .regions import WILDCARD as REGION_WILDCARD
 from .regions import normalize as normalize_region
 from .regions import parse_region_list, region_key
@@ -3371,6 +3372,36 @@ class MockDevice(Device):
                 ("a1b2c3d4", -3.25, 900),
             ],
         }
+        # Simulated region tables, keyed like the neighbour tables: one per repeater, what
+        # its ``region`` CLI edits and the anonymous regions request reads. Yagi's fits in
+        # one reply; Local's is deliberately too big for the 160-byte reply buffer, so the
+        # region editor's cut-and-recover path is drivable without hardware.
+        self._region_maps: dict[str, SimulatedRegionMap] = {
+            "a1b2c3d4": SimulatedRegionMap(
+                [
+                    ("lakeside", "*", True),
+                    ("lakeside-north", "lakeside", True),
+                    ("lakeside-south", "lakeside", False),
+                    ("harbour", "*", True),
+                ]
+            ),
+            "b2c3d4e5": SimulatedRegionMap(
+                [
+                    ("lakeside", "*", True),
+                    ("lakeside-north", "lakeside", True),
+                    ("lakeside-south", "lakeside", False),
+                    ("harbour", "*", True),
+                    ("harbour-east", "harbour", True),
+                    ("harbour-west", "harbour", True),
+                    ("old-town", "*", False),
+                    ("old-town-market", "old-town", True),
+                    ("riverside", "*", True),
+                    ("riverside-upper", "riverside", True),
+                    ("riverside-lower", "riverside", False),
+                    ("hilltop", "*", True),
+                ]
+            ),
+        }
         # Mutable configuration state, keyed exactly like the real SELF_INFO payload so the
         # settings registry behaves identically on the simulator and on hardware.
         self._info: dict = {
@@ -3564,6 +3595,11 @@ class MockDevice(Device):
             return "OK - clock synced" if parts[1:] == ["sync"] else "12:00 - 1/1/2026 UTC"
         if verb == "advert":
             return "OK - Advert sent"
+        regions = self._region_maps.get(node.key_prefix or "")
+        if verb == "region" and regions is not None:
+            return regions.command(command.strip())
+        if verb == "reboot" and regions is not None:
+            regions.reboot()  # a power cycle drops every region edit not saved
         if verb in ("reboot", "password", "time", "start"):
             return "OK"
         if verb == "neighbors":
@@ -3658,12 +3694,17 @@ class MockDevice(Device):
     async def request_regions(self, node: Contact) -> list[str]:  # noqa: D102
         await asyncio.sleep(0)
         key = self._mock_key(node)
-        # Only a node with a neighbour table is a repeater here, and only a repeater answers.
-        if self._neighbour_tables.get(key[:8]) is None:
+        # Only a node with a region table is a repeater here, and only a repeater answers.
+        regions = self._region_maps.get(node.key_prefix or key[:8])
+        if node.name in self._unreachable:
+            raise DeviceCommandError(
+                f"{node.name!r} did not answer the regions request (out of direct reach)."
+            )
+        if regions is None:
             raise DeviceCommandError(
                 f"{node.name!r} did not answer the regions request (not a repeater)."
             )
-        return parse_region_list("*,lakeside,lakeside-north,harbour")
+        return parse_region_list(regions.allowed_names())
 
     @staticmethod
     def _mock_key(node: Contact) -> str:

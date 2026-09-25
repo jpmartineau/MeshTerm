@@ -620,12 +620,16 @@ def test_a_port_that_will_not_open_is_no_device_not_a_device_failure(run) -> Non
     "args",
     [
         ("repeater-admin", "Nobody", "get", "name"),
+        ("regions", "Nobody"),
+        ("regions", "Alice"),
         ("courier", "queue", "Nobody", "hi"),
         ("courier", "queue", "Alice", "hi", "--at", "25:99"),
         ("tx-optimize", "--path", "Yagi-Repeater", "--samples", "1"),
     ],
     ids=[
         "unknown-admin-node",
+        "unknown-regions-node",
+        "regions-of-a-companion",
         "unknown-courier-contact",
         "bad-at-time",
         "tx-optimize-one-hop-path",
@@ -653,6 +657,49 @@ def test_a_node_that_answers_no_is_still_a_device_failure(run) -> None:  # noqa:
     """
     result = run("repeater-admin", "Yagi-Repeater", "get", "name", "--password", "wrongpw")
     assert result.exit_code == exitcodes.DEVICE, result.output
+
+
+def test_a_repeaters_regions_on_both_faces(run) -> None:  # noqa: ANN001
+    """Who answered, whether it relays unscoped floods, and the regions — never the ``*``."""
+    plain = run("regions", "Yagi-Repeater")
+    assert plain.exit_code == exitcodes.OK, plain.output
+    assert result_lines(plain) == [
+        "node      Yagi-Repeater",
+        "unscoped  yes",
+        "regions   lakeside, lakeside-north, harbour",
+    ]
+    document = json.loads(run("--json", "regions", "Yagi-Repeater").stdout)
+    assert document["node"]["name"] == "Yagi-Repeater"
+    assert document["unscoped"] is True
+    assert document["regions"] == ["lakeside", "lakeside-north", "harbour"]
+
+
+def test_a_repeater_that_names_nothing_is_nothing_to_report(run, monkeypatch) -> None:  # noqa: ANN001
+    """It answered, so this is not a failure — but it relays no floods at all: exit 5."""
+    from meshterm.core.connection import MockDevice
+
+    async def nothing(self, node):  # noqa: ANN001, ANN202
+        return []
+
+    monkeypatch.setattr(MockDevice, "request_regions", nothing)
+    result = run("regions", "Yagi-Repeater")
+    assert result.exit_code == exitcodes.NO_RESULT
+    document = json.loads(run("--json", "regions", "Yagi-Repeater").stdout)
+    assert document["unscoped"] is False and document["regions"] == []
+
+
+def test_a_repeater_that_never_answers_is_a_device_failure(run, monkeypatch) -> None:  # noqa: ANN001
+    """The request went out and nothing came back — a retry is a real option: exit 4."""
+    from meshterm.core.connection import DeviceCommandError, MockDevice
+
+    async def silent(self, node):  # noqa: ANN001, ANN202
+        raise DeviceCommandError(f"{node.name!r} did not answer the regions request.")
+
+    monkeypatch.setattr(MockDevice, "request_regions", silent)
+    result = run("regions", "Yagi-Repeater")
+    assert result.exit_code == exitcodes.DEVICE
+    assert result.stdout == ""
+    assert "did not answer" in result.stderr
 
 
 def test_an_empty_result_writes_nothing_to_stdout_at_all(run) -> None:  # noqa: ANN001

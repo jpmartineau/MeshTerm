@@ -18,9 +18,10 @@ firmware doesn't have reads as ``n/a`` — kept apart from ``?``, never read. Ap
 staged values the same way and folds each confirmed value straight back into the cache.
 
 Beyond the settings, the action rows cover the box itself — advert, clock sync, change
-admin password, reboot, each behind its own floating confirmation — and the **Command
-line** opens the readline-style remote CLI (:mod:`meshterm.ui.remote_cli`) for anything
-the catalog doesn't spell.
+admin password, reboot, each behind its own floating confirmation — **Regions** opens the
+region editor (:mod:`meshterm.ui.region_editor`), which floods it relays region by region,
+and the **Command line** opens the readline-style remote CLI (:mod:`meshterm.ui.remote_cli`)
+for anything the catalog doesn't spell.
 
 That command line is also where the page *grows*. Third-party builds carry settings the
 catalog has never heard of, and MeshTerm can't know which build a node is running without
@@ -99,6 +100,7 @@ _ADVERT = "__advert__"
 _CLOCK = "__clock__"
 _PASSWORD = "__password__"
 _REBOOT = "__reboot__"
+_REGIONS = "__regions__"
 _APPLY = "__apply__"
 _CANCEL = "__cancel__"
 
@@ -409,6 +411,10 @@ async def _admin_session(ctx: AppContext, device: Device, node: Contact) -> dict
                 await _stage_location(ctx, cache, pending)
             elif choice == _CLI:
                 await _command_line(ctx, device, node)
+            elif choice == _REGIONS:
+                from .region_editor import open_region_editor
+
+                await open_region_editor(ctx, device, node)
             elif choice == _ADVERT:
                 await _simple_action(
                     ctx,
@@ -523,6 +529,7 @@ def _menu_items(node: Contact, cache: dict, pending: dict[str, str]) -> tuple[st
     actions = [
         ("↻", "Read settings", "Fetch every value from the node, one paced read", _READ),
         ("⌨", "Command line…", "Talk to the node's CLI directly", _CLI),
+        ("🔖", "Regions…", "Which scoped floods it relays", _REGIONS),
         ("📡", "Send advert…", "Have the node announce itself now", _ADVERT),
         ("🕒", "Sync clock…", "Set the node's clock over the mesh", _CLOCK),
         ("🔐", "Admin password…", "Change the node's admin password", _PASSWORD),

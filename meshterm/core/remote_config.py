@@ -52,12 +52,13 @@ from dataclasses import dataclass
 
 #: Reply text (lowercased) that reads as the firmware refusing/unknowing a command. ``??:``
 #: is how ``handleGetCmd`` answers a key it doesn't know; ``unknown config:`` is its ``set``
-#: twin.
+#: twin. ``err - `` is the ``region`` verbs' own refusal (``Err - not empty``).
 _ERRORISH = (
     "??:",
     "unknown",
     "error",
     "err:",
+    "err - ",
     "invalid",
     "denied",
     "bad ",
@@ -627,12 +628,17 @@ KNOWN_COMMANDS: tuple[str, ...] = (
     "password ",
     "poweroff",
     "reboot",
+    # ``region load`` is left out on purpose: it switches the CLI into a line-by-line
+    # reading mode ended by a blank line, which a remote command line cannot send.
     "region",
     "region allowf ",
+    "region def ",
     "region default",
     "region denyf ",
     "region get ",
     "region home",
+    "region list allowed",
+    "region list denied",
     "region put ",
     "region remove ",
     "region save",

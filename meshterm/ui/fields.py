@@ -276,6 +276,22 @@ def scope(key: str = "scope", header: str = "SCOPE") -> Column:
     return Column(key=key, lanes=(Lane(header=header, render=_scope_cell),), json=scope_json)
 
 
+def regions(key: str = "regions", header: str = "REGIONS") -> Column:
+    """A set of region names — what a repeater relays: joined plain, an array in the document.
+
+    The row holds a sequence of bare names, never the wildcard: *unscoped* is its own
+    concept (a :func:`flag` beside this column), because ``*`` names no region and a
+    consumer reading this array for names would otherwise have to know to skip it. An empty
+    sequence is a real answer — *no regions* — so it reads as the word ``none`` plain and
+    stays ``[]`` in the document; ``None`` is *not known*, the absent token and ``null``.
+    """
+    return Column(
+        key=key,
+        lanes=(Lane(header=header, render=_regions_cell),),
+        json=lambda names: None if names is None else [str(n) for n in names],
+    )
+
+
 def when(key: str, header: str, *, absent: str = script.NONE) -> Column:
     """A time the reader reads as an age: ``5m``, ``3h``, ``never``.
 
@@ -487,6 +503,13 @@ def hidden(key: str) -> Column:
     enum's number is called, and whether the value was withheld.
     """
     return Column(key=key)
+
+
+def _regions_cell(names: Sequence[str] | None) -> str:
+    """A region set's plain cell: the names comma-joined, ``none`` when empty, else absent."""
+    if names is None:
+        return script.NONE
+    return ", ".join(script.name(n) for n in names) if names else "none"
 
 
 def _rendered_cell(value: Rendered | None) -> str:

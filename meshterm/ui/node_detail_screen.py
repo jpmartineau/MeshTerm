@@ -15,7 +15,9 @@ the node itself, in full:
 
   * **Info** — the node's vitals as labelled rows (its key with the routing hash lit, when
     it was first and last heard, how many packets we've overheard, its reception SNR and
-    last RSSI, and where it sits). The key is a single lane, never wrapped: a full public
+    last RSSI, where it sits, and — for a repeater — the regions it was last heard to relay
+    floods for, whether it relays unscoped floods too, and when it said so; see
+    :func:`regions_value`). The key is a single lane, never wrapped: a full public
     key outruns the row on any terminal we target, so ``←→`` scroll it a whole four bytes
     at a time under faint ``…`` edge marks, exactly as a long pathline scrolls on the
     Routes tab. Then — when the node has advertised a location — a
@@ -24,7 +26,10 @@ the node itself, in full:
     map opens centred here with its find filter seeded to this node, so it lights among
     the rest), ``Time machine``, ``Share contact`` — a popup contact card (QR code +
     ``meshcore://`` link, see :func:`~meshterm.ui.config_editor.show_contact_card`),
-    offered whenever the node's full key is known — and, last, ``Remove contact``: the
+    offered whenever the node's full key is known — ``Ask which regions it carries`` on a
+    repeater (one anonymous request, answered only when it arrives direct; the answer is
+    learned into the region store and the row redraws in place) — and, last,
+    ``Remove contact``: the
     single-contact counterpart to the Contacts list's bulk archive (see
     :mod:`~meshterm.ui.contacts_screen`), dropping *this* node from the device's contact
     table behind a red confirm. It is the one thing on the page that changes anything, so
@@ -68,7 +73,8 @@ The screen is a pure read-and-route view: it renders already-resolved display da
 resolves an action token (the Trace token carrying the selected route's spec via
 :meth:`NodeDetailScreen.selected_spec`); :func:`open_node_detail` owns the data-gathering
 and runs the sub-flows each action opens, then re-shows the page — the same loop the Time
-Machine and Contacts list use. Nothing here transmits.
+Machine and Contacts list use. The screen itself never transmits; the one action that does
+is the regions question, asked once, by the opener, when the reader commits its row.
 """
 
 from __future__ import annotations
@@ -85,9 +91,9 @@ from typing import TYPE_CHECKING
 from rich.cells import cell_len
 from rich.text import Text
 
-from ..core.connection import ContactNotOnDeviceError
+from ..core.connection import ContactNotOnDeviceError, DeviceCommandError
 from ..core.geo import haversine_km, usable_fix
-from ..core.models import NODE_TYPE_LABELS, Contact, utcnow
+from ..core.models import NODE_TYPE_LABELS, NODE_TYPE_REPEATER, Contact, utcnow
 from ..platforms import Platform, on_platform
 from . import menus
 from .mapcanvas import RGB
@@ -575,6 +581,18 @@ class NodeDetailScreen(Screen):
         """The action rows' icon column over every mark currently on the page."""
         trace = [self._trace_action] if self._trace_action else []
         return menus.icon_lane(action.glyph for action in (*self._info_actions, *trace))
+
+    def replace_info_row(self, label: str, value: Text) -> None:
+        """Swap one vital's value in place — the regions row, once the repeater has answered.
+
+        The row keeps its place in the block (a label not already there is appended), and
+        the cursor stays on whatever it was on: the page is the same visit, one fact newer.
+        """
+        for i, (existing, _value) in enumerate(self._info_rows):
+            if existing == label:
+                self._info_rows[i] = (label, value)
+                return
+        self._info_rows.append((label, value))
 
     def replace_info_actions(self, actions: list[_Action]) -> None:
         """Swap the Info tab's action rows in place, keeping the cursor on the row it was on.
@@ -1279,6 +1297,20 @@ async def open_node_detail(
             info_rows.append(("signal", signal))
     if lat is not None and lon is not None:
         info_rows.append(("where", _range_text(lat, lon, self_lat, self_lon)))
+    # A repeater's regions: what it was last heard to relay, from the region store (its own
+    # answer to the regions request, or its table read on the admin page). Only a repeater
+    # answers the request, so only a repeater's page asks it.
+    region_store = getattr(ctx, "region_store", None)
+    asks_regions = (
+        not you
+        and contact is not None
+        and node_type == NODE_TYPE_REPEATER
+        and bool(node_id)
+        and region_store is not None
+    )
+    routed = contact is not None and contact.route_hops is not None
+    if asks_regions:
+        info_rows.append(("regions", regions_value(region_store, node_id, routed=routed)))
 
     # -- the location preview (only when the node advertised a fix).
     minimap: MiniMap | None = None
@@ -1347,6 +1379,9 @@ async def open_node_detail(
     full_key = key.lower().removeprefix("0x")
     if len(full_key) == 64 and is_path_hash(full_key):
         info_actions.append(_Action("share", "📱", "", "Share contact — QR / link"))
+    if asks_regions:
+        # Acts at once — one anonymous request, one transmission — so no trailing "…".
+        info_actions.append(_Action("regions", "🔖", "", "Ask which regions it carries"))
     # -- contact management, the page's last group and the only actions that end the visit.
     # Withheld entirely when the caller opened the page to look rather than to act (see
     # ``manage``), and never offered for our own node or for a contact carrying no key at
@@ -1450,6 +1485,13 @@ async def open_node_detail(
                     )
             elif action == "share":
                 await show_contact_card(ctx, label, full_key, adv_type)
+            elif action == "regions":
+                assert contact is not None and region_store is not None  # only offered so
+                failed = await _ask_regions(ctx, contact, node_id, label, routed=routed)
+                screen.replace_info_row(
+                    "regions",
+                    regions_value(region_store, node_id, routed=routed, failed=failed),
+                )
             elif action == "timemachine":
                 if you:
                     await open_timemachine_self(ctx)
@@ -1725,6 +1767,88 @@ async def _remove_contact(ctx: AppContext, contact: Contact, self_key: str, labe
     # this one is self-evident. The page closes on the contact it detailed and the list
     # behind it comes back without the row, which says it better than a dialog to dismiss.
     return True
+
+
+#: Why a repeater may not answer the regions request, in the words the page uses for it.
+_REGIONS_REACH = "it answers only a neighbour, or over a known route"
+
+
+def regions_value(store, node_id: str, *, routed: bool, failed: bool = False) -> Text:  # noqa: ANN001 - RegionStore
+    """A repeater's ``regions`` vital: what it relays, whether unscoped too, and how fresh.
+
+    Four states, each in its own words so none reads as another:
+
+    * **answered** — the regions it named, then whether it also relays *unscoped* floods
+      (the ``*`` its answer leads with, which names no region), then when it said so. A
+      repeater that relays unscoped floods and no region reads ``unscoped floods only``, and
+      one that named nothing at all reads that it relays no floods;
+    * **not asked** — nothing on record; a repeater with no known route also says why the
+      question may go unanswered (the request is only answered when it arrives direct);
+    * **no answer** — the question was just asked and nothing came back, on a repeater that
+      never answered before. One that answered earlier keeps its answer, marked stale by its
+      age: an unanswered repeat says nothing about what it carries.
+
+    Args:
+        store: The region store.
+        node_id: The repeater's 12-hex id.
+        routed: Whether the device holds a route to it (a neighbour or a learned path).
+        failed: Whether the ask this visit went unanswered.
+
+    Returns:
+        The row's value.
+    """
+    answer = store.answer_of(node_id)
+    if answer is None:
+        if failed:
+            text = Text("no answer", style="warn")
+            text.append(f" — {_REGIONS_REACH}", style="muted")
+            return text
+        text = Text("not asked yet", style="muted")
+        if not routed:
+            text.append(f" — {_REGIONS_REACH}", style="muted")
+        return text
+    names = store.carried_by(node_id)
+    text = Text()
+    if names:
+        text.append(", ".join(names))
+        text.append("  ·  " + ("unscoped too" if answer.unscoped else "scoped only"), style="muted")
+    elif answer.unscoped:
+        text.append("unscoped floods only")
+    else:
+        text.append("none — it relays no floods", style="warn")
+    text.append(f"  ·  answered {format_ago(age_seconds(answer.answered_at))}", style="muted")
+    if failed:
+        text.append("  ·  no answer now", style="warn")
+    return text
+
+
+async def _ask_regions(
+    ctx: AppContext, contact: Contact, node_id: str, label: str, *, routed: bool
+) -> bool:
+    """Ask a repeater which regions it carries — once — and learn the answer.
+
+    One anonymous request, one transmission, under the busy overlay; the answer replaces
+    what the store held for this repeater (:meth:`~meshterm.core.region_store.RegionStore.
+    learn_carried`). An unanswered request is said in a popup with the reason it most
+    likely went unanswered — the request is dropped unless it arrives direct, and the
+    repeater rate-limits it — and nothing retries it.
+
+    Returns:
+        ``True`` when the repeater did not answer.
+    """
+    device = await ctx.device()
+    try:
+        async with ctx.ui.busy_overlay():
+            names = await device.request_regions(contact)
+    except DeviceCommandError as exc:
+        where = "" if routed else " There is no known route to it, so only a neighbour answers."
+        await ctx.ui.session.message_dialog(
+            Text(f"{exc}{where}", style="warn"),
+            title=f"Regions — {label}",
+        )
+        return True
+    ctx.region_store.learn_carried(node_id, names)
+    return False
 
 
 def _signal_row(hn) -> Text | None:  # noqa: ANN001 - Optional[HeardNode]

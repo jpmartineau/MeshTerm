@@ -36,7 +36,7 @@ from meshterm.core.regions import (
 from meshterm.persistence.repository import Repository
 
 #: A channel-text payload: channel hash, 2-byte MAC, ciphertext (contents are arbitrary).
-_PAYLOAD = bytes.fromhex("a7" "1c2d" "00112233445566778899aabbccddeeff")
+_PAYLOAD = bytes.fromhex("a71c2d00112233445566778899aabbccddeeff")
 _GRP_TXT = 5
 
 

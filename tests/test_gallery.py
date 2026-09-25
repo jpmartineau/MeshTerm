@@ -406,6 +406,59 @@ def _node_detail_map(cols: int, rows: int) -> Screen:
     return _node_detail(cols, rows, with_minimap=True)
 
 
+def _node_detail_regions(cols: int, rows: int) -> Screen:
+    """A repeater's node page with its regions answered — the longest the row gets."""
+    from meshterm.core.region_store import RegionStore
+    from meshterm.ui.node_detail_screen import regions_value
+
+    store = RegionStore(Path(tempfile.mkdtemp(prefix="meshterm-gallery-regions-")) / "r.json")
+    store.learn_carried(_HUB_KEY[:12], ["*", "lakeside", "lakeside-north", "harbour"])
+    screen = _node_detail(cols, rows)
+    assert isinstance(screen, NodeDetailScreen)
+    screen.replace_info_row("regions", regions_value(store, _HUB_KEY[:12], routed=True))
+    screen.replace_info_actions(
+        [
+            _Action("timemachine", "⏳", "", "Time machine — 42 receptions"),
+            _Action("regions", "🔖", "", "Ask which regions it carries"),
+            _Action("remove", "🗑", "err", "Remove contact…"),
+        ]
+    )
+    return screen
+
+
+def _region_editor(cols: int, rows: int) -> Screen:
+    """The region editor at its fullest: a cut dump, the rest recovered, edits unsaved."""
+    from meshterm.core.region_admin import parse_region_dump
+    from meshterm.core.region_sim import SimulatedRegionMap
+    from meshterm.ui.region_editor import RegionMenu, region_items
+
+    hub = Contact(name="Hilltop-Repeater", public_key=_HUB_KEY, key_prefix="3d63c6429436")
+    # A table too big for one reply, answered the way a repeater answers it.
+    sim = SimulatedRegionMap(
+        [
+            ("lakeside", "*", True),
+            ("lakeside-north", "lakeside", True),
+            ("lakeside-south", "lakeside", False),
+            ("harbour", "*", True),
+            ("harbour-east", "harbour", True),
+            ("harbour-west", "harbour", True),
+            ("old-town", "*", False),
+            ("old-town-market", "old-town", True),
+            ("riverside", "*", True),
+            ("riverside-upper", "riverside", True),
+            ("a-region-named-thirty-bytes-xx", "riverside", True),
+        ]
+    )
+    sim.command("region default harbour")
+    table = (
+        parse_region_dump(sim.command("region"))
+        .with_default(sim.command("region default"))
+        .with_lists(sim.command("region list allowed"), sim.command("region list denied"))
+    )
+    title, items = region_items(hub, table, 2)
+    return RegionMenu(title, items)
+
+
 def _chat(cols: int, rows: int) -> Screen:
     conv = Conversation(
         label="Alice",
@@ -1286,6 +1339,7 @@ _ENTRIES: list[_Entry] = [
     _Entry("archived", _archived),
     _Entry("node_detail", _node_detail),
     _Entry("node_detail_map", _node_detail_map),
+    _Entry("node_detail_regions", _node_detail_regions),
     _Entry("map", _map),
     _Entry("map_panned", _map_panned),
     _Entry("map_find", _map_find),
@@ -1320,6 +1374,7 @@ _ENTRIES: list[_Entry] = [
     _Entry("config_editor", _config_editor),
     _Entry("config_editor_revealed", _config_editor_revealed),
     _Entry("repeater_admin", _repeater_admin),
+    _Entry("region_editor", _region_editor),
     _Entry("preferences", _preferences),
     _Entry("preferences-weekly-advert", _preferences_weekly_advert),
     _Entry("cooldown_countdown", _cooldown_countdown),

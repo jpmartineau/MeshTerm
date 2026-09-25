@@ -11,7 +11,8 @@ wherever MeshTerm meets one:
 * ``repeater`` — a repeater's answer to the regions request, or its ``region`` listing,
   which also records *which* repeaters carry it (the node page lists them, and a scoped
   send that nothing relayed can say whether anything in earshot was ever heard to carry
-  its region);
+  its region) — and, beside the regions, each repeater's last whole answer: whether it
+  relays unscoped floods too, and when it said so (:class:`CarriedAnswer`);
 * ``typed`` — a name the reader entered themselves.
 
 The store also holds **channel scopes**: the region a channel's messages are sent under.
@@ -80,6 +81,30 @@ class KnownRegion:
     RETIRED: ClassVar[frozenset[str]] = frozenset()
 
 
+@dataclass(frozen=True)
+class CarriedAnswer:
+    """The last whole answer one repeater gave about what it carries.
+
+    The regions themselves live on :class:`KnownRegion` (``repeaters``), where resolution
+    wants them; this keeps what does not belong to any one region — whether the repeater
+    also relays *unscoped* floods (the ``*`` a region list leads with, which names no
+    region), and when it said so. A repeater with no record here was never asked, which is
+    a different thing from a repeater that answered with nothing.
+
+    Attributes:
+        node: The repeater's 12-hex node id.
+        unscoped: Whether its answer included the wildcard.
+        answered_at: When it answered (UTC).
+    """
+
+    node: str
+    unscoped: bool
+    answered_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    #: Fields this record once held and must never hold again under another meaning.
+    RETIRED: ClassVar[frozenset[str]] = frozenset()
+
+
 class RegionStore:
     """Reads and writes the known regions and the channel scopes, memory-first.
 
@@ -99,6 +124,7 @@ class RegionStore:
         self._path = path
         self._regions: dict[str, KnownRegion] | None = None
         self._channels: dict[str, str] = {}
+        self._answers: dict[str, CarriedAnswer] = {}
         self._memo: dict[tuple[bytes, int], str | None] = {}
         self.revision = 0
 
@@ -108,17 +134,19 @@ class RegionStore:
     def _state(self) -> dict[str, KnownRegion]:
         """The name -> record map, loaded from disk on first access."""
         if self._regions is None:
-            self._regions, self._channels = self._load()
+            self._regions, self._channels, self._answers = self._load()
         return self._regions
 
-    def _load(self) -> tuple[dict[str, KnownRegion], dict[str, str]]:
+    def _load(
+        self,
+    ) -> tuple[dict[str, KnownRegion], dict[str, str], dict[str, CarriedAnswer]]:
         """Parse the file, or start empty on a missing or corrupt one."""
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return {}, {}
+            return {}, {}, {}
         if not isinstance(data, dict):
-            return {}, {}
+            return {}, {}, {}
         regions: dict[str, KnownRegion] = {}
         for entry in data.get("regions") or []:
             region = _region_from_json(entry)
@@ -130,7 +158,12 @@ class RegionStore:
                 channels[str(identity)] = validate(str(name))
             except RegionNameError:
                 continue
-        return regions, channels
+        answers: dict[str, CarriedAnswer] = {}
+        for entry in data.get("answers") or []:
+            answer = _answer_from_json(entry)
+            if answer is not None:
+                answers[answer.node] = answer
+        return regions, channels, answers
 
     # -- what is known ---------------------------------------------------------------
 
@@ -162,6 +195,15 @@ class RegionStore:
         """The regions a repeater was heard to carry, by its node id (12-hex prefix)."""
         node = node.lower()[:12]
         return [r.name for r in self.regions() if node in r.repeaters]
+
+    def answer_of(self, node: str) -> CarriedAnswer | None:
+        """The last whole answer a repeater gave (unscoped too, and when), or ``None``.
+
+        ``None`` means it was never asked — or never answered — which the node page states
+        as such, rather than reading an empty :meth:`carried_by` as "carries nothing".
+        """
+        self._state  # noqa: B018 - load on first access
+        return self._answers.get(node.lower()[:12])
 
     # -- changing it -----------------------------------------------------------------
 
@@ -200,17 +242,23 @@ class RegionStore:
         """Record what one repeater says it carries, replacing what it said before.
 
         A repeater's list is its whole answer, so a region it no longer names loses that
-        repeater (and, if nothing else taught it, the region itself).
+        repeater (and, if nothing else taught it, the region itself). Whether it listed the
+        wildcard — relays unscoped floods — and when it answered are kept beside the
+        regions (:meth:`answer_of`).
 
         Args:
             repeater: The repeater's node id (12-hex prefix or full key).
-            names: The regions it listed (the wildcard is skipped).
+            names: The regions it listed (the wildcard is recorded as the unscoped flag).
 
         Returns:
             The bare region names learned, in the order given.
         """
         node = repeater.lower()[:12]
-        wanted = [n for n in (normalize(x) for x in names) if n and n != WILDCARD]
+        given = [normalize(x) for x in names]
+        self._state  # noqa: B018 - load on first access
+        self._answers[node] = CarriedAnswer(node=node, unscoped=WILDCARD in given)
+        self._changed()
+        wanted = [n for n in given if n and n != WILDCARD]
         learned: list[str] = []
         for name in wanted:
             bare = self.learn(name, "repeater", repeater=node)
@@ -321,8 +369,33 @@ class RegionStore:
                 for r in self._state.values()
             ],
             "channels": dict(sorted(self._channels.items())),
+            "answers": [
+                {
+                    "node": a.node,
+                    "unscoped": a.unscoped,
+                    "answered_at": a.answered_at.astimezone(timezone.utc).isoformat(),
+                }
+                for a in self._answers.values()
+            ],
         }
         write_atomically(self._path, json.dumps(data, indent=2, ensure_ascii=False))
+
+
+def _answer_from_json(entry: object) -> CarriedAnswer | None:
+    """Parse one stored repeater answer, or ``None`` if it is malformed."""
+    if not isinstance(entry, dict) or not entry.get("node"):
+        return None
+    try:
+        answered_at = datetime.fromisoformat(str(entry["answered_at"]))
+    except (KeyError, ValueError):
+        return None
+    if answered_at.tzinfo is None:
+        answered_at = answered_at.replace(tzinfo=timezone.utc)
+    return CarriedAnswer(
+        node=str(entry["node"]).lower()[:12],
+        unscoped=bool(entry.get("unscoped")),
+        answered_at=answered_at,
+    )
 
 
 def _region_from_json(entry: object) -> KnownRegion | None:
