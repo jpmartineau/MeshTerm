@@ -86,44 +86,48 @@ def _col(line: str, needle: str) -> int:
 # -- the packet viewer -------------------------------------------------------------------
 
 
-def _route_row(raw: dict, scope_of=None) -> str:  # noqa: ANN001
-    """The viewer's ``route`` row for one frame, as plain text."""
+def _card_row(raw: dict, label: str, scope_of=None) -> str | None:  # noqa: ANN001
+    """The value of the viewer's ``label`` row for one frame, as plain text (``None``: absent)."""
     entry = PacketEntry(when=utcnow(), kind="packet", path="3d", raw=raw)
     body = _stripped(
         PacketViewer([entry], 0, resolve=lambda h: "", scope_of=scope_of).render_body(80)
     )
-    return next(line for line in body if line.startswith("route")).rstrip()
+    row = next((line for line in body if line.split(None, 1)[:1] == [label]), None)
+    return None if row is None else row.split(None, 1)[1].rstrip()
+
+
+def _has_scope_row(text: str, value: str) -> bool:
+    """Whether a rendered card carries a ``scope`` row reading ``value``."""
+    return re.search(rf"^scope\s+{re.escape(value)}\s*$", text, re.M) is not None
 
 
 def test_the_viewer_names_the_region_a_flood_was_scoped_to() -> None:
-    """``tc flood`` said *how* and never *where*; the row now says flood, then the scope."""
-    assert _route_row(_scoped("harbour"), _knows("harbour")).split(None, 1)[1] == (
-        "flood · scope harbour"
-    )
+    """``tc flood`` said *how* and never *where*: route says flood, its own row the region."""
+    assert _card_row(_scoped("harbour"), "route", _knows("harbour")) == "flood"
+    assert _card_row(_scoped("harbour"), "scope", _knows("harbour")) == "harbour"
 
 
 def test_the_viewer_shows_an_unnamed_scopes_code_and_a_plain_flood_as_unscoped() -> None:
     """A scope no known name reproduces keeps its code; a plain flood reads unscoped."""
-    assert _route_row(_scoped("elsewhere"), _knows("harbour")).endswith(
-        f"flood · unknown scope {_code('elsewhere')}"
+    assert _card_row(_scoped("elsewhere"), "scope", _knows("harbour")) == (
+        f"unknown region · code {_code('elsewhere')}"
     )
-    assert _route_row(_FLOOD, _knows("harbour")).endswith("flood · unscoped")
+    assert _card_row(_FLOOD, "scope", _knows("harbour")) == "unscoped"
 
 
 def test_the_viewer_without_a_store_still_tells_scoped_from_unscoped() -> None:
     """No names at hand is less of the truth, never a wrong one: the code stands in."""
-    assert _route_row(_scoped("harbour")).endswith(f"flood · unknown scope {_code('harbour')}")
-    assert _route_row(_FLOOD).endswith("flood · unscoped")
+    assert _card_row(_scoped("harbour"), "scope") == f"unknown region · code {_code('harbour')}"
+    assert _card_row(_FLOOD, "scope") == "unscoped"
 
 
 def test_the_viewer_never_gives_a_direct_frame_a_scope() -> None:
-    """A repeater never region-filters a direct packet, so its route row is the word alone."""
-    assert _route_row(_DIRECT, _knows("harbour")).split() == ["route", "direct"]
-    assert _route_row({**_DIRECT, "route_typename": "TC_DIRECT"}).split() == [
-        "route",
-        "tc",
-        "direct",
-    ]
+    """A repeater never region-filters a direct packet: its route word alone, no scope row."""
+    assert _card_row(_DIRECT, "route", _knows("harbour")) == "direct"
+    assert _card_row(_DIRECT, "scope", _knows("harbour")) is None
+    tc_direct = {**_DIRECT, "route_typename": "TC_DIRECT"}
+    assert _card_row(tc_direct, "route") == "tc direct"
+    assert _card_row(tc_direct, "scope") is None
 
 
 def test_the_viewer_keeps_the_scope_body_out_of_the_raw_dump(tmp_path: Path) -> None:
@@ -139,7 +143,7 @@ def test_the_viewer_keeps_the_scope_body_out_of_the_raw_dump(tmp_path: Path) -> 
             scope_of=_knows("harbour"),
         ).render_body(80)
     )
-    assert "scope harbour" in body  # a replayed frame resolves exactly as a live one
+    assert _has_scope_row(body, "harbour")  # a replayed frame resolves exactly as a live one
     assert "scope_body" not in body
 
 
@@ -148,9 +152,9 @@ def test_the_viewer_renames_a_scope_the_moment_its_region_is_learned(tmp_path: P
     store = RegionStore(tmp_path / "regions.json")
     entry = PacketEntry(when=utcnow(), kind="packet", path="", raw=_scoped("harbour"))
     viewer = PacketViewer([entry], 0, resolve=lambda h: "", scope_of=store.scope_of)
-    assert "scope harbour" not in _plain(viewer.render_body(80))
+    assert not _has_scope_row(_plain(viewer.render_body(80)), "harbour")
     store.learn("harbour", "typed")
-    assert "scope harbour" in _plain(viewer.render_body(80))
+    assert _has_scope_row(_plain(viewer.render_body(80)), "harbour")
 
 
 # -- the live feed -----------------------------------------------------------------------
@@ -220,7 +224,7 @@ def test_the_feed_hands_its_scope_reader_to_the_viewer() -> None:
     screen._session.run_screen = lambda viewer: opened.append(viewer)  # noqa: SLF001
     screen._session.run_detached = lambda coro: None  # noqa: SLF001
     screen.handle("enter")
-    assert "flood · scope harbour" in _plain(opened[0].render_body(80))
+    assert _has_scope_row(_plain(opened[0].render_body(80)), "harbour")
 
 
 # -- message paths -----------------------------------------------------------------------

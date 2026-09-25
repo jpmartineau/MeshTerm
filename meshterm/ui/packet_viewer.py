@@ -940,7 +940,10 @@ class PacketViewer(Screen):
         rows.extend(self._addressing_rows(raw))
         route = raw.get("route_typename")
         if route:
-            rows.append(("route", self._route_text(route, self._entry_scope(entry))))
+            scope = self._entry_scope(entry)
+            rows.append(("route", self._route_text(route, scope)))
+            if scope is not None:
+                rows.append(("scope", self._scope_text(scope)))
         rows.append(("via", self._via_path(entry)))
         # The figure the chain above encodes but never states, hung under it as the app's
         # own hop atom — the same one the node page's routes and the trace scenarios carry
@@ -995,27 +998,39 @@ class PacketViewer(Screen):
 
     @staticmethod
     def _route_text(route: str, scope: Scope | None) -> Text:
-        """The ``route`` row: how the frame was routed, and for a flood, where to.
+        """The ``route`` row: how the frame was routed — ``flood`` or ``direct``.
 
-        A flood reads ``flood`` and then its scope as a chained atom
-        (:func:`~meshterm.ui.widgets.scope_text`) — ``flood · scope harbour``,
-        ``flood · unknown scope 3fa1``, ``flood · unscoped`` — rather than the library's
-        ``tc flood``, which named the wire mechanism (transport codes) and left the
-        reader to know that it meant *scoped*, and to which region nobody could say.
-        A scoped and an unscoped flood are one routing; the scope is what differs, so it
-        is the scope that is spelled out.
+        A scoped flood reads ``flood``, not the library's ``tc flood``: that named the wire
+        mechanism (transport codes) and left the reader to know it meant *scoped*. A scoped
+        and an unscoped flood are one routing; where they differ is the region, and that
+        has a row of its own underneath (:meth:`_scope_text`).
 
-        A direct frame keeps its route word alone. A repeater never region-filters a
-        direct packet, so it has no scope, and a ``TC_DIRECT`` frame's codes are the
-        "to nowhere" pair a contact share uses, not a region — a word there would claim a
-        meaning the frame does not carry.
+        A direct frame keeps its route word alone. A ``TC_DIRECT`` frame's codes are the
+        "to nowhere" pair a contact share uses, not a region, so it has no scope row.
         """
         if scope is None:
             return Text(route.replace("_", " ").lower())
-        text = Text("flood")
-        text.append(" · ", style="muted")
-        text.append_text(scope_text(scope))
-        return text
+        return Text("flood")
+
+    @staticmethod
+    def _scope_text(scope: Scope) -> Text:
+        """The ``scope`` row: the region a flood was sent into, stated on its own line.
+
+        Its own row, labelled, rather than an atom trailing the route: it is what a reader
+        opened the card from the feed's SCOPE lane to see, and a card has the room to say
+        it in full where the lane had ten cells. The label says *scope*, so the value is
+        the region alone (``harbour``, in the ``scope`` style); a region no name known here
+        reproduces reads ``unknown region · code 3fa1``, the code kept so two packets can be
+        seen to share it; a plain flood reads ``unscoped``.
+        """
+        if scope.state == "scoped" and scope.region:
+            return scope_text(scope, bare=True)
+        if scope.scoped:
+            text = Text("unknown region", style="muted")
+            if scope.code:
+                text.append(f" · code {scope.code}", style="muted")
+            return text
+        return Text("unscoped", style="muted")
 
     def _addressing_rows(self, raw: dict) -> list[tuple[str, RenderableType]]:
         """Who a frame was for, who it says it was from, and the token it carries.

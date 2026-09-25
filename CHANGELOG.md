@@ -38,8 +38,8 @@ one caveat SemVer makes for a leading zero: while the major version is still `0`
   `channels scope INDEX [REGION]` reads or sets it, `channels list` gains a `SCOPE` column,
   and `chat send --channel N --scope REGION` (or `--scope '*'` for unscoped) overrides it
   for one message. Scoped sending needs firmware 1.10; `*` needs 1.16.
-- **Packets say which region a flood was scoped to.** The packet viewer's route row, the
-  message paths title, and a new `SCOPE` lane in the live feed name the region a scoped
+- **Packets say which region a flood was scoped to.** A `scope` row in the packet viewer,
+  the message paths title, and a new `SCOPE` lane in the live feed name the region a scoped
   flood was sent into, or its code when no region known here matches it. `monitor` gains
   the same `SCOPE` column and a `scope` field in `--json`. A scoped packet is kept with
   what is needed to name its region later, so one heard today is named once a repeater or
