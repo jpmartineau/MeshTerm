@@ -202,10 +202,10 @@ _REGISTRY: dict[str, Tool] = {}
 #: everything that shares it. Message leads (the everyday features, plus the book you
 #: pick a recipient from), then Watch (what the mesh is doing, what it did, what to be
 #: told about), Explore (where the nodes are, how they reach each other, and the boards
-#: that score the walking), then the two scopes a setting can belong to — This node, the
+#: that score the walking), then the two owners a setting can belong to — This node, the
 #: radio in your hand, and Other nodes, someone else's over the mesh.
 #:
-#: This app closes the list as the third and last *scope*, after the radio in your hand and
+#: This app closes the list as the third and last *owner*, after the radio in your hand and
 #: someone else's over the mesh: the program in front of you. It holds the one thing that
 #: changes how MeshTerm behaves (Preferences) and the four pages that say what MeshTerm is
 #: — questions none of the doings above can hold, and which nothing on the mesh can answer.

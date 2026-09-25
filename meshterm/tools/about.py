@@ -4,7 +4,7 @@
 *About MeshTerm*, *About the author*, *Join Discord*, *Support MeshTerm* — in that
 order, which is the order a stranger asks the questions in: what is this, who made it,
 where is everyone, how do I help. They share the *This app* section with Preferences,
-which leads it: the section is the app's own scope, and the one row that *changes*
+which leads it: the section is the app's own, and the one row that *changes*
 MeshTerm sits above the four that describe it.
 Each is a page rather than a feature: it reads nothing, transmits nothing, and needs no
 device, so it opens straight to its screen (see :mod:`meshterm.ui.about`) instead of

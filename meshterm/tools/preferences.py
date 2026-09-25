@@ -12,7 +12,7 @@ staging eleven changes or from a single ``preferences set``.
 
 This is deliberately the *app's* tool, not the radio's. It reads nothing from the
 companion, transmits nothing, and works with no device attached at all — which is why it
-leads the **This app** section (the third scope, after this node and other nodes) rather
+leads the **This app** section (the third owner, after this node and other nodes) rather
 than sitting beside Device config.
 """
 

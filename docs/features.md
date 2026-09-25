@@ -5,7 +5,7 @@ the catalogue; [the command line](cli.md) is the manual for the scripted half of
 
 MeshTerm's menu asks one question — *what would you like to do?* — and its six sections
 answer it in two halves. The first three name a **doing**: Message, Watch, Explore. The
-last three name the **scope** a setting belongs to: This node, the radio in your hand;
+last three name **whose** a setting is: This node, the radio in your hand;
 Other nodes, someone else's over the mesh; and This app, the program in front of you.
 
 Every interactive screen is listed here with its scripted equivalent, where one exists.
@@ -58,7 +58,7 @@ Every interactive screen is listed here with its scripted equivalent, where one 
 
 ## ⚙ This app — the program in front of you
 
-The last scope, and the one nothing on the mesh can answer. Preferences leads it because
+The last of the three, and the one nothing on the mesh can answer. Preferences leads it because
 it is the only row here that *changes* MeshTerm rather than describing it; the written
 pages close it.
 

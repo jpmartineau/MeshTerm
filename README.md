@@ -242,7 +242,7 @@ want the node on the mesh all the time. The device-side scripts both manuals run
 The menu asks one question — *what would you like to do?* — and answers it in two halves.
 Three sections name a doing: **Message** is chat, channels, the courier outbox and
 contacts; **Watch** is the dashboard, the live feed, the watchtower and the time machine;
-**Explore** is the map, the mesh walk, tracing and the trophy case. Three name a scope:
+**Explore** is the map, the mesh walk, tracing and the trophy case. Three name whose it is:
 **This node** is the radio in your hand, **Other nodes** is someone else's over the mesh,
 and **This app** is MeshTerm itself — preferences, diagnostics, and the written pages.
 

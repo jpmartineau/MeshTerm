@@ -65,7 +65,7 @@ them instead of hand-rolling:
 | route | the concrete node sequence a trace walked or will walk |
 | via | prefix for a packet/message's relay chain |
 | region | a named area a repeater relays floods for (`region put yul`); shown bare, never `#yul` — the `#` belongs to key derivation only |
-| scope | the region a flood is limited to — a packet's, a channel's send scope, the device's default scope. A direct packet has none |
+| scope | the region a flood is limited to — a packet's, a channel's send scope, the device's default scope. A direct packet has none. MeshCore's sense and the only one: the menu's This node / Other nodes / This app sections name *whose* a setting is, never a "scope" |
 | unscoped | a plain flood, relayed by any repeater that allows the wildcard `*` |
 | Back | leave the current screen/list — Esc's word, and a row's only where leaving is a *choice* (see below) |
 | Quit | leave the app (main menu, device splash) — nowhere else |
