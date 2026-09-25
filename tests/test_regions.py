@@ -285,13 +285,21 @@ def test_default_scope_frame_is_bare_and_byte_padded() -> None:
 
 
 def test_session_scope_sends_the_key_the_override_or_the_reset() -> None:
-    """A name sends its key; ``*`` forces unscoped; ``None`` falls back to the default."""
+    """A name sends its key; ``*`` forces unscoped; ``None`` falls back to the default.
+
+    Framed by MeshTerm as the firmware's command 54, never through the library's
+    ``reset_flood_scope``/``force_unscoped``, which an older meshcore 2.3 lacks.
+    """
     commands = _Commands()
     device = _device(commands)
     asyncio.run(device.set_flood_scope("#harbour"))
     asyncio.run(device.set_flood_scope("*"))
     asyncio.run(device.set_flood_scope(None))
-    assert commands.calls == [("scope", region_key("harbour")), ("unscoped",), ("reset",)]
+    assert commands.calls == [
+        ("send", bytes([54, 0]) + region_key("harbour")),
+        ("send", bytes([54, 1])),
+        ("send", bytes([54, 0])),
+    ]
 
 
 def test_mock_device_mirrors_scope_and_answers_regions_from_repeaters() -> None:

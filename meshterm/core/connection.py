@@ -323,6 +323,11 @@ _CMD_SET_AUTOADD_CONFIG = 58
 #: :meth:`MeshCoreDevice.set_default_flood_scope` itself rather than the library.
 _CMD_SET_DEFAULT_FLOOD_SCOPE = 63
 
+#: Companion command that sets (or clears, or forces off) the session flood scope
+#: (firmware 1.10+; the force-unscoped mode 1.16+), framed by
+#: :meth:`MeshCoreDevice.set_flood_scope` itself rather than the library.
+_CMD_SET_FLOOD_SCOPE_KEY = 54
+
 #: ``RESP_CODE_AUTOADD_CONFIG`` — the reply to a read of the auto-add configuration. Its
 #: second payload byte is the hop limit, which the library's parser drops (it keeps only the
 #: bitmask), so :meth:`MeshCoreDevice.get_autoadd_config` recognises the raw frame by this.
@@ -3240,16 +3245,23 @@ class MeshCoreDevice(Device):
         self._ok(await mc.commands.send(frame, [EventType.OK, EventType.ERROR]))
 
     async def set_flood_scope(self, region: str | None) -> None:  # noqa: D102
-        commands = self._require().commands
+        from meshcore import EventType
+
+        # Framed here, like the default scope, rather than through the library's helpers:
+        # ``reset_flood_scope`` and ``force_unscoped`` arrived late in meshcore 2.3.x, and
+        # an install that satisfies ``meshcore>=2.3`` without them (the uConsole's 2.3.7)
+        # crashed every scoped channel send on the restore. The frame is the firmware's
+        # own ``CMD_SET_FLOOD_SCOPE_KEY``: ``[54][0][key16]`` sets the session scope,
+        # ``[54][0]`` alone clears it back to the default, ``[54][1]`` forces unscoped.
         bare = normalize_region(region) if region else ""
         if not bare:
-            self._ok(await commands.reset_flood_scope())
+            frame = bytes([_CMD_SET_FLOOD_SCOPE_KEY, 0])
         elif bare == REGION_WILDCARD:
-            self._ok(await commands.force_unscoped())
+            frame = bytes([_CMD_SET_FLOOD_SCOPE_KEY, 1])
         else:
-            # The key goes over as bytes, which the library sends as-is — its string path
-            # would derive the same key, but through its own ``#`` handling.
-            self._ok(await commands.set_flood_scope(region_key(validate_region(bare))))
+            frame = bytes([_CMD_SET_FLOOD_SCOPE_KEY, 0]) + region_key(validate_region(bare))
+        mc = self._require()
+        self._ok(await mc.commands.send(frame, [EventType.OK, EventType.ERROR]))
 
     async def set_manual_add_contacts(self, enabled: bool) -> None:  # noqa: D102
         self._ok(await self._require().commands.set_manual_add_contacts(enabled))
