@@ -82,6 +82,15 @@ shows how to install that.
 `/dev/spidev1.0` exists the device screen lists it as **SPI radio**, and `meshterm --spi`
 reaches it. Any other board is added with a profile that states how it is wired.
 
+**Why a profile, and not a prompt on the device screen.** A USB companion describes itself:
+plug it in and there is nothing to ask. An SPI radio says nothing about how it is wired, and
+the wiring is a dozen facts — the bus, the chip select, the reset, busy, and interrupt pins,
+the antenna switch, the TCXO — any one of which, wrong, leaves a radio that comes up deaf
+rather than failing. Those are facts to look up once and write down, not to type into a
+dialog. And the radio doesn't come and go the way a cable does: it is soldered, stacked on
+a header, or built into the case, so its description belongs somewhere as lasting as the
+hardware is. A file you write once, and can read back when something is off, is that place.
+
 ### 1. Find your board's wiring
 
 The easiest place to find it is the board's `meshtasticd` configuration, which most vendors
