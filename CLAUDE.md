@@ -182,6 +182,18 @@ deliberately, one at a time, and say why in the code.
   shape in `ReorderScreen`. A **Quit** row is likewise kept (main menu, device splash):
   it *initiates* the app's terminal action behind a confirm, and on the splash it is the
   only statement that the app can be left at all.
+- **An editor has one of two shapes, chosen by who holds the change.** Where MeshTerm
+  holds it until told (Device config, Preferences, Repeater admin's settings), edits are
+  *staged* and nothing reaches the device until Apply — the `exit_rows` shape above.
+  Where the **device** holds each edit live in RAM until its own save command (a
+  repeater's region table: every edit takes effect at once, and a reboot undoes whatever
+  `region save` did not persist), edits apply immediately and the page is *live, then
+  save*: the title counts unsaved edits (`· 2 unsaved`), the page ends on the same
+  shape reworded — `✓ Save n changes to the …` over `✗ Back — a reboot undoes them` —
+  and Esc with unsaved edits asks first (amber). Never stage what the device already
+  holds live: the edits depend on each other there (a region must exist before it can be
+  allowed), and a stage would have to re-implement the firmware's rules to order them.
+  `ui/region_editor.py` is the reference.
 - **A cursor clamps at both ends — nothing in the app rolls over.** ↓ off the last row
   and ↑ off the first stay put, in a select list, a hand-drawn action list, a reorder
   list, a dialog's button row, everywhere. The window follows the highlight, so a roll
@@ -414,6 +426,13 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
 - Dialogs anchor slightly above true centre, sized for their populated state.
 - Radio traffic: single transmissions or a user-chosen sample count with cooldown pacing
   — never bursts.
+- **A channel message goes out through `Device.send_channel_in_scope`**, never
+  `send_channel_message` directly. The firmware has no per-channel scope, only one
+  session scope that every flood uses, so a channel's scope is a window: set it, send,
+  restore, under the transmit lock (`Device.transmitting()`) so no other flood slips out
+  inside it. A direct send skips that window without an error and the message floods
+  everywhere; a refused scope raises `FloodScopeError` and sends nothing, never a quiet
+  unscoped send. Any new command that can transmit a flood holds `transmitting()` too.
 
 ### The command line — one answer, two faces
 
