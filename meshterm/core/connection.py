@@ -3130,7 +3130,7 @@ class MeshCoreDevice(Device):
         # or a slow response arriving after a timeout) would otherwise misidentify the slot and
         # misfile a channel's messages. On mismatch we raise rather than return foreign data.
         async with self._channel_read_lock:
-            event = self._ok(await self._require().commands.get_channel(index))
+            event = await self._channel_event(index)
         payload = getattr(event, "payload", {}) or {}
         got = payload.get("channel_idx")
         if got is not None and int(got) != index:
@@ -3138,6 +3138,41 @@ class MeshCoreDevice(Device):
         if not payload.get("channel_name"):
             return None
         return payload
+
+    async def _channel_event(self, index: int):  # noqa: ANN202 - a meshcore Event
+        """Read one slot, telling the firmware's "no such slot" apart from any other error.
+
+        The slot probe ends on a *rejection* and keeps the list it has as the device's whole
+        layout, so what counts as one matters. The firmware answers an index past its last
+        slot with ``ERR_CODE_NOT_FOUND`` and nothing else. But the library does not
+        serialize commands, and every one that waits for "OK or ERROR" takes the first
+        ERROR that arrives — so a read racing another command can be handed *that*
+        command's refusal. At connect the channel prewarm runs beside the clock sync, and a
+        clock the firmware refuses as malformed ended the probe at whatever slot it had
+        reached, which cached a list missing every channel after it for the session.
+
+        So only ``NOT_FOUND`` (or a code-less refusal from firmware too old to send one) is
+        a rejection. Any other refusal is asked again once, since a borrowed error is
+        someone else's and the next answer is this read's own; a second one, or no answer
+        at all, is a failed read (:class:`DeviceCommandError`), which the probe reports as
+        unfinished rather than caching.
+        """
+        commands = self._require().commands
+        for attempt in (1, 2):
+            event = await commands.get_channel(index)
+            if event is None or not getattr(event, "is_error", lambda: False)():
+                return event
+            payload = getattr(event, "payload", {}) or {}
+            if isinstance(payload, dict) and payload.get("reason") == "no_event_received":
+                raise DeviceCommandError(f"channel read for slot {index} got no answer")
+            code = error_code(event)
+            if code is None or code == _ERR_NOT_FOUND:
+                return self._ok(event)  # the firmware's own "no such slot"
+            if attempt == 2:
+                raise DeviceCommandError(
+                    f"channel read for slot {index} was refused: {reject_reason(event)}"
+                )
+        return None  # pragma: no cover - the loop always returns or raises
 
     async def set_name(self, name: str) -> None:  # noqa: D102 - inherited docstring
         self._ok(await self._require().commands.set_name(name))
