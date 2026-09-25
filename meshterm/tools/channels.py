@@ -215,14 +215,20 @@ class ChannelsTool(Tool):
         device = await ctx.device()
         idx = int(params["index"])
         slot = next((s for s in await read_channel_slots(device) if s.idx == idx), None)
+        region = params.get("region")
         if slot is None:
+            if region is not None or params.get("clear"):
+                # A write names a channel that isn't there: a bad argument, not an empty
+                # answer — exit 5 would tell a script the scope was set and read back empty.
+                import typer
+
+                raise typer.BadParameter(f"slot {idx} is empty; there is no channel to scope")
             return ToolResult(
                 summary={"index": idx, "scope": None},
                 report=(_scoped(idx, None, None, None, changed=False),),
                 exit_code=exitcodes.NO_RESULT,
             )
         store = ctx.region_store
-        region = params.get("region")
         changed = bool(params.get("clear")) or region is not None
         if params.get("clear"):
             store.set_channel_scope(slot.identity, None)

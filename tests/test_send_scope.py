@@ -577,9 +577,15 @@ async def test_cli_channel_scope_reads_sets_and_clears(tmp_path: Path) -> None:
 
 
 def test_cli_channel_scope_refuses_bad_arguments(run) -> None:  # noqa: ANN001
-    """A bad name or a name with --clear is a usage error; an empty slot is exit 5 + a doc."""
+    """A bad name, a name with --clear, or a write to an empty slot is a usage error.
+
+    Reading an empty slot is exit 5 with its document, the way ``share`` answers one; a
+    write there did nothing, and exit 5 would tell a script it had.
+    """
     assert run("channels", "scope", "0", "two words").exit_code == 2
     assert run("channels", "scope", "0", "yul", "--clear").exit_code == 2
+    assert run("channels", "scope", "0", "yul").exit_code == 2
+    assert run("channels", "scope", "0", "--clear").exit_code == 2
     result = run("--json", "channels", "scope", "0")
     assert result.exit_code == 5
     assert json.loads(result.stdout) == {"channel": None, "scope": None}
@@ -593,6 +599,20 @@ def test_cli_send_scope_is_a_channel_option_and_reports_its_scope(run) -> None: 
     assert doc["scope"]["region"] == "yul"
     assert run("chat", "send", "hi", "--to", "Alice", "--scope", "yul").exit_code == 2
     assert run("chat", "send", "hi", "--channel", "0", "--scope", "$x").exit_code == 2
+
+
+def test_the_entry_point_never_expands_a_wildcard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``--scope '*'`` reaches the command as ``*``, not as the directory's file names.
+
+    Click expands globs in the arguments on Windows, even quoted ones; the console-script
+    entry point turns that off, since ``*`` is the wildcard region and nothing takes a glob.
+    """
+    import meshterm.cli as cli
+
+    seen: dict = {}
+    monkeypatch.setattr(cli, "app", lambda **kwargs: seen.update(kwargs))
+    cli.main()
+    assert seen == {"windows_expand_args": False}
 
 
 # -- Device config teaches the default ---------------------------------------------------------

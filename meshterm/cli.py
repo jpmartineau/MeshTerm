@@ -889,7 +889,11 @@ def main() -> None:
     run from a shell leaves its output on the screen anyway.
     """
     try:
-        app()
+        # No wildcard expansion on Windows. Click expands an argument holding `*` into
+        # the files it matches — even one the shell passed through quoted, which it can't
+        # tell apart — so `chat send --scope '*'` arrived as the working directory's file
+        # names. No MeshTerm argument is a file glob, and `*` is the wildcard region.
+        app(windows_expand_args=False)
     except SystemExit as exit_request:
         if exit_request.code and _owns_its_console():
             _wait_before_the_window_closes()
