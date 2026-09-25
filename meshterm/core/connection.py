@@ -21,7 +21,7 @@ import re
 import sys
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable, Iterable
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -545,6 +545,13 @@ _BLE_AUTH_HINTS = (
     "could not pair",
     "authentication failed",
     "authenticationfailed",
+    # ATT 0x0E, "Unlikely Error": what a companion that has since been given a PIN answers
+    # the UART subscribe with over an *unauthenticated* bond left from when it was open —
+    # encryption succeeds on the old key, and the characteristic's MITM requirement is what
+    # refuses. Seen on a uConsole (BlueZ bond Authenticated=0). Only consulted while
+    # connecting, where it is the security layer talking; it routes the refusal to the
+    # stale-bond message and the PIN repair, which is exactly what heals it.
+    "unlikely error",
 )
 
 
@@ -690,6 +697,69 @@ def _serial_open_message(port: str, exc: BaseException) -> str | None:
     if code in _ERRNO_GONE or "cannot find the file" in text or "no such file" in text:
         return f"{port} isn't there — the device was unplugged, or came back under another name."
     return None
+
+
+class _ConnectingClients(list):
+    """Every bleak client a connecting ``BLEConnection`` reported a disconnect for.
+
+    Attributes:
+        connecting: Whether ``connect()`` is still running; while it is, a disconnect is
+            recorded here and *not* passed on to meshcore (see
+            :func:`_hold_disconnects_while_connecting`).
+    """
+
+    connecting = True
+
+
+def _hold_disconnects_while_connecting(connection) -> _ConnectingClients:  # noqa: ANN001
+    """Keep meshcore from dropping its bleak client while that client is still connecting.
+
+    On Linux, BlueZ answers a link attempt that failed to synchronise
+    (``le-connection-abort-by-local``, HCI 0x3e) and bleak retries it inside its own
+    ``connect()`` — three to seven times per connect on a Raspberry Pi radio. Each failed
+    attempt fires the client's disconnect callback, and meshcore's
+    ``BLEConnection.handle_disconnect`` answers by resetting ``self.client`` to what the
+    caller passed in, which is ``None``. bleak's next retry then succeeds on a client
+    nobody holds: meshcore's ``start_notify`` hits ``None``, its connect gives up as "not
+    established", and the live link is stranded. The companion, connected to us, stops
+    advertising, so the retry cannot find it and the reader is told it is out of range.
+    Measured against a companion on a uConsole with btmon: three runs out of three.
+
+    So while ``connect()`` runs, a disconnect is only recorded. bleak raises on its own if
+    the link really cannot be made, and once ``connect()`` returns, disconnects reach
+    meshcore as before, because the client keeps calling this same wrapper.
+
+    Args:
+        connection: The ``meshcore.BLEConnection`` about to connect.
+
+    Returns:
+        The record of clients seen, whose ``connecting`` flag the caller clears once
+        ``connect()`` has returned or raised.
+    """
+    seen = _ConnectingClients()
+    forward = getattr(connection, "handle_disconnect", None)
+    if forward is None:  # a transport with no drop handler has nothing to hold back
+        return seen
+
+    def _handle_disconnect(client) -> None:  # noqa: ANN001 - a bleak client
+        seen.append(client)
+        if seen.connecting:
+            _log.debug("BLE link attempt dropped while connecting; bleak retries it")
+            return
+        forward(client)
+
+    # BLEConnection hands ``self.handle_disconnect`` to each BleakClient it builds inside
+    # ``connect()``, so an instance attribute set now is the callback every client gets.
+    connection.handle_disconnect = _handle_disconnect
+    return seen
+
+
+def _held_client(connection, seen: _ConnectingClients):  # noqa: ANN001, ANN202
+    """The bleak client to keep for teardown: the connection's, else the last one it lost."""
+    client = getattr(connection, "client", None)
+    if client is not None:
+        return client
+    return next((c for c in reversed(seen) if getattr(c, "is_connected", False)), None)
 
 
 def serial_port_present(port: str) -> bool:
@@ -1625,8 +1695,22 @@ class MeshCoreDevice(Device):
         Returns:
             The connected ``MeshCore`` client, or ``None`` if the peripheral never answered.
         """
-        await self._pair_ble(force=False)
-        return await self._open_ble(mesh_core, allow_repair=True)
+        async with self._ble_pairing_agent():
+            await self._pair_ble(force=False)
+            return await self._open_ble(mesh_core, allow_repair=True)
+
+    def _ble_pairing_agent(self) -> AbstractAsyncContextManager[object]:
+        """Answer BlueZ's own pairing requests for this device while connecting (Linux only).
+
+        See :func:`meshterm.core.bluez.answering` for why: BlueZ starts a pairing of its own
+        when the subscribe is refused, and with nobody to answer it the connect stalls 30 s.
+        An instance hook, so tests can keep the system bus out of it.
+        """
+        from . import bluez
+
+        if sys.platform.startswith("linux") and bluez.is_mac(self._address or ""):
+            return bluez.answering(self._address or "", self._pin)
+        return nullcontext()
 
     async def _open_ble(self, mesh_core, *, allow_repair: bool):  # type: ignore[no-untyped-def]
         """Open the meshcore BLE client, translating auth failures and healing stale bonds.
@@ -1823,6 +1907,7 @@ class MeshCoreDevice(Device):
         # Handing bleak the PIN would only start a second pairing we can't answer.
         pin = None if sys.platform == "darwin" or sys.platform.startswith("linux") else self._pin
         connection = BLEConnection(address=self._address, device=self._ble_device, pin=pin)
+        seen = _hold_disconnects_while_connecting(connection)
         mc = mesh_core(
             connection,
             default_timeout=self._connect_timeout,
@@ -1831,14 +1916,16 @@ class MeshCoreDevice(Device):
         try:
             started = await mc.connect()
         except BaseException:
-            self._ble_client = getattr(connection, "client", None)
+            self._ble_client = _held_client(connection, seen)
             await MeshCoreDevice._discard_meshcore(mc)
             await self._release_ble_client()
             raise
+        finally:
+            seen.connecting = False
         # Take our own reference to the bleak client now, while ``BLEConnection`` still holds
         # one. It drops it the instant the peripheral goes away, and by then nothing else can
         # reach the object that needs closing (see :meth:`_release_ble_client`).
-        self._ble_client = getattr(connection, "client", None)
+        self._ble_client = _held_client(connection, seen)
         if started is None:
             await MeshCoreDevice._discard_meshcore(mc)
             await self._release_ble_client()

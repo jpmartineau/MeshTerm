@@ -34,6 +34,8 @@ import asyncio
 import logging
 import os
 import re
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 _log = logging.getLogger(__name__)
@@ -62,6 +64,24 @@ DISCOVER_S = 6.0
 #: Bound on the ``Pair`` call itself (seconds). A healthy passkey pairing takes one to three
 #: seconds; this only has to outlast a slow radio, and stays well inside the probe's window.
 PAIR_TIMEOUT_S = 15.0
+
+#: Attempts at ``Pair`` when the link under it fails to come up, and the pause between them.
+#: A Raspberry Pi class radio drops three to seven link attempts per connect
+#: (``le-connection-abort-by-local``, HCI 0x3e). bleak retries those inside its own
+#: ``connect()``; BlueZ's ``Pair`` does not, and answers ConnectionAttemptFailed at once.
+#: Measured on a uConsole: the first Pair failed that way, the connect then went ahead
+#: unpaired, and the protected subscribe cost 32 s before the repair paired it after all.
+PAIR_ATTEMPTS = 4
+PAIR_RETRY_DELAY_S = 0.5
+
+_LINK_FLAKES = ("org.bluez.Error.ConnectionAttemptFailed",)
+
+
+def _link_flake(reply: Any) -> bool:
+    """Whether a ``Pair`` error is the link failing to come up — worth another try."""
+    detail = reply.body[0] if reply.body and isinstance(reply.body[0], str) else ""
+    return reply.error_name in _LINK_FLAKES or "le-connection-abort" in detail
+
 
 _MAC = re.compile(r"^[0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5}$")
 
@@ -100,12 +120,18 @@ def status_name(error_name: str, body: list[Any] | None = None) -> str:
 
 
 class PinAgent:
-    """A BlueZ ``Agent1`` that answers one device's pairing with one PIN.
+    """A BlueZ ``Agent1`` that answers one device's pairing with one PIN — or refuses it.
 
     Installed as a message handler on the bus that calls ``Pair`` (see the module docstring
-    for why that bus). It answers only calls addressed to its own object path, and only for
+    for why that bus), or made BlueZ's default agent for the length of a connect (see
+    :func:`answering`). It answers only calls addressed to its own object path, and only for
     the device it was built for; anything else is ``Rejected``, so a pairing we did not start
-    can never be approved by us.
+    can never be approved by us. Without a PIN it refuses every request at once, which is
+    the point of it there: the alternative is BlueZ waiting on an agent that doesn't exist.
+
+    It never approves a pairing *without* the passkey (``RequestAuthorization``, the "Just
+    Works" yes/no). That is how a companion ends up with an unauthenticated bond — encryption
+    works, the UART characteristic still refuses — which is the stale-bond failure itself.
 
     Attributes:
         path: The object path the agent is registered at.
@@ -113,13 +139,15 @@ class PinAgent:
             asking was refused before the passkey stage, which is a different story.
     """
 
-    def __init__(self, path: str, pin: str, device_path: str) -> None:
+    def __init__(self, path: str, pin: str | None, device_path: str) -> None:
         """Build the agent.
 
         Args:
             path: The object path to answer at.
-            pin: The pairing PIN (digits).
-            device_path: The BlueZ object path of the one device it may answer for.
+            pin: The pairing PIN (digits), or ``None`` to refuse every request.
+            device_path: The one device it may answer for: its BlueZ object path, or the
+                path's ``/dev_…`` tail when the adapter isn't known yet (see
+                :func:`device_tail`).
         """
         self.path = path
         self._pin = pin
@@ -147,8 +175,11 @@ class PinAgent:
         if member in ("Release", "Cancel"):
             return Message.new_method_return(msg)
         device = msg.body[0] if msg.body else ""
-        if device != self._device:
+        if not str(device).endswith(self._device):
             return Message.new_error(msg, _REJECTED, "not the device MeshTerm is pairing")
+        if member in ("RequestPasskey", "RequestPinCode", "RequestConfirmation") and not self._pin:
+            self.asked = True
+            return Message.new_error(msg, _REJECTED, "no PIN was given for this device")
         if member == "RequestPasskey":
             self.asked = True
             return Message.new_method_return(msg, "u", [int(self._pin)])
@@ -163,9 +194,74 @@ class PinAgent:
             if int(msg.body[1]) == int(self._pin):
                 return Message.new_method_return(msg)
             return Message.new_error(msg, _REJECTED, "passkey does not match the PIN")
-        if member in ("DisplayPasskey", "DisplayPinCode", "RequestAuthorization"):
+        if member in ("DisplayPasskey", "DisplayPinCode"):
             return Message.new_method_return(msg)
         return Message.new_error(msg, _REJECTED, f"{member} is not something MeshTerm answers")
+
+
+def device_tail(address: str) -> str:
+    """The ``/dev_AA_BB_…`` tail of the object path BlueZ gives the device at ``address``."""
+    return "/dev_" + _normal(address).replace(":", "_")
+
+
+@asynccontextmanager
+async def answering(address: str, pin: str | None) -> AsyncIterator[None]:
+    """Be BlueZ's default pairing agent for one device while a connect runs.
+
+    BlueZ does not wait to be asked to pair. When the companion refuses the UART subscribe
+    with *Insufficient Authentication*, BlueZ raises the link's security by itself and starts
+    SMP pairing, which needs an agent — and the one it asks is the **default** agent, not
+    ours (that routing is only for a ``Pair`` we call). With none registered, as on any
+    headless machine, it offers the companion ``DisplayYesNo``, lands on "Just Works", asks a
+    yes/no nobody is there to answer, and the companion hangs up on its 30 s SMP timeout.
+    Measured on a uConsole with btmon: 3.3 s to the question, 33.5 s to the hang-up, and only
+    then "requires a PIN". On a desktop the question goes to the desktop's dialog instead,
+    and answering it makes the unauthenticated bond that later refuses the subscribe.
+
+    So for the length of the connect MeshTerm is the default agent, for this device only,
+    declared ``KeyboardOnly`` so the pairing BlueZ starts is Passkey Entry: with a PIN it types
+    it in and the connect pairs on the spot; without one it refuses at once and the refusal
+    arrives in seconds. Another device's pairing in that window is refused, not left hanging.
+    BlueZ keeps default agents as a stack, so unregistering hands the role back to whoever
+    held it. Best-effort: with no system bus it simply does nothing.
+
+    Args:
+        address: The companion's Bluetooth address.
+        pin: Its PIN, or ``None`` to refuse.
+
+    Yields:
+        Nothing; the agent is live for the body of the ``async with``.
+    """
+    bus = None
+    agent = PinAgent(f"/net/meshterm/connect{os.getpid()}", pin, device_tail(address))
+    registered = False
+    try:
+        bus = await _system_bus()
+        bus.add_message_handler(agent.handle)
+        reply = await _call(
+            bus, _AGENTS, _AGENT_MANAGER_IFACE, "RegisterAgent", "os",
+            [agent.path, AGENT_CAPABILITY],
+        )  # fmt: skip
+        registered = not _is_error(reply)
+        if registered:
+            await _call(
+                bus, _AGENTS, _AGENT_MANAGER_IFACE, "RequestDefaultAgent", "o", [agent.path]
+            )
+    except Exception as exc:  # noqa: BLE001 - no bus, no BlueZ: connect without an agent
+        _log.debug("couldn't stand in as the BlueZ agent: %s", exc)
+    try:
+        yield
+    finally:
+        if bus is not None:
+            try:
+                if registered:
+                    await _call(
+                        bus, _AGENTS, _AGENT_MANAGER_IFACE, "UnregisterAgent", "o", [agent.path]
+                    )
+            except Exception as exc:  # noqa: BLE001 - the bus closing drops it anyway
+                _log.debug("unregistering the BlueZ agent failed: %s", exc)
+            bus.remove_message_handler(agent.handle)
+            bus.disconnect()
 
 
 async def _call(bus: Any, path: str, interface: str, member: str, signature: str = "", body=None):
@@ -315,6 +411,7 @@ async def pair(
             if path is None:
                 return "absent", ""
         agent = PinAgent(f"/net/meshterm/agent{os.getpid()}", pin, path)
+        paired_link: str | None = None  # set once Pair has been asked to open a link
         bus.add_message_handler(agent.handle)
         try:
             reply = await _call(
@@ -323,13 +420,20 @@ async def pair(
             )  # fmt: skip
             if _is_error(reply):
                 return "error", status_name(reply.error_name, reply.body)
-            try:
-                reply = await asyncio.wait_for(
-                    _call(bus, path, _DEVICE_IFACE, "Pair"), pair_timeout_s
-                )
-            except asyncio.TimeoutError:
-                await _call(bus, path, _DEVICE_IFACE, "CancelPairing")
-                return "failed", "authentication timeout"
+            paired_link = path
+            for attempt in range(PAIR_ATTEMPTS):
+                if attempt:
+                    await asyncio.sleep(PAIR_RETRY_DELAY_S)
+                try:
+                    reply = await asyncio.wait_for(
+                        _call(bus, path, _DEVICE_IFACE, "Pair"), pair_timeout_s
+                    )
+                except asyncio.TimeoutError:
+                    await _call(bus, path, _DEVICE_IFACE, "CancelPairing")
+                    return "failed", "authentication timeout"
+                if not (_is_error(reply) and _link_flake(reply)):
+                    break
+                _log.debug("BlueZ Pair lost its link (attempt %d/%d)", attempt + 1, PAIR_ATTEMPTS)
             if _is_error(reply) and reply.error_name != _ALREADY_EXISTS:
                 status = status_name(reply.error_name, reply.body)
                 if not agent.asked and status == "authentication failed":
@@ -345,6 +449,14 @@ async def pair(
             )  # fmt: skip
             return "paired", ""
         finally:
+            if paired_link is not None:
+                # ``Pair`` opens a link to pair over and BlueZ leaves it up. A companion that
+                # is connected stops advertising, and the connect that follows looks the
+                # device up by scanning for it, so it never finds it — measured on a
+                # uConsole: paired, then "couldn't open a link" after two 30 s tries. Put
+                # the link down so the connect meets an advertising device, as it would
+                # have without us.
+                await _call(bus, paired_link, _DEVICE_IFACE, "Disconnect")
             await _call(bus, _AGENTS, _AGENT_MANAGER_IFACE, "UnregisterAgent", "o", [agent.path])
             bus.remove_message_handler(agent.handle)
     except Exception as exc:  # noqa: BLE001 - best-effort: the connect reports the refusal

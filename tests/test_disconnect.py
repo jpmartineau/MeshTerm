@@ -128,6 +128,93 @@ _OPEN_ADDR = "AA:BB:CC:DD:EE:FF"
 _A_PIN = "123456"
 
 
+@pytest.fixture(autouse=True)
+def _no_bluez_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the connect-time BlueZ agent off the system bus when these run on Linux."""
+    from contextlib import nullcontext
+
+    monkeypatch.setattr(connection.MeshCoreDevice, "_ble_pairing_agent", lambda self: nullcontext())
+
+
+def test_an_unlikely_error_on_the_subscribe_is_a_pairing_refusal() -> None:
+    """ATT 0x0E is how a companion given a PIN refuses a subscribe over an unauthenticated bond.
+
+    Seen on a uConsole whose bond with a T1000-E predated its PIN (BlueZ Authenticated=0):
+    encryption succeeded, the subscribe did not, and the raw GATT error was all anyone saw.
+    """
+    exc = BleakGATTProtocolError(
+        "(<BleakGATTProtocolErrorCode.UNLIKELY_ERROR: 14>, 'GATT Protocol Error: Unlikely Error')"
+    )
+    assert connection._is_ble_auth_error(exc)
+
+
+class _RetryingBleakClient:
+    """A bleak client whose connect drops its first link attempts and then succeeds."""
+
+    def __init__(self, drops: int, callback) -> None:
+        self.drops, self.callback = drops, callback
+        self.is_connected = False
+        self.disconnects = 0
+
+    async def connect(self) -> None:
+        for _ in range(self.drops):
+            self.callback(self)  # bleak fires the disconnect callback for each lost attempt
+        self.is_connected = True
+
+    async def disconnect(self) -> None:
+        self.disconnects += 1
+        self.is_connected = False
+
+
+class _MeshcoreLikeConnection:
+    """Mirrors meshcore's BLEConnection: a disconnect resets ``client`` to what was passed."""
+
+    def __init__(self, drops: int) -> None:
+        self.client = None
+        self.drops = drops
+        self.forwarded = 0
+
+    def handle_disconnect(self, client) -> None:
+        self.forwarded += 1
+        self.client = None  # the reset that stranded the live link
+
+    async def connect(self):
+        self.client = _RetryingBleakClient(self.drops, self.handle_disconnect)
+        await self.client.connect()
+        if self.client is None:  # meshcore's start_notify on None, as "not established"
+            return None
+        return "address"
+
+
+async def test_a_retried_link_attempt_no_longer_strands_the_client() -> None:
+    """The retries inside bleak must not make meshcore drop the client that then connects.
+
+    The uConsole failure, three runs out of three: each lost link attempt fired meshcore's
+    disconnect handler, which set ``client`` to ``None``; bleak's next retry connected a
+    client nobody held, meshcore gave up, and the live link kept the companion from
+    advertising to the retry.
+    """
+    unguarded = _MeshcoreLikeConnection(drops=3)
+    assert await unguarded.connect() is None  # the bug, reproduced
+
+    guarded = _MeshcoreLikeConnection(drops=3)
+    seen = connection._hold_disconnects_while_connecting(guarded)
+    assert await guarded.connect() == "address"
+    seen.connecting = False
+    assert guarded.forwarded == 0  # held while connecting...
+    assert connection._held_client(guarded, seen) is guarded.client
+    guarded.client.callback(guarded.client)  # ...and a real drop afterwards still arrives
+    assert guarded.forwarded == 1
+
+
+def test_the_held_client_falls_back_to_the_one_meshcore_lost() -> None:
+    """If meshcore let go anyway, teardown still gets the live client to close."""
+    lost = _RetryingBleakClient(0, None)
+    lost.is_connected = True
+    seen = connection._ConnectingClients([lost])
+    assert connection._held_client(SimpleNamespace(client=None), seen) is lost
+
+
 async def _disable_windows_pairing(dev: connection.MeshCoreDevice) -> None:
     """Stub out the WinRT ProvidePin step so ``_create_ble`` stays hermetic in tests.
 
