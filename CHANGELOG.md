@@ -30,8 +30,30 @@ one caveat SemVer makes for a leading zero: while the major version is still `0`
   and saving — edits take effect at once and a reboot undoes whatever was not saved. A tree
   too big for one reply is said to be cut, and the rest is recovered from the repeater's
   own lists. On the command line, `meshterm regions NODE` asks the same question.
+- **A channel can be kept to one region.** Give a channel a **Send scope** on its page, and
+  its messages are flooded into that region alone — only repeaters that carry it relay
+  them. The chat's title names the scope, and **^R** resends your last scoped message
+  unscoped when the region is getting it nowhere. A radio that can't send under the scope
+  refuses before anything goes out, rather than sending it everywhere. On the command line,
+  `channels scope INDEX [REGION]` reads or sets it, `channels list` gains a `SCOPE` column,
+  and `chat send --channel N --scope REGION` (or `--scope '*'` for unscoped) overrides it
+  for one message. Scoped sending needs firmware 1.10; `*` needs 1.16.
+- **Packets say which region a flood was scoped to.** The packet viewer's route row, the
+  message paths title, and a new `SCOPE` lane in the live feed name the region a scoped
+  flood was sent into, or its code when no region known here matches it. `monitor` gains
+  the same `SCOPE` column and a `scope` field in `--json`. A scoped packet is kept with
+  what is needed to name its region later, so one heard today is named once a repeater or
+  a channel teaches the name. Packets recorded before this version have no scope.
+- **A message you sent says what it was sent under.** Its message paths dialog names the
+  scope, and when nothing relayed it and no repeater known here carries that region, it
+  says so.
 
 ### Fixed
+
+- **The default flood scope is stored the way the firmware and the MeshCore app store it.**
+  MeshTerm saved it as `#name` where they save `name`, refused a 30-character name the
+  firmware accepts, and mis-framed a name with an accent. Device config also now refuses
+  a name no repeater could list back (spaces, commas, a private `$` region).
 
 - **The SPI bridge remembers its channels across restarts.** It kept them only in memory,
   so after every reboot the Channels page came up empty while mute settings, which

@@ -15,7 +15,7 @@ Every interactive screen is listed here with its scripted equivalent, where one 
 | Feature | What it does | Scripted |
 | --- | --- | --- |
 | **💬 Chat** | Live full-screen channel and direct messaging — a scrolling transcript with a pinned input line where sent and received messages stream together. Every message is logged; unread counts show in the menu header. | `meshterm chat send / history / list` |
-| **📻 Channels** | Create, join, reorder, mute, and share mesh channels — with QR codes and `meshcore://` share links. | `meshterm channels list / add / join / import / share / clear` |
+| **📻 Channels** | Create, join, reorder, mute, and share mesh channels — with QR codes and `meshcore://` share links. Give a channel a **send scope** and its messages are flooded into one region, relayed only by the repeaters that carry it. | `meshterm channels list / add / join / import / share / clear / scope` |
 | **📨 Courier** | Store-and-forward outbox for contacts that aren't reachable yet. Queue a message; it goes out (with ack tracking and polite exponential backoff) the moment the contact is next heard, or at a scheduled time. | `meshterm courier queue / list / send / cancel / clear` |
 | **👥 Contacts** | This node and its known contacts — a recency heat-map, overheard packet counts, and full public keys with the path-hash prefix highlighted. The scripted listing is the contacts alone (this node is `meshterm info`'s answer, in far more detail). | `meshterm contacts` |
 
@@ -24,7 +24,7 @@ Every interactive screen is listed here with its scripted equivalent, where one 
 | Feature | What it does | Scripted |
 | --- | --- | --- |
 | **📊 Dashboard** | The live mesh overview: a two-hour all-packet activity chart with a pulse line, session traffic tallies by packet class, and window RF health beside the radio's own live numbers. Repaints every second. | — |
-| **📰 Live feed** | Every packet as it arrives, newest first: time, what the frame *is* (its parsed payload class), and what it is *about* — the node for an advert, the channel for a channel text, sender → recipient for a direct message or a request, the tag for a trace — with reception quality beside it. Enter opens any row in the packet viewer, route graph and all. | — |
+| **📰 Live feed** | Every packet as it arrives, newest first: time, what the frame *is* (its parsed payload class), and what it is *about* — the node for an advert, the channel for a channel text, sender → recipient for a direct message or a request, the tag for a trace — with reception quality beside it, and the region a scoped flood was sent into where the terminal is wide enough. Enter opens any row in the packet viewer, route graph and all. | — |
 | **🚨 Watchtower** | A passive sentinel over the nodes you star: silence alarms when a watched node goes quiet, SNR-sag warnings when reception degrades, recovery notes when it returns, and a heads-up when a never-before-seen node appears. Runs in the background all session; unacked alerts show as a header badge. | — |
 | **⏳ Time machine** | Everything the recorder ever heard, as braille charts: reception volume, the median-SNR band, hour-of-day rhythm, packets and nodes per day, and first-ever arrivals — over a switchable 24h / 7d / 30d / all-time window (on the PicoCalc the windows stop at 30d), per node or mesh-wide. | — |
 | **🎧 Monitor** | Passive recording is always on in the app. On the CLI, capture a bounded foreground window, tailing each overheard packet and summarising when it ends. It transmits nothing — it only listens. | `meshterm monitor --seconds 60` |
@@ -52,7 +52,8 @@ Every interactive screen is listed here with its scripted equivalent, where one 
 
 | Feature | What it does | Scripted |
 | --- | --- | --- |
-| **🗼 Repeater admin** | Set up remote repeaters and room servers over the mesh: log in (remembered or prompted password), then a config-style editor speaking the node's text CLI — including repeater-only knobs (TX delay, airtime factor, advert intervals) — plus one-shot actions and a readline remote command line. | `meshterm repeater-admin <node> <command…>` |
+| **🗼 Repeater admin** | Set up remote repeaters and room servers over the mesh: log in (remembered or prompted password), then a config-style editor speaking the node's text CLI — including repeater-only knobs (TX delay, airtime factor, advert intervals) — plus one-shot actions and a readline remote command line. A **Regions** page edits the repeater's region tree: which regions it relays floods for, whether it relays unscoped floods, its home and default scope. | `meshterm repeater-admin <node> <command…>` |
+| **🔖 Regions** | Not a menu screen. A repeater's node page lists the regions it carries and asks it once, without logging in (it answers only a neighbour, or over a known route); the packet viewer, message paths and live feed name the region a flood was scoped to. | `meshterm regions <node>` |
 | **📶 TX optimize** | Sweep a remote node's transmit power live — coarse, then refine, then verify — watch each level land, and decide whether to apply the winner. The scripted form applies the winner unless told not to. | `meshterm tx-optimize --path … [--no-apply]` |
 
 ## ⚙ This app — the program in front of you

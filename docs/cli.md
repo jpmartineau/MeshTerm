@@ -105,6 +105,7 @@ of two directories from the same shell.
 | `contacts.json`, `channels.json`, `settings.json` | Per-device caches of what the radio last told us, so a screen opens without a round-trip. |
 | `adverts.json` | The weekly flood advert's clock: when it was switched on, and when each device's week began. |
 | `mutes.json`, `watchtower.json`, `remote.json` | Muted channels; watched nodes and their alerts; per-node remote-admin cache and CLI history. |
+| `regions.json` | The regions known by name — and which repeaters carry each — plus every channel's send scope and each repeater's last answer to "which regions do you carry?". What a scoped packet's region is named against. |
 | `radio/<spidev>/` | An SPI radio's node, one folder per device node (`radio/spidev1.0/`): its identity key, settings, channels, and contacts, and its log, `node.log`. What firmware would keep in flash. |
 | `tilecache/` | Downloaded basemap tiles. |
 | `meshterm.log` | The log file. |
@@ -995,7 +996,7 @@ The live transcript is a menu screen; from the command line, pick a subcommand.
 | Subcommand | What it does |
 | --- | --- |
 | `send TEXT --to NAME` | Send a direct message. |
-| `send TEXT --channel N` | Broadcast on a channel slot. |
+| `send TEXT --channel N [--scope REGION]` | Broadcast on a channel slot, under the channel's scope — or under `REGION` for this one message, `*` for unscoped. |
 | `history [--to NAME \| --channel N] [--limit N]` | Print a conversation's stored transcript. Default limit 50. |
 | `list` | Every channel and contact with its unread count and last message. |
 | `listen [-s SECONDS] [--debug]` | Tail inbound messages live. `-s 0` (the default) runs until Ctrl-C. |
@@ -1061,6 +1062,23 @@ $ meshterm chat send "net in 5" --channel 0 --json
 ```
 
 `kind` is `"direct"` \| `"channel"` and says which of `node` / `channel` is populated.
+A channel send also carries `scope`, in the same shape `monitor` gives a received packet's:
+`{"state":"scoped","region":"harbour","code":null}` for a region, `"unscoped"` for a plain
+flood, and `null` where it isn't known (a direct message, or a channel with no scope of its
+own whose device default couldn't be read). `code` is `null` on a send: the code is a hash
+of the packet, and the radio builds the packet.
+
+`--scope` applies to a channel send only. A direct message has no scope of its own to give
+— the radio floods it under the device default like anything else — so `--scope` with
+`--to` is a usage error (exit `2`), as is a name the firmware would refuse. A radio that
+can't send under the scope (firmware older than 1.10, or `*` before 1.16 with a default
+scope set) refuses before anything is transmitted, and that is a failure (exit `1`),
+never a quiet unscoped send. Quote the `*` so the shell leaves it alone:
+
+```console
+$ meshterm chat send "all clear" --channel 0 --scope '*' --json
+{"kind":"channel","node":null,"channel":{"slot":0,"name":"#0","public":true,"hash":null},"sent":true,"acked":null,"scope":{"state":"unscoped","region":null,"code":null}}
+```
 `acked` is `null` on a channel, not `false`: there is no acknowledgement to have, and that
 is exactly what one absence token is for — it is also why the plain face prints nothing
 there, having no way to say it.
@@ -1105,8 +1123,9 @@ Join on `hash`.
 | `import INDEX URL` | Import a `meshcore://channel/add` link. |
 | `share INDEX` | Print a slot's share link. |
 | `clear INDEX --yes` | Clear a slot, removing the channel from the device. |
+| `scope INDEX [REGION] [--clear]` | Show or set the region the channel's messages are flooded into. |
 
-`list` prints `SLOT NAME TYPE HASH`, one record per configured slot, and returns `5` when
+`list` prints `SLOT NAME TYPE HASH SCOPE`, one record per configured slot, and returns `5` when
 the device has none. (The simulator these examples run against has none, so there is no
 captured listing to show; each `--mock` invocation opens a fresh radio, and a slot written
 by one run is not there for the next.)
@@ -1125,9 +1144,18 @@ that is actually the answer.)
 `clear` is gated behind `--yes`, because a private channel's key is lost with the slot
 unless it is saved elsewhere.
 
+`scope` is MeshTerm's to keep, not the radio's: the firmware has no per-channel scope, so
+MeshTerm sets the companion's scope around each message it sends on the channel. Setting
+one therefore writes nothing to the device, and it follows the channel to any slot it moves
+to. With no `REGION`, `scope` prints the channel's region alone, the way `config get` prints
+one value — and a channel with none prints nothing and exits `5`. Setting (`scope 1
+harbour`) or clearing (`scope 1 --clear`) prints nothing plain. Reading an empty slot exits
+`5`, like `share`; writing to one is a usage error (exit `2`), since there is no channel to
+scope. `SCOPE` in `list` is `-` for a channel that sends under the device default.
+
 **`--json`.** `list` is an array whose rows are **flat** — this is the one listing whose
 record *is* the shared shape rather than carrying one, so a row is
-`{"slot":0,"name":"Public","type":"public","hash":"11"}`, with `type` the plain column's
+`{"slot":0,"name":"Public","type":"public","hash":"11","scope":null}`, with `type` the plain column's
 word rather than the `channel` shape's `public` boolean. Nesting a `channel` key under
 every row would make `jq '.[].channel.name'` out of a listing whose every column is
 already the channel.
