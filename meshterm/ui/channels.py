@@ -468,14 +468,15 @@ class _LiveStats:
 
 #: Widest the name lane grows (longer names are ellipsized so the lanes stay put).
 _NAME_WIDTH_MAX = 18
-#: Cells the name and send-scope lanes share. The scope lane is only as wide as the longest
-#: scope on the list (never narrower than its ``SCOPE`` label), and takes what the names
-#: leave of this budget: with a name at :data:`_NAME_WIDTH_MAX` it gets eight cells — what
-#: the 72-column row had spare before the lane existed, less the last cell an ellipsizing
-#: row keeps back — so the activity sparkline is never cut to make room; shorter names give
-#: a long region name more of its own. A 30-byte region name is ellipsized rather than let
-#: widen the row. On the PicoCalc's 53 the row was already cut inside the activity lane, so
-#: the scope lane there costs the LAST ages behind it; the detail page still states both.
+#: Cells the name and send-scope lanes share. The scope lane is drawn only while at least
+#: one channel on the list has a scope — a column of blanks says nothing — and is then only
+#: as wide as the longest scope (never narrower than its ``SCOPE`` label), taking what the
+#: names leave of this budget: with a name at :data:`_NAME_WIDTH_MAX` it gets eight cells —
+#: what the 72-column row had spare before the lane existed, less the last cell an
+#: ellipsizing row keeps back — so the activity sparkline is never cut to make room; shorter
+#: names give a long region name more of its own. A 30-byte region name is ellipsized rather
+#: than let widen the row. On the PicoCalc's 53 the row was already cut inside the activity
+#: lane, so a scope lane there costs the MSGS count behind it; the detail page states it.
 _NAME_SCOPE_BUDGET = _NAME_WIDTH_MAX + 8
 #: Width of the unread-badge lane (fits ``● 999``), matching the conversation picker's.
 _BADGE_WIDTH = 5
@@ -517,7 +518,10 @@ def _lanes_header(name_w: int, scope_w: int, width: int) -> str:
     message count. (No TYPE or HASH lane: the glyph already carries the openness and the
     hash lives in Show key, which buys the activity sparkline its room on a 72-column
     terminal.) ``SCOPE`` sits between the name and the badge: it says where the channel's
-    messages go, which is the channel's own fact, before the lanes that count its traffic.
+    messages go, which is the channel's own fact, before the lanes that count its traffic —
+    and only while some channel has one (``scope_w`` is 0 otherwise). ``LAST`` comes before
+    ``MSGS``: how recently a channel spoke is the question a glance down the list asks, and
+    the total is the detail behind it.
 
     Resolved against the render width, because the header row is pinned and must stay one
     row: at 53 columns the full line ran to 54 and wrapped, costing a content row out of
@@ -527,13 +531,13 @@ def _lanes_header(name_w: int, scope_w: int, width: int) -> str:
     return column_header(
         [
             Lane("CHANNEL", name_w + 2),
-            Lane("SCOPE", scope_w + 2),
+            *([Lane("SCOPE", scope_w + 2)] if scope_w else []),
             Lane("UNREAD", _BADGE_WIDTH + 2),
-            # Right-aligned, because the values under them are: a count and an age are
+            # Right-aligned, because the values under them are: an age and a count are
             # padded to the right edge of their lane, so a left-aligned label would sit
             # off the digits it names.
-            Lane(f"{'MSGS':>{_COUNT_WIDTH}}", _COUNT_WIDTH + 2),
             Lane(f"{'LAST':>{_AGE_WIDTH}}", _AGE_WIDTH + 2),
+            Lane(f"{'MSGS':>{_COUNT_WIDTH}}", _COUNT_WIDTH + 2),
             Lane(("ACTIVITY", "ACT")),
         ],
         width,
@@ -558,8 +562,9 @@ def _slot_text(
 ) -> Text:
     """Build one channel's list row as fixed-width, colour-coded lanes.
 
-    Alignment carries the readability — glyph, name, send scope, unread badge, total
-    messages, last-message age, and the activity sparkline each sit in their own lane under the
+    Alignment carries the readability — glyph, name, send scope, unread badge,
+    last-message age, total messages, and the activity sparkline each sit in their own lane
+    under the
     :func:`_lanes_header` line. Colour stays light and purposeful: the name is the row's
     focus in the base colour, the descriptive lanes are muted, the unread ``●`` badge is
     red with its count in warn (the conversation picker's language), and the sparkline
@@ -567,9 +572,10 @@ def _slot_text(
     the unread lane instead of a count — muting zeros its unread and stops it accruing, so
     that lane is always free to carry the state. The scope is the region name in the
     ``scope`` style, and blank for a channel that sends under the device default — the
-    ordinary case, which a word in every row would only make harder to see past. The row
-    is always a Rich
-    :class:`~rich.text.Text` so those spans survive under the select screen's row highlight.
+    ordinary case, which a word in every row would only make harder to see past; with
+    ``scope_w`` 0 (no channel has one) the lane is not drawn at all. The row is always a
+    Rich :class:`~rich.text.Text` so those spans survive under the select screen's row
+    highlight.
     """
     st = stats.get(slot.identity)
     muted = _is_muted(ctx, slot)
@@ -578,9 +584,9 @@ def _slot_text(
     text.append(f"{channel_glyph(slot.name, slot.secret)} ")  # ＃ / 🌐 / 🔒 (2 cells) + gap
     text.append(fit_cells(slot.name, name_w))
     text.append("  ")
-    scope = _channel_scope(ctx, slot) or ""
-    text.append(fit_cells(scope, scope_w), style="scope")
-    text.append("  ")
+    if scope_w:
+        text.append(fit_cells(_channel_scope(ctx, slot) or "", scope_w), style="scope")
+        text.append("  ")
     if muted:
         mark = glyph("🔕")  # two cells on the desktop, one on the console
         text.append(mark, style="muted")
@@ -591,19 +597,19 @@ def _slot_text(
     else:
         text.append(" " * _BADGE_WIDTH)
     text.append("  ")
+    age = format_age(age_seconds(st.last_at)) if st is not None and st.last_at else ""
+    text.append(f"{age:>{_AGE_WIDTH}}", style="muted")
+    text.append("  ")
     total = st.total if st is not None else 0
     if total:
         # Clamped so a pathological backlog can't push the row out of its lanes.
         text.append(f"{min(total, 99999):>{_COUNT_WIDTH}}")
     else:
         # ``○`` is the app's empty mark. ``·`` here was three things at once: the separator
-        # that chains status atoms, the picker's unknown-sender stand-in, and — two cells
-        # away in this very row — what the console folds ``🔕`` to, so a muted channel with
-        # no messages drew the same glyph twice meaning different things.
+        # that chains status atoms, the picker's unknown-sender stand-in, and — in this very
+        # row — what the console folds ``🔕`` to, so a muted channel with no messages drew
+        # the same glyph twice meaning different things.
         text.append(f"{'○':>{_COUNT_WIDTH}}", style="muted")
-    text.append("  ")
-    age = format_age(age_seconds(st.last_at)) if st is not None and st.last_at else ""
-    text.append(f"{age:>{_AGE_WIDTH}}", style="muted")
     text.append("  ")
     # The shared peak across all channels, so every row's sparkline uses one scale.
     text.append_text(_activity_sparkline(st.histogram if st is not None else (), stats.peak()))
@@ -624,7 +630,8 @@ def _menu_items(
     if slots:
         name_w = min(_NAME_WIDTH_MAX, max(len("CHANNEL"), *(len(s.name) for s in slots)))
         scopes = [cell_len(_channel_scope(ctx, s) or "") for s in slots]
-        scope_w = min(_NAME_SCOPE_BUDGET - name_w, max(len("SCOPE"), *scopes))
+        # No lane at all while no channel has a scope (see :data:`_NAME_SCOPE_BUDGET`).
+        scope_w = min(_NAME_SCOPE_BUDGET - name_w, max(len("SCOPE"), *scopes)) if any(scopes) else 0
         # The lane names are this block's only landmark (its section carries no ── heading ──),
         # so they pin overhead while the slots scroll and give way to Organize/Add a channel.
         items.append(Separator(lambda w: _lanes_header(name_w, scope_w, w), heading=True))
