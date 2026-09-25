@@ -317,15 +317,16 @@ def test_the_retry_loop_never_reuses_a_torn_down_client() -> None:
 
 
 def test_every_link_open_attempt_failing_raises_the_last_error() -> None:
-    """Exhausting the retries surfaces the link failure — with nothing left open."""
+    """Exhausting the retries says the link never opened — with nothing left open."""
     _FakeMeshCore.reset(
         ConnectionError("Failed to connect to device"),
         ConnectionError("Failed to connect to device"),
     )
     dev = _device()
 
-    with pytest.raises(ConnectionError):
+    with pytest.raises(conn_mod.DeviceCommandError) as excinfo:
         asyncio.run(dev._create_ble_with_retry(_FakeMeshCore))
 
+    assert isinstance(excinfo.value.__cause__, ConnectionError)
     assert len(_FakeMeshCore.built) == conn_mod._BLE_CONNECT_ATTEMPTS
     assert all(not c.cx.link_open for c in _FakeMeshCore.built)

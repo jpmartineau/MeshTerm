@@ -22,7 +22,7 @@ import sys
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable, Iterable
 from contextlib import asynccontextmanager
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -226,7 +226,26 @@ class DeviceAuthenticationError(DeviceCommandError):
     picker opens a PIN dialog and retries, while the scripted CLI (which catches the base
     class) prints the message and bails, since it can't prompt. The message already names the
     fix (``--ble-pin`` and OS pairing).
+
+    The one exception covers several different failures — no PIN at all, a stale bond the OS
+    still believes in, a wrong PIN, a pairing the device itself refused — and each has its own
+    remedy, so the message names which one happened (see
+    :meth:`MeshCoreDevice._ble_auth_failure`) rather than one sentence covering all of them.
+
+    Attributes:
+        hint: The same diagnosis cut to one line for the PIN dialog, which re-asks under it;
+            empty when there is nothing to say beyond the dialog's own question.
     """
+
+    def __init__(self, message: str, *, hint: str = "") -> None:
+        """Build the error.
+
+        Args:
+            message: The full, actionable sentence — what failed and what to do.
+            hint: The dialog-sized version of it (see the class attributes).
+        """
+        super().__init__(message)
+        self.hint = hint
 
 
 class FloodScopeError(DeviceCommandError):
@@ -519,6 +538,52 @@ _BLE_AUTH_HINTS = (
     "insufficient authorization",
     "insufficient encryption",
     "not paired",
+    # The pairing step itself failing, rather than the subscribe it guards: bleak's
+    # ``pair()`` ("Could not pair with device: …") and BlueZ's AuthenticationFailed. Without
+    # these a refused pairing fell through as an anonymous failure and was reported as a
+    # device that "didn't answer as a MeshCore device".
+    "could not pair",
+    "authentication failed",
+    "authenticationfailed",
+)
+
+
+@dataclass(frozen=True)
+class _BlePairing:
+    """What the last Windows PIN-pairing attempt found, kept so a refusal can say why.
+
+    The pairing step is best-effort and returns a bool (see
+    :meth:`MeshCoreDevice._pair_ble_windows`), which is all the connect needs to decide
+    whether to retry — but a bool can't tell the reader whether the PIN was wrong, the device
+    refused, or Windows couldn't reach it, and those have different fixes.
+
+    Attributes:
+        outcome: ``"reused"`` (an existing bond was trusted), ``"paired"``, ``"absent"``
+            (Windows couldn't reach the device), ``"failed"`` (the ceremony returned a
+            non-success status), or ``"error"`` (the WinRT call raised).
+        status: The ceremony's status name, lowercase with spaces (``"authentication
+            failure"``), or the exception text for ``"error"``; empty otherwise.
+    """
+
+    outcome: str
+    status: str = ""
+
+
+#: Pairing statuses that mean the PIN itself was wrong.
+_PAIRING_WRONG_PIN = frozenset({"authentication failure", "invalid ceremony data"})
+
+#: Pairing statuses that mean the device (not the PIN) turned the pairing down — busy with
+#: another host, holding an old bond, or simply not answering in time.
+_PAIRING_REFUSED = frozenset(
+    {
+        "connection rejected",
+        "too many connections",
+        "remote device has association",
+        "not ready to pair",
+        "rejected by handler",
+        "authentication timeout",
+        "protection level could not be met",
+    }
 )
 
 
@@ -1369,6 +1434,9 @@ class MeshCoreDevice(Device):
         self._transport = transport
         self._address = address
         self._pin = pin
+        #: What the last Windows PIN-pairing attempt found (``None`` when none ran), so an
+        #: authentication refusal can name the failure rather than guess at it.
+        self._ble_pairing: _BlePairing | None = None
         self._ble_device = ble_device
         self._host = host
         self._tcp_port = tcp_port
@@ -1515,7 +1583,7 @@ class MeshCoreDevice(Device):
             # putting its Passkey dialog up as we unwind. Wait for the person to answer it.
             if allow_repair and sys.platform == "darwin":
                 return await self._open_ble_after_macos_pairing(mesh_core, exc)
-            raise DeviceAuthenticationError(self._ble_auth_message()) from exc
+            raise await self._ble_auth_failure() from exc
 
     async def _open_ble_after_macos_pairing(self, mesh_core, cause: BaseException):  # type: ignore[no-untyped-def]
         """Re-open the link while macOS is running the Passkey dialog it just raised.
@@ -1556,7 +1624,7 @@ class MeshCoreDevice(Device):
                     attempt + 1,
                     _BLE_MACOS_PAIRING_ATTEMPTS,
                 )
-        raise DeviceAuthenticationError(self._ble_auth_message()) from cause
+        raise await self._ble_auth_failure() from cause
 
     async def _create_ble_with_retry(self, mesh_core):  # type: ignore[no-untyped-def]
         """Open the owned BLE client, retrying the transport-level failures that are transient.
@@ -1585,7 +1653,9 @@ class MeshCoreDevice(Device):
             the peripheral never answered the identity handshake.
 
         Raises:
-            ConnectionError: If every attempt failed to open the link.
+            DeviceCommandError: If every attempt failed to open the link — said as such,
+                because this is the one failure where the device was never reached at all,
+                and "didn't answer as a MeshCore device" sent people looking at the firmware.
         """
         last_exc: ConnectionError | None = None
         for attempt in range(_BLE_CONNECT_ATTEMPTS):
@@ -1603,7 +1673,14 @@ class MeshCoreDevice(Device):
                 )
                 last_exc = exc
         assert last_exc is not None  # the loop always runs; only ConnectionError falls through
-        raise last_exc
+        where = self._address or "the selected Bluetooth device"
+        _log.warning("BLE link to %s never opened: %s", where, last_exc)
+        raise DeviceCommandError(
+            f"couldn't open a Bluetooth link to {where} ({_BLE_CONNECT_ATTEMPTS} tries) — it "
+            "wasn't found, or didn't accept the connection. It may be out of range, powered "
+            "off, or connected to a phone or another computer (a companion takes one "
+            "connection at a time)."
+        ) from last_exc
 
     async def _connect_owned_ble(self, mesh_core):  # type: ignore[no-untyped-def]
         """Build the meshcore BLE client here and connect it, so we own its teardown.
@@ -1786,14 +1863,18 @@ class MeshCoreDevice(Device):
             _log.debug("BLE PIN pairing unavailable (winrt import failed): %s", exc)
             return False
 
+        # Every exit records what it found in ``_ble_pairing``, so a refusal further on can
+        # say which of these it was — the bool alone is only enough to decide on a retry.
         device = None
         try:
             device = await BluetoothLEDevice.from_bluetooth_address_async(address)
             if device is None:
+                self._ble_pairing = _BlePairing("absent")
                 return False  # out of range / not connectable right now
             pairing = device.device_information.pairing
             if pairing.is_paired:
                 if not force:
+                    self._ble_pairing = _BlePairing("reused")
                     return True  # trust the existing (authenticated) bond — fast path
                 # Tear the stale bond down, then re-fetch: the pairing object is a snapshot and
                 # won't reflect the unpair, so a fresh device_information is needed to re-pair.
@@ -1801,6 +1882,7 @@ class MeshCoreDevice(Device):
                 MeshCoreDevice._close_ble_device(device)  # release the pre-unpair handle
                 device = await BluetoothLEDevice.from_bluetooth_address_async(address)
                 if device is None:
+                    self._ble_pairing = _BlePairing("absent")
                     return False
                 pairing = device.device_information.pairing
             custom = pairing.custom
@@ -1823,10 +1905,19 @@ class MeshCoreDevice(Device):
                 int(DevicePairingResultStatus.PAIRED),
                 int(DevicePairingResultStatus.ALREADY_PAIRED),
             )
-            _log.debug("BLE ProvidePin pairing for %s: status=%d ok=%s", self._address, status, ok)
+            name = str(getattr(result.status, "name", status)).lower().replace("_", " ")
+            if ok:
+                self._ble_pairing = _BlePairing("paired")
+                _log.debug("BLE ProvidePin pairing for %s: %s", self._address, name)
+            else:
+                # A warning, not debug: this is the line that tells a wrong PIN from a device
+                # that refused to pair, and the default log level would otherwise hide it.
+                self._ble_pairing = _BlePairing("failed", name)
+                _log.warning("BLE PIN pairing with %s failed: %s", self._address, name)
             return ok
         except Exception as exc:  # noqa: BLE001 - best-effort; caller falls through on False
-            _log.debug("BLE ProvidePin pairing attempt failed for %s: %s", self._address, exc)
+            self._ble_pairing = _BlePairing("error", str(exc))
+            _log.warning("BLE PIN pairing with %s raised: %s", self._address, exc)
             return False
         finally:
             MeshCoreDevice._close_ble_device(device)
@@ -1969,14 +2060,54 @@ class MeshCoreDevice(Device):
             # it the device stays "connected" after the unpair and won't re-pair until rebooted.
             MeshCoreDevice._close_ble_device(device)
 
-    def _ble_auth_message(self) -> str:
-        """A clean, actionable error for a Bluetooth companion that requires a PIN/bond.
+    async def _ble_os_bonded(self) -> bool:
+        """Whether Windows holds a bond for this device — asked only to explain a refusal.
 
-        Distinguishes "you gave the wrong PIN" from "you gave none at all", and points at
-        both fixes: MeshTerm's ``--ble-pin`` and the one-time OS pairing that Windows needs
-        before an authenticated characteristic can be subscribed.
+        An instance hook over :meth:`is_ble_paired` so tests can answer it without the OS.
+        """
+        return await MeshCoreDevice.is_ble_paired(self._address or "")
+
+    async def _ble_auth_failure(self) -> DeviceAuthenticationError:
+        """Name *which* authentication failure this was, and what fixes it.
+
+        The GATT refusal looks the same on the wire whatever caused it, but the causes don't
+        share a remedy, and one sentence covering all of them sent people to the wrong one — a
+        stale Windows bond, say, was reported as "requires a PIN" to someone whose device
+        Windows plainly showed as paired. So the error is built from what is actually known:
+
+        * macOS — the OS runs the pairing in its own dialog; say so.
+        * No PIN, and Windows holds a bond — the bond is stale (the device was reflashed,
+          reset, or given a new PIN since), and re-pairing is the fix.
+        * No PIN, no bond — the device needs its PIN.
+        * A PIN, and the Windows pairing ceremony reported a status — a wrong PIN, a device
+          that refused to pair, or some other status, each named.
+        * A PIN, the pairing succeeded, and the device still refused — it is holding an old
+          bond for this computer.
+        * A PIN and nothing more known (Linux, or no WinRT) — the PIN was rejected.
+
+        Every case is also logged, so a log sent in from another machine says which it was.
+
+        Returns:
+            The error to raise, carrying a one-line :attr:`~DeviceAuthenticationError.hint`
+            for the PIN dialog.
         """
         where = self._address or "the selected Bluetooth device"
+        # Windows' bond changes the message in exactly one case, so it is asked only there.
+        bonded = sys.platform == "win32" and not self._pin and await self._ble_os_bonded()
+        message, hint = self._ble_auth_diagnosis(where, bonded)
+        _log.warning("BLE connect to %s refused: %s", where, message)
+        return DeviceAuthenticationError(message, hint=hint)
+
+    def _ble_auth_diagnosis(self, where: str, os_bonded: bool) -> tuple[str, str]:
+        """The message and dialog hint for :meth:`_ble_auth_failure` (see there for the cases).
+
+        Args:
+            where: The device, as the message names it.
+            os_bonded: Whether Windows holds a bond (asked only when no PIN was given).
+
+        Returns:
+            ``(message, hint)``.
+        """
         if sys.platform == "darwin":
             # macOS collects the code itself, in its own dialog, so --ble-pin is not the
             # remedy here and naming it would send the reader somewhere that cannot help.
@@ -1985,29 +2116,76 @@ class MeshCoreDevice(Device):
                 "rather than through MeshTerm — enter the 6-digit code shown on the device "
                 "(or in the MeshCore app) when it appears, and the bond is remembered for "
                 "next time. If no dialog appeared, check that Bluetooth is allowed for this "
-                "terminal in System Settings > Privacy & Security > Bluetooth."
+                "terminal in System Settings > Privacy & Security > Bluetooth.",
+                "",
             )
-        if self._pin:
+        if not self._pin:
+            if os_bonded:
+                return (
+                    f"Windows has {where} paired, but the device refused that pairing — it is "
+                    "probably out of date (the device was reflashed, reset, or given a new PIN "
+                    "since). Pass --ble-pin <PIN> and MeshTerm will pair it again, or remove it "
+                    "in Settings > Bluetooth and reconnect.",
+                    "Windows' saved pairing was refused — the PIN pairs it again.",
+                )
             return (
-                f"{where} rejected the Bluetooth PIN — it needs pairing and the PIN provided "
-                "wasn't accepted. Double-check the 6-digit code shown on the device (or in the "
-                "MeshCore app) and pass it with --ble-pin, then try again. On Windows you may "
-                "also need to remove and re-pair the device in Settings > Bluetooth."
+                f"{where} requires a Bluetooth pairing PIN. Pass it with --ble-pin <PIN> (the "
+                "6-digit code shown on the device or in the MeshCore app). On Windows you may "
+                "also need to pair the device once in Settings > Bluetooth before it will "
+                "connect.",
+                "",
+            )
+        pairing = self._ble_pairing
+        outcome = pairing.outcome if pairing else ""
+        status = pairing.status if pairing else ""
+        if outcome == "failed" and status in _PAIRING_REFUSED:
+            return (
+                f"{where} refused to pair ({status}) — it may be connected to a phone or "
+                "another computer, or still holding an old pairing for this one. Disconnect "
+                "it there or restart it, then try again.",
+                "The device refused to pair — restart it and try again.",
+            )
+        if outcome == "failed" and status not in _PAIRING_WRONG_PIN:
+            return (
+                f"Windows couldn't pair with {where} ({status}). Remove it in Settings > "
+                "Bluetooth, restart the device, and try again.",
+                f"Windows couldn't pair ({status}).",
+            )
+        if outcome == "absent":
+            return (
+                f"Windows couldn't reach {where} to pair it — it may be out of range, asleep, "
+                "or connected to another device.",
+                "Windows couldn't reach the device to pair it.",
+            )
+        if outcome == "error":
+            return (
+                f"Windows' pairing call failed for {where}: {status}",
+                "Windows' pairing call failed — the log has the detail.",
+            )
+        if outcome in ("paired", "reused"):
+            return (
+                f"Windows paired with {where}, but the device still refuses the connection — "
+                "it is probably holding an old pairing for this computer. Restart the device, "
+                "remove it in Settings > Bluetooth, and try again.",
+                "Paired, but still refused — restart the device and retry.",
             )
         return (
-            f"{where} requires a Bluetooth pairing PIN. Pass it with --ble-pin <PIN> (the "
-            "6-digit code shown on the device or in the MeshCore app). On Windows you may also "
-            "need to pair the device once in Settings > Bluetooth before it will connect."
+            f"{where} rejected the Bluetooth PIN — it needs pairing and the PIN provided "
+            "wasn't accepted. Double-check the 6-digit code shown on the device (or in the "
+            "MeshCore app) and pass it with --ble-pin, then try again.",
+            "That PIN was rejected — check the code and try again.",
         )
 
     def _no_response_message(self) -> str:
         """A clean, recoverable error for an endpoint that didn't answer as a companion."""
         if self._transport == "ble":
+            # The link opened (a link that didn't has its own message), so range and power
+            # are not the question here — what answered is.
             where = self._address or "the selected Bluetooth device"
             return (
-                f"no response from a MeshCore companion over Bluetooth ({where}); it may be "
-                "out of range, powered off, already connected to another device, or not a "
-                "MeshCore device."
+                f"connected to {where} over Bluetooth, but it never answered as a MeshCore "
+                "companion — it may be running repeater or room server firmware, or be busy "
+                "with another app."
             )
         if self._transport == "tcp":
             where = self.endpoint or "the selected network device"
@@ -4655,9 +4833,33 @@ async def _probe(device: MeshCoreDevice, timeout: float) -> tuple[MeshCoreDevice
     # ``wait_for`` is only a safety net a few seconds beyond that, so we never cancel the
     # client mid-handshake (which would leak the open connection). A real companion answers in
     # well under a second (serial) or a few seconds (BLE), so this never delays a good device.
+    stage = "connect"
     try:
         await asyncio.wait_for(device.connect(), timeout + 4.0)
+        stage = "identity"
         info = await asyncio.wait_for(device.get_self_info(), timeout)
+    except asyncio.TimeoutError as exc:
+        await _safe_disconnect(device)
+        if getattr(device, "transport", None) != "ble":
+            return None
+        # A Bluetooth connect has more stages than a serial one (link, pairing, service
+        # discovery, the identity reply), so saying which one ran out of time is what
+        # tells a device out of range apart from one that connected and then went quiet.
+        where = device.endpoint or "the selected Bluetooth device"
+        if stage == "connect":
+            message = (
+                f"connecting to {where} over Bluetooth took longer than {timeout + 4.0:.0f}s — "
+                "the link, pairing, or service discovery stalled. Move closer, restart the "
+                "device, and try again."
+            )
+        else:
+            message = (
+                f"connected to {where} over Bluetooth, but it didn't answer the identity query "
+                f"within {timeout:.0f}s — it may be busy with another app; restart it and try "
+                "again."
+            )
+        _log.warning("BLE probe of %s timed out at the %s stage", where, stage)
+        raise DeviceCommandError(message) from exc
     except DeviceCommandError:
         # A clean, actionable failure (the device needs a PIN, say): close the probe and let it
         # through so the picker surfaces the remedy rather than hiding it behind "didn't answer".

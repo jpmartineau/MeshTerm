@@ -251,7 +251,6 @@ async def _smoke_test(
         unrecoverable failure, or a cancelled PIN prompt).
     """
     pin: str | None = None
-    pin_error = ""  # empty on the first ask; set once a PIN has been rejected
     while True:
         # BLE connect and service discovery take a few seconds, so the spinner matters most here.
         try:
@@ -261,19 +260,21 @@ async def _smoke_test(
                 title="Checking companion",
                 banner=load_logo(),
             )
-        except DeviceAuthenticationError:
+        except DeviceAuthenticationError as exc:
             # The device answered the scan but won't connect until it's bonded (or the last PIN
             # was wrong). Collect one in the popup and loop to retry; Esc returns to the list.
+            # The error says *which* refusal it was — a stale bond, a wrong PIN, a device that
+            # turned the pairing down — and the dialog carries that line under its question,
+            # rather than calling every refusal a rejected PIN.
             entered = await ui.prompt_pin_startup(
                 name,
-                error=pin_error,
+                error=exc.hint,
                 help_text="The 6-digit code shown on the device or in the MeshCore app",
                 banner=load_logo(),
             )
             if entered is None:
                 return None  # the user gave up → back to the device list
             pin = entered
-            pin_error = "That PIN was rejected — check the code and try again."
             continue
         except DeviceCommandError as exc:
             # A different actionable failure (not a PIN): show its remedy verbatim, then back to

@@ -139,7 +139,11 @@ async def _disable_windows_pairing(dev: connection.MeshCoreDevice) -> None:
     async def _never_pairs(*, force: bool) -> bool:
         return False
 
+    async def _no_bond() -> bool:
+        return False
+
     dev._pair_ble_windows = _never_pairs  # type: ignore[method-assign]
+    dev._ble_os_bonded = _no_bond  # type: ignore[method-assign]
 
 
 def _fake_ble_stack(monkeypatch: pytest.MonkeyPatch, *outcomes):
@@ -219,6 +223,90 @@ async def test_create_ble_translates_auth_error_to_pin_guidance(monkeypatch) -> 
     assert "rejected" in str(excinfo_pin.value).lower()
 
 
+async def test_create_ble_names_a_stale_windows_bond(monkeypatch) -> None:
+    """No PIN, but Windows holds a bond the device refuses: say the bond is stale.
+
+    The case reported from the field — a companion Windows showed as paired, refusing the
+    subscribe after the device's side of the bond was lost. "Requires a PIN" was the wrong
+    story for someone looking at "Paired" in Settings.
+    """
+    monkeypatch.setattr(sys, "platform", "win32")
+    fake = _fake_ble_stack(monkeypatch, BleakGATTProtocolError("Insufficient Authentication"))
+    dev = connection.MeshCoreDevice(transport="ble", address=_BONDED_ADDR)
+    await _disable_windows_pairing(dev)
+
+    async def _bonded() -> bool:
+        return True
+
+    dev._ble_os_bonded = _bonded  # type: ignore[method-assign]
+    with pytest.raises(connection.DeviceAuthenticationError) as excinfo:
+        await dev._create_ble(fake)
+    assert "Windows has" in str(excinfo.value)
+    assert "--ble-pin" in str(excinfo.value)  # the PIN is still how MeshTerm re-pairs it
+    assert "saved pairing" in excinfo.value.hint  # and the PIN dialog says why it is asking
+
+
+@pytest.mark.parametrize(
+    ("pairing", "expected", "hint"),
+    [
+        (connection._BlePairing("failed", "authentication failure"), "rejected", "PIN"),
+        (connection._BlePairing("failed", "connection rejected"), "refused to pair", "refused"),
+        (connection._BlePairing("failed", "hardware failure"), "couldn't pair", "hardware"),
+        (connection._BlePairing("absent"), "couldn't reach", "reach"),
+        (connection._BlePairing("paired"), "still refuses", "still refused"),
+        (None, "rejected the Bluetooth PIN", "PIN was rejected"),
+    ],
+)
+async def test_create_ble_names_what_the_pairing_found(
+    monkeypatch, pairing, expected: str, hint: str
+) -> None:
+    """With a PIN, the refusal names the pairing's own outcome, each with its own fix."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    fake = _fake_ble_stack(
+        monkeypatch,
+        BleakGATTProtocolError("Insufficient Authentication"),
+        BleakGATTProtocolError("Insufficient Authentication"),
+    )
+    dev = connection.MeshCoreDevice(transport="ble", address=_BONDED_ADDR, pin=_A_PIN)
+
+    async def _pair(*, force: bool) -> bool:
+        dev._ble_pairing = pairing
+        return pairing is not None and pairing.outcome == "paired"
+
+    dev._pair_ble_windows = _pair  # type: ignore[method-assign]
+    with pytest.raises(connection.DeviceAuthenticationError) as excinfo:
+        await dev._create_ble(fake)
+    assert expected in str(excinfo.value)
+    assert hint in excinfo.value.hint
+
+
+def test_a_refused_pairing_step_is_an_auth_error() -> None:
+    """A failing pair() in bleak is a pairing problem, not a device that "didn't answer"."""
+    assert connection._is_ble_auth_error(Exception("Could not pair with device: 19: FAILED"))
+    assert connection._is_ble_auth_error(Exception("org.bluez.Error.AuthenticationFailed"))
+
+
+@pytest.mark.parametrize(
+    ("stage", "expected"), [("connect", "took longer"), ("identity", "identity")]
+)
+async def test_ble_probe_timeout_names_its_stage(monkeypatch, stage: str, expected: str) -> None:
+    """A BLE probe that runs out of time says which stage stalled, instead of returning None."""
+    dev = connection.MeshCoreDevice(transport="ble", address=_OPEN_ADDR)
+
+    async def _connect() -> None:
+        if stage == "connect":
+            raise asyncio.TimeoutError
+
+    async def _self_info() -> dict:
+        raise asyncio.TimeoutError
+
+    dev.connect = _connect  # type: ignore[method-assign]
+    dev.get_self_info = _self_info  # type: ignore[method-assign]
+    with pytest.raises(DeviceCommandError) as excinfo:
+        await connection._probe(dev, 1.0)
+    assert expected in str(excinfo.value)
+
+
 async def test_create_ble_repairs_stale_bond_and_retries_once(monkeypatch) -> None:
     """A first auth failure triggers one unpair-and-re-pair, then the retried connect succeeds.
 
@@ -290,7 +378,7 @@ async def test_create_ble_retries_a_transient_link_failure(monkeypatch) -> None:
 
 
 async def test_create_ble_gives_up_after_the_retry(monkeypatch) -> None:
-    """A link that never opens surfaces its ConnectionError after the bounded retries."""
+    """A link that never opens says so after the bounded retries — not "not a companion"."""
     fake = _fake_ble_stack(
         monkeypatch,
         ConnectionError("Failed to connect to device"),
@@ -299,8 +387,11 @@ async def test_create_ble_gives_up_after_the_retry(monkeypatch) -> None:
     monkeypatch.setattr(connection, "_BLE_CONNECT_RETRY_DELAY_S", 0.0)
     dev = connection.MeshCoreDevice(transport="ble", address=_OPEN_ADDR)
     await _disable_windows_pairing(dev)
-    with pytest.raises(ConnectionError):
+    with pytest.raises(DeviceCommandError) as excinfo:
         await dev._create_ble(fake)
+    assert not isinstance(excinfo.value, connection.DeviceAuthenticationError)
+    assert "couldn't open a Bluetooth link" in str(excinfo.value)
+    assert isinstance(excinfo.value.__cause__, ConnectionError)  # the original rides along
     assert len(fake.built) == connection._BLE_CONNECT_ATTEMPTS
     assert all(client.disconnect_calls == 1 for client in fake.built)
 

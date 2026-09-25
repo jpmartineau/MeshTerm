@@ -1911,12 +1911,14 @@ def test_device_picker_prompts_and_retries_ble_pin(tmp_path) -> None:
 
     async def verify(_device, pin=None):
         if pin != "654321":  # the first probe (no PIN) and the wrong code both get rejected
-            raise DeviceAuthenticationError("needs a Bluetooth pairing PIN")
+            # The connection names the refusal; the picker carries its hint into the dialog.
+            hint = "That PIN was rejected — check the code and try again." if pin else ""
+            raise DeviceAuthenticationError("needs a Bluetooth pairing PIN", hint=hint)
         return {"adv_name": "Pinned", "model": "Seeed Tracker T1000-E"}
 
     chosen = asyncio.run(prompt_device(_Ui(), devices, store, verify))
     assert chosen is devices[0]
-    # Asked twice: first with no error, then with a "rejected" note after the wrong code.
+    # Asked twice: first with no error, then with the refusal's own hint after the wrong code.
     assert errors[0] == ""
     assert "rejected" in errors[1].lower()
     remembered = store.load()
