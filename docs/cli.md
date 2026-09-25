@@ -880,11 +880,11 @@ the live view.
 
 ```console
 $ meshterm monitor --seconds 2
-TIME                       NODE      SNR_DB  RSSI_DBM  LOCATION             NAME
-2026-09-08T04:26:00-04:00  a1b2c3d4    +7.0      -101  45.50190,-73.56740   Yagi-Repeater
-2026-09-08T04:26:00-04:00  b2c3d4e5    +9.5       -98  45.47680,-73.59900   Local-Repeater
-2026-09-08T04:26:00-04:00  c3d4e5f6    +4.9       -93  -                    Observer-Bot
-2026-09-08T04:26:00-04:00  d4e5f6a7    +7.4       -86  -                    Alice
+TIME                       NODE      SNR_DB  RSSI_DBM  LOCATION             SCOPE       NAME
+2026-09-08T04:26:00-04:00  a1b2c3d4    +7.0      -101  45.50190,-73.56740   -           Yagi-Repeater
+2026-09-08T04:26:00-04:00  b2c3d4e5    +9.5       -98  45.47680,-73.59900   -           Local-Repeater
+2026-09-08T04:26:00-04:00  c3d4e5f6    +4.9       -93  -                    -           Observer-Bot
+2026-09-08T04:26:00-04:00  d4e5f6a7    +7.4       -86  -                    -           Alice
 NODE      NAME            PKTS  MEDIAN_SNR_DB  BEST_SNR_DB  RSSI_DBM  HEARD  LOCATION
 d4e5f6a7  Alice            149           +6.9        +14.1       -93    now  -
 c3d4e5f6  Observer-Bot     148           +5.7        +13.0      -108    now  -
@@ -903,7 +903,7 @@ stream cannot give: a count, a median, a best per node, most recently heard firs
 same shape, and **no summary document at the end**:
 
 ```json
-{"observed_at":"2026-09-08T08:30:40Z","node":{"name":"Yagi-Repeater","key":"a1b2c3d400000000000000000000000000000000000000000000000000000000","hash":"a1b2c3d4","type":"repeater","self":false},"kind":"advert","snr_db":7.0,"rssi_dbm":-101.3,"position":{"lat":45.5019,"lon":-73.5674},"path":null}
+{"observed_at":"2026-09-08T08:30:40Z","node":{"name":"Yagi-Repeater","key":"a1b2c3d400000000000000000000000000000000000000000000000000000000","hash":"a1b2c3d4","type":"repeater","self":false},"kind":"advert","snr_db":7.0,"rssi_dbm":-101.3,"position":{"lat":45.5019,"lon":-73.5674},"scope":null,"path":null}
 ```
 
 | Field | Type | Meaning |
@@ -914,6 +914,7 @@ same shape, and **no summary document at the end**:
 | `snr_db` | number \| null | |
 | `rssi_dbm` | number \| null | |
 | `position` | object \| null | The `position` shape. |
+| `scope` | object \| null | The region a flood was sent into: `{"state", "region", "code"}`. `state` is `"scoped"` (`region` names it), `"unknown"` (scoped, but no region known here reproduces `code`) or `"unscoped"` (a plain flood). `code` is the frame's transport code as lowercase hex, kept even when unresolved so two packets can be seen to share a region. `null` for a direct packet, or a class whose route was never reported — a repeater never region-filters those. The plain `SCOPE` lane prints the region, `unknown`, `unscoped` or `-`. |
 | `path` | array of strings \| null | The relay chain the packet arrived by, one lowercase-hex hash per hop, in propagation order. `[]` is a direct reception; `null` means the packet class carries no path at all. This is the one place `path` is an array — it is a *received* relay chain rather than a composed spec. |
 
 **This is the one place a whole block appears on one face and not the other, and it is

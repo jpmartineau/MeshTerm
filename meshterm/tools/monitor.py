@@ -112,6 +112,9 @@ class MonitorTool(Tool):
                     "snr_db": obs.snr,
                     "rssi_dbm": obs.rssi,
                     "position": _position(obs.lat, obs.lon),
+                    # The region a flood was sent into, resolved against the names known
+                    # right now; a direct frame (or a class with no route) has none.
+                    "scope": ctx.region_store.scope_of(obs.raw),
                     "path": _relays(obs.path),
                 }
             )
@@ -188,7 +191,9 @@ def _live_packets() -> Listing:
     """The shape the live capture streams: one record per packet, as it lands.
 
     ``TIME`` is absolute where a listing's times are ages, and for the reason the whole
-    rule turns on: every row of a live tail would read ``now``. The **name goes last**, so
+    rule turns on: every row of a live tail would read ``now``. ``SCOPE`` says which region
+    a flood was sent into (:func:`~meshterm.ui.fields.scope`), ``null`` in the document for
+    a frame that has none. The **name goes last**, so
     the one field with no width cannot push a lane — which is what finally let the two
     streams have columns at all, and with them the quoting could go.
     """
@@ -217,9 +222,13 @@ def _live_packets() -> Listing:
             pin(fields.snr("snr_db", "SNR_DB"), 6),
             pin(fields.decimal("rssi_dbm", "RSSI_DBM", ".0f"), 8),
             pin(fields.position(), 19),
+            # The flood's scope — a region name, ``unknown`` or ``unscoped``, ``-`` for a
+            # frame with none. Pinned to hold the two words whole; a long region name
+            # overruns and pushes the row right, which is why NAME still goes last.
+            pin(fields.scope(), 10),
             fields.hidden("path"),
         ),
-        order=("TIME", "NODE", "SNR_DB", "RSSI_DBM", "LOCATION", "NAME"),
+        order=("TIME", "NODE", "SNR_DB", "RSSI_DBM", "LOCATION", "SCOPE", "NAME"),
     )
 
 

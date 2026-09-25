@@ -6,7 +6,8 @@ the rows share this module's per-kind chrome — a colour and a two-cell icon pe
 class — and every row can open into the same viewer: a centered dialog over the list
 that lays the packet out in full, flavoured by kind. An advert shows the node's
 identity, type, and location; telemetry shows the node and its reported values; an
-RX-logged packet shows its parsed class and route, what it was addressed to (the
+RX-logged packet shows its parsed class and route — a flood's with the region it was
+scoped to, if any (:func:`~meshterm.ui.widgets.scope_text`) — what it was addressed to (the
 recipient and sender read out of the frame body — see :mod:`~meshterm.core.frames` — or
 the token a trace or an ack stands on), plus the relay path it rode in on —
 as a ``via`` chain on THE path line (:mod:`~meshterm.ui.pathline`), wrapping at hop
@@ -51,6 +52,7 @@ from rich.text import Text
 
 from ..core.channels import decrypt_channel_text, identify_channel
 from ..core.models import Observation, node_type_label, utcnow
+from ..core.regions import Scope, frame_scope
 from ..services.trace_runner import NodeResolver
 from .marks import SELF_MARK, UNKNOWN_MARK
 from .menus import SEP_COMPACT, SEP_ROOMY
@@ -71,7 +73,24 @@ from .widgets import (
     node_type_legend,
     revisit_note,
     route_graph_style,
+    scope_text,
 )
+
+#: Reads a frame's scope from its raw payload — ``ctx.region_store.scope_of`` in the app:
+#: ``None`` for a frame with no scope to state (direct, or a route type never kept).
+ScopeOf = Callable[[dict | None], Scope | None]
+
+
+def unnamed_scope(raw: dict | None) -> Scope | None:
+    """A frame's scope read without any region names — the fallback when none are at hand.
+
+    Still says everything the frame itself says: a plain flood is ``unscoped``, and a
+    scoped one is ``scoped · <code>``. Only the *naming* needs the known regions (see
+    :meth:`~meshterm.core.region_store.RegionStore.scope_of`), so a viewer opened without a
+    store never draws less than the truth, only less than the whole of it.
+    """
+    return frame_scope(raw, ()) if isinstance(raw, dict) else None
+
 
 #: Composed packet cards the viewer memoizes (a few pages either side of the view).
 _BODY_CACHE_MAX = 8
@@ -101,7 +120,7 @@ _PAYLOAD_GLOSS = {
 _RAW_ROW_SKIP = frozenset({
     "node", "name", "kind", "snr", "rssi", "lat", "lon", "path", "node_type",
     "observed_at", "text",
-    "header", "payload_ver", "transport_code", "path_len", "path_hash_size",
+    "header", "payload_ver", "transport_code", "scope_body", "path_len", "path_hash_size",
     "payload_type", "payload_typename", "route_type", "route_typename",
     "pkt_payload", "pkt_hash", "raw_hex", "payload", "payload_length", "recv_time",
     "chan_hash", "cipher_mac", "crypted", "message", "msg_hash", "sender_timestamp",
@@ -412,6 +431,7 @@ class PacketViewer(Screen):
         source: Callable[[], Sequence[PacketEntry]] | None = None,
         type_of: TypeOf | None = None,
         key_of: NameKeyResolver | None = None,
+        scope_of: ScopeOf | None = None,
     ) -> None:
         """Open the viewer over a packet list.
 
@@ -442,6 +462,11 @@ class PacketViewer(Screen):
             key_of: Maps an origin's display name back to its node's key, so the route
                 graph's left endpoint takes its key-derived hue; ``None`` (or an
                 unresolvable name) leaves it muted.
+            scope_of: Reads a flood's scope off its raw frame against the regions known
+                by name (``ctx.region_store.scope_of``), so the ``route`` row can say which
+                region a scoped flood was sent into. ``None`` falls back to
+                :func:`unnamed_scope`: the flood is still told apart as scoped or not,
+                and a scoped one shows its code where a name would go.
         """
         super().__init__()
         self._entries = list(entries)
@@ -457,6 +482,7 @@ class PacketViewer(Screen):
         self._source = source
         self._type_of = type_of
         self._key_of = key_of
+        self._scope_of: ScopeOf = scope_of or unnamed_scope
         #: The packet currently shown, tracked by identity so a live prepend to the
         #: source (which shifts every index) never slides the view onto another packet.
         self._current: PacketEntry | None = self._entries[self._index] if self._entries else None
@@ -661,7 +687,11 @@ class PacketViewer(Screen):
         # Memoize on exactly that: the repaint tick re-lays the graph only when a
         # minute boundary actually moves the visible text.
         age_minute = int(max(0.0, (utcnow() - entry.when).total_seconds()) // 60)
-        key = (id(entry), width, age_minute)
+        # …and of the flood's scope, which is *not* fixed at capture: a region learned
+        # while the card is open (a repeater's list arriving, a name typed) names a code
+        # that read as unknown a moment ago. The store memoizes the lookup, so asking it
+        # every paint costs a dict hit.
+        key = (id(entry), width, age_minute, self._entry_scope(entry))
         cached = self._body_cache.get(key)
         if cached is not None:
             self._body_cache.move_to_end(key)
@@ -910,7 +940,7 @@ class PacketViewer(Screen):
         rows.extend(self._addressing_rows(raw))
         route = raw.get("route_typename")
         if route:
-            rows.append(("route", Text(route.replace("_", " ").lower())))
+            rows.append(("route", self._route_text(route, self._entry_scope(entry))))
         rows.append(("via", self._via_path(entry)))
         # The figure the chain above encodes but never states, hung under it as the app's
         # own hop atom — the same one the node page's routes and the trace scenarios carry
@@ -952,6 +982,40 @@ class PacketViewer(Screen):
                     )
                 )
         return rows
+
+    def _entry_scope(self, entry: PacketEntry) -> Scope | None:
+        """The scope of an entry's frame, or ``None`` where it has none to state.
+
+        Only a raw ``packet`` frame carries the route type and transport codes a scope is
+        read from; every other kind answers ``None`` and draws nothing.
+        """
+        if entry.kind != "packet" or not isinstance(entry.raw, dict):
+            return None
+        return self._scope_of(entry.raw)
+
+    @staticmethod
+    def _route_text(route: str, scope: Scope | None) -> Text:
+        """The ``route`` row: how the frame was routed, and for a flood, where to.
+
+        A flood reads ``flood`` and then its scope as a chained atom
+        (:func:`~meshterm.ui.widgets.scope_text`) — ``flood · scope harbour``,
+        ``flood · scoped · 3fa1``, ``flood · unscoped`` — rather than the library's
+        ``tc flood``, which named the wire mechanism (transport codes) and left the
+        reader to know that it meant *scoped*, and to which region nobody could say.
+        A scoped and an unscoped flood are one routing; the scope is what differs, so it
+        is the scope that is spelled out.
+
+        A direct frame keeps its route word alone. A repeater never region-filters a
+        direct packet, so it has no scope, and a ``TC_DIRECT`` frame's codes are the
+        "to nowhere" pair a contact share uses, not a region — a word there would claim a
+        meaning the frame does not carry.
+        """
+        if scope is None:
+            return Text(route.replace("_", " ").lower())
+        text = Text("flood")
+        text.append(" · ", style="muted")
+        text.append_text(scope_text(scope))
+        return text
 
     def _addressing_rows(self, raw: dict) -> list[tuple[str, RenderableType]]:
         """Who a frame was for, who it says it was from, and the token it carries.

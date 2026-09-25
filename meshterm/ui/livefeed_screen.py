@@ -11,6 +11,11 @@ to the packet viewer, which has the room to draw it as a wrapped path line over 
 graph. The feed's job is to say what arrived and how well it was heard; Enter says how
 it got here.
 
+Where the width allows, a **scope** lane follows the readings: the region a flood was sent
+into (``harbour``), ``scoped · 3fa1`` for a region nobody here has named, ``unscoped`` for a
+plain flood, and nothing for a direct frame, which no repeater region-filters (see
+:func:`_lanes_for` for which widths hold it, and why the PicoCalc's never does).
+
 The subject lane is contextual: it holds whatever the *class* of packet is about (see
 :meth:`LiveFeedScreen._feed_subject`). An advert or a telemetry frame is about the node
 that sent it, so the lane names the node — but a channel text is about its channel, a
@@ -54,7 +59,7 @@ import asyncio
 from collections import deque
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from rich.text import Text
 
@@ -67,17 +72,20 @@ from .packet_viewer import (
     KIND_STYLES,
     PacketEntry,
     PacketViewer,
+    ScopeOf,
     class_marks,
     node_label,
+    unnamed_scope,
 )
 from .pathline import SELF_GLYPH, PathHop, PathLine
 from .theme import name_style, snr_style
 from .tui.render import crop_cells, render_to_ansi
 from .tui.screen import ListWindow, Screen
-from .widgets import NameKeyResolver, TypeOf
+from .widgets import NameKeyResolver, TypeOf, scope_text
 
 if TYPE_CHECKING:
     from ..context import AppContext
+    from ..core.regions import Scope
 
 #: Seconds between full repaints while the feed is open (keeps age-sensitive chrome
 #: honest even between hub events).
@@ -151,6 +159,62 @@ _FEED_LABEL_MIN_WIDTH = (
     + _SNR_LANE
     + _RSSI_LANE
 )
+
+#: The scope lane's width: the longest thing :func:`~meshterm.ui.widgets.scope_text` draws
+#: for an unnamed scope (``scoped · 3fa1``), so the one reading that carries a code keeps
+#: it whole. A named region longer than this ellipsizes — its whole name is on the
+#: viewer's ``route`` row, one keypress away, like everything else a lane cuts.
+_FEED_SCOPE_WIDTH = 13
+
+#: The scope lane with the gap that sets it off from the RSSI reading ahead of it.
+_SCOPE_LANE = _LANE_GAP + _FEED_SCOPE_WIDTH
+
+#: The most cells the subject lane lends the scope lane when the row is that close to
+#: holding it. On a 72-column terminal the framed body is 68 cells and the icon-only row
+#: 54, so the scope lane is exactly one cell short — and one cell off an 18-cell name
+#: lane (``Hilltop-Rep…`` for ``Hilltop-Repe…``) is a far better trade than no scope at
+#: all at the width the app is designed to. Never more than that: the subject is what the
+#: row is about, and a lane that shrank to make room for another would stop naming it.
+_SUBJECT_LEND = 1
+
+
+class _Lanes(NamedTuple):
+    """Which of the optional lanes a paint at one width carries, and the subject's width.
+
+    Attributes:
+        label: The class lane's text label beside its icon.
+        scope: The scope lane after the readings.
+        subject: The subject lane's width (:data:`_FEED_SUBJECT_WIDTH`, less whatever it
+            lent the scope lane).
+    """
+
+    label: bool
+    scope: bool
+    subject: int
+
+
+def _lanes_for(width: int) -> _Lanes:
+    """The lanes a row can carry at ``width``, most informative first.
+
+    The class label comes first — it says what a packet *is*, on every row — and keeps
+    the threshold it always had (:data:`_FEED_LABEL_MIN_WIDTH`). The scope lane then takes
+    whatever the row has left, borrowing up to :data:`_SUBJECT_LEND` cells off the subject
+    to fit. That makes the scope appear at two widths with a gap between them: at 72
+    columns (the label already dropped, the icon row leaving room), and again once a wide
+    terminal has room for both. In between the label wins, because a scope is ``unscoped``
+    on most rows and a class never is.
+
+    The PicoCalc's 53 columns never carry it: the icon-only row is 54 cells before any
+    scope, so it already scrolls sideways there, and a lane only reachable by ``←→`` on the
+    highlighted row would be a lane nobody reads. The viewer's ``route`` row states it.
+    """
+    label = width >= _FEED_LABEL_MIN_WIDTH
+    row = _FEED_LABEL_MIN_WIDTH - (0 if label else _FEED_CLASS_WIDTH + _LANE_GAP)
+    short = row + _SCOPE_LANE - width
+    if short > _SUBJECT_LEND:
+        return _Lanes(label, False, _FEED_SUBJECT_WIDTH)
+    return _Lanes(label, True, _FEED_SUBJECT_WIDTH - max(0, short))
+
 
 #: Cells one ←/→ press shifts the highlighted row by — the app-wide select list's own
 #: step (:attr:`~meshterm.ui.tui.select.SelectScreen._HSCROLL_STEP`), so a row here
@@ -236,6 +300,7 @@ class LiveFeedScreen(Screen):
         channel_names: Mapping[int, str] | None = None,
         type_of: TypeOf | None = None,
         key_of: NameKeyResolver | None = None,
+        scope_of: ScopeOf | None = None,
     ) -> None:
         """Create the feed over its data feeds.
 
@@ -259,6 +324,11 @@ class LiveFeedScreen(Screen):
                 :func:`~meshterm.services.trace_runner.make_name_key_resolver`), so a
                 channel sender the contacts or the recorder know takes its key-derived
                 hue; an unresolvable name stays muted.
+            scope_of: Reads a flood's scope off its raw frame against the regions known by
+                name (``ctx.region_store.scope_of``) — for the scope lane, and handed to
+                each opened viewer for its ``route`` row. ``None`` still tells a scoped
+                flood from a plain one, showing a scoped one's code where a name would go
+                (:func:`~meshterm.ui.packet_viewer.unnamed_scope`).
         """
         super().__init__()
         self.title = "Live feed"
@@ -270,6 +340,10 @@ class LiveFeedScreen(Screen):
         self._channel_names: Mapping[int, str] = channel_names or {}
         self._type_of = type_of
         self._key_of: NameKeyResolver = key_of or (lambda name: None)
+        self._scope_of: ScopeOf = scope_of or unnamed_scope
+        #: The lanes the last paint carried (see :func:`_lanes_for`) — read by the subject
+        #: builders, whose crowded-lane fallbacks measure against the lane actually drawn.
+        self._lanes = _lanes_for(_FEED_LABEL_MIN_WIDTH)
         #: The feed: latest events of every class as data, newest first — rendered
         #: fresh each paint (rows adapt to width) and handed whole to the viewer.
         self._feed: deque[PacketEntry] = deque(maxlen=_FEED_CAP)
@@ -476,6 +550,7 @@ class LiveFeedScreen(Screen):
             channels=self._channels,
             type_of=self._type_of,
             key_of=self._key_of,
+            scope_of=self._scope_of,
             # The live feed itself (newest first), so the viewer keeps up with packets
             # that arrive while it is open instead of freezing at this snapshot.
             source=lambda: list(self._feed),
@@ -497,17 +572,17 @@ class LiveFeedScreen(Screen):
         if self._selected is None:
             self._hmax = 0  # nothing highlighted scrolls, so nothing advertises ←→
             self._pinned = False  # a feed with no rows has nothing to pin to
-        show_label = width >= _FEED_LABEL_MIN_WIDTH
+        lanes = self._lanes = _lanes_for(width)
         lines: list[str] = []
         if self._feed:  # a header over nothing is noise; the empty note speaks for itself
-            lines.append(render_to_ansi(self._column_header(show_label), width, no_wrap=True))
+            lines.append(render_to_ansi(self._column_header(lanes), width, no_wrap=True))
         win = max(1, self._scroll_viewport - len(lines))
-        lines.extend(self._feed_lines(width, win, show_label))
+        lines.extend(self._feed_lines(width, win, lanes))
         self._scroll_total = max(1, len(lines))
         return lines
 
     @staticmethod
-    def _column_header(show_label: bool) -> Text:
+    def _column_header(lanes: _Lanes) -> Text:
         """The lane names, in the app's uppercase muted column-header voice.
 
         Laid out lane for lane against :meth:`_feed_row`, the pointer column included, so
@@ -527,10 +602,10 @@ class LiveFeedScreen(Screen):
         header.append(fit_cells("TIME", _TIME_LANE))
         header.append(
             fit_cells("CLASS", _ICON_LANE + _FEED_CLASS_WIDTH + _LANE_GAP)
-            if show_label
+            if lanes.label
             else " " * _ICON_LANE
         )
-        header.append(fit_cells("SUBJECT", _FEED_SUBJECT_WIDTH + _LANE_GAP))
+        header.append(fit_cells("SUBJECT", lanes.subject + _LANE_GAP))
         # The two readings right-align their number, so their labels do too — each sits
         # over the digits it names rather than over the sign column ahead of them.
         header.append(fit_cells("SNR", _READING_W, align="right"))
@@ -538,9 +613,12 @@ class LiveFeedScreen(Screen):
         header.append(" " * _LANE_GAP)
         header.append(fit_cells("RSSI", _READING_W, align="right"))
         header.append(" " * (_RSSI_LANE - _LANE_GAP - _READING_W))
+        if lanes.scope:
+            header.append(" " * _LANE_GAP)
+            header.append(fit_cells("SCOPE", _FEED_SCOPE_WIDTH))
         return header
 
-    def _feed_lines(self, width: int, win: int, show_label: bool) -> list[str]:
+    def _feed_lines(self, width: int, win: int, lanes: _Lanes) -> list[str]:
         """The feed's windowed rows: newest first, ``↑/↓ n more`` at the edges."""
         if not self._feed:
             return [render_to_ansi(Text("nothing heard yet", style="muted"), width)]
@@ -550,14 +628,14 @@ class LiveFeedScreen(Screen):
         if top > 0:
             out.append(render_to_ansi(ListWindow.marker(top, "above"), width))
         for i in range(top, top + count):
-            row = self._feed_row(entries[i], i == self._selected, show_label, width)
+            row = self._feed_row(entries[i], i == self._selected, lanes, width)
             out.append(render_to_ansi(row, width, no_wrap=True))
         below = len(entries) - top - count
         if below > 0:
             out.append(render_to_ansi(ListWindow.marker(below, "below"), width))
         return out
 
-    def _feed_row(self, entry: PacketEntry, selected: bool, show_label: bool, width: int) -> Text:
+    def _feed_row(self, entry: PacketEntry, selected: bool, lanes: _Lanes, width: int) -> Text:
         """Lay one feed row out in fixed lanes: time, class, subject, reception, detail.
 
         The class lane says what the packet *is*, straight from
@@ -565,7 +643,7 @@ class LiveFeedScreen(Screen):
         ``📻 channel text``, the class the viewer's card headlines, rather than the
         ``📦 packet`` event family it merely arrived in. Its icon always shows; the
         textual label beside it is dropped wholesale on a narrow terminal
-        (``show_label``), keeping the lanes aligned either way. The subject lane beside it
+        (``lanes.label``), keeping the lanes aligned either way. The subject lane beside it
         then answers what the packet is *about*, in whatever terms its class deals in
         (:meth:`_feed_subject`). No relay path rides here — the whole row fits a
         72-column screen precisely because it doesn't try to, and the route is drawn
@@ -600,7 +678,7 @@ class LiveFeedScreen(Screen):
         )
         icon, class_label = class_marks(entry)
         body.append(fit_cells(icon, _ICON_LANE))
-        if show_label:
+        if lanes.label:
             body.append(
                 fit_cells(class_label, _FEED_CLASS_WIDTH),
                 style=KIND_STYLES.get(entry.kind, "brand"),
@@ -609,7 +687,7 @@ class LiveFeedScreen(Screen):
         subject = self._feed_subject(entry)
         # The lane fits like every other: cells, not characters, ellipsis on overflow —
         # but as a Text, so a subject built of several styled pieces keeps them.
-        subject.truncate(_FEED_SUBJECT_WIDTH, overflow="ellipsis", pad=True)
+        subject.truncate(lanes.subject, overflow="ellipsis", pad=True)
         body.append_text(subject)
         body.append(" " * _LANE_GAP)
         body.append(
@@ -623,6 +701,14 @@ class LiveFeedScreen(Screen):
             style="muted",
         )
         note = self._feed_note(entry)
+        if lanes.scope:
+            scope = scope_text(self._entry_scope(entry), bare=True)
+            if scope or note is not None:
+                # Padded only where something follows it — a lane at the row's end needs
+                # no trailing blanks, and they would only give ←→ nothing to scroll to.
+                body.append(" " * _LANE_GAP)
+                scope.truncate(_FEED_SCOPE_WIDTH, overflow="ellipsis", pad=note is not None)
+                body.append_text(scope)
         if note is not None:
             body.append(" " * _LANE_GAP)
             body.append_text(note)
@@ -759,7 +845,7 @@ class LiveFeedScreen(Screen):
         if not src:
             return self._token("to", dest)
         named = PathLine([self._hop(src), self._hop(dest)], mode="plain").text()
-        if named.cell_len <= _FEED_SUBJECT_WIDTH:
+        if named.cell_len <= self._lanes.subject:
             return named
         # Too wide: the sender drops to its hash, so the addressee keeps its name whole (or
         # as much of it as the lane holds) instead of being the half that gets amputated.
@@ -798,6 +884,20 @@ class LiveFeedScreen(Screen):
         text = Text(f"{word} ", style="faint")
         text.append(value, style="muted")
         return text
+
+    def _entry_scope(self, entry: PacketEntry) -> Scope | None:
+        """The scope of a row's frame, or ``None`` where it has none to state.
+
+        Only a raw ``packet`` frame carries the route type and transport codes a scope is
+        read from, and only a flood has one; the lane is left blank for everything else —
+        a direct frame is never region-filtered, so a word there would claim a meaning it
+        lacks. The lane is drawn ``bare``: its heading already says ``SCOPE``, so a known
+        region reads as its name alone, while ``unscoped`` and ``scoped · 3fa1`` stay the
+        words they are everywhere (:func:`~meshterm.ui.widgets.scope_text`).
+        """
+        if entry.kind != "packet" or not isinstance(entry.raw, dict):
+            return None
+        return self._scope_of(entry.raw)
 
     def _feed_note(self, entry: PacketEntry) -> Text | None:
         """The row's trailing detail — a message's conversation, and nothing else.
@@ -883,6 +983,7 @@ async def open_livefeed(ctx: AppContext) -> None:
         channel_names=channel_names,
         type_of=type_of,
         key_of=key_of,
+        scope_of=ctx.region_store.scope_of,
     )
 
     unsubscribe = ctx.events.subscribe(screen.on_event)

@@ -35,11 +35,18 @@ detail read together:
   under a cracked chip at whichever edge continues, and snaps back the moment the
   selection moves on. A row you are *not* on is cut the same way — it just cannot slide.
 
+The message's **scope** — the region it was flooded into — rides the title as a status
+atom (``Message paths · scope harbour``), stated once for the message rather than per
+arrival: every copy carries its sender's transport code unchanged (see
+:func:`~meshterm.services.message_paths.message_scope`).
+
 Nothing here transmits; like the service beneath it, this is a read-model over what
 the radio already heard.
 """
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from rich.text import Text
 
@@ -67,7 +74,11 @@ from .widgets import (
     node_type_legend,
     revisit_note,
     route_graph_style,
+    scope_text,
 )
+
+if TYPE_CHECKING:
+    from ..core.regions import Scope
 
 #: Cells one ←/→ press shifts the selected row by.
 _HSTEP = 4
@@ -108,6 +119,7 @@ class MessagePathsScreen(Screen):
         destination: str | None = None,
         type_of: TypeOf | None = None,
         key_of: NameKeyResolver | None = None,
+        scope: Scope | None = None,
     ) -> None:
         """Build the dialog over one message's matched arrivals.
 
@@ -135,9 +147,12 @@ class MessagePathsScreen(Screen):
             key_of: Maps the origin's display name back to its node's key, so the
                 graph's left endpoint takes its key-derived hue; ``None`` (or an
                 unresolvable name) leaves it muted.
+            scope: The region the message was flooded into, read off its arrivals'
+                frames (:func:`~meshterm.services.message_paths.message_scope`); ``None``
+                where no copy was a flood, and the title then states nothing.
         """
         super().__init__()
-        self.title = "Message paths"
+        self.title = self.titled(scope)
         self._message = message
         self._arrivals = arrivals
         self._matched = matched
@@ -160,6 +175,23 @@ class MessagePathsScreen(Screen):
         #: makes the paging keys worth advertising.
         self._list = ListWindow()
         self._list_hidden = False
+
+    @staticmethod
+    def titled(scope: Scope | None) -> str:
+        """The dialog's title: its name, then the message's scope as a status atom.
+
+        Every copy of one message carries its sender's transport code (the code is over the
+        payload, which no relay touches), so the scope is a fact about the *message*, not
+        about any one arrival — stated once, up here, rather than repeated down a list whose
+        rows differ only by path. It rides the title because the title is where a screen's
+        status atoms chain (``Message paths · scope harbour``) and it costs the body no
+        line: on the PicoCalc's 26 rows a line spent here is a lane of the fan or a row of
+        the list. The words are :func:`~meshterm.ui.widgets.scope_text`'s, plain — a title
+        carries no styling — so ``unscoped`` and ``scoped · 3fa1`` read here exactly as they
+        do on the packet viewer's ``route`` row.
+        """
+        atom = scope_text(scope).plain
+        return f"Message paths · {atom}" if atom else "Message paths"
 
     # --- input ---------------------------------------------------------------
 

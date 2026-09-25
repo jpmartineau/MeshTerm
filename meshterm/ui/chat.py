@@ -1180,6 +1180,7 @@ async def _make_paths_presenter(
         collapse,
         direct_arrivals,
         distinct_paths,
+        message_scope,
     )
     from .message_paths_screen import MessagePathsScreen
 
@@ -1289,6 +1290,7 @@ async def _make_paths_presenter(
                 destination=destination or None,
                 type_of=type_of,
                 key_of=key_of,
+                scope=message_scope(arrivals, ctx.region_store.scope_of),
             )
         )
 

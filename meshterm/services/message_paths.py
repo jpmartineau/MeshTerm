@@ -36,8 +36,8 @@ Nothing here transmits; it is a read-model over the repository.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -46,6 +46,7 @@ from ..core.frames import ENDPOINT_HASH_BYTES
 from ..core.models import ChatMessage, Observation
 
 if TYPE_CHECKING:
+    from ..core.regions import Scope
     from ..persistence.repository import Repository
 
 #: How far around a channel message the log is searched. Wide, because an inbound
@@ -104,6 +105,9 @@ class Arrival:
             repeater in earshot, so one message routinely leaves a dozen frames on two
             paths; listing them individually said "twelve arrivals" where the truth was
             "two paths, six times each".
+        frame: The logged frame's raw payload — what :func:`message_scope` reads the
+            message's scope from. Not part of an arrival's identity (two copies on one path
+            are one row whatever else their frames carry), so it takes no part in equality.
     """
 
     when: datetime
@@ -112,6 +116,7 @@ class Arrival:
     resend: int = 0
     routed: bool | None = None
     copies: int = 1
+    frame: dict | None = field(default=None, compare=False, repr=False)
 
     @property
     def route_known(self) -> bool:
@@ -196,6 +201,7 @@ def channel_arrivals(
                 snr=frame.snr,
                 resend=decrypted.attempt,
                 routed=_frame_routed(raw),
+                frame=raw,
             )
         )
     return arrivals
@@ -337,6 +343,7 @@ def direct_arrivals(
             hops=_frame_hops(frame),
             snr=frame.snr,
             routed=_frame_routed(raw),
+            frame=raw,
         )
         mac = str(raw.get("cipher_mac") or "").lower()
         if mac:
@@ -384,6 +391,45 @@ def collapse(arrivals: Sequence[Arrival]) -> list[Arrival]:
         )
         folded[key] = replace(seen, snr=best, copies=seen.copies + 1)
     return list(folded.values())
+
+
+def message_scope(
+    arrivals: Sequence[Arrival], scope_of: Callable[[dict | None], Scope | None]
+) -> Scope | None:
+    """The one scope a message was flooded under, read off its arrivals' frames.
+
+    A transport code is a keyed hash of the payload alone — neither the header nor the
+    path is in it (see :mod:`~meshterm.core.regions`) — so every relay's copy carries the
+    sender's code unchanged, and one message has **one** scope however many ways it
+    arrived. That is why the dialog states it once rather than per arrival row.
+
+    Which frame answers still matters, because not every copy is a flood: a direct-routed
+    copy has no scope at all. So the first scoped reading wins, a *named* one over one no
+    known region reproduces (they are the same code, but a name is the better answer when
+    any copy yields one); failing that, any plain-flood copy makes the message
+    ``unscoped``; and a message heard only direct-routed has no scope to state.
+
+    Args:
+        arrivals: The message's arrivals, as the matchers (or :func:`collapse`) return
+            them — each carrying its logged frame.
+        scope_of: Reads a frame's scope (``ctx.region_store.scope_of``).
+
+    Returns:
+        The message's scope, or ``None`` where no copy was a flood.
+    """
+    unscoped: Scope | None = None
+    unnamed: Scope | None = None
+    for arrival in arrivals:
+        scope = scope_of(arrival.frame)
+        if scope is None:
+            continue
+        if not scope.scoped:
+            unscoped = unscoped or scope
+        elif scope.region:
+            return scope
+        else:
+            unnamed = unnamed or scope
+    return unnamed or unscoped
 
 
 def distinct_paths(arrivals: list[Arrival]) -> int:

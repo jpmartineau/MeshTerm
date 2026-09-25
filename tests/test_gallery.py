@@ -53,6 +53,7 @@ from meshterm.core.models import (
     utcnow,
 )
 from meshterm.core.preferences import Preferences
+from meshterm.core.regions import frame_scope, region_key, scope_body, transport_code
 from meshterm.core.remote_store import CachedValue
 from meshterm.core.watch_store import WatchStore
 from meshterm.persistence.repository import DiscoveredPath
@@ -602,6 +603,48 @@ def _livefeed(cols: int, rows: int) -> Screen:
     )
 
 
+#: The region the scope specimens resolve against, and a channel-text payload to scope.
+_REGION = "harbour"
+_SCOPED_PAYLOAD = bytes.fromhex("a71c2d00112233445566778899aabbccddeeff")
+
+
+def _scoped_frame(region: str) -> dict:
+    """An RX-log frame's raw payload for a channel text flooded under ``region``."""
+    code = transport_code(region_key(region), scope_body(5, _SCOPED_PAYLOAD))
+    return {
+        "route_typename": "TC_FLOOD",
+        "payload_type": 5,
+        "payload_typename": "GRP_TXT",
+        "chan_hash": "a7",
+        "pkt_payload": _SCOPED_PAYLOAD,
+        "transport_code": code.to_bytes(2, "little").hex() + "0000",
+    }
+
+
+def _scope_of(raw: dict | None):  # noqa: ANN202 - the region store's answer, standing in
+    """Resolve a frame's scope against the one region the specimens know by name."""
+    return frame_scope(raw, (_REGION,)) if isinstance(raw, dict) else None
+
+
+def _livefeed_scopes(cols: int, rows: int) -> Screen:
+    """The feed carrying a scoped, an unknown-scoped, an unscoped and a direct frame."""
+    frames = [
+        _scoped_frame(_REGION),
+        _scoped_frame("elsewhere"),  # a region nobody here has named
+        {"route_typename": "FLOOD", "payload_typename": "GRP_TXT", "chan_hash": "a7"},
+        {"route_typename": "DIRECT", "payload_typename": "TEXT_MSG", "dest_hash": "a1"},
+    ]
+    return LiveFeedScreen(
+        session=_GallerySession(cols, rows),
+        resolve=lambda h: {"a1": "Alice"}.get(h, ""),
+        seed=[
+            Observation(node="", kind="packet", snr=5.0, rssi=-90.0, observed_at=utcnow(), raw=raw)
+            for raw in frames
+        ],
+        scope_of=_scope_of,
+    )
+
+
 def _walk_topo() -> tuple[MeshTopology, dict[str, Contact]]:
     hub = Contact(name="Hilltop-Repeater", public_key=_HUB_KEY, key_prefix="3d63c6429436")
     far = Contact(name="Alice", public_key=_FAR_KEY, key_prefix="f2c24f54551e")
@@ -651,6 +694,38 @@ def _message_paths(cols: int, rows: int) -> Screen:
         self_name="Homestead",
         summary="heard twice",
         source="Alice",
+    )
+
+
+def _message_paths_scoped(cols: int, rows: int) -> Screen:
+    """A message flooded under a known region: its scope rides the title, stated once."""
+    screen = _message_paths(cols, rows)
+    return MessagePathsScreen(
+        screen._message,
+        screen._arrivals,
+        matched=True,
+        resolve=lambda h: h,
+        prefix_bytes=1,
+        self_name="Homestead",
+        summary="heard twice",
+        source="Alice",
+        scope=_scope_of(_scoped_frame(_REGION)),
+    )
+
+
+def _message_paths_unknown_scope(cols: int, rows: int) -> Screen:
+    """A message flooded under a region nobody here has named: the code stands in."""
+    screen = _message_paths(cols, rows)
+    return MessagePathsScreen(
+        screen._message,
+        screen._arrivals,
+        matched=True,
+        resolve=lambda h: h,
+        prefix_bytes=1,
+        self_name="Homestead",
+        summary="heard twice",
+        source="Alice",
+        scope=_scope_of(_scoped_frame("elsewhere")),
     )
 
 
@@ -801,6 +876,27 @@ def _packet_viewer(cols: int, rows: int) -> Screen:
         0,
         resolve=lambda h: {"3d63c6429436": "Hilltop-Repeater"}.get(h, h),
     )
+
+
+def _packet_viewer_scoped(cols: int, rows: int, region: str = _REGION) -> Screen:
+    """A channel text flooded under a region: the route row names it."""
+    entry = PacketEntry(
+        when=utcnow(),
+        kind="packet",
+        path="3d63c6429436f2c24f54551e",
+        raw=_scoped_frame(region),
+    )
+    return PacketViewer(
+        [entry],
+        0,
+        resolve=lambda h: {"3d63c6429436": "Hilltop-Repeater"}.get(h, h),
+        scope_of=_scope_of,
+    )
+
+
+def _packet_viewer_unknown_scope(cols: int, rows: int) -> Screen:
+    """A channel text flooded under a region nobody here has named: its code stands in."""
+    return _packet_viewer_scoped(cols, rows, region="elsewhere")
 
 
 def _trace(cols: int, rows: int) -> Screen:
@@ -1103,9 +1199,12 @@ _ENTRIES: list[_Entry] = [
     _Entry("channels_manager", _channels_manager),
     _Entry("channel_detail", _channel_detail),
     _Entry("livefeed", _livefeed),
+    _Entry("livefeed_scopes", _livefeed_scopes),
     _Entry("walk", _walk),
     _Entry("timemachine", _timemachine),
     _Entry("message_paths", _message_paths),
+    _Entry("message_paths_scoped", _message_paths_scoped),
+    _Entry("message_paths_unknown_scope", _message_paths_unknown_scope),
     _Entry("remote_cli", _remote_cli),
     _Entry("path_composer", _path_composer),
     _Entry("courier_outbox", _courier_outbox),
@@ -1113,6 +1212,8 @@ _ENTRIES: list[_Entry] = [
     _Entry("record_route", _record_route),
     _Entry("record_area", _record_area),
     _Entry("packet_viewer", _packet_viewer),
+    _Entry("packet_viewer_scoped", _packet_viewer_scoped),
+    _Entry("packet_viewer_unknown_scope", _packet_viewer_unknown_scope),
     _Entry("trace", _trace),
     _Entry("tx_sweep", _tx_sweep),
     _Entry("device_info", _device_info),
