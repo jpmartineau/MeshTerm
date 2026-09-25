@@ -12,7 +12,7 @@ graph. The feed's job is to say what arrived and how well it was heard; Enter sa
 it got here.
 
 Where the width allows, a **scope** lane follows the readings: the region a flood was sent
-into (``harbour``), ``scoped · 3fa1`` for a region nobody here has named, ``unscoped`` for a
+into (``harbour``), ``unknown scope 3fa1`` for a region nobody here has named, ``unscoped`` for a
 plain flood, and nothing for a direct frame, which no repeater region-filters (see
 :func:`_lanes_for` for which widths hold it, and why the PicoCalc's never does).
 
@@ -161,7 +161,7 @@ _FEED_LABEL_MIN_WIDTH = (
 )
 
 #: The scope lane's width: the longest thing :func:`~meshterm.ui.widgets.scope_text` draws
-#: for an unnamed scope (``scoped · 3fa1``), so the one reading that carries a code keeps
+#: for an unnamed scope (``unknown scope 3fa1``), so the one reading that carries a code keeps
 #: it whole. A named region longer than this ellipsizes — its whole name is on the
 #: viewer's ``route`` row, one keypress away, like everything else a lane cuts.
 _FEED_SCOPE_WIDTH = 13
@@ -892,7 +892,7 @@ class LiveFeedScreen(Screen):
         read from, and only a flood has one; the lane is left blank for everything else —
         a direct frame is never region-filtered, so a word there would claim a meaning it
         lacks. The lane is drawn ``bare``: its heading already says ``SCOPE``, so a known
-        region reads as its name alone, while ``unscoped`` and ``scoped · 3fa1`` stay the
+        region reads as its name alone, while ``unscoped`` and ``unknown scope 3fa1`` stay the
         words they are everywhere (:func:`~meshterm.ui.widgets.scope_text`).
         """
         if entry.kind != "packet" or not isinstance(entry.raw, dict):

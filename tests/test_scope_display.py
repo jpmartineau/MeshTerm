@@ -105,14 +105,14 @@ def test_the_viewer_names_the_region_a_flood_was_scoped_to() -> None:
 def test_the_viewer_shows_an_unnamed_scopes_code_and_a_plain_flood_as_unscoped() -> None:
     """A scope no known name reproduces keeps its code; a plain flood reads unscoped."""
     assert _route_row(_scoped("elsewhere"), _knows("harbour")).endswith(
-        f"flood · scoped · {_code('elsewhere')}"
+        f"flood · unknown scope {_code('elsewhere')}"
     )
     assert _route_row(_FLOOD, _knows("harbour")).endswith("flood · unscoped")
 
 
 def test_the_viewer_without_a_store_still_tells_scoped_from_unscoped() -> None:
     """No names at hand is less of the truth, never a wrong one: the code stands in."""
-    assert _route_row(_scoped("harbour")).endswith(f"flood · scoped · {_code('harbour')}")
+    assert _route_row(_scoped("harbour")).endswith(f"flood · unknown scope {_code('harbour')}")
     assert _route_row(_FLOOD).endswith("flood · unscoped")
 
 
@@ -182,7 +182,7 @@ def test_the_feed_carries_a_scope_lane_on_a_72_column_terminal() -> None:
     header, *rows = _stripped(screen.render_body(68))
     assert header.split()[-1] == "SCOPE"
     assert rows[0].rstrip().endswith("harbour")
-    assert rows[1].rstrip().endswith(f"scoped · {_code('elsewhere')}")
+    assert rows[1].rstrip().endswith(f"? {_code('elsewhere')}")
     assert rows[2].rstrip().endswith("unscoped")
     assert rows[3].rstrip().endswith("dBm")  # the direct frame states no scope
     for line in (header, *rows):
@@ -293,7 +293,9 @@ def test_the_paths_dialog_states_the_scope_once_in_its_title() -> None:
     assert _paths_screen(Scope("scoped", "harbour", "3fa1")).title == (
         "Message paths · scope harbour"
     )
-    assert _paths_screen(Scope("unknown", None, "3fa1")).title == "Message paths · scoped · 3fa1"
+    assert (
+        _paths_screen(Scope("unknown", None, "3fa1")).title == "Message paths · unknown scope 3fa1"
+    )
     assert _paths_screen(UNSCOPED).title == "Message paths · unscoped"
     assert _paths_screen(None).title == "Message paths"
     # …and never per arrival row: the body does not repeat it.

@@ -192,7 +192,7 @@ class MessagePathsScreen(Screen):
         status atoms chain (``Message paths · scope harbour``) and it costs the body no
         line: on the PicoCalc's 26 rows a line spent here is a lane of the fan or a row of
         the list. The words are :func:`~meshterm.ui.widgets.scope_text`'s, plain — a title
-        carries no styling — so ``unscoped`` and ``scoped · 3fa1`` read here exactly as they
+        carries no styling — so ``unscoped`` and ``unknown scope 3fa1`` read here exactly as they
         do on the packet viewer's ``route`` row.
         """
         atom = scope_text(scope).plain

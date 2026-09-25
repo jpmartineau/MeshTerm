@@ -102,7 +102,8 @@ def scope_text(scope: Scope | None, *, bare: bool = False) -> Text:
 
     * ``scope yul`` — a scoped flood whose region is known, the name in the ``scope``
       style (a region is not a node, so it never takes a node hue);
-    * ``scoped · 3fa1`` — a scoped flood no known name reproduces: the code is shown so
+    * ``unknown scope 3fa1`` (``? 3fa1`` bare) — a scoped flood no known name
+      reproduces: the code is shown so
       two frames can still be told to share a region, ``muted`` because it names nothing;
     * ``unscoped`` — a plain flood, ``muted``: the ordinary case, stated not stressed.
 
@@ -125,9 +126,11 @@ def scope_text(scope: Scope | None, *, bare: bool = False) -> Text:
             text.append("scope ", style="muted")
         text.append(scope.region, style="scope")
     elif scope.scoped:
-        text.append("scoped", style="muted")
+        # No `·` inside the reading: a title chains its status atoms with `·`, and
+        # ``scoped · 3fa1`` there read as two atoms where it is one fact.
+        text.append("?" if bare else "unknown scope", style="muted")
         if scope.code:
-            text.append(f" · {scope.code}", style="muted")
+            text.append(f" {scope.code}", style="muted")
     else:
         text.append("unscoped", style="muted")
     return text

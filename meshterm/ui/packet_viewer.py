@@ -85,7 +85,7 @@ def unnamed_scope(raw: dict | None) -> Scope | None:
     """A frame's scope read without any region names — the fallback when none are at hand.
 
     Still says everything the frame itself says: a plain flood is ``unscoped``, and a
-    scoped one is ``scoped · <code>``. Only the *naming* needs the known regions (see
+    scoped one is ``unknown scope <code>``. Only the *naming* needs the known regions (see
     :meth:`~meshterm.core.region_store.RegionStore.scope_of`), so a viewer opened without a
     store never draws less than the truth, only less than the whole of it.
     """
@@ -999,7 +999,7 @@ class PacketViewer(Screen):
 
         A flood reads ``flood`` and then its scope as a chained atom
         (:func:`~meshterm.ui.widgets.scope_text`) — ``flood · scope harbour``,
-        ``flood · scoped · 3fa1``, ``flood · unscoped`` — rather than the library's
+        ``flood · unknown scope 3fa1``, ``flood · unscoped`` — rather than the library's
         ``tc flood``, which named the wire mechanism (transport codes) and left the
         reader to know that it meant *scoped*, and to which region nobody could say.
         A scoped and an unscoped flood are one routing; the scope is what differs, so it
