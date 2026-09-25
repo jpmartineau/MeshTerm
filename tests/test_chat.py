@@ -1693,9 +1693,25 @@ async def test_open_chat_sends_through_real_session(tmp_path: Path) -> None:
             session = TuiSession(input=inp, output=DummyOutput())
             ctx.ui = TuiUi(session)
 
+            def stored_texts() -> list[str]:
+                rows = ctx.repo.recent_chat_messages(is_channel=False, peer="d4e5f6a7")
+                return [m.text for m in rows]
+
+            async def drive() -> None:
+                # Esc only once the send has been recorded: the send runs in a task the
+                # screen spawns, and piping Esc beside Enter let a slow runner leave (and
+                # cancel it) before the row was written.
+                inp.send_text("hi\r")  # type "hi", Enter (send)
+                while not stored_texts():
+                    await asyncio.sleep(0.01)
+                inp.send_text("\x1b")  # Esc (leave)
+
             async def main() -> None:
-                inp.send_text("hi\r\x1b")  # type "hi", Enter (send), Esc (leave)
-                await open_chat(ctx, conv)
+                driver = asyncio.ensure_future(drive())
+                try:
+                    await open_chat(ctx, conv)
+                finally:
+                    driver.cancel()
 
             await asyncio.wait_for(session.run(main()), timeout=5)
 

@@ -11,6 +11,7 @@ against a scripted stand-in for the system bus: no BlueZ, no radio, and no real 
 from __future__ import annotations
 
 import asyncio
+import os
 
 import pytest
 
@@ -161,19 +162,18 @@ class _FakeBus:
         self.disconnected = True
 
 
-_AGENT = "/net/meshterm/agent"
+_AGENT = f"/net/meshterm/agent{os.getpid()}"
 
 
 @pytest.fixture
 def bus(monkeypatch):
-    """Point :mod:`bluez` at a fresh fake bus, with the agent at a fixed path."""
+    """Point :mod:`bluez` at a fresh fake bus."""
     holder: dict = {}
 
     async def _system_bus():
         return holder["bus"]
 
     monkeypatch.setattr(bluez, "_system_bus", _system_bus)
-    monkeypatch.setattr(bluez.os, "getpid", lambda: "")
 
     def _make(**kwargs) -> _FakeBus:
         holder["bus"] = _FakeBus(**kwargs)
