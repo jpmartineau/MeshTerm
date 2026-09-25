@@ -149,6 +149,9 @@ MESH_THEME = Theme(
         "type.repeater": "#a78bfa",
         "type.room": "#ffffff",
         "type.sensor": "#fb923c",
+        # A region name (a flood's scope). Not a node, so no hue from the node wheel: a
+        # light slate, set apart from prose by its slant the way a tag is from a sentence.
+        "scope": "italic #cbd5e1",
         # The basemap features whose *hue* is the information — water is blue, parks are
         # green, a highway is the warm one — and which a naive downsample therefore ruins
         # (the dark blue lands on grey, the dark green on black, the amber on bright red).
@@ -345,6 +348,9 @@ MESH_THEME_16 = Theme(
         "type.repeater": "not bold color(5)",
         "type.room": "color(15)",
         "type.sensor": "not bold color(3)",
+        # A region name: the VT has no italic and every chromatic slot is a node hue, so
+        # the plain light grey — the word "scope" in front of it does the setting apart.
+        "scope": "not bold color(7)",
         # The basemap on the console: a water body is the dim blue, every watercourse
         # crossing it the bright blue one rung up (the palette has exactly one of each —
         # a river's depth of shade is a truecolour luxury, and all three waterway shades
@@ -701,6 +707,7 @@ _GLYPH_MAP: dict[str, str] = {
     "🗼": "▲",   # repeater admin — the repeater mark itself
     "🔌": "~",   # serial port — the cable
     "📍": "╨",   # a radio on the host's SPI bus — the antenna on its board
+    "🔖": "╬",   # region/scope — a flood's label; the grid square of an area
     "👤": "%",   # a person (two-circle silhouette)
     "👥": "%",   # contacts — people
     "👋": "",    # a wave in prose — the words carry it

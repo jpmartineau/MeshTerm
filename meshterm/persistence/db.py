@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -140,7 +140,10 @@ CREATE TABLE IF NOT EXISTS observations (
     src         TEXT,             -- …the sender's key hash, or its whole key (anon request)
     tag         TEXT,             -- …the frame's own token: an ack's checksum, a trace's tag
     trace_snrs  TEXT,             -- TRACE rows: comma-separated per-hop SNR readings (dB)
-    route       TEXT              -- 'packet' rows: FLOOD/DIRECT/… — what `path` MEANS here
+    route       TEXT,             -- 'packet' rows: FLOOD/DIRECT/… — what `path` MEANS here
+    transport_code TEXT,          -- scoped (TC_*) rows: the 4-byte transport-codes field (hex)
+    scope_body  TEXT              -- TC_FLOOD rows: payload type byte + payload (hex), the
+                                  --   HMAC input a region name is resolved against
 );
 
 -- One chat message, sent or received, on a channel or with a contact. Unlike the other
@@ -332,3 +335,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # than assumed flooded; the raw headers they arrived in were never persisted, so this
         # cannot be filled in from history.
         conn.execute("ALTER TABLE observations ADD COLUMN route TEXT")
+    if "transport_code" not in observation_cols:
+        # v15 -> v16: a scoped flood's region. A TC_FLOOD frame carries a transport code —
+        # an HMAC of its own payload keyed on the region it was sent into — and nothing
+        # else names the region, so which one it was can only be answered by trying the
+        # region names known (see meshterm.core.regions). Names arrive late: a repeater
+        # tells us what it carries long after we overheard traffic scoped to it. So the
+        # code is kept with the exact bytes it was computed over, and a row heard today
+        # resolves against a name learned next week. The body is kept for TC_FLOOD rows
+        # alone — a plain flood has no code, a direct frame is never region-filtered — so
+        # the price is paid only by the traffic it explains. Older rows carry NULL: the
+        # raw frames they arrived in were never persisted, so their scope is lost.
+        conn.execute("ALTER TABLE observations ADD COLUMN transport_code TEXT")
+        conn.execute("ALTER TABLE observations ADD COLUMN scope_body TEXT")

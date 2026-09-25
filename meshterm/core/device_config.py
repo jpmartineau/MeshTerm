@@ -18,6 +18,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
+from . import regions
 from .connection import Device, repeat_freq_allowed
 
 # Display categories, in the order the editor and `config show` present them.
@@ -375,6 +376,21 @@ async def _client_repeat_apply(device: Device, value: Any, snapshot: dict) -> No
         )
     await device.set_radio(*radio, repeat=bool(value))
     snapshot["repeat"] = bool(value)
+
+
+def _flood_scope_valid(value: Any, snapshot: dict | None) -> str | None:
+    """Refuse a default scope name the firmware would refuse (see :func:`regions.validate`).
+
+    ``max_length`` counts characters; the firmware counts UTF-8 bytes, and a repeater could
+    never list back a name with a space or comma in it. Empty is valid — it clears.
+    """
+    if not str(value or "").strip():
+        return None
+    try:
+        regions.validate(str(value))
+    except regions.RegionNameError as exc:
+        return str(exc)
+    return None
 
 
 async def _autoadd_hops_apply(device: Device, value: Any, snapshot: dict) -> None:
@@ -744,10 +760,11 @@ DEVICE_SETTINGS: list[SettingSpec] = [
     SettingSpec(
         "flood_scope",
         "Flood scope",
-        "Keep traffic to one group; empty reaches everyone",
+        "Keep floods in one region; empty reaches everyone",
         "Behavior",
         "str",
         max_length=30,
+        validate=_flood_scope_valid,
         getter=_get("flood_scope"),
         apply=lambda d, v, s: d.set_default_flood_scope(v),
     ),

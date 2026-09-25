@@ -43,6 +43,10 @@ from .models import (
     advert_time,
     utcnow,
 )
+from .regions import WILDCARD as REGION_WILDCARD
+from .regions import normalize as normalize_region
+from .regions import parse_region_list, region_key
+from .regions import validate as validate_region
 from .tracing import path_hash_flags, trace_timeout
 
 if TYPE_CHECKING:
@@ -227,6 +231,10 @@ _ERR_NOT_FOUND = 2
 #: ``CMD_SET_AUTOADD_CONFIG`` — the auto-add bitmask, and (as an optional second byte, which
 #: the ``meshcore`` library never sends) the hop limit.
 _CMD_SET_AUTOADD_CONFIG = 58
+
+#: Companion command that persists the default flood scope (firmware 1.15+), framed by
+#: :meth:`MeshCoreDevice.set_default_flood_scope` itself rather than the library.
+_CMD_SET_DEFAULT_FLOOD_SCOPE = 63
 
 #: ``RESP_CODE_AUTOADD_CONFIG`` — the reply to a read of the auto-add configuration. Its
 #: second payload byte is the hop limit, which the library's parser drops (it keeps only the
@@ -699,6 +707,29 @@ class Device(ABC):
         """
 
     @abstractmethod
+    async def request_regions(self, node: Contact) -> list[str]:
+        """Ask a repeater which regions it relays floods for (firmware 1.12+).
+
+        An anonymous request — no login — that a repeater answers only when it arrives
+        *direct or zero-hop*: a flooded copy is dropped (firmware gates ``REGIONS`` behind
+        ``isRouteDirect()``), so the library pins a routeless contact to zero hops for the
+        exchange. In practice that means a neighbour, or a contact with a learned route.
+        It is also rate-limited on the repeater, so this is a one-shot question, never a
+        poll.
+
+        Args:
+            node: The repeater to ask.
+
+        Returns:
+            The region names it listed, bare, in its order — ``*`` first when it also
+            relays unscoped floods (see :func:`~meshterm.core.regions.parse_region_list`).
+
+        Raises:
+            DeviceCommandError: If the repeater never answered (out of direct reach, too
+                old, rate-limited, or not a repeater).
+        """
+
+    @abstractmethod
     async def run_trace(
         self,
         target: str,
@@ -982,8 +1013,24 @@ class Device(ABC):
     async def set_default_flood_scope(self, scope: str) -> None:
         """Persist the default flood scope by name (empty string clears it).
 
-        A missing leading ``#`` is added by the transport layer, matching how scope names
-        are hashed into their 16-byte keys.
+        The name is stored bare, as the firmware and the official apps store it; the
+        ``#`` belongs only to deriving its 16-byte key (see :mod:`~meshterm.core.regions`).
+        """
+
+    @abstractmethod
+    async def set_flood_scope(self, region: str | None) -> None:
+        """Set the session send scope — what the next floods go out under, until changed.
+
+        The firmware's session override (``CMD_SET_FLOOD_SCOPE_KEY``): not persisted, reset
+        at boot, and applied to *every* flood the companion sends — channel messages, flood
+        DMs, acks, path returns, requests — ahead of the persisted default. There is no
+        per-channel scope in firmware, so a channel scope is this call made just before the
+        channel send (and undone after it).
+
+        Args:
+            region: A region name to scope to; :data:`~meshterm.core.regions.WILDCARD`
+                (``*``) to force unscoped even over a default scope (firmware 1.16+); or
+                ``None`` to drop the override and fall back to the default scope.
         """
 
     @abstractmethod
@@ -2320,6 +2367,21 @@ class MeshCoreDevice(Device):
             )
         return neighbours
 
+    async def request_regions(self, node: Contact) -> list[str]:  # noqa: D102
+        mc = self._require()
+        pub = self._node_pubkey(node)
+        transmit_gate.mark()
+        # ``min_timeout`` for the reason the neighbour request carries one: the companion's
+        # suggested timeout is optimistic for anything but an adjacent node.
+        text = await mc.commands.req_regions_sync(pub, min_timeout=10)
+        if text is None:
+            raise DeviceCommandError(
+                f"{node.name!r} did not answer the regions request. A repeater answers it "
+                "only when it arrives direct (a neighbour, or a contact with a route), at "
+                "most every few seconds, and only on firmware 1.12 or newer."
+            )
+        return parse_region_list(text)
+
     async def run_trace(  # noqa: D102 - inherited docstring
         self,
         target: str,
@@ -2765,7 +2827,9 @@ class MeshCoreDevice(Device):
         event = self._ok(await self._require().commands.get_default_flood_scope())
         payload = getattr(event, "payload", {}) or {}
         name = payload.get("scope_name")
-        return None if name is None else str(name)
+        # Bare, whichever client wrote it: MeshTerm before its own framing, and the library
+        # still, stored a ``#`` the firmware and the apps leave off.
+        return None if name is None else normalize_region(str(name))
 
     async def get_time(self) -> int | None:  # noqa: D102 - inherited docstring
         event = self._ok(await self._require().commands.get_time())
@@ -2889,9 +2953,40 @@ class MeshCoreDevice(Device):
         self._autoadd_hops = _UNREAD
 
     async def set_default_flood_scope(self, scope: str) -> None:  # noqa: D102
-        # The library treats "", "0", "None" and "*" as "clear the scope"; normalize to
-        # None for the empty case so only a real name gets the ``#`` treatment.
-        self._ok(await self._require().commands.set_default_flood_scope(scope.strip() or None))
+        from meshcore import EventType
+
+        # Framed here rather than by the library's ``set_default_flood_scope``, which stores
+        # the name *with* a ``#`` (the firmware and the apps store it bare, so ours read
+        # back differently from theirs, and a 30-byte name became a 31-byte one the
+        # firmware refuses) and pads by characters rather than UTF-8 bytes (so a name with
+        # an accent put the key at the wrong offset). ``[63][name, 31 bytes NUL-padded]
+        # [key16]``; a frame shorter than that clears the default.
+        bare = normalize_region(scope)
+        if not bare or bare == REGION_WILDCARD:
+            frame = bytes([_CMD_SET_DEFAULT_FLOOD_SCOPE])
+        else:
+            bare = validate_region(bare)
+            name = bare.encode("utf-8")
+            frame = (
+                bytes([_CMD_SET_DEFAULT_FLOOD_SCOPE])
+                + name
+                + bytes(31 - len(name))
+                + region_key(bare)
+            )
+        mc = self._require()
+        self._ok(await mc.commands.send(frame, [EventType.OK, EventType.ERROR]))
+
+    async def set_flood_scope(self, region: str | None) -> None:  # noqa: D102
+        commands = self._require().commands
+        bare = normalize_region(region) if region else ""
+        if not bare:
+            self._ok(await commands.reset_flood_scope())
+        elif bare == REGION_WILDCARD:
+            self._ok(await commands.force_unscoped())
+        else:
+            # The key goes over as bytes, which the library sends as-is — its string path
+            # would derive the same key, but through its own ``#`` handling.
+            self._ok(await commands.set_flood_scope(region_key(validate_region(bare))))
 
     async def set_manual_add_contacts(self, enabled: bool) -> None:  # noqa: D102
         self._ok(await self._require().commands.set_manual_add_contacts(enabled))
@@ -3079,6 +3174,8 @@ class MockDevice(Device):
         # Client repeat (firmware v9+): off, as a freshly flashed companion ships.
         self._client_repeat = False
         self._flood_scope = ""
+        #: The session send scope (``""`` follows the default, ``"*"`` is forced unscoped).
+        self._send_scope = ""
         # Simulated clock skew (seconds behind the host), so the sync-clock flow has a
         # visible drift to correct until set_time is called.
         self._clock_offset: int | None = -125
@@ -3323,6 +3420,16 @@ class MockDevice(Device):
             for prefix, snr, ago in table
         ]
 
+    async def request_regions(self, node: Contact) -> list[str]:  # noqa: D102
+        await asyncio.sleep(0)
+        key = self._mock_key(node)
+        # Only a node with a neighbour table is a repeater here, and only a repeater answers.
+        if self._neighbour_tables.get(key[:8]) is None:
+            raise DeviceCommandError(
+                f"{node.name!r} did not answer the regions request (not a repeater)."
+            )
+        return parse_region_list("*,lakeside,lakeside-north,harbour")
+
     @staticmethod
     def _mock_key(node: Contact) -> str:
         """Return the lookup key for a remote node (its public key, else key prefix)."""
@@ -3440,12 +3547,13 @@ class MockDevice(Device):
             self._autoadd_max_hops = min(int(max_hops), 64)
 
     async def set_default_flood_scope(self, scope: str) -> None:  # noqa: D102
-        # Mirror the transport layer: empty clears, a bare name gains its leading #.
-        scope = scope.strip()
-        if not scope:
-            self._flood_scope = ""
-        else:
-            self._flood_scope = scope if scope.startswith("#") else f"#{scope}"
+        # Mirror the firmware: empty (or the wildcard) clears, a name is stored bare.
+        bare = normalize_region(scope)
+        self._flood_scope = "" if bare in ("", REGION_WILDCARD) else validate_region(bare)
+
+    async def set_flood_scope(self, region: str | None) -> None:  # noqa: D102
+        bare = normalize_region(region) if region else ""
+        self._send_scope = validate_region(bare) if bare and bare != REGION_WILDCARD else bare
 
     async def set_manual_add_contacts(self, enabled: bool) -> None:  # noqa: D102
         self._info["manual_add_contacts"] = enabled

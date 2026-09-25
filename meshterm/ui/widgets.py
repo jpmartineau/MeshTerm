@@ -62,6 +62,7 @@ from .theme import glyph, mark_rgb, name_style, node_style, snr_style
 
 if TYPE_CHECKING:
     from ..core.discovery import DiscoveredDevice
+    from ..core.regions import Scope
 
 
 def channel_glyph(name: str, secret: bytes | None) -> str:
@@ -88,6 +89,48 @@ def channel_glyph(name: str, secret: bytes | None) -> str:
     if is_public_channel(name, secret):
         return glyph("🌐")
     return glyph("🔒")
+
+
+#: The concept icon for a region — a flood's scope (see ``CLAUDE.md``'s icon table).
+REGION_ICON = "🔖"
+
+
+def scope_text(scope: Scope | None, *, bare: bool = False) -> Text:
+    """THE rendering of a flood's scope, for every surface that states one.
+
+    Three readings, one per :attr:`~meshterm.core.regions.Scope.state`:
+
+    * ``scope yul`` — a scoped flood whose region is known, the name in the ``scope``
+      style (a region is not a node, so it never takes a node hue);
+    * ``scoped · 3fa1`` — a scoped flood no known name reproduces: the code is shown so
+      two frames can still be told to share a region, ``muted`` because it names nothing;
+    * ``unscoped`` — a plain flood, ``muted``: the ordinary case, stated not stressed.
+
+    ``None`` (a direct frame, or one whose route type was never kept) draws nothing — a
+    repeater never region-filters those, so a word there would claim a meaning it lacks.
+
+    Args:
+        scope: The frame's scope (:meth:`~meshterm.core.region_store.RegionStore.scope_of`).
+        bare: Drop the ``scope`` lead-in and draw the region name alone, for a lane whose
+            heading already says what it holds.
+
+    Returns:
+        The styled text (empty for ``None``).
+    """
+    text = Text()
+    if scope is None:
+        return text
+    if scope.state == "scoped" and scope.region:
+        if not bare:
+            text.append("scope ", style="muted")
+        text.append(scope.region, style="scope")
+    elif scope.scoped:
+        text.append("scoped", style="muted")
+        if scope.code:
+            text.append(f" · {scope.code}", style="muted")
+    else:
+        text.append("unscoped", style="muted")
+    return text
 
 
 def identity_label(label: str | None) -> str | None:

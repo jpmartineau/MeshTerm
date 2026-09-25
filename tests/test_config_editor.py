@@ -1148,9 +1148,9 @@ async def test_actions_sync_clock_cancel_leaves_the_clock_alone(ctx: AppContext)
 
 
 async def test_editor_stages_flood_scope(ctx: AppContext, applied_ops: list[tuple]) -> None:
-    """The flood scope is a first-class staged setting, hashtag-normalized on apply.
+    """The flood scope is a first-class staged setting, stored bare on apply.
 
-    The device reads it back as ``#alpha``, not the ``alpha`` that was staged — and the row
+    The device reads it back as ``alpha``, not the ``#alpha`` that was staged — and the row
     must still leave the stage, because the device *took* it: what unstages a value is its
     acceptance, never a string comparison.
     """
@@ -1158,14 +1158,14 @@ async def test_editor_stages_flood_scope(ctx: AppContext, applied_ops: list[tupl
         ctx,
         [
             ("select", "flood_scope"),
-            ("text", "alpha"),
+            ("text", "#alpha"),
             ("select", "__apply__"),
             ("select", None),  # nothing left staged: Esc leaves without a discard dialog
         ],
     )
     await edit_config(ctx)
-    assert applied_ops == [("set", "flood_scope", "alpha")]
-    assert await (await ctx.device()).get_default_flood_scope() == "#alpha"
+    assert applied_ops == [("set", "flood_scope", "#alpha")]
+    assert await (await ctx.device()).get_default_flood_scope() == "alpha"
 
 
 async def test_actions_backup_writes_immediately(ctx: AppContext, tmp_path: Path) -> None:
@@ -1345,7 +1345,7 @@ async def test_a_refused_value_stays_staged_while_the_rest_apply(
     )
     assert await edit_config(ctx) == {"applied": 1}
     assert [op[1] for op in applied_ops] == ["name", "flood_scope"]
-    assert await device.get_default_flood_scope() == "#alpha"
+    assert await device.get_default_flood_scope() == "alpha"
     assert any("still staged" in note for note in ui.notes)
     assert any("1[/brand] of 2" in note for note in ui.notes)
 

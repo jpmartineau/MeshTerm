@@ -25,6 +25,7 @@ from .core.discovery import DiscoveredDevice, discover_devices
 from .core.mute_store import MuteStore
 from .core.preferences import PREFERENCES_FILENAME, Preferences, report_dropped
 from .core.preferences import install as install_preferences
+from .core.region_store import RegionStore
 from .core.remote_store import RemoteStore
 from .core.selection import resolve_device
 from .core.settings_store import SettingsStore
@@ -76,6 +77,9 @@ class AppContext:
         mute_store: Store for muted channel notifications — the channels whose new
             messages don't raise the unread badge (defaults to
             ``<config_dir>/mutes.json`` when not injected).
+        region_store: Store for the regions known by name and each channel's send scope —
+            what a scoped flood is resolved against (defaults to
+            ``<config_dir>/regions.json`` when not injected).
         channel_store: Store for channels created through MeshTerm, replayed into a device
             that forgot them (a firmware-less radio bridge). Keyed by device public key;
             defaults to ``<config_dir>/channels.json`` when not injected.
@@ -121,6 +125,7 @@ class AppContext:
     watch_store: WatchStore | None = None
     courier_store: CourierStore | None = None
     mute_store: MuteStore | None = None
+    region_store: RegionStore | None = None
     channel_store: ChannelStore | None = None
     settings_store: SettingsStore | None = None
     contact_store: ContactStore | None = None
@@ -185,6 +190,8 @@ class AppContext:
             self.courier_store = CourierStore(self.settings.config_dir / "courier.json")
         if self.mute_store is None:
             self.mute_store = MuteStore(self.settings.config_dir / "mutes.json")
+        if self.region_store is None:
+            self.region_store = RegionStore(self.settings.config_dir / "regions.json")
         if self.channel_store is None:
             self.channel_store = ChannelStore(self.settings.config_dir / "channels.json")
         if self.settings_store is None:

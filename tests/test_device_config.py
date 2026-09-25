@@ -1366,15 +1366,19 @@ def test_flood_scope_length_limited_and_formats_empty() -> None:
     with pytest.raises(DeviceConfigError, match="at most 30"):
         parse_value(spec, "x" * 31)
     assert format_value(spec, "") == "(not set)"
-    assert format_value(spec, "#alpha") == "#alpha"
+    assert format_value(spec, "alpha") == "alpha"
+    with pytest.raises(DeviceConfigError, match="no spaces or commas"):
+        parse_value(spec, "north shore")
+    with pytest.raises(DeviceConfigError, match="30 bytes"):
+        parse_value(spec, "é" * 16)  # 16 characters, 32 bytes
 
 
 async def test_flood_scope_round_trips_with_hashtag_normalization() -> None:
-    """Applying a bare scope name stores it with its leading #; empty clears it."""
+    """A scope name is stored bare, as the firmware and apps store it; empty clears it."""
     device = await _connected_mock()
     spec = get_spec("flood_scope")
-    await spec.apply(device, "alpha", await build_snapshot(device))
-    assert (await build_snapshot(device))["flood_scope"] == "#alpha"
+    await spec.apply(device, "#alpha", await build_snapshot(device))
+    assert (await build_snapshot(device))["flood_scope"] == "alpha"
     await spec.apply(device, "", await build_snapshot(device))
     assert (await build_snapshot(device))["flood_scope"] == ""
 

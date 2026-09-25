@@ -64,6 +64,9 @@ them instead of hand-rolling:
 | path | an ordered hop spec you compose or force (`a1,3d,…`) |
 | route | the concrete node sequence a trace walked or will walk |
 | via | prefix for a packet/message's relay chain |
+| region | a named area a repeater relays floods for (`region put yul`); shown bare, never `#yul` — the `#` belongs to key derivation only |
+| scope | the region a flood is limited to — a packet's, a channel's send scope, the device's default scope. A direct packet has none |
+| unscoped | a plain flood, relayed by any repeater that allows the wildcard `*` |
 | Back | leave the current screen/list — Esc's word, and a row's only where leaving is a *choice* (see below) |
 | Quit | leave the app (main menu, device splash) — nowhere else |
 
@@ -351,7 +354,7 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   ⚙ parameter · `#` count · ▶ run · ⚡ explore/probe · ★ best/winner · ⭐ watch ·
   📤 send now · 📨 courier/queue · 💬 chat · 🔔 notify · 🔕 mute (notifications off) ·
   📱 QR · 🔗 link · ↻ re-read · ↕ reorder · ⇄ reverse (flip a path's direction) ·
-  🏆 trophy case/record · ⌨ command line · 📖 read/about · 💰 support/donate ·
+  🔖 region/scope · 🏆 trophy case/record · ⌨ command line · 📖 read/about · 💰 support/donate ·
   🚪 quit. Packet-class icons (feed/viewer
   lane): 📢 advert · 📊 telemetry · 📦 packet · 💬 message · ✅ ack. Raw payload
   classes (`PAYLOAD_ICONS`): 📻 channel text · 💽 channel data · 📩 direct message

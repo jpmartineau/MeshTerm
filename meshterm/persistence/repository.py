@@ -29,6 +29,7 @@ from ..core.models import (
     TxLevelResult,
     utcnow,
 )
+from ..core.regions import SCOPED_ROUTES, raw_scope_body
 from . import db
 
 if TYPE_CHECKING:
@@ -96,6 +97,8 @@ def _packet_raw(row: sqlite3.Row) -> dict | None:
     tag = _row_value(row, "tag")
     trace_snrs = _row_value(row, "trace_snrs")
     route = _row_value(row, "route")
+    transport_code = _row_value(row, "transport_code")
+    scope_body = _row_value(row, "scope_body")
     if not any((typename, chan_hash, cipher_mac, dest, src, tag, trace_snrs, route)):
         return None
     raw: dict = {}
@@ -121,6 +124,12 @@ def _packet_raw(row: sqlite3.Row) -> dict | None:
         raw["trace_snrs"] = [float(v) for v in str(trace_snrs).split(",") if v]
     if route:
         raw["route_typename"] = route
+    if transport_code:
+        # A scoped frame's code and the bytes it was computed over, so its region resolves
+        # against names learned after it was heard (see meshterm.core.regions).
+        raw["transport_code"] = transport_code
+    if scope_body:
+        raw["scope_body"] = scope_body
     return raw
 
 
@@ -1024,12 +1033,18 @@ class Repository:
         trace_snrs = ",".join(f"{v:g}" for v in readings) if readings else None
         # What the frame's `path` means — see the v15 migration. Only a packet row has one.
         route = raw.get("route_typename") if obs.kind == "packet" else None
+        # A scoped frame's transport code, and — for a scoped flood — the bytes it was
+        # computed over, so its region can be resolved against a name learned later (see
+        # the v16 migration). Nothing is kept for a frame that carries no code.
+        transport_code = raw.get("transport_code") if route in SCOPED_ROUTES else None
+        body = raw_scope_body(raw) if route == "TC_FLOOD" and transport_code else None
+        scope_body = body.hex() if body is not None else None
         self._conn.execute(
             "INSERT INTO observations "
             "(run_id, node, public_key, name, kind, node_type, snr, rssi, lat, lon, path, "
             "observed_at, chan_hash, cipher_mac, crypted, payload_typename, dest, src, tag, "
-            "trace_snrs, route) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "trace_snrs, route, transport_code, scope_body) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run_id,
                 obs.node,
@@ -1052,6 +1067,8 @@ class Repository:
                 tag,
                 trace_snrs,
                 route,
+                transport_code,
+                scope_body,
             ),
         )
         self._conn.commit()
@@ -1150,7 +1167,8 @@ class Repository:
         """
         rows = self._conn.execute(
             "SELECT node, name, kind, node_type, snr, rssi, lat, lon, path, observed_at, "
-            "chan_hash, cipher_mac, crypted, payload_typename, dest, src, tag, trace_snrs, route "
+            "chan_hash, cipher_mac, crypted, payload_typename, dest, src, tag, trace_snrs, route, "
+            "transport_code, scope_body "
             "FROM observations WHERE observed_at >= ? ORDER BY observed_at DESC LIMIT ?",
             (since.isoformat(), limit),
         ).fetchall()
@@ -1176,7 +1194,8 @@ class Repository:
         """
         rows = self._conn.execute(
             "SELECT node, name, kind, node_type, snr, rssi, lat, lon, path, observed_at, "
-            "chan_hash, cipher_mac, crypted, payload_typename, dest, src, tag, trace_snrs, route "
+            "chan_hash, cipher_mac, crypted, payload_typename, dest, src, tag, trace_snrs, route, "
+            "transport_code, scope_body "
             "FROM observations WHERE kind = 'packet' AND observed_at >= ? "
             "AND observed_at <= ? ORDER BY observed_at ASC LIMIT ?",
             (start.isoformat(), end.isoformat(), limit),

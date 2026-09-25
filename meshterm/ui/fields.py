@@ -32,10 +32,13 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from . import script
 from .report import Column, Lane, normalise
+
+if TYPE_CHECKING:
+    from ..core.regions import Scope
 
 # -- the shared value shapes -----------------------------------------------------------
 
@@ -238,6 +241,39 @@ def channel(
         lanes=tuple(Lane(header=header, render=parts[part]) for part, header in lanes),
         json=channel_json,
     )
+
+
+def scope_json(scope: Scope | None) -> dict[str, Any] | None:
+    """A flood's scope as its machine object, or ``null`` for a frame that has none.
+
+    ``state`` is ``scoped`` (``region`` names it), ``unknown`` (scoped, no known region
+    reproduces ``code``) or ``unscoped``; ``code`` is the frame's first transport code as
+    lowercase hex, kept even when unresolved so two frames can be seen to share a region.
+    A direct frame is ``null`` — never region-filtered, so it has no scope to report.
+    """
+    if scope is None:
+        return None
+    return {"state": scope.state, "region": scope.region, "code": scope.code}
+
+
+def _scope_cell(scope: Scope | None) -> str:
+    """A scope's plain word: the region, ``unknown`` for an unresolved one, or ``unscoped``."""
+    if scope is None:
+        return script.NONE
+    if scope.state == "scoped" and scope.region:
+        return script.name(scope.region)
+    return "unknown" if scope.scoped else "unscoped"
+
+
+def scope(key: str = "scope", header: str = "SCOPE") -> Column:
+    """A flood's scope — the region a repeater relays it in — as one lane and one object.
+
+    The row holds a :class:`~meshterm.core.regions.Scope` (or ``None`` for a direct frame).
+    The plain lane is a word, never the code: a four-digit hash in a column of region
+    names reads as a region nobody has, and the document carries the code for whoever
+    needs it.
+    """
+    return Column(key=key, lanes=(Lane(header=header, render=_scope_cell),), json=scope_json)
 
 
 def when(key: str, header: str, *, absent: str = script.NONE) -> Column:
