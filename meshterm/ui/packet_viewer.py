@@ -104,12 +104,12 @@ _BODY_CACHE_MAX = 8
 _PAYLOAD_GLOSS = {
     "REQ": "request",
     "RESPONSE": "response",
-    "TEXT_MSG": "direct message",
+    "TEXT_MSG": "dir messg",
     "ACK": "ack",
     "ADVERT": "advert",
-    "GRP_TXT": "channel text",
-    "GRP_DATA": "channel data",
-    "ANON_REQ": "anon request",
+    "GRP_TXT": "chan text",
+    "GRP_DATA": "chan data",
+    "ANON_REQ": "anon req",
     "PATH": "path",
     "TRACE": "trace",
     "MULTIPART": "multipart",
@@ -256,7 +256,7 @@ def payload_class(raw: dict | None) -> str | None:
 
     Maps the frame's ``payload_typename`` (``GRP_TXT``, ``TRACE``, …) through
     :data:`_PAYLOAD_GLOSS` — the one identifying thing a relayed flood carries when it
-    names no origin node, so a packet list can read "channel text" / "trace" instead of a
+    names no origin node, so a packet list can read "chan text" / "trace" instead of a
     bare ``?``.
     """
     if not isinstance(raw, dict):

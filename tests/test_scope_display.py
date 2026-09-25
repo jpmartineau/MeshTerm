@@ -203,7 +203,7 @@ def test_the_feed_never_collapses_a_lane() -> None:
     screen = _feed(_scoped("harbour"))
     for width in (68, 72, 80, 100):
         header, row = _stripped(screen.render_body(width))[:2]
-        assert "CLASS" in header and "channel text" in row, width
+        assert "CLASS" in header and "chan text" in row, width
         assert _col(header, "SCOPE") == _col(row, "harbour"), width
     screen._selected = 0  # noqa: SLF001
     screen.render_body(68)
@@ -219,7 +219,7 @@ def test_the_picocalc_feed_names_the_class_without_an_icon() -> None:
         screen = _feed(_scoped("harbour"))
         header, row = _stripped(screen.render_body(53))[:2]
         assert header.split()[:2] == ["TIME", "CLASS"]
-        assert _col(header, "CLASS") == _col(row, "channel text")
+        assert _col(header, "CLASS") == _col(row, "chan text")
     finally:
         set_platform(REGULAR)
 

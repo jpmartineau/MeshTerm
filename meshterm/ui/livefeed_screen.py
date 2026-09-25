@@ -127,8 +127,10 @@ _FEED_SEED_FLOOR = datetime.min.replace(tzinfo=timezone.utc)
 _FEED_SUBJECT_WIDTH = 18
 
 #: The class lane's fixed width — wide enough for the longest class the app files a
-#: packet under (``direct message``), so every label reads whole and the lanes hold.
-_FEED_CLASS_WIDTH = 14
+#: packet under (``telemetry``, ``chan text``, ``multipart``), so every label reads whole.
+#: The names are kept short on purpose (``dir messg``, ``anon req`` — JP, 2026-09-25): the
+#: lane never collapses, so every cell it spends is one the row's readings scroll off for.
+_FEED_CLASS_WIDTH = 9
 
 # The remaining lanes, as the row and its column header both measure them — one set of
 # numbers so a header label can never drift off the values it names, and so a lane a

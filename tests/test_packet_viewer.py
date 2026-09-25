@@ -46,7 +46,7 @@ def test_packet_viewer_shows_class_and_route() -> None:
     """A raw packet's parsed payload class headlines the card; the route is a row."""
     entry = _grp_txt_entry({"chan_hash": "ff", "cipher_mac": "0000", "crypted": "00" * 16})
     body = _plain(_viewer(entry).render_body(80))
-    assert "📻 CHANNEL TEXT" in body
+    assert "📻 CHAN TEXT" in body
     assert "flood" in body
 
 
@@ -54,7 +54,7 @@ def test_packet_viewer_class_row_leads_the_card() -> None:
     """The class headline is the first row — above heard/from — for every kind."""
     packet = _grp_txt_entry({"chan_hash": "ff", "cipher_mac": "0000", "crypted": "00" * 16})
     body = _plain(_viewer(packet).render_body(80))
-    assert body.index("CHANNEL TEXT") < body.index("heard")
+    assert body.index("CHAN TEXT") < body.index("heard")
 
     advert = PacketEntry(when=utcnow(), kind="advert", node="aa")
     body = _plain(_viewer(advert).render_body(80))
@@ -440,7 +440,7 @@ def test_packet_viewer_names_a_channel_datagram_by_its_confirmed_channel() -> No
         },
     )
     body = _plain(_viewer(entry, channels=[("Public", secret)]).render_body(80))
-    assert "💽 CHANNEL DATA" in body and "Public" in body
+    assert "💽 CHAN DATA" in body and "Public" in body
 
     unknown = _plain(_viewer(entry).render_body(80))  # no keys held: named by fingerprint only
     assert "unknown" in unknown and "Public" not in unknown

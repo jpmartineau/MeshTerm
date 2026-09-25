@@ -215,7 +215,7 @@ def test_livefeed_addressed_frame_is_about_its_two_ends() -> None:
     raw = {"payload_typename": "TEXT_MSG", "dest_hash": "c0", "src_hash": "a1"}
     screen.on_event(MeshEvent.observation_event(_obs(node="", kind="packet", raw=raw)))
     row = _rows(screen, 100)[0]
-    assert "📩 direct message" in row
+    assert "📩 dir messg" in row
     # …including us, when a frame is addressed to us — as the app-wide ★, which is the one
     # endpoint the reader never has to be told and the cells the other end's name needs.
     assert "Alice → ★" in row
