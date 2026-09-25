@@ -200,21 +200,18 @@ def test_the_feed_carries_a_scope_lane_on_a_72_column_terminal() -> None:
     assert all(row.rstrip().endswith("dBm") for row in rows)
 
 
-def test_the_feed_keeps_the_class_label_ahead_of_the_scope() -> None:
-    """Between the two widths that hold it, the label wins: a class is never ``unscoped``."""
-    screen = _feed(_scoped("harbour"))
-    header = _stripped(screen.render_body(72))[0]
-    assert "CLASS" in header and "SCOPE" not in header
-    header, row = _stripped(screen.render_body(100))[:2]
-    assert "CLASS" in header and "SCOPE" in header
-    assert _col(header, "SCOPE") == _col(row, "harbour")
+def test_the_feed_never_collapses_the_scope_lane() -> None:
+    """The scope is drawn at every width; the class label is what gives way when narrow.
 
-
-def test_the_feed_leaves_the_scope_to_the_viewer_on_the_picocalc() -> None:
-    """At 53 the row already scrolls sideways; a lane only ←→ reaches is not drawn."""
+    Beside the subject, the lane is on screen even at the PicoCalc's 53, where it is the
+    readings after it that run off the edge.
+    """
     screen = _feed(_scoped("harbour"))
-    body = _plain(screen.render_body(53))
-    assert "SCOPE" not in body and "harbour" not in body
+    for width in (53, 68, 72, 80, 100):
+        header, row = _stripped(screen.render_body(width))[:2]
+        assert _col(header, "SCOPE") == _col(row, "harbour"), width
+    assert "CLASS" not in _stripped(screen.render_body(80))[0]
+    assert "CLASS" in _stripped(screen.render_body(100))[0]
 
 
 def test_the_feed_hands_its_scope_reader_to_the_viewer() -> None:

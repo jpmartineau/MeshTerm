@@ -123,16 +123,16 @@ def test_livefeed_rows_leave_the_relay_path_to_the_viewer() -> None:
     """A row says what arrived and how well it was heard; the route is Enter's job.
 
     Whatever the fixed lanes left a route was never enough to draw one in — it arrived
-    elided to a stub — so the feed carries none, and the whole row fits a 72-column
-    screen with its class label intact.
+    elided to a stub — so the feed carries none: the whole row, scope lane and all, fits a
+    72-column screen, and a wide one keeps its class label in words too.
     """
     screen = _screen()
     screen.on_event(MeshEvent.observation_event(_obs(kind="packet", path="3d63,a1b2", snr=1.0)))
-    row = _rows(screen, 72)[0]
+    row = _rows(screen, 68)[0]  # a 72-column terminal's framed body
     assert "via" not in row and "Hub" not in row  # no route, not even a stub of one
-    assert "📦 packet" in row  # the class still reads in words at 72
-    assert "+1.0 dB" in row and "-90 dBm" in row  # …as does the reception it was heard at
-    assert len(row.rstrip()) <= 72
+    assert "+1.0 dB" in row and "-90 dBm" in row  # …the reception it was heard at reads
+    assert len(row.rstrip()) <= 68
+    assert "📦 packet" in _rows(screen, 90)[0]  # the class label, where there is room
 
 
 def test_livefeed_class_lane_names_the_payload_class_once() -> None:
@@ -263,8 +263,8 @@ def test_livefeed_tokened_classes_are_about_their_token() -> None:
 def test_livefeed_column_header_sits_over_the_lanes_it_names() -> None:
     """The header names each lane, and every label lands on the values beneath it."""
     screen = _screen(seed=[_obs(node="3d63", kind="telemetry", snr=12.8, rssi=-105.0)])
-    header, row = _stripped(screen.render_body(72))[:2]
-    assert header.split() == ["TIME", "CLASS", "SUBJECT", "SNR", "RSSI"]
+    header, row = _stripped(screen.render_body(90))[:2]
+    assert header.split() == ["TIME", "CLASS", "SUBJECT", "SCOPE", "SNR", "RSSI"]
     # Measured in display cells, not characters — the class icon is one character wide
     # but two cells, so a character index would report every later lane one column early.
     # The clock is read off the row itself: a literal needle would only match during the
