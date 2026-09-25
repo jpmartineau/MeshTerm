@@ -1148,8 +1148,9 @@ unless it is saved elsewhere.
 MeshTerm sets the companion's scope around each message it sends on the channel. Setting
 one therefore writes nothing to the device, and it follows the channel to any slot it moves
 to. With no `REGION`, `scope` prints the channel's region alone, the way `config get` prints
-one value — and a channel with none prints nothing and exits `5`. Setting (`scope 1
-harbour`) or clearing (`scope 1 --clear`) prints nothing plain. Reading an empty slot exits
+one value — and a channel with none prints `-` (`null` in `--json`) and exits `0`: it sends
+under the device default, which is an answer. Setting (`scope 1 harbour`) or clearing
+(`scope 1 --clear`) prints nothing plain. Reading an empty slot exits
 `5`, like `share`; writing to one is a usage error (exit `2`), since there is no channel to
 scope. `SCOPE` in `list` is `-` for a channel that sends under the device default.
 

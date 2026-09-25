@@ -374,8 +374,8 @@ def _channel_chat(session, messages, *, scope="lakeside", resend=None) -> ChatSc
 
 
 def test_the_chat_title_carries_the_scope_as_a_status_atom() -> None:
-    """``#ops · scope lakeside``; no atom at all when the channel has no scope."""
-    assert _channel_chat(_Session(), []).title == "#ops · scope lakeside"
+    """``#ops · lakeside``; no atom at all when the channel has no scope."""
+    assert _channel_chat(_Session(), []).title == "#ops · lakeside"
     assert _channel_chat(_Session(), [], scope=None).title == "#ops"
 
 
@@ -536,7 +536,7 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
 
 
 async def test_cli_channel_scope_reads_sets_and_clears(tmp_path: Path) -> None:
-    """``channels scope`` reads (exit 5 for none), sets, clears — keyed by the channel."""
+    """``channels scope`` reads (``-``, exit 0, for none), sets, clears — keyed by the channel."""
     from io import StringIO
 
     from rich.console import Console
@@ -545,6 +545,8 @@ async def test_cli_channel_scope_reads_sets_and_clears(tmp_path: Path) -> None:
     from meshterm.core.admin_store import AdminStore
     from meshterm.core.device_store import DeviceStore
     from meshterm.tools.channels import ChannelsTool
+    from meshterm.ui import script
+    from meshterm.ui.renderers import PlainRenderer
 
     settings = Settings(config_dir=tmp_path, db_path=tmp_path / "chan.db")
     ctx = AppContext(
@@ -560,7 +562,10 @@ async def test_cli_channel_scope_reads_sets_and_clears(tmp_path: Path) -> None:
         await tool.run(ctx, {"cli_action": "add", "index": 1, "name": "Ops", "secret": None})
         read = {"cli_action": "scope", "index": 1, "region": None, "clear": False}
         empty = await tool.run(ctx, read)
-        assert empty.summary["scope"] is None and empty.exit_code == 5
+        assert empty.summary["scope"] is None and empty.exit_code == 0
+        buffer = StringIO()
+        PlainRenderer(script.console(buffer)).render(empty.report)
+        assert buffer.getvalue().strip() == "-"
 
         await tool.run(ctx, {**read, "region": "lakeside"})
         again = await tool.run(ctx, read)

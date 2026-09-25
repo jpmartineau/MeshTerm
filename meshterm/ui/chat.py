@@ -65,7 +65,7 @@ class ChatScreen(Screen):
     with nothing picked there is nothing to show. Esc leaves the chat once nothing is
     picked.
 
-    A channel with a send scope says so in the title (``#ops · scope yul``), and ^R there
+    A channel with a send scope names its region in the title (``#ops · yul``), and ^R there
     resends the newest message *unscoped* — the way out for a scoped message no repeater
     in earshot carries — after an amber confirm, since an unscoped flood reaches every
     repeater the scope was keeping it from.
@@ -168,8 +168,9 @@ class ChatScreen(Screen):
                 :func:`~meshterm.services.trace_runner.make_name_key_resolver`), the seed
                 of the sender's hue; ``None`` (or a name it can't place) leaves senders
                 muted — colour is reserved for keyed identities.
-            scope: The channel's send scope, stated in the title as a ``·`` atom
-                (``#ops · scope yul``); ``None`` for a channel sending under the device
+            scope: The channel's send scope, stated in the title as a bare ``·`` atom
+                (``#ops · yul`` — a channel's title has no other atom a region name could be
+                mistaken for); ``None`` for a channel sending under the device
                 default, and always for a direct chat.
             resend_unscoped: Async callable that sends a channel message's text again,
                 unscoped, and returns the recorded message (channels only; ``None`` leaves
@@ -177,9 +178,7 @@ class ChatScreen(Screen):
         """
         super().__init__()
         self._scope = scope if conversation.is_channel else None
-        self.title = (
-            f"{conversation.label} · scope {self._scope}" if self._scope else conversation.label
-        )
+        self.title = f"{conversation.label} · {self._scope}" if self._scope else conversation.label
         self._is_channel = conversation.is_channel
         self._key_of: Callable[[str], str | None] = key_of or (lambda name: None)
         # A direct thread's one remote sender is the peer; its key colours the header

@@ -206,9 +206,11 @@ class ChannelsTool(Tool):
         channel's identity and follows it to any slot.
 
         With no region, the plain face prints the scope alone, the way ``config get`` prints
-        one value — and a channel with none prints nothing and exits 5, nothing to report;
-        a set or a clear prints nothing, and the document always carries the channel and
-        its scope (``null`` for none).
+        one value — and a channel with none prints ``-`` and exits 0: "no scope, so the
+        device default" is an answer about a channel that is there, not an empty result. A
+        set or a clear prints nothing, and the document always carries the channel and its
+        scope (``null`` for none). Only an empty slot, with no channel to answer about,
+        exits 5.
         """
         from ..core.channel_probe import read_channel_slots
 
@@ -238,8 +240,6 @@ class ChannelsTool(Tool):
         return ToolResult(
             summary={"index": idx, "scope": scope},
             report=(_scoped(idx, slot.name, slot.secret, scope, changed=changed),),
-            # A read of a channel with no scope found nothing to report; a write did its job.
-            exit_code=exitcodes.OK if scope or changed else exitcodes.NO_RESULT,
         )
 
     @staticmethod
@@ -402,18 +402,23 @@ def _scoped(
     Returns:
         The facts block.
     """
-    from ..ui import fields
-    from ..ui.fields import ChannelRef
+    from ..ui import fields, script
+    from ..ui.fields import ChannelRef, Rendered
     from ..ui.report import BARE, SILENT, Facts
 
     channel = None
     if name is not None and secret is not None:
         public = is_public_channel(name, secret)
         channel = ChannelRef(slot=idx, name=name, public=public, hash=channel_hash(secret))
+    # A channel with no scope answers `-` plain (and `null` in the document): "the device
+    # default" is an answer about a channel that is there, where the bare form's usual
+    # silence for an absent value would leave only the exit status to say it. An empty
+    # slot has no channel to answer about, so it keeps that silence (and its exit 5).
+    value = Rendered(scope, scope or script.NONE) if channel is not None else None
     return Facts(
         key="channel",
-        fields=(fields.channel("channel"), fields.name("scope", "scope")),
-        values={"channel": channel, "scope": scope},
+        fields=(fields.channel("channel"), fields.rendered("scope", "scope")),
+        values={"channel": channel, "scope": value},
         shape=SILENT if changed else BARE,
         bare="scope",
     )
