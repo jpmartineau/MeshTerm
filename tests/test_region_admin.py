@@ -827,3 +827,14 @@ def tui_ctx(tmp_path: Path):  # noqa: ANN201
     ctx.ui = TuiUi(TuiSession())
     yield ctx
     ctx.repo.close()
+
+
+def test_the_wildcard_row_says_when_no_home_region_is_set() -> None:
+    """``*^`` is the firmware parking its home mark on the wildcard: no home region set."""
+    from meshterm.ui.region_editor import _row_note
+
+    unset = parse_region_dump("*^ F\n lakeside F\n")
+    assert _row_note(unset.rows[0], unset) == "unscoped · no home"
+    homed = parse_region_dump("* F\n lakeside^ F\n")
+    assert _row_note(homed.rows[0], homed) == "unscoped floods"
+    assert _row_note(homed.rows[1], homed) == "home"

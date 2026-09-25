@@ -270,9 +270,15 @@ def _flood_text(row: RegionRow) -> Text:
 
 
 def _row_note(row: RegionRow, table: RegionTable) -> str:
-    """The NOTE lane: what the row *is* beyond its flag — unscoped, home, default."""
+    """The NOTE lane: what the row *is* beyond its flag — unscoped, home, default.
+
+    The wildcard's ``^`` is not a home: the firmware parks the home mark on ``*`` when no
+    region has been made home, so ``*^`` reads *no home region set*, and the note says so
+    (``unscoped · no home``, short enough to stay whole in the 72-column lane) rather than
+    leaving the mark's one meaning there unsaid.
+    """
     if row.wildcard:
-        return "unscoped floods"
+        return "unscoped · no home" if row.home else "unscoped floods"
     notes = []
     if row.home:
         notes.append("home")
