@@ -400,6 +400,37 @@ async def test_resend_unscoped_targets_only_a_newest_scoped_message() -> None:
     assert "unscoped" in _plain_lines(screen)
 
 
+async def test_resend_unscoped_takes_the_picked_message_over_the_newest() -> None:
+    """With a message picked, ^R resends that one — and only if it is a scoped one of ours."""
+    sent: list[str] = []
+
+    async def resend(message: ChatMessage) -> ChatMessage:
+        sent.append(message.text)
+        return ChatMessage(text=message.text, outbound=True, is_channel=True, scope="*")
+
+    older = ChatMessage(text="older", outbound=True, is_channel=True, scope="lakeside")
+    heard = ChatMessage(text="heard", outbound=False, is_channel=True)
+    newest = ChatMessage(text="newest", outbound=True, is_channel=True, scope="lakeside")
+    screen = _channel_chat(_Session(), [older, heard, newest], resend=resend)
+    assert screen._retry_target() is newest  # nothing picked: the newest
+
+    screen._selected = 0  # the older scoped message
+    assert screen._retry_target() is older
+    assert "^R resend unscoped" in screen.footer_hint
+    assert len(screen.footer_hint) <= 72
+
+    screen._selected = 1  # someone else's message: nothing to resend, no fallback
+    assert screen._retry_target() is None
+    assert "^R" not in screen.footer_hint
+
+    screen._selected = 0
+    screen.handle("retry")
+    await asyncio.sleep(0.05)
+    assert sent == ["older"]
+    assert screen._selected is None  # the pick is done; the resend is at the tail
+    assert screen._messages[-1].text == "older" and screen._messages[-1].scope == "*"
+
+
 async def test_a_declined_resend_sends_nothing() -> None:
     """Cancel on the amber confirm leaves the transcript as it was."""
     calls: list[str] = []

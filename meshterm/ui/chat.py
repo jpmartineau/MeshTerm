@@ -66,9 +66,9 @@ class ChatScreen(Screen):
     picked.
 
     A channel with a send scope names its region in the title (``#ops · yul``), and ^R there
-    resends the newest message *unscoped* — the way out for a scoped message no repeater
-    in earshot carries — after an amber confirm, since an unscoped flood reaches every
-    repeater the scope was keeping it from.
+    resends a message *unscoped* — the picked one, or with nothing picked the newest — the
+    way out for a scoped message no repeater in earshot carries — after an amber confirm,
+    since an unscoped flood reaches every repeater the scope was keeping it from.
     """
 
     floating = False
@@ -92,10 +92,10 @@ class ChatScreen(Screen):
         The F3 pair follows the lane's two claims. *Retry* is absent in a channel — a
         channel message is never acknowledged, so there is no such thing to retry there —
         and merely dim in a direct chat with nothing outstanding. A channel's Shift slot is
-        *Resend* instead — the newest message again, unscoped (see :meth:`_retry_target`)
-        — present where a resend is wired and dim until the newest message went out under
-        a region. *Paths* needs a picked message to have paths of, and both nav slots need
-        a transcript to walk.
+        *Resend* instead — the picked message (or the newest) again, unscoped (see
+        :meth:`_retry_target`) — present where a resend is wired and dim until that message
+        is one of ours that went out under a region. *Paths* needs a picked message to have
+        paths of, and both nav slots need a transcript to walk.
 
         F1/F2 carry the **day** jump, the transcript's own section step (its dividers are
         days) — the same claim a grouped select list makes with ``Sect ↑``/``Sect ↓``, on
@@ -237,6 +237,11 @@ class ChatScreen(Screen):
         :meth:`_retry_target`) — the same rules the F-key lane dims its slots by.
         """
         if self._selected is not None:
+            if self._is_channel and self._retry_target() is not None:
+                # A picked scoped message of ours can be resent unscoped, and that key has
+                # to be named; the reply's "(@mention)" and ^End give way to keep the line
+                # inside 72 (Esc still cancels the pick, and Enter still says what it does).
+                return "Enter reply · ^P paths · ^R resend unscoped · ↑↓ pick · Esc cancel"
             if self._is_channel:
                 return "Enter reply (@mention) · ^P paths · ↑↓ pick · ^End/Esc cancel"
             return "Enter paths · ↑↓ pick · ^End/Esc cancel"
@@ -951,19 +956,30 @@ class ChatScreen(Screen):
         """The message ^R would re-send, or ``None`` when there is nothing to retry.
 
         In a direct chat, the newest outbound message that went out and was never
-        acknowledged. In a channel — where nothing is ever acknowledged — the newest
-        message *we* sent, when it went out under a region: ^R sends it again unscoped. The
-        newest, not any scoped one: once the unscoped copy has gone it is the newest, and
-        there is nothing left to offer. Either way only while a resend could actually
-        start — no send already in flight, and a resend path wired.
+        acknowledged. In a channel — where nothing is ever acknowledged — a message *we*
+        sent under a region, which ^R sends again unscoped: the **picked** one when a
+        message is picked (the reader pointed at it), else the newest we sent. With a pick,
+        only the pick: a picked message that isn't a scoped one of ours offers nothing,
+        rather than ^R quietly reaching past it to another. With none, only the newest —
+        once its unscoped copy has gone that copy is the newest, and nothing is left to
+        offer. Either way only while a resend could actually start — no send already in
+        flight, and a resend path wired.
         """
         if self._is_channel:
             if self._sending or self._resend_unscoped is None:
                 return None
-            newest = next((m for m in reversed(self._messages) if m.outbound), None)
-            if newest is None or not newest.scope or newest.scope == WILDCARD:
+            if self._selected is not None:
+                candidate: ChatMessage | None = self._messages[self._selected]
+            else:
+                candidate = next((m for m in reversed(self._messages) if m.outbound), None)
+            if (
+                candidate is None
+                or not candidate.outbound
+                or not candidate.scope
+                or candidate.scope == WILDCARD
+            ):
                 return None
-            return newest
+            return candidate
         if self._sending or self._resend is None:
             return None
         return next(
@@ -984,7 +1000,7 @@ class ChatScreen(Screen):
         self._spawn(self._resend_message(target))
 
     def _begin_resend_unscoped(self) -> None:
-        """Confirm, then send the newest scoped channel message again unscoped (^R).
+        """Confirm, then send a scoped channel message again unscoped (^R).
 
         Amber (``danger``): nothing is lost, but an unscoped flood is relayed by every
         repeater that allows one — the whole mesh the scope was keeping the message out of —
@@ -1020,6 +1036,8 @@ class ChatScreen(Screen):
                 return
             self._sending = True
             self._status = "resending unscoped…"
+            # The resend lands at the tail as a new message; the pick that chose it is done.
+            self._clear_selection()
             self._stick = True
             self._session.invalidate()
             try:
