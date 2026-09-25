@@ -152,6 +152,53 @@ def test_spi_flag_takes_the_spi_profile_wiring(contexts) -> None:  # noqa: ANN00
     assert contexts(spi_override=True).active_transport == "spi"
 
 
+def test_spi_flag_takes_the_one_radio_attached(contexts, monkeypatch) -> None:  # noqa: ANN001
+    """The common case: one radio on the bus, and --spi is all it takes, profile or not."""
+    monkeypatch.setattr(spiradio, "spi_present", lambda w: w.spidev == "/dev/spidev1.0")
+    elsewhere = SpiWiring(bus_id=0, reset_pin=17)  # a profile for a radio not plugged in
+    profiles = {"hat": DeviceProfile(name="hat", transport="spi", spi=elsewhere)}
+    assert contexts(spi_override=True, profiles=profiles).resolve_spi() == SpiWiring()
+    assert contexts(spi_override=True).resolve_spi() == SpiWiring()
+
+
+def test_spi_flag_refuses_to_guess_between_two_attached_radios(
+    contexts,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two radios on the bus: --spi names neither, so it lists them and asks for -p."""
+    from meshterm.core.selection import DeviceSelectionError
+
+    monkeypatch.setattr(spiradio, "spi_present", lambda w: True)
+    hat = SpiWiring(bus_id=0, reset_pin=17)
+    profiles = {"hat": DeviceProfile(name="hat", transport="spi", spi=hat)}
+    with pytest.raises(DeviceSelectionError) as err:
+        contexts(spi_override=True, profiles=profiles).resolve_spi()
+    message = str(err.value)
+    assert "Several radios are attached to the SPI bus" in message
+    assert "hat" in message and "/dev/spidev0.0" in message
+    assert "(no profile)" in message and "/dev/spidev1.0" in message
+    assert "-p <PROFILE>" in message
+    # A profile still says exactly which, however many there are.
+    ctx = contexts(profile=profiles["hat"], profiles=profiles)
+    assert ctx.resolve_spi() == hat
+
+
+def test_spi_flag_refuses_two_profiles_with_nothing_attached(
+    contexts,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no radio to count, two SPI profiles leave --spi as ambiguous as two radios."""
+    from meshterm.core.selection import DeviceSelectionError
+
+    monkeypatch.setattr(spiradio, "spi_present", lambda w: False)
+    profiles = {
+        "aio": DeviceProfile(name="aio", transport="spi"),
+        "hat": DeviceProfile(name="hat", transport="spi", spi=SpiWiring(bus_id=0)),
+    }
+    with pytest.raises(DeviceSelectionError, match="Several SPI profiles are configured"):
+        contexts(spi_override=True, profiles=profiles).resolve_spi()
+
+
 def test_another_named_radio_is_not_the_spi_radio(contexts) -> None:  # noqa: ANN001
     """A port, an address or a host named outright means the session is about that radio."""
     for override in (

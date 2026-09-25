@@ -661,7 +661,7 @@ class AppContext:
         """The wiring of the SPI radio to open, or ``None`` when another transport is meant.
 
         In priority order: an SPI profile, the radio picked on the startup splash, ``--spi``
-        (the first SPI profile's wiring, else the AIO's), then the remembered default when it
+        (the one radio attached — see :meth:`_spi_for_flag`), then the remembered default when it
         was an SPI radio and nothing else was named. Anything else named explicitly — a port,
         an address, a host, another kind of profile — means this session is not about the SPI
         radio.
@@ -672,10 +672,7 @@ class AppContext:
         if chosen is not None and chosen.is_spi:
             return chosen.spi or self.spi_wiring_for(chosen.port)  # type: ignore[return-value]
         if self.spi_override:
-            return next(
-                (p.spi or SpiWiring() for p in self.settings.profiles.values() if p.is_spi),
-                SpiWiring(),
-            )
+            return self._spi_for_flag()
         if self.port_override or self.ble_override or self.tcp_override or self.profile:
             return None
         remembered = self.device_store.load()
@@ -683,6 +680,43 @@ class AppContext:
             return None
         self.selected_device = None  # remembered, not freshly discovered this session
         return self.spi_wiring_for(remembered.target)
+
+    def _spi_for_flag(self) -> SpiWiring:
+        """The radio a bare ``--spi`` means: the one there is, and never a guess between two.
+
+        Nearly everyone with a radio on the SPI bus has exactly one, and for them ``--spi``
+        needs nothing more — attached radios are counted first, so a single one is used
+        whether or not a profile names it. Only when two are attached, or (with none
+        attached to count) two SPI profiles are configured, is the flag ambiguous; it used
+        to take whichever profile ``config.toml`` listed first, which is a coin toss that
+        transmits. With none attached and one profile or none, the choice is made from the
+        configuration, so the connect attempt can say what is missing.
+
+        Raises:
+            DeviceSelectionError: When more than one radio could be meant.
+        """
+        from .core.selection import DeviceSelectionError
+        from .core.spiradio import spi_radios
+
+        profiles = self.settings.profiles
+        attached = spi_radios(profiles)
+        if len(attached) == 1:
+            return attached[0].spi  # type: ignore[return-value]
+        configured = [p for p in profiles.values() if p.is_spi]
+        if not attached and len(configured) <= 1:
+            return (configured[0].spi or SpiWiring()) if configured else SpiWiring()
+        if attached:
+            rows = [f"  {d.name or '(no profile)':<16} {d.port}" for d in attached]
+            what = "Several radios are attached to the SPI bus"
+        else:
+            rows = [f"  {p.name:<16} {(p.spi or SpiWiring()).spidev}" for p in configured]
+            what = "Several SPI profiles are configured"
+        raise DeviceSelectionError(
+            f"{what}, and --spi doesn't say which.\n"
+            + "\n".join(rows)
+            + "\nChoose one with -p <PROFILE>. A radio with no profile needs one first — see "
+            "'Adding a radio on the SPI bus' in docs/configuration.md."
+        )
 
     def spi_wiring_for(self, spidev: str) -> SpiWiring:
         """The wiring for the radio on ``spidev``: a profile's that names it, else the AIO's.

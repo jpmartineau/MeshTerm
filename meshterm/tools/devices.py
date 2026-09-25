@@ -25,6 +25,7 @@ from ..core.discovery import (
     discover_all,
     discover_devices,
 )
+from ..core.selection import DeviceSelectionError
 from ..core.spiradio import spi_radios
 from .base import Tool, ToolResult, register
 
@@ -81,11 +82,15 @@ class DevicesTool(Tool):
         known = ctx.device_store.load_all()
         remembered = ctx.device_store.load()
         active = ctx.selected_device
-        spi = (
-            ctx.resolve_spi()
-            if ctx.spi_override or (ctx.profile is not None and ctx.profile.is_spi)
-            else None
-        )
+        try:
+            spi = (
+                ctx.resolve_spi()
+                if ctx.spi_override or (ctx.profile is not None and ctx.profile.is_spi)
+                else None
+            )
+        except DeviceSelectionError:
+            spi = None  # an ambiguous --spi: the listing is how the reader finds out which
+
         active_target = (
             ctx.ble_override
             or ctx.port_override
