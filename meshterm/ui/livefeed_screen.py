@@ -11,10 +11,11 @@ to the packet viewer, which has the room to draw it as a wrapped path line over 
 graph. The feed's job is to say what arrived and how well it was heard; Enter says how
 it got here.
 
-Where the width allows, a **scope** lane follows the readings: the region a flood was sent
-into (``harbour``), ``unknown scope 3fa1`` for a region nobody here has named, ``unscoped`` for a
-plain flood, and nothing for a direct frame, which no repeater region-filters (see
-:func:`_lanes_for` for which widths hold it, and why the PicoCalc's never does).
+Where the width allows, a **scope** lane sits between the subject and the readings: the
+region a flood was sent into (``harbour``), ``? 3fa1`` for a region nobody here has named, a
+muted ``-`` for a plain flood, and nothing for a direct frame, which no repeater
+region-filters (see :func:`_lanes_for` for which widths hold it, and why the PicoCalc's
+never does).
 
 The subject lane is contextual: it holds whatever the *class* of packet is about (see
 :meth:`LiveFeedScreen._feed_subject`). An advert or a telemetry frame is about the node
@@ -160,22 +161,32 @@ _FEED_LABEL_MIN_WIDTH = (
     + _RSSI_LANE
 )
 
-#: The scope lane's width: the longest thing :func:`~meshterm.ui.widgets.scope_text` draws
-#: for an unnamed scope (``unknown scope 3fa1``), so the one reading that carries a code keeps
-#: it whole. A named region longer than this ellipsizes — its whole name is on the
-#: viewer's ``route`` row, one keypress away, like everything else a lane cuts.
-_FEED_SCOPE_WIDTH = 13
+#: The scope lane's width. Room for an unnamed scope's ``? 3fa1`` and a short region name
+#: whole; a longer name ellipsizes — its whole name is on the viewer's ``route`` row, one
+#: keypress away, like everything else a lane cuts.
+_FEED_SCOPE_WIDTH = 10
 
-#: The scope lane with the gap that sets it off from the RSSI reading ahead of it.
-_SCOPE_LANE = _LANE_GAP + _FEED_SCOPE_WIDTH
+#: The scope lane with the gap that sets it off from the readings after it.
+_SCOPE_LANE = _FEED_SCOPE_WIDTH + _LANE_GAP
 
 #: The most cells the subject lane lends the scope lane when the row is that close to
-#: holding it. On a 72-column terminal the framed body is 68 cells and the icon-only row
-#: 54, so the scope lane is exactly one cell short — and one cell off an 18-cell name
-#: lane (``Hilltop-Rep…`` for ``Hilltop-Repe…``) is a far better trade than no scope at
-#: all at the width the app is designed to. Never more than that: the subject is what the
-#: row is about, and a lane that shrank to make room for another would stop naming it.
+#: holding it. On a 72-column terminal the framed body is 68 cells and the icon-only row 54,
+#: so the scope lane fits there with room to spare today; the lend is what keeps it at the
+#: width the app is designed to if either lane ever grows by a cell. Never more than that:
+#: the subject is what the row is about, and a lane that shrank to make room for another
+#: would stop naming it.
 _SUBJECT_LEND = 1
+
+
+def _feed_scope(scope: Scope | None) -> Text:
+    """One row's scope cell: the region, ``? 3fa1`` unnamed, a muted dash for unscoped.
+
+    Blank for a direct frame (or a row that is no frame at all), which has no scope: a
+    dash there would claim a plain flood it never was.
+    """
+    if scope is not None and not scope.scoped:
+        return Text("-", style="muted")
+    return scope_text(scope, bare=True)
 
 
 class _Lanes(NamedTuple):
@@ -183,7 +194,7 @@ class _Lanes(NamedTuple):
 
     Attributes:
         label: The class lane's text label beside its icon.
-        scope: The scope lane after the readings.
+        scope: The scope lane between the subject and the readings.
         subject: The subject lane's width (:data:`_FEED_SUBJECT_WIDTH`, less whatever it
             lent the scope lane).
     """
@@ -201,8 +212,8 @@ def _lanes_for(width: int) -> _Lanes:
     whatever the row has left, borrowing up to :data:`_SUBJECT_LEND` cells off the subject
     to fit. That makes the scope appear at two widths with a gap between them: at 72
     columns (the label already dropped, the icon row leaving room), and again once a wide
-    terminal has room for both. In between the label wins, because a scope is ``unscoped``
-    on most rows and a class never is.
+    terminal has room for both. In between the label wins, because a scope is a dash on
+    most rows and a class never is.
 
     The PicoCalc's 53 columns never carry it: the icon-only row is 54 cells before any
     scope, so it already scrolls sideways there, and a lane only reachable by ``←→`` on the
@@ -606,6 +617,8 @@ class LiveFeedScreen(Screen):
             else " " * _ICON_LANE
         )
         header.append(fit_cells("SUBJECT", lanes.subject + _LANE_GAP))
+        if lanes.scope:
+            header.append(fit_cells("SCOPE", _SCOPE_LANE))
         # The two readings right-align their number, so their labels do too — each sits
         # over the digits it names rather than over the sign column ahead of them.
         header.append(fit_cells("SNR", _READING_W, align="right"))
@@ -613,9 +626,6 @@ class LiveFeedScreen(Screen):
         header.append(" " * _LANE_GAP)
         header.append(fit_cells("RSSI", _READING_W, align="right"))
         header.append(" " * (_RSSI_LANE - _LANE_GAP - _READING_W))
-        if lanes.scope:
-            header.append(" " * _LANE_GAP)
-            header.append(fit_cells("SCOPE", _FEED_SCOPE_WIDTH))
         return header
 
     def _feed_lines(self, width: int, win: int, lanes: _Lanes) -> list[str]:
@@ -690,6 +700,15 @@ class LiveFeedScreen(Screen):
         subject.truncate(lanes.subject, overflow="ellipsis", pad=True)
         body.append_text(subject)
         body.append(" " * _LANE_GAP)
+        if lanes.scope:
+            # Beside the subject, ahead of the readings: where a flood was allowed to go is
+            # a fact about the packet, as its subject is, and the readings are about how it
+            # reached us. A plain flood — most rows — is a muted dash rather than the word,
+            # so the lane is quiet until a row is actually scoped.
+            scope = _feed_scope(self._entry_scope(entry))
+            scope.truncate(_FEED_SCOPE_WIDTH, overflow="ellipsis", pad=True)
+            body.append_text(scope)
+            body.append(" " * _LANE_GAP)
         body.append(
             f"{entry.snr:+{_READING_W}.1f} dB" if entry.snr is not None else " " * _SNR_LANE,
             style=snr_style(entry.snr) if entry.snr is not None else "muted",
@@ -701,14 +720,6 @@ class LiveFeedScreen(Screen):
             style="muted",
         )
         note = self._feed_note(entry)
-        if lanes.scope:
-            scope = scope_text(self._entry_scope(entry), bare=True)
-            if scope or note is not None:
-                # Padded only where something follows it — a lane at the row's end needs
-                # no trailing blanks, and they would only give ←→ nothing to scroll to.
-                body.append(" " * _LANE_GAP)
-                scope.truncate(_FEED_SCOPE_WIDTH, overflow="ellipsis", pad=note is not None)
-                body.append_text(scope)
         if note is not None:
             body.append(" " * _LANE_GAP)
             body.append_text(note)

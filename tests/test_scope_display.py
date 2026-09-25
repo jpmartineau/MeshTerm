@@ -177,18 +177,23 @@ def _feed(*raws: dict) -> LiveFeedScreen:
 
 
 def test_the_feed_carries_a_scope_lane_on_a_72_column_terminal() -> None:
-    """The framed body there is 68 cells: the icon-only row holds the lane, name and all."""
+    """The framed body there is 68 cells: the icon-only row holds the lane, name and all.
+
+    The lane sits between the subject and the readings; a plain flood is a muted dash and
+    a direct frame, which has no scope, leaves the lane blank.
+    """
     screen = _feed(_DIRECT, _FLOOD, _scoped("elsewhere"), _scoped("harbour"))
     header, *rows = _stripped(screen.render_body(68))
-    assert header.split()[-1] == "SCOPE"
-    assert rows[0].rstrip().endswith("harbour")
-    assert rows[1].rstrip().endswith(f"? {_code('elsewhere')}")
-    assert rows[2].rstrip().endswith("unscoped")
-    assert rows[3].rstrip().endswith("dBm")  # the direct frame states no scope
+    lanes = header.split()
+    assert lanes.index("SCOPE") == lanes.index("SNR") - 1
     for line in (header, *rows):
         assert cell_len(line.rstrip()) <= 68
-    # The label sits over the values it names.
-    assert _col(header, "SCOPE") == _col(rows[0], "harbour")
+    col = _col(header, "SCOPE")
+    assert _col(rows[0], "harbour") == col
+    assert _col(rows[1], f"? {_code('elsewhere')}") == col
+    assert _col(rows[2], " - ") + 1 == col
+    assert "-" not in rows[3].replace("-9", "")  # the direct frame's lane is blank
+    assert all(row.rstrip().endswith("dBm") for row in rows)
 
 
 def test_the_feed_keeps_the_class_label_ahead_of_the_scope() -> None:
@@ -372,3 +377,35 @@ def test_monitor_json_carries_the_scope_object_or_null() -> None:
     assert first["scope"] == {"state": "scoped", "region": "harbour", "code": "3fa1"}
     assert second["scope"] is None
     assert list(first)[-2:] == ["scope", "path"]
+
+
+# -- the channel list --------------------------------------------------------------------
+
+
+def _channel_header(scopes: dict[int, str]) -> str:
+    """The Channels list's column header, with the given slots scoped."""
+    from meshterm.core.channel_probe import ChannelSlot
+    from meshterm.ui.channels import _LiveStats, _menu_items
+    from meshterm.ui.tui.select import SelectScreen
+    from tests.test_gallery import DEFAULT_PUBLIC_SECRET, _ChannelsCtx
+
+    slots = [
+        ChannelSlot(idx=0, name="Public", secret=DEFAULT_PUBLIC_SECRET),
+        ChannelSlot(idx=1, name="Ops", secret=bytes(range(16))),
+    ]
+    ctx = _ChannelsCtx(muted=set(), scopes={slots[i].identity: n for i, n in scopes.items()})
+    title, items = _menu_items(ctx, slots, 8, _LiveStats(ctx))
+    return _stripped(SelectScreen(title, items).render_body(68))[0]
+
+
+def test_the_channel_list_draws_scope_only_when_a_channel_has_one() -> None:
+    """A column of blanks says nothing; one scoped channel brings the lane back."""
+    assert _channel_header({}).split() == ["CHANNEL", "UNREAD", "LAST", "MSGS", "ACTIVITY"]
+    assert _channel_header({1: "harbour"}).split() == [
+        "CHANNEL",
+        "SCOPE",
+        "UNREAD",
+        "LAST",
+        "MSGS",
+        "ACTIVITY",
+    ]
