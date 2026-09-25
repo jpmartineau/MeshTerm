@@ -158,13 +158,16 @@ def _bind_class_icon(platform: Platform) -> None:
     _ICON_LANE = 3 if platform.menu_icons else 0
 
 
-#: Cells a reception reading right-aligns its number in — the ``%+5.1f``/``%5.0f`` field
-#: both lanes are built on, and the slot their column headers sit over.
-_READING_W = 5
+#: Cells an SNR right-aligns its number in: ``+13.2``, ``-20.5`` — sign, two digits, tenth.
+_SNR_W = 5
+#: Cells an RSSI right-aligns its number in: ``-120`` at its weakest, whole dBm. Sized to
+#: the reading rather than borrowed from the SNR's field, whose extra cell used to sit
+#: between the two readings as a gap twice the width of every other gap on the row.
+_RSSI_W = 4
 #: ``+13.2 dB`` — the number field, then its unit.
-_SNR_LANE = _READING_W + len(" dB")
-#: ``    -61 dBm`` — the lane gap, the number field, then its unit.
-_RSSI_LANE = _LANE_GAP + _READING_W + len(" dBm")
+_SNR_LANE = _SNR_W + len(" dB")
+#: ``  -105 dBm`` — the lane gap, the number field, then its unit.
+_RSSI_LANE = _LANE_GAP + _RSSI_W + len(" dBm")
 
 #: The scope lane's width. Room for an unnamed scope's ``? 3fa1`` and a short region name
 #: whole; a longer name ellipsizes — its whole name is on the viewer's ``scope`` row, one
@@ -601,13 +604,11 @@ class LiveFeedScreen(Screen):
         header.append(fit_cells("CLASS", _ICON_LANE + _FEED_CLASS_WIDTH + _LANE_GAP))
         header.append(fit_cells("SUBJECT", lanes.subject + _LANE_GAP))
         header.append(fit_cells("SCOPE", _SCOPE_LANE))
-        # The two readings right-align their number, so their labels do too — each sits
-        # over the digits it names rather than over the sign column ahead of them.
-        header.append(fit_cells("SNR", _READING_W, align="right"))
-        header.append(" " * (_SNR_LANE - _READING_W))
-        header.append(" " * _LANE_GAP)
-        header.append(fit_cells("RSSI", _READING_W, align="right"))
-        header.append(" " * (_RSSI_LANE - _LANE_GAP - _READING_W))
+        # Each reading's label starts where its lane does, as every other label on the row
+        # does. Right-aligned over the number instead, it ended mid-value with the unit
+        # trailing past it, and read as floating between two columns rather than naming one.
+        header.append(fit_cells("SNR", _SNR_LANE + _LANE_GAP))
+        header.append(fit_cells("RSSI", _RSSI_LANE - _LANE_GAP))
         return header
 
     def _feed_lines(self, width: int, win: int, lanes: _Lanes) -> list[str]:
@@ -691,11 +692,11 @@ class LiveFeedScreen(Screen):
         body.append_text(scope)
         body.append(" " * _LANE_GAP)
         body.append(
-            f"{entry.snr:+{_READING_W}.1f} dB" if entry.snr is not None else " " * _SNR_LANE,
+            f"{entry.snr:+{_SNR_W}.1f} dB" if entry.snr is not None else " " * _SNR_LANE,
             style=snr_style(entry.snr) if entry.snr is not None else "muted",
         )
         body.append(
-            f"{'':{_LANE_GAP}}{entry.rssi:{_READING_W}.0f} dBm"
+            f"{'':{_LANE_GAP}}{entry.rssi:{_RSSI_W}.0f} dBm"
             if entry.rssi is not None
             else " " * _RSSI_LANE,
             style="muted",

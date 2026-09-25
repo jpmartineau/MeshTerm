@@ -273,9 +273,11 @@ def test_livefeed_column_header_sits_over_the_lanes_it_names() -> None:
     assert _col(header, "TIME") == _col(row, stamp.group(0))
     assert _col(header, "CLASS") == _col(row, "telemetry") - _ICON_LANE
     assert _col(header, "SUBJECT") == _col(row, "Hub")
-    # The two readings right-align their number, so their labels end where the digits do.
-    assert _col(header, "SNR") + 3 == _col(row, "+12.8") + 5
-    assert _col(header, "RSSI") + 4 == _col(row, "-105") + 4
+    # Each reading's label starts where its lane does, like every other label.
+    assert _col(header, "SNR") == _col(row, "+12.8")
+    assert _col(header, "RSSI") == _col(row, "-105")
+    # And the readings are set off by the row's one gap, not the width of a spare field.
+    assert "+12.8 dB  -105 dBm" in row
 
 
 def test_livefeed_column_header_is_pinned_and_carries_no_sort_cue() -> None:
