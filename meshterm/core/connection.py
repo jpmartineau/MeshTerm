@@ -569,8 +569,27 @@ class _BlePairing:
     status: str = ""
 
 
-#: Pairing statuses that mean the PIN itself was wrong.
-_PAIRING_WRONG_PIN = frozenset({"authentication failure", "invalid ceremony data"})
+def _ble_host() -> str | None:
+    """The OS whose pairing MeshTerm runs itself, as a message names it; ``None`` elsewhere."""
+    if sys.platform == "win32":
+        return "Windows"
+    if sys.platform.startswith("linux"):
+        return "Linux"
+    return None
+
+
+def _ble_forget(where: str) -> str:
+    """How to forget a device's bond on this OS, as a clause a remedy can carry."""
+    if sys.platform.startswith("linux"):
+        return f"remove it with `bluetoothctl remove {where}`"
+    return "remove it in Settings > Bluetooth"
+
+
+#: Pairing statuses that mean the PIN itself was wrong: WinRT's names, then BlueZ's (whose
+#: AuthenticationFailed after the agent was asked for the PIN is a passkey mismatch).
+_PAIRING_WRONG_PIN = frozenset(
+    {"authentication failure", "invalid ceremony data", "authentication failed"}
+)
 
 #: Pairing statuses that mean the device (not the PIN) turned the pairing down — busy with
 #: another host, holding an old bond, or simply not answering in time.
@@ -583,6 +602,11 @@ _PAIRING_REFUSED = frozenset(
         "rejected by handler",
         "authentication timeout",
         "protection level could not be met",
+        # BlueZ's spellings of the same refusals.
+        "authentication rejected",
+        "authentication canceled",
+        "connection attempt failed",
+        "in progress",
     }
 )
 
@@ -608,6 +632,64 @@ def _is_ble_auth_error(exc: BaseException) -> bool:
             return True
         current = current.__cause__ or current.__context__
     return False
+
+
+#: ``errno`` values a serial open fails with, by what they mean for the reader.
+_ERRNO_DENIED = {1, 13}  # EPERM, EACCES
+_ERRNO_BUSY = {11, 16}  # EAGAIN (pyserial's exclusive lock), EBUSY
+_ERRNO_GONE = {2, 6, 19}  # ENOENT, ENXIO, ENODEV
+
+_ERRNO_IN_TEXT = re.compile(r"\[Errno (\d+)\]")
+
+
+def _serial_open_message(port: str, exc: BaseException) -> str | None:
+    """Name why a serial port wouldn't open, or ``None`` if the failure isn't one of those.
+
+    pyserial folds the OS error into a ``SerialException`` whose ``errno`` is usually unset,
+    so the chain is walked for a real ``OSError`` first and the ``[Errno N]`` in the text
+    second. Windows says "Access is denied" for a port another program holds, which is a
+    busy port there, not a permission.
+
+    Args:
+        port: The port, as the message names it.
+        exc: What opening it raised.
+
+    Returns:
+        The actionable sentence, or ``None`` to let the original error through.
+    """
+    code: int | None = None
+    text = ""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        text += " " + str(current).lower()
+        if code is None and isinstance(current, OSError) and current.errno:
+            code = current.errno
+        current = current.__cause__ or current.__context__
+    if code is None and (found := _ERRNO_IN_TEXT.search(text)):
+        code = int(found.group(1))
+    windows_busy = sys.platform == "win32" and ("access is denied" in text or code == 13)
+    if windows_busy or code in _ERRNO_BUSY or "resource busy" in text or "exclusively lock" in text:
+        modem = (
+            " On Linux this is often ModemManager, which probes new USB serial devices: "
+            "`sudo systemctl stop ModemManager` and try again."
+            if sys.platform.startswith("linux")
+            else ""
+        )
+        return (
+            f"{port} is in use by another program — the MeshCore app, a flasher, or a serial "
+            f"monitor. Close it and try again.{modem}"
+        )
+    if code in _ERRNO_DENIED or "permission denied" in text:
+        return (
+            f"no permission to open {port}. Your user needs to be in the group that owns it "
+            "(dialout on Ubuntu and Debian): `sudo usermod -aG dialout $USER`, then log out "
+            "and back in."
+        )
+    if code in _ERRNO_GONE or "cannot find the file" in text or "no such file" in text:
+        return f"{port} isn't there — the device was unplugged, or came back under another name."
+    return None
 
 
 def serial_port_present(port: str) -> bool:
@@ -1493,9 +1575,18 @@ class MeshCoreDevice(Device):
                 # the things to check) rather than letting a raw socket traceback escape.
                 raise DeviceCommandError(self._no_response_message()) from exc
         else:
-            self._mc = await MeshCore.create_serial(
-                self._port, self._baudrate, default_timeout=self._connect_timeout
-            )
+            try:
+                self._mc = await MeshCore.create_serial(
+                    self._port, self._baudrate, default_timeout=self._connect_timeout
+                )
+            except Exception as exc:  # noqa: BLE001 - named when recognised, else re-raised
+                # The port refused to open at all — which says nothing about whether a
+                # companion is on it, and used to be reported as if it had said exactly that.
+                message = _serial_open_message(self._port or "the serial port", exc)
+                if message is None:
+                    raise
+                _log.warning("couldn't open %s: %s", self._port, exc)
+                raise DeviceCommandError(message) from exc
         # ``create_*`` returns ``None`` (after cleaning up its own connection) when the node
         # never answers the identity handshake — i.e. the endpoint isn't a MeshCore companion.
         # Surface that as a clean, recoverable error rather than leaving a half-open device
@@ -1534,7 +1625,7 @@ class MeshCoreDevice(Device):
         Returns:
             The connected ``MeshCore`` client, or ``None`` if the peripheral never answered.
         """
-        await self._pair_ble_windows(force=False)
+        await self._pair_ble(force=False)
         return await self._open_ble(mesh_core, allow_repair=True)
 
     async def _open_ble(self, mesh_core, *, allow_repair: bool):  # type: ignore[no-untyped-def]
@@ -1575,7 +1666,7 @@ class MeshCoreDevice(Device):
             # "Just Works" bond from an older attempt is in the way: is_paired is true so the
             # ProvidePin step above was skipped, yet the bond can't unlock the characteristic.
             # Clear it, pair with the PIN, and retry the connect exactly once before giving up.
-            if allow_repair and await self._pair_ble_windows(force=True):
+            if allow_repair and await self._pair_ble(force=True):
                 return await self._open_ble(mesh_core, allow_repair=False)
             # On macOS the same rejection means the opposite thing: it is not the end of a
             # pairing attempt but the *start* of one, because touching the authenticated
@@ -1726,7 +1817,11 @@ class MeshCoreDevice(Device):
         # Saying nothing here is therefore what *lets* a PIN-protected companion bond;
         # the OS keeps the bond, and later connections need no PIN. Windows and Linux do
         # expose explicit pairing, and keep it (see :meth:`_pair_ble_windows`).
-        pin = None if sys.platform == "darwin" else self._pin
+        # Linux is the same story from the other side: bleak's BlueZ ``pair()`` ignores the
+        # PIN and pairs through whatever system agent there is (a desktop dialog, or nothing
+        # at all), so MeshTerm pairs there itself beforehand (see :meth:`_pair_ble_bluez`).
+        # Handing bleak the PIN would only start a second pairing we can't answer.
+        pin = None if sys.platform == "darwin" or sys.platform.startswith("linux") else self._pin
         connection = BLEConnection(address=self._address, device=self._ble_device, pin=pin)
         mc = mesh_core(
             connection,
@@ -1818,6 +1913,52 @@ class MeshCoreDevice(Device):
                 await asyncio.wait_for(raw.disconnect(), timeout=_FORCE_DISCONNECT_TIMEOUT_S)
         except Exception as exc:  # noqa: BLE001 - the link may already be gone
             _log.debug("forced transport close failed: %s", exc)
+
+    async def _pair_ble(self, *, force: bool) -> bool:
+        """Pair with the PIN through the OS, where MeshTerm has to (Windows, Linux).
+
+        One door for :meth:`_create_ble` and its stale-bond repair, so the connect path is the
+        same everywhere and only the ceremony differs. macOS has no pairing API and pairs on
+        its own (see :meth:`_open_ble_after_macos_pairing`).
+
+        Args:
+            force: Tear down an existing bond and pair afresh (see :meth:`_pair_ble_windows`).
+
+        Returns:
+            ``True`` if an authenticated bond exists afterward.
+        """
+        if not self._pin:
+            return False
+        if sys.platform == "win32":
+            return await self._pair_ble_windows(force=force)
+        if sys.platform.startswith("linux"):
+            return await self._pair_ble_bluez(force=force)
+        return False
+
+    async def _pair_ble_bluez(self, *, force: bool) -> bool:
+        """Pair through BlueZ with our own agent answering the PIN (Linux only).
+
+        See :mod:`meshterm.core.bluez` for why bleak can't: BlueZ asks a pairing *agent* for
+        the passkey, and bleak registers none. Records what it found in ``_ble_pairing``, as
+        the Windows ceremony does, so a refusal can say which step failed.
+
+        Args:
+            force: Remove an existing bond first — the heal for one the device has lost.
+
+        Returns:
+            ``True`` if an authenticated bond exists afterward.
+        """
+        from . import bluez
+
+        if not self._pin or not bluez.is_mac(self._address or ""):
+            return False
+        outcome, status = await bluez.pair(self._address or "", self._pin, force=force)
+        self._ble_pairing = _BlePairing(outcome, status)
+        if outcome in ("failed", "error"):
+            _log.warning("BLE PIN pairing with %s failed: %s", self._address, status)
+        else:
+            _log.debug("BLE PIN pairing with %s: %s", self._address, outcome)
+        return outcome in ("paired", "reused")
 
     async def _pair_ble_windows(self, *, force: bool) -> bool:
         """Establish an authenticated BLE bond via the WinRT ProvidePin ceremony (Windows only).
@@ -1964,7 +2105,7 @@ class MeshCoreDevice(Device):
 
     @staticmethod
     async def is_ble_paired(address: str) -> bool:
-        """Whether Windows currently holds a bond for the BLE peripheral at ``address``.
+        """Whether the OS holds a bond for the BLE peripheral at ``address`` (Windows, Linux).
 
         The read-only companion to :meth:`_pair_ble_windows` / :meth:`unpair_ble`: it asks
         WinRT whether an OS-level pairing exists, so the UI can decide whether an "unpair"
@@ -1983,6 +2124,10 @@ class MeshCoreDevice(Device):
         Returns:
             ``True`` only when Windows reports a live bond for the device.
         """
+        if sys.platform.startswith("linux"):
+            from . import bluez
+
+            return bluez.is_mac(address or "") and await bluez.is_paired(address)
         if sys.platform != "win32":
             return False
         addr = MeshCoreDevice._ble_address_int(address or "")
@@ -2007,7 +2152,7 @@ class MeshCoreDevice(Device):
 
     @staticmethod
     async def unpair_ble(address: str) -> bool:
-        """Drop the Windows OS-level bond for the BLE peripheral at ``address`` (Windows only).
+        """Drop the OS-level bond for the BLE peripheral at ``address`` (Windows and Linux).
 
         The inverse of :meth:`_pair_ble_windows`: it removes the persisted
         ``ENCRYPTION_AND_AUTHENTICATION`` bond so the next connection has to re-run the PIN
@@ -2028,6 +2173,10 @@ class MeshCoreDevice(Device):
             ``True`` if a bond was removed, ``False`` if there was nothing to unpair or the
             attempt failed.
         """
+        if sys.platform.startswith("linux"):
+            from . import bluez
+
+            return bluez.is_mac(address or "") and await bluez.unpair(address)
         if sys.platform != "win32":
             return False
         addr = MeshCoreDevice._ble_address_int(address or "")
@@ -2061,7 +2210,7 @@ class MeshCoreDevice(Device):
             MeshCoreDevice._close_ble_device(device)
 
     async def _ble_os_bonded(self) -> bool:
-        """Whether Windows holds a bond for this device — asked only to explain a refusal.
+        """Whether the OS holds a bond for this device — asked only to explain a refusal.
 
         An instance hook over :meth:`is_ble_paired` so tests can answer it without the OS.
         """
@@ -2076,24 +2225,27 @@ class MeshCoreDevice(Device):
         Windows plainly showed as paired. So the error is built from what is actually known:
 
         * macOS — the OS runs the pairing in its own dialog; say so.
-        * No PIN, and Windows holds a bond — the bond is stale (the device was reflashed,
+        * No PIN, and the OS holds a bond — the bond is stale (the device was reflashed,
           reset, or given a new PIN since), and re-pairing is the fix.
         * No PIN, no bond — the device needs its PIN.
-        * A PIN, and the Windows pairing ceremony reported a status — a wrong PIN, a device
-          that refused to pair, or some other status, each named.
+        * A PIN, and MeshTerm's own pairing (WinRT on Windows, a BlueZ agent on Linux)
+          reported a status — a wrong PIN, a device that refused to pair, or some other
+          status, each named.
         * A PIN, the pairing succeeded, and the device still refused — it is holding an old
           bond for this computer.
-        * A PIN and nothing more known (Linux, or no WinRT) — the PIN was rejected.
+        * A PIN and nothing more known — the PIN was rejected.
 
-        Every case is also logged, so a log sent in from another machine says which it was.
+        The OS is named in the message (Windows, Linux) because each has its own place to
+        forget a bond, and that is half of most of these remedies. Every case is also logged,
+        so a log sent in from another machine says which it was.
 
         Returns:
             The error to raise, carrying a one-line :attr:`~DeviceAuthenticationError.hint`
             for the PIN dialog.
         """
         where = self._address or "the selected Bluetooth device"
-        # Windows' bond changes the message in exactly one case, so it is asked only there.
-        bonded = sys.platform == "win32" and not self._pin and await self._ble_os_bonded()
+        # The OS bond changes the message in exactly one case, so it is asked only there.
+        bonded = _ble_host() is not None and not self._pin and await self._ble_os_bonded()
         message, hint = self._ble_auth_diagnosis(where, bonded)
         _log.warning("BLE connect to %s refused: %s", where, message)
         return DeviceAuthenticationError(message, hint=hint)
@@ -2103,7 +2255,7 @@ class MeshCoreDevice(Device):
 
         Args:
             where: The device, as the message names it.
-            os_bonded: Whether Windows holds a bond (asked only when no PIN was given).
+            os_bonded: Whether the OS holds a bond (asked only when no PIN was given).
 
         Returns:
             ``(message, hint)``.
@@ -2119,20 +2271,26 @@ class MeshCoreDevice(Device):
                 "terminal in System Settings > Privacy & Security > Bluetooth.",
                 "",
             )
+        host = _ble_host() or "The system"
+        forget = _ble_forget(where)
         if not self._pin:
             if os_bonded:
                 return (
-                    f"Windows has {where} paired, but the device refused that pairing — it is "
+                    f"{host} has {where} paired, but the device refused that pairing — it is "
                     "probably out of date (the device was reflashed, reset, or given a new PIN "
-                    "since). Pass --ble-pin <PIN> and MeshTerm will pair it again, or remove it "
-                    "in Settings > Bluetooth and reconnect.",
-                    "Windows' saved pairing was refused — the PIN pairs it again.",
+                    f"since). Pass --ble-pin <PIN> and MeshTerm will pair it again, or {forget} "
+                    "and reconnect.",
+                    f"{host}'s saved pairing was refused — the PIN pairs it again.",
                 )
+            once = (
+                " On Windows you may also need to pair the device once in Settings > Bluetooth "
+                "before it will connect."
+                if sys.platform == "win32"
+                else ""
+            )
             return (
                 f"{where} requires a Bluetooth pairing PIN. Pass it with --ble-pin <PIN> (the "
-                "6-digit code shown on the device or in the MeshCore app). On Windows you may "
-                "also need to pair the device once in Settings > Bluetooth before it will "
-                "connect.",
+                f"6-digit code shown on the device or in the MeshCore app).{once}",
                 "",
             )
         pairing = self._ble_pairing
@@ -2147,26 +2305,26 @@ class MeshCoreDevice(Device):
             )
         if outcome == "failed" and status not in _PAIRING_WRONG_PIN:
             return (
-                f"Windows couldn't pair with {where} ({status}). Remove it in Settings > "
-                "Bluetooth, restart the device, and try again.",
-                f"Windows couldn't pair ({status}).",
+                f"{host} couldn't pair with {where} ({status}). Restart the device, {forget}, "
+                "and try again.",
+                f"{host} couldn't pair ({status}).",
             )
         if outcome == "absent":
             return (
-                f"Windows couldn't reach {where} to pair it — it may be out of range, asleep, "
+                f"{host} couldn't reach {where} to pair it — it may be out of range, asleep, "
                 "or connected to another device.",
-                "Windows couldn't reach the device to pair it.",
+                f"{host} couldn't reach the device to pair it.",
             )
         if outcome == "error":
             return (
-                f"Windows' pairing call failed for {where}: {status}",
-                "Windows' pairing call failed — the log has the detail.",
+                f"{host}'s pairing call failed for {where}: {status}",
+                f"{host}'s pairing call failed — the log has the detail.",
             )
         if outcome in ("paired", "reused"):
             return (
-                f"Windows paired with {where}, but the device still refuses the connection — "
+                f"{host} paired with {where}, but the device still refuses the connection — "
                 "it is probably holding an old pairing for this computer. Restart the device, "
-                "remove it in Settings > Bluetooth, and try again.",
+                f"{forget}, and try again.",
                 "Paired, but still refused — restart the device and retry.",
             )
         return (
@@ -2194,9 +2352,17 @@ class MeshCoreDevice(Device):
                 "and that the device is powered on, reachable on the network, and not already "
                 "connected to another client."
             )
+        # ModemManager opens without locking, so the port opens fine and the handshake is
+        # what it spoils — which makes this, not the open error, where it has to be named.
+        modem = (
+            " On Linux, ModemManager may be probing it: `sudo systemctl stop ModemManager` "
+            "and try again."
+            if sys.platform.startswith("linux")
+            else ""
+        )
         return (
             f"no response from a MeshCore companion on {self._port}; it may not be a "
-            "MeshCore device, or it may be powered off or in use by another program."
+            f"MeshCore device, or it may be powered off or in use by another program.{modem}"
         )
 
     async def link_present(self) -> bool:  # noqa: D102 - inherited docstring
@@ -4865,7 +5031,10 @@ async def _probe(device: MeshCoreDevice, timeout: float) -> tuple[MeshCoreDevice
         # through so the picker surfaces the remedy rather than hiding it behind "didn't answer".
         await _safe_disconnect(device)
         raise
-    except Exception:  # noqa: BLE001 - any other failure just means "not confirmed"
+    except Exception as exc:  # noqa: BLE001 - any other failure just means "not confirmed"
+        # Still "not confirmed" to the picker, but said in the log: this used to be the one
+        # failure that left no trace, so a report from another machine had nothing to show.
+        _log.warning("probe of %s failed: %r", getattr(device, "endpoint", None), exc)
         await _safe_disconnect(device)
         return None
     if not info:

@@ -244,6 +244,23 @@ def test_the_pin_is_withheld_on_macos(monkeypatch: pytest.MonkeyPatch) -> None:
     assert dev._pin == "000000"  # still remembered — it is the platform that can't use it
 
 
+def test_the_pin_is_withheld_from_bleak_on_linux(monkeypatch: pytest.MonkeyPatch) -> None:
+    """On Linux MeshTerm pairs through its own BlueZ agent, so bleak never gets the PIN.
+
+    bleak's BlueZ ``pair()`` ignores it and pairs through whatever system agent there is — a
+    desktop dialog, or nothing — so handing it over would only start a second pairing
+    nobody can answer.
+    """
+    monkeypatch.setattr(sys, "platform", "linux")
+    _FakeMeshCore.reset("ok")
+    dev = MeshCoreDevice(transport="ble", address=_ADDR, pin="000000")
+
+    asyncio.run(dev._connect_owned_ble(_FakeMeshCore))
+
+    assert _FakeTransport.last.pin is None
+    assert dev._pin == "000000"
+
+
 def test_a_cancelled_handshake_still_closes_the_link() -> None:
     """A probe's ``wait_for`` expiring mid-handshake must not leak what it cancelled.
 

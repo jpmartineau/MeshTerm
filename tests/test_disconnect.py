@@ -131,7 +131,7 @@ _A_PIN = "123456"
 async def _disable_windows_pairing(dev: connection.MeshCoreDevice) -> None:
     """Stub out the WinRT ProvidePin step so ``_create_ble`` stays hermetic in tests.
 
-    On a real Windows host ``_pair_ble_windows`` would reach the OS Bluetooth stack (and the
+    On a real Windows or Linux host ``_pair_ble`` would reach the OS Bluetooth stack (and the
     physical device); pinning it to a no-op reproduces the non-Windows / no-winrt path so the
     auth-translation logic can be exercised without hardware.
     """
@@ -142,7 +142,7 @@ async def _disable_windows_pairing(dev: connection.MeshCoreDevice) -> None:
     async def _no_bond() -> bool:
         return False
 
-    dev._pair_ble_windows = _never_pairs  # type: ignore[method-assign]
+    dev._pair_ble = _never_pairs  # type: ignore[method-assign]
     dev._ble_os_bonded = _no_bond  # type: ignore[method-assign]
 
 
@@ -273,7 +273,7 @@ async def test_create_ble_names_what_the_pairing_found(
         dev._ble_pairing = pairing
         return pairing is not None and pairing.outcome == "paired"
 
-    dev._pair_ble_windows = _pair  # type: ignore[method-assign]
+    dev._pair_ble = _pair  # type: ignore[method-assign]
     with pytest.raises(connection.DeviceAuthenticationError) as excinfo:
         await dev._create_ble(fake)
     assert expected in str(excinfo.value)
@@ -311,7 +311,7 @@ async def test_create_ble_repairs_stale_bond_and_retries_once(monkeypatch) -> No
     """A first auth failure triggers one unpair-and-re-pair, then the retried connect succeeds.
 
     Models the Windows upgrade case: a leftover unauthenticated "Just Works" bond makes the
-    first connect fail even with the right PIN, so ``_pair_ble_windows(force=True)`` clears it
+    first connect fail even with the right PIN, so ``_pair_ble(force=True)`` clears it
     and the second connect goes through.
     """
     fake = _fake_ble_stack(
@@ -324,7 +324,7 @@ async def test_create_ble_repairs_stale_bond_and_retries_once(monkeypatch) -> No
         repairs.append(force)
         return force  # the pre-connect pass (force=False) no-ops; the repair (force=True) works
 
-    dev._pair_ble_windows = _pair  # type: ignore[method-assign]
+    dev._pair_ble = _pair  # type: ignore[method-assign]
     result = await dev._create_ble(fake)
     assert result is fake.built[1]  # the retry's client is what the caller gets
     assert len(fake.built) == 2  # failed once, retried once
@@ -347,7 +347,7 @@ async def test_create_ble_gives_up_after_one_repair(monkeypatch) -> None:
         calls.append(force)
         return force  # even the repair "succeeds" so we prove the retry runs exactly once
 
-    dev._pair_ble_windows = _pair  # type: ignore[method-assign]
+    dev._pair_ble = _pair  # type: ignore[method-assign]
     with pytest.raises(connection.DeviceAuthenticationError):
         await dev._create_ble(fake)
     # force=False (pre-connect), then force=True (repair). The repair's retry passes
@@ -469,6 +469,147 @@ async def test_pair_ble_windows_noops_without_pin() -> None:
     """Pairing is skipped (no WinRT touched) when no PIN is set — the fast, hermetic path."""
     dev = connection.MeshCoreDevice(transport="ble", address=_BONDED_ADDR)
     assert await dev._pair_ble_windows(force=False) is False
+
+
+@pytest.mark.parametrize(
+    ("platform", "ceremony"),
+    [("win32", "_pair_ble_windows"), ("linux", "_pair_ble_bluez"), ("darwin", None)],
+)
+async def test_pair_ble_runs_this_platform_s_ceremony(monkeypatch, platform, ceremony) -> None:
+    """Windows pairs through WinRT, Linux through a BlueZ agent, macOS not at all."""
+    monkeypatch.setattr(sys, "platform", platform)
+    dev = connection.MeshCoreDevice(transport="ble", address=_BONDED_ADDR, pin=_A_PIN)
+    ran: list[str] = []
+    for name in ("_pair_ble_windows", "_pair_ble_bluez"):
+
+        async def _ceremony(*, force: bool, name=name) -> bool:
+            ran.append(name)
+            return True
+
+        setattr(dev, name, _ceremony)
+    assert await dev._pair_ble(force=False) is (ceremony is not None)
+    assert ran == ([ceremony] if ceremony else [])
+
+
+async def test_linux_pairing_records_what_bluez_found(monkeypatch) -> None:
+    """The BlueZ outcome lands in ``_ble_pairing``, where the refusal message reads it."""
+    from meshterm.core import bluez
+
+    async def _pair(address, pin, *, force):
+        return "failed", "authentication failed"
+
+    monkeypatch.setattr(bluez, "pair", _pair)
+    dev = connection.MeshCoreDevice(transport="ble", address=_BONDED_ADDR, pin=_A_PIN)
+    assert await dev._pair_ble_bluez(force=False) is False
+    assert dev._ble_pairing == connection._BlePairing("failed", "authentication failed")
+
+
+@pytest.mark.parametrize(
+    ("pairing", "expected"),
+    [
+        (connection._BlePairing("failed", "authentication failed"), "rejected the Bluetooth PIN"),
+        (connection._BlePairing("failed", "connection attempt failed"), "refused to pair"),
+        (connection._BlePairing("failed", "failed: le-connection-abort"), "Linux couldn't pair"),
+        (connection._BlePairing("absent"), "Linux couldn't reach"),
+        (connection._BlePairing("paired"), "bluetoothctl remove"),
+    ],
+)
+def test_linux_refusals_speak_of_linux_and_bluetoothctl(monkeypatch, pairing, expected) -> None:
+    """On Linux the remedies name Linux and ``bluetoothctl``, never Windows' Settings."""
+    monkeypatch.setattr(sys, "platform", "linux")
+    dev = connection.MeshCoreDevice(transport="ble", address=_BONDED_ADDR, pin=_A_PIN)
+    dev._ble_pairing = pairing
+    message, _hint = dev._ble_auth_diagnosis(_BONDED_ADDR, False)
+    assert expected in message
+    assert "Windows" not in message and "Settings" not in message
+
+
+def test_a_stale_linux_bond_is_named_as_such(monkeypatch) -> None:
+    """No PIN, BlueZ holds a bond, the device refuses it: stale, with the Linux way out."""
+    monkeypatch.setattr(sys, "platform", "linux")
+    dev = connection.MeshCoreDevice(transport="ble", address=_BONDED_ADDR)
+    message, hint = dev._ble_auth_diagnosis(_BONDED_ADDR, True)
+    assert message.startswith("Linux has") and "bluetoothctl remove" in message
+    assert "Linux's saved pairing" in hint
+    # And with no bond, the PIN request carries no Windows-only advice.
+    message, _ = dev._ble_auth_diagnosis(_BONDED_ADDR, False)
+    assert "--ble-pin" in message and "Windows" not in message
+
+
+class SerialException(OSError):
+    """Stand-in for pyserial's exception (an ``OSError`` whose ``errno`` is usually unset)."""
+
+
+@pytest.mark.parametrize(
+    ("platform", "exc", "expected"),
+    [
+        (
+            "linux",
+            SerialException(
+                "[Errno 13] could not open port /dev/ttyACM0: [Errno 13] "
+                "Permission denied: '/dev/ttyACM0'"
+            ),
+            "dialout",
+        ),
+        (
+            "linux",
+            SerialException(
+                "Could not exclusively lock port /dev/ttyACM0: [Errno 11] "
+                "Resource temporarily unavailable"
+            ),
+            "ModemManager",
+        ),
+        ("linux", SerialException("[Errno 16] Device or resource busy"), "in use"),
+        ("linux", SerialException("[Errno 2] No such file or directory"), "isn't there"),
+        (
+            "win32",
+            SerialException(
+                "could not open port 'COM5': PermissionError(13, 'Access is denied.', None, 5)"
+            ),
+            "in use by another program",
+        ),
+        (
+            "win32",
+            SerialException(
+                "could not open port 'COM9': FileNotFoundError(2, 'The system "
+                "cannot find the file specified.', None, 2)"
+            ),
+            "isn't there",
+        ),
+    ],
+)
+def test_serial_open_failures_are_named(monkeypatch, platform, exc, expected) -> None:
+    """A port that won't open says why, instead of "didn't answer as a MeshCore device"."""
+    monkeypatch.setattr(sys, "platform", platform)
+    message = connection._serial_open_message("PORT", exc)
+    assert message is not None and expected in message
+    if platform == "win32":
+        assert "dialout" not in message  # Windows' "Access is denied" is a held port
+
+
+def test_an_unrecognised_serial_failure_passes_through() -> None:
+    """Anything that isn't an open failure keeps its own error."""
+    assert connection._serial_open_message("PORT", ValueError("bad baud rate")) is None
+
+
+async def test_serial_connect_raises_the_named_failure(monkeypatch) -> None:
+    """``connect`` turns a refused open into a DeviceCommandError the picker shows verbatim."""
+    import types
+
+    class _MeshCore:
+        @staticmethod
+        async def create_serial(*_args, **_kwargs):
+            raise SerialException("[Errno 13] could not open port: Permission denied")
+
+    module = types.ModuleType("meshcore")
+    module.MeshCore = _MeshCore
+    monkeypatch.setitem(sys.modules, "meshcore", module)
+    monkeypatch.setattr(sys, "platform", "linux")
+    dev = connection.MeshCoreDevice(port="/dev/ttyACM0")
+    with pytest.raises(DeviceCommandError) as excinfo:
+        await dev.connect()
+    assert "dialout" in str(excinfo.value)
+    assert isinstance(excinfo.value.__cause__, SerialException)
 
 
 def test_ble_address_int_parses_macs_and_rejects_others() -> None:
