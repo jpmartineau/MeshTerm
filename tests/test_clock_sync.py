@@ -20,6 +20,7 @@ from rich.console import Console
 from meshterm.context import AppContext
 from meshterm.core.admin_store import AdminStore
 from meshterm.core.config import Settings
+from meshterm.core.connection import ClockAheadError
 from meshterm.core.device_store import DeviceStore
 from meshterm.core.preferences import get_spec
 from meshterm.persistence.repository import Repository
@@ -78,7 +79,7 @@ def test_the_preference_exists_and_is_off_by_default() -> None:
 async def test_set_clock_writes_the_host_time_and_reports_the_drift(ctx: AppContext) -> None:
     """The shared step corrects a clock an hour slow and says by how much."""
     device = await ctx.device()
-    await device.set_time(int(time.time()) - 3600)
+    device._clock_offset = -3600  # noqa: SLF001 - an hour slow; a write could only go forward
 
     done = await set_clock(device)
 
@@ -92,7 +93,7 @@ async def test_the_service_does_nothing_while_the_preference_is_off(
 ) -> None:
     """Off by default: a connection is noted and the clock is left alone."""
     device = await ctx.device()
-    await device.set_time(int(time.time()) - 3600)
+    device._clock_offset = -3600  # noqa: SLF001 - an hour slow; a write could only go forward
     service = ClockSync(ctx)
     await service.start()
 
@@ -109,7 +110,7 @@ async def test_the_service_sets_the_clock_once_per_connection_and_logs_it(
     """On: the first settled connection is set in the background; the same one is not set twice."""
     ctx.preferences.set("set_clock_on_connect", True)
     device = await ctx.device()
-    await device.set_time(int(time.time()) - 3600)
+    device._clock_offset = -3600  # noqa: SLF001 - an hour slow; a write could only go forward
     service = ClockSync(ctx)
     await service.start()  # a device is already connected: that counts as the first one
 
@@ -119,7 +120,7 @@ async def test_the_service_sets_the_clock_once_per_connection_and_logs_it(
     assert len(said) == 1
     assert "-36" in said[0]  # "(was -3600 s off)", give or take the seconds the test took
 
-    await device.set_time(int(time.time()) - 3600)
+    device._clock_offset = -3600  # noqa: SLF001 - an hour slow; a write could only go forward
     service.on_connected(device)
     await _settle()
     assert abs(await device.get_time() - (int(time.time()) - 3600)) <= 2  # untouched
@@ -133,7 +134,7 @@ async def test_a_service_never_started_ignores_connections(
     """A scripted run never starts the service, so its connections never write the clock."""
     ctx.preferences.set("set_clock_on_connect", True)
     device = await ctx.device()
-    await device.set_time(int(time.time()) - 3600)
+    device._clock_offset = -3600  # noqa: SLF001 - an hour slow; a write could only go forward
 
     ctx.clock_sync.on_connected(device)  # what the connect path does
     await _settle()
@@ -158,3 +159,71 @@ async def test_a_write_that_fails_is_logged_not_raised(
     await _settle()
 
     assert any("could not set the device clock: no clock here" in line for line in log_lines)
+
+
+async def test_a_clock_a_few_seconds_ahead_is_in_sync_and_left_alone(ctx: AppContext) -> None:
+    """Firmware never sets its clock back; a few seconds ahead needs no setting anyway."""
+    device = await ctx.device()
+    device._clock_offset = 5  # noqa: SLF001 - e.g. a GPS-disciplined radio beside a slow PC
+
+    done = await set_clock(device)
+
+    assert not done.written
+    assert done.drift_s is not None and 3 <= done.drift_s <= 6
+
+
+async def test_a_clock_far_ahead_is_stated_not_retried(ctx: AppContext) -> None:
+    """Minutes ahead: nothing is written, and the error says why and what resets it."""
+    device = await ctx.device()
+    device._clock_offset = 1800  # noqa: SLF001
+
+    with pytest.raises(ClockAheadError) as caught:
+        await set_clock(device)
+    assert caught.value.ahead_s is not None and 1795 <= caught.value.ahead_s <= 1801
+    assert "30 min ahead" in str(caught.value) and "rebooting the radio" in str(caught.value)
+
+
+async def test_the_simulator_refuses_to_set_its_clock_back_like_the_firmware() -> None:
+    """``CMD_SET_DEVICE_TIME`` with an earlier time is refused, never applied."""
+    from meshterm.core.connection import MockDevice
+
+    device = MockDevice()
+    await device.connect()
+    now = int(time.time())
+    await device.set_time(now + 100)
+    with pytest.raises(ClockAheadError):
+        await device.set_time(now)
+    assert await device.get_time() >= now + 99
+
+
+async def test_the_firmwares_refusal_reads_as_a_clock_ahead_not_malformed() -> None:
+    """The real device turns ERR_CODE_ILLEGAL_ARG on a set-time into ClockAheadError."""
+    from types import SimpleNamespace
+
+    from meshterm.core.connection import MeshCoreDevice
+
+    class _Commands:
+        async def set_time(self, epoch):  # noqa: ANN001, ANN201
+            return SimpleNamespace(is_error=lambda: True, payload={"error_code": 6})
+
+    device = object.__new__(MeshCoreDevice)
+    device._mc = SimpleNamespace(commands=_Commands())  # noqa: SLF001
+    with pytest.raises(ClockAheadError) as caught:
+        await device.set_time(int(time.time()))
+    assert "malformed" not in str(caught.value)
+
+
+async def test_the_service_logs_a_clock_ahead_plainly(
+    ctx: AppContext, log_lines: list[str]
+) -> None:
+    """On connect, a clock far ahead is one clear warning, not a 'malformed' request."""
+    ctx.preferences.set("set_clock_on_connect", True)
+    device = await ctx.device()
+    device._clock_offset = 7200  # noqa: SLF001
+    service = ClockSync(ctx)
+    await service.start()
+    service.on_connected(device)
+    await _settle()
+    assert any("left the device clock alone" in line and "2 h ahead" in line for line in log_lines)
+    assert not any("malformed" in line for line in log_lines)
+    await service.aclose()

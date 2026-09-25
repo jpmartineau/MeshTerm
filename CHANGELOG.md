@@ -50,6 +50,12 @@ one caveat SemVer makes for a leading zero: while the major version is still `0`
 
 ### Fixed
 
+- **Clock sync explains a radio whose clock is ahead, instead of calling it malformed.**
+  MeshCore firmware never sets its clock back, so once a radio's clock ran ahead of the
+  computer's — a GPS fix, another app, drift — every sync was refused and logged as "the
+  device rejected the request as malformed". MeshTerm now reads the radio's clock first: a
+  few seconds ahead is in sync and left alone, and further ahead says by how much and that
+  rebooting the radio resets it.
 - **The default flood scope is stored the way the firmware and the MeshCore app store it.**
   MeshTerm saved it as `#name` where they save `name`, refused a 30-character name the
   firmware accepts, and mis-framed a name with an accent. Device config also now refuses

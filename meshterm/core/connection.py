@@ -218,6 +218,47 @@ class ContactNotOnDeviceError(DeviceCommandError):
         self.contact = contact
 
 
+class ClockAheadError(DeviceCommandError):
+    """The radio's clock is ahead of the time being written, and firmware won't go back.
+
+    MeshCore's companion firmware sets its clock only *forward*: ``CMD_SET_DEVICE_TIME``
+    with a time earlier than the one it holds is answered ``ERR_CODE_ILLEGAL_ARG``
+    (``examples/companion_radio/MyMesh.cpp``), which the error table reads as "malformed" —
+    true of the argument, and no help to anyone. A clock a GPS fix, another app, or plain
+    drift carried past this computer's stays there until the radio reboots, so a set that
+    meets one is not a failure to retry but a fact to state.
+
+    Attributes:
+        ahead_s: How far ahead the radio's clock was, in seconds, or ``None`` where it was
+            not read (the firmware's refusal says only *that* it is ahead).
+    """
+
+    def __init__(self, ahead_s: int | None) -> None:
+        """Say how far ahead the clock is, and what does and does not move it.
+
+        Args:
+            ahead_s: Seconds ahead of the time written, or ``None`` when unknown.
+        """
+        by = f" {_span(ahead_s)}" if ahead_s is not None else ""
+        super().__init__(
+            f"the radio's clock is{by} ahead of this computer's, and MeshCore firmware never "
+            "sets its clock back — rebooting the radio resets it"
+        )
+        self.ahead_s = ahead_s
+
+
+def _span(seconds: int) -> str:
+    """A duration as a person says it: ``3 s``, ``12 min``, ``5 h``, ``2 days``."""
+    seconds = abs(int(seconds))
+    if seconds < 120:
+        return f"{seconds} s"
+    if seconds < 2 * 3600:
+        return f"{seconds // 60} min"
+    if seconds < 2 * 86400:
+        return f"{seconds // 3600} h"
+    return f"{seconds // 86400} days"
+
+
 class DeviceAuthenticationError(DeviceCommandError):
     """A Bluetooth companion refused the connection because it needs a pairing PIN/bond.
 
@@ -333,6 +374,10 @@ def _scope_refusal(scope: str, exc: BaseException) -> str:
 
 #: ``ERR_CODE_NOT_FOUND`` — the companion has no entry matching what a command addressed.
 _ERR_NOT_FOUND = 2
+
+#: ``ERR_CODE_ILLEGAL_ARG`` — an argument the firmware refuses; for ``CMD_SET_DEVICE_TIME``
+#: specifically, a time earlier than the clock it already holds (see :class:`ClockAheadError`).
+_ERR_ILLEGAL_ARG = 6
 
 #: ``CMD_SET_AUTOADD_CONFIG`` — the auto-add bitmask, and (as an optional second byte, which
 #: the ``meshcore`` library never sends) the hop limit.
@@ -1498,7 +1543,12 @@ class Device(ABC):
 
     @abstractmethod
     async def set_time(self, epoch: int) -> None:
-        """Set the device clock to a UNIX epoch timestamp."""
+        """Set the device clock to a UNIX epoch timestamp.
+
+        Raises:
+            ClockAheadError: If the device's clock is already later than ``epoch`` —
+                MeshCore firmware only moves its clock forward.
+        """
 
     @abstractmethod
     async def send_advert(self, flood: bool = False) -> None:
@@ -3722,7 +3772,12 @@ class MeshCoreDevice(Device):
         self._ok(await self._require().commands.set_channel(index, name, secret))
 
     async def set_time(self, epoch: int) -> None:  # noqa: D102 - inherited docstring
-        self._ok(await self._require().commands.set_time(epoch))
+        event = await self._require().commands.set_time(epoch)
+        if getattr(event, "is_error", lambda: False)() and error_code(event) == _ERR_ILLEGAL_ARG:
+            # The one argument the set-time handler refuses: a time behind the radio's own
+            # clock, which firmware never winds back (see ClockAheadError).
+            raise ClockAheadError(None)
+        self._ok(event)
 
     async def send_advert(self, flood: bool = False) -> None:  # noqa: D102
         transmit_gate.mark(flood_advert=flood)
@@ -4337,6 +4392,10 @@ class MockDevice(Device):
     async def set_time(self, epoch: int) -> None:  # noqa: D102 - inherited docstring
         import time as _time
 
+        # Like the firmware, the simulated clock only ever moves forward.
+        current = await self.get_time()
+        if current is not None and epoch < current:
+            raise ClockAheadError(None)
         self._info["clock"] = epoch
         # The simulated clock now runs from the set point (drift corrected).
         self._clock_offset = epoch - int(_time.time())

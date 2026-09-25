@@ -280,12 +280,18 @@ async def apply_ops(
             # The same step the on-connect service runs in the background
             # (:mod:`meshterm.services.clock_sync`); here it is acknowledged and reported.
             done = await set_clock(device)
-            ctx.ui.ack(f"[ok]✓[/ok] device clock set to [brand]{done.stamp}[/brand]")
-            changes += 1
+            if done.written:
+                ctx.ui.ack(f"[ok]✓[/ok] device clock set to [brand]{done.stamp}[/brand]")
+            else:
+                ctx.ui.ack(
+                    f"[ok]✓[/ok] device clock already in sync "
+                    f"([muted]{done.drift_s:+d} s, ahead of this computer's[/muted])"
+                )
+            changes += int(done.written)
             report.append(
                 _acted(
                     "clock",
-                    changes=1,
+                    changes=int(done.written),
                     set_at=done.set_at,
                     # What the clock was off by *before* the set: the fact worth logging,
                     # and the one this command destroys by succeeding.

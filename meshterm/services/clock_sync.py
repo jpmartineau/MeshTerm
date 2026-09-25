@@ -11,6 +11,13 @@ and acknowledges on screen; :class:`ClockSync` calls the same function on its ow
 per connection, when the ``set_clock_on_connect`` preference asks for it (off by default —
 writing to a radio that nobody asked to be written to is a choice the owner makes).
 
+**Forward only.** MeshCore firmware never sets its clock back: a time earlier than the one
+it holds is refused (:class:`~meshterm.core.connection.ClockAheadError`). So a radio whose
+clock has run ahead of this computer's — a GPS fix, another app, drift — is read first and
+not written at all: a few seconds ahead is simply in sync, and more is stated plainly with
+what resets it, rather than retried every connect into a refusal the firmware's error code
+calls "malformed".
+
 The automatic set is a background step, not a startup step: the connect path hands the
 device over and carries on, and the write happens in a task of its own so a slow or silent
 firmware never holds the menu. It reports in the **log**, never on screen.
@@ -30,9 +37,16 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from ..core.connection import ClockAheadError
+
 if TYPE_CHECKING:
     from ..context import AppContext
     from ..core.connection import Device
+
+#: How far ahead a radio's clock may run and still count as in sync. Two clocks a few
+#: seconds apart — a GPS-disciplined radio beside a PC that is itself a second or so off
+#: true time — are not a problem to report, and the firmware couldn't close the gap anyway.
+IN_SYNC_AHEAD_S = 60
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,13 +54,18 @@ class ClockSet:
     """What one clock set did.
 
     Attributes:
-        epoch: The UNIX time written to the device.
+        epoch: The UNIX time written to the device — or, where nothing was written, the
+            time the device already held.
         drift_s: How far the device's clock was from ours *before* the set (device minus
             host, seconds), or ``None`` where the firmware would not report its clock.
+        written: Whether the clock was written. ``False`` when it was already a few
+            seconds ahead (within :data:`IN_SYNC_AHEAD_S`), which firmware would refuse to
+            set back and which needs no setting.
     """
 
     epoch: int
     drift_s: int | None
+    written: bool = True
 
     @property
     def set_at(self) -> datetime:
@@ -72,13 +91,23 @@ async def set_clock(device: Device) -> ClockSet:
         The instant written and the drift it corrected.
 
     Raises:
-        Whatever the device raises when the write itself fails.
+        ClockAheadError: If the device's clock is ahead of this computer's by more than
+            :data:`IN_SYNC_AHEAD_S` (read first) or the firmware refused the write as one
+            that would set it back. Within the margin nothing is written, and the result
+            says so (``written`` false).
+        Whatever the device raises when the write itself fails otherwise.
     """
     try:
         before = await device.get_time()
     except Exception:  # noqa: BLE001 - optional read; the drift is a nicety
         before = None
     epoch = int(time.time())
+    if before is not None and before > epoch:
+        # Firmware only moves its clock forward, so a write here could only be refused.
+        # Close enough is in sync; further ahead is a fact to state, not a write to retry.
+        if before - epoch > IN_SYNC_AHEAD_S:
+            raise ClockAheadError(before - epoch)
+        return ClockSet(epoch=before, drift_s=before - epoch, written=False)
     await device.set_time(epoch)
     return ClockSet(epoch=epoch, drift_s=None if before is None else before - epoch)
 
@@ -161,10 +190,19 @@ class ClockSync:
             done = await set_clock(device)
         except asyncio.CancelledError:
             raise
+        except ClockAheadError as exc:
+            log.warning("clock sync: left the device clock alone: %s", exc)
+            return
         except Exception as exc:  # noqa: BLE001 - best-effort; the link is not ours to break
             log.warning("clock sync: could not set the device clock: %s", exc)
             return
-        if done.drift_s is None:
+        if not done.written:
+            log.info(
+                "clock sync: device clock already in sync (%+d s, ahead of ours; firmware "
+                "never sets it back)",
+                done.drift_s,
+            )
+        elif done.drift_s is None:
             log.info("clock sync: device clock set to %s (drift unknown)", done.stamp)
         else:
             log.info("clock sync: device clock set to %s (was %+d s off)", done.stamp, done.drift_s)
