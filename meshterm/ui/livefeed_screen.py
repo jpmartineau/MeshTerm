@@ -3,7 +3,7 @@
 
 The interactive face of the ``livefeed`` tool — the dashboard's old feed panel,
 promoted to a first-class screen. One always-repainting list streams the latest
-packets, newest first: time, class (icon + label, icon alone on a narrow terminal),
+packets, newest first: time, class (its name, beside an icon where the platform draws one),
 subject, SNR/RSSI, and a message's conversation. What a row deliberately does *not* carry
 is the relay path a frame rode in on: a route is a shape, not a lane, and squeezing one
 into the cells left at the right edge only ever produced a stub — so the route belongs
@@ -68,6 +68,7 @@ from ..core.channels import identify_channel, split_channel_sender
 from ..core.events import EventKind, MeshEvent
 from ..core.frames import CHANNEL_CLASSES, ENDPOINT_HASH_BYTES
 from ..core.models import Observation, utcnow
+from ..platforms import Platform, on_platform
 from .menus import fit_cells
 from .packet_viewer import (
     KIND_STYLES,
@@ -136,8 +137,25 @@ _FEED_CLASS_WIDTH = 14
 _LANE_GAP = 2
 #: ``HH:MM:SS`` plus the gap that follows it.
 _TIME_LANE = 8 + _LANE_GAP
-#: The class icon and its trailing space (all the class lane keeps on a narrow terminal).
+#: The class icon and its trailing space — or nothing, where the platform draws no icons
+#: (bound by :func:`_bind_class_icon`).
 _ICON_LANE = 3
+
+
+@on_platform
+def _bind_class_icon(platform: Platform) -> None:
+    """Bind the class icon lane to the platform (runs now and on every switch).
+
+    The class *name* is always drawn (it never collapses — JP, 2026-09-25), so the icon
+    beside it is a family cue rather than the information, which is exactly what
+    :attr:`~meshterm.platforms.Platform.menu_icons` governs: on the PicoCalc, where a class
+    icon can only be a one-glyph stand-in, the lane is dropped and its three cells go to
+    the row.
+    """
+    global _ICON_LANE
+    _ICON_LANE = 3 if platform.menu_icons else 0
+
+
 #: Cells a reception reading right-aligns its number in — the ``%+5.1f``/``%5.0f`` field
 #: both lanes are built on, and the slot their column headers sit over.
 _READING_W = 5
@@ -146,21 +164,6 @@ _SNR_LANE = _READING_W + len(" dB")
 #: ``    -61 dBm`` — the lane gap, the number field, then its unit.
 _RSSI_LANE = _LANE_GAP + _READING_W + len(" dBm")
 
-#: The full row's width without its scope lane: every lane the row always carries plus the
-#: class label — see :data:`_FEED_LABEL_MIN_WIDTH` for the width the label needs once the
-#: scope is added.
-_FEED_ROW_WIDTH = (
-    2
-    + _TIME_LANE
-    + _ICON_LANE
-    + _FEED_CLASS_WIDTH
-    + _LANE_GAP
-    + _FEED_SUBJECT_WIDTH
-    + _LANE_GAP
-    + _SNR_LANE
-    + _RSSI_LANE
-)
-
 #: The scope lane's width. Room for an unnamed scope's ``? 3fa1`` and a short region name
 #: whole; a longer name ellipsizes — its whole name is on the viewer's ``scope`` row, one
 #: keypress away, like everything else a lane cuts.
@@ -168,13 +171,6 @@ _FEED_SCOPE_WIDTH = 10
 
 #: The scope lane with the gap that sets it off from the readings after it.
 _SCOPE_LANE = _FEED_SCOPE_WIDTH + _LANE_GAP
-
-#: Terminal width below which the feed drops the textual class label and keeps only the
-#: two-cell icon: the whole row, scope lane included. The scope never collapses (JP,
-#: 2026-09-25) — a lane that came and went with the terminal's width hid the one reading
-#: that says where a flood was allowed to go — so on a narrower screen it is the label that
-#: gives way, the icon beside it still saying what the packet is.
-_FEED_LABEL_MIN_WIDTH = _FEED_ROW_WIDTH + _SCOPE_LANE
 
 
 def _feed_scope(scope: Scope | None) -> Text:
@@ -189,28 +185,25 @@ def _feed_scope(scope: Scope | None) -> Text:
 
 
 class _Lanes(NamedTuple):
-    """Which of the optional lanes a paint at one width carries, and the subject's width.
+    """The lane widths one paint lays its rows out in.
 
     Attributes:
-        label: The class lane's text label beside its icon.
         subject: The subject lane's width (:data:`_FEED_SUBJECT_WIDTH`).
     """
 
-    label: bool
     subject: int
 
 
 def _lanes_for(width: int) -> _Lanes:
-    """The lanes a row can carry at ``width``.
+    """The lanes a row carries at ``width`` — all of them, at every width.
 
-    Every lane but one is always drawn, the scope lane included. The class label is the
-    one that gives way: it needs the whole row (:data:`_FEED_LABEL_MIN_WIDTH`), and below
-    that the icon alone says what the packet is. On a 72-column terminal (a 68-cell body)
-    that is the icon row with its scope, 66 cells; on the PicoCalc's 53 the icon row is
-    wider than the screen before any scope, so there the row reads by scrolling the
-    highlighted one sideways (``←→``), as it already did.
+    No lane collapses (JP, 2026-09-25): the class name and the scope were each dropped on
+    a narrow terminal in turn, and each time the lane that went was one a reader came to
+    the feed for. A row wider than the screen is read the app-wide way instead — the
+    highlighted row slides sideways under ``←→`` — which on a 72-column terminal reaches
+    the readings at the row's end, and on the PicoCalc's 53 everything past the subject.
     """
-    return _Lanes(width >= _FEED_LABEL_MIN_WIDTH, _FEED_SUBJECT_WIDTH)
+    return _Lanes(_FEED_SUBJECT_WIDTH)
 
 
 #: Cells one ←/→ press shifts the highlighted row by — the app-wide select list's own
@@ -345,7 +338,7 @@ class LiveFeedScreen(Screen):
         self._message_scope = message_scope
         #: The lanes the last paint carried (see :func:`_lanes_for`) — read by the subject
         #: builders, whose crowded-lane fallbacks measure against the lane actually drawn.
-        self._lanes = _lanes_for(_FEED_LABEL_MIN_WIDTH)
+        self._lanes = _lanes_for(0)
         #: The feed: latest events of every class as data, newest first — rendered
         #: fresh each paint (rows adapt to width) and handed whole to the viewer.
         self._feed: deque[PacketEntry] = deque(maxlen=_FEED_CAP)
@@ -603,11 +596,7 @@ class LiveFeedScreen(Screen):
         """
         header = Text("  ", style="muted")  # the pointer lane
         header.append(fit_cells("TIME", _TIME_LANE))
-        header.append(
-            fit_cells("CLASS", _ICON_LANE + _FEED_CLASS_WIDTH + _LANE_GAP)
-            if lanes.label
-            else " " * _ICON_LANE
-        )
+        header.append(fit_cells("CLASS", _ICON_LANE + _FEED_CLASS_WIDTH + _LANE_GAP))
         header.append(fit_cells("SUBJECT", lanes.subject + _LANE_GAP))
         header.append(fit_cells("SCOPE", _SCOPE_LANE))
         # The two readings right-align their number, so their labels do too — each sits
@@ -642,9 +631,9 @@ class LiveFeedScreen(Screen):
         The class lane says what the packet *is*, straight from
         :func:`~meshterm.ui.packet_viewer.class_marks` — so a raw frame reads
         ``📻 channel text``, the class the viewer's card headlines, rather than the
-        ``📦 packet`` event family it merely arrived in. Its icon always shows; the
-        textual label beside it is dropped wholesale on a narrow terminal
-        (``lanes.label``), keeping the lanes aligned either way. The subject lane beside it
+        ``📦 packet`` event family it merely arrived in. The name always shows; the icon
+        beside it only where the platform draws icons (:func:`_bind_class_icon`). The
+        subject lane beside it
         then answers what the packet is *about*, in whatever terms its class deals in
         (:meth:`_feed_subject`). No relay path rides here — the whole row fits a
         72-column screen precisely because it doesn't try to, and the route is drawn
@@ -678,13 +667,13 @@ class LiveFeedScreen(Screen):
             style="muted",
         )
         icon, class_label = class_marks(entry)
-        body.append(fit_cells(icon, _ICON_LANE))
-        if lanes.label:
-            body.append(
-                fit_cells(class_label, _FEED_CLASS_WIDTH),
-                style=KIND_STYLES.get(entry.kind, "brand"),
-            )
-            body.append(" " * _LANE_GAP)  # the lane's gutter — the longest class fills it
+        if _ICON_LANE:
+            body.append(fit_cells(icon, _ICON_LANE))
+        body.append(
+            fit_cells(class_label, _FEED_CLASS_WIDTH),
+            style=KIND_STYLES.get(entry.kind, "brand"),
+        )
+        body.append(" " * _LANE_GAP)  # the lane's gutter — the longest class fills it
         subject = self._feed_subject(entry)
         # The lane fits like every other: cells, not characters, ellipsis on overflow —
         # but as a Text, so a subject built of several styled pieces keeps them.

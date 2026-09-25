@@ -123,16 +123,15 @@ def test_livefeed_rows_leave_the_relay_path_to_the_viewer() -> None:
     """A row says what arrived and how well it was heard; the route is Enter's job.
 
     Whatever the fixed lanes left a route was never enough to draw one in — it arrived
-    elided to a stub — so the feed carries none: the whole row, scope lane and all, fits a
-    72-column screen, and a wide one keeps its class label in words too.
+    elided to a stub — so the feed carries none: the row is its fixed lanes, class name
+    and all, and a wide terminal holds the whole of it.
     """
     screen = _screen()
     screen.on_event(MeshEvent.observation_event(_obs(kind="packet", path="3d63,a1b2", snr=1.0)))
-    row = _rows(screen, 68)[0]  # a 72-column terminal's framed body
+    row = _rows(screen, 100)[0]
     assert "via" not in row and "Hub" not in row  # no route, not even a stub of one
-    assert "+1.0 dB" in row and "-90 dBm" in row  # …the reception it was heard at reads
-    assert len(row.rstrip()) <= 68
-    assert "📦 packet" in _rows(screen, 90)[0]  # the class label, where there is room
+    assert "📦 packet" in row  # the class, in words
+    assert "+1.0 dB" in row and "-90 dBm" in row  # …and the reception it was heard at
 
 
 def test_livefeed_class_lane_names_the_payload_class_once() -> None:
@@ -483,11 +482,11 @@ def test_livefeed_windows_inside_the_fixed_screen() -> None:
 _CRAMPED = 44
 
 
-def test_livefeed_the_whole_row_fits_a_72_column_screen() -> None:
-    """No row overflows at 72 — which is why ←→ has nothing to advertise there."""
+def test_livefeed_the_whole_row_fits_a_wide_screen() -> None:
+    """No row overflows where the lanes fit — which is when ←→ has nothing to advertise."""
     screen = _screen(seed=[_obs(node="n0", kind="telemetry")])
-    for line in _stripped(screen.render_body(72)):
-        assert len(line.rstrip()) <= 72
+    for line in _stripped(screen.render_body(100)):
+        assert len(line.rstrip()) <= 100
     assert screen._hmax == 0
     assert "←→" not in screen.footer_hint
 

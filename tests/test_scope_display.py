@@ -180,18 +180,12 @@ def _feed(*raws: dict) -> LiveFeedScreen:
     return screen
 
 
-def test_the_feed_carries_a_scope_lane_on_a_72_column_terminal() -> None:
-    """The framed body there is 68 cells: the icon-only row holds the lane, name and all.
-
-    The lane sits between the subject and the readings; a plain flood is a muted dash and
-    a direct frame, which has no scope, leaves the lane blank.
-    """
+def test_the_feed_scope_lane_sits_between_subject_and_readings() -> None:
+    """A plain flood is a muted dash; a direct frame, which has no scope, leaves it blank."""
     screen = _feed(_DIRECT, _FLOOD, _scoped("elsewhere"), _scoped("harbour"))
-    header, *rows = _stripped(screen.render_body(68))
+    header, *rows = _stripped(screen.render_body(100))
     lanes = header.split()
-    assert lanes.index("SCOPE") == lanes.index("SNR") - 1
-    for line in (header, *rows):
-        assert cell_len(line.rstrip()) <= 68
+    assert lanes.index("SUBJECT") + 1 == lanes.index("SCOPE") == lanes.index("SNR") - 1
     col = _col(header, "SCOPE")
     assert _col(rows[0], "harbour") == col
     assert _col(rows[1], f"? {_code('elsewhere')}") == col
@@ -200,18 +194,34 @@ def test_the_feed_carries_a_scope_lane_on_a_72_column_terminal() -> None:
     assert all(row.rstrip().endswith("dBm") for row in rows)
 
 
-def test_the_feed_never_collapses_the_scope_lane() -> None:
-    """The scope is drawn at every width; the class label is what gives way when narrow.
+def test_the_feed_never_collapses_a_lane() -> None:
+    """The class name and the scope are drawn at every width; a narrow row scrolls instead.
 
-    Beside the subject, the lane is on screen even at the PicoCalc's 53, where it is the
-    readings after it that run off the edge.
+    Nothing gives way: at 72 columns (a 68-cell body) the readings run past the edge, and
+    the highlighted row's ←→ is what reaches them.
     """
     screen = _feed(_scoped("harbour"))
-    for width in (53, 68, 72, 80, 100):
+    for width in (68, 72, 80, 100):
         header, row = _stripped(screen.render_body(width))[:2]
+        assert "CLASS" in header and "channel text" in row, width
         assert _col(header, "SCOPE") == _col(row, "harbour"), width
-    assert "CLASS" not in _stripped(screen.render_body(80))[0]
-    assert "CLASS" in _stripped(screen.render_body(100))[0]
+    screen._selected = 0  # noqa: SLF001
+    screen.render_body(68)
+    assert screen._hmax > 0  # noqa: SLF001 - the row is wider than the body: ←→ reaches it
+
+
+def test_the_picocalc_feed_names_the_class_without_an_icon() -> None:
+    """On the console the class icon is a one-glyph stand-in; the name alone says it."""
+    from meshterm.platforms import PICOCALC, REGULAR, set_platform
+
+    set_platform(PICOCALC)
+    try:
+        screen = _feed(_scoped("harbour"))
+        header, row = _stripped(screen.render_body(53))[:2]
+        assert header.split()[:2] == ["TIME", "CLASS"]
+        assert _col(header, "CLASS") == _col(row, "channel text")
+    finally:
+        set_platform(REGULAR)
 
 
 def test_the_feed_hands_its_scope_reader_to_the_viewer() -> None:
