@@ -595,9 +595,10 @@ def _channels_manager(cols: int, rows: int) -> Screen:
 
     Built through the feature's own row funnel, so the header line, the glyph lane, the
     unread badge, the counts, the ages and the sparkline are laid out by the code the app
-    runs. The cases that matter are here: a name at the lane's ceiling, a muted channel (its
-    mark folds to a different glyph on the console), a channel with no messages at all, and
-    a three-digit unread badge.
+    runs. The cases that matter are here: a name at the lane's ceiling, a send scope at its
+    lane's ceiling (ellipsized) beside a short one and channels with none, a muted channel
+    (its mark folds to a different glyph on the console), a channel with no messages at all,
+    and a three-digit unread badge.
     """
     from meshterm.core.channel_probe import ChannelSlot
     from meshterm.ui.channels import _MANAGER_HINT, _LiveStats, _menu_items
@@ -608,7 +609,11 @@ def _channels_manager(cols: int, rows: int) -> Screen:
         ChannelSlot(idx=2, name="#montreal", secret=derive_secret("#montreal")),
         ChannelSlot(idx=3, name="Ops", secret=bytes(range(16, 32))),
     ]
-    ctx = _ChannelsCtx(muted={slots[3].identity})
+    scopes = {
+        slots[1].identity: "lakeside-north-shore-emergency",
+        slots[2].identity: "harbour",
+    }
+    ctx = _ChannelsCtx(muted={slots[3].identity}, scopes=scopes)
     title, items = _menu_items(ctx, slots, 8, _LiveStats(ctx))
     return SelectScreen(title, items, footer_hint=_MANAGER_HINT)
 

@@ -25,10 +25,10 @@ detail page's *Send scope…* row picks it from the regions already known here, 
 typed name.
 
 The list is laid out like the config editor: fixed, column-aligned lanes under one header
-line — the openness glyph and name, unread badge, total messages, last-message age, and a
-braille sparkline of the trailing two hours' traffic — so a glance shows not just *which*
-channels exist but which ones are alive. Openness beyond the glyph, and the hash, live in
-the detail views (the title line and Show key), keeping the list lean enough that the
+line — the openness glyph and name, send scope, unread badge, total messages, last-message
+age, and a braille sparkline of the trailing two hours' traffic — so a glance shows not
+just *which* channels exist but which ones are alive. Openness beyond the glyph, and the
+hash, live in the detail views (the title line and Show key), keeping the list lean enough that the
 activity lane survives a 72-column terminal. The message statistics come from
 :meth:`~meshterm.persistence.repository.Repository.channel_stats` (read through a small
 TTL cache) and the unread counts from the live chat service, and each row is a callable
@@ -468,6 +468,15 @@ class _LiveStats:
 
 #: Widest the name lane grows (longer names are ellipsized so the lanes stay put).
 _NAME_WIDTH_MAX = 18
+#: Cells the name and send-scope lanes share. The scope lane is only as wide as the longest
+#: scope on the list (never narrower than its ``SCOPE`` label), and takes what the names
+#: leave of this budget: with a name at :data:`_NAME_WIDTH_MAX` it gets eight cells — what
+#: the 72-column row had spare before the lane existed, less the last cell an ellipsizing
+#: row keeps back — so the activity sparkline is never cut to make room; shorter names give
+#: a long region name more of its own. A 30-byte region name is ellipsized rather than let
+#: widen the row. On the PicoCalc's 53 the row was already cut inside the activity lane, so
+#: the scope lane there costs the LAST ages behind it; the detail page still states both.
+_NAME_SCOPE_BUDGET = _NAME_WIDTH_MAX + 8
 #: Width of the unread-badge lane (fits ``● 999``), matching the conversation picker's.
 _BADGE_WIDTH = 5
 #: Width of the right-aligned total-messages lane.
@@ -497,7 +506,7 @@ def _activity_sparkline(histogram: tuple[int, ...], peak: float) -> Text:
 # --- menus -------------------------------------------------------------------
 
 
-def _lanes_header(name_w: int, width: int) -> str:
+def _lanes_header(name_w: int, scope_w: int, width: int) -> str:
     """Column headers over the channel list's fixed lanes (see :func:`_slot_text`).
 
     The indent covers the select screen's pointer column (2 cells, drawn on choice rows but
@@ -507,7 +516,8 @@ def _lanes_header(name_w: int, width: int) -> str:
     itself is one cell too narrow for the word — which still leaves a space before the
     message count. (No TYPE or HASH lane: the glyph already carries the openness and the
     hash lives in Show key, which buys the activity sparkline its room on a 72-column
-    terminal.)
+    terminal.) ``SCOPE`` sits between the name and the badge: it says where the channel's
+    messages go, which is the channel's own fact, before the lanes that count its traffic.
 
     Resolved against the render width, because the header row is pinned and must stay one
     row: at 53 columns the full line ran to 54 and wrapped, costing a content row out of
@@ -517,6 +527,7 @@ def _lanes_header(name_w: int, width: int) -> str:
     return column_header(
         [
             Lane("CHANNEL", name_w + 2),
+            Lane("SCOPE", scope_w + 2),
             Lane("UNREAD", _BADGE_WIDTH + 2),
             # Right-aligned, because the values under them are: a count and an age are
             # padded to the right edge of their lane, so a left-aligned label would sit
@@ -531,7 +542,7 @@ def _lanes_header(name_w: int, width: int) -> str:
 
 
 def _slot_row(
-    ctx: AppContext, slot: ChannelSlot, stats: _LiveStats, name_w: int
+    ctx: AppContext, slot: ChannelSlot, stats: _LiveStats, name_w: int, scope_w: int
 ) -> Callable[[], Text]:
     """Return a list-row title *callable* the select screen re-renders on each repaint.
 
@@ -539,20 +550,25 @@ def _slot_row(
     :class:`_LiveStats`), so a message arriving while the list sits open updates the row on
     the next repaint — exactly the conversation picker's behavior.
     """
-    return lambda: _slot_text(ctx, slot, stats, name_w)
+    return lambda: _slot_text(ctx, slot, stats, name_w, scope_w)
 
 
-def _slot_text(ctx: AppContext, slot: ChannelSlot, stats: _LiveStats, name_w: int) -> Text:
+def _slot_text(
+    ctx: AppContext, slot: ChannelSlot, stats: _LiveStats, name_w: int, scope_w: int
+) -> Text:
     """Build one channel's list row as fixed-width, colour-coded lanes.
 
-    Alignment carries the readability — glyph, name, unread badge, total messages,
-    last-message age, and the activity sparkline each sit in their own lane under the
+    Alignment carries the readability — glyph, name, send scope, unread badge, total
+    messages, last-message age, and the activity sparkline each sit in their own lane under the
     :func:`_lanes_header` line. Colour stays light and purposeful: the name is the row's
     focus in the base colour, the descriptive lanes are muted, the unread ``●`` badge is
     red with its count in warn (the conversation picker's language), and the sparkline
     draws in the ok green over a faint flatline. A muted channel shows a muted ``🔕`` in
     the unread lane instead of a count — muting zeros its unread and stops it accruing, so
-    that lane is always free to carry the state. The row is always a Rich
+    that lane is always free to carry the state. The scope is the region name in the
+    ``scope`` style, and blank for a channel that sends under the device default — the
+    ordinary case, which a word in every row would only make harder to see past. The row
+    is always a Rich
     :class:`~rich.text.Text` so those spans survive under the select screen's row highlight.
     """
     st = stats.get(slot.identity)
@@ -561,6 +577,9 @@ def _slot_text(ctx: AppContext, slot: ChannelSlot, stats: _LiveStats, name_w: in
     text = Text(no_wrap=True, overflow="ellipsis")
     text.append(f"{channel_glyph(slot.name, slot.secret)} ")  # ＃ / 🌐 / 🔒 (2 cells) + gap
     text.append(fit_cells(slot.name, name_w))
+    text.append("  ")
+    scope = _channel_scope(ctx, slot) or ""
+    text.append(fit_cells(scope, scope_w), style="scope")
     text.append("  ")
     if muted:
         mark = glyph("🔕")  # two cells on the desktop, one on the console
@@ -604,11 +623,13 @@ def _menu_items(
     items: list = []
     if slots:
         name_w = min(_NAME_WIDTH_MAX, max(len("CHANNEL"), *(len(s.name) for s in slots)))
+        scopes = [cell_len(_channel_scope(ctx, s) or "") for s in slots]
+        scope_w = min(_NAME_SCOPE_BUDGET - name_w, max(len("SCOPE"), *scopes))
         # The lane names are this block's only landmark (its section carries no ── heading ──),
         # so they pin overhead while the slots scroll and give way to Organize/Add a channel.
-        items.append(Separator(lambda w: _lanes_header(name_w, w), heading=True))
+        items.append(Separator(lambda w: _lanes_header(name_w, scope_w, w), heading=True))
         for slot in slots:
-            items.append(Choice(title=_slot_row(ctx, slot, stats, name_w), value=slot.idx))
+            items.append(Choice(title=_slot_row(ctx, slot, stats, name_w, scope_w), value=slot.idx))
     else:
         items.append(Separator("  no channels yet — add one below"))
 
