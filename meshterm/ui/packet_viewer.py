@@ -80,6 +80,10 @@ from .widgets import (
 #: ``None`` for a frame with no scope to state (direct, or a route type never kept).
 ScopeOf = Callable[[dict | None], Scope | None]
 
+#: Reads a decoded message entry's scope off the flooded copies the packet log holds of it
+#: (see :func:`~meshterm.ui.livefeed_screen.message_scope_reader`).
+MessageScopeOf = Callable[["PacketEntry"], Scope | None]
+
 
 def unnamed_scope(raw: dict | None) -> Scope | None:
     """A frame's scope read without any region names — the fallback when none are at hand.
@@ -432,6 +436,7 @@ class PacketViewer(Screen):
         type_of: TypeOf | None = None,
         key_of: NameKeyResolver | None = None,
         scope_of: ScopeOf | None = None,
+        message_scope: MessageScopeOf | None = None,
     ) -> None:
         """Open the viewer over a packet list.
 
@@ -463,10 +468,14 @@ class PacketViewer(Screen):
                 graph's left endpoint takes its key-derived hue; ``None`` (or an
                 unresolvable name) leaves it muted.
             scope_of: Reads a flood's scope off its raw frame against the regions known
-                by name (``ctx.region_store.scope_of``), so the ``route`` row can say which
+                by name (``ctx.region_store.scope_of``), so the ``scope`` row can say which
                 region a scoped flood was sent into. ``None`` falls back to
                 :func:`unnamed_scope`: the flood is still told apart as scoped or not,
                 and a scoped one shows its code where a name would go.
+            message_scope: Reads a decoded ``message`` entry's scope, which its own raw
+                payload cannot carry, off the flooded copies of it in the packet log (see
+                :func:`~meshterm.ui.livefeed_screen.message_scope_reader`). ``None``: a
+                message's card has no ``scope`` row.
         """
         super().__init__()
         self._entries = list(entries)
@@ -483,6 +492,7 @@ class PacketViewer(Screen):
         self._type_of = type_of
         self._key_of = key_of
         self._scope_of: ScopeOf = scope_of or unnamed_scope
+        self._message_scope = message_scope
         #: The packet currently shown, tracked by identity so a live prepend to the
         #: source (which shifts every index) never slides the view onto another packet.
         self._current: PacketEntry | None = self._entries[self._index] if self._entries else None
@@ -782,6 +792,12 @@ class PacketViewer(Screen):
 
         if entry.kind == "packet":
             rows.extend(self._packet_rows(entry))
+        elif entry.kind == "message":
+            # A decoded message carries no routing of its own; its scope is read off the
+            # flooded copies of it the packet log holds (see :meth:`_entry_scope`).
+            scope = self._entry_scope(entry)
+            if scope is not None:
+                rows.append(("scope", self._scope_text(scope)))
         return rows
 
     def _node_marker(self, entry: PacketEntry, style: str) -> tuple[str, str]:
@@ -989,9 +1005,14 @@ class PacketViewer(Screen):
     def _entry_scope(self, entry: PacketEntry) -> Scope | None:
         """The scope of an entry's frame, or ``None`` where it has none to state.
 
-        Only a raw ``packet`` frame carries the route type and transport codes a scope is
-        read from; every other kind answers ``None`` and draws nothing.
+        A raw ``packet`` frame carries the route type and transport codes a scope is read
+        from. A decoded ``message`` carries neither — the radio hands over the text, not
+        the frame — so its scope is read off the flooded copies of it in the packet log,
+        where a ``message_scope`` reader was given (the live feed gives one for channel
+        messages). Every other kind answers ``None`` and draws nothing.
         """
+        if entry.kind == "message" and self._message_scope is not None:
+            return self._message_scope(entry)
         if entry.kind != "packet" or not isinstance(entry.raw, dict):
             return None
         return self._scope_of(entry.raw)

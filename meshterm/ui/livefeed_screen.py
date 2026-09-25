@@ -71,6 +71,7 @@ from ..core.models import Observation, utcnow
 from .menus import fit_cells
 from .packet_viewer import (
     KIND_STYLES,
+    MessageScopeOf,
     PacketEntry,
     PacketViewer,
     ScopeOf,
@@ -297,6 +298,7 @@ class LiveFeedScreen(Screen):
         type_of: TypeOf | None = None,
         key_of: NameKeyResolver | None = None,
         scope_of: ScopeOf | None = None,
+        message_scope: MessageScopeOf | None = None,
     ) -> None:
         """Create the feed over its data feeds.
 
@@ -322,9 +324,12 @@ class LiveFeedScreen(Screen):
                 hue; an unresolvable name stays muted.
             scope_of: Reads a flood's scope off its raw frame against the regions known by
                 name (``ctx.region_store.scope_of``) — for the scope lane, and handed to
-                each opened viewer for its ``route`` row. ``None`` still tells a scoped
+                each opened viewer for its ``scope`` row. ``None`` still tells a scoped
                 flood from a plain one, showing a scoped one's code where a name would go
                 (:func:`~meshterm.ui.packet_viewer.unnamed_scope`).
+            message_scope: Reads a decoded channel message's scope off its copies in the
+                packet log (:func:`message_scope_reader`), handed to each opened viewer so
+                a message's card has a ``scope`` row too. ``None``: no row for messages.
         """
         super().__init__()
         self.title = "Live feed"
@@ -337,6 +342,7 @@ class LiveFeedScreen(Screen):
         self._type_of = type_of
         self._key_of: NameKeyResolver = key_of or (lambda name: None)
         self._scope_of: ScopeOf = scope_of or unnamed_scope
+        self._message_scope = message_scope
         #: The lanes the last paint carried (see :func:`_lanes_for`) — read by the subject
         #: builders, whose crowded-lane fallbacks measure against the lane actually drawn.
         self._lanes = _lanes_for(_FEED_LABEL_MIN_WIDTH)
@@ -547,6 +553,7 @@ class LiveFeedScreen(Screen):
             type_of=self._type_of,
             key_of=self._key_of,
             scope_of=self._scope_of,
+            message_scope=self._message_scope,
             # The live feed itself (newest first), so the viewer keeps up with packets
             # that arrive while it is open instead of freezing at this snapshot.
             source=lambda: list(self._feed),
@@ -944,6 +951,7 @@ async def open_livefeed(ctx: AppContext) -> None:
     self_name: str | None = None
     channels: list[tuple[str, bytes]] = []
     channel_names: dict[int, str] = {}
+    slots_by_idx: dict[int, tuple[str, bytes]] = {}
     try:
         if ctx.is_connected or ctx.settings.connect_on_start:
             # Through the session cache: contacts and the channel-slot probe are the two
@@ -954,6 +962,7 @@ async def open_livefeed(ctx: AppContext) -> None:
             slots = await ctx.devstate.channel_slots()
             channels = [(s.name, s.secret) for s in slots]
             channel_names = {s.idx: s.name for s in slots}
+            slots_by_idx = {s.idx: (s.name, s.secret) for s in slots}
     except Exception:  # noqa: BLE001 - the feed renders fine without contact names
         contacts = []
     # Contacts first, every name the recorder ever overheard as the fallback — the
@@ -978,6 +987,7 @@ async def open_livefeed(ctx: AppContext) -> None:
         type_of=type_of,
         key_of=key_of,
         scope_of=ctx.region_store.scope_of,
+        message_scope=message_scope_reader(ctx, slots_by_idx),
     )
 
     unsubscribe = ctx.events.subscribe(screen.on_event)
@@ -1000,3 +1010,60 @@ async def open_livefeed(ctx: AppContext) -> None:
             pass
         except Exception:  # noqa: BLE001 - teardown must never surface a tick hiccup
             pass
+
+
+def message_scope_reader(
+    ctx: AppContext, slots_by_idx: Mapping[int, tuple[str, bytes]]
+) -> MessageScopeOf:
+    """A reader for a decoded channel message's scope, off its copies in the packet log.
+
+    The radio hands a received message over as text, not as the frame it arrived in, so a
+    ``message`` row carries no transport code. Its flooded copies are in the packet log,
+    though, and the message paths dialog already finds them by decrypting and matching
+    the text (:func:`~meshterm.services.message_paths.channel_arrivals`); every copy
+    carries the sender's one code, so their scope is the message's
+    (:func:`~meshterm.services.message_paths.message_scope`).
+
+    The copies found are kept per entry — a card repaints every second and the lookup is a
+    windowed query plus a decrypt per frame — but only once some were found: a message
+    can be told to the feed a beat before its frame is written to the log, and a miss
+    cached then would be a miss for good. The region is resolved on every call, against
+    the store's memo, so a name learned while the card is open still names it.
+
+    A direct message has no reader: its copies are encrypted end to end and a routed one
+    has no scope anyway.
+
+    Args:
+        ctx: The application context (its repository and region store).
+        slots_by_idx: The device's channels by slot, as ``(name, secret)``.
+
+    Returns:
+        The reader, answering ``None`` for anything it can't place.
+    """
+    from ..core.models import ChatMessage
+    from ..services.message_paths import channel_arrivals, message_scope
+
+    found: dict[int, list] = {}
+
+    def read(entry: PacketEntry) -> Scope | None:
+        if entry.kind != "message" or entry.channel is None:
+            return None
+        channel = slots_by_idx.get(entry.channel)
+        if channel is None or not entry.text:
+            return None
+        arrivals = found.get(id(entry))
+        if arrivals is None:
+            message = ChatMessage(
+                text=entry.text, outbound=False, is_channel=True, created_at=entry.when
+            )
+            try:
+                arrivals = channel_arrivals(
+                    ctx.repo, message, channel_name=channel[0], secret=channel[1]
+                )
+            except Exception:  # noqa: BLE001 - a card without a scope row, never a crash
+                return None
+            if arrivals:
+                found[id(entry)] = arrivals
+        return message_scope(arrivals, ctx.region_store.scope_of)
+
+    return read

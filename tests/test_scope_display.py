@@ -410,3 +410,46 @@ def test_the_channel_list_draws_scope_only_when_a_channel_has_one() -> None:
         "MSGS",
         "ACTIVITY",
     ]
+
+
+# -- a decoded message's card --------------------------------------------------------------
+
+
+def test_a_decoded_messages_card_reads_its_scope_off_its_logged_copies(tmp_path: Path) -> None:
+    """A 💬 row carries no frame; its card finds the flooded copy in the log and names it."""
+    from types import SimpleNamespace
+
+    from meshterm.persistence.repository import Repository
+    from meshterm.ui.livefeed_screen import message_scope_reader
+
+    text = "Alice: road closed"
+    raw = _grp_txt_raw(SECRET, text)
+    payload = bytes.fromhex(raw["chan_hash"] + raw["cipher_mac"] + raw["crypted"])
+    code = transport_code(region_key("harbour"), scope_body(5, payload))
+    raw.update(
+        route_typename="TC_FLOOD",
+        payload_type=5,
+        pkt_payload=payload,
+        transport_code=code.to_bytes(2, "little").hex() + "0000",
+    )
+    repo = Repository(tmp_path / "log.db")
+    when = utcnow()
+    repo.record_observation(
+        repo.start_run("monitor", {}),
+        Observation(node=None, kind="packet", path="3d", observed_at=when, raw=raw),
+    )
+    store = RegionStore(tmp_path / "regions.json")
+    ctx = SimpleNamespace(repo=repo, region_store=store)
+    read = message_scope_reader(ctx, {1: ("#general", SECRET)})
+
+    entry = PacketEntry(when=when, kind="message", channel=1, text=text)
+    assert read(entry).state == "unknown"  # the copy is found; its region not yet named
+    store.learn("harbour", "typed")
+    assert read(entry).region == "harbour"  # named the moment the region is known
+
+    viewer = PacketViewer([entry], 0, resolve=lambda h: "", message_scope=read)
+    assert _has_scope_row(_plain(viewer.render_body(80)), "harbour")
+    other = PacketEntry(when=when, kind="message", channel=1, text="Bob: something else")
+    assert read(other) is None  # no copy of it in the log: no scope row, no guess
+    assert read(PacketEntry(when=when, kind="message", channel=9, text=text)) is None
+    repo.close()
