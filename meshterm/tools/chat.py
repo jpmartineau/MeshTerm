@@ -286,15 +286,22 @@ class ChatTool(Tool):
         message prints its ``acked`` state, which is the one thing the send does not
         already tell the caller: the radio accepted it either way, and whether the peer
         answered is a separate fact.
+
+        A channel message goes out under the channel's send scope, or under ``scope`` for
+        this one message (a region name, or ``*`` for unscoped); the document says which it
+        went under. A radio that can't send under the scope refuses before anything is
+        transmitted, and that is a failure (exit 1), never a quiet unscoped send.
         """
         device = await ctx.device()
         text = str(params["text"])
         channel = params.get("channel")
         if channel is not None:
-            await ctx.chat.send_channel(int(channel), text, label=f"#{channel}")
+            message = await ctx.chat.send_channel(
+                int(channel), text, label=f"#{channel}", scope=params.get("scope") or None
+            )
             return ToolResult(
-                summary={"channel": channel, "sent": True},
-                report=(_sent(channel=int(channel)),),
+                summary={"channel": channel, "sent": True, "scope": message.scope},
+                report=(_sent(channel=int(channel), scope=message.scope),),
             )
 
         contact = _resolve_contact(await device.get_contacts(), str(params["to"]))
@@ -433,11 +440,19 @@ class ChatTool(Tool):
             text: str = typer.Argument(..., help="The message body"),
             to: str | None = typer.Option(None, "--to", help="Contact name or key prefix"),
             channel: int | None = typer.Option(None, "--channel", help="Channel slot index"),
+            scope: str | None = typer.Option(
+                None,
+                "--scope",
+                help="Send under this region instead of the channel's scope (* = unscoped)",
+            ),
         ) -> None:
             if (to is None) == (channel is None):
                 raise typer.BadParameter("Pass exactly one of --to / --channel.")
+            if scope is not None:
+                scope = _cli_scope(scope, channel)
             run_tool_command(
-                self, {"cli_action": "send", "to": to, "channel": channel, "text": text}
+                self,
+                {"cli_action": "send", "to": to, "channel": channel, "text": text, "scope": scope},
             )
 
         @chat_app.command("history", help="Show a conversation's stored history")
@@ -474,6 +489,28 @@ class ChatTool(Tool):
 
 
 # -- helpers ------------------------------------------------------------------
+
+
+def _cli_scope(scope: str, channel: int | None) -> str:
+    """Check ``--scope`` before anything is sent: a region the firmware could hold, or ``*``.
+
+    A usage error (exit 2), not a device failure: nothing has been transmitted yet. A
+    direct message has no scope to give it here — the firmware floods a DM under the
+    session scope like anything else, but only a channel send sets one for itself.
+
+    Raises:
+        typer.BadParameter: For a direct send, or a name the firmware would refuse.
+    """
+    from ..core.regions import WILDCARD, RegionNameError, normalize, validate
+
+    if channel is None:
+        raise typer.BadParameter("--scope applies to a channel send (--channel).")
+    if normalize(scope) == WILDCARD:
+        return WILDCARD
+    try:
+        return validate(scope)
+    except RegionNameError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def _enable_receive_debug() -> None:
@@ -1092,6 +1129,7 @@ def _sent(
     contact: object | None = None,
     channel: int | None = None,
     acked: bool | None = None,
+    scope: str | None = None,
 ) -> Facts:
     """What one ``chat send`` did.
 
@@ -1100,9 +1138,23 @@ def _sent(
     answered is a separate fact. A channel broadcast prints nothing, because there *is* no
     acknowledgement on a channel — and the document says that in the one way the plain
     face never could, with ``null`` rather than ``false``.
+
+    The document also carries the ``scope`` a channel message went out under, in the same
+    shape a received frame's scope takes (:func:`~meshterm.ui.fields.scope`): the region,
+    ``unscoped``, or ``null`` where it isn't known (a direct message, or a default scope
+    that couldn't be read).
     """
+    from dataclasses import replace
+
+    from ..core.regions import UNSCOPED, WILDCARD, Scope
     from ..ui import fields
     from ..ui.report import PAIRS, SILENT, Facts
+
+    sent_scope = None
+    if scope == WILDCARD:
+        sent_scope = UNSCOPED
+    elif scope:
+        sent_scope = Scope("scoped", scope)
 
     node = (
         NodeRef(
@@ -1125,6 +1177,9 @@ def _sent(
             fields.channel("channel", lanes=()),
             fields.hidden("sent"),
             fields.flag("acked", "acked"),
+            # Document only: a direct message has no scope of its own to print, and a
+            # channel send prints nothing at all.
+            replace(fields.scope("scope", "scope"), lanes=()),
         ),
         values={
             "kind": "channel" if channel is not None else "direct",
@@ -1134,6 +1189,7 @@ def _sent(
             ),
             "sent": True,
             "acked": acked,
+            "scope": sent_scope,
         },
         shape=SILENT if channel is not None else PAIRS,
     )

@@ -17,9 +17,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 import sys
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterable
+from collections.abc import AsyncIterator, Callable, Iterable
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -48,6 +50,7 @@ from .regions import normalize as normalize_region
 from .regions import parse_region_list, region_key
 from .regions import validate as validate_region
 from .tracing import path_hash_flags, trace_timeout
+from .transmit_lock import TransmitLock
 
 if TYPE_CHECKING:
     from .config import SpiWiring
@@ -223,6 +226,89 @@ class DeviceAuthenticationError(DeviceCommandError):
     class) prints the message and bails, since it can't prompt. The message already names the
     fix (``--ble-pin`` and OS pairing).
     """
+
+
+class FloodScopeError(DeviceCommandError):
+    """The companion could not send under the scope a channel send asked for — so it didn't.
+
+    A scoped send is set-scope, send, restore (see :meth:`Device.send_channel_in_scope`),
+    and when the first step fails the message is **not** sent at all: going out unscoped
+    instead would reach every repeater the reader meant to keep it from, and going out
+    under the device's default scope would reach a region they never picked. Either would
+    be a silent substitute for what was asked. The message names the firmware each kind of
+    scope needs, since an old companion is by far the likeliest reason.
+
+    Attributes:
+        scope: The scope that was asked for — a region name, or ``*`` for unscoped.
+    """
+
+    def __init__(self, scope: str, reason: str) -> None:
+        """Explain which scope could not be set and why.
+
+        Args:
+            scope: The region name, or :data:`~meshterm.core.regions.WILDCARD`.
+            reason: The sentence to show (it already says nothing was sent).
+        """
+        super().__init__(reason)
+        self.scope = scope
+
+
+#: The companion firmware that first takes a session scope (``CMD_SET_FLOOD_SCOPE``), and
+#: the one that first takes the explicit-unscoped override on it (``*``, sent as flag byte
+#: ``0x01``) — before that release the flag frame is not understood, so an "unscoped" send
+#: would fall back to the default scope instead.
+SCOPE_FIRMWARE = (1, 10)
+UNSCOPED_FIRMWARE = (1, 16)
+
+#: The firmware that first has a persisted default scope (``CMD_SET_DEFAULT_FLOOD_SCOPE``).
+#: On anything older a plain flood is unscoped by construction.
+DEFAULT_SCOPE_FIRMWARE = (1, 15)
+
+
+def firmware_version(info: dict | None) -> tuple[int, int, int] | None:
+    """The companion's release as a comparable tuple, read from its device-query ``ver``.
+
+    Firmware reports its build as a string — ``v1.15.0``, ``1.16.0-dev``, a vendor's own
+    suffix — and only the leading ``major.minor[.patch]`` means anything here.
+
+    Args:
+        info: A :meth:`Device.get_device_info` payload.
+
+    Returns:
+        ``(major, minor, patch)``, or ``None`` where nothing version-shaped was reported
+        (the simulator, or firmware predating the device query) — a caller then trusts the
+        command itself to say whether it is understood.
+    """
+    match = _VERSION.search(str((info or {}).get("ver") or ""))
+    if match is None:
+        return None
+    return int(match.group(1)), int(match.group(2)), int(match.group(3) or 0)
+
+
+#: The leading ``major.minor[.patch]`` of a firmware build string.
+_VERSION = re.compile(r"(\d+)\.(\d+)(?:\.(\d+))?")
+
+
+def _version_text(version: tuple[int, ...]) -> str:
+    """``(1, 16)`` as ``1.16`` for a sentence."""
+    return ".".join(str(part) for part in version[:2])
+
+
+def _scope_refusal(scope: str, exc: BaseException) -> str:
+    """The sentence for a companion that refused to set a send scope.
+
+    Args:
+        scope: The region name, or ``*``.
+        exc: What the command raised, kept in the sentence for whoever is debugging it.
+
+    Returns:
+        A sentence naming the firmware the scope needs, and that nothing was sent.
+    """
+    if scope == REGION_WILDCARD:
+        need = f"sending unscoped needs firmware {_version_text(UNSCOPED_FIRMWARE)} or newer"
+    else:
+        need = f"region scopes need firmware {_version_text(SCOPE_FIRMWARE)} or newer"
+    return f"The radio refused scope {scope} ({exc}) — {need}. Nothing was sent."
 
 
 #: ``ERR_CODE_NOT_FOUND`` — the companion has no entry matching what a command addressed.
@@ -812,6 +898,140 @@ class Device(ABC):
         Raises:
             DeviceCommandError: If the companion rejected the send.
         """
+
+    # -- transmitting under a scope -----------------------------------------------------
+
+    @property
+    def transmit_lock(self) -> TransmitLock:
+        """The lock every transmission holds while it hands its frame to the companion.
+
+        Created on first use rather than in ``__init__`` so an implementation need not
+        remember to chain up for it. See :mod:`~meshterm.core.transmit_lock` for why it
+        exists: a channel scope is a window on the companion's one session scope, and
+        nothing else may be sent through that window.
+        """
+        lock = getattr(self, "_transmit_lock", None)
+        if lock is None:
+            lock = TransmitLock()
+            self._transmit_lock = lock
+        return lock
+
+    @asynccontextmanager
+    async def transmitting(self) -> AsyncIterator[None]:
+        """Hold the transmit lock for one hand-over, repairing a scope a failed restore left.
+
+        Every send an implementation makes that could go out as a flood takes this around
+        the command that transmits — only that command: an ack or reply *wait* afterwards
+        is not a transmission and must not hold a scoped channel send up behind it.
+
+        A scoped send whose restore failed (see :meth:`send_channel_in_scope`) leaves the
+        companion's session scope pointing at a channel's region, where every later flood
+        would follow it. The first transmission to come through here afterwards puts it
+        back before it sends anything — and if the companion still won't take the reset,
+        the send goes ahead under the scope it had rather than not at all, logged, since
+        refusing every transmission from then on would be the worse failure.
+        """
+        async with self.transmit_lock.held():
+            leaked = getattr(self, "_scope_leaked", None)
+            if leaked is not None and not getattr(self, "_scope_active", False):
+                try:
+                    await self.set_flood_scope(None)
+                except Exception as exc:  # noqa: BLE001 - see the docstring: send regardless
+                    _log.warning("send scope %r is still set on the radio: %s", leaked, exc)
+                else:
+                    self._scope_leaked = None
+            yield
+
+    async def send_channel_in_scope(self, index: int, text: str, scope: str | None) -> None:
+        """Broadcast on a channel under a given scope, and leave the session scope as found.
+
+        The one way MeshTerm sends a channel message. ``None`` is the plain send, going out
+        under whatever the companion's default scope is; a region name or ``*`` is the
+        three-step window the firmware makes a per-channel scope out of — set the session
+        scope, send, restore it (``None``, back to the default) — all under
+        :attr:`transmit_lock`, so no other flood can go out between the steps.
+
+        What is refused is refused *before* anything is sent (:class:`FloodScopeError`):
+        a scoped message never quietly goes out unscoped, or under the default scope.
+
+        * A region name needs firmware :data:`SCOPE_FIRMWARE`; older firmware answers the
+          command with an error, which is taken as the refusal it is.
+        * ``*`` needs firmware :data:`UNSCOPED_FIRMWARE` to override a default scope.
+          Older firmware can still send unscoped when there is no default to override —
+          anything before :data:`DEFAULT_SCOPE_FIRMWARE` has none at all, and later ones
+          may have none set — so then the plain send *is* the unscoped one and goes out;
+          only a default that is actually set is refused.
+
+        Args:
+            index: Zero-based channel slot to transmit on.
+            text: The message body.
+            scope: A region name, :data:`~meshterm.core.regions.WILDCARD` for unscoped, or
+                ``None`` for the device's default.
+
+        Raises:
+            FloodScopeError: If the companion can't send under ``scope``; nothing was sent.
+            ~meshterm.core.regions.RegionNameError: If ``scope`` is not a region name the
+                firmware could hold.
+            DeviceCommandError: If the send itself was rejected.
+        """
+        bare = normalize_region(scope) if scope else ""
+        if bare and bare != REGION_WILDCARD:
+            bare = validate_region(bare)
+        async with self.transmitting():
+            if not bare:
+                await self.send_channel_message(index, text)
+                return
+            if bare == REGION_WILDCARD and await self._unscoped_is_plain():
+                await self.send_channel_message(index, text)
+                return
+            try:
+                await self.set_flood_scope(bare)
+            except DeviceCommandError as exc:
+                raise FloodScopeError(bare, _scope_refusal(bare, exc)) from exc
+            self._scope_active = True
+            try:
+                await self.send_channel_message(index, text)
+            finally:
+                self._scope_active = False
+                try:
+                    await self.set_flood_scope(None)
+                except Exception as exc:  # noqa: BLE001 - the message went; repair next time
+                    _log.warning("couldn't clear send scope %r after a channel send: %s", bare, exc)
+                    self._scope_leaked = bare
+
+    async def _unscoped_is_plain(self) -> bool:
+        """Whether a plain flood is already unscoped, so ``*`` needs no override — or refuse.
+
+        Only firmware too old to take the override is asked anything; firmware that reports
+        no version is trusted to answer the override command itself.
+
+        Returns:
+            ``True`` when the plain send is unscoped; ``False`` when the override is
+            available and should be used.
+
+        Raises:
+            FloodScopeError: When a default scope is set and the firmware cannot override it.
+        """
+        try:
+            version = firmware_version(await self.get_device_info())
+        except Exception:  # noqa: BLE001 - an unreadable version is an unknown one
+            version = None
+        if version is None or version >= UNSCOPED_FIRMWARE:
+            return False
+        if version < DEFAULT_SCOPE_FIRMWARE:
+            return True
+        try:
+            default = await self.get_default_flood_scope()
+        except Exception:  # noqa: BLE001 - can't see the default: can't promise unscoped
+            default = "?"
+        if not normalize_region(default or ""):
+            return True
+        raise FloodScopeError(
+            REGION_WILDCARD,
+            f"This radio floods everything under its default scope {default}, and only "
+            f"firmware {_version_text(UNSCOPED_FIRMWARE)} or newer can send one message "
+            "unscoped over it. Nothing was sent.",
+        )
 
     # -- configuration: extra reads ---------------------------------------------
 
@@ -2219,7 +2439,8 @@ class MeshCoreDevice(Device):
         budget = max(trace_timeout(hops), trace_timeout(0))
         started = loop.time()
         try:
-            sent = await mc.commands.send_login_sync(pub, password)
+            async with self.transmitting():
+                sent = await mc.commands.send_login_sync(pub, password)
             # The budget times the *node's* answer, so it is spent from the moment the
             # request is on the air — not from the moment we began queuing it. Everything
             # before that belongs to the companion, and it can be most of a minute:
@@ -2308,7 +2529,8 @@ class MeshCoreDevice(Device):
 
         mc = self._require()
         pub = self._node_pubkey(node)
-        sent = await mc.commands.send_cmd(pub, cmd)
+        async with self.transmitting():
+            sent = await mc.commands.send_cmd(pub, cmd)
         if sent is not None and getattr(sent, "is_error", lambda: False)():
             raise DeviceCommandError(
                 f"couldn't send admin command {cmd!r} to {node.name}: {reject_reason(sent)}"
@@ -2340,7 +2562,8 @@ class MeshCoreDevice(Device):
         # The library pages through the table (one binary request per ~25 entries) and
         # concatenates; ``min_timeout`` keeps slow multi-hop replies from being cut off
         # at the companion's optimistic suggested timeout.
-        result = await mc.commands.fetch_all_neighbours(pub, min_timeout=20)
+        async with self.transmitting():
+            result = await mc.commands.fetch_all_neighbours(pub, min_timeout=20)
         if result is None:
             raise DeviceCommandError(
                 f"{node.name!r} did not answer the neighbour request. Firmware ignores "
@@ -2373,7 +2596,8 @@ class MeshCoreDevice(Device):
         transmit_gate.mark()
         # ``min_timeout`` for the reason the neighbour request carries one: the companion's
         # suggested timeout is optimistic for anything but an adjacent node.
-        text = await mc.commands.req_regions_sync(pub, min_timeout=10)
+        async with self.transmitting():
+            text = await mc.commands.req_regions_sync(pub, min_timeout=10)
         if text is None:
             raise DeviceCommandError(
                 f"{node.name!r} did not answer the regions request. A repeater answers it "
@@ -2720,7 +2944,9 @@ class MeshCoreDevice(Device):
 
         mc = self._require()
         pub = self._node_pubkey(contact)
-        result = await mc.commands.send_msg(pub, text)
+        # Only the hand-over holds the transmit lock; the ack wait below is not a send.
+        async with self.transmitting():
+            result = await mc.commands.send_msg(pub, text)
         if result is None or getattr(result, "is_error", lambda: False)():
             # A recipient the firmware has no entry for is the one rejection with an obvious
             # fix, so it gets its own class for the chat screen to offer that fix on; see
@@ -2746,7 +2972,8 @@ class MeshCoreDevice(Device):
         self, index: int, text: str
     ) -> None:
         transmit_gate.mark()
-        self._ok(await self._require().commands.send_chan_msg(index, text))
+        async with self.transmitting():
+            self._ok(await self._require().commands.send_chan_msg(index, text))
 
     @staticmethod
     def _ok(event):  # type: ignore[no-untyped-def]
@@ -3020,7 +3247,8 @@ class MeshCoreDevice(Device):
 
     async def send_advert(self, flood: bool = False) -> None:  # noqa: D102
         transmit_gate.mark(flood_advert=flood)
-        self._ok(await self._require().commands.send_advert(flood))
+        async with self.transmitting():
+            self._ok(await self._require().commands.send_advert(flood))
 
     async def reboot(self) -> None:  # noqa: D102 - inherited docstring
         await self._require().commands.reboot()  # device reboots; no OK reply expected
@@ -3176,6 +3404,8 @@ class MockDevice(Device):
         self._flood_scope = ""
         #: The session send scope (``""`` follows the default, ``"*"`` is forced unscoped).
         self._send_scope = ""
+        #: Every channel message handed over: ``(slot, text, session scope at the time)``.
+        self.sent_channel: list[tuple[int, str, str]] = []
         # Simulated clock skew (seconds behind the host), so the sync-clock flow has a
         # visible drift to correct until set_time is called.
         self._clock_offset: int | None = -125
@@ -3247,7 +3477,8 @@ class MockDevice(Device):
         self, contact: Contact, text: str
     ) -> Ack | None:
         transmit_gate.mark()
-        await asyncio.sleep(0)
+        async with self.transmitting():
+            await asyncio.sleep(0)
         # Firmware can only address a contact it holds, so a recipient this simulated device
         # doesn't have is refused exactly as hardware refuses one — which is what makes the
         # chat screen's "add it back and send" offer walkable on the simulator.
@@ -3261,7 +3492,11 @@ class MockDevice(Device):
         self, index: int, text: str
     ) -> None:
         transmit_gate.mark()
-        await asyncio.sleep(0)
+        async with self.transmitting():
+            await asyncio.sleep(0)
+            #: What each channel message went out under — the session scope at the moment
+            #: it was handed over (``""`` the default, ``"*"`` forced unscoped).
+            self.sent_channel.append((index, text, self._send_scope))
 
     async def admin_login(self, node: Contact, password: str) -> LoginResult:  # noqa: D102
         await asyncio.sleep(0)
@@ -3589,7 +3824,8 @@ class MockDevice(Device):
 
     async def send_advert(self, flood: bool = False) -> None:  # noqa: D102
         transmit_gate.mark(flood_advert=flood)
-        await asyncio.sleep(0)
+        async with self.transmitting():
+            await asyncio.sleep(0)
 
     async def reboot(self) -> None:  # noqa: D102 - inherited docstring
         await asyncio.sleep(0)

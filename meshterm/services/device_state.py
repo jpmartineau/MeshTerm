@@ -99,6 +99,9 @@ class DeviceState:
         self._channels: list[ChannelSlot] | None = None
         self._channels_epoch = 0
         self._channel_capacity: int | None = None
+        #: The companion's default flood scope — ``""`` for none — once read (see
+        #: :meth:`default_scope`); ``None`` while unread.
+        self._default_scope: str | None = None
         # One lock per slow fetch so overlapping first-access callers (two screens opened in
         # quick succession) collapse onto a single round-trip instead of each firing their own.
         self._contacts_lock = asyncio.Lock()
@@ -309,6 +312,36 @@ class DeviceState:
             return 0
         return (mode + 1) if isinstance(mode, int) and 0 <= mode <= 3 else 0
 
+    # -- the default flood scope (held until a config write invalidates it) ------
+
+    async def default_scope(self) -> str:
+        """The companion's persisted default flood scope, ``""`` for none, read once.
+
+        What a plain channel send goes out under, so it is what a channel with no scope of
+        its own records its messages as sent under. One round trip, then held until the
+        config editor writes a setting (:meth:`invalidate_config`) or the link is rebuilt.
+
+        Returns:
+            The bare region name, or ``""`` when no default scope is set.
+
+        Raises:
+            Exception: Like :meth:`~meshterm.core.connection.Device.get_default_flood_scope`
+                — firmware older than 1.15 has no default scope to read. Not cached, so the
+                next call asks again.
+        """
+        if self._default_scope is None:
+            device = await self._ctx.device()
+            self._default_scope = str(await device.get_default_flood_scope() or "")
+        return self._default_scope
+
+    def note_default_scope(self, name: str | None) -> None:
+        """Record a default scope just read or written elsewhere (Device config).
+
+        Args:
+            name: The bare name, ``""`` for none, or ``None`` to forget it and re-read.
+        """
+        self._default_scope = None if name is None else str(name)
+
     # -- channel slots (held until the channel editor invalidates them) --------
 
     async def channel_slots(self) -> list[ChannelSlot]:
@@ -446,6 +479,7 @@ class DeviceState:
         """
         self.invalidate_self_info()
         self.invalidate_path_hash_mode()
+        self._default_scope = None
 
     def reset(self) -> None:
         """Clear the whole cache and cancel any in-flight background refresh.
@@ -457,6 +491,7 @@ class DeviceState:
         self.invalidate_self_info()
         self.invalidate_path_hash_mode()
         self.invalidate_channels()
+        self._default_scope = None
         # Capacity is a hardware constant (not touched by channel edits, so it has no per-write
         # invalidator), but a reconnect may be to a different device — drop it too.
         self._channel_capacity = None

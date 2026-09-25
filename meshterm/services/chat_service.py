@@ -30,6 +30,7 @@ from ..core.models import (
     is_direct_messageable,
     utcnow,
 )
+from ..core.regions import WILDCARD, normalize
 
 if TYPE_CHECKING:
     from ..context import AppContext
@@ -509,28 +510,86 @@ class ChatService:
             self._ctx.repo.update_chat_ack(message.row_id, message.acked)
         return message
 
-    async def send_channel(self, index: int, text: str, *, label: str | None = None) -> ChatMessage:
-        """Broadcast a message on a channel and record it in history.
+    def channel_scope(self, channel_id: str | None) -> str | None:
+        """The region a channel's messages are sent under, or ``None`` for the device default.
+
+        Read from :class:`~meshterm.core.region_store.RegionStore` by the channel's intrinsic
+        identity, so the scope follows the channel across slots. A context with no store (a
+        test's, or a surface that never built one) has no channel scopes at all.
+        """
+        store = getattr(self._ctx, "region_store", None)
+        return store.channel_scope(channel_id) if store is not None else None
+
+    async def send_channel(
+        self,
+        index: int,
+        text: str,
+        *,
+        label: str | None = None,
+        scope: str | None = None,
+    ) -> ChatMessage:
+        """Broadcast a message on a channel, under the channel's scope, and record it.
+
+        The channel's identity is resolved *before* the send, because it is what names the
+        scope the message goes out under (:meth:`channel_scope`). The send itself is
+        :meth:`~meshterm.core.connection.Device.send_channel_in_scope` — set the session
+        scope, send, restore, with no other flood let in between — and a scope the radio
+        can't take stops the message rather than sending it some other way.
 
         Args:
             index: The channel slot to transmit on.
             text: The message body.
             label: A display label for the channel (e.g. ``#general``), stored for the
                 transcript.
+            scope: Overrides the channel's own scope for this one message: a region name,
+                or :data:`~meshterm.core.regions.WILDCARD` (``*``) to send it unscoped —
+                the resend for a scoped message nothing relayed. ``None`` uses the
+                channel's scope, or the device default when the channel has none.
 
         Returns:
-            The recorded outbound :class:`ChatMessage`.
+            The recorded outbound :class:`ChatMessage`, its :attr:`~ChatMessage.scope` the
+            one it went out under.
+
+        Raises:
+            ~meshterm.core.connection.FloodScopeError: If the radio can't send under the
+                scope; nothing was sent and nothing is recorded.
         """
         device = await self._ctx.device()
-        await device.send_channel_message(index, text)
+        channel_id = await self.channel_id_for(index)
+        asked = scope if scope is not None else self.channel_scope(channel_id)
+        await device.send_channel_in_scope(index, text, asked)
         chat = ChatMessage(
             text=text,
             outbound=True,
             is_channel=True,
-            channel_id=await self.channel_id_for(index),
+            channel_id=channel_id,
             channel_idx=index,
             peer_name=label,
             created_at=utcnow(),
+            scope=await self._sent_under(asked),
         )
-        self._ctx.repo.record_chat_message(chat, run_id=self._run_id)
+        chat.row_id = self._ctx.repo.record_chat_message(chat, run_id=self._run_id)
         return chat
+
+    async def _sent_under(self, asked: str | None) -> str | None:
+        """What a channel send asked to go out under, as the transcript records it.
+
+        A scope that was asked for is what it went under — the send refuses rather than
+        substitute. A plain send went under the device's default scope, which is read (once
+        a session, through the devstate cache): its name when one is set, ``*`` when none
+        is — a plain flood with no default *is* unscoped. A default that can't be read
+        (firmware before 1.15 has none to read; a link blip) records ``None``: unknown is
+        the honest answer, and the transcript never claims a scope it didn't see.
+        """
+        bare = normalize(asked) if asked else ""
+        if bare:
+            return bare
+        devstate = getattr(self._ctx, "devstate", None)
+        if devstate is None:
+            return None
+        try:
+            default = await devstate.default_scope()
+        except Exception as exc:  # noqa: BLE001 - unknown, not a failed send
+            self._ctx.log.debug("chat: default scope unreadable: %s", exc)
+            return None
+        return normalize(default) or WILDCARD

@@ -120,6 +120,7 @@ class MessagePathsScreen(Screen):
         type_of: TypeOf | None = None,
         key_of: NameKeyResolver | None = None,
         scope: Scope | None = None,
+        sent_scope: Text | None = None,
     ) -> None:
         """Build the dialog over one message's matched arrivals.
 
@@ -150,6 +151,9 @@ class MessagePathsScreen(Screen):
             scope: The region the message was flooded into, read off its arrivals'
                 frames (:func:`~meshterm.services.message_paths.message_scope`); ``None``
                 where no copy was a flood, and the title then states nothing.
+            sent_scope: For a message we sent, the line saying what it was flooded under
+                (``sent under scope yul``, and why nothing relayed it where that is
+                known), drawn under the summary; ``None`` draws nothing.
         """
         super().__init__()
         self.title = self.titled(scope)
@@ -164,6 +168,7 @@ class MessagePathsScreen(Screen):
         self._destination = destination
         self._type_of = type_of
         self._key_of = key_of
+        self._sent_scope = sent_scope
         self._index = 0
         #: Cells the selected row is shifted left by (reset whenever ↑↓ move), and
         #: how far it *can* shift, measured against the width of the last render.
@@ -287,6 +292,9 @@ class MessagePathsScreen(Screen):
             render_to_ansi(Text(f"“{quoted}”"), width, no_wrap=True),
             render_to_ansi(stamp, width, no_wrap=True),
         ]
+        if self._sent_scope is not None:
+            # Wrapped rather than cut: its tail is the reason a message went nowhere.
+            lines.extend(render_lines(self._sent_scope, width))
         self._cursor = None
         self._list_hidden = False
         if not self._arrivals:
@@ -297,7 +305,9 @@ class MessagePathsScreen(Screen):
                 if self._matched
                 else "No direct-message frames logged in the window."
             )
-            lines.append(render_to_ansi(Text(note, style="muted"), width))
+            # One entry per drawn row: a wrapped render_to_ansi is one string holding a
+            # newline, which the frame counts as a single line and measures as one.
+            lines.extend(render_lines(Text(note, style="muted"), width))
             self._scroll_total = len(lines)
             return lines
 

@@ -78,6 +78,7 @@ class ConfigTool(Tool):
         device = await ctx.device()
         ops: list[tuple] = list(params.get("ops") or [])
         snapshot = await build_snapshot(device)
+        learn_default_scope(ctx, snapshot)
         changes, artifacts, report = await apply_ops(ctx, device, snapshot, ops)
 
         plural = "" if changes == 1 else "s"
@@ -348,8 +349,40 @@ async def _apply_setting(
     # meshterm.core.settings_store). Provenance-gated: only values changed through MeshTerm.
     if ctx.settings_store is not None:
         ctx.settings_store.remember(str(snapshot.get("public_key") or ""), key, value)
+    if key == "flood_scope":
+        learn_default_scope(ctx, snapshot)
     ctx.ui.ack(f"[ok]✓[/ok] [brand]{key}[/brand] = {format_value(spec, value)}")
     return {"key": key, "previous": previous, "value": value}
+
+
+def learn_default_scope(ctx: AppContext, snapshot: dict) -> None:
+    """Take in the default flood scope a config read or write has just seen.
+
+    Two things want it. The region store learns the name (source ``default``): it is the
+    region this station's own plain floods carry, so it is the first name any of them will
+    be resolved against. And the session cache holds it (``devstate``), since a channel with
+    no scope of its own records its messages as sent under the default, and this saves that
+    record a round trip.
+
+    A snapshot whose read of the default failed (firmware before 1.15) carries no
+    ``flood_scope`` key at all, and teaches nothing.
+
+    Args:
+        ctx: Shared application context.
+        snapshot: A :func:`~meshterm.core.device_config.build_snapshot` result, or one an
+            apply has just updated.
+    """
+    if "flood_scope" not in snapshot:
+        return
+    from ..core.regions import normalize
+
+    name = normalize(str(snapshot.get("flood_scope") or ""))
+    devstate = getattr(ctx, "devstate", None)
+    if devstate is not None:
+        devstate.note_default_scope(name)
+    store = getattr(ctx, "region_store", None)
+    if store is not None and name:
+        store.learn(name, "default")
 
 
 async def _show(ctx: AppContext, device: Device, snapshot: dict) -> Listing | None:

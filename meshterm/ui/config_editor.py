@@ -123,7 +123,11 @@ async def cached_snapshot(ctx: AppContext, device: Device) -> dict:
         path_hash_mode = await ctx.devstate.path_hash_mode()
     except Exception:  # noqa: BLE001 - fall back to the raw reads below
         pass
-    return await build_snapshot(device, self_info=self_info, path_hash_mode=path_hash_mode)
+    from ..tools.config import learn_default_scope
+
+    snapshot = await build_snapshot(device, self_info=self_info, path_hash_mode=path_hash_mode)
+    learn_default_scope(ctx, snapshot)
+    return snapshot
 
 
 async def edit_config(ctx: AppContext) -> dict[str, Any] | None:
@@ -1024,10 +1028,13 @@ async def _reread(ctx: AppContext, device: Device) -> tuple[dict, dict[str, str]
     Raw rather than through the session cache, which is exactly what just went stale — and
     the cache is dropped on the way, so the next screen that trusts it reads the truth too.
     """
+    from ..tools.config import learn_default_scope
+
     ctx.devstate.invalidate_config()
     async with ctx.ui.busy_overlay():
         snapshot = await build_snapshot(device)
         custom = await device.get_custom_vars()
+    learn_default_scope(ctx, snapshot)
     return snapshot, custom
 
 

@@ -405,6 +405,10 @@ class ChatMessage:
         created_at: When the message was sent or received.
         row_id: The ``messages`` table primary key once persisted, used to update an
             outbound message's delivery state in place on retry; ``None`` until stored.
+        scope: What an outbound channel message was flooded under: the bare region name,
+            :data:`~meshterm.core.regions.WILDCARD` (``*``) for unscoped, or ``None`` where
+            it isn't known — every inbound or direct message, and anything sent before the
+            scope was recorded.
     """
 
     text: str
@@ -418,6 +422,7 @@ class ChatMessage:
     acked: bool | None = None
     created_at: datetime = field(default_factory=utcnow)
     row_id: int | None = None
+    scope: str | None = None
 
     @property
     def key(self) -> str:

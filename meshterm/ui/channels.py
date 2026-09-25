@@ -16,6 +16,14 @@ recorded to history. The mute lives in :class:`~meshterm.core.mute_store.MuteSto
 the channel's intrinsic identity so it follows the channel across slot moves, and the list
 row shows a ``🔕`` in its (then always-empty) unread lane to mark it.
 
+A channel's **send scope** is the other: the region its messages are flooded into, so only
+the repeaters carrying that region relay them. The firmware has no such thing per channel —
+the chat sets the companion's session scope around each send instead (see
+:meth:`~meshterm.core.connection.Device.send_channel_in_scope`) — so it is kept by MeshTerm,
+in :class:`~meshterm.core.region_store.RegionStore`, keyed the same way a mute is. The
+detail page's *Send scope…* row picks it from the regions already known here, or takes a
+typed name.
+
 The list is laid out like the config editor: fixed, column-aligned lanes under one header
 line — the openness glyph and name, unread badge, total messages, last-message age, and a
 braille sparkline of the trailing two hours' traffic — so a glance shows not just *which*
@@ -55,6 +63,8 @@ from ..core.channels import (
     share_url,
 )
 from ..core.connection import Device
+from ..core.regions import RegionNameError
+from ..core.regions import validate as validate_region
 from ..persistence.repository import ACTIVITY_DRAWN_BUCKETS
 from ..platforms import get_platform
 from .braillechart import activity_peak, activity_sparkline
@@ -93,7 +103,15 @@ _QR = "qr"
 _KEY = "key"
 _CHAT = "chat"
 _MUTE = "mute"
+_SCOPE = "scope"
 _EDIT = "edit"
+
+# Send-scope picker sentinels: clear the channel's scope, or type a region by name.
+_NO_SCOPE = "__no_scope__"
+_TYPE_REGION = "__type_region__"
+
+#: The scope picker's footer: a value picker over a list that can grow, so it filters.
+_SCOPE_HINT = "↑↓ move · type to filter · Enter set · Esc keep"
 _CLEAR = "clear"
 
 
@@ -668,6 +686,11 @@ def _detail_summary(ctx: AppContext, slot: ChannelSlot, stats: _LiveStats) -> st
     unread = ctx.chat.unread(slot.conversation.key)
     kind = "public" if slot.is_public else "private"
     parts = [kind, f"hash {slot.hash}", f"slot {slot.idx}"]
+    # The scope rides with the channel's identity rather than its traffic: it decides who
+    # can hear the next message, so it is kept ahead of the counts when the line sheds.
+    scope = _channel_scope(ctx, slot)
+    if scope:
+        parts.append(f"scope {scope}")
     if st is None or not st.total:
         parts.append("no messages yet")
     else:
@@ -698,7 +721,7 @@ def _detail_items(ctx: AppContext, slot: ChannelSlot) -> list:
     # ✎ and 🗑 are one cell where 📱 🔑 💬 🔔 🔕 are two, so the column is measured once and
     # every mark padded out to it — otherwise the edit and clear rows start their labels a
     # column left of the rows above them.
-    lane = icon_lane(("📱", "🔑", "💬", "🔔", "🔕", "✎", "🗑"))
+    lane = icon_lane(("📱", "🔑", "💬", "🔔", "🔕", "🔖", "✎", "🗑"))
     chat_label = marked_label("💬", "Open in chat", "", lane=lane)
     if unread:
         chat_label.append("  ●", style="err")
@@ -729,6 +752,7 @@ def _detail_items(ctx: AppContext, slot: ChannelSlot) -> list:
             ),
             (chat_label, "Read and send messages on this channel", _CHAT),
             mute_row,
+            _scope_row(ctx, slot, lane),
             (
                 marked_label("✎", "Rename / change key…", "", lane=lane),
                 "Edit the name or paste a different key",
@@ -794,6 +818,10 @@ async def _channel_detail(
             # A preference, not a slot-config change: toggle in place and loop back to the
             # detail (whose rows re-render to the new state) without counting a channel change.
             _toggle_mute(ctx, slot)
+        elif choice == _SCOPE:
+            # MeshTerm's to keep, like the mute: nothing is written to the radio until a
+            # message is sent, so it is not a channel change either.
+            await _pick_scope(ctx, slot)
         elif choice == _EDIT and await _edit(ctx, device, slot):
             changes += 1
             if not await reread():  # pragma: no cover - the slot we just wrote is there
@@ -827,6 +855,106 @@ async def _channel_detail(
                 title=title_for(),
                 prompt=_detail_summary(ctx, slot, stats),
             )
+
+
+# --- send scope ----------------------------------------------------------------
+
+
+def _channel_scope(ctx: AppContext, slot: ChannelSlot) -> str | None:
+    """The region this channel's messages are sent under, or ``None`` for the device default."""
+    store = getattr(ctx, "region_store", None)
+    return store.channel_scope(slot.identity) if store is not None else None
+
+
+def _scope_row(ctx: AppContext, slot: ChannelSlot, lane: int) -> tuple:
+    """The detail page's *Send scope…* row, its description saying what is set now."""
+    scope = _channel_scope(ctx, slot)
+    description = f"Messages flood in {scope} only" if scope else "Keep messages in one region"
+    return (marked_label("🔖", "Send scope…", "", lane=lane), description, _SCOPE)
+
+
+def _scope_items(ctx: AppContext, current: str | None) -> list:
+    """The scope picker's rows: no scope, every region known here, then typing one in.
+
+    A region reads in the ``scope`` style (a region is not a node, so no node hue), with
+    how many repeaters were heard to carry it — the thing that decides whether a message
+    scoped to it goes anywhere at all. The one in force is marked ``current``.
+    """
+    store = getattr(ctx, "region_store", None)
+    none_row = Text("No scope — the device default")
+    if not current:
+        none_row.append("  · current", style="muted")
+    items: list = [Choice(title=none_row, value=_NO_SCOPE)]
+    for name in store.names() if store is not None else []:
+        row = Text(name, style="scope")
+        carriers = len(store.carriers(name))
+        if carriers:
+            row.append(f"  · {carriers} repeater{'s' if carriers != 1 else ''}", style="muted")
+        if name == current:
+            row.append("  · current", style="muted")
+        items.append(Choice(title=row, value=name))
+    items.append(Choice(title=Text("Type a region name…"), value=_TYPE_REGION))
+    return items
+
+
+async def _pick_scope(ctx: AppContext, slot: ChannelSlot) -> bool:
+    """Pick the region a channel's messages are sent under; return whether it changed.
+
+    A value picker floated over the detail page, opening on the scope in force. Typing a
+    new name is a second step stacked on the first (the ``run_steps`` shape): Esc on the
+    name field comes back to the list rather than abandoning the pick. A typed name is
+    learned (source ``typed``) as well as set, so the next channel can pick it from the
+    list.
+
+    Args:
+        ctx: Shared application context.
+        slot: The channel whose scope is being set.
+
+    Returns:
+        ``True`` when the channel's scope changed.
+    """
+    store = getattr(ctx, "region_store", None)
+    if store is None:  # pragma: no cover - every real context builds one
+        return False
+    current = store.channel_scope(slot.identity)
+    session = getattr(ctx.ui, "session", None)
+    while True:
+        items = _scope_items(ctx, current)
+        title = f"Send scope — {slot.name}"
+        prompt = "The region this channel's messages flood into:"
+        default = current or _NO_SCOPE
+        if session is not None:
+            picked = await session.select(
+                title, items, prompt=prompt, default=default, footer_hint=_SCOPE_HINT
+            )
+        else:
+            picked = await ctx.ui.select(title, items, prompt=prompt, default=default)
+        if picked is None:
+            return False
+        if picked == _TYPE_REGION:
+            typed = await ctx.ui.text(
+                "Send scope",
+                prompt="Region name, as its repeaters list it:",
+                default=current or "",
+                validate=_valid_region,
+            )
+            if typed is None:
+                continue  # Esc on the name steps back to the list
+            picked = store.learn(typed, "typed") or typed
+        wanted = None if picked == _NO_SCOPE else str(picked)
+        if wanted == current:
+            return False
+        store.set_channel_scope(slot.identity, wanted)
+        return True
+
+
+def _valid_region(text: str) -> bool | str:
+    """Require a region name the firmware could hold (see :func:`regions.validate`)."""
+    try:
+        validate_region(text)
+    except RegionNameError as exc:
+        return str(exc)
+    return True
 
 
 # --- create / join flows -----------------------------------------------------

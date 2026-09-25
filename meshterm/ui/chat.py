@@ -27,6 +27,7 @@ from ..core.channels import MENTION, split_channel_sender
 from ..core.connection import ContactNotOnDeviceError
 from ..core.events import EventKind, MeshEvent
 from ..core.models import ChatMessage, Contact, Conversation, Message, utcnow
+from ..core.regions import WILDCARD
 from .theme import name_style, snr_style
 from .tui.prompt import (
     CHANNEL_BYTE_LIMIT,
@@ -63,6 +64,11 @@ class ChatScreen(Screen):
     opens the picked message's paths in either kind — a path belongs to one message, so
     with nothing picked there is nothing to show. Esc leaves the chat once nothing is
     picked.
+
+    A channel with a send scope says so in the title (``#ops · scope yul``), and ^R there
+    resends the newest message *unscoped* — the way out for a scoped message no repeater
+    in earshot carries — after an amber confirm, since an unscoped flood reaches every
+    repeater the scope was keeping it from.
     """
 
     floating = False
@@ -85,8 +91,11 @@ class ChatScreen(Screen):
 
         The F3 pair follows the lane's two claims. *Retry* is absent in a channel — a
         channel message is never acknowledged, so there is no such thing to retry there —
-        and merely dim in a direct chat with nothing outstanding. *Paths* needs a picked
-        message to have paths of, and both nav slots need a transcript to walk.
+        and merely dim in a direct chat with nothing outstanding. A channel's Shift slot is
+        *Resend* instead — the newest message again, unscoped (see :meth:`_retry_target`)
+        — present where a resend is wired and dim until the newest message went out under
+        a region. *Paths* needs a picked message to have paths of, and both nav slots need
+        a transcript to walk.
 
         F1/F2 carry the **day** jump, the transcript's own section step (its dividers are
         days) — the same claim a grouped select list makes with ``Sect ↑``/``Sect ↓``, on
@@ -111,7 +120,12 @@ class ChatScreen(Screen):
         lane[1] = FPair("Day ↓", "ctrl_pagedown", enabled=days)
         lane[3] = FPair("Page ↓", "pagedown", "Latest", "ctrl_end", enabled=live, opp_enabled=live)
         lane[4] = FPair("Page ↑", "pageup", "Oldest", "ctrl_home", enabled=live, opp_enabled=live)
-        retry = ("Retry", "retry") if not self._is_channel else ("", "")
+        if not self._is_channel:
+            retry = ("Retry", "retry")
+        elif self._resend_unscoped is not None:
+            retry = ("Resend", "retry")
+        else:
+            retry = ("", "")
         lane[2] = FPair(
             "Paths",
             "paths",
@@ -132,6 +146,8 @@ class ChatScreen(Screen):
         resend: Callable[[ChatMessage], Awaitable[ChatMessage]] | None = None,
         paths: Callable[[ChatMessage], Awaitable[None]] | None = None,
         key_of: Callable[[str], str | None] | None = None,
+        scope: str | None = None,
+        resend_unscoped: Callable[[ChatMessage], Awaitable[ChatMessage | None]] | None = None,
     ) -> None:
         """Build the chat screen.
 
@@ -152,9 +168,18 @@ class ChatScreen(Screen):
                 :func:`~meshterm.services.trace_runner.make_name_key_resolver`), the seed
                 of the sender's hue; ``None`` (or a name it can't place) leaves senders
                 muted — colour is reserved for keyed identities.
+            scope: The channel's send scope, stated in the title as a ``·`` atom
+                (``#ops · scope yul``); ``None`` for a channel sending under the device
+                default, and always for a direct chat.
+            resend_unscoped: Async callable that sends a channel message's text again,
+                unscoped, and returns the recorded message (channels only; ``None`` leaves
+                ^R inert there).
         """
         super().__init__()
-        self.title = conversation.label
+        self._scope = scope if conversation.is_channel else None
+        self.title = (
+            f"{conversation.label} · scope {self._scope}" if self._scope else conversation.label
+        )
         self._is_channel = conversation.is_channel
         self._key_of: Callable[[str], str | None] = key_of or (lambda name: None)
         # A direct thread's one remote sender is the peer; its key colours the header
@@ -168,6 +193,7 @@ class ChatScreen(Screen):
         self._messages = list(messages)
         self._send = send
         self._resend = resend
+        self._resend_unscoped = resend_unscoped if conversation.is_channel else None
         self._paths = paths
         self._names = names
         self._session = session
@@ -181,6 +207,7 @@ class ChatScreen(Screen):
         self._stick = True  # keep the newest message in view until the user scrolls up
         self._paths_open = False  # one paths dialog at a time
         self._paste_open = False  # one paste-confirm dialog at a time
+        self._resend_open = False  # one resend-unscoped confirm at a time
         # The pick: index of the highlighted message (or None when the compose line is
         # focused), plus the body line it rendered on so the frame keeps it in view.
         self._selected: int | None = None
@@ -215,6 +242,8 @@ class ChatScreen(Screen):
                 return "Enter reply (@mention) · ^P paths · ↑↓ pick · ^End/Esc cancel"
             return "Enter paths · ↑↓ pick · ^End/Esc cancel"
         if self._retry_target() is not None:
+            if self._is_channel:
+                return "Enter send · ↑ pick a message · ^R resend unscoped · Esc back"
             return "Enter send · ↑ pick a message · ^R retry failed · Esc back"
         return "Enter send · ↑ pick a message · Esc back"
 
@@ -496,12 +525,27 @@ class ChatScreen(Screen):
             if message.is_channel:
                 if message.acked is False:
                     text.append("  ⚠ no ack", style="warn")
+                text.append_text(self._scope_note(message))
             else:
                 text.append("  ")
                 text.append_text(self._delivery_glyph(message.acked))
         if message.snr is not None:
             text.append(f"  {message.snr:+.0f} dB", style=snr_style(message.snr))
         return text
+
+    def _scope_note(self, message: ChatMessage) -> Text:
+        """A muted tail on a sent message that went out under a scope other than the title's.
+
+        Only in a channel whose title names a scope, and only for the exceptions to it — an
+        unscoped resend, or a message sent before the scope was set or changed. Every other
+        line would repeat the title; and in a channel with no scope of its own, the default
+        its messages went under is the device's business, not news on every line.
+        """
+        if not self._scope or not message.scope or message.scope == self._scope:
+            return Text()
+        if message.scope == WILDCARD:
+            return Text("  · unscoped", style="muted")
+        return Text(f"  · scope {message.scope}", style="muted")
 
     def _render_mentions(self, body: str, *, selected: bool) -> Text:
         """Render body text, rewriting each ``@[Name]`` token to a ``@Name`` in its hue.
@@ -625,7 +669,9 @@ class ChatScreen(Screen):
         elif action == "paths":
             self._open_paths(self._selected)
         elif action == "retry":
-            if not self._is_channel:
+            if self._is_channel:
+                self._begin_resend_unscoped()
+            else:
                 self._retry()
         elif action == "escape":
             if self._selected is not None:
@@ -905,10 +951,20 @@ class ChatScreen(Screen):
     def _retry_target(self) -> ChatMessage | None:
         """The message ^R would re-send, or ``None`` when there is nothing to retry.
 
-        The newest outbound direct message that went out and was never acknowledged —
-        and only while a retry could actually start: no send already in flight, a resend
-        path wired (channels have none, since a channel message is never acked).
+        In a direct chat, the newest outbound message that went out and was never
+        acknowledged. In a channel — where nothing is ever acknowledged — the newest
+        message *we* sent, when it went out under a region: ^R sends it again unscoped. The
+        newest, not any scoped one: once the unscoped copy has gone it is the newest, and
+        there is nothing left to offer. Either way only while a resend could actually
+        start — no send already in flight, and a resend path wired.
         """
+        if self._is_channel:
+            if self._sending or self._resend_unscoped is None:
+                return None
+            newest = next((m for m in reversed(self._messages) if m.outbound), None)
+            if newest is None or not newest.scope or newest.scope == WILDCARD:
+                return None
+            return newest
         if self._sending or self._resend is None:
             return None
         return next(
@@ -927,6 +983,59 @@ class ChatScreen(Screen):
         self._stick = True
         self._session.invalidate()
         self._spawn(self._resend_message(target))
+
+    def _begin_resend_unscoped(self) -> None:
+        """Confirm, then send the newest scoped channel message again unscoped (^R).
+
+        Amber (``danger``): nothing is lost, but an unscoped flood is relayed by every
+        repeater that allows one — the whole mesh the scope was keeping the message out of —
+        so it is a choice made on purpose, with the region it is leaving named. The resend
+        is a new message on the air (a channel message has no identity to re-deliver), so
+        it appends as one; a radio that can't send unscoped refuses before anything goes
+        out, and the status line says why.
+        """
+        target = self._retry_target()
+        if target is None or self._resend_open:
+            return
+        self._resend_open = True
+        preview = target.text if len(target.text) <= 32 else target.text[:31] + "…"
+
+        async def run() -> None:
+            try:
+                confirmed = await self._session.button_dialog(
+                    Text(
+                        f"Send “{preview}” again, unscoped? Every repeater that relays "
+                        f"unscoped floods will carry it, not only those in {target.scope}.",
+                        style="warn",
+                    ),
+                    [("Cancel", False), ("Resend", True)],
+                    title="Resend unscoped",
+                    default=1,
+                    border_style="warn",
+                    footer_hint="←→ choose · Enter select · Esc cancel",
+                )
+            finally:
+                self._resend_open = False
+            if not confirmed or self._sending or self._resend_unscoped is None:
+                self._session.invalidate()
+                return
+            self._sending = True
+            self._status = "resending unscoped…"
+            self._stick = True
+            self._session.invalidate()
+            try:
+                message = await self._resend_unscoped(target)
+                if message is not None:
+                    self._messages.append(message)
+                self._status = ""
+            except Exception as exc:  # noqa: BLE001 - report inline, keep the chat alive
+                self._status = f"resend failed: {exc}"
+            finally:
+                self._sending = False
+                self._stick = True
+                self._session.invalidate()
+
+        self._spawn(run())
 
     async def _resend_message(self, message: ChatMessage) -> None:
         """Drive a retry to completion, refreshing the message's delivery state in place."""
@@ -1010,7 +1119,18 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
         return await _with_restore(ctx, lambda: ctx.chat.send_direct(conversation.contact, text))
 
     resend: Callable[[ChatMessage], Awaitable[ChatMessage]] | None = None
-    if not conversation.is_channel:
+    resend_unscoped: Callable[[ChatMessage], Awaitable[ChatMessage | None]] | None = None
+    scope: str | None = None
+    if conversation.is_channel:
+        scope = ctx.chat.channel_scope(conversation.channel_id)
+
+        async def resend_unscoped(message: ChatMessage) -> ChatMessage | None:
+            assert conversation.channel_idx is not None
+            return await ctx.chat.send_channel(
+                conversation.channel_idx, message.text, label=conversation.label, scope=WILDCARD
+            )
+
+    else:
 
         async def resend(message: ChatMessage) -> ChatMessage:
             assert conversation.contact is not None
@@ -1028,6 +1148,8 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
         resend=resend,
         paths=paths,
         key_of=key_of,
+        scope=scope,
+        resend_unscoped=resend_unscoped,
     )
     ctx.chat.set_active(conversation.key)
 
@@ -1150,6 +1272,49 @@ def _belongs(message: Message, conversation: Conversation) -> bool:
 
 
 # --- message paths (the ^P view) -----------------------------------------------------
+
+
+def _sent_scope_line(ctx: AppContext, message: ChatMessage, *, relayed: bool) -> Text | None:
+    """What a message we sent went out under, for the paths dialog — and why it may be lost.
+
+    Built from the scope recorded on the message at send time (:attr:`ChatMessage.scope`),
+    never from the channel's scope now, which may have moved on since. When a scoped
+    message has no relayed copy on record *and* no repeater was ever heard here to carry
+    its region (:meth:`~meshterm.core.region_store.RegionStore.carriers`), the likeliest
+    reason is stated plainly: a scoped flood is relayed only by repeaters carrying its
+    region, and nothing known in earshot does.
+
+    Args:
+        ctx: Shared application context (for the region store).
+        message: The message whose paths are open.
+        relayed: Whether any copy of it was heard coming back.
+
+    Returns:
+        The line, or ``None`` for a message with no recorded scope (inbound, direct, or
+        sent before scopes were recorded).
+    """
+    from ..core.regions import UNSCOPED, Scope
+    from .widgets import scope_text
+
+    if not message.outbound or not message.scope:
+        return None
+    line = Text("sent ", style="muted")
+    if message.scope == WILDCARD:
+        line.append_text(scope_text(UNSCOPED))
+        return line
+    line.append("under ", style="muted")
+    line.append_text(scope_text(Scope("scoped", message.scope)))
+    store = getattr(ctx, "region_store", None)
+    carriers = len(store.carriers(message.scope)) if store is not None else 0
+    if not relayed and not carriers:
+        line.append(" — no repeater known here carries it", style="warn")
+    elif carriers:
+        line.append(
+            f" · {carriers} known repeater{'s' if carriers != 1 else ''} carr"
+            f"{'y' if carriers != 1 else 'ies'} it",
+            style="muted",
+        )
+    return line
 
 
 async def _make_paths_presenter(
@@ -1291,6 +1456,7 @@ async def _make_paths_presenter(
                 type_of=type_of,
                 key_of=key_of,
                 scope=message_scope(arrivals, ctx.region_store.scope_of),
+                sent_scope=_sent_scope_line(ctx, message, relayed=bool(arrivals)),
             )
         )
 

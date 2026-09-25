@@ -427,6 +427,39 @@ def _chat(cols: int, rows: int) -> Screen:
     )
 
 
+def _chat_channel_scoped(cols: int, rows: int) -> Screen:
+    """A channel with a send scope: the title's ``· scope`` atom, and a resend under it.
+
+    The widest honest case: a region name at the firmware's 30-byte ceiling in the title,
+    a message that went out under it, and an unscoped one wearing the muted tail — with
+    ^R's hint and the lane's *Resend* chip both live on the scoped newest message.
+    """
+    region = "lakeside-north-shore-emergency"  # 30 bytes, the firmware's longest
+    conv = Conversation(label="Lakeside emergency", is_channel=True, channel_idx=2)
+    messages = [
+        ChatMessage(text="Alice: anyone on the north shore?", is_channel=True),
+        ChatMessage(
+            text="here — relaying for the south side", outbound=True, is_channel=True, scope="*"
+        ),
+        ChatMessage(
+            text="road closed past the marina", outbound=True, is_channel=True, scope=region
+        ),
+    ]
+
+    async def resend(message: ChatMessage) -> ChatMessage:  # pragma: no cover - not pressed
+        return message
+
+    return ChatScreen(
+        conv,
+        messages,
+        send=None,
+        names={},
+        session=_GallerySession(cols, rows),
+        scope=region,
+        resend_unscoped=resend,
+    )
+
+
 class _PickerChat:
     """The unread counter the picker rows read live."""
 
@@ -527,19 +560,41 @@ def _channels_manager(cols: int, rows: int) -> Screen:
     return SelectScreen(title, items, footer_hint=_MANAGER_HINT)
 
 
-def _channel_detail(cols: int, rows: int) -> Screen:
+def _channel_detail(cols: int, rows: int, *, scope: str | None = None) -> Screen:
     """One channel's action page, its vital-signs line above the rows."""
     from meshterm.core.channel_probe import ChannelSlot
     from meshterm.ui.channels import _detail_items, _detail_summary, _LiveStats
 
     slot = ChannelSlot(idx=2, name="Lakeside emergency", secret=bytes(range(16)))
-    ctx = _ChannelsCtx(muted=set())
+    ctx = _ChannelsCtx(muted=set(), scopes={slot.identity: scope} if scope else None)
     stats = _LiveStats(ctx)
     return SelectScreen(
         f"Channel — {slot.name}",
         _detail_items(ctx, slot),
         prompt=_detail_summary(ctx, slot, stats),
         footer_hint="↑↓ move · Enter select · Esc back",
+    )
+
+
+def _channel_detail_scoped(cols: int, rows: int) -> Screen:
+    """The same page with a send scope at the 30-byte ceiling — the summary's atom and row."""
+    return _channel_detail(cols, rows, scope="lakeside-north-shore-emergency")
+
+
+def _scope_picker(cols: int, rows: int) -> Screen:
+    """The send-scope value picker: no scope, known regions with their carriers, typing one."""
+    from meshterm.ui.channels import _SCOPE_HINT, _scope_items
+
+    ctx = _ChannelsCtx(
+        muted=set(),
+        regions={"lakeside": 3, "lakeside-north-shore-emergency": 1, "harbour": 0},
+    )
+    return SelectScreen(
+        "Send scope — Lakeside emergency",
+        _scope_items(ctx, "lakeside"),
+        prompt="The region this channel's messages flood into:",
+        default="lakeside",
+        footer_hint=_SCOPE_HINT,
     )
 
 
@@ -557,11 +612,26 @@ class _ChannelsChat:
 class _ChannelsCtx:
     """The minimal AppContext surface the channel rows and detail page read."""
 
-    def __init__(self, muted: set[str]) -> None:
+    def __init__(
+        self,
+        muted: set[str],
+        *,
+        scopes: dict[str, str] | None = None,
+        regions: dict[str, int] | None = None,
+    ) -> None:
         self.chat = _ChannelsChat(muted)
         self.repo = _ChannelsRepo()
         self.preferences = Preferences()
         self._muted = muted
+        scopes = scopes or {}
+        regions = regions or {}
+        # The region store's reading surface: each channel's scope, and the known regions
+        # with how many repeaters were heard to carry each.
+        self.region_store = SimpleNamespace(
+            channel_scope=lambda identity: scopes.get(identity),
+            names=lambda: list(regions),
+            carriers=lambda name: ("3d63c6429436",) * regions.get(name, 0),
+        )
 
     @property
     def mute_store(self):  # noqa: ANN201 - a stand-in for the real store
@@ -726,6 +796,31 @@ def _message_paths_unknown_scope(cols: int, rows: int) -> Screen:
         summary="heard twice",
         source="Alice",
         scope=_scope_of(_scoped_frame("elsewhere")),
+    )
+
+
+def _message_paths_sent_scope(cols: int, rows: int) -> Screen:
+    """Our scoped send that nothing relayed: the line saying no known repeater carries it."""
+    from meshterm.ui.chat import _sent_scope_line
+
+    message = ChatMessage(
+        text="road closed past the marina",
+        outbound=True,
+        is_channel=True,
+        created_at=utcnow(),
+        scope="lakeside-north-shore-emergency",
+    )
+    ctx = SimpleNamespace(region_store=SimpleNamespace(carriers=lambda name: ()))
+    return MessagePathsScreen(
+        message,
+        [],
+        matched=True,
+        resolve=lambda h: h,
+        prefix_bytes=1,
+        self_name="Homestead",
+        summary="no copies in the packet log",
+        source="Homestead",
+        sent_scope=_sent_scope_line(ctx, message, relayed=False),
     )
 
 
@@ -1195,9 +1290,12 @@ _ENTRIES: list[_Entry] = [
     _Entry("map_panned", _map_panned),
     _Entry("map_find", _map_find),
     _Entry("chat", _chat),
+    _Entry("chat_channel_scoped", _chat_channel_scoped),
     _Entry("chat_picker", _chat_picker),
     _Entry("channels_manager", _channels_manager),
     _Entry("channel_detail", _channel_detail),
+    _Entry("channel_detail_scoped", _channel_detail_scoped),
+    _Entry("scope_picker", _scope_picker),
     _Entry("livefeed", _livefeed),
     _Entry("livefeed_scopes", _livefeed_scopes),
     _Entry("walk", _walk),
@@ -1205,6 +1303,7 @@ _ENTRIES: list[_Entry] = [
     _Entry("message_paths", _message_paths),
     _Entry("message_paths_scoped", _message_paths_scoped),
     _Entry("message_paths_unknown_scope", _message_paths_unknown_scope),
+    _Entry("message_paths_sent_scope", _message_paths_sent_scope),
     _Entry("remote_cli", _remote_cli),
     _Entry("path_composer", _path_composer),
     _Entry("courier_outbox", _courier_outbox),

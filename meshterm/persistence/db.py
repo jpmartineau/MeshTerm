@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -161,7 +161,9 @@ CREATE TABLE IF NOT EXISTS messages (
     text        TEXT    NOT NULL,
     snr         REAL,
     acked       INTEGER,
-    created_at  TEXT    NOT NULL
+    created_at  TEXT    NOT NULL,
+    scope       TEXT              -- outbound floods: the region it was sent under, '*' for
+                                  --   unscoped, NULL where it was never known
 );
 
 CREATE INDEX IF NOT EXISTS idx_traces_run ON traces(run_id);
@@ -348,3 +350,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # raw frames they arrived in were never persisted, so their scope is lost.
         conn.execute("ALTER TABLE observations ADD COLUMN transport_code TEXT")
         conn.execute("ALTER TABLE observations ADD COLUMN scope_body TEXT")
+    if "scope" not in message_cols:
+        # v16 -> v17: the scope a message we sent went out under. A channel can be given a
+        # region its messages are flooded into (a scope is a *setting on the companion*,
+        # made just before the send — see Device.send_channel_in_scope), and the scope can
+        # change between one message and the next, or be dropped for one resend. So the
+        # transcript cannot work out afterwards what a message went out under from what the
+        # channel's scope is *now*; it is kept with the message, the moment it is sent.
+        # Its first reader is the message paths dialog: a scoped message nothing relayed is
+        # most often one no repeater in earshot carries the region of, and saying so needs
+        # the region. Stored as the bare name, '*' for a flood sent unscoped, and NULL for
+        # anything else — inbound messages, direct messages, and every row sent before this
+        # column existed, whose scope was never known and cannot be recovered.
+        conn.execute("ALTER TABLE messages ADD COLUMN scope TEXT")

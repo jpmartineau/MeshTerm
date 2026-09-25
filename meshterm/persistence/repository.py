@@ -1921,7 +1921,7 @@ class Repository:
         cur = self._conn.execute(
             "INSERT INTO messages "
             "(run_id, outbound, is_channel, channel_id, channel_idx, peer, peer_name, text, "
-            "snr, acked, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "snr, acked, created_at, scope) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run_id,
                 int(msg.outbound),
@@ -1934,6 +1934,7 @@ class Repository:
                 msg.snr,
                 None if msg.acked is None else int(msg.acked),
                 msg.created_at.isoformat(),
+                msg.scope,
             ),
         )
         self._conn.commit()
@@ -2227,4 +2228,5 @@ class Repository:
             acked=None if row["acked"] is None else bool(row["acked"]),
             created_at=datetime.fromisoformat(row["created_at"]),
             row_id=row["id"],
+            scope=row["scope"] if "scope" in row.keys() else None,
         )

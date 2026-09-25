@@ -4,8 +4,8 @@
 Interactively it opens a full-screen channel manager (see :mod:`meshterm.ui.channels`) — a
 first-class, phone-app-style experience for creating private channels, adding public ``#``
 channels, joining with a key, importing a scanned ``meshcore://`` link, and sharing any
-channel as a QR code. On the CLI it exposes ``list``, ``add``, ``join``, ``import``, and
-``share`` subcommands for scripted use.
+channel as a QR code. On the CLI it exposes ``list``, ``add``, ``join``, ``import``,
+``share``, ``clear`` and ``scope`` subcommands for scripted use.
 
 Channels are also *listed* by the ``chat`` tool for picking a conversation; this tool owns
 everything to do with configuring the slots themselves.
@@ -81,6 +81,8 @@ class ChannelsTool(Tool):
             return await self._cli_share(ctx, params)
         if action == "clear":
             return await self._cli_clear(ctx, params)
+        if action == "scope":
+            return await self._cli_scope(ctx, params)
         return await self._cli_list(ctx)
 
     async def _cli_list(self, ctx: AppContext) -> ToolResult:
@@ -91,7 +93,7 @@ class ChannelsTool(Tool):
         slots = await read_channel_slots(device)
         return ToolResult(
             summary={"channels": len(slots)},
-            report=(_channel_listing(slots),),
+            report=(_channel_listing(slots, ctx.region_store),),
             exit_code=exitcodes.OK if slots else exitcodes.NO_RESULT,
         )
 
@@ -194,6 +196,46 @@ class ChannelsTool(Tool):
             report=(_cleared(idx, True),),
         )
 
+    async def _cli_scope(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
+        """Read, set or clear the region a channel's messages are sent under.
+
+        The scriptable face of the detail page's *Send scope…*. The scope is MeshTerm's to
+        keep (the firmware has none per channel; the send sets the companion's session
+        scope around each message), so setting one writes nothing to the radio — the slot
+        is read only to learn which channel is in it, since the scope is keyed by the
+        channel's identity and follows it to any slot.
+
+        With no region, the plain face prints the scope alone, the way ``config get`` prints
+        one value — and a channel with none prints nothing and exits 5, nothing to report;
+        a set or a clear prints nothing, and the document always carries the channel and
+        its scope (``null`` for none).
+        """
+        from ..core.channel_probe import read_channel_slots
+
+        device = await ctx.device()
+        idx = int(params["index"])
+        slot = next((s for s in await read_channel_slots(device) if s.idx == idx), None)
+        if slot is None:
+            return ToolResult(
+                summary={"index": idx, "scope": None},
+                report=(_scoped(idx, None, None, None, changed=False),),
+                exit_code=exitcodes.NO_RESULT,
+            )
+        store = ctx.region_store
+        region = params.get("region")
+        changed = bool(params.get("clear")) or region is not None
+        if params.get("clear"):
+            store.set_channel_scope(slot.identity, None)
+        elif region is not None:
+            store.set_channel_scope(slot.identity, region)
+        scope = store.channel_scope(slot.identity)
+        return ToolResult(
+            summary={"index": idx, "scope": scope},
+            report=(_scoped(idx, slot.name, slot.secret, scope, changed=changed),),
+            # A read of a channel with no scope found nothing to report; a write did its job.
+            exit_code=exitcodes.OK if scope or changed else exitcodes.NO_RESULT,
+        )
+
     @staticmethod
     async def _show_qr(ctx: AppContext, name: str, url: str) -> None:
         """Draw a channel's share link as a QR code — in the menu, and only there.
@@ -274,18 +316,47 @@ class ChannelsTool(Tool):
                 )
             run_tool_command(self, {"cli_action": "clear", "index": index})
 
+        @channels_app.command("scope", help="Show or set the region a channel sends into")
+        def _scope_cmd(
+            index: int = typer.Argument(..., help="Channel slot index"),
+            region: str | None = typer.Argument(
+                None, help="Region to send this channel's messages into (omit to show it)"
+            ),
+            clear: bool = typer.Option(
+                False, "--clear", help="Drop the channel's scope (send under the default)"
+            ),
+        ) -> None:
+            from ..core.regions import RegionNameError, validate
+
+            if clear and region is not None:
+                raise typer.BadParameter("Pass a region or --clear, not both.")
+            if region is not None:
+                try:
+                    region = validate(region)
+                except RegionNameError as exc:
+                    raise typer.BadParameter(str(exc)) from exc
+            run_tool_command(
+                self, {"cli_action": "scope", "index": index, "region": region, "clear": clear}
+            )
+
         app.add_typer(channels_app, name=self.name)
 
 
-def _channel_listing(slots: list) -> Listing:
+def _channel_listing(slots: list, store: object | None = None) -> Listing:
     """The configured slots, one record each.
 
     The one listing whose record *is* a shared shape rather than carrying one: a row that
     nested its only field under a ``channel`` key would make ``jq '.[].channel.name'``
     out of a listing whose every column is already the channel.
+
+    ``SCOPE`` is the region the channel's messages are sent under (``-`` and ``null`` for
+    the device default), read from the region store the send path reads.
     """
     from ..ui import fields
     from ..ui.report import Listing
+
+    def scope_of(slot) -> str | None:  # noqa: ANN001 - a ChannelSlot
+        return store.channel_scope(slot.identity) if store is not None else None
 
     return Listing(
         key="channels",
@@ -294,6 +365,7 @@ def _channel_listing(slots: list) -> Listing:
             fields.name("name", "NAME"),
             fields.word("type", "TYPE"),
             fields.hexid("hash", "HASH"),
+            fields.name("scope", "SCOPE"),
         ),
         rows=[
             {
@@ -301,9 +373,43 @@ def _channel_listing(slots: list) -> Listing:
                 "name": slot.name,
                 "type": "public" if slot.is_public else "private",
                 "hash": slot.hash,
+                "scope": scope_of(slot),
             }
             for slot in slots
         ],
+    )
+
+
+def _scoped(
+    idx: int, name: str | None, secret: bytes | None, scope: str | None, *, changed: bool
+) -> Facts:
+    """What ``channels scope`` read or set: the channel and the region it sends into.
+
+    Args:
+        idx: The slot index.
+        name: The channel name, or ``None`` for a slot that turned out to be empty.
+        secret: The 16-byte key, or ``None`` for an empty slot.
+        scope: The channel's scope now, or ``None`` for the device default.
+        changed: Whether this run set or cleared it — then the plain face is silent, the
+            way every write's is; a read prints the scope alone.
+
+    Returns:
+        The facts block.
+    """
+    from ..ui import fields
+    from ..ui.fields import ChannelRef
+    from ..ui.report import BARE, SILENT, Facts
+
+    channel = None
+    if name is not None and secret is not None:
+        public = is_public_channel(name, secret)
+        channel = ChannelRef(slot=idx, name=name, public=public, hash=channel_hash(secret))
+    return Facts(
+        key="channel",
+        fields=(fields.channel("channel"), fields.name("scope", "scope")),
+        values={"channel": channel, "scope": scope},
+        shape=SILENT if changed else BARE,
+        bare="scope",
     )
 
 
