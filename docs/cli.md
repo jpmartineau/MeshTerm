@@ -1395,6 +1395,43 @@ node sent multiple lines. It is **not** parsed: MeshTerm does not know the remot
 CLI grammar, and a document that pretended to would be inventing structure. `reply` is
 `null` on the exit-`5` no-answer path.
 
+#### `meshterm regions`
+
+Ask a repeater which regions it relays floods for (firmware 1.12 or newer).
+
+```
+meshterm regions NODE
+```
+
+| Argument / option | What it does |
+| --- | --- |
+| `NODE` | The repeater's contact name. |
+
+```console
+$ meshterm regions Yagi-Repeater
+node      Yagi-Repeater
+unscoped  yes
+regions   lakeside, lakeside-north, harbour
+```
+
+One anonymous request — no login — and one transmission. A repeater answers it only when it
+arrives direct: from a neighbour, or over a route the companion has learned. It also
+rate-limits the question, so nothing here retries it. `unscoped` says whether it relays plain
+floods too; `regions` lists the regions it relays *scoped* floods for. The answer is
+remembered, so the node page and the packet views know it afterwards.
+
+A repeater that answered and named nothing at all relays no floods, and returns `5`. One that
+never answered is a device error (`4`). A name no contact matches, and a contact known to be
+something other than a repeater, are usage errors (`2`): nothing was sent.
+
+**`--json`:**
+
+```json
+{"node":{"name":"Yagi-Repeater","key":"a1b2c3d400000000000000000000000000000000000000000000000000000000","hash":"a1b2c3d4","type":"repeater","self":false},"unscoped":true,"regions":["lakeside","lakeside-north","harbour"]}
+```
+
+`regions` never holds the wildcard `*` — that is `unscoped`, since it names no region.
+
 ---
 
 ### MeshTerm itself

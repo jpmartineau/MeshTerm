@@ -22,6 +22,14 @@ one caveat SemVer makes for a leading zero: while the major version is still `0`
   'openhop-core[hardware]'`); a board wired differently from the AIO v1 states its pins in
   a profile's `spi` table. The bridge is still there for a node that stays on the mesh
   while MeshTerm is closed. ([#21](https://github.com/jpmartineau/MeshTerm/issues/21))
+- **A repeater's regions, read and edited.** A repeater's node page shows the regions it
+  relays floods for and whether it relays unscoped floods too, and **Ask which regions it
+  carries** asks it once (it answers only a neighbour, or over a known route). Repeater
+  admin gains a **Regions** page: the repeater's region tree, with flood allowed or denied
+  per region and for unscoped floods, home and default scope, adding and removing regions,
+  and saving — edits take effect at once and a reboot undoes whatever was not saved. A tree
+  too big for one reply is said to be cut, and the rest is recovered from the repeater's
+  own lists. On the command line, `meshterm regions NODE` asks the same question.
 
 ### Fixed
 
