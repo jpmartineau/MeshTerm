@@ -3,7 +3,7 @@
 Why MeshTerm looks right in some terminals and draws empty boxes in others, what it does
 about it on Windows, and how to turn all of that off.
 
-MeshTerm is drawn with emoji icons, braille charts and powerline path chips. Whether you
+MeshTerm is drawn with emoji icons, braille charts, and powerline path chips. Whether you
 see them is up to your *terminal*, not really your font: a modern terminal, asked for a
 character its font doesn't have, quietly borrows it from another font on the machine.
 That's why the app looks right in Windows Terminal, in VS Code's terminal, and on macOS

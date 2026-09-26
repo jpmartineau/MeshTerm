@@ -12,7 +12,7 @@ build-backend = "hatchling.build"
 # wheel shipping the `meshterm/` package under this different name.
 name = "mesh-term"
 dynamic = ["version"]
-description = "MeshTerm is a full-featured TUI MeshCore client for your terminal. Connects to a companion over USB, Bluetooth or TCP. For Windows, macOS and Linux."
+description = "MeshTerm is a full-featured TUI MeshCore client for your terminal. Connects to a companion over USB, Bluetooth, or TCP. For Windows, macOS, and Linux."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Jean-Pierre Martineau" }]

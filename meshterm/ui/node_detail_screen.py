@@ -1598,7 +1598,7 @@ async def _archive_contact(ctx: AppContext, contact: Contact, self_key: str, lab
     )
     prompt.append(
         "? It comes off this device's contact list, freeing a slot for a new one. MeshTerm "
-        "keeps it — with its key, reception history and messages — and you can restore it "
+        "keeps it — with its key, reception history, and messages — and you can restore it "
         "at any time.",
         style="warn",
     )

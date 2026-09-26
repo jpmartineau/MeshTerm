@@ -661,7 +661,7 @@ async def _sweep(ctx: AppContext, self_key: str, victims: list[ScoredContact]) -
     if not await ctx.ui.dialog(
         f"Archive {_count_desc(len(victims))}? They come off this device's contact list, "
         "freeing space for new ones. MeshTerm keeps them — with their keys, reception "
-        "history and messages — under Archived contacts, and any of them can be restored.",
+        "history, and messages — under Archived contacts, and any of them can be restored.",
         [("Cancel", False), ("Archive", True)],
         title="Archive contacts",
         default=1,

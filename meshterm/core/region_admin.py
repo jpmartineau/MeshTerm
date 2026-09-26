@@ -513,7 +513,7 @@ def validate_new_name(name: str, taken: Iterable[str] = ()) -> str:
     bad = sorted({ch for ch in bare if not _is_name_char(ch)})
     if bad:
         raise RegionNameError(
-            f"a repeater refuses {' '.join(bad)} in a region name — letters, digits and - only"
+            f"a repeater refuses {' '.join(bad)} in a region name — letters, digits, and - only"
         )
     if bare in set(taken):
         raise RegionNameError(f"{bare} is already a region here")

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """MeshTerm is a full-featured TUI MeshCore client for your terminal.
 
-Connects to a companion over USB, Bluetooth or TCP. For Windows, macOS and Linux.
+Connects to a companion over USB, Bluetooth, or TCP. For Windows, macOS, and Linux.
 """
 
 from datetime import datetime

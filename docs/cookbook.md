@@ -7,7 +7,7 @@ shell loops.
 
 Nearly every menu option is also a subcommand — ideal for scripting, cron, and bots. The
 live pictures stay in the menu, where their meaning is (the map, dashboard, live feed,
-watchtower and mesh walk); everything else has a command, and every command speaks
+watchtower, and mesh walk); everything else has a command, and every command speaks
 `--json`. **[`docs/cli.md`](cli.md) is the full manual**: every command and option,
 what each one prints on both faces, and the exit statuses. A taste:
 
@@ -70,7 +70,7 @@ allowed to be comfortable about it: listings are `ps`-style aligned records with
 route is drawn with arrows — `MockCompanion (00) → Yagi-Repeater (a1) → Alice (d4)`.
 `--absolute` swaps every age back for an ISO-8601 instant. A *path*, the spec `--path`
 takes back, stays comma-separated hex. `-` is the one token for absent. Errors,
-acknowledgements and progress all go to stderr, so a redirect catches only the answer.
+acknowledgements, and progress all go to stderr, so a redirect catches only the answer.
 
 The **JSON face** is the machine contract, and `--json` works on **every** command:
 

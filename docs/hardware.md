@@ -1,7 +1,7 @@
 # MeshTerm on hardware
 
 MeshTerm talks to a **node** — a MeshCore radio that speaks the companion protocol over
-serial, Bluetooth LE or TCP. Plug a companion board into USB, or pair one over Bluetooth,
+serial, Bluetooth LE, or TCP. Plug a companion board into USB, or pair one over Bluetooth,
 and none of this page applies: MeshTerm finds it, and the [README](../README.md) and the
 [command line manual](cli.md) are all you need.
 

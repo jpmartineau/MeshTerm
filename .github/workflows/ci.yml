@@ -3,7 +3,7 @@
 # Split in two on purpose. Style is a property of the source, not of the machine, so
 # `lint` runs once and its failure is unambiguous. Behaviour is a property of the
 # machine, so `test` runs everywhere we claim to work — the description promises
-# Windows, macOS and Linux, and until this file existed that promise had only ever been
+# Windows, macOS, and Linux, and until this file existed that promise had only ever been
 # checked on one of them.
 name: CI
 

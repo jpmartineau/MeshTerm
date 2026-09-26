@@ -629,7 +629,7 @@ async def _add_region(
             prompt=f"Name of the new region, {inside}:",
             default=values[slot] or "",
             validate=check,
-            help_text="letters, digits and -, up to 30 bytes",
+            help_text="letters, digits, and -, up to 30 bytes",
             floating=True,
         )
         return typed.strip() if typed else None

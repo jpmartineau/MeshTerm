@@ -543,7 +543,7 @@ REPEATER_SETTINGS: tuple[RemoteSetting, ...] = (
         label="Bridge type",
         category="Bridge",
         writable=False,
-        help="The bridge this firmware was built with: none, rs232 or espnow",
+        help="The bridge this firmware was built with: none, rs232, or espnow",
     ),
     RemoteSetting(
         key="bridge.enabled",

@@ -94,7 +94,7 @@ body:
       description: >
         Only if you are running on something the diagnostics file cannot name. It knows a
         PicoCalc from a regular terminal, but a uConsole and a laptop look much the same to
-        it. Leave blank on a desktop, laptop or Mac.
+        it. Leave blank on a desktop, laptop, or Mac.
       placeholder: "ClockworkPi uConsole (CM4)"
 
   - type: input

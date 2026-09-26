@@ -55,7 +55,7 @@ class DiagnosticsTool(Tool):
     name = "diagnostics"
     title = "Diagnostics"
     icon = "🩺"
-    help = "Version, host, terminal and device facts for a bug report"
+    help = "Version, host, terminal, and device facts for a bug report"
     category = "This app"
     order = 7  # after Preferences (the row that changes MeshTerm), before the pages
 

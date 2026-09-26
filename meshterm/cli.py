@@ -127,8 +127,8 @@ app = typer.Typer(
     # `meshterm.__doc__` — if this drifts from that, one of them is lying.
     help=(
         "MeshTerm is a full-featured TUI MeshCore client for your terminal. "
-        "Connects to a companion over USB, Bluetooth or TCP. "
-        "For Windows, macOS and Linux."
+        "Connects to a companion over USB, Bluetooth, or TCP. "
+        "For Windows, macOS, and Linux."
     ),
     epilog=EXIT_STATUS_EPILOG,
 )
@@ -593,9 +593,9 @@ def _report_no_windows_console(console: Console) -> None:
     console.print()
     console.print("That usually means one of two things:")
     console.print()
-    console.print("  • You are in Git Bash, MSYS or Cygwin. Those are not Windows consoles.")
-    console.print("    Open [accent]Windows Terminal[/accent] or [accent]PowerShell[/accent]")
-    console.print("    and run it from there.")
+    console.print("  • You are in Git Bash, MSYS, or Cygwin, which are not Windows")
+    console.print("    consoles. Open [accent]Windows Terminal[/accent] or")
+    console.print("    [accent]PowerShell[/accent] and run it from there.")
     console.print("  • The output is piped or redirected somewhere. The full-screen menu")
     console.print("    needs the terminal itself.")
     console.print()

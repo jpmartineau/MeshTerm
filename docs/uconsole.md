@@ -15,7 +15,7 @@ That's [further down](#always-on-the-bridge) — most people want the section ab
 > user to hardware groups, and then keys a LoRa transmitter. It assumes you are comfortable
 > at a Linux shell and know which frequency plan and power limits apply where you live —
 > what the radio does on air is your responsibility, not MeshTerm's. There is a real risk
-> of leaving the system, the radio or the mesh around you in a worse state if a step goes
+> of leaving the system, the radio, or the mesh around you in a worse state if a step goes
 > wrong. You do this at your own risk.
 >
 > **Read the whole manual through once before you start.** Which install route you take
@@ -23,10 +23,10 @@ That's [further down](#always-on-the-bridge) — most people want the section ab
 > steps.
 >
 > This is a guide, not a prescription. Despite the author's best efforts it may contain
-> errors, and parts of it will go out of date as packages, runtimes and boards change. It
+> errors, and parts of it will go out of date as packages, runtimes, and boards change. It
 > is up to you to check every fact in it against your own hardware and the current sources
 > before you act on it, and every decision along the way is yours. The author accepts no
-> responsibility for any damage, loss or injury that results from following this guide.
+> responsibility for any damage, loss, or injury that results from following this guide.
 
 - [What you need](#what-you-need)
 - [Step 1 — Prepare the system](#step-1--prepare-the-system)
@@ -194,7 +194,7 @@ frees the GPIO lines and SPI handle the moment its process does. The trade-off i
 this implies: **the node is off the mesh while MeshTerm is closed.** If you want it on all
 the time, that's what [the bridge](#always-on-the-bridge) is for.
 
-**Where its state lives.** Each radio keeps its identity, preferences, channels and
+**Where its state lives.** Each radio keeps its identity, preferences, channels, and
 contacts under `~/.meshterm/radio/spidev1.0/` — `identity.key`, `prefs.json`,
 `channels.json`, `contacts.json` — plus a running log, `node.log` (the previous run's is
 kept as `node.log.1`). All of it survives a restart.
@@ -557,7 +557,7 @@ Then `systemctl --user restart meshterm-spi-bridge.service`.
 
 | Variable | What it sets |
 | --- | --- |
-| `MESHCORE_BUS_ID`, `MESHCORE_CS_ID`, `MESHCORE_CS_PIN` | which SPI bus, device and chip-select pin the radio is on |
+| `MESHCORE_BUS_ID`, `MESHCORE_CS_ID`, `MESHCORE_CS_PIN` | which SPI bus, device, and chip-select pin the radio is on |
 | `MESHCORE_RESET_PIN`, `MESHCORE_BUSY_PIN`, `MESHCORE_IRQ_PIN` | the three control lines |
 | `MESHCORE_FREQUENCY`, `MESHCORE_TX_POWER` | frequency in Hz, power in dBm |
 | `MESHCORE_SPREADING_FACTOR`, `MESHCORE_BANDWIDTH`, `MESHCORE_CODING_RATE` | the modem preset — all three must match the mesh you are joining. Whole numbers only: bandwidth in Hz (`62500`), coding rate as the denominator (`5` for 4/5). A decimal or `4/5` stops the bridge at startup. |

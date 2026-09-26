@@ -123,7 +123,7 @@ what the mesh is doing.
 - **You can see where everyone is.** There is a street map, drawn in the terminal, with the
   radios on it. You can pan it, zoom it, and search it. There is also a Time Machine: charts of
   everything you have ever overheard, so you can see when a radio usually talks and how
-  well you have heard it, over a day, a week, a month or all of it.
+  well you have heard it, over a day, a week, a month, or all of it.
 
 - **You can talk to people.** Group channels and one-to-one messages, both live. If someone
   is out of range right now, the courier holds your message and delivers it when they come
@@ -158,7 +158,7 @@ what the mesh is doing.
 ### Getting it
 
 One file to download, with nothing else to install, for Windows, macOS (both Intel and
-Apple silicon) and Linux (including 64-bit ARM, which covers the uConsole). If you would
+Apple silicon), and Linux (including 64-bit ARM, which covers the uConsole). If you would
 rather use Python, `pipx install` works too, on Python 3.10 to 3.14. The README has the
 exact commands.
 

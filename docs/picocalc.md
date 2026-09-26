@@ -25,8 +25,8 @@ a radio in the meantime.
 > errors, and parts of it will go out of date as boards, images and firmware change. It is
 > up to you to check every fact in it against your own hardware and the current sources
 > before you act on it, and every decision along the way is yours. The author accepts no
-> responsibility for any damage, loss or injury that results from following this guide,
-> and nothing in it is a warranty that your parts, your tools or your hands will behave the
+> responsibility for any damage, loss, or injury that results from following this guide,
+> and nothing in it is a warranty that your parts, your tools, or your hands will behave the
 > way the author's did. If you are not comfortable with any step, stop and get help from
 > someone who is.
 
@@ -213,7 +213,7 @@ machine it describes. Read this section before you open the shell.
 Follow ClockworkPi's own
 [assembly guidelines](https://github.com/clockworkpi/PicoCalc/blob/master/Clockwork_PicoCalc_Assembly_Guidelines.pdf)
 (a PDF in the [PicoCalc repository](https://github.com/clockworkpi/PicoCalc), which also
-has a wiki) to put the kit together: mainboard, screen, keyboard, speakers and shell. Insert your 18650
+has a wiki) to put the kit together: mainboard, screen, keyboard, speakers, and shell. Insert your 18650
 battery (or two), watching the `+`/`-` marks in the battery compartment.
 
 ⚠ Two of the warnings in [Three ways to break it](#three-ways-to-break-it) apply here: tape
@@ -223,7 +223,7 @@ there is no reason to make the screws tight now.
 
 Power it on once with the **stock Pico still in place**. You should see the stock BASIC
 firmware boot on the screen, and the keyboard should respond. This confirms the screen,
-keyboard and battery are all good before you start swapping boards.
+keyboard, and battery are all good before you start swapping boards.
 
 Power it back off.
 
@@ -756,7 +756,7 @@ those. Keep the iron on each pin only as long as it takes, and don't press down 
 board. Attach the LoRa antenna to the Wio-SX1262's u.FL connector before you
 power anything back on — running the radio without an antenna attached can damage it.
 Wrap the XIAO + Wio-SX1262 stack in Kapton tape so no pad can touch the Lyra, the
-mainboard or a battery, then tuck it into the shell wherever it fits without straining the
+mainboard, or a battery, then tuck it into the shell wherever it fits without straining the
 wires; a strip of foam tape holds it in place against the inside of the case.
 
 ### Step 15 — Set up the Lyra
@@ -914,7 +914,7 @@ The rest is one bench's findings, and a second device may disagree:
   on one board, not read from a reference manual.
 - **That the Calculinux kernel permits those `/dev/mem` writes**, and that the mux oneshot
   really runs at every boot.
-- **The header pin numbers** 6, 7, 8 and 36 for GP4, GP5, GND and 3V3. The Pico-side
+- **The header pin numbers** 6, 7, 8, and 36 for GP4, GP5, GND, and 3V3. The Pico-side
   numbering is right; the carrier's wiring is a bench observation.
 - **The MX1.25 socket's pin order.** Taken from the wire colours of Luckfox's own cable,
   which is why [Step 3](#step-3--attach-the-wi-fi-dongle) has you check pin 1 with a meter.

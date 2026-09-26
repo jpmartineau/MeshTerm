@@ -133,7 +133,7 @@ Whichever you took, you now have a single file: `meshterm` on macOS and Linux,
 
 ### If your terminal draws empty boxes
 
-MeshTerm is drawn with emoji icons, braille charts and powerline path chips, and whether
+MeshTerm is drawn with emoji icons, braille charts, and powerline path chips, and whether
 you see them is up to your *terminal* rather than your font. Windows Terminal, VS Code's
 terminal, and anything modern on macOS and Linux all draw them correctly.
 
@@ -247,9 +247,9 @@ connect](docs/connecting.md)** covers Bluetooth pairing on Windows, Linux, and m
 ## What it does
 
 The menu asks one question — *what would you like to do?* — and answers it in two halves.
-Three sections name a doing: **Message** is chat, channels, the courier outbox and
-contacts; **Watch** is the dashboard, the live feed, the watchtower and the time machine;
-**Explore** is the map, the mesh walk, tracing and the trophy case. Three name whose it is:
+Three sections name a doing: **Message** is chat, channels, the courier outbox, and
+contacts; **Watch** is the dashboard, the live feed, the watchtower, and the time machine;
+**Explore** is the map, the mesh walk, tracing, and the trophy case. Three name whose it is:
 **This node** is the radio in your hand, **Other nodes** is someone else's over the mesh,
 and **This app** is MeshTerm itself — preferences, diagnostics, and the written pages.
 
@@ -338,7 +338,7 @@ are decoded with a small built-in reader for the
 
 Both map surfaces carry the credit themselves. The full-screen map opens with
 `© OpenMapTiles · Data from OpenStreetMap` in its bottom-right corner and collapses it to
-`© OpenStreetMap` once you pan, zoom or type — set into the panel's bottom border rule on
+`© OpenStreetMap` once you pan, zoom, or type — set into the panel's bottom border rule on
 a desktop terminal, so the drawing itself keeps every cell, and on the map's own last row
 on the PicoCalc, whose frame has no bottom rule. The node page's location preview shows the
 short form throughout. The About page inside the app spells out the licence URL.
@@ -368,7 +368,7 @@ respective project for the authoritative terms):
 | [prompt_toolkit](https://github.com/prompt-toolkit/python-prompt-toolkit) | Full-screen interactive TUI | BSD-3-Clause |
 | [markdown-it-py](https://github.com/executablebooks/markdown-it-py) | CommonMark parser behind the written About pages | MIT |
 | [Segno](https://github.com/heuer/segno) | Pure-Python QR codes (channel share links) | BSD-3-Clause |
-| [tomli](https://github.com/hukkin/tomli) / [tomli-w](https://github.com/hukkin/tomli-w) | TOML config, preferences and device-config backups | MIT |
+| [tomli](https://github.com/hukkin/tomli) / [tomli-w](https://github.com/hukkin/tomli-w) | TOML config, preferences, and device-config backups | MIT |
 
 ## License
 
@@ -388,7 +388,7 @@ is Microsoft's Cascadia Mono PL, redistributed unmodified under the SIL Open Fon
 [CascadiaMono-OFL.txt](meshterm/assets/fonts/CascadiaMono-OFL.txt) and stays its only
 license.
 
-Each standalone build is a single file with `LICENSE`, `NOTICE` and a generated
+Each standalone build is a single file with `LICENSE`, `NOTICE`, and a generated
 `THIRD-PARTY-NOTICES.txt` (every dependency's own license text) bundled inside it. The same
 three files are also attached to each release on the
 [releases page](https://github.com/jpmartineau/MeshTerm/releases), so you can read them

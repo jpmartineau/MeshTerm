@@ -113,7 +113,7 @@ of two directories from the same shell.
 
 **`--db` alone does not isolate a run.** It moves the database, which is most of the
 weight but none of the identity: the contact and channel caches, the outbox, the stored
-admin passwords and the remembered device all live beside it in the config directory and
+admin passwords, and the remembered device all live beside it in the config directory and
 would still be the ones you use every day. To run against a scratch state — a test, a
 demo, a second radio — set `MESHTERM_HOME`, and set `--db` inside it if you want the
 database somewhere else again. The same holds for the database `--mock` picks for itself:
@@ -147,8 +147,8 @@ Three things the simulator does that a radio does not, all visible in the sample
 > **`--mock` records into its own history, not yours — but it still writes the caches.**
 > The simulator is a fake radio, not a fake MeshTerm: what it adverts is written down like
 > anything else. The database it writes is `meshterm-mock.db`, so its invented nodes stay
-> out of your mesh walk, dashboard and map; naming a database with `--db` overrides that
-> choice. The contact and channel caches, the outbox and the remembered devices are still
+> out of your mesh walk, dashboard, and map; naming a database with `--db` overrides that
+> choice. The contact and channel caches, the outbox, and the remembered devices are still
 > the ones you use every day, so a demo that should touch nothing at all gets a home of
 > its own: `MESHTERM_HOME=... meshterm --mock …`.
 
@@ -266,7 +266,7 @@ fields; a paragraph has no fields, and unwrapped it is a 600-cell line no termin
 read.
 
 **stdout is the answer; everything else is stderr** — errors (`meshterm: what went
-wrong`), progress bars, log records, acknowledgements and closing messages:
+wrong`), progress bars, log records, acknowledgements, and closing messages:
 
 ```console
 $ meshterm config set radio_sf 9
