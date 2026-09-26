@@ -15,7 +15,7 @@ its own step-by-step manual, and this page only tells you which one is yours.
 | a ClockworkPi **PicoCalc**, stock or already running Calculinux on a Luckfox Lyra, and I want MeshTerm on its own screen | **[MeshTerm on the PicoCalc](picocalc.md)** — from the shopping list to a working machine |
 | …and I want a **radio** inside it | the same manual, [Phase 3](picocalc.md#phase-3--add-the-radio) — a XIAO nRF52840 + Wio-SX1262 soldered to the Lyra's UART |
 | a ClockworkPi **uConsole** with the hackergadgets AIO board — an SX1262 on the host's own SPI bus | **[MeshTerm on the uConsole](uconsole.md)** — MeshTerm drives it directly with `--spi`, or a bridge service fronts it as a companion if you want it always on |
-| a MeshCore companion on USB, BLE or Wi-Fi | nothing here — the [README](../README.md) |
+| a MeshCore companion on USB, Bluetooth, or Wi-Fi | nothing here — the [README](../README.md), and [When a companion won't connect](connecting.md) if it doesn't |
 
 The two targets have nothing in common but MeshTerm itself. The device-side scripts each
 manual runs live in [`scripts/`](../scripts/), one folder per handheld; the

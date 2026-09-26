@@ -52,8 +52,8 @@ With no command, MeshTerm launches the interactive menu instead.
 | `--version` | Print `meshterm <version>` and exit `0`, before anything else is opened. |
 | `-p`, `--profile NAME` | Use a named device profile from `config.toml`. |
 | `--port PORT` | Serial port to connect to (`COM5`, `/dev/ttyACM0`), overriding the profile. |
-| `--ble ADDRESS` | Bluetooth address of a companion; selects the BLE transport. |
-| `--ble-pin PIN` | Pairing PIN, if the Bluetooth companion asks for one. |
+| `--ble ADDRESS` | Bluetooth address of a companion; selects the Bluetooth transport. |
+| `--ble-pin PIN` | Pairing PIN, if the Bluetooth companion asks for one. MeshTerm pairs with it itself on Windows and Linux; on macOS the system asks for the code in its own dialog, and this option has no effect. See [When a companion won't connect](connecting.md#bluetooth). |
 | `--tcp HOST[:PORT]` | Network address of a TCP companion; selects the TCP transport. Default port 5000. |
 | `--spi` | The LoRa radio on this machine's own SPI bus; selects the SPI transport. MeshTerm runs the node for the length of the command. With one radio attached, that's the one, profile or not; with none attached, the one SPI profile, else the uConsole AIO's wiring. With two, it refuses (exit `3`) and lists them — pick one with `-p`. See [Adding a radio on the SPI bus](configuration.md#adding-a-radio-on-the-spi-bus). Linux only. |
 | `--mock` | Use the built-in simulator instead of real hardware. Nothing transmits, and the run records to `meshterm-mock.db` rather than your real history. |
@@ -482,10 +482,15 @@ consumer that cannot would have to tell an error document from a result.
 
 ```console
 $ meshterm --port NOSUCHPORT99 info
-meshterm: could not open serial port NOSUCHPORT99: could not open port 'NOSUCHPORT99': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)
+meshterm: could not open serial port NOSUCHPORT99: NOSUCHPORT99 isn't there — the device was unplugged, or came back under another name.
 $ echo $?
 3
 ```
+
+The sentence names the cause and the remedy: a port that is missing, in use by another
+program, or not yours to open, and for Bluetooth a link that never opened, a pairing that is
+out of date, or a PIN that was wrong. [When a companion won't connect](connecting.md) lists
+every one of them.
 
 With nothing named and more than one candidate attached, the same `3` arrives as a list
 and the way out of it:
@@ -626,7 +631,7 @@ table has no room for.
 | `target` | string | What `--port` / `--ble` take, verbatim. |
 | `transport` | string | `"serial"` \| `"ble"` \| `"tcp"`, or `"mock"` under `--mock`. |
 | `port` | string \| null | The serial port, for a serial device. `""` on the `--mock` row. |
-| `address` | string \| null | The Bluetooth address, for a BLE device. |
+| `address` | string \| null | The Bluetooth address, for a Bluetooth device. |
 | `label` | string | The OS's name for the device, or the confirmed node name where we have one. |
 | `hardware` | string \| null | The confirmed hardware model, else the USB vendor label. `""` on the `--mock` row. |
 | `meshcore` | string | `"yes"` \| `"maybe"` \| `"no"`. Not a boolean — rounding a hint up to `true` would be a lie. |

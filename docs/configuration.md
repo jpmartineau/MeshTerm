@@ -32,6 +32,7 @@ Copy [`config.example.toml`](../config.example.toml) to `~/.meshterm/config.toml
 ```toml
 # default_profile = "s3"   # uncomment and name your own profile to make it the default
 connect_on_start = true   # false opens the radio link lazily instead of at launch
+# db_path = "C:/Users/you/meshterm/meshterm.db"   # the history lives elsewhere
 
 [profiles.s3]
 port = "COM5"
@@ -41,13 +42,13 @@ description = "XIAO ESP32-S3 + Wio SX1262 serial companion"
 # A Bluetooth LE companion: give it an `address` instead of a `port`.
 [profiles.handheld]
 address = "AA:BB:CC:DD:EE:FF"
-# ble_pin = "123456"   # only if your device requires a pairing PIN
+# ble_pin = "123456"   # only if your device requires a pairing PIN (not used on macOS)
 description = "Pocket handheld over Bluetooth"
 
 # A network (TCP) companion: give it a `host` (and optional `tcp_port`, default 5000).
 [profiles.wifi]
 host = "192.168.1.50"
-description = "Basestation over WiFi"
+description = "Basestation over Wi-Fi"
 
 # A radio on this machine's own SPI bus (the uConsole AIO): MeshTerm runs its node.
 # The pins default to the AIO v1's; a `spi` table states only what differs.

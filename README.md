@@ -58,10 +58,12 @@ https://github.com/user-attachments/assets/f91a6695-14d5-4ae0-8fdc-e65492d0955d
   sweep, and a walkable graph of how the mesh actually hangs together.
 - **It talks.** Live channel and direct messaging, store-and-forward courier delivery for
   contacts that aren't there yet, and shareable channels as QR codes and `meshcore://` links.
-- **It connects however your companion does.** Serial (USB), Bluetooth LE, or TCP (a WiFi
+- **It connects however your companion does.** Serial (USB), Bluetooth LE, or TCP (a Wi-Fi
   board or a network proxy) — the discoverable transports are auto-found and picked
   interactively, a network device is named by hand, and every kind reconnects live when a link
-  drops. No radio? A built-in simulator covers development.
+  drops. It pairs a PIN-protected Bluetooth companion itself on Windows and Linux, and when a
+  connection fails it says which step failed and what to do. No radio? A built-in simulator
+  covers development.
 - **It works offline.** The street map caches OpenStreetMap tiles to disk and falls back to
   a blank grid when there's no network — it never needs the internet to run.
 
@@ -199,6 +201,7 @@ surveys kept as a historical record. The short version:
 | **[What MeshTerm does](docs/features.md)** | Every screen the menu offers, and the command that does the same job without it. |
 | [The CLI cookbook](docs/cookbook.md) | Common one-liners, by the thing you're trying to do. |
 | [Configuring MeshTerm](docs/configuration.md) | Preferences, device profiles, and everything kept under `~/.meshterm`. |
+| [When a companion won't connect](docs/connecting.md) | Bluetooth pairing on each system, finding the PIN, USB permissions, and every connection error, with what to do about it. |
 | [MeshTerm on hardware](docs/hardware.md) | Which handheld manual is yours — the [PicoCalc](docs/picocalc.md) build, or the [uConsole](docs/uconsole.md), whose LoRa chip MeshTerm can drive directly. |
 | [How the code is laid out](docs/architecture.md) | The layering, and where a new feature goes. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | The development setup and the house rules. |
@@ -210,8 +213,8 @@ surveys kept as a historical record. The short version:
 # Interactive full-screen menu (auto-discovers serial + Bluetooth companions)
 meshterm
 
-# Connect over Bluetooth (address from `meshterm devices`)
-meshterm --ble AA:BB:CC:DD:EE:FF info
+# Connect over Bluetooth (address from `meshterm devices`); add --ble-pin if it has a PIN
+meshterm --ble AA:BB:CC:DD:EE:FF --ble-pin 123456 info
 
 # Connect over the network to a TCP companion (host[:port], port defaults to 5000)
 meshterm --tcp 192.168.1.50 info
@@ -236,6 +239,10 @@ drives a uConsole's SPI LoRa board directly with `--spi`, or through a small bri
 want the node on the mesh all the time. The device-side scripts both manuals run are in
 [`scripts/`](scripts/); not sure which manual is yours?
 [`docs/hardware.md`](docs/hardware.md) says.
+
+A companion that won't connect? **[When a companion won't
+connect](docs/connecting.md)** covers Bluetooth pairing on Windows, Linux, and macOS, the
+`dialout` group and ModemManager for USB on Linux, and every error message MeshTerm gives.
 
 ## What it does
 

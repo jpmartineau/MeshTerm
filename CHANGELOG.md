@@ -56,11 +56,27 @@ one caveat SemVer makes for a leading zero: while the major version is still `0`
   device rejected the request as malformed". MeshTerm now reads the radio's clock first: a
   few seconds ahead is in sync and left alone, and further ahead says by how much and that
   rebooting the radio resets it.
+- **Bluetooth on Linux works with a PIN-protected companion.** MeshTerm never got the PIN to
+  the radio there: pairing fell back to "Just Works", which the firmware refuses, so a
+  correct PIN was reported as rejected, again and again. MeshTerm now does the pairing
+  itself, answering with the PIN, so it works over SSH and without a desktop, and a
+  companion paired before it had a PIN is paired again properly. An unpaired companion
+  with no PIN given is reported in seconds, where it used to take 30. **Unpair & quit** now
+  works on Linux too.
+- **A Bluetooth connect on Linux no longer loses its own link.** When the radio needed a few
+  tries to open the link, which is routine on a Raspberry Pi, MeshTerm lost track of the
+  link that finally opened. The companion, still connected, stopped advertising, so the
+  retry could not find it and MeshTerm reported it out of range.
+- **A connection that fails says which step failed.** Bluetooth now tells a link that never
+  opened from a stale saved pairing, a wrong PIN, a companion that refused to pair, and
+  a connect that timed out; the PIN dialog shows the reason instead of calling every
+  refusal a wrong PIN. A USB port says whether it is missing, in use by another program
+  (ModemManager, on Linux), or not yours to open (the `dialout` group). All of them are
+  listed, with what to do, in [When a companion won't connect](https://github.com/jpmartineau/MeshTerm/blob/main/docs/connecting.md).
 - **The default flood scope is stored the way the firmware and the MeshCore app store it.**
   MeshTerm saved it as `#name` where they save `name`, refused a 30-character name the
   firmware accepts, and mis-framed a name with an accent. Device config also now refuses
   a name no repeater could list back (spaces, commas, a private `$` region).
-
 - **The SPI bridge remembers its channels across restarts.** It kept them only in memory,
   so after every reboot the Channels page came up empty while mute settings, which
   MeshTerm keeps itself, survived. Update the service (menu option 2) to get the fix.

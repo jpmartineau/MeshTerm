@@ -12,12 +12,13 @@ This folder is the rest.
 | **[The command line](cli.md)** | The manual. Every subcommand and option, what each prints on the plain and JSON faces, the exit statuses, and recipes built on `jq`. |
 | [The CLI cookbook](cookbook.md) | Common one-liners by task, for when you want the shape of a command rather than its specification. |
 | [Configuring MeshTerm](configuration.md) | Preferences versus config, device profiles, and everything kept under `~/.meshterm`. |
+| [When a companion won't connect](connecting.md) | Bluetooth pairing on each system, finding the PIN, and every connection error MeshTerm reports, with what to do about it. |
 | [Terminals, icons, and the Windows console](terminals.md) | Why the icons and charts draw on some terminals and not others, and what MeshTerm does about it on Windows. |
 
 ## Putting it on hardware
 
 Only if you want MeshTerm running on a handheld's own screen. A MeshCore companion on
-USB, Bluetooth or Wi-Fi needs none of this.
+USB, Bluetooth, or Wi-Fi needs none of this.
 
 | Read | For |
 | --- | --- |
