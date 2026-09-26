@@ -51,6 +51,11 @@ A release does not go out on a red suite. If something fails, stop and say so.
 Patch unless JP says otherwise. Say the number you arrived at before you write it anywhere,
 so a wrong assumption costs a sentence instead of a tag.
 
+**Don't recommend a bigger bump**, however many features or changed defaults the release
+carries — not even on the strength of the changelog's SemVer note. 0.10.0 went out that way
+on a recommendation, and JP would have preferred 0.9.1. A minor or major bump happens only
+when he names it.
+
 ## 3. Write the entry
 
 This is the work. Read the commits since the last tag (`git log --stat v<last>..HEAD`) and
