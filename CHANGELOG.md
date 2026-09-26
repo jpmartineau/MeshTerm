@@ -9,91 +9,114 @@ one caveat SemVer makes for a leading zero: while the major version is still `0`
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-09-25
+
+**Regions, a uConsole with no bridge, and Bluetooth that works on Linux.** MeshTerm now
+speaks MeshCore's regions: it reads and edits them on a repeater, keeps a channel's messages
+inside one, and tells you which region any flood it hears was sent into. It drives the
+uConsole's LoRa radio itself. And connecting is far less of a mystery: a PIN-protected
+companion pairs on Linux, and a connection that fails says which step failed and what to do.
+
 ### Added
 
 - **MeshTerm drives the uConsole's LoRa radio itself, without the bridge service.** A radio
   on this machine's own SPI bus is now a connection like USB, Bluetooth, or TCP: pick
-  **SPI radio** on the device screen, or run `meshterm --spi`. MeshTerm starts the node when
-  it connects and ends it when it quits, so the radio's pins are free for other programs
-  whenever MeshTerm is closed — even after a crash. The node keeps its identity, name,
-  radio settings, channels, and contacts in `~/.meshterm/radio/`, and the first time it
-  runs it takes over the bridge's identity and contacts, so it stays the node everyone
-  already knows. It needs the radio library (`pipx inject mesh-term
-  'openhop-core[hardware]'`); a board wired differently from the AIO v1 states its pins in
-  a profile's `spi` table. The bridge is still there for a node that stays on the mesh
-  while MeshTerm is closed. ([#21](https://github.com/jpmartineau/MeshTerm/issues/21))
+  **SPI radio** on the device screen, or run `meshterm --spi`, and `meshterm devices` lists
+  it beside everything else. MeshTerm starts the node when it connects and stops it when it
+  quits, so the radio is free for other programs whenever MeshTerm is closed — even after a
+  crash. The node keeps its identity, name, radio settings, channels, and contacts in
+  `~/.meshterm/radio/`, and the first time it runs it takes over the bridge's identity and
+  contacts, so it stays the node everyone already knows. It needs the radio library
+  (`pipx inject mesh-term 'openhop-core[hardware]'`), and a board wired differently from
+  the AIO v1 states its pins in a profile's `spi` table. The bridge is still there for a
+  node that should stay on the mesh while MeshTerm is closed.
+  ([#21](https://github.com/jpmartineau/MeshTerm/issues/21))
 - **A repeater's regions, read and edited.** A repeater's node page shows the regions it
-  relays floods for and whether it relays unscoped floods too, and **Ask which regions it
-  carries** asks it once (it answers only a neighbour, or over a known route). Repeater
-  admin gains a **Regions** page: the repeater's region tree, with flood allowed or denied
-  per region and for unscoped floods, home and default scope, adding and removing regions,
-  and saving — edits take effect at once and a reboot undoes whatever was not saved. A tree
-  too big for one reply is said to be cut, and the rest is recovered from the repeater's
-  own lists. On the command line, `meshterm regions NODE` asks the same question.
+  relays floods for, and whether it relays unscoped floods too; **Ask which regions it
+  carries** asks it once (a repeater answers only a neighbour, or over a known route).
+  Repeater admin gains a **Regions** page for the whole tree: allow or deny floods per region
+  and for unscoped traffic, set the home and default scope, add and remove regions, and save.
+  Every edit takes effect at once on the repeater, and a reboot undoes whatever was not
+  saved, so the page counts your unsaved edits and asks before you leave with any. A tree
+  too big for one reply is said to be cut, and the rest is recovered from the repeater's own
+  lists. On the command line, `meshterm regions NODE` asks the same question.
 - **A channel can be kept to one region.** Give a channel a **Send scope** on its page, and
-  its messages are flooded into that region alone — only repeaters that carry it relay
-  them. The chat's title names the scope, and **^R** resends your last scoped message
-  unscoped when the region is getting it nowhere. A radio that can't send under the scope
-  refuses before anything goes out, rather than sending it everywhere. On the command line,
-  `channels scope INDEX [REGION]` reads or sets it, `channels list` gains a `SCOPE` column,
-  and `chat send --channel N --scope REGION` (or `--scope '*'` for unscoped) overrides it
-  for one message. Scoped sending needs firmware 1.10; `*` needs 1.16.
-- **Packets say which region a flood was scoped to.** A `scope` row in the packet viewer,
-  the message paths title, and a new `SCOPE` lane in the live feed name the region a scoped
-  flood was sent into, or its code when no region known here matches it. `monitor` gains
-  the same `SCOPE` column and a `scope` field in `--json`. A scoped packet is kept with
-  what is needed to name its region later, so one heard today is named once a repeater or
-  a channel teaches the name. Packets recorded before this version have no scope.
+  its messages are flooded into that region alone — only repeaters that carry it relay them.
+  The chat's title names the scope, and **^R** resends the message you picked (or your last
+  one) unscoped when the region is getting it nowhere. A radio that can't send under the
+  scope refuses before anything goes out, rather than quietly sending it everywhere. On the
+  command line, `channels scope INDEX [REGION]` reads or sets it, `channels list` gains a
+  `SCOPE` column, and `chat send --channel N --scope REGION` (or `--scope '*'` for unscoped)
+  overrides it for one message. Scoped sending needs firmware 1.10, and `*` needs 1.16.
+- **Every flood says which region it was sent into.** The packet viewer has a `scope` row,
+  the live feed a `SCOPE` lane, and a received channel message's card names its region too.
+  Where no region known here matches, the code is shown instead, and it turns into a name
+  as soon as a repeater or a channel teaches it one. `monitor` gains the same `SCOPE` column
+  and a `scope` field under `--json`. Packets recorded before this version have no scope.
 - **A message you sent says what it was sent under.** Its message paths dialog names the
   scope, and when nothing relayed it and no repeater known here carries that region, it
-  says so.
+  says so — which is usually the answer to "why did nobody hear that?"
+
+### Changed
+
+- **MeshTerm sends at most one automatic advert a week, and none unless you ask.** A
+  MeshCore companion never advertises by itself, so the hourly zero-hop and daily flood
+  adverts MeshTerm sent by default were the only automatic adverts on the air — more than
+  a companion needs, on a shared channel. They are gone from Device config, along with
+  `config advert-cadence`. In their place is one preference, **Weekly advert**, off by
+  default: once a device has gone a week without a flood advert, MeshTerm floods one, after
+  it has heard the mesh and then waited for **Advert quiet** seconds of silence (5, 15, 30,
+  or 60; 30 by default) plus a random 0–5 s, so two waiting radios do not collide. A line
+  under the setting says where the week stands. Switching it on starts the week rather than
+  sending; a flood advert sent by hand restarts it; each device keeps its own week, and one
+  that falls due while MeshTerm is closed goes out the next time that device connects. The
+  two old cadence preferences are dropped from `preferences.toml` the next time it is saved.
+- The live feed's packet classes take shorter names in a narrower column that never cuts
+  them off, and the SNR and RSSI labels line up with their lanes. On the PicoCalc the class
+  drops its icon to make room.
+- The Channels list reads **LAST** before **MSGS**, and shows a **SCOPE** column only when a
+  channel has one.
 
 ### Fixed
 
+- **Bluetooth on Linux works with a PIN-protected companion.** The PIN never reached the
+  radio: pairing fell back to a no-PIN ceremony the firmware refuses, so a correct PIN was
+  reported as rejected, again and again. MeshTerm now runs the pairing itself and answers
+  with the PIN, so it works over SSH and on machines with no desktop, and a companion that
+  was paired before it had a PIN is paired again properly. An unpaired companion with no PIN
+  given is now reported in seconds rather than after 30. **Unpair & quit** works on Linux
+  too.
+- **A Bluetooth connect on Linux no longer loses its own link.** When the radio needed a few
+  tries to open a link — routine on a Raspberry Pi — MeshTerm lost track of the one that
+  finally opened. The companion, still connected, stopped advertising, so the retry could
+  not find it and MeshTerm reported it out of range.
+- **A connection that fails says which step failed.** Bluetooth now tells a link that never
+  opened from a stale saved pairing, a wrong PIN, a companion that refused to pair, and a
+  connect that timed out, and the PIN dialog shows the reason instead of calling every
+  refusal a wrong PIN. A USB port says whether it is missing, in use by another program
+  (ModemManager, on Linux), or not yours to open (the `dialout` group). Every message, and
+  what to do about it, is in
+  [When a companion won't connect](https://github.com/jpmartineau/MeshTerm/blob/main/docs/connecting.md).
 - **Clock sync explains a radio whose clock is ahead, instead of calling it malformed.**
   MeshCore firmware never sets its clock back, so once a radio's clock ran ahead of the
   computer's — a GPS fix, another app, drift — every sync was refused and logged as "the
   device rejected the request as malformed". MeshTerm now reads the radio's clock first: a
-  few seconds ahead is in sync and left alone, and further ahead says by how much and that
-  rebooting the radio resets it.
-- **Bluetooth on Linux works with a PIN-protected companion.** MeshTerm never got the PIN to
-  the radio there: pairing fell back to "Just Works", which the firmware refuses, so a
-  correct PIN was reported as rejected, again and again. MeshTerm now does the pairing
-  itself, answering with the PIN, so it works over SSH and without a desktop, and a
-  companion paired before it had a PIN is paired again properly. An unpaired companion
-  with no PIN given is reported in seconds, where it used to take 30. **Unpair & quit** now
-  works on Linux too.
-- **A Bluetooth connect on Linux no longer loses its own link.** When the radio needed a few
-  tries to open the link, which is routine on a Raspberry Pi, MeshTerm lost track of the
-  link that finally opened. The companion, still connected, stopped advertising, so the
-  retry could not find it and MeshTerm reported it out of range.
-- **A connection that fails says which step failed.** Bluetooth now tells a link that never
-  opened from a stale saved pairing, a wrong PIN, a companion that refused to pair, and
-  a connect that timed out; the PIN dialog shows the reason instead of calling every
-  refusal a wrong PIN. A USB port says whether it is missing, in use by another program
-  (ModemManager, on Linux), or not yours to open (the `dialout` group). All of them are
-  listed, with what to do, in [When a companion won't connect](https://github.com/jpmartineau/MeshTerm/blob/main/docs/connecting.md).
+  few seconds ahead counts as in sync, and further ahead says by how much and that rebooting
+  the radio resets it.
+- **The Channels page no longer loses channels at connect.** When the radio refused another
+  command while MeshTerm was reading its channel slots, the refusal was taken for "no such
+  slot", and every channel after it was missing for the rest of the session.
+- **The uConsole's radio hears the whole mesh.** Its SPI node, and the bridge, listened for a
+  shorter preamble than MeshCore sends, so the chip gave up on most packets part-way through
+  and decoded one only when it happened to catch the end. It now expects the preamble the
+  mesh uses for the spreading factor in force.
 - **The default flood scope is stored the way the firmware and the MeshCore app store it.**
   MeshTerm saved it as `#name` where they save `name`, refused a 30-character name the
-  firmware accepts, and mis-framed a name with an accent. Device config also now refuses
-  a name no repeater could list back (spaces, commas, a private `$` region).
-- **The SPI bridge remembers its channels across restarts.** It kept them only in memory,
-  so after every reboot the Channels page came up empty while mute settings, which
-  MeshTerm keeps itself, survived. Update the service (menu option 2) to get the fix.
-
-### Changed
-
-- **MeshTerm now sends at most one automatic advert a week, and none unless you ask.** A
-  MeshCore companion never advertises by itself, so the hourly zero-hop and daily flood
-  adverts MeshTerm sent by default were the only automatic adverts on the air, and more
-  than a companion needs. They are gone from Device config, along with
-  `config advert-cadence`. In their place is one preference, **Weekly advert** (off by
-  default): once a device has gone a week without a flood advert, MeshTerm floods one —
-  after it has heard the mesh, and then waited for **Advert quiet** seconds of silence
-  (5, 15, 30, or 60; 30 by default) plus a random 0–5 s, so two waiting radios do not
-  collide. Switching it on starts the week rather than sending; a flood advert sent by hand
-  restarts it; each device keeps its own week, and one that falls due while MeshTerm is
-  closed goes out the next time that device connects.
+  firmware accepts, and mis-framed a name with an accent. Device config now also refuses a
+  name no repeater could list back (spaces, commas, or a private `$` region).
+- **The SPI bridge remembers its channels across restarts.** It kept them only in memory, so
+  after every reboot the Channels page came up empty. For this fix and the preamble one,
+  run the bridge's setup menu again and choose **2) Install as a service**.
 
 ## [0.9.0] — 2026-09-22
 
@@ -165,5 +188,6 @@ exact commands.
 MeshTerm is free and open source under the Apache 2.0 licence. The name and the logo are
 not covered by the licence (see `NOTICE`), so a fork is welcome under its own name.
 
-[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.10.0
 [0.9.0]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.9.0
