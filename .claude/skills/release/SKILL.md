@@ -48,8 +48,22 @@ A release does not go out on a red suite. If something fails, stop and say so.
 
 ## 2. Decide the version
 
-Patch unless JP says otherwise. Say the number you arrived at before you write it anywhere,
-so a wrong assumption costs a sentence instead of a tag.
+**Always ask, as a multiple choice**, whenever JP asks for a release — even when his
+request names a bump, because words like "minor" have meant "a small one" before (he
+asked to "bump minor" and meant the patch). One AskUserQuestion, three choices, each
+showing the actual number it produces:
+
+- **Patch — X.Y.(Z+1)** (Recommended)
+- **Minor — X.(Y+1).0**
+- **Major — (X+1).0.0**
+
+**Major asks twice.** If he picks it, ask a second, separate question before writing the
+number anywhere — "Release (X+1).0.0? A major version is a promise about compatibility
+that can't be taken back." — with *Yes, (X+1).0.0* and *No, go back to patch* as its
+choices. Only a second yes makes it major.
+
+Then say the number you arrived at before you write it anywhere, so a wrong assumption
+costs a sentence instead of a tag.
 
 **Don't recommend a bigger bump**, however many features or changed defaults the release
 carries — not even on the strength of the changelog's SemVer note. 0.10.0 went out that way
