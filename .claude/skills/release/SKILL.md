@@ -1,6 +1,6 @@
 ---
 name: release
-description: Cut a MeshTerm release — pick the version, write the changelog entry from the commits since the last tag, bump `__version__`, commit, tag, and push so the GitHub release builds. Use when JP says to release, cut a release, ship a version, tag a version, or bump the version, and when asked what would go into the next release.
+description: Cut a MeshTerm release — pick the version, write the changelog entry from the commits since the last tag, bump `__version__`, commit, tag, push so the GitHub release builds, and hand JP a Discord announcement to post. Use when JP says to release, cut a release, ship a version, tag a version, or bump the version, and when asked what would go into the next release.
 ---
 
 # Cutting a MeshTerm release
@@ -179,18 +179,47 @@ gh release view vX.Y.Z --json body --jq .body | sed -n '/## What changed/,$p' | 
 ```
 
 If that reads "No changelog entry for X.Y.Z.", the extraction failed rather than the
-changelog being empty.
+changelog being empty. Fix the workflow, then repair the published notes in place with
+`gh release edit vX.Y.Z --notes-file` — the binaries are fine and the tag does not move.
 
 Fourteen assets is the right count — five version-stamped binaries, five version-less
 copies of them, `SHA256SUMS`, and the three licence files:
 
 ```
 gh release view vX.Y.Z --json assets --jq '.assets | length'
-``` Fix the workflow, then repair the published notes in place with
-`gh release edit vX.Y.Z --notes-file` — the binaries are fine and the tag does not move.
+```
 
 If a *build* fails, the tag is already public: fix forward with a new patch version rather
 than deleting and re-pushing a tag people may have fetched.
+
+## 7. The Discord announcement — for JP to post
+
+Once the release has landed and checked out, end by showing JP a short announcement for
+the Discord server's `#announcements` channel, in a code block he can copy as-is. **He
+posts it himself** — never post it, never hand it to a bot. Write it for the people on
+the server, in plain words (they use MeshTerm; they don't read the diff):
+
+- one bolded opening line naming the version and what it is, in a few words;
+- two to five short bullets of what changed *for them*, from the changelog entry —
+  the headline items only, not every line;
+- the release link, and one line on how to get it (the download page, or the README's
+  install line for someone who installed that way);
+- Discord markdown only (`**bold**`, `- ` bullets, bare links); no headings, no tables,
+  no emoji beyond one at the start if it fits. Well under Discord's 2000 characters —
+  it should fit on a phone screen.
+
+```
+**MeshTerm 0.10.1 is out**: three small command-line fixes.
+
+- `records --width` now tells you when a width doesn't exist, instead of looking empty
+- The simulator's row in `devices` lost a stray `()`
+- `platform --help` and `specimen --help` read like the rest
+
+Download: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.10.1
+```
+
+Say who it was written for, then show it last in the reply, so it's the easiest thing to
+copy.
 
 ## At 0.9.0 the changelog resets
 
