@@ -9,6 +9,10 @@ one caveat SemVer makes for a leading zero: while the major version is still `0`
 
 ## [Unreleased]
 
+### Changed
+
+- The Support page's Patreon link is shorter, and so is its QR code.
+
 ## [0.10.1] — 2026-09-27
 
 **Three small fixes to the command line.** A mistyped `records --width` now says so instead

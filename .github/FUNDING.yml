@@ -1,6 +1,11 @@
 # Kept in step with meshterm/assets/pages/support.md deliberately. If the app offers a
 # way to chip in and this file doesn't, the two have drifted and one of them is lying.
 buy_me_a_coffee: johnputer
+patreon: MeshTerm
+# PayPal is not one of GitHub's built-in platforms, so it is a custom link, written
+# without a scheme so the sidebar shows it as cleanly as it can. It stays the donate
+# button, not a paypal.me link: a payment through the button is recorded as a donation,
+# which PayPal's purchase protection does not cover, so a donor cannot claim a refund
+# for an item that never arrived.
 custom:
-  - "https://www.patreon.com/cw/MeshTerm"
-  - "https://www.paypal.com/donate/?hosted_button_id=5RATNEJP2K5U6"
+  - "paypal.com/donate/?hosted_button_id=5RATNEJP2K5U6"

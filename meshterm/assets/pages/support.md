@@ -30,10 +30,10 @@ https://www.paypal.com/donate/?hosted_button_id=5RATNEJP2K5U6
 
 ### Become a patron
 
-- *https://www.patreon.com/cw/MeshTerm*
+- *https://patreon.com/MeshTerm*
 
 ```qr
-https://www.patreon.com/cw/MeshTerm
+https://patreon.com/MeshTerm
 ```
 
 ## Other ways to help
