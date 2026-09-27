@@ -9,6 +9,12 @@ one caveat SemVer makes for a leading zero: while the major version is still `0`
 
 ## [Unreleased]
 
+## [0.10.1] — 2026-09-27
+
+**Three small fixes to the command line.** A mistyped `records --width` now says so instead
+of looking like an empty result, the simulator's row in `devices` loses a stray `()`, and
+two help pages read like the rest.
+
 ### Fixed
 
 - **`meshterm records --width` refuses a width that doesn't exist.** Hash widths are 1, 2,
@@ -200,6 +206,7 @@ exact commands.
 MeshTerm is free and open source under the Apache 2.0 licence. The name and the logo are
 not covered by the licence (see `NOTICE`), so a fork is welcome under its own name.
 
-[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.10.1
 [0.10.0]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.10.0
 [0.9.0]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.9.0
