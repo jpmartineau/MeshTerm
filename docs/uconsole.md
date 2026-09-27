@@ -33,7 +33,7 @@ That's [further down](#always-on-the-bridge) — most people want the section ab
 - [Step 2 — Install the radio library](#step-2--install-the-radio-library)
 - [Step 3 — Install MeshTerm](#step-3--install-meshterm)
 - [Step 4 — Connect](#step-4--connect)
-- [Moving over from the bridge](#moving-over-from-the-bridge)
+- [Moving over from the bridge (0.9.0 and earlier)](#moving-over-from-the-bridge-090-and-earlier)
 - [Board wiring](#board-wiring)
 - [Troubleshooting](#troubleshooting)
 - [Always on: the bridge](#always-on-the-bridge)
@@ -215,11 +215,16 @@ The AIO's wiring is the default, so this profile needs nothing beyond `transport
 
 ---
 
-## Moving over from the bridge
+## Moving over from the bridge (0.9.0 and earlier)
 
-Already running the bridge? The first time you connect with `--spi` (or a profile, or the
-picker row), MeshTerm carries the bridge's node over — **copying**, never moving, so the
-bridge still works afterwards if you go back to it:
+> **Only if you set up the bridge with MeshTerm 0.9.0 or earlier.** Before 0.10.0 the bridge
+> was the only way to use the uConsole's radio, so an older setup is almost certainly
+> running one. On a fresh install of 0.10.0 or newer there is nothing to move over — skip
+> ahead to [Board wiring](#board-wiring).
+
+Upgraded from 0.9.0 or earlier with the bridge still installed? The first time you connect
+with `--spi` (or a profile, or the picker row), MeshTerm carries the bridge's node over —
+**copying**, never moving, so the bridge still works afterwards if you go back to it:
 
 - the identity key — from the `meshcore-console` GUI's copy first
   (`~/.local/share/meshcore-uconsole/identity.key`), the way the bridge itself looks for
