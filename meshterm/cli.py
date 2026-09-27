@@ -603,7 +603,10 @@ def _report_no_windows_console(console: Console) -> None:
     console.print("try [accent]meshterm --help[/accent].")
 
 
-@app.command(name="platform")
+@app.command(
+    name="platform",
+    help="Show which platform MeshTerm runs as, and why",
+)
 def platform_command() -> None:
     """Print the resolved platform and every input the resolution looked at.
 
@@ -650,7 +653,10 @@ def platform_command() -> None:
     )
 
 
-@app.command(name="specimen")
+@app.command(
+    name="specimen",
+    help="Print every mark, icon, and colour MeshTerm draws",
+)
 def specimen_command() -> None:
     """Print the visual-language specimen for the active platform.
 

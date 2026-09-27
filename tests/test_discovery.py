@@ -14,7 +14,7 @@ import pytest
 
 from meshterm.core.config import DeviceProfile
 from meshterm.core.device_store import DeviceStore
-from meshterm.core.discovery import DiscoveredDevice, discover_devices
+from meshterm.core.discovery import TRANSPORT_MOCK, DiscoveredDevice, discover_devices
 from meshterm.core.selection import DeviceSelectionError, resolve_device
 
 
@@ -110,6 +110,21 @@ def test_label_does_not_repeat_the_port() -> None:
     assert dev.label == "USB Serial Device (COM11)"
     # A product name without the port still gets one appended.
     assert DiscoveredDevice("COM5", product="Wio SX1262").label == "Wio SX1262 (COM5)"
+
+
+def test_a_device_with_no_port_gets_no_empty_brackets() -> None:
+    """The simulator has nothing to point at, so its label ends at its name, not in "()".
+
+    The serial branch is also where every transport without one of its own lands, and it
+    appended ``({port})`` whether or not there was a port.
+    """
+    sim = DiscoveredDevice(
+        transport=TRANSPORT_MOCK,
+        description="the built-in simulator (nothing transmits)",
+        name="simulator",
+    )
+    assert sim.label == "the built-in simulator (nothing transmits)"
+    assert DiscoveredDevice(product="Wio SX1262").label == "Wio SX1262"
 
 
 def test_stable_id_precedence() -> None:

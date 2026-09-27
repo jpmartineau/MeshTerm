@@ -566,8 +566,19 @@ def test_a_destructive_command_without_yes_is_a_silent_usage_error(run, args) ->
     [
         (("contacts", "--sort", "bogus"), "--sort"),
         (("records", "--category", "long_hual"), "--category"),
+        (("records", "--width", "3"), "--width"),
+        (("records", "--width", "0"), "--width"),
+        (("records", "--width", "-1"), "--width"),
+        (("records", "--json", "--width", "3"), "--width"),
     ],
-    ids=["contacts-sort", "records-category"],
+    ids=[
+        "contacts-sort",
+        "records-category",
+        "records-width-3",
+        "records-width-0",
+        "records-width-negative",
+        "records-width-3-json",
+    ],
 )
 def test_a_value_outside_a_closed_set_is_refused_rather_than_ignored(run, args, flag) -> None:  # noqa: ANN001
     """A typo in a closed-set option used to be answered with a different question.
@@ -752,6 +763,49 @@ def test_a_closing_message_goes_to_stderr_too(run) -> None:  # noqa: ANN001
     assert result.exit_code == exitcodes.NO_RESULT
     assert result.stdout == ""
     assert "records stored" in result.stderr
+
+
+@pytest.mark.parametrize("width", ["1", "2", "4"])
+def test_every_real_hash_width_is_accepted(run, width) -> None:  # noqa: ANN001
+    """Refusing the widths that don't exist must not refuse the three that do."""
+    result = run("records", "--width", width)
+    assert result.exit_code == exitcodes.NO_RESULT, result.stderr
+    assert "records stored" in result.stderr
+
+
+def test_the_simulator_is_listed_without_empty_brackets(run) -> None:  # noqa: ANN001
+    """``--mock devices`` named the simulator ``… (nothing transmits) ()``: a port it lacks."""
+    result = run("devices")
+    assert result.exit_code == exitcodes.OK, result.stderr
+    assert "the built-in simulator (nothing transmits)" in result.stdout
+    assert "()" not in result.stdout
+
+
+#: What a docstring written for the source leaks into ``--help`` when Typer is left to
+#: use it: a Sphinx role, reST's double backticks, or a path into the package.
+_SOURCE_NOTES = re.compile(r":(func|mod|class|meth|attr|data):`|``|meshterm/[\w/]+\.py")
+
+
+@pytest.mark.parametrize("leaf", _leaf_commands(), ids=lambda leaf: "-".join(leaf))
+def test_every_command_help_is_written_for_the_terminal(run, leaf) -> None:  # noqa: ANN001
+    """A help page is for someone at a prompt asking what a command does.
+
+    ``platform`` and ``specimen`` printed their whole docstrings — notes for whoever reads
+    ``cli.py``, Sphinx roles and source paths included — and the same markup cut their
+    one-line summaries short in ``meshterm --help``.
+    """
+    result = run(*leaf, "--help")
+    assert result.exit_code == exitcodes.OK, result.output
+    assert not _SOURCE_NOTES.search(result.output), result.output
+
+
+def test_the_command_list_has_no_source_notes(run) -> None:  # noqa: ANN001
+    """The one-line summaries in ``meshterm --help`` come from the same help text."""
+    result = run("--help")
+    assert not _SOURCE_NOTES.search(result.output), result.output
+    for line in result.output.splitlines():
+        if line.split()[:1] in (["platform"], ["specimen"]):
+            assert not line.rstrip().endswith("..."), f"summary cut short: {line!r}"
 
 
 # -- the simulator's own history ------------------------------------------------------

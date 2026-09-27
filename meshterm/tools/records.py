@@ -26,6 +26,9 @@ from ..services.records import CATEGORIES, CATEGORY_BY_ID, Category
 from ..ui.script import NONE
 from .base import Tool, ToolResult, register
 
+#: The hash widths a record can be set at: MeshCore's path hashes are 1, 2 or 4 bytes.
+WIDTHS = (1, 2, 4)
+
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..persistence.repository import DiscoveredPath
     from ..ui.fields import NodeRef
@@ -183,7 +186,13 @@ class TrophyCaseTool(Tool):
                         f"--category must be one of: {choices} (got {category!r})"
                     )
                 tool_params["category"] = category
-            if width:
+            if width is not None:
+                # The same closed set as --category, for the same reason: `--width 3`
+                # found nothing and exited 5, indistinguishable from an empty database,
+                # and `--width 0` was falsy and so quietly listed every width.
+                if width not in WIDTHS:
+                    choices = ", ".join(map(str, WIDTHS))
+                    raise typer.BadParameter(f"--width must be one of: {choices} (got {width})")
                 tool_params["width"] = width
             run_tool_command(self, tool_params)
 

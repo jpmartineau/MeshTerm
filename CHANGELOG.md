@@ -9,6 +9,18 @@ one caveat SemVer makes for a leading zero: while the major version is still `0`
 
 ## [Unreleased]
 
+### Fixed
+
+- **`meshterm records --width` refuses a width that doesn't exist.** Hash widths are 1, 2,
+  or 4. Any other number used to look like an empty result, so a typo and an empty
+  database gave the same answer, and `--width 0` was ignored and listed every width. Now
+  it's a usage error that names the three choices, like `--category` already was.
+- **The simulator's row in `meshterm --mock devices` no longer ends in an empty `()`.**
+  The brackets hold a serial port, and the simulator doesn't have one.
+- **`meshterm platform --help` and `meshterm specimen --help` read like the others.** They
+  used to print notes meant for someone reading the source code, markup and all, and cut
+  their summaries short in `meshterm --help`. Now each has one plain line.
+
 ## [0.10.0] — 2026-09-25
 
 **Regions, a uConsole with no bridge, and Bluetooth that works on Linux.** MeshTerm now

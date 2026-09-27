@@ -273,6 +273,8 @@ class DiscoveredDevice:
         if self.is_spi:
             return f"{self.name or 'SPI radio'} ({self.port})"
         name = self.product or self.description or self.vendor_label or "Serial device"
+        if not self.port:  # the simulator has nothing to point at, so no "()"
+            return name
         suffix = f"({self.port})"
         if name.endswith(suffix):  # avoid "… (COM11) (COM11)"
             name = name[: -len(suffix)].rstrip()
