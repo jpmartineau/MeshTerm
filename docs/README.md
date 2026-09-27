@@ -32,7 +32,7 @@ USB, Bluetooth, or Wi-Fi needs none of this.
 | --- | --- |
 | [How the code is laid out](architecture.md) | The layering, and where a new feature goes. |
 | [CLAUDE.md](../CLAUDE.md) | The actual style guide — terminology, UX standards, and the reusable building blocks. Written for AI assistants, and the house rules for everyone. |
-| [CONTRIBUTING.md](../CONTRIBUTING.md) | The dev install, the three gates a change has to pass, and what happens to your contribution's licensing. |
+| [CONTRIBUTING.md](../CONTRIBUTING.md) | How to propose a change, the rules on AI use, the dev install, the three checks a change must pass, and what happens to your contribution's licensing. |
 
 ## Historical record
 

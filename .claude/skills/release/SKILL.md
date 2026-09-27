@@ -121,9 +121,15 @@ field, which is the live `{version}` placeholder and must show the new one.
 ## 5. Commit, tag, push
 
 ```
-git commit -am "MeshTerm X.Y.Z"
+git commit -a -m "MeshTerm X.Y.Z" -m "Co-Authored-By: <the model running this skill> <noreply@anthropic.com>"
 git tag -a vX.Y.Z -m "MeshTerm X.Y.Z"
 ```
+
+The trailer is not optional: the changelog entry in this commit is prose you wrote, and
+CONTRIBUTING.md asks every contributor to say when an AI tool wrote part of a change —
+the project's own commits say it first. Name the model actually running, not a
+hardcoded one. Seven release commits (0.3.1 through 0.10.0) went out without it because
+this line used to omit it.
 
 Commit on `main` — never a topic branch. Then **confirm with JP before pushing**, because
 the push is the act that builds and publishes the release:

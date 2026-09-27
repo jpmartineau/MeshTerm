@@ -23,8 +23,8 @@ your mesh's history is worth.
   <a href="https://discord.gg/AZwe5Uvb3S"><img alt="Discord" src="https://img.shields.io/badge/chat-Discord-5865F2"></a>
 </p>
 
-> MeshTerm is a side project, run by one person. Bug reports are very welcome. Small fixes
-> can go straight to a pull request; for anything bigger, please open an issue first.
+> MeshTerm is a side project, run by one person. Bug reports are very welcome. Want to
+> change something? Say hello on [Discord](https://discord.gg/AZwe5Uvb3S) first.
 > [More on how it's run](#how-this-project-is-run).
 
 https://github.com/user-attachments/assets/f91a6695-14d5-4ae0-8fdc-e65492d0955d
@@ -297,11 +297,13 @@ fair bit, and that's on purpose: how well a problem is described really does dec
 I can do anything with it. If I can reproduce it, I'll usually chase it. If I can't, I'm
 mostly guessing.
 
-**Ask before you write a big pull request.** Small fixes can go straight to a pull
-request. For anything bigger, open an issue first and wait for a yes. I'm not being
-precious — MeshTerm has firm house rules about how screens get built (they're in
-[CLAUDE.md](CLAUDE.md)), and I'd hate for you to spend a weekend on something I then ask
-you to rewrite. A quick conversation first saves us both.
+**Ask before you write a pull request.** Join the [Discord](https://discord.gg/AZwe5Uvb3S)
+and say hello in `#contributing`. Tell us what you'd like to change. Then wait for a yes.
+That goes for small fixes too. I'm not being precious. MeshTerm has firm house rules
+about how screens get built (they're in [CLAUDE.md](CLAUDE.md)), and I'd hate for you to
+spend a weekend on something I then ask you to rewrite. A quick conversation first saves
+us both. AI tools are fine, as long as you say you used them.
+[CONTRIBUTING.md](CONTRIBUTING.md) has the details.
 
 **I can't promise timelines.** Some things get fixed the same night. Some sit for a month
 because life happened. If your issue goes quiet, please give it a nudge. That helps me.

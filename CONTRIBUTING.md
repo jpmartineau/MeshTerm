@@ -25,8 +25,66 @@ this repository.
   seen, etc.), UX standards for screens/dialogs/menus, and where the reusable building
   blocks live in code (`ui/menus.py`, `ui/markdown.py`, `ui/widgets.py`, `ui/theme.py`).
   New code should read like it always belonged here.
-- Small fixes can go straight to a pull request. For anything bigger, open an issue
-  first and wait for a yes before writing a lot of code — saves both of us a rewrite.
+- Tell us before you start working on something (see below). For anything bigger than a
+  small fix, expect to talk it through first. That saves everyone a rewrite.
+
+## Who can contribute
+
+If you use MeshTerm, you're welcome here. Maybe something broke for you, or you wished
+it could do one more thing, or a screen looked wrong on your radio. Those are exactly
+the changes we want.
+
+### How MeshTerm was made
+
+Some people in the MeshCore community don't trust code written by AI. After some of
+what has happened lately, that's easy to understand, and it deserves a straight answer.
+
+Jean-Pierre Martineau, who started MeshTerm, sees it differently. AI was a big help on
+this project. Honestly, MeshTerm couldn't have been built without it. But the choices
+were his. He decided what MeshTerm should be, what it should do, and how it should
+look. He uses it every day. It's handmade, with AI's help.
+
+The project wants to stay that way. That's what the rules below are for.
+
+### Come say hello first
+
+Using AI tools to help you work is fine. What matters is that a real person who cares
+about MeshTerm is behind the change.
+
+The MeshTerm community lives on [Discord](https://discord.gg/AZwe5Uvb3S), and everyone
+is welcome to join. But please join before you change things. Before you start writing
+code, say hello in the **#contributing** channel and tell us what you'd like to work on.
+Then wait until we say yes. This goes for small fixes too.
+
+When you open your pull request, include two things:
+
+- **Your Discord username**, the one you use on the MeshTerm server.
+- **A link to the message where we said yes.** In Discord, right-click the message and
+  choose "Copy Message Link."
+
+If you haven't joined the Discord, or nobody said yes to your idea, your pull request
+will be closed without a review.
+
+### No bots
+
+Some accounts use AI to find open issues, write a fix, and open a pull request, all on
+their own. There's no person behind it who read the change or can answer questions
+about it. People call this "AI slop." We close those pull requests without a review,
+even if the code looks fine. The same goes for issues and bug reports written that way.
+
+### Tell us if you used AI
+
+This part is required. If an AI tool wrote any part of your change, say so in two
+places:
+
+- **In each commit it helped with.** Add a line at the end of the commit message naming
+  the tool, like `Co-Authored-By: Claude <noreply@anthropic.com>` or
+  `Assisted-by: GitHub Copilot`.
+- **In your pull request.** Write a sentence about what the tool did and what you
+  checked yourself.
+
+If you used AI and didn't say so, we'll treat your pull request as a bot's. Saying so
+costs you nothing. Either way, you're the author, so be ready to explain your change.
 
 ## Making a change
 
