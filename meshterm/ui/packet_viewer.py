@@ -281,12 +281,21 @@ def class_marks(entry: PacketEntry) -> tuple[str, str]:
     """
     if entry.kind == "packet":
         raw = entry.raw if isinstance(entry.raw, dict) else {}
-        typename = raw.get("payload_typename")
-        if typename:
-            emoji = PAYLOAD_ICONS.get(typename, DEFAULT_ICON)
-            return glyph(emoji), _PAYLOAD_GLOSS.get(typename, typename.lower())
-        return glyph(KIND_ICONS["packet"]), "packet"
+        return payload_marks(raw.get("payload_typename"))
     return kind_icon(entry.kind), entry.kind
+
+
+def payload_marks(typename: str | None) -> tuple[str, str]:
+    """A raw frame's icon and class label from its payload typename alone.
+
+    :func:`class_marks`'s half for a ``packet`` frame, for a surface that holds a tally by
+    typename rather than a packet (the dashboard's traffic rows), so a class reads the same
+    there as it does in the live feed's class lane. ``None`` is the class-less frame.
+    """
+    if typename:
+        emoji = PAYLOAD_ICONS.get(typename, DEFAULT_ICON)
+        return glyph(emoji), _PAYLOAD_GLOSS.get(typename, typename.lower())
+    return glyph(KIND_ICONS["packet"]), "packet"
 
 
 def class_chrome(entry: PacketEntry) -> tuple[str, str]:

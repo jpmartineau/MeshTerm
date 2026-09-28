@@ -177,7 +177,7 @@ def _dashboard(cols: int, rows: int) -> Screen:
         ],
         activity=lambda: (2.0,) * ACTIVITY_BUCKETS,
         activity_flags=lambda: (True,) * ACTIVITY_BUCKETS,
-        kind_counts=lambda: {"advert": 5, "ack": 2, "packet": 3},
+        kind_counts=lambda: {"packet:ADVERT": 5, "packet:ACK": 2, "packet": 3},
     )
 
 

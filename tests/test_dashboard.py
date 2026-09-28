@@ -80,7 +80,7 @@ def test_dashboard_renders_all_three_sections() -> None:
     screen = _screen(
         window=[_obs(), _obs(node="3d63", node_type=2, snr=-2.0)],
         histogram=[3] + [0] * (ACTIVITY_BUCKETS - 1),
-        kinds={"advert": 5, "ack": 1},
+        kinds={"packet:ADVERT": 5, "packet:ACK": 1},
     )
     body = _plain(screen.render_body(100))
     assert "Activity" in body and "Traffic" in body and "RF health" in body
@@ -140,28 +140,41 @@ def test_dashboard_pulse_drops_heard_only_when_it_wont_fit() -> None:
 
 
 def test_dashboard_traffic_breaks_packets_out_by_payload_class() -> None:
-    """The raw ``packet`` bucket meters per payload class, glossed and iconed."""
+    """Each frame class meters on its own row, glossed and iconed as the live feed does."""
     screen = _screen(
         window=[_obs()],
-        kinds={"advert": 4, "packet:GRP_TXT": 3, "packet:TRACE": 2, "packet": 1},
+        kinds={"packet:GRP_TXT": 3, "packet:TRACE": 2, "packet": 1},
     )
     body = _plain(screen.render_body(100))
     assert "chan text" in body and "trace" in body  # glossed, not raw typenames
     assert "GRP_TXT" not in body
-    # The class-less remainder keeps a plain "packet" row alongside the classed ones.
-    assert "packet" in body
-    # Decoded families before the raw classes, class-less packet closing the block.
-    assert body.index("advert") < body.index("chan text") < body.index("trace")
+    # The class-less remainder keeps a plain "packet" row after the classed ones.
+    assert body.index("chan text") < body.index("trace") < body.rindex("packet")
 
 
-def test_dashboard_traffic_disambiguates_raw_advert_and_ack_rows() -> None:
-    """An overheard ADVERT/ACK frame's row reads "raw …" so no two meters match."""
-    screen = _screen(
-        window=[_obs()],
-        kinds={"advert": 4, "packet:ADVERT": 2, "ack": 3, "packet:ACK": 1},
-    )
-    body = _plain(screen.render_body(100))
-    assert "raw advert" in body and "raw ack" in body
+def test_dashboard_traffic_counts_each_frame_once_under_the_feeds_names() -> None:
+    """The device's own reports stay out: an advert is its ADVERT frame, counted once.
+
+    The monitor tallies the advert *event* and the RX-logged frame it arrived in, and a
+    decoded message beside its ``chan text`` frame; counting both lists one packet twice.
+    The frame's row takes the live feed's name — ``advert``, never a "raw" variant.
+    """
+    from meshterm.ui.packet_viewer import payload_marks
+
+    kinds = {
+        "advert": 40,
+        "telemetry": 9,
+        "message": 7,
+        "ack": 30,
+        "packet:ADVERT": 2,
+        "packet:ACK": 1,
+    }
+    lines = _plain(_screen(window=[_obs()], kinds=kinds).render_body(100)).splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.startswith("Traffic"))
+    rows = lines[start + 1 : lines.index("", start)]
+    assert [r.split()[1:3] for r in rows] == [["advert", "2"], ["ack", "1"]]
+    assert not any("raw" in r or "telemetry" in r or "message" in r for r in rows)
+    assert payload_marks("ADVERT")[1] == "advert" and payload_marks(None)[1] == "packet"
 
 
 def test_dashboard_live_observations_land_in_the_window() -> None:
