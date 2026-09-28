@@ -55,8 +55,8 @@ from ..core.regions import Scope
 from ..persistence.repository import OBSERVATION_WINDOW
 from ..services.monitor_service import ACTIVITY_BUCKET_S, ACTIVITY_BUCKETS
 from .braillechart import axis_chart, axis_chrome, axis_label_w, meter, timeline_rows
-from .menus import fit_cells
 from .packet_viewer import KIND_STYLES, payload_marks
+from .scopering import ScopeKey, ring, scope_atom, scope_chip, scope_key, step
 from .theme import snr_style
 from .trace_screen import snr_bar
 from .tui.render import render_lines
@@ -122,55 +122,8 @@ _TRAFFIC_METER_CELLS = 24
 _GRID_LABEL_W = 9
 
 
-#: A scope view: ``("unscoped",)``, ``("region", name)`` or ``("unknown",)``. ``None`` is
-#: the unnarrowed view — every packet heard, direct ones included.
-ScopeKey = tuple[str, ...]
-
 #: The screen's title, before any scope atom.
 _TITLE = "Dashboard — mesh overview"
-
-
-def _scope_key(scope: Scope | None) -> ScopeKey | None:
-    """The view a frame counts in, or ``None`` for one with no scope to state.
-
-    A direct frame has none, and neither does one stored before its route type was kept;
-    both are counted only in the unnarrowed view. Every scoped frame no known region name
-    reproduces shares one ``unknown`` view: its code changes with each packet, so it
-    cannot tell two unnamed regions apart.
-    """
-    if scope is None:
-        return None
-    if not scope.scoped:
-        return ("unscoped",)
-    if scope.region:
-        return ("region", scope.region)
-    return ("unknown",)
-
-
-def _ring_order(key: ScopeKey) -> tuple[int, str]:
-    """Where a view sits in the cycle: unscoped, the regions A–Z, then unknown.
-
-    Alphabetical rather than busiest-first so the ring holds still while the counts move:
-    a cycle whose order shifted under the reader's thumb would skip or repeat a view.
-    """
-    if key[0] == "unscoped":
-        return (0, "")
-    if key[0] == "region":
-        return (1, key[1].casefold())
-    return (2, "")
-
-
-def _scope_atom(key: ScopeKey) -> str:
-    """A view's title atom: ``scope yul``, ``unscoped`` or ``unknown scope``."""
-    if key[0] == "region":
-        return f"scope {key[1]}"
-    return "unscoped" if key[0] == "unscoped" else "unknown scope"
-
-
-def _scope_chip(key: ScopeKey | None) -> str:
-    """The F3 chip naming the view a press goes *to*, within the lane's 6 cells."""
-    word = "all" if key is None else key[-1]
-    return "▸ " + fit_cells(word, 4).rstrip()
 
 
 class _ScopeDigest(NamedTuple):
@@ -230,10 +183,9 @@ class DashboardScreen(Screen):
         from .tui.fkeys import FPair, default_lane
 
         lane = list(default_lane(nav=self.content_overflows))
-        ring = self._ring()
-        if len(ring) > 1:
-            nxt = ring[(ring.index(self._scope) + 1) % len(ring)]
-            lane[2] = FPair(_scope_chip(nxt), "scope")
+        views = self._ring()
+        if len(views) > 1:
+            lane[2] = FPair(scope_chip(step(views, self._scope)), "scope")
         return lane
 
     def __init__(
@@ -339,27 +291,16 @@ class DashboardScreen(Screen):
     # --- scope -----------------------------------------------------------------------
 
     def _ring(self) -> list[ScopeKey | None]:
-        """Every view on offer: all, then each scope heard in the window.
-
-        The view on screen stays in the ring even once its last frame ages out, so the
-        cycle never loses the reader's place; it simply leaves on the next press.
-        """
+        """Every view on offer: all, then each scope heard in the window."""
         self._digest_window()
-        keys = {key for key, _ in self._win_scoped}
-        if self._scope is not None:
-            keys.add(self._scope)
-        return [None, *sorted(keys, key=_ring_order)]
+        return ring((key for key, _ in self._win_scoped), self._scope)
 
     def _cycle_scope(self) -> None:
-        """Step to the next view.
-
-        The cycle wraps: ``s`` is forward-only, with no reverse key of its own, so a ring
-        that stopped at its end would strand the reader there.
-        """
-        ring = self._ring()
-        if len(ring) < 2:
+        """Step to the next view (see :func:`~meshterm.ui.scopering.step`)."""
+        views = self._ring()
+        if len(views) < 2:
             return
-        self._scope = ring[(ring.index(self._scope) + 1) % len(ring)]
+        self._scope = step(views, self._scope)
         self._set_title()
         self.scroll_to_top()
         self._session.invalidate()
@@ -369,7 +310,7 @@ class DashboardScreen(Screen):
         if self._scope is None:
             self.title, self.short_title = _TITLE, ""
             return
-        atom = _scope_atom(self._scope)
+        atom = scope_atom(self._scope)
         self.title = f"{_TITLE} · {atom}"
         self.short_title = f"Dashboard · {atom}"
 
@@ -445,7 +386,7 @@ class DashboardScreen(Screen):
                 repeaters.add(o.node)
             if o.kind == "packet":
                 # The region store memoizes by frame, so a frame is checked once per visit.
-                key = _scope_key(self._scope_of(o.raw)) if self._scope_of else None
+                key = scope_key(self._scope_of(o.raw)) if self._scope_of else None
                 if key is not None:
                     scoped.append((key, o))
                 continue

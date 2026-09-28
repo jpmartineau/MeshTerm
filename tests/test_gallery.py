@@ -812,6 +812,32 @@ def _walk_topo() -> tuple[MeshTopology, dict[str, Contact]]:
     return topo, {hub_id: hub, far_id: far}
 
 
+def _timemachine_scoped(cols: int, rows: int) -> Screen:
+    """The whole-mesh page narrowed to one scope: its title, its F2 chip, its charts.
+
+    The region is named long on purpose, so the title needs its short form on the console.
+    """
+    from datetime import timedelta
+
+    from meshterm.ui.timemachine_screen import _mesh_scope_sections
+
+    now = utcnow()
+    stamps = [now - timedelta(hours=h) for h in (150, 90, 60, 30, 20, 5, 2)]
+
+    def build(window, width, scope):  # noqa: ANN001, ANN202
+        return _mesh_scope_sections(stamps, window, width) if scope else [Text("page")]
+
+    screen = TimeMachineScreen(
+        session=_GallerySession(cols, rows),
+        label="the whole mesh",
+        build=build,
+        scopes=lambda _window: {("unscoped",), ("region", "laurentides-nord")},
+    )
+    screen.handle("scope")
+    screen.handle("scope")
+    return screen
+
+
 def _walk(cols: int, rows: int) -> Screen:
     topo, contacts = _walk_topo()
     return WalkScreen(
@@ -823,7 +849,7 @@ def _walk(cols: int, rows: int) -> Screen:
 
 
 def _timemachine(cols: int, rows: int) -> Screen:
-    def build(window, width):  # noqa: ANN001
+    def build(window, width, scope):  # noqa: ANN001
         return [Text("Hilltop-Repeater  5m ago  advert"), Text("Alice  12m ago  packet")]
 
     return TimeMachineScreen(
@@ -1388,6 +1414,7 @@ _ENTRIES: list[_Entry] = [
     _Entry("livefeed_scopes", _livefeed_scopes),
     _Entry("walk", _walk),
     _Entry("timemachine", _timemachine),
+    _Entry("timemachine-scoped", _timemachine_scoped),
     _Entry("message_paths", _message_paths),
     _Entry("message_paths_scoped", _message_paths_scoped),
     _Entry("message_paths_unknown_scope", _message_paths_unknown_scope),

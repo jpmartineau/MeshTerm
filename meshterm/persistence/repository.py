@@ -1401,6 +1401,44 @@ class Repository:
                 continue  # a malformed stray timestamp simply isn't counted
         return counts
 
+    def flood_frames(self, *, since: datetime | None = None) -> list[tuple[datetime, dict]]:
+        """Every stored flood frame, oldest first, with what its scope is read from.
+
+        The Time Machine's scope views: a scoped frame's region is named by recomputing its
+        transport code under each known region's key, which no SQL can do, so the frames
+        come back as the raw mapping :meth:`~meshterm.core.region_store.RegionStore.scope_of`
+        reads (route, transport code, the bytes the code was computed over) for the caller
+        to resolve. Only floods: a direct frame has no scope, and a frame stored before its
+        route was kept cannot say which it was.
+
+        Args:
+            since: Only frames at or after this time, if given.
+
+        Returns:
+            ``(observed_at, raw)`` per flood frame, oldest first.
+        """
+        sql = (
+            "SELECT observed_at, route, transport_code, scope_body FROM observations "
+            "WHERE kind = 'packet' AND upper(route) IN ('FLOOD', 'TC_FLOOD')"
+        )
+        params: list[Any] = []
+        if since is not None:
+            sql += " AND observed_at >= ?"
+            params.append(since.isoformat())
+        sql += " ORDER BY observed_at"
+        frames: list[tuple[datetime, dict]] = []
+        for row in self._conn.execute(sql, params):
+            when = _as_when(row["observed_at"])
+            if when is None:
+                continue  # a malformed stray simply isn't counted
+            raw = {"route_typename": row["route"]}
+            if row["transport_code"]:
+                raw["transport_code"] = row["transport_code"]
+            if row["scope_body"]:
+                raw["scope_body"] = row["scope_body"]
+            frames.append((when, raw))
+        return frames
+
     def self_transmissions(self, *, since: datetime | None = None) -> list[datetime]:
         """Timestamps of everything this station put on the air, oldest first.
 

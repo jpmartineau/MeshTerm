@@ -15,6 +15,14 @@ the PicoCalc's ring stops at 30 d, its F3 chip cycling the same three spans):
   mesh-wide hour-of-day rhythm, the arrivals of the window (nodes heard for the first
   time ever, in aligned name/hash/first-heard lanes), and the all-time totals.
 
+The whole-mesh page also cycles its **scope** on ``s`` (F2 on the PicoCalc): all, unscoped,
+each region heard in the window A–Z, unknown scope — the dashboard's ring over the recorded
+history. A narrowed page charts that scope's floods per day (or hour) and their rhythm, and
+its own ledger; the node counts and arrivals leave, being read off adverts, which carry no
+scope. Floods stored before MeshTerm kept their route count only under all. The node and
+own-node pages have no scope to narrow: a node's page is its adverts and telemetry, and
+what we send is traces, which go direct.
+
 Charts read chronologically — oldest at the left, now at the right, the app-wide
 timeline direction — and draw through :mod:`~meshterm.ui.braillechart`, so the grey
 baseline always marks zero: the SNR band's readings hang below it or rise above it
@@ -24,6 +32,7 @@ transmits.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from statistics import median
@@ -45,6 +54,7 @@ from .braillechart import (
 )
 from .contactlist import SORT_COLUMNS, SORT_OPENS_ASCENDING, ContactListScreen, ContactRow
 from .menus import command_label, fit_cells, section_heading
+from .scopering import ScopeKey, ring, scope_atom, scope_chip, scope_key, step
 from .theme import name_style, snr_style
 from .tui.render import render_lines
 from .tui.screen import CANCEL, Screen
@@ -214,10 +224,18 @@ def _quarter_axis(frac: float) -> str:
 
 
 class TimeMachineScreen(Screen):
-    """One subject's history page: scrollable sections, ``w`` cycles the window."""
+    """One subject's history page: scrollable sections, ``w`` cycles the window.
+
+    A page whose history carries scope (the whole mesh's) also cycles it on ``s``.
+    """
 
     floating = False
-    footer_hint = "↑↓ PgUp/PgDn scroll · w window · Esc back"
+
+    @property
+    def footer_hint(self) -> str:  # type: ignore[override]
+        """The page's keys; ``s scope`` only where there is a scope to narrow to."""
+        scope = " · s scope" if len(self._ring()) > 1 else ""
+        return f"↑↓ PgUp/PgDn scroll · w window{scope} · Esc back"
 
     @property
     def fkey_lane(self):
@@ -241,6 +259,10 @@ class TimeMachineScreen(Screen):
         lane = list(default_lane(nav=self.content_overflows))
         nxt, _delta = _WINDOWS[(self._window_index + 1) % len(_WINDOWS)]
         lane[2] = FPair(f"▸ {'all' if nxt == 'all time' else nxt}", "window")
+        # The scope cycle beside it, on the same terms: the chip names where a press goes.
+        views = self._ring()
+        if len(views) > 1:
+            lane[1] = FPair(scope_chip(step(views, self._scope)), "scope")
         return lane
 
     def __init__(
@@ -248,28 +270,45 @@ class TimeMachineScreen(Screen):
         *,
         session,  # noqa: ANN001 - TuiSession, imported lazily to avoid a cycle
         label: str,
-        build: Callable[[timedelta | None, int], list[RenderableType]],
+        build: Callable[[timedelta | None, int, ScopeKey | None], list[RenderableType]],
+        scopes: Callable[[timedelta | None], set[ScopeKey]] | None = None,
     ) -> None:
         """Create the page over its section builder.
 
         Args:
             session: The running TUI session (for repaints on window switch).
             label: The subject's display name (titles the screen).
-            build: Renders the sections for ``(window, width)``; called once per
-                window/width combination and cached — the data is stored history,
-                so nothing needs re-querying per repaint.
+            build: Renders the sections for ``(window, width, scope)``; called once per
+                combination and cached — the data is stored history, so nothing needs
+                re-querying per repaint. ``scope`` is ``None`` for every packet.
+            scopes: The scope views a window's history holds, for a page that can narrow
+                to one; ``None`` offers no scope cycle.
         """
         super().__init__()
         self._session = session
         self._label = label
         self._build = build
+        self._scopes = scopes
         self._window_index = 1  # open on 7 d: enough depth to see shape, still fast
-        self._cache: dict[tuple[int, int], list[str]] = {}
+        #: The scope view on screen; ``None`` is every packet.
+        self._scope: ScopeKey | None = None
+        self._cache: dict[tuple[int, int, ScopeKey | None], list[str]] = {}
         self._set_title()
+
+    def _ring(self) -> list[ScopeKey | None]:
+        """The scope views on offer in the current window (just ``[None]`` if none)."""
+        if self._scopes is None:
+            return [None]
+        _name, delta = _WINDOWS[self._window_index]
+        return ring(self._scopes(delta), self._scope)
 
     def _set_title(self) -> None:
         name, _delta = _WINDOWS[self._window_index]
         self.title = f"{self._label} · {name}"
+        self.short_title = ""
+        if self._scope is not None:
+            self.title += f" · {scope_atom(self._scope)}"
+            self.short_title = f"{self._label} · {name} · {scope_atom(self._scope, bare=True)}"
 
     def handle(self, action: str, data: str = "") -> None:
         """Scroll, cycle the window, or dismiss.
@@ -295,16 +334,23 @@ class TimeMachineScreen(Screen):
             self._set_title()
             self.scroll_to_top()
             self._session.invalidate()
+        elif action == "scope" or (action == "text" and data.lower() == "s"):
+            views = self._ring()
+            if len(views) > 1:
+                self._scope = step(views, self._scope)
+                self._set_title()
+                self.scroll_to_top()
+                self._session.invalidate()
         elif action == "escape":
             self.resolve(None)
 
     def render_body(self, width: int) -> list[str]:
         """Render (or reuse) the current window's sections."""
-        key = (self._window_index, width)
+        key = (self._window_index, width, self._scope)
         lines = self._cache.get(key)
         if lines is None:
             _name, delta = _WINDOWS[self._window_index]
-            lines = render_lines(Group(*self._build(delta, width)), width)
+            lines = render_lines(Group(*self._build(delta, width, self._scope)), width)
             self._cache[key] = lines
         self._scroll_total = max(1, len(lines))
         return lines
@@ -1110,6 +1156,133 @@ def _mesh_sections(
     return out
 
 
+class _MeshFloods:
+    """The mesh page's stored floods per window, each with the scope view it counts in.
+
+    Naming a scoped flood's region recomputes its transport code under each known region's
+    key (see :meth:`~meshterm.core.region_store.RegionStore.scope_of`), so a window's
+    floods are read and resolved once and kept for the page's life: the ring asks which
+    views a window holds, and a narrowed page asks for one view's timestamps.
+    """
+
+    def __init__(self, ctx: AppContext) -> None:
+        """Bind to the context's history and region names."""
+        self._ctx = ctx
+        self._by_window: dict[timedelta | None, list[tuple[ScopeKey, datetime]]] = {}
+
+    def _frames(self, window: timedelta | None) -> list[tuple[ScopeKey, datetime]]:
+        if window not in self._by_window:
+            store = getattr(self._ctx, "region_store", None)
+            frames: list[tuple[ScopeKey, datetime]] = []
+            if store is not None:
+                since = utcnow() - window if window is not None else None
+                for when, raw in self._ctx.repo.flood_frames(since=since):
+                    key = scope_key(store.scope_of(raw))
+                    if key is not None:
+                        frames.append((key, when))
+            self._by_window[window] = frames
+        return self._by_window[window]
+
+    def keys(self, window: timedelta | None) -> set[ScopeKey]:
+        """The scope views ``window`` holds any flood in."""
+        return {key for key, _ in self._frames(window)}
+
+    def stamps(self, window: timedelta | None, scope: ScopeKey) -> list[datetime]:
+        """When each of the window's floods in ``scope`` was heard, oldest first."""
+        return [when for key, when in self._frames(window) if key == scope]
+
+
+def _floods(count: int) -> str:
+    """``1 flood``, ``12 floods``."""
+    return f"{count} flood{'' if count == 1 else 's'}"
+
+
+def _mesh_scope_sections(
+    stamps: list[datetime], window: timedelta | None, width: int
+) -> list[RenderableType]:
+    """The whole-mesh page narrowed to one scope: its floods per day, their rhythm, a ledger.
+
+    The unnarrowed page's day (or hour) bars and rhythm, over the scope's floods instead of
+    every observation. Its node counts and arrivals have no narrowed form — a node is known
+    by its adverts, and an advert says nothing about the scope other traffic was sent in —
+    so they leave rather than show the whole mesh's under a scope's title.
+    """
+    now = utcnow()
+    since = now - window if window is not None else None
+    if not stamps:
+        return [
+            Text(),
+            Text("Nothing recorded in this scope in this window.", style="muted"),
+            Text("Press w to widen it, or s for another scope.", style="muted"),
+        ]
+    hourly = since is not None and window is not None and window <= timedelta(days=1)
+    # The same local-time keys the repository's day and hour series group by, so the fill
+    # and tick machinery below reads them exactly as it reads the unnarrowed page's.
+    per = Counter(
+        when.astimezone().strftime("%Y-%m-%dT%H" if hourly else "%Y-%m-%d") for when in stamps
+    )
+    active = [(iso, count, 0) for iso, count in sorted(per.items())]
+    series = _fill_hours(active, since, now) if hourly and since else _fill_days(active, since, now)
+
+    base_w = axis_label_w(max(d[1] for d in series), _CHART_ROWS)
+    slots, slice_minutes, label_w = _fit_rhythm(
+        lambda minutes: _rhythm_slots(stamps, minutes), width, base_w
+    )
+    chars = max(20, width - axis_chrome(label_w))
+    shown = series[-chars * 2 :]
+    floods = [d[1] for d in shown]
+    out: list[RenderableType] = []
+    out.append(
+        body_heading(
+            "Floods per hour" if hourly else "Floods per day",
+            "local hours" if hourly else "local days",
+        )
+    )
+    out.extend(
+        axis_chart(
+            timeline_rows(_day_columns(floods, chars), rows=_CHART_ROWS),
+            max(floods),
+            chars,
+            label_w=label_w,
+            ticks=_hour_ticks(shown, chars) if hourly else _day_ticks(shown, chars),
+        )
+    )
+
+    out.append(Text())
+    out.append(
+        body_heading("Rhythm", f"floods by local time of day · {_slice_note(slice_minutes)}")
+    )
+    out.extend(
+        axis_chart(
+            timeline_rows(slots, rows=_CHART_ROWS),
+            max(slots),
+            len(slots) // 2,
+            _quarter_axis,
+            label_w=label_w,
+        )
+    )
+
+    days = Counter(when.astimezone().strftime("%Y-%m-%d") for when in stamps)
+    busiest = max(days.items(), key=lambda day: day[1])
+    out.append(Text())
+    out.append(body_heading("Ledger", "this window"))
+    out.append(
+        Text.assemble(
+            ("history  ", "muted"),
+            (_floods(len(stamps)), ""),
+            (f" across {len(days)} active day{'' if len(days) == 1 else 's'}", "muted"),
+        )
+    )
+    out.append(
+        Text.assemble(
+            ("busiest  ", "muted"),
+            (busiest[0], "brand"),
+            (f"  {_floods(busiest[1])}", "muted"),
+        )
+    )
+    return out
+
+
 # --- the picker loop ---------------------------------------------------------------------
 
 #: Widest the mesh page's arrivals name lane grows (longer names ellipsize so the lanes
@@ -1336,24 +1509,29 @@ async def open_timemachine(ctx: AppContext) -> None:
                     return
                 if picked == SELF:
                     label = self_name or "you"
-                    build = lambda window, width: _self_sections(  # noqa: E731
+                    build = lambda window, width, _scope: _self_sections(  # noqa: E731
                         ctx, window, width
                     )
+                    scopes = None
                 elif picked == MESH:
                     label = "the whole mesh"
-                    build = (  # noqa: E731
-                        lambda window, width, _pb=prefix_bytes: _mesh_sections(
-                            ctx, window, width, _pb, resolve, resolve_key
-                        )
-                    )
+                    floods = _MeshFloods(ctx)
+
+                    def build(window, width, scope, _pb=prefix_bytes, _floods=floods):  # noqa: ANN001, ANN202
+                        if scope is None:
+                            return _mesh_sections(ctx, window, width, _pb, resolve, resolve_key)
+                        return _mesh_scope_sections(_floods.stamps(window, scope), window, width)
+
+                    scopes = floods.keys
                 else:
                     node_id, label = picked
                     build = (  # noqa: E731 - a tiny binding closure beats a def here
-                        lambda window, width, _id=node_id, _lb=label: _node_sections(
+                        lambda window, width, _scope, _id=node_id, _lb=label: _node_sections(
                             ctx, _id, _lb, window, width
                         )
                     )
-                screen = TimeMachineScreen(session=session, label=label, build=build)
+                    scopes = None
+                screen = TimeMachineScreen(session=session, label=label, build=build, scopes=scopes)
                 await session.run_screen(screen)
                 if {n.node for n in ctx.repo.heard_nodes() if n.node} != subjects:
                     break  # the mesh spoke while the page was open; relist
@@ -1381,7 +1559,9 @@ async def open_timemachine_node(ctx: AppContext, node_id: str, label: str) -> No
         raise RuntimeError("the time machine is only available in the menu")
     session = ctx.ui.session
     build = (  # noqa: E731 - a tiny binding closure reads better than a def here
-        lambda window, width, _id=node_id, _lb=label: _node_sections(ctx, _id, _lb, window, width)
+        lambda window, width, _scope, _id=node_id, _lb=label: _node_sections(
+            ctx, _id, _lb, window, width
+        )
     )
     await session.run_screen(TimeMachineScreen(session=session, label=label, build=build))
 
@@ -1407,5 +1587,5 @@ async def open_timemachine_self(ctx: AppContext) -> None:
     session = ctx.ui.session
     self_name, _ = await _self_identity(ctx)
     label = self_name or "you"
-    build = lambda window, width: _self_sections(ctx, window, width)  # noqa: E731
+    build = lambda window, width, _scope: _self_sections(ctx, window, width)  # noqa: E731
     await session.run_screen(TimeMachineScreen(session=session, label=label, build=build))

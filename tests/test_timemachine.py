@@ -13,6 +13,8 @@ from itertools import pairwise
 from pathlib import Path
 from types import SimpleNamespace
 
+from rich.text import Text
+
 from meshterm.core.models import Observation, utcnow
 from meshterm.persistence.repository import Repository
 from meshterm.ui.braillechart import GAP
@@ -954,7 +956,7 @@ def test_screen_cycles_windows_and_caches(tmp_path: Path) -> None:
     """`w` moves to the next window (retitling) and each window renders once."""
     calls: list = []
 
-    def build(window, width):
+    def build(window, width, scope):
         calls.append(window)
         from rich.text import Text
 
@@ -988,7 +990,9 @@ def test_picocalc_window_ring_stops_at_30_days() -> None:
     from meshterm.platforms import PICOCALC, set_platform
 
     set_platform(PICOCALC)
-    screen = TimeMachineScreen(session=_FakeSession(), label="Hub", build=lambda window, width: [])
+    screen = TimeMachineScreen(
+        session=_FakeSession(), label="Hub", build=lambda window, width, scope: []
+    )
     assert "7 d" in screen.title  # opens on 7 d, as everywhere
     screen.handle("text", "w")
     assert "30 d" in screen.title
@@ -1212,3 +1216,129 @@ def test_picker_hash_lane_shows_a_captured_full_key_without_a_device() -> None:
     screen = _picker([(node, "Rep")], width=100)
     row = next(c for c in screen._choices() if c.value == (stored, "Rep"))
     assert stored + "cd" * 10 in row.label.plain
+
+
+# -- the scope cycle ----------------------------------------------------------------------
+
+
+def _flood_repo(tmp_path: Path) -> Repository:
+    """Stored floods under three scopes, plus a direct frame that has none.
+
+    Two ``yul`` floods, one unscoped, one scoped to a region nobody here knows (``qc``, left
+    out of :func:`_scope_ctx`'s names), and a direct message — each a real frame whose code
+    the repository must carry through storage for its region to be named again.
+    """
+    from tests.test_scope_display import _DIRECT, _FLOOD, _scoped
+
+    repo = Repository(tmp_path / "floods.db")
+    run = repo.start_run("monitor", {}, None)
+    now = utcnow()
+    for hours_ago, raw in (
+        (30, _scoped("yul")),
+        (5, _scoped("yul")),
+        (4, _FLOOD),
+        (3, _scoped("qc")),
+        (2, _DIRECT),
+    ):
+        repo.record_observation(
+            run,
+            Observation(
+                node=None,
+                kind="packet",
+                path="",
+                observed_at=now - timedelta(hours=hours_ago),
+                raw=dict(raw),
+            ),
+        )
+    return repo
+
+
+def _scope_ctx(repo: Repository) -> SimpleNamespace:
+    from tests.test_scope_display import _knows
+
+    return SimpleNamespace(repo=repo, region_store=SimpleNamespace(scope_of=_knows("yul", "mtl")))
+
+
+def test_flood_frames_come_back_with_what_their_scope_is_read_from(tmp_path: Path) -> None:
+    """Floods only, oldest first, each still resolvable to its region after storage."""
+    from tests.test_scope_display import _knows
+
+    repo = _flood_repo(tmp_path)
+    frames = repo.flood_frames()
+    assert [raw["route_typename"] for _when, raw in frames] == [
+        "TC_FLOOD",
+        "TC_FLOOD",
+        "FLOOD",
+        "TC_FLOOD",
+    ]
+    assert _knows("yul")(frames[0][1]).region == "yul"
+    assert len(repo.flood_frames(since=utcnow() - timedelta(hours=24))) == 3
+    repo.close()
+
+
+def test_the_mesh_page_offers_each_scope_its_window_holds(tmp_path: Path) -> None:
+    """The ring is the window's: a 24 h window holds one yul flood, not the 30 h old one."""
+    from meshterm.ui.timemachine_screen import _MeshFloods
+
+    floods = _MeshFloods(_scope_ctx(_flood_repo(tmp_path)))
+    assert floods.keys(timedelta(days=1)) == {("unscoped",), ("region", "yul"), ("unknown",)}
+    assert len(floods.stamps(timedelta(days=7), ("region", "yul"))) == 2
+    assert len(floods.stamps(timedelta(days=1), ("region", "yul"))) == 1
+
+
+def test_s_cycles_the_mesh_pages_scope_and_retitles_it(tmp_path: Path) -> None:
+    """All → unscoped → yul → unknown → all, each view rendered for its own scope."""
+    from meshterm.ui.timemachine_screen import _MeshFloods
+
+    floods = _MeshFloods(_scope_ctx(_flood_repo(tmp_path)))
+    built: list = []
+
+    def build(window, width, scope):  # noqa: ANN001, ANN202
+        built.append(scope)
+        return [Text("page")]
+
+    screen = TimeMachineScreen(
+        session=_FakeSession(), label="the whole mesh", build=build, scopes=floods.keys
+    )
+    assert "s scope" in screen.footer_hint
+    titles = []
+    for _ in range(4):
+        screen.handle("text", "s")
+        screen.render_body(80)
+        titles.append(screen.title.removeprefix("the whole mesh · 7 d"))
+    assert titles == [" · unscoped", " · scope yul", " · unknown scope", ""]
+    assert built == [("unscoped",), ("region", "yul"), ("unknown",), None]
+    screen.handle("scope")  # the F2 chip's action is the same cycle
+    assert screen.short_title == "the whole mesh · 7 d · unscoped"
+
+
+def test_a_page_with_no_scope_offers_no_cycle() -> None:
+    """A node's page is its adverts, which carry no scope: no hint, no chip, no cycle."""
+    screen = TimeMachineScreen(
+        session=_FakeSession(), label="Hub", build=lambda window, width, scope: []
+    )
+    assert "scope" not in screen.footer_hint
+    screen.handle("text", "s")
+    assert screen.title == "Hub · 7 d"
+
+
+def test_a_narrowed_mesh_page_charts_the_scopes_floods_and_drops_the_node_counts(
+    tmp_path: Path,
+) -> None:
+    """Floods per day, their rhythm, and a ledger of the scope's own; no nodes, no arrivals."""
+    from meshterm.ui.timemachine_screen import _mesh_scope_sections, _MeshFloods
+
+    floods = _MeshFloods(_scope_ctx(_flood_repo(tmp_path)))
+    week = timedelta(days=7)
+    text = _plain(_mesh_scope_sections(floods.stamps(week, ("region", "yul")), week, 80), 80)
+    assert "Floods per day" in text and "Rhythm" in text and "2 floods" in text
+    assert "Nodes per day" not in text and "Arrivals" not in text
+    day = _plain(
+        _mesh_scope_sections(
+            floods.stamps(timedelta(days=1), ("unscoped",)), timedelta(days=1), 80
+        ),
+        80,
+    )
+    assert "Floods per hour" in day and "1 flood " in day
+    empty = _plain(_mesh_scope_sections([], week, 80), 80)
+    assert "Nothing recorded in this scope" in empty
