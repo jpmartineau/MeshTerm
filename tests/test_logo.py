@@ -62,11 +62,15 @@ def test_returning_to_dim_restates_the_colour_in_the_dim_bank() -> None:
     assert "\x1b[22;31m" in out, out.replace("\x1b", "ESC")
 
 
-def test_a_reset_takes_the_standing_colour_with_it() -> None:
-    """After `0m` there is no colour in force, so a later `1m` has nothing to restate."""
-    out = _state_intensity("\x1b[0;36mcyan\x1b[0m\x1b[1mplain")
-    tail = out.split("plain")[0].split("\x1b[0m")[-1]
-    assert _brights(tail) == 0, out.replace("\x1b", "ESC")
+def test_bright_after_a_reset_is_white() -> None:
+    """After `0m` the colour in force is the console's default grey, so `1m` means white.
+
+    The splash's letters say white exactly this way (`0m` then `1m`); read as "no colour to
+    restate", the run fell to the terminal's own default and a white row drew grey.
+    """
+    out = _state_intensity("\x1b[0;36mcyan\x1b[0m\x1b[1mwhite")
+    tail = out.split("white")[0].split("\x1b[0m")[-1]
+    assert "\x1b[97m" in tail, out.replace("\x1b", "ESC")
 
 
 def test_a_named_foreground_is_still_rewritten_in_place() -> None:
@@ -88,25 +92,22 @@ def test_no_splash_row_asks_a_terminal_for_bold() -> None:
 
 
 def test_no_bright_run_in_the_art_is_silently_dropped() -> None:
-    """A `1m` with a colour standing must leave a bright-bank foreground behind.
+    """Every `1m` must leave a bright-bank foreground behind.
+
+    A colour is always standing: the one last named, or after a reset the console's default
+    grey — which a bare `1m` lifts to white, the case the splash's lettering is drawn in.
 
     Counting brights across a file cannot catch this -- one `1m` brightens every later
     sequence, so the totals stay comfortably high while individual runs go missing. The
-    invariant is per sequence: walk the source keeping track of whether a colour is in
-    force, and every sequence that turns brightness on while one is must produce a
-    bright-bank emission in the rewritten row.
+    invariant is per sequence: every sequence in the source that turns brightness on must
+    produce a bright-bank emission in the rewritten row.
     """
     for art in sorted(_SPLASH.glob("*.ans")):
         raw = art.read_bytes().decode("cp437", errors="replace")
         for number, line in enumerate(raw.split("\n"), start=1):
-            standing, owed = None, 0
+            owed = 0
             for parts in _params(line):
-                for part in parts:
-                    if part in ("", "0"):
-                        standing = None
-                    elif re.fullmatch(r"3[0-7]", part):
-                        standing = part
-                if "1" in parts and standing is not None:
+                if "1" in parts:
                     owed += 1
             if owed:
                 assert _brights(_state_intensity(line)) >= owed, (

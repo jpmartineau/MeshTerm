@@ -64,6 +64,10 @@ _SGR = re.compile(r"\x1b\[[0-9;]*m")
 #: lands a bank too high — the theme's own styles state their intent for the same reason.
 _DIM_FG = re.compile(r"3[0-7]")
 
+#: The foreground a DOS console stands on after a reset: grey, slot 7 — which bold lifts
+#: to white.
+_DEFAULT_FG = 37
+
 #: Parameters that settle the intensity question themselves, so a span carrying one needs
 #: no help: a reset, bold, faint, or an explicit return to normal.
 _SAYS_INTENSITY = frozenset({"", "0", "1", "2", "22"})
@@ -215,6 +219,12 @@ def _state_intensity(row: str) -> str:
                     kept.append(standing)
                     if "22" not in kept:
                         kept.insert(0, "22")
+            elif says and here:
+                # No colour named since a reset: the one in force is the console's default,
+                # grey (7), and brightening it gives white. ``ESC[0m`` then ``ESC[1m`` is how
+                # the art says "white", and dropping the "1" without restating anything left
+                # those spans in the terminal's own default grey — a white run drawn grey.
+                kept.append(str(_DEFAULT_FG + 60))
             if kept:
                 out.append("\x1b[" + ";".join(kept) + "m")
         else:
