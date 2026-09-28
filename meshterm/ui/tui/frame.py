@@ -220,6 +220,23 @@ _ESC_ATOM = re.compile(r"(?:^|·\s*)(Esc\s+\S+)\s*$")
 _MIN_RULE = 2
 
 
+def fitted_title(screen: Screen, room: int) -> str:
+    """The heading to draw in ``room`` cells: the full title, or its short form where it won't fit.
+
+    A title that states figures (``Contacts · 198 known + 123 archived``) would otherwise be
+    cut by the rule it sits in, and the cut takes the end — the last figure. A screen that
+    declares a :attr:`~meshterm.ui.tui.screen.Screen.short_title` gets that instead, the same
+    atoms said tighter; one with none keeps its title and the frame's usual clipping.
+
+    Args:
+        screen: The screen whose heading is drawn.
+        room: Cells the heading may take, not counting the space either side of it.
+    """
+    if screen.short_title and cell_len(screen.title) > room:
+        return screen.short_title
+    return screen.title
+
+
 def _esc_hint(hint: str) -> str:
     """The ``Esc …`` atom a screen's footer hint ends on, or ``""`` where it has none."""
     found = _ESC_ATOM.search(hint or "")
@@ -264,7 +281,10 @@ def _title_bar(screen: Screen, cols: int, more_above: bool, more_below: bool) ->
     """
     border = "accent"
     head_span = 3  # the arrow pair, plus the space parting it from the rule
-    label_w = cell_len(screen.title) + 2 if screen.title else 0  # a space either side
+    # The short form is chosen against the bar with no Esc tail at all: the title is what
+    # the reader came for, so the tail gives way to it before it gives way to the tail.
+    title = fitted_title(screen, cols - head_span - 2 - 2 * _MIN_RULE)
+    label_w = cell_len(title) + 2 if title else 0  # a space either side
     atom = _esc_hint(screen.footer_hint)
     for esc in (atom, "Esc" if atom else "", ""):
         tail_span = cell_len(esc) + 1 if esc else 0  # the space in front of the tail
@@ -276,12 +296,12 @@ def _title_bar(screen: Screen, cols: int, more_above: bool, more_below: bool) ->
     bar.append("↑", style=border if more_above else "muted")
     bar.append("↓", style=border if more_below else "muted")
     bar.append(" ")
-    if screen.title:
+    if title:
         left = max(1, (rule_span - label_w) // 2)
         right = max(1, rule_span - label_w - left)
         bar.append("─" * left, style=border)
         bar.append(" ", style=None)
-        bar.append(screen.title, style=title_style(border))
+        bar.append(title, style=title_style(border))
         bar.append(" ", style=None)
         bar.append("─" * right, style=border)
     else:
@@ -347,11 +367,13 @@ def compose_base(
         # a keystroke that need not change a single body line, and a memo without it would
         # keep serving the rule the reader has already grown out of.
         caption = base.bottom_caption
-        key = (cols, rows, base.title, caption, footer_hint, more_above, more_below, *visible)
+        # Rich sets the padded title into the rule's inner ``cols - 4`` cells.
+        title = fitted_title(base, cols - 4 - 2)
+        key = (cols, rows, title, caption, footer_hint, more_above, more_below, *visible)
         if footer_lane is None and _BASE_BOX_CACHE is not None and _BASE_BOX_CACHE[0] == key:
             body = _BASE_BOX_CACHE[1]
         else:
-            panel = _panel_box(base.title, visible, more_above, more_below, "accent", caption)
+            panel = _panel_box(title, visible, more_above, more_below, "accent", caption)
             body = render_lines(Group(panel, footer_row()), cols)
             if footer_lane is None:
                 _BASE_BOX_CACHE = (key, body)

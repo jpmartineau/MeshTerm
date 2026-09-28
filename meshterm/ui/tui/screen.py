@@ -60,6 +60,11 @@ class Screen:
 
     Attributes:
         title: Heading shown at the top of the screen/dialog.
+        short_title: The abbreviated heading the frame draws instead of :attr:`title` where
+            the full one would not fit the rule it sits in (see
+            :func:`~meshterm.ui.tui.frame.fitted_title`) — the same atoms said tighter, so a
+            narrow frame still carries every figure rather than a title cut off mid-word.
+            Empty (the default) means the title has no shorter form.
         footer_hint: One-line key hint shown in the footer.
         scroll: Current vertical scroll offset into the body's rendered lines.
         future: Resolved with the screen's result (or :data:`CANCEL`) when it commits.
@@ -104,6 +109,7 @@ class Screen:
     """
 
     title: str = ""
+    short_title: str = ""
     footer_hint: str = "Esc back"
     bottom_caption: str = ""
     floating: bool = True

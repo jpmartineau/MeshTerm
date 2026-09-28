@@ -98,9 +98,10 @@ class ContactsScreen(ContactListScreen):
                 span :data:`~meshterm.ui.contactlist.SORT_COLUMNS` so the hash sort is
                 reachable.
             archived: How many contacts are archived off this device. Non-zero adds the
-                ``View archived contacts`` row and shows the count on it, so the tally is
-                visible without opening the list; zero draws no row, since a screen should
-                not offer a way into an empty list.
+                ``View archived contacts`` row and shows the count on it and in the title
+                (``Contacts · 198 known + 123 archived``), so the tally is visible without
+                opening the list; zero draws no row and leaves the title at ``… known``,
+                since a screen should not offer a way into an empty list.
             locked: The full keys (lowercase hex) of the contacts locked against archiving;
                 each of those rows closes its name lane on a padlock.
         """
@@ -132,13 +133,22 @@ class ContactsScreen(ContactListScreen):
             label = marked_label("📂", "View archived contacts", "", lane=lane)
             label.append(f"  ·  {archived}", style="muted")
             tail.append(Choice(title=label, value=_ARCHIVED))
+        # The title counts both halves of what this device's contacts amount to: those on it
+        # and those a sweep moved off it. Where the frame is too narrow for the words, the
+        # figures stay and the words go (``Contacts · 198 + 123``).
+        known = len(contacts)
+        title = f"Contacts · {known} known"
+        if archived:
+            title += f" + {archived} archived"
         super().__init__(
-            f"Contacts · {len(contacts)} known",
+            title,
             rows=rows,
             prefix_bytes=prefix_bytes,
             sort=sort,
             tail=tail,
         )
+        if archived:
+            self.short_title = f"Contacts · {known} + {archived}"
 
     def _contact_rows_for(self, locked: frozenset[str]) -> list[ContactRow]:
         """Our own node, then every contact, each marked locked or not by ``locked``."""

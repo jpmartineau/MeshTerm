@@ -1074,6 +1074,32 @@ def test_the_archived_row_appears_only_when_something_is_archived() -> None:
     assert _ARCHIVE not in values and values[-1] == _ARCHIVED
 
 
+def test_contacts_title_counts_the_archived_and_abbreviates_where_narrow() -> None:
+    """The title carries both tallies, and drops the words before it would drop a figure.
+
+    Nothing archived keeps the plain ``… known`` title with no short form; with some, the
+    full ``198 known + 123 archived`` draws wherever it fits and ``198 + 123`` where the
+    rule is too narrow — on both frames, the bordered panel and the one-row title bar.
+    """
+    from meshterm.core.models import Contact
+    from meshterm.ui.contacts_screen import ContactsScreen
+    from meshterm.ui.tui.frame import _title_bar, fitted_title
+
+    contacts = [Contact(name=f"n{i}", public_key=f"{i:02x}" * 32) for i in range(198)]
+
+    plain = ContactsScreen("Us", "cc" * 32, contacts, 1, {}, _contacts_sort())
+    assert plain.title == "Contacts · 198 known" and not plain.short_title
+
+    both = ContactsScreen("Us", "cc" * 32, contacts, 1, {}, _contacts_sort(), archived=123)
+    assert both.title == "Contacts · 198 known + 123 archived"
+    assert both.short_title == "Contacts · 198 + 123"
+    assert fitted_title(both, 72) == both.title
+    assert fitted_title(both, 30) == both.short_title
+
+    assert "198 known + 123 archived" in _title_bar(both, 53, False, False).plain
+    assert "Contacts · 198 + 123 " in _title_bar(both, 40, False, False).plain
+
+
 async def test_archiving_one_contact_takes_it_off_the_device_and_keeps_it() -> None:
     """The single-contact archive: an amber confirm, off the radio, stamped in the store.
 
