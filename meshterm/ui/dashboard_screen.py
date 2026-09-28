@@ -21,6 +21,12 @@ stacks three reads of the mesh, coarsest first:
   numbers — noise floor, last RSSI/SNR, airtime, battery — polled from the device the
   way Device info reads them.
 
+**Scope** narrows the whole screen to one region's floods: ``s`` (the PicoCalc's F3 chip)
+cycles every view — all, unscoped, each region heard, unknown scopes — as the Time
+Machine's ``w`` cycles its windows. A narrowed view reads the screen's own trailing
+window (stored + live, 2 h), since a region is named per frame by a cryptographic check
+the database cannot run; the radio's own numbers stay whole, being the device's.
+
 The per-packet stream that used to close this screen is now its own tool — the Live
 feed (see :mod:`meshterm.ui.livefeed_screen`), right under the dashboard in the menu —
 so this screen is pure overview: it scrolls as one body under the arrow/page keys.
@@ -33,9 +39,11 @@ tears them all down when the screen resolves. Esc backs out directly.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections import Counter, deque
+from collections.abc import Callable
 from statistics import median
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from rich.console import Group, RenderableType
 from rich.table import Table
@@ -43,8 +51,11 @@ from rich.text import Text
 
 from ..core.events import MeshEvent
 from ..core.models import NODE_TYPE_REPEATER, Observation, utcnow
+from ..core.regions import Scope
 from ..persistence.repository import OBSERVATION_WINDOW
+from ..services.monitor_service import ACTIVITY_BUCKET_S, ACTIVITY_BUCKETS
 from .braillechart import axis_chart, axis_chrome, axis_label_w, meter, timeline_rows
+from .menus import fit_cells
 from .packet_viewer import KIND_STYLES, payload_marks
 from .theme import snr_style
 from .trace_screen import snr_bar
@@ -111,6 +122,73 @@ _TRAFFIC_METER_CELLS = 24
 _GRID_LABEL_W = 9
 
 
+#: A scope view: ``("unscoped",)``, ``("region", name)`` or ``("unknown",)``. ``None`` is
+#: the unnarrowed view — every packet heard, direct ones included.
+ScopeKey = tuple[str, ...]
+
+#: The screen's title, before any scope atom.
+_TITLE = "Dashboard — mesh overview"
+
+
+def _scope_key(scope: Scope | None) -> ScopeKey | None:
+    """The view a frame counts in, or ``None`` for one with no scope to state.
+
+    A direct frame has none, and neither does one stored before its route type was kept;
+    both are counted only in the unnarrowed view. Every scoped frame no known region name
+    reproduces shares one ``unknown`` view: its code changes with each packet, so it
+    cannot tell two unnamed regions apart.
+    """
+    if scope is None:
+        return None
+    if not scope.scoped:
+        return ("unscoped",)
+    if scope.region:
+        return ("region", scope.region)
+    return ("unknown",)
+
+
+def _ring_order(key: ScopeKey) -> tuple[int, str]:
+    """Where a view sits in the cycle: unscoped, the regions A–Z, then unknown.
+
+    Alphabetical rather than busiest-first so the ring holds still while the counts move:
+    a cycle whose order shifted under the reader's thumb would skip or repeat a view.
+    """
+    if key[0] == "unscoped":
+        return (0, "")
+    if key[0] == "region":
+        return (1, key[1].casefold())
+    return (2, "")
+
+
+def _scope_atom(key: ScopeKey) -> str:
+    """A view's title atom: ``scope yul``, ``unscoped`` or ``unknown scope``."""
+    if key[0] == "region":
+        return f"scope {key[1]}"
+    return "unscoped" if key[0] == "unscoped" else "unknown scope"
+
+
+def _scope_chip(key: ScopeKey | None) -> str:
+    """The F3 chip naming the view a press goes *to*, within the lane's 6 cells."""
+    word = "all" if key is None else key[-1]
+    return "▸ " + fit_cells(word, 4).rstrip()
+
+
+class _ScopeDigest(NamedTuple):
+    """One scope view's numbers over the window, in the shapes the sections draw.
+
+    Attributes:
+        histogram: Frames per minute, newest first, the monitor's bucket shape.
+        counts: Frames by traffic bucket (``packet:<TYPENAME>``).
+        snrs: Every SNR reading among them.
+        rssis: Every RSSI reading among them.
+    """
+
+    histogram: tuple[int, ...]
+    counts: dict[str, int]
+    snrs: list[float]
+    rssis: list[float]
+
+
 def _span_label(minutes: int) -> str:
     """A compact duration — ``45 min`` under two hours, else ``2.5 h`` / ``3 h``."""
     if minutes < 120:
@@ -134,21 +212,29 @@ class DashboardScreen(Screen):
         :attr:`~meshterm.ui.tui.screen.Screen.content_overflows`); otherwise Esc is the only
         key that acts.
         """
-        if self.content_overflows:
-            return "↑↓ PgUp/PgDn scroll · Esc back"
-        return "Esc back"
+        atoms = ["↑↓ PgUp/PgDn scroll"] if self.content_overflows else []
+        if len(self._ring()) > 1:
+            atoms.append("s scope")
+        return " · ".join([*atoms, "Esc back"])
 
     @property
     def fkey_lane(self):
-        """The shared lane, dimmed on the same gate the hint above uses.
+        """The shared lane, dimmed on the same gate the hint above uses, plus the scope cycle.
 
         The PicoCalc draws no hint line at all — the lane *is* the footer — so the rule
         the hint follows has to hold there too: an overview that fits whole has nothing
-        for Top/End or the paging pair to move.
+        for Top/End or the paging pair to move. The scope cycle takes F3, as the Time
+        Machine's window cycle does, its chip naming the view a press goes *to* (the title
+        already says where you are); with no flood heard to narrow to, the slot stays empty.
         """
-        from .tui.fkeys import default_lane
+        from .tui.fkeys import FPair, default_lane
 
-        return default_lane(nav=self.content_overflows)
+        lane = list(default_lane(nav=self.content_overflows))
+        ring = self._ring()
+        if len(ring) > 1:
+            nxt = ring[(ring.index(self._scope) + 1) % len(ring)]
+            lane[2] = FPair(_scope_chip(nxt), "scope")
+        return lane
 
     def __init__(
         self,
@@ -159,6 +245,7 @@ class DashboardScreen(Screen):
         activity: Any,
         activity_flags: Any,
         kind_counts: Any,
+        scope_of: Callable[[dict | None], Scope | None] | None = None,
     ) -> None:
         """Create the dashboard over its data feeds.
 
@@ -170,9 +257,15 @@ class DashboardScreen(Screen):
             activity_flags: Zero-arg callable returning the histogram's per-bucket
                 this-session flags (seeded history draws grey, live traffic green).
             kind_counts: Zero-arg callable returning the monitor's kind tallies.
+            scope_of: Names a frame's scope from its raw payload
+                (:meth:`~meshterm.core.region_store.RegionStore.scope_of`); ``None`` offers
+                no scope views.
         """
         super().__init__()
-        self.title = "Dashboard — mesh overview"
+        self._scope_of = scope_of
+        #: The scope view on screen; ``None`` is every packet heard.
+        self._scope: ScopeKey | None = None
+        self._set_title()
         self._session = session
         self._resolve = resolve
         self._activity = activity
@@ -196,6 +289,10 @@ class DashboardScreen(Screen):
         self._win_counts: Counter = Counter()
         self._win_snrs: list[float] = []
         self._win_rssis: list[float] = []
+        #: The window's frames that have a scope, each with the view it counts in.
+        self._win_scoped: list[tuple[ScopeKey, Observation]] = []
+        #: The narrowed view's numbers and what they were computed for — see :meth:`_scoped`.
+        self._scoped_memo: tuple[tuple, _ScopeDigest] | None = None
         #: The last activity chart and the inputs it was drawn from — see
         #: :meth:`_activity_section`.
         self._chart_memo: tuple[tuple, list[RenderableType]] | None = None
@@ -234,8 +331,73 @@ class DashboardScreen(Screen):
             self.scroll_to_top()
         elif action in ("end", "ctrl_end"):
             self.scroll_to_bottom()
+        elif action == "scope" or (action == "text" and data.lower() == "s"):
+            self._cycle_scope()
         elif action == "escape":
             self.resolve(None)
+
+    # --- scope -----------------------------------------------------------------------
+
+    def _ring(self) -> list[ScopeKey | None]:
+        """Every view on offer: all, then each scope heard in the window.
+
+        The view on screen stays in the ring even once its last frame ages out, so the
+        cycle never loses the reader's place; it simply leaves on the next press.
+        """
+        self._digest_window()
+        keys = {key for key, _ in self._win_scoped}
+        if self._scope is not None:
+            keys.add(self._scope)
+        return [None, *sorted(keys, key=_ring_order)]
+
+    def _cycle_scope(self) -> None:
+        """Step to the next view.
+
+        The cycle wraps: ``s`` is forward-only, with no reverse key of its own, so a ring
+        that stopped at its end would strand the reader there.
+        """
+        ring = self._ring()
+        if len(ring) < 2:
+            return
+        self._scope = ring[(ring.index(self._scope) + 1) % len(ring)]
+        self._set_title()
+        self.scroll_to_top()
+        self._session.invalidate()
+
+    def _set_title(self) -> None:
+        """Title the screen for its view; a narrowed one says which, tightened when narrow."""
+        if self._scope is None:
+            self.title, self.short_title = _TITLE, ""
+            return
+        atom = _scope_atom(self._scope)
+        self.title = f"{_TITLE} · {atom}"
+        self.short_title = f"Dashboard · {atom}"
+
+    def _scoped(self) -> _ScopeDigest:
+        """The narrowed view's numbers, recomputed only when the window, view or minute moves."""
+        minute = int(time.time() // ACTIVITY_BUCKET_S)
+        memo_key = (self._window_rev, self._scope, minute)
+        if self._scoped_memo is not None and self._scoped_memo[0] == memo_key:
+            return self._scoped_memo[1]
+        histogram = [0] * ACTIVITY_BUCKETS
+        counts: Counter = Counter()
+        snrs: list[float] = []
+        rssis: list[float] = []
+        for key, o in self._win_scoped:
+            if key != self._scope:
+                continue
+            age = minute - int(o.observed_at.timestamp() // ACTIVITY_BUCKET_S)
+            if 0 <= age < ACTIVITY_BUCKETS:
+                histogram[age] += 1
+            typename = (o.raw or {}).get("payload_typename")
+            counts[f"packet:{typename}" if typename else "packet"] += 1
+            if o.snr is not None:
+                snrs.append(o.snr)
+            if o.rssi is not None:
+                rssis.append(o.rssi)
+        digest = _ScopeDigest(tuple(histogram), dict(counts), snrs, rssis)
+        self._scoped_memo = (memo_key, digest)
+        return digest
 
     # --- rendering ---------------------------------------------------------------------
 
@@ -277,10 +439,15 @@ class DashboardScreen(Screen):
         counts: Counter = Counter()
         snrs: list[float] = []
         rssis: list[float] = []
+        scoped: list[tuple[ScopeKey, Observation]] = []
         for o in self._window:
             if o.node and o.node_type == NODE_TYPE_REPEATER:
                 repeaters.add(o.node)
             if o.kind == "packet":
+                # The region store memoizes by frame, so a frame is checked once per visit.
+                key = _scope_key(self._scope_of(o.raw)) if self._scope_of else None
+                if key is not None:
+                    scoped.append((key, o))
                 continue
             if o.node:
                 nodes.add(o.node)
@@ -294,6 +461,7 @@ class DashboardScreen(Screen):
         self._win_counts = counts
         self._win_snrs = snrs
         self._win_rssis = rssis
+        self._win_scoped = scoped
 
     # -- activity --
 
@@ -307,7 +475,8 @@ class DashboardScreen(Screen):
         terminal simply shows more history. Time runs oldest→now left to right,
         every MeshTerm timeline's direction.
         """
-        histogram = list(self._activity())  # newest first, one count per minute
+        # Newest first, one count per minute.
+        histogram = list(self._scoped().histogram if self._scope else self._activity())
         # Size the label lane from the whole histogram's peak (not just the visible
         # slice) so the gutters never shift as a burst scrolls out of view.
         label_w = axis_label_w(max(histogram, default=0), _CHART_ROWS)
@@ -317,7 +486,14 @@ class DashboardScreen(Screen):
         peak = max(shown)
 
         heading = Text("Activity", style="accent")
-        heading.append("  ·  every packet heard · one minute per dot column", style="muted")
+        # A narrowed view spends the aside on what it counts, which the reader has to be
+        # told; the minute per column is on the axis beneath either way.
+        what = (
+            "floods in this scope · last 2 h"
+            if self._scope
+            else "every packet heard · one minute per dot column"
+        )
+        heading.append(f"  ·  {what}", style="muted")
         # Buckets seeded from a previous session's stored history draw grey; only
         # what this session heard itself pulses green.
         flags = (tuple(self._activity_flags()) + (True,) * minutes)[:minutes]
@@ -389,6 +565,8 @@ class DashboardScreen(Screen):
             line = Text()
             line.append(f"{recent:.1f} pkt/min", style="brand")
             line.append(f" (15 m) · {overall:.1f} ({span})", style="muted")
+            if self._scope:
+                return line  # who was heard is read off adverts, which carry no scope
             line.append("  ·  ", style="muted")
             line.append(str(len(nodes)))
             suffix = f" node{'s' if len(nodes) != 1 else ''}"
@@ -404,7 +582,7 @@ class DashboardScreen(Screen):
         if len(line.plain) + _GRID_LABEL_W > width:
             line = compose(heard=False)
         rows = [("pulse", line)]
-        busiest = self._busiest()
+        busiest = None if self._scope else self._busiest()
         if busiest is not None:
             name, count = busiest
             value = Text(name, style="brand")
@@ -434,10 +612,16 @@ class DashboardScreen(Screen):
         nothing left to say here.
         """
         heading = Text("Traffic", style="accent")
-        heading.append("  ·  by packet class · stored history + live", style="muted")
-        counts = {k: n for k, n in self._kind_counts().items() if _is_frame_bucket(k)}
+        if self._scope:
+            heading.append("  ·  by packet class · floods in the last 2 h", style="muted")
+            counts = self._scoped().counts
+            empty = "nothing heard in this scope in the last 2 h"
+        else:
+            heading.append("  ·  by packet class · stored history + live", style="muted")
+            counts = {k: n for k, n in self._kind_counts().items() if _is_frame_bucket(k)}
+            empty = "nothing heard yet"
         if not counts:
-            return [heading, Text("nothing heard yet", style="muted")]
+            return [heading, Text(empty, style="muted")]
         order = {k: i for i, k in enumerate(_TRAFFIC_ORDER)}
         peak = max(counts.values())
         chrome = {bucket: _traffic_chrome(bucket) for bucket in counts}
@@ -469,8 +653,11 @@ class DashboardScreen(Screen):
         heading.append("  ·  reception over 2 h · radio live", style="muted")
         rows: list[tuple[str, Text]] = []
 
-        snrs = self._win_snrs  # the one-pass window digest (see _digest_window)
-        rssis = self._win_rssis
+        # The one-pass window digest (see _digest_window), or the narrowed view's frames.
+        if self._scope:
+            snrs, rssis = self._scoped().snrs, self._scoped().rssis
+        else:
+            snrs, rssis = self._win_snrs, self._win_rssis
         if snrs:
             med = median(snrs)
             line = Text(f"{med:+.1f} dB median  ", style=snr_style(med))
@@ -559,6 +746,7 @@ async def open_dashboard(ctx: AppContext) -> None:
         activity=ctx.monitor.activity_histogram,
         activity_flags=ctx.monitor.activity_session_flags,
         kind_counts=ctx.monitor.kind_counts,
+        scope_of=ctx.region_store.scope_of if ctx.region_store is not None else None,
     )
 
     unsubscribe = ctx.events.subscribe(screen.on_event)

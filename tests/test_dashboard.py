@@ -418,3 +418,98 @@ def test_the_chart_is_redrawn_when_the_terminal_width_changes() -> None:
     narrow = screen._chart_memo
     screen.render_body(100)
     assert screen._chart_memo is not narrow
+
+
+def _flood(region: str | None, typename: str = "GRP_TXT", snr: float = 4.0) -> Observation:
+    """A packet frame whose raw payload names its scope the way ``_fake_scope_of`` reads it.
+
+    ``region`` is a region name, ``""`` for an unscoped flood, ``"?"`` for a scope no known
+    name reproduces, and ``None`` for a direct frame, which has no scope at all.
+    """
+    raw = {"payload_typename": typename, "fake_scope": region}
+    return _obs(node=None, kind="packet", snr=snr, raw=raw)
+
+
+def _fake_scope_of(raw):  # noqa: ANN001, ANN202 - the RegionStore.scope_of shape
+    from meshterm.core.regions import UNSCOPED, Scope
+
+    region = (raw or {}).get("fake_scope")
+    if region is None:
+        return None
+    if region == "":
+        return UNSCOPED
+    if region == "?":
+        return Scope("unknown", None, "3fa1")
+    return Scope("scoped", region, "beef")
+
+
+def _scoped_screen(window) -> DashboardScreen:
+    screen = DashboardScreen(
+        session=_FakeSession(),
+        resolve=lambda h: "",
+        window=list(window),
+        activity=lambda: (0,) * ACTIVITY_BUCKETS,
+        activity_flags=lambda: (True,) * ACTIVITY_BUCKETS,
+        kind_counts=lambda: {"packet:GRP_TXT": 50, "packet:ACK": 9},
+        scope_of=_fake_scope_of,
+    )
+    screen.note_viewport(48)
+    return screen
+
+
+def test_the_scope_cycle_steps_through_every_scope_heard_and_back_to_all() -> None:
+    """``s`` cycles all → unscoped → regions A–Z → unknown → all, retitling each view.
+
+    Direct frames add no view: they have no scope, so they are counted only under all.
+    """
+    screen = _scoped_screen(
+        [_flood("yul"), _flood(""), _flood("?"), _flood("mtl"), _flood(None, "TEXT_MSG")]
+    )
+    assert screen.title == "Dashboard — mesh overview" and "s scope" in screen.footer_hint
+    seen = []
+    for _ in range(5):
+        screen.handle("text", "s")
+        seen.append(screen.title.removeprefix("Dashboard — mesh overview"))
+    assert seen == [
+        " · unscoped",
+        " · scope mtl",
+        " · scope yul",
+        " · unknown scope",
+        "",
+    ]
+    screen.handle("scope")  # the F3 chip's action is the same cycle
+    assert screen.short_title == "Dashboard · unscoped"
+
+
+def test_a_scope_view_narrows_traffic_and_reception_to_its_floods() -> None:
+    """Traffic and RF read the view's frames; the all view keeps the stored tallies."""
+    screen = _scoped_screen(
+        [
+            _flood("yul", "GRP_TXT", snr=8.0),
+            _flood("yul", "TRACE", snr=8.0),
+            _flood("mtl", "GRP_TXT", snr=-9.0),
+            _flood(None, "ACK", snr=-9.0),
+        ]
+    )
+    screen.handle("text", "s")  # mtl (no unscoped floods in this window)
+    screen.handle("text", "s")  # yul
+    assert screen.title.endswith("scope yul")
+    body = _plain(screen.render_body(100))
+    assert "floods in the last 2 h" in body
+    traffic = body[body.index("Traffic") : body.index("RF health")]
+    assert "chan text" in traffic and "trace" in traffic and " ack " not in traffic
+    assert "+8.0 dB median" in body  # mtl's -9 and the direct ACK's stay out
+    assert "nodes" not in body and "busiest" not in body  # adverts carry no scope
+
+    screen.handle("text", "s")  # back to all
+    body = _plain(screen.render_body(100))
+    assert "stored history + live" in body and "50" in body
+
+
+def test_no_scope_view_is_offered_without_a_flood_to_narrow_to() -> None:
+    """A window of direct frames only offers nothing to cycle: no hint atom, no chip."""
+    screen = _scoped_screen([_flood(None, "TEXT_MSG")])
+    assert "scope" not in screen.footer_hint
+    assert screen.fkey_lane[2] is None or not getattr(screen.fkey_lane[2], "label", "")
+    screen.handle("text", "s")
+    assert screen.title == "Dashboard — mesh overview"

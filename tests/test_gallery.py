@@ -181,6 +181,34 @@ def _dashboard(cols: int, rows: int) -> Screen:
     )
 
 
+def _dashboard_scoped(cols: int, rows: int) -> Screen:
+    """The dashboard narrowed to one region: its title, its F3 chip, its scoped sections.
+
+    The region is named long on purpose, so the title needs its short form on the console.
+    """
+    from meshterm.core.regions import Scope
+
+    def scope_of(raw):  # noqa: ANN001, ANN202 - the RegionStore.scope_of shape
+        return Scope("scoped", "laurentides-nord", "beef") if raw else None
+
+    frame = {"payload_typename": "GRP_TXT", "route_typename": "TC_FLOOD"}
+    screen = DashboardScreen(
+        session=_GallerySession(cols, rows),
+        resolve=lambda h: "",
+        window=[
+            Observation(
+                node=None, kind="packet", snr=3.5, rssi=-98.0, observed_at=utcnow(), raw=dict(frame)
+            )
+        ],
+        activity=lambda: (2.0,) * ACTIVITY_BUCKETS,
+        activity_flags=lambda: (True,) * ACTIVITY_BUCKETS,
+        kind_counts=lambda: {"packet:GRP_TXT": 5},
+        scope_of=scope_of,
+    )
+    screen.handle("scope")
+    return screen
+
+
 def _contacts(cols: int, rows: int) -> Screen:
     sort = ContactsSort.from_name("name", SORT_COLUMNS, SORT_OPENS_ASCENDING)
     contacts = [
@@ -1338,6 +1366,7 @@ def _share_qr(cols: int, rows: int) -> Screen:
 
 _ENTRIES: list[_Entry] = [
     _Entry("dashboard", _dashboard),
+    _Entry("dashboard-scoped", _dashboard_scoped),
     _Entry("contacts", _contacts),
     _Entry("archive_ladder", _archive_ladder),
     _Entry("archive_preview", _archive_preview),
