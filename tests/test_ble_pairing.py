@@ -50,7 +50,13 @@ class _FakeTransport:
         self.pin = pin
         self.link_open = False
         self.disconnect_calls = 0
+        #: What the peripheral answers a write with: ``None`` accepts it, an exception refuses.
+        self.write_answer: BaseException | None = None
         _FakeTransport.last = self
+
+    async def _write_locked(self, data) -> None:
+        if self.write_answer is not None:
+            raise self.write_answer
 
     async def disconnect(self) -> None:
         self.disconnect_calls += 1
@@ -75,8 +81,10 @@ class _FakeMeshCore:
 
     ``outcomes`` drives each successive ``connect()``: an exception instance is raised (with
     the link already up, as the real GATT failure leaves it), ``"none"`` returns ``None``
-    (transport up, no identity reply), ``"slow"`` hangs for a caller to cancel, and anything
-    else is returned as a successful handshake.
+    (transport up, no identity reply), ``"slow"`` hangs for a caller to cancel, a
+    ``("refused", exc)`` pair has the handshake's write refused with ``exc`` — swallowed, as
+    meshcore's ``send`` does, leaving the handshake empty — and anything else is returned as
+    a successful handshake.
     """
 
     #: Every instance built during a test, in order (a retry builds a second one).
@@ -100,6 +108,13 @@ class _FakeMeshCore:
             # The GATT subscribe fails here — after the link is up and *before* the manager
             # records it. Nothing downstream will close it unless someone reaches the cx.
             raise outcome
+        if isinstance(outcome, tuple) and outcome[0] == "refused":
+            self.cx.write_answer = outcome[1]
+            try:  # meshcore's send: log the failure, return False, and carry on
+                await self.cx._write_locked(b"")
+            except Exception:
+                pass
+            return None
         if outcome == "slow":
             await asyncio.sleep(30)  # a handshake the caller's wait_for will cancel
         self.connection_manager._is_connected = True
@@ -204,8 +219,7 @@ def test_a_good_connect_hands_the_client_over_still_open() -> None:
 def test_the_connection_is_built_from_this_device_s_own_endpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Address, discovered ``BLEDevice`` and PIN all reach the connection we construct."""
-    # Pinned off macOS, where the PIN is deliberately withheld (see the test below).
+    """Address and discovered ``BLEDevice`` reach the connection we construct; the PIN doesn't."""
     monkeypatch.setattr(sys, "platform", "win32")
     _FakeMeshCore.reset("ok")
     sentinel = object()
@@ -220,7 +234,7 @@ def test_the_connection_is_built_from_this_device_s_own_endpoint(
     asyncio.run(dev._connect_owned_ble(_FakeMeshCore))
 
     cx = _FakeTransport.last
-    assert (cx.address, cx.device, cx.pin) == (_ADDR, sentinel, "000000")
+    assert (cx.address, cx.device, cx.pin) == (_ADDR, sentinel, None)
     client = _FakeMeshCore.built[0]
     # auto_reconnect stays off: MeshTerm drives reconnection itself.
     assert (client.default_timeout, client.auto_reconnect) == (7.5, False)
@@ -259,6 +273,72 @@ def test_the_pin_is_withheld_from_bleak_on_linux(monkeypatch: pytest.MonkeyPatch
 
     assert _FakeTransport.last.pin is None
     assert dev._pin == "000000"
+
+
+def test_the_pin_is_withheld_from_bleak_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """bleak's WinRT ``pair()`` is Just Works only, so a PIN handed to it bonds *without* one.
+
+    After our own PIN pairing failed on a mistyped PIN, that fallback left Windows holding an
+    unauthenticated bond, and the next attempt — right PIN — reused it and was refused.
+    """
+    monkeypatch.setattr(sys, "platform", "win32")
+    _FakeMeshCore.reset("ok")
+    dev = MeshCoreDevice(transport="ble", address=_ADDR, pin="000000")
+
+    asyncio.run(dev._connect_owned_ble(_FakeMeshCore))
+
+    assert _FakeTransport.last.pin is None
+    assert dev._pin == "000000"
+
+
+def test_a_refused_handshake_write_is_a_pairing_problem() -> None:
+    """A firmware that guards only the write (MeshOS, wadamesh on a T-Deck) is still paired.
+
+    The subscribe succeeds there, and the refusal lands on the handshake's first write, which
+    meshcore's ``send`` swallows. The empty handshake must surface as that refusal — not as
+    "not a companion" — so the pairing, the stale-bond repair and the macOS wait all run.
+    """
+    refusal = _AuthError("GATT Protocol Error: Insufficient Encryption")
+    _FakeMeshCore.reset(("refused", refusal))
+    dev = _device()
+
+    with pytest.raises(_AuthError) as caught:
+        asyncio.run(dev._connect_owned_ble(_FakeMeshCore))
+
+    assert caught.value is refusal
+    assert _FakeMeshCore.built[0].cx.link_open is False  # released before it was raised
+
+
+def test_a_write_failing_for_another_reason_still_reads_as_no_answer() -> None:
+    """Only a refusal for want of a bond is promoted; a dropped write stays "no answer"."""
+    _FakeMeshCore.reset(("refused", OSError("device unreachable")))
+    dev = _device()
+
+    assert asyncio.run(dev._connect_owned_ble(_FakeMeshCore)) is None
+
+
+def test_a_refused_write_heals_through_the_pin_repair(monkeypatch: pytest.MonkeyPatch) -> None:
+    """End to end on Windows: refused write → unpair and pair with the PIN → connected.
+
+    The T-Deck case exactly: a Just Works bond is trusted on the fast path, the handshake's
+    write is refused over it, and the repair that stock firmware reaches from the subscribe
+    must be reached from the write too.
+    """
+    monkeypatch.setattr(sys, "platform", "win32")
+    forced: list[bool] = []
+
+    async def _pair(self, *, force: bool) -> bool:
+        forced.append(force)
+        return True
+
+    monkeypatch.setattr(MeshCoreDevice, "_pair_ble", _pair)
+    _FakeMeshCore.reset(("refused", _AuthError("Insufficient Authentication")), "ok")
+    dev = _device(pin="000000")
+
+    client = asyncio.run(dev._create_ble(_FakeMeshCore))
+
+    assert client is _FakeMeshCore.built[1]
+    assert forced == [False, True]  # the fast path, then the repair
 
 
 def test_a_cancelled_handshake_still_closes_the_link() -> None:

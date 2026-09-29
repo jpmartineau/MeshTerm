@@ -799,6 +799,55 @@ def _hold_disconnects_while_connecting(connection) -> _ConnectingClients:  # noq
     return seen
 
 
+class _WriteRefusals(list):
+    """Every exception a ``BLEConnection`` write raised, oldest first."""
+
+    def refusal(self) -> BaseException | None:
+        """The first write the peripheral refused for want of a bond, else ``None``."""
+        return next((exc for exc in self if _is_ble_auth_error(exc)), None)
+
+
+def _record_write_refusals(connection) -> _WriteRefusals:  # noqa: ANN001
+    """Keep what a refused write said, which meshcore's ``send`` logs and then forgets.
+
+    Stock companion firmware guards *both* halves of its UART service with ENC+MITM, so an
+    unbonded host is refused at the notify subscribe — raised out of ``connect()``, where
+    :meth:`MeshCoreDevice._open_ble` turns it into a pairing. The standalone T-Deck firmwares
+    (MeshOS, wadamesh) guard only the **write** characteristic: the subscribe succeeds, and
+    the refusal ("Insufficient Encryption" unbonded, "Insufficient Authentication" over a
+    Just Works bond) arrives on the identity handshake's first write. ``BLEConnection.send``
+    catches that, logs "BLE write failed", and returns ``False``; the handshake then comes
+    back empty and the device read as "not a MeshCore companion" — with no PIN pairing, no
+    stale-bond repair, and no macOS Passkey wait, because nothing downstream ever saw an
+    authentication error. Verified against a T-Deck on MeshOS 1.3.0.
+
+    So the write is wrapped to record the exception on its way through (it still propagates
+    to ``send``, which behaves as before), and :meth:`MeshCoreDevice._connect_owned_ble`
+    raises the recorded refusal when the handshake came back empty. Both firmwares then take
+    the same pairing path.
+
+    Args:
+        connection: The ``meshcore.BLEConnection`` about to connect.
+
+    Returns:
+        The record of write failures, empty until one happens.
+    """
+    seen = _WriteRefusals()
+    write = getattr(connection, "_write_locked", None)
+    if write is None:  # a meshcore without the hook: the handshake reads as before
+        return seen
+
+    async def _write_locked(data) -> None:  # noqa: ANN001 - bytes-like, as meshcore sends
+        try:
+            await write(data)
+        except Exception as exc:
+            seen.append(exc)
+            raise
+
+    connection._write_locked = _write_locked
+    return seen
+
+
 def _held_client(connection, seen: _ConnectingClients):  # noqa: ANN001, ANN202
     """The bleak client to keep for teardown: the connection's, else the last one it lost."""
     client = getattr(connection, "client", None)
@@ -1939,7 +1988,7 @@ class MeshCoreDevice(Device):
         """
         from meshcore import BLEConnection
 
-        # Withhold the PIN on macOS. Handed one, ``BLEConnection.connect`` calls bleak's
+        # bleak never gets the PIN, on any platform. On macOS: handed one, ``BLEConnection.connect`` calls bleak's
         # ``client.pair()``, and CoreBluetooth has no pairing API at all — the macOS
         # backend raises ``NotImplementedError`` outright — whereupon the library
         # disconnects and re-raises, so supplying a *correct* PIN is what breaks the
@@ -1949,15 +1998,21 @@ class MeshCoreDevice(Device):
         # the unbonded subscribe below is answered with "Insufficient Authentication",
         # and macOS reacts by running Passkey Entry and prompting for the code itself.
         # Saying nothing here is therefore what *lets* a PIN-protected companion bond;
-        # the OS keeps the bond, and later connections need no PIN. Windows and Linux do
-        # expose explicit pairing, and keep it (see :meth:`_pair_ble_windows`).
+        # the OS keeps the bond, and later connections need no PIN (a firmware that guards
+        # only the write gets there too, via :func:`_record_write_refusals`).
         # Linux is the same story from the other side: bleak's BlueZ ``pair()`` ignores the
         # PIN and pairs through whatever system agent there is (a desktop dialog, or nothing
         # at all), so MeshTerm pairs there itself beforehand (see :meth:`_pair_ble_bluez`).
         # Handing bleak the PIN would only start a second pairing we can't answer.
-        pin = None if sys.platform == "darwin" or sys.platform.startswith("linux") else self._pin
-        connection = BLEConnection(address=self._address, device=self._ble_device, pin=pin)
+        # And Windows: bleak's WinRT ``pair()`` is hardcoded to CONFIRM_ONLY
+        # ("Just Works") and never sends a PIN, so after a PIN pairing of our own that failed
+        # (a mistyped PIN), handing bleak the PIN made it bond *without* one — and Windows
+        # kept that unauthenticated bond. The next attempt, with the right PIN, then reused
+        # it and was refused, until the bond was removed by hand. Pairing is ours to run on
+        # every platform that has an API for it (see :meth:`_pair_ble`).
+        connection = BLEConnection(address=self._address, device=self._ble_device, pin=None)
         seen = _hold_disconnects_while_connecting(connection)
+        refused = _record_write_refusals(connection)
         mc = mesh_core(
             connection,
             default_timeout=self._connect_timeout,
@@ -1979,6 +2034,11 @@ class MeshCoreDevice(Device):
         if started is None:
             await MeshCoreDevice._discard_meshcore(mc)
             await self._release_ble_client()
+            # An empty handshake whose write was refused for want of a bond is a pairing
+            # problem, not a stranger on the air (see :func:`_record_write_refusals`).
+            refusal = refused.refusal()
+            if refusal is not None:
+                raise refusal
             return None
         return mc
 
