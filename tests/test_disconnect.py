@@ -1066,6 +1066,44 @@ async def test_wait_for_disconnect_fires_on_an_announced_reboot(
         ctx.repo.close()
 
 
+async def test_reboot_does_not_wait_for_an_acknowledgement_that_never_comes() -> None:
+    """A reboot write the board never acknowledges returns at once, not at link loss.
+
+    Over Bluetooth the write is a write-with-response, and a board that restarts on the
+    command can drop the link before acknowledging it; waiting that out held the reboot
+    dialog back by the supervision timeout.
+    """
+    ended = asyncio.Event()
+
+    async def never_acknowledged() -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            ended.set()
+
+    device = connection.MeshCoreDevice(port="mock")
+    device._mc = SimpleNamespace(commands=SimpleNamespace(reboot=never_acknowledged))
+    await asyncio.wait_for(device.reboot(), timeout=1.0)
+    assert len(connection._REBOOT_WRITES) == 1  # still pending, and still referenced
+    for write in list(connection._REBOOT_WRITES):
+        write.cancel()  # the teardown that follows a reboot
+    await asyncio.wait_for(ended.wait(), timeout=1.0)
+    await asyncio.sleep(0)
+    assert not connection._REBOOT_WRITES
+
+
+async def test_reboot_still_raises_a_write_that_fails_outright() -> None:
+    """Returning early is for a write left hanging; one that fails at once still raises."""
+
+    async def refused() -> None:
+        raise RuntimeError("not connected")
+
+    device = connection.MeshCoreDevice(port="mock")
+    device._mc = SimpleNamespace(commands=SimpleNamespace(reboot=refused))
+    with pytest.raises(RuntimeError):
+        await device.reboot()
+
+
 class _FakeBleDevice:
     """A minimal stand-in for a connected BLE :class:`Device` in liveness tests.
 

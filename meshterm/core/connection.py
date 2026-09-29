@@ -135,6 +135,24 @@ _LOGIN_STRAY_LOG_CAP = 4
 #: finishes as a *clean* exit rather than an ``os._exit`` reap.
 _DISCONNECT_TIMEOUT_S = 2.0
 
+#: How long :meth:`MeshcoreDevice.reboot` waits on the reboot write before treating it as
+#: gone out (seconds). Over Bluetooth every command is a write-with-response, and a board
+#: that restarts on the command may never send the link-layer acknowledgement — the write
+#: then hangs until the link supervision timeout drops it, a second or more in which the
+#: app looks like it ignored the keypress. A write that fails does so well inside this.
+_REBOOT_WRITE_GRACE_S = 0.25
+
+#: Reboot writes still awaiting an acknowledgement that will likely never come, held so the
+#: loop keeps a reference until the teardown that follows the reboot ends them.
+_REBOOT_WRITES: set[asyncio.Future] = set()
+
+
+def _forget_reboot_write(write: asyncio.Future) -> None:
+    """Drop a finished reboot write, retrieving its outcome so none is logged as unhandled."""
+    _REBOOT_WRITES.discard(write)
+    if not write.cancelled() and write.exception() is not None:
+        _log.debug("reboot write ended after the device went away: %s", write.exception())
+
 #: Bound on the forced transport close that follows an abandoned graceful teardown (seconds).
 #: ``_DISCONNECT_TIMEOUT_S + _FORCE_DISCONNECT_TIMEOUT_S`` stays under the exit watchdog.
 _FORCE_DISCONNECT_TIMEOUT_S = 1.5
@@ -3844,8 +3862,22 @@ class MeshCoreDevice(Device):
         async with self.transmitting():
             self._ok(await self._require().commands.send_advert(flood))
 
-    async def reboot(self) -> None:  # noqa: D102 - inherited docstring
-        await self._require().commands.reboot()  # device reboots; no OK reply expected
+    async def reboot(self) -> None:
+        """Reboot the device, returning once the command is out rather than acknowledged.
+
+        The device sends no reply to a reboot, and over Bluetooth it may not even acknowledge
+        the write before restarting (see :data:`_REBOOT_WRITE_GRACE_S`), so waiting for the
+        write to complete only delays the reconnect flow by the link supervision timeout. A
+        write that fails fast still raises; one still pending after the grace is left to
+        finish or die with the link, which the caller is about to tear down anyway.
+        """
+        write = asyncio.ensure_future(self._require().commands.reboot())
+        done, _ = await asyncio.wait({write}, timeout=_REBOOT_WRITE_GRACE_S)
+        if done:
+            write.result()  # raise a write that failed outright
+            return
+        _REBOOT_WRITES.add(write)
+        write.add_done_callback(_forget_reboot_write)
 
     async def export_private_key(self) -> str:  # noqa: D102 - inherited docstring
         event = self._ok(await self._require().commands.export_private_key())
