@@ -2327,6 +2327,7 @@ def test_right_ctrl_rescue_covers_the_sessions_own_chords(monkeypatch) -> None:
     class FakeApp:
         def __init__(self) -> None:
             self.exited = False
+            self.is_running = True
 
         def exit(self) -> None:
             self.exited = True

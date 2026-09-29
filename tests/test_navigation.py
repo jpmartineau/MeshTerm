@@ -866,6 +866,110 @@ async def test_quit_from_a_nested_screen_still_runs_the_apps_teardown() -> None:
     assert torn_down == ["services closed"]
 
 
+def _asking_session(inp, asked: list[str], answer: str | None = None):
+    """A session whose quit chord floats a Cancel/Quit confirm, the way the menu declares it.
+
+    ``answer`` resolves the dialog as soon as it is pushed (``None`` leaves it up for the
+    test to drive); ``asked`` records each time the question is put.
+    """
+    session = _session(inp)
+
+    async def ask() -> bool:
+        asked.append("asked")
+        dialog = ButtonDialog("Quit?", [("Cancel", "cancel"), ("Quit", "quit")], default=1)
+        if answer is not None:
+            asyncio.get_running_loop().call_soon(dialog.resolve, answer)
+        return await session.run_dialog(dialog) == "quit"
+
+    session.set_quit_confirm(ask)
+    return session
+
+
+async def test_quit_asks_first_and_cancelling_leaves_the_flow_where_it_was() -> None:
+    """One ^Q floats the confirm over whatever is up; Cancel puts the reader back.
+
+    The screen under it is never resolved or popped — a capture behind the box keeps
+    capturing — which is the whole difference from the old straight-out chord (issue #22).
+    """
+    with create_pipe_input() as inp:
+        asked: list[str] = []
+        session = _asking_session(inp, asked, answer="cancel")
+        screen = ScrollScreen("a capture in progress")
+
+        async def main() -> None:
+            session.push(screen)
+            session._dispatch("quit")
+            for _ in range(5):
+                await asyncio.sleep(0)
+            assert asked == ["asked"]
+            assert session.top is screen, "Cancel lands back on the screen it floated over"
+            assert not session._quit_asking
+            session.pop(screen)
+
+        await asyncio.wait_for(session.run(main()), timeout=5)
+    assert screen.future is None or not screen.future.done()
+
+
+async def test_a_second_quit_while_the_confirm_is_up_leaves_at_once() -> None:
+    """^Q ^Q is the fast way out, and it never waits on the dialog to take a key."""
+    with create_pipe_input() as inp:
+        asked: list[str] = []
+        session = _asking_session(inp, asked)
+        torn_down: list[str] = []
+
+        async def main() -> None:
+            try:
+                await session.run_screen(ScrollScreen("deep"))
+            finally:
+                torn_down.append("services closed")
+
+        # Both presses in one batch: the flag is raised synchronously, so the second is
+        # the leaving rather than a second dialog.
+        inp.send_text(QUIT_KEY + QUIT_KEY)
+        await asyncio.wait_for(session.run(main()), timeout=5)
+    assert torn_down == ["services closed"]
+    assert len(asked) <= 1
+
+
+async def test_quit_confirmed_from_anywhere_exits_the_app() -> None:
+    """Choosing Quit in the floated confirm exits, and the flow's teardown still runs."""
+    with create_pipe_input() as inp:
+        asked: list[str] = []
+        session = _asking_session(inp, asked, answer="quit")
+        torn_down: list[str] = []
+
+        async def main() -> None:
+            try:
+                await session.run_screen(ScrollScreen("deep"))
+            finally:
+                torn_down.append("services closed")
+
+        inp.send_text(QUIT_KEY)
+        await asyncio.wait_for(session.run(main()), timeout=5)
+    assert asked == ["asked"]
+    assert torn_down == ["services closed"]
+
+
+def test_esc_at_the_main_menu_does_nothing_but_peel_a_filter() -> None:
+    """Esc-mashing up to the menu settles there instead of opening the quit confirm."""
+    from meshterm.ui.menu import _MainMenu
+
+    menu = _MainMenu(
+        "menu",
+        [Choice("alpha", 1), Choice("beta", 2)],
+        footer_hint="↑↓ move · type to filter · Enter select · ^Q quit",
+    )
+    menu.future = asyncio.new_event_loop().create_future()
+    menu.handle("escape")
+    assert not menu.future.done(), "a bare Esc at the menu resolves nothing"
+    assert not menu.footer_hint.endswith("Esc clear")
+    menu.handle("text", "b")
+    assert menu.footer_hint.endswith("^Q quit · Esc clear")
+    menu.handle("escape")
+    assert menu._filter == "" and not menu.future.done()
+    assert menu.footer_hint.endswith("^Q quit")
+
+
 # --- the bindings themselves -------------------------------------------------
 
 
@@ -885,10 +989,12 @@ def test_both_global_chords_are_bound_on_both_ctrl_keys() -> None:
 
 
 def test_neither_global_chord_is_advertised_anywhere() -> None:
-    """Both are deliberately undiscoverable in the UI — the About page states them instead.
+    """Both are deliberately undiscoverable in the UI, bar the menu's own way out.
 
     A global verb has no screen to belong to, so a footer atom or an F-key chip would have to
-    ride on *every* screen; the lane only has three free slots per screen to begin with.
+    ride on *every* screen; the lane only has three free slots per screen to begin with. The
+    one exception is the main menu's hint, which names ^Q because Esc is inert there and the
+    menu is where a reader looks for the way out (issue #22) — exactly one string, there.
     """
     import ast
     import re
@@ -919,6 +1025,9 @@ def test_neither_global_chord_is_advertised_anywhere() -> None:
                 and chord.search(node.value)
             ):
                 offenders.append(f"{path.name}:{node.lineno}: {node.value.strip()[:70]}")
+    menu_hint = [o for o in offenders if o.startswith("menu.py:") and o.endswith("· ^Q quit")]
+    assert len(menu_hint) == 1, "the main menu's hint must name the quit chord, once"
+    offenders.remove(menu_hint[0])
     assert not offenders, "the global chords must not appear in any hint or chip:\n" + "\n".join(
         offenders
     )

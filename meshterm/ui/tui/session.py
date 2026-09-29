@@ -68,10 +68,12 @@ from .spinner import spinner_interval
 #: walk, because what it names on both is our own node.
 #:
 #: Two of these are app-wide rather than a screen's: ``to_menu`` (^W) unwinds the whole
-#: navigation stack back to the main menu, and ``quit`` (^Q, alongside the older ^C) leaves
-#: the app from anywhere. Neither is advertised in a footer hint or an F-key chip — the lane
-#: has three free slots per screen and a global verb would claim one on every screen forever,
-#: so both are stated once on the About page's key list instead (JP, 2026-08-30). ^W was
+#: navigation stack back to the main menu, and ``quit`` (^Q, alongside the older ^C) asks
+#: to leave the app from anywhere — a second press while it asks is the leaving (see
+#: :meth:`TuiSession.request_quit`). Neither is advertised in a footer hint or an F-key
+#: chip — the lane has three free slots per screen and a global verb would claim one on
+#: every screen forever (JP, 2026-08-30) — save ``^Q quit`` on the main menu's own hint,
+#: where Esc is inert and the reader looks for the way out (issue #22). ^W was
 #: picked for the close-this-whole-thing reflex; both were verified deliverable on the
 #: Canadian Multilingual layout (^W ``U+0017``, ^Q ``U+0011``) and neither is eaten by the
 #: terminal — prompt_toolkit's raw mode clears ``IXON``/``IXOFF``, so ^Q is not XON here.
@@ -515,6 +517,11 @@ class TuiSession:
         # the top rather than pointlessly rebuilding it — and what a popup floats over when
         # nothing else is pushed (see :meth:`_floated`). ``None`` until the menu declares it.
         self._root: Screen | None = None
+        # The quit confirm ^Q raises from anywhere (see :meth:`request_quit`), declared by
+        # the app with :meth:`set_quit_confirm`; and whether it is up right now, which is
+        # what turns the next ^Q into the leaving itself.
+        self._quit_confirm: Callable[[], Awaitable[bool]] | None = None
+        self._quit_asking = False
 
     # --- stack ---------------------------------------------------------------
 
@@ -595,6 +602,74 @@ class TuiSession:
     def root(self) -> Screen | None:
         """The declared navigation root (the main menu), or ``None`` before it is declared."""
         return self._root
+
+    def set_quit_confirm(self, ask: Callable[[], Awaitable[bool]] | None) -> None:
+        """Declare the question the quit chord asks before it leaves.
+
+        The app declares it once, because only the app knows what the question offers —
+        the main menu's confirm adds *Unpair & quit* over a Bluetooth bond, which needs the
+        application context the session never holds. ``ask`` floats its dialog and returns
+        whether to leave; it owns any side effect of the answer (recording an unpair).
+
+        Args:
+            ask: The confirm, or ``None`` to have the quit chord leave without asking.
+        """
+        self._quit_confirm = ask
+
+    async def confirm_quit(self) -> bool:
+        """Ask the declared quit confirm, as the main menu's Quit row does.
+
+        The same question ^Q asks, and the same dialog: while it is up the chord's next
+        press leaves outright (see :meth:`request_quit`), whichever door opened it.
+
+        Returns:
+            Whether the reader chose to leave — ``True`` with no confirm declared.
+        """
+        self._quit_asking = True
+        return await self._asking_quit()
+
+    async def _asking_quit(self) -> bool:
+        """Run the declared confirm with :attr:`_quit_asking` already raised, then lower it."""
+        try:
+            return self._quit_confirm is None or bool(await self._quit_confirm())
+        finally:
+            self._quit_asking = False
+
+    def request_quit(self) -> None:
+        """Answer the quit chord (^Q, and ^C beside it): ask first, leave on the second press.
+
+        ^Q sits one key from ^W, the chord that climbs back to the menu, so a slip on the way
+        to the menu used to close the app — and a running capture or a courier queue with
+        it. It now floats the quit confirm over whatever is up, from anywhere (issue #22,
+        option D). The confirm is a detached flow (:meth:`run_detached`): nothing under it
+        is interrupted, a capture keeps capturing behind the box, and Esc puts the reader
+        back exactly where they were.
+
+        While the confirm is up, the chord leaves at once, so the fastest way out is still
+        two keys and still works when a screen is wedged or a device read hangs — the
+        second press never waits on the dialog to paint or take a key. The flag is raised
+        here, synchronously, so two presses arriving in one input batch are still a quit
+        rather than two dialogs.
+
+        Leaving is clean either way: :meth:`run` cancels the coroutine driving the app and
+        waits for its unwind, so the history and chat runs close, the services stop, and the
+        exit watchdog is armed, the same as quitting from the menu.
+        """
+        if self._quit_asking or self._quit_confirm is None:
+            self._exit_app()
+            return
+        self._quit_asking = True
+
+        async def ask() -> None:
+            if await self._asking_quit():
+                self._exit_app()
+
+        self.run_detached(ask())
+
+    def _exit_app(self) -> None:
+        """Exit the running application, from under whatever flow is driving it."""
+        if self._app is not None and self._app.is_running:
+            self._app.exit()
 
     def request_pop_all(self) -> bool:
         """Arm the unwind to the navigation root (the ^W key). Returns whether it fired.
@@ -1603,7 +1678,8 @@ class TuiSession:
         # touches the screen. Errors from ``main`` still propagate via ``driver``/``box``.
         await self._app.run_async(pre_run=pre_run, set_exception_handler=False)
         # The app can also exit from *under* the driver: the quit chords (^Q/^C) call
-        # ``Application.exit`` straight from the key handler, so ``run_async`` returns while
+        # ``Application.exit`` from their detached confirm, or straight from the key handler
+        # on the second press (see request_quit), so ``run_async`` returns while
         # ``main`` is still parked on whatever screen was up. Left alone, that coroutine is
         # simply abandoned mid-await and its ``finally`` never runs — which is where the
         # history and chat runs are closed, the background services stopped, and the exit
@@ -2030,20 +2106,10 @@ class TuiSession:
             self.invalidate()
             return
         if action == "quit":
-            # Straight out (^Q/^C), with no confirmation — deliberately, and not an
-            # oversight to be tidied up later. The quit dialog exists to catch *one Esc too
-            # many* at the main menu, where a single reflexive keystroke on the way out of
-            # something would otherwise end the session (JP, 2026-08-30). Neither of these
-            # chords can be pressed by accident, so there is nothing for a confirm to catch
-            # — and both are the escape hatch: a screen that is wedged, or a device read
-            # that is hanging, is exactly when a confirm dialog (itself a screen, which has
-            # to paint and take a key) would be the thing in the way. Leaving is still
-            # clean: ``run`` cancels the coroutine driving the app and waits for its unwind,
-            # so the history and chat runs close, the services stop, and the exit watchdog
-            # is armed, the same as quitting from the menu. What this route does *not* offer
-            # is the dialog's "Unpair & quit" — that stays a deliberate, menu-only choice.
-            if self._app is not None:
-                self._app.exit()
+            # Asks first, from anywhere; a second press while it asks leaves (see
+            # request_quit). "Unpair & quit" rides the confirm the menu declared.
+            self.request_quit()
+            self.invalidate()
             return
         if action == "paste_clipboard":
             # Some terminals deliver Ctrl-V as the literal control key — no bracketed-paste

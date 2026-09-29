@@ -148,11 +148,18 @@ deliberately, one at a time, and say why in the code.
   for as long as it is true. Chat is the same shape with a different peelable thing — its
   first Esc unpicks a selected message. It used to be a 2–2 split, which put opposite
   outcomes behind the same keystroke on the same affordance.
-- **^W** unwinds every frame back to the main menu, **^Q** quits from anywhere. Both are
-  answered in `TuiSession._dispatch` and neither is ever advertised — a global verb has no
-  screen to belong to, and the F-key lane has only three free slots per screen. They are
-  stated once, on the About page. `test_navigation` walks every string literal in the
-  package to keep them out of the UI. ^W arms **every frame on the stack**, not just the
+- **^W** unwinds every frame back to the main menu, **^Q** asks to quit from anywhere: it
+  floats the same confirm the menu's Quit row opens, detached over whatever is up so
+  nothing under it stops, and a second ^Q while it asks leaves at once
+  (`TuiSession.request_quit`; ^Q sits one key from ^W). Both are answered in
+  `TuiSession._dispatch`, and neither is advertised — a global verb has no screen to
+  belong to, and the F-key lane has only three free slots per screen — except `^Q quit`
+  on the main menu's own hint, where Esc is inert and the reader looks for the way out.
+  `test_navigation` walks every string literal in the package to keep them out of the rest
+  of the UI.
+- **Esc at the main menu does nothing** but peel a typed filter: the menu is the bottom of
+  the stack, so Esc-mashing up to it settles there. Leaving is the Quit row or ^Q, both
+  behind the confirm. ^W arms **every frame on the stack**, not just the
   top (`request_pop_all`), stopping at anything modal: a screen opened from a key handler
   — the packet viewer, the chat's delivery paths, a trace path flow — runs in a task no
   navigation frame awaits, so an unwind sent only to the top died there while the hub
@@ -265,7 +272,8 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
 - ≤72 cells. Sentence shape: navigation keys, then action keys, **Esc last**.
 - Esc verb by surface: `Esc back` leaves a screen · `Esc close` dismisses a read-only
   floating view · `Esc cancel` abandons a prompt/dialog · `Esc keep` leaves a value
-  picker unchanged · `Esc quit` only at the main menu · `Esc bye` only on the device
+  picker unchanged · no Esc atom at the main menu, which ends on `^Q quit` instead ·
+  `Esc bye` only on the device
   splash, which is the door rather than a screen — nothing has been started there to
   quit out of. While a find-as-you-type filter is standing the verb becomes `Esc clear`,
   because that is what the press does then.

@@ -39,7 +39,6 @@ from .menus import (
 from .surface import TuiUi
 from .theme import make_console
 from .tui import (
-    CANCEL,
     Choice,
     PopToMenu,
     ReconnectDialog,
@@ -398,6 +397,8 @@ async def run_menu(ctx: AppContext) -> None:
     header_cache: dict = {}
     session = TuiSession(header=lambda cols: _header(ctx, header_cache, cols))
     ctx.ui = TuiUi(session)
+    # The one quit confirm, asked by the menu's Quit row and by the quit chord from anywhere.
+    session.set_quit_confirm(lambda: _confirm_quit(ctx, session))
 
     async def main() -> None:
         try:
@@ -482,9 +483,79 @@ async def _unpair_on_exit(ctx: AppContext) -> None:
 #: can show, the same as any tool's.
 _QUIT_ICON = "🚪"
 
-#: The value the Quit row resolves with — Esc's ``CANCEL`` and this both open the quit
-#: confirm (see :func:`_menu_round`).
+#: The value the Quit row resolves with, which opens the quit confirm (see
+#: :func:`_menu_round`). Esc at the menu does not: it is inert there (see :class:`_MainMenu`).
 _QUIT_VALUE = "__quit__"
+
+
+async def _confirm_quit(ctx: AppContext, session: TuiSession) -> bool:
+    """Float the quit confirm over whatever is up; return whether to leave.
+
+    One dialog for both doors — the menu's Quit row and the quit chord, which asks from
+    anywhere (see :meth:`~meshterm.ui.tui.session.TuiSession.request_quit`). Cancel (Esc)
+    sits left of Quit (Enter), and Quit starts highlighted so Enter commits it.
+
+    It offers to drop the OS pairing on the way out, but only when there is a live Bluetooth
+    bond to drop — never on serial, an open (PIN-less) companion, or a platform we can't
+    unpair. That button sits between Cancel and Quit and is never the default, so it takes a
+    deliberate choice, not a stray Enter. The unpair itself is deferred to teardown (see
+    :func:`run_menu`), because the link has to be disconnected first; the remembered-device
+    record is intentionally kept, so the device just asks for its PIN again.
+
+    Args:
+        ctx: The shared application context (``unpair_on_exit`` is set on *Unpair & quit*).
+        session: The running TUI session.
+
+    Returns:
+        ``True`` if the reader chose Quit or Unpair & quit.
+    """
+    buttons = [("Cancel", "cancel")]
+    if await _can_unpair(ctx):
+        buttons.append(("Unpair & quit", "unpair"))
+    buttons.append(("Quit", "quit"))
+    choice = await session.button_dialog(
+        "Are you sure you want to quit?",
+        buttons,
+        title="Quit MeshTerm",
+        default=len(buttons) - 1,  # highlight Quit
+        # The hint stays the dialog default: Enter commits *the highlighted button*,
+        # which is Quit only until ←→ moves it — and with a third button in the row,
+        # naming the key that moves it is the point.
+        prompt_style="warn",
+        button_style="selected",
+        button_idle_style="muted",
+        border_style="warn",
+    )
+    if choice == "unpair":
+        ctx.unpair_on_exit = True
+    return choice in ("unpair", "quit")
+
+
+class _MainMenu(SelectScreen):
+    """The main menu's list, on which Esc peels a typed filter and otherwise does nothing.
+
+    Pressing Esc over and over is the natural climb back to the menu, and when Esc at the
+    top opened the quit confirm, the presses that landed after the climb opened it too — the
+    reader asked for the menu and got a question about leaving (issue #22). The menu is the
+    bottom of the stack, so there is nothing for Esc to go back to; leaving is a choice made
+    on the Quit row, or with the quit chord, both of which ask first.
+
+    The footer therefore ends on the quit chord rather than on Esc, until a filter is
+    standing and ``Esc clear`` joins it last, because that is what the press does then —
+    the same atom every filtering list shows.
+    """
+
+    def handle(self, action: str, data: str = "") -> None:
+        """Answer every key as a select list does, except a bare Esc, which is inert."""
+        if action == "escape" and not self._filter:
+            return
+        super().handle(action, data)
+
+    @property
+    def footer_hint(self) -> str:
+        """The list's own hint, gaining ``Esc clear`` only while a filter is standing."""
+        base = super().footer_hint
+        return f"{base} · Esc clear" if self._filter else base
 
 
 def _menu_lane(tools: Sequence[Any]) -> int:
@@ -614,18 +685,20 @@ async def _menu_loop(ctx: AppContext, session: TuiSession) -> None:
     # Drive the menu list ourselves (rather than via session.select) so it stays on the
     # stack while the quit dialog floats over it: the confirm is drawn as a centered box
     # on top of the still-visible menu, not as a screen that replaces it.
-    menu = SelectScreen(
+    menu = _MainMenu(
         "What would you like to do?",
         items,
-        footer_hint="↑↓ move · type to filter · Enter select · Esc quit",
+        # The one place the quit chord is named: the menu is where a reader looks for the
+        # way out, and with Esc inert here the footer would otherwise name none. Everywhere
+        # else it stays unadvertised, like ^W (see session._CTRL_LETTER_CHORDS).
+        footer_hint="↑↓ move · type to filter · Enter select · ^Q quit",
     )
     session.set_root(menu)
     loop = asyncio.get_running_loop()
     while True:
         try:
             await _menu_round(ctx, session, menu, tools, loop)
-        except _Quit as chosen:
-            ctx.unpair_on_exit = chosen.unpair
+        except _Quit:
             return
         except PopToMenu:
             # ^W from somewhere deep. Every frame between there and here has already
@@ -635,17 +708,13 @@ async def _menu_loop(ctx: AppContext, session: TuiSession) -> None:
 
 
 class _Quit(Exception):
-    """The user confirmed the quit dialog; ``unpair`` says whether to drop the OS bond too.
+    """The user confirmed the quit dialog from the menu's Quit row.
 
     A menu round runs a whole tool inside itself, so "the user chose Quit" cannot be spelled
     as a ``return`` — the loop would just show the menu again. It is raised instead, and
-    caught in the one frame that owns the decision to leave.
+    caught in the one frame that owns the decision to leave. Whether to drop the OS bond too
+    is already recorded on the context by the confirm (see :func:`_confirm_quit`).
     """
-
-    def __init__(self, *, unpair: bool) -> None:
-        """Record whether the OS pairing should be dropped on the way out."""
-        super().__init__("quit")
-        self.unpair = unpair
 
 
 async def _menu_round(
@@ -677,41 +746,11 @@ async def _menu_round(
     ran_over_menu = False
     try:
         selection = await menu.future
-        if selection is CANCEL:  # Esc at the top level
-            selection = None
-        # Both picking "quit" and pressing Esc ask to leave; confirm on a dialog floating
-        # over the (still-pushed) menu so a stray key doesn't drop the user out. Cancel
-        # (Esc) sits left of Quit (Enter); Quit starts highlighted so Enter commits it.
-        if selection in (None, _QUIT_VALUE):
-            # Offer to drop the OS pairing on the way out, but only when there is a live
-            # Bluetooth bond to drop — never on serial, an open (PIN-less) companion, or a
-            # platform we can't unpair. The extra button sits between Cancel and Quit and is
-            # never the default, so it takes a deliberate choice, not a stray Enter.
-            unpairable = await _can_unpair(ctx)
-            buttons = [("Cancel", "cancel")]
-            if unpairable:
-                buttons.append(("Unpair & quit", "unpair"))
-            buttons.append(("Quit", "quit"))
-            choice = await session.button_dialog(
-                "Are you sure you want to quit?",
-                buttons,
-                title="Quit MeshTerm",
-                default=len(buttons) - 1,  # highlight Quit
-                # The hint stays the dialog default: Enter commits *the highlighted
-                # button*, which is Quit only until ←→ moves it — and with a third
-                # button in the row, naming the key that moves it is the point.
-                prompt_style="warn",
-                button_style="selected",
-                button_idle_style="muted",
-                border_style="warn",
-            )
-            # "Unpair & quit" forgets the OS bond as we leave; the disconnect must happen
-            # first, so the actual unpair is deferred to teardown (see run_menu). The
-            # remembered-device record is intentionally kept — the device just asks for its
-            # PIN again. Cancel (button or Esc → None) ends the round and redraws the menu,
-            # whose cursor never moved off the row they came from.
-            if choice in ("unpair", "quit"):
-                raise _Quit(unpair=choice == "unpair")
+        # The Quit row asks first, on a dialog floating over the (still-pushed) menu; Cancel
+        # ends the round and redraws the menu, whose cursor never moved off the row.
+        if selection == _QUIT_VALUE:
+            if await session.confirm_quit():
+                raise _Quit()
             return
         # A popup tool runs while the menu is still pushed, so its prompts and
         # result float over it as modal dialogs instead of replacing the screen.

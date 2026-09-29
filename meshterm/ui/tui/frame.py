@@ -212,7 +212,7 @@ _BASE_BOX_CACHE: tuple[tuple, list[str]] | None = None
 #: The screen's own way out, lifted off the end of its footer hint. The grammar is
 #: mandated — "navigation keys, then action keys, **Esc last**" — so the last atom is the
 #: Esc clause wherever a screen has one, and its verb is the true one for that surface
-#: (``back`` on a screen, ``quit`` at the main menu, ``keep`` in a value picker).
+#: (``back`` on a screen, ``keep`` in a value picker; the main menu names none).
 _ESC_ATOM = re.compile(r"(?:^|·\s*)(Esc\s+\S+)\s*$")
 
 #: Rule cells the title keeps on each side before the bar gives the Esc hint back. Below
@@ -274,10 +274,11 @@ def _title_bar(screen: Screen, cols: int, more_above: bool, more_below: bool) ->
     its five slots do — so nothing on the screen said that Esc leaves, which is the one key
     every screen answers to and the reason no screen spends a row on a *Back* item. The
     verb is the screen's own (:func:`_esc_hint` lifts the atom off its footer hint, so a
-    value picker says ``keep`` and the main menu says ``quit``); a screen whose hint names
-    no Esc gets nothing. Compact by construction: where a long title would be crowded, the
-    atom drops to a bare ``Esc`` and then out altogether — the title is what the reader
-    came for, and the arrows are two cells nothing else can spend.
+    value picker says ``keep``); a screen whose hint names no Esc gets nothing — the
+    main menu, where Esc is inert until a filter is typed. Compact by construction: where
+    a long title would be crowded, the atom drops to a bare ``Esc`` and then out
+    altogether — the title is what the reader came for, and the arrows are two cells
+    nothing else can spend.
     """
     border = "accent"
     head_span = 3  # the arrow pair, plus the space parting it from the rule
