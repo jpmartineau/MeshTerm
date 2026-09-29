@@ -131,10 +131,26 @@ def test_the_clip_arrows_are_always_drawn_and_say_it_in_colour() -> None:
 
 def test_the_bar_speaks_the_screen_s_own_esc_verb() -> None:
     """Lifted off the screen's own footer hint, so each surface keeps its true verb."""
-    assert _bar("MeshTerm", "↑↓ move · Enter open · Esc quit").endswith("Esc quit")
+    assert _bar("Contacts", "↑↓ move · Enter open · Esc back").endswith("Esc back")
     assert _bar("Path width", "↑↓ move · Enter set · Esc keep").endswith("Esc keep")
     # A hint that names no way out advertises none — the lane's rule, one row up.
     assert "Esc" not in _bar("Working", "↑↓ move")
+
+
+def test_the_main_menu_s_way_out_is_the_quit_chord_until_a_filter_stands() -> None:
+    """Esc is inert at the menu, so the bar carries ^Q there — and Esc clear over it.
+
+    The menu's hint ends on ``^Q quit`` rather than an Esc clause (issue #22); the tail
+    lifts whichever way out the hint ends on, so a typed filter's ``Esc clear`` wins while
+    it stands, because that is the key that does something then.
+    """
+    title = "What would you like to do?"
+    idle = "↑↓ move · type to filter · Enter select · ^Q quit"
+    assert _bar(title, idle).endswith(" ^Q quit")
+    assert _bar(title, f"{idle} · Esc clear").endswith(" Esc clear")
+    # Crowded, it gives way the way Esc does: its bare key first, never a stray "Esc".
+    verbless = _bar("Trace — Hilltop-Repeater over a specs", "↑↓ move · ^Q quit")
+    assert verbless.rstrip().endswith(" ^Q") and "Esc" not in verbless
 
 
 def test_the_esc_hint_gives_way_before_it_crowds_the_title() -> None:

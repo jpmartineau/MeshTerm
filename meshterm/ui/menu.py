@@ -48,6 +48,7 @@ from .tui import (
     TuiSession,
 )
 from .tui.emoji_width import install as install_emoji_widths
+from .tui.fkeys import FPair
 from .tui.spinner import spinner_interval
 from .widgets import battery_cell
 
@@ -550,6 +551,20 @@ class _MainMenu(SelectScreen):
         if action == "escape" and not self._filter:
             return
         super().handle(action, data)
+
+    @property
+    def fkey_lane(self):
+        """The list's own lane, with the way out on F3: ``Quit?`` asks, ``Quit!`` doesn't.
+
+        The PicoCalc has no hint line, so the lane is where the menu's way out has to be
+        stated. F3 is the list's one free slot (F1/F2 are the section jumps; a menu row is
+        never deletable). ``Quit?`` opens the same confirm as the Quit row and ^Q; its Shift
+        half, F8, leaves without asking — a two-key reach on the menu alone, for the reader
+        who already decided (JP, 2026-09-29).
+        """
+        lane = list(super().fkey_lane)
+        lane[2] = FPair("Quit?", "quit", "Quit!", "quit_now")
+        return lane
 
     @property
     def footer_hint(self) -> str:

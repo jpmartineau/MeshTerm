@@ -155,6 +155,9 @@ deliberately, one at a time, and say why in the code.
   `TuiSession._dispatch`, and neither is advertised — a global verb has no screen to
   belong to, and the F-key lane has only three free slots per screen — except `^Q quit`
   on the main menu's own hint, where Esc is inert and the reader looks for the way out.
+  On picocalc that atom rides the title bar's tail (`frame._way_out`), and the menu's lane
+  puts the way out on F3: `Quit?` asks, its Shift half F8 `Quit!` leaves without asking
+  (`quit_now`, the one door that skips the confirm, and only on the menu).
   `test_navigation` walks every string literal in the package to keep them out of the rest
   of the UI.
 - **Esc at the main menu does nothing** but peel a typed filter: the menu is the bottom of

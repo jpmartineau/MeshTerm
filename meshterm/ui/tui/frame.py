@@ -212,8 +212,10 @@ _BASE_BOX_CACHE: tuple[tuple, list[str]] | None = None
 #: The screen's own way out, lifted off the end of its footer hint. The grammar is
 #: mandated — "navigation keys, then action keys, **Esc last**" — so the last atom is the
 #: Esc clause wherever a screen has one, and its verb is the true one for that surface
-#: (``back`` on a screen, ``keep`` in a value picker; the main menu names none).
-_ESC_ATOM = re.compile(r"(?:^|·\s*)(Esc\s+\S+)\s*$")
+#: (``back`` on a screen, ``keep`` in a value picker). The main menu is the one screen
+#: whose way out is not Esc, which is inert there: its hint ends on ``^Q quit`` instead,
+#: until a typed filter puts ``Esc clear`` after it.
+_WAY_OUT_ATOM = re.compile(r"(?:^|·\s*)(Esc\s+\S+|\^[A-Z]\s+quit)\s*$")
 
 #: Rule cells the title keeps on each side before the bar gives the Esc hint back. Below
 #: this the title is being crowded, which is the one thing the hint must not do.
@@ -237,9 +239,9 @@ def fitted_title(screen: Screen, room: int) -> str:
     return screen.title
 
 
-def _esc_hint(hint: str) -> str:
-    """The ``Esc …`` atom a screen's footer hint ends on, or ``""`` where it has none."""
-    found = _ESC_ATOM.search(hint or "")
+def _way_out(hint: str) -> str:
+    """The way-out atom a screen's footer hint ends on (``Esc …``, ``^Q quit``), or ``""``."""
+    found = _WAY_OUT_ATOM.search(hint or "")
     return found.group(1) if found else ""
 
 
@@ -273,10 +275,10 @@ def _title_bar(screen: Screen, cols: int, more_above: bool, more_below: bool) ->
     hint line — the F-key lane stands where it would be, and the lane advertises only what
     its five slots do — so nothing on the screen said that Esc leaves, which is the one key
     every screen answers to and the reason no screen spends a row on a *Back* item. The
-    verb is the screen's own (:func:`_esc_hint` lifts the atom off its footer hint, so a
-    value picker says ``keep``); a screen whose hint names no Esc gets nothing — the
-    main menu, where Esc is inert until a filter is typed. Compact by construction: where
-    a long title would be crowded, the atom drops to a bare ``Esc`` and then out
+    verb is the screen's own (:func:`_way_out` lifts the atom off its footer hint, so a
+    value picker says ``keep``, and the main menu, where Esc is inert, says ``^Q quit``);
+    a screen whose hint names no way out gets nothing. Compact by construction: where a
+    long title would be crowded, the atom drops to its bare key and then out
     altogether — the title is what the reader came for, and the arrows are two cells
     nothing else can spend.
     """
@@ -286,8 +288,8 @@ def _title_bar(screen: Screen, cols: int, more_above: bool, more_below: bool) ->
     # the reader came for, so the tail gives way to it before it gives way to the tail.
     title = fitted_title(screen, cols - head_span - 2 - 2 * _MIN_RULE)
     label_w = cell_len(title) + 2 if title else 0  # a space either side
-    atom = _esc_hint(screen.footer_hint)
-    for esc in (atom, "Esc" if atom else "", ""):
+    atom = _way_out(screen.footer_hint)
+    for esc in (atom, atom.split()[0] if atom else "", ""):
         tail_span = cell_len(esc) + 1 if esc else 0  # the space in front of the tail
         if not esc or cols - head_span - tail_span - label_w >= 2 * _MIN_RULE:
             break

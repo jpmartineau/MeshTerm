@@ -970,6 +970,46 @@ def test_esc_at_the_main_menu_does_nothing_but_peel_a_filter() -> None:
     assert menu.footer_hint.endswith("^Q quit")
 
 
+def test_the_main_menu_lane_puts_the_way_out_on_f3() -> None:
+    """``Quit?`` on F3 asks; its Shift half, F8, is ``Quit!``, which doesn't."""
+    from meshterm.ui.menu import _MainMenu
+    from meshterm.ui.menus import section_heading
+    from meshterm.ui.tui.fkeys import action_for
+
+    menu = _MainMenu(
+        "menu",
+        [section_heading("A"), Choice("alpha", 1), section_heading("B"), Choice("beta", 2)],
+    )
+    lane = menu.fkey_lane
+    assert (lane[2].label, lane[2].opp_label) == ("Quit?", "Quit!")
+    assert action_for(lane, 3) == "quit"
+    assert action_for(lane, 8) == "quit_now"
+    assert lane[0].label == "Sect ↑", "the section jumps keep F1/F2"
+
+
+async def test_quit_now_leaves_without_asking() -> None:
+    """F8's ``quit_now`` exits even with a confirm declared, and the teardown still runs."""
+    with create_pipe_input() as inp:
+        asked: list[str] = []
+        session = _asking_session(inp, asked)
+        torn_down: list[str] = []
+
+        async def main() -> None:
+            try:
+                await session.run_screen(ScrollScreen("menu"))
+            finally:
+                torn_down.append("services closed")
+
+        async def press() -> None:
+            await asyncio.sleep(0.05)
+            session._dispatch("quit_now")
+
+        asyncio.ensure_future(press())
+        await asyncio.wait_for(session.run(main()), timeout=5)
+    assert asked == []
+    assert torn_down == ["services closed"]
+
+
 # --- the bindings themselves -------------------------------------------------
 
 

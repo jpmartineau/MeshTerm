@@ -2070,8 +2070,8 @@ class TuiSession:
         just the screen actions: right Ctrl-V pastes into a compose line instead of typing a
         ``v``, right Ctrl-C quits.
 
-        The three session-level actions are answered here rather than forwarded — no screen
-        ever sees ``to_menu``, ``quit`` or ``paste_clipboard``.
+        The session-level actions are answered here rather than forwarded — no screen ever
+        sees ``to_menu``, ``quit``, ``quit_now`` or ``paste_clipboard``.
 
         The repaint keeps prompt_toolkit's fast differential paint; a frame carrying a glyph
         the terminal may draw narrower than pt reserves for it (an emoji) upgrades itself to a
@@ -2110,6 +2110,12 @@ class TuiSession:
             # request_quit). "Unpair & quit" rides the confirm the menu declared.
             self.request_quit()
             self.invalidate()
+            return
+        if action == "quit_now":
+            # Straight out, no question: the main menu's ``Quit!`` chip, on the Shift half
+            # of the ``Quit?`` it sits behind — a deliberate two-key reach on the one screen
+            # that offers it, never a chord a slip on the way to ^W could land on.
+            self._exit_app()
             return
         if action == "paste_clipboard":
             # Some terminals deliver Ctrl-V as the literal control key — no bracketed-paste
