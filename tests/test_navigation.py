@@ -957,17 +957,17 @@ def test_esc_at_the_main_menu_does_nothing_but_peel_a_filter() -> None:
     menu = _MainMenu(
         "menu",
         [Choice("alpha", 1), Choice("beta", 2)],
-        footer_hint="↑↓ move · type to filter · Enter select · ^Q quit",
+        footer_hint="↑↓ move · type to filter · Enter select · ^Q quit?",
     )
     menu.future = asyncio.new_event_loop().create_future()
     menu.handle("escape")
     assert not menu.future.done(), "a bare Esc at the menu resolves nothing"
     assert not menu.footer_hint.endswith("Esc clear")
     menu.handle("text", "b")
-    assert menu.footer_hint.endswith("^Q quit · Esc clear")
+    assert menu.footer_hint.endswith("^Q quit? · Esc clear")
     menu.handle("escape")
     assert menu._filter == "" and not menu.future.done()
-    assert menu.footer_hint.endswith("^Q quit")
+    assert menu.footer_hint.endswith("^Q quit?")
 
 
 def test_the_main_menu_lane_puts_the_way_out_on_f3() -> None:
@@ -1065,7 +1065,7 @@ def test_neither_global_chord_is_advertised_anywhere() -> None:
                 and chord.search(node.value)
             ):
                 offenders.append(f"{path.name}:{node.lineno}: {node.value.strip()[:70]}")
-    menu_hint = [o for o in offenders if o.startswith("menu.py:") and o.endswith("· ^Q quit")]
+    menu_hint = [o for o in offenders if o.startswith("menu.py:") and o.endswith("· ^Q quit?")]
     assert len(menu_hint) == 1, "the main menu's hint must name the quit chord, once"
     offenders.remove(menu_hint[0])
     assert not offenders, "the global chords must not appear in any hint or chip:\n" + "\n".join(

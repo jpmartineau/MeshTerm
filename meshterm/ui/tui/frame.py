@@ -213,9 +213,9 @@ _BASE_BOX_CACHE: tuple[tuple, list[str]] | None = None
 #: mandated — "navigation keys, then action keys, **Esc last**" — so the last atom is the
 #: Esc clause wherever a screen has one, and its verb is the true one for that surface
 #: (``back`` on a screen, ``keep`` in a value picker). The main menu is the one screen
-#: whose way out is not Esc, which is inert there: its hint ends on ``^Q quit`` instead,
+#: whose way out is not Esc, which is inert there: its hint ends on ``^Q quit?`` instead,
 #: until a typed filter puts ``Esc clear`` after it.
-_WAY_OUT_ATOM = re.compile(r"(?:^|·\s*)(Esc\s+\S+|\^[A-Z]\s+quit)\s*$")
+_WAY_OUT_ATOM = re.compile(r"(?:^|·\s*)(Esc\s+\S+|\^[A-Z]\s+quit\??)\s*$")
 
 #: Rule cells the title keeps on each side before the bar gives the Esc hint back. Below
 #: this the title is being crowded, which is the one thing the hint must not do.
@@ -240,7 +240,7 @@ def fitted_title(screen: Screen, room: int) -> str:
 
 
 def _way_out(hint: str) -> str:
-    """The way-out atom a screen's footer hint ends on (``Esc …``, ``^Q quit``), or ``""``."""
+    """The way-out atom a screen's footer hint ends on (``Esc …``, ``^Q quit?``), or ``""``."""
     found = _WAY_OUT_ATOM.search(hint or "")
     return found.group(1) if found else ""
 
@@ -276,7 +276,7 @@ def _title_bar(screen: Screen, cols: int, more_above: bool, more_below: bool) ->
     its five slots do — so nothing on the screen said that Esc leaves, which is the one key
     every screen answers to and the reason no screen spends a row on a *Back* item. The
     verb is the screen's own (:func:`_way_out` lifts the atom off its footer hint, so a
-    value picker says ``keep``, and the main menu, where Esc is inert, says ``^Q quit``);
+    value picker says ``keep``, and the main menu, where Esc is inert, says ``^Q quit?``);
     a screen whose hint names no way out gets nothing. Compact by construction: where a
     long title would be crowded, the atom drops to its bare key and then out
     altogether — the title is what the reader came for, and the arrows are two cells

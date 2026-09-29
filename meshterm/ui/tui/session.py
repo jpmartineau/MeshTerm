@@ -72,7 +72,7 @@ from .spinner import spinner_interval
 #: to leave the app from anywhere — a second press while it asks is the leaving (see
 #: :meth:`TuiSession.request_quit`). Neither is advertised in a footer hint or an F-key
 #: chip — the lane has three free slots per screen and a global verb would claim one on
-#: every screen forever (JP, 2026-08-30) — save ``^Q quit`` on the main menu's own hint,
+#: every screen forever (JP, 2026-08-30) — save ``^Q quit?`` on the main menu's own hint,
 #: where Esc is inert and the reader looks for the way out (issue #22). ^W was
 #: picked for the close-this-whole-thing reflex; both were verified deliverable on the
 #: Canadian Multilingual layout (^W ``U+0017``, ^Q ``U+0011``) and neither is eaten by the

@@ -153,7 +153,7 @@ deliberately, one at a time, and say why in the code.
   nothing under it stops, and a second ^Q while it asks leaves at once
   (`TuiSession.request_quit`; ^Q sits one key from ^W). Both are answered in
   `TuiSession._dispatch`, and neither is advertised — a global verb has no screen to
-  belong to, and the F-key lane has only three free slots per screen — except `^Q quit`
+  belong to, and the F-key lane has only three free slots per screen — except `^Q quit?`
   on the main menu's own hint, where Esc is inert and the reader looks for the way out.
   On picocalc that atom rides the title bar's tail (`frame._way_out`), and the menu's lane
   puts the way out on F3: `Quit?` asks, its Shift half F8 `Quit!` leaves without asking
@@ -275,7 +275,7 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
 - ≤72 cells. Sentence shape: navigation keys, then action keys, **Esc last**.
 - Esc verb by surface: `Esc back` leaves a screen · `Esc close` dismisses a read-only
   floating view · `Esc cancel` abandons a prompt/dialog · `Esc keep` leaves a value
-  picker unchanged · no Esc atom at the main menu, which ends on `^Q quit` instead ·
+  picker unchanged · no Esc atom at the main menu, which ends on `^Q quit?` instead ·
   `Esc bye` only on the device
   splash, which is the door rather than a screen — nothing has been started there to
   quit out of. While a find-as-you-type filter is standing the verb becomes `Esc clear`,

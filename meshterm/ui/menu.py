@@ -706,7 +706,7 @@ async def _menu_loop(ctx: AppContext, session: TuiSession) -> None:
         # The one place the quit chord is named: the menu is where a reader looks for the
         # way out, and with Esc inert here the footer would otherwise name none. Everywhere
         # else it stays unadvertised, like ^W (see session._CTRL_LETTER_CHORDS).
-        footer_hint="↑↓ move · type to filter · Enter select · ^Q quit",
+        footer_hint="↑↓ move · type to filter · Enter select · ^Q quit?",
     )
     session.set_root(menu)
     loop = asyncio.get_running_loop()

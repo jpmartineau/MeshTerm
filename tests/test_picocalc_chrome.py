@@ -140,16 +140,16 @@ def test_the_bar_speaks_the_screen_s_own_esc_verb() -> None:
 def test_the_main_menu_s_way_out_is_the_quit_chord_until_a_filter_stands() -> None:
     """Esc is inert at the menu, so the bar carries ^Q there — and Esc clear over it.
 
-    The menu's hint ends on ``^Q quit`` rather than an Esc clause (issue #22); the tail
+    The menu's hint ends on ``^Q quit?`` rather than an Esc clause (issue #22); the tail
     lifts whichever way out the hint ends on, so a typed filter's ``Esc clear`` wins while
     it stands, because that is the key that does something then.
     """
     title = "What would you like to do?"
-    idle = "↑↓ move · type to filter · Enter select · ^Q quit"
-    assert _bar(title, idle).endswith(" ^Q quit")
+    idle = "↑↓ move · type to filter · Enter select · ^Q quit?"
+    assert _bar(title, idle).endswith(" ^Q quit?")
     assert _bar(title, f"{idle} · Esc clear").endswith(" Esc clear")
     # Crowded, it gives way the way Esc does: its bare key first, never a stray "Esc".
-    verbless = _bar("Trace — Hilltop-Repeater over a specs", "↑↓ move · ^Q quit")
+    verbless = _bar("Trace — Hilltop-Repeater over a spec", "↑↓ move · ^Q quit?")
     assert verbless.rstrip().endswith(" ^Q") and "Esc" not in verbless
 
 
