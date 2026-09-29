@@ -9,9 +9,52 @@ one caveat SemVer makes for a leading zero: while the major version is still `0`
 
 ## [Unreleased]
 
+## [0.10.2] — 2026-09-29
+
+**Harder to leave by accident, a scope picker on the dashboard and the Time Machine, and
+T-Deck Bluetooth pairing.** Esc no longer walks you into the quit dialog, ^Q asks before it
+quits, both traffic screens can narrow to one region, and a T-Deck on MeshOS or wadamesh
+pairs like any other companion.
+
+### Added
+
+- **The dashboard and the Time Machine can show one scope at a time.** Press `s` (F3 on the
+  dashboard, F2 on the Time Machine, on the PicoCalc) to step through all traffic, unscoped
+  floods, each region heard, and floods of an unknown scope. The charts, counts, and signal
+  figures narrow to that scope, and the title says which one you are looking at. A direct
+  packet has no scope, so it only counts under all.
+- The Channels list leads with each channel's slot number.
+- The Contacts title counts archived contacts too, and shortens itself on a narrow screen.
+
 ### Changed
 
+- **Esc at the main menu no longer opens the quit dialog.** Pressing Esc again and again is
+  the natural way back to the menu, and the presses that landed after you got there used to
+  ask whether you wanted to quit. Now Esc stops at the menu (it still clears a typed
+  filter), and you leave through the Quit row or ^Q.
+- **^Q asks before it quits, from any screen.** It sits right next to ^W, which goes back to
+  the menu, so one slip used to close the app, along with any capture or queued message.
+  Now it opens the same dialog as the Quit row, whatever you were doing keeps running
+  behind it, and Esc puts you back. Pressing ^Q a second time quits straight away. The main
+  menu names it: `^Q quit?` on the hint line, or, on the PicoCalc, in the title bar, with
+  **Quit?** on F3 and **Quit!** (no question) on Shift+F3.
+- **The dashboard counts each packet once.** Its traffic list used to count an advert twice,
+  once as the device reported it and once as the frame it arrived in. It now counts frames
+  heard on the air, under the same names and colours as the live feed.
+- The splash screen has new art, and its white letters no longer come out grey.
 - The Support page's Patreon link is shorter, and so is its QR code.
+
+### Fixed
+
+- **A T-Deck running MeshOS or wadamesh pairs over Bluetooth.** Those firmwares refuse the
+  first message until the device is paired, and MeshTerm read the silence as "this isn't a
+  MeshCore companion", so the PIN prompt never came. It now recognises the refusal and
+  pairs the way it does with any other companion. On Windows, a mistyped PIN also no longer
+  leaves behind a half-made pairing that made the next, correct attempt fail.
+- **Rebooting from Device config shows the reconnect dialog straight away.** A board behind
+  a USB serial adapter could restart without MeshTerm noticing, and it kept sending
+  commands to a board that was mid-restart. Over Bluetooth, the reboot also no longer waits
+  a second or more for a reply the restarting board never sends.
 
 ## [0.10.1] — 2026-09-27
 
@@ -210,7 +253,8 @@ exact commands.
 MeshTerm is free and open source under the Apache 2.0 licence. The name and the logo are
 not covered by the licence (see `NOTICE`), so a fork is welcome under its own name.
 
-[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.10.2...HEAD
+[0.10.2]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.10.2
 [0.10.1]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.10.1
 [0.10.0]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.10.0
 [0.9.0]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.9.0
