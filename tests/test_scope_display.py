@@ -411,8 +411,9 @@ def _channel_header(scopes: dict[int, str]) -> str:
 
 def test_the_channel_list_draws_scope_only_when_a_channel_has_one() -> None:
     """A column of blanks says nothing; one scoped channel brings the lane back."""
-    assert _channel_header({}).split() == ["CHANNEL", "UNREAD", "LAST", "MSGS", "ACTIVITY"]
+    assert _channel_header({}).split() == ["SLOT", "CHANNEL", "UNREAD", "LAST", "MSGS", "ACTIVITY"]
     assert _channel_header({1: "harbour"}).split() == [
+        "SLOT",
         "CHANNEL",
         "SCOPE",
         "UNREAD",

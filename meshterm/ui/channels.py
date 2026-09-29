@@ -477,7 +477,12 @@ _NAME_WIDTH_MAX = 18
 #: names give a long region name more of its own. A 30-byte region name is ellipsized rather
 #: than let widen the row. On the PicoCalc's 53 the row was already cut inside the activity
 #: lane, so a scope lane there costs the MSGS count behind it; the detail page states it.
+#: The leading SLOT lane is paid for out of this budget too (see :func:`_menu_items`), for
+#: the same reason: the sparkline keeps its cells.
 _NAME_SCOPE_BUDGET = _NAME_WIDTH_MAX + 8
+#: Narrowest the right-aligned slot-index lane is drawn (two digits: MeshCore's default
+#: table holds more than ten slots); a wider table widens it to its highest index.
+_SLOT_WIDTH_MIN = 2
 #: Width of the unread-badge lane (fits ``● 999``), matching the conversation picker's.
 _BADGE_WIDTH = 5
 #: Width of the right-aligned total-messages lane.
@@ -507,13 +512,15 @@ def _activity_sparkline(histogram: tuple[int, ...], peak: float) -> Text:
 # --- menus -------------------------------------------------------------------
 
 
-def _lanes_header(name_w: int, scope_w: int, width: int) -> str:
+def _lanes_header(slot_w: int, name_w: int, scope_w: int, width: int) -> str:
     """Column headers over the channel list's fixed lanes (see :func:`_slot_text`).
 
     The indent covers the select screen's pointer column (2 cells, drawn on choice rows but
-    not separators) plus the glyph lane, *measured* rather than assumed: a channel's glyph
-    is two cells on the desktop and one on the console, so a hard-coded indent put every
-    label a column off there. ``UNREAD`` borrows its lane's trailing gap — the badge lane
+    not separators). ``SLOT`` leads — the index every ``channels`` command and the chat's
+    slot references take — and its lane also spans the unlabelled glyph lane after it,
+    *measured* rather than assumed: a channel's glyph is two cells on the desktop and one on
+    the console, so a hard-coded width put every later label a column off there. ``UNREAD``
+    borrows its lane's trailing gap — the badge lane
     itself is one cell too narrow for the word — which still leaves a space before the
     message count. (No TYPE or HASH lane: the glyph already carries the openness and the
     hash lives in Show key, which buys the activity sparkline its room on a 72-column
@@ -530,6 +537,7 @@ def _lanes_header(name_w: int, scope_w: int, width: int) -> str:
     """
     return column_header(
         [
+            Lane("SLOT", slot_w + 2 + cell_len(channel_glyph("Public", None)) + 1),
             Lane("CHANNEL", name_w + 2),
             *([Lane("SCOPE", scope_w + 2)] if scope_w else []),
             Lane("UNREAD", _BADGE_WIDTH + 2),
@@ -541,12 +549,11 @@ def _lanes_header(name_w: int, scope_w: int, width: int) -> str:
             Lane(("ACTIVITY", "ACT")),
         ],
         width,
-        indent=2 + cell_len(channel_glyph("Public", None)) + 1,
     )
 
 
 def _slot_row(
-    ctx: AppContext, slot: ChannelSlot, stats: _LiveStats, name_w: int, scope_w: int
+    ctx: AppContext, slot: ChannelSlot, stats: _LiveStats, slot_w: int, name_w: int, scope_w: int
 ) -> Callable[[], Text]:
     """Return a list-row title *callable* the select screen re-renders on each repaint.
 
@@ -554,15 +561,15 @@ def _slot_row(
     :class:`_LiveStats`), so a message arriving while the list sits open updates the row on
     the next repaint — exactly the conversation picker's behavior.
     """
-    return lambda: _slot_text(ctx, slot, stats, name_w, scope_w)
+    return lambda: _slot_text(ctx, slot, stats, slot_w, name_w, scope_w)
 
 
 def _slot_text(
-    ctx: AppContext, slot: ChannelSlot, stats: _LiveStats, name_w: int, scope_w: int
+    ctx: AppContext, slot: ChannelSlot, stats: _LiveStats, slot_w: int, name_w: int, scope_w: int
 ) -> Text:
     """Build one channel's list row as fixed-width, colour-coded lanes.
 
-    Alignment carries the readability — glyph, name, send scope, unread badge,
+    Alignment carries the readability — slot index (right-aligned, muted), glyph, name, send scope, unread badge,
     last-message age, total messages, and the activity sparkline each sit in their own lane
     under the
     :func:`_lanes_header` line. Colour stays light and purposeful: the name is the row's
@@ -581,6 +588,8 @@ def _slot_text(
     muted = _is_muted(ctx, slot)
     unread = ctx.chat.unread(slot.conversation.key)
     text = Text(no_wrap=True, overflow="ellipsis")
+    text.append(f"{slot.idx:>{slot_w}}", style="muted")
+    text.append("  ")
     text.append(f"{channel_glyph(slot.name, slot.secret)} ")  # ＃ / 🌐 / 🔒 (2 cells) + gap
     text.append(fit_cells(slot.name, name_w))
     text.append("  ")
@@ -628,15 +637,25 @@ def _menu_items(
     """
     items: list = []
     if slots:
+        slot_w = max(_SLOT_WIDTH_MIN, *(len(str(s.idx)) for s in slots))
         name_w = min(_NAME_WIDTH_MAX, max(len("CHANNEL"), *(len(s.name) for s in slots)))
         scopes = [cell_len(_channel_scope(ctx, s) or "") for s in slots]
-        # No lane at all while no channel has a scope (see :data:`_NAME_SCOPE_BUDGET`).
-        scope_w = min(_NAME_SCOPE_BUDGET - name_w, max(len("SCOPE"), *scopes)) if any(scopes) else 0
+        # No lane at all while no channel has a scope (see :data:`_NAME_SCOPE_BUDGET`); the
+        # slot lane and its gap come out of the same budget, so the sparkline keeps its room.
+        # A drawn scope lane is never narrower than its label — a long name gives up cells
+        # before the lane would crowd ``SCOPE`` against ``UNREAD``.
+        budget = _NAME_SCOPE_BUDGET - (slot_w + 2)
+        scope_w = (
+            max(len("SCOPE"), min(budget - name_w, max(*scopes))) if any(scopes) else 0
+        )
+        name_w = min(name_w, budget - scope_w)
         # The lane names are this block's only landmark (its section carries no ── heading ──),
         # so they pin overhead while the slots scroll and give way to Organize/Add a channel.
-        items.append(Separator(lambda w: _lanes_header(name_w, scope_w, w), heading=True))
+        items.append(Separator(lambda w: _lanes_header(slot_w, name_w, scope_w, w), heading=True))
         for slot in slots:
-            items.append(Choice(title=_slot_row(ctx, slot, stats, name_w, scope_w), value=slot.idx))
+            items.append(
+                Choice(title=_slot_row(ctx, slot, stats, slot_w, name_w, scope_w), value=slot.idx)
+            )
     else:
         items.append(Separator("  no channels yet — add one below"))
 
