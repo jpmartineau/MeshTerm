@@ -1038,6 +1038,34 @@ async def test_wait_for_disconnect_ignores_the_simulator(tmp_path: Path) -> None
         ctx.repo.close()
 
 
+async def test_wait_for_disconnect_fires_on_an_announced_reboot(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A reboot we sent fires the watcher at once, though the port never goes away.
+
+    A board behind a USB-UART bridge keeps its port through a reboot, so the poll alone
+    would never see the drop; the announcement is the evidence.
+    """
+    ctx = _make_ctx(tmp_path)
+    ctx.mock = False
+    ctx._device = _FakeSerialDevice("COM_TEST")
+    ctx._active_transport = "serial"
+    ctx._active_port = "COM_TEST"
+    monkeypatch.setattr(connection, "serial_port_present", lambda port: True)  # never leaves
+    try:
+        watcher = asyncio.ensure_future(menu._wait_for_disconnect(ctx))
+        await asyncio.sleep(0)
+        assert not watcher.done()
+        ctx.announce_reboot()
+        await asyncio.wait_for(watcher, timeout=0.5)  # well inside one liveness poll
+        assert ctx.take_reboot() is True
+        assert ctx.take_reboot() is False  # consumed: the next drop reads as an unplug
+        with pytest.raises(asyncio.TimeoutError):  # and the next watcher waits for one
+            await asyncio.wait_for(menu._wait_for_disconnect(ctx), timeout=0.2)
+    finally:
+        ctx.repo.close()
+
+
 class _FakeBleDevice:
     """A minimal stand-in for a connected BLE :class:`Device` in liveness tests.
 

@@ -79,6 +79,12 @@ _BLE_PRESENCE_SCAN_S = 8.0
 #: stops the loop spinning when scanning fails instantly (no adapter, Bluetooth switched off).
 _BLE_RESCAN_PAUSE_S = 1.0
 
+#: After a reboot we sent, how long to leave the companion alone before the first reconnect
+#: attempt (seconds). The dialog is up the instant the command is out, which is before the
+#: board has necessarily started restarting; a port that stays put through the reboot would
+#: otherwise be reopened against the old session, which dies under it a moment later.
+_REBOOT_SETTLE_S = 1.5
+
 
 def _arm_exit_watchdog(seconds: float = _EXIT_WATCHDOG_S) -> None:
     """Guarantee the process terminates even if the exit path wedges.
@@ -1044,6 +1050,20 @@ async def _wait_for_disconnect(ctx: AppContext) -> None:
     if ctx.mock:
         await asyncio.Event().wait()  # the simulator is never "unplugged"; wait forever
         return
+    # A reboot we sent is a drop we already know about: race it against the poll so the
+    # reconnect dialog is up the moment the command is out, not whenever (or if ever) a
+    # poll happens to land inside the reboot.
+    announced = asyncio.ensure_future(ctx.link_going_down())
+    polled = asyncio.ensure_future(_poll_for_disconnect(ctx))
+    try:
+        await asyncio.wait({announced, polled}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        await _cancel_and_wait(announced)
+        await _cancel_and_wait(polled)
+
+
+async def _poll_for_disconnect(ctx: AppContext) -> None:
+    """Resolve once the liveness check sees the link gone, debounced against a blip."""
     while True:
         await asyncio.sleep(_LIVENESS_POLL_S)
         if not ctx.is_connected:
@@ -1076,8 +1096,8 @@ async def _handle_disconnect(ctx: AppContext, session: TuiSession) -> bool:
     # A drop the config editor announced (it just sent a reboot command) is expected, so
     # the dialog says what is actually happening instead of implying an unplug. The flag
     # is consumed here so a later, genuine disconnect goes back to the generic wording.
-    if ctx.reboot_in_progress:
-        ctx.reboot_in_progress = False
+    rebooting = ctx.take_reboot()
+    if rebooting:
         dialog = ReconnectDialog(
             "Rebooting — waiting for the device to come back…",
             title="Device rebooting",
@@ -1096,7 +1116,9 @@ async def _handle_disconnect(ctx: AppContext, session: TuiSession) -> bool:
     session.push(base)
     session.push(dialog)
     animator = asyncio.ensure_future(_animate_dialog(session, dialog))
-    reconnector = asyncio.ensure_future(_auto_reconnect(ctx, dialog))
+    reconnector = asyncio.ensure_future(
+        _auto_reconnect(ctx, dialog, settle_s=_REBOOT_SETTLE_S if rebooting else 0.0)
+    )
     try:
         result = await dialog.future
     finally:
@@ -1115,7 +1137,7 @@ async def _animate_dialog(session: TuiSession, dialog: ReconnectDialog) -> None:
         session.invalidate()
 
 
-async def _auto_reconnect(ctx: AppContext, dialog: ReconnectDialog) -> None:
+async def _auto_reconnect(ctx: AppContext, dialog: ReconnectDialog, *, settle_s: float = 0.0) -> None:
     """Poll for the device to return, reconnect when it does, then dismiss ``dialog``.
 
     The dead link is released up front (:meth:`~meshterm.context.AppContext.release_link`) so
@@ -1141,6 +1163,10 @@ async def _auto_reconnect(ctx: AppContext, dialog: ReconnectDialog) -> None:
     Args:
         ctx: The shared application context.
         dialog: The reconnect dialog to dismiss once the link is back.
+        settle_s: How long to leave the device alone after releasing the link, before the
+            first attempt. Nonzero only for a reboot we sent: the watcher fires the instant
+            the command is out, and a serial port that never went away would otherwise be
+            reopened against a board that has not yet begun to restart.
     """
     from ..core.connection import serial_port_present
     from ..core.discovery import find_ble_device
@@ -1149,6 +1175,8 @@ async def _auto_reconnect(ctx: AppContext, dialog: ReconnectDialog) -> None:
     # still nominally connected to does not advertise, so the scan below would wait out a
     # peripheral that is powered on and silent purely because we never let go of it.
     await ctx.release_link()
+    if settle_s:
+        await asyncio.sleep(settle_s)
 
     while True:
         ble_device: object | None = None

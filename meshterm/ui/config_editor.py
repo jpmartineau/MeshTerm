@@ -97,13 +97,11 @@ _OTHER = "__other__"
 #: The setting keys the map pick sets together (each also has its own row, for a typed value).
 _COORD_KEYS = ("adv_lat", "adv_lon")
 
-#: How long the reboot flow waits to *observe* the link actually dropping before handing
-#: off to the session's reconnect dialog (seconds). A companion normally vanishes from the
-#: bus well within this; on timeout we hand off anyway.
-_REBOOT_DROP_TIMEOUT_S = 10.0
-
-#: Poll cadence while waiting for the rebooting companion's link to drop (seconds).
-_REBOOT_DROP_POLL_S = 0.25
+#: How long the reboot flow holds the actions screen after announcing the reboot, waiting
+#: for the session's disconnect watcher to cancel it and raise the reconnect dialog
+#: (seconds). The watcher wakes on the announcement itself, so this only runs out where
+#: no watcher is running.
+_REBOOT_HANDOFF_TIMEOUT_S = 5.0
 
 
 async def cached_snapshot(ctx: AppContext, device: Device) -> dict:
@@ -1182,10 +1180,11 @@ async def _show_contact_card(ctx: AppContext, snapshot: dict) -> None:
 async def _reboot(ctx: AppContext, device: Device, snapshot: dict) -> bool:
     """Confirm and reboot the device, handing off to the session's reconnect dialog.
 
-    After the command is sent, we wait to actually observe the link dropping — flagging
-    :attr:`~meshterm.context.AppContext.reboot_in_progress` so the session-wide
-    disconnect watcher labels the ensuing dialog as a reboot, waits for the companion to
-    come back, and reconnects — exactly the unplugged-device flow.
+    Once the command is sent the link is declared down
+    (:meth:`~meshterm.context.AppContext.announce_reboot`) rather than waited on, so the
+    session-wide disconnect watcher raises its dialog at once, labelled as a reboot, waits
+    for the companion to come back, and reconnects — exactly the unplugged-device flow,
+    and nothing else is sent to the board while it restarts.
 
     Returns:
         ``True`` if the reboot was sent and the actions screen should close; ``False``
@@ -1208,22 +1207,15 @@ async def _reboot(ctx: AppContext, device: Device, snapshot: dict) -> bool:
         await ctx.ui.present(title="Reboot")
         return False
 
-    # Flag the drop as expected *before* sending, so however quickly the watcher fires,
-    # the reconnect dialog already knows to present it as a reboot.
-    ctx.reboot_in_progress = True
-    try:
-        await device.reboot()
-    except Exception:
-        ctx.reboot_in_progress = False
-        raise
-    # Hold here until the link is actually observed down (or a generous timeout), so the
-    # actions screen doesn't flash back to the menu for the second or two before the
-    # watcher notices. The watcher may cancel us mid-wait when it fires — that's the handoff.
-    deadline = asyncio.get_running_loop().time() + _REBOOT_DROP_TIMEOUT_S
-    while asyncio.get_running_loop().time() < deadline:
-        if not await ctx.link_alive():
-            break
-        await asyncio.sleep(_REBOOT_DROP_POLL_S)
+    await device.reboot()
+    # The command is out, so the link is as good as gone: declare it, rather than wait for
+    # a liveness poll to notice — a quick reboot behind a port that never disappears is
+    # never noticed at all, and the next command would go to a board mid-restart.
+    ctx.announce_reboot()
+    # The session's watcher now cancels us and raises the reconnect dialog; hold here until
+    # it does, so the actions screen doesn't flash back to the menu in between. The timeout
+    # only matters where no watcher is running to take the handoff.
+    await asyncio.sleep(_REBOOT_HANDOFF_TIMEOUT_S)
     return True
 
 

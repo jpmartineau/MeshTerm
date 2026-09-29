@@ -302,6 +302,10 @@ async def apply_ops(
             await device.reboot()
             ctx.ui.ack("[warn]device rebooting[/warn]")
             report.append(_acted("reboot", rebooted=True))
+            if ctx.active_transport is not None:
+                # Run from the menu's command line, this hands off to the reconnect dialog
+                # as the config editor's reboot does; a scripted run has no watcher to wake.
+                ctx.announce_reboot()
         elif kind == "export_key":
             report.append(await _export_key(ctx, device, op[1] if len(op) > 1 else None, artifacts))
         elif kind == "import_key":

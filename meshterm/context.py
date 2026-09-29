@@ -8,6 +8,7 @@ never open a serial port.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -151,11 +152,15 @@ class AppContext:
     #: the older handle no longer names it. Typed ``object`` so ``bleak`` stays optional.
     _ble_handle: object | None = field(default=None, init=False, repr=False)
     unpair_on_exit: bool = field(default=False, init=False, repr=False)
-    #: Set by the config editor just before it sends a reboot command, so the session's
-    #: disconnect watcher can label the ensuing (expected) link drop as a reboot in
-    #: progress rather than a surprise unplug. Cleared by the reconnect dialog that
-    #: consumes it (see :func:`meshterm.ui.menu._handle_disconnect`).
+    #: Set by :meth:`announce_reboot` once a reboot command has gone out, so the reconnect
+    #: dialog presents the drop as a reboot in progress rather than a surprise unplug.
+    #: Cleared by :meth:`take_reboot` in the dialog that consumes it (see
+    #: :func:`meshterm.ui.menu._handle_disconnect`).
     reboot_in_progress: bool = field(default=False, init=False, repr=False)
+    #: Set alongside :attr:`reboot_in_progress`: wakes the session's disconnect watcher at
+    #: once, without waiting for a liveness poll to *observe* the drop — which it may never
+    #: do, since a board behind a USB-UART bridge keeps its port through a reboot.
+    _link_going_down: asyncio.Event = field(default_factory=asyncio.Event, init=False, repr=False)
     _resume_intent: tuple[bool, bool, bool] | None = field(default=None, init=False, repr=False)
     _events: EventHub | None = field(default=None, init=False, repr=False)
     _monitor: MonitorService | None = field(default=None, init=False, repr=False)
@@ -281,6 +286,34 @@ class AppContext:
             return await device.link_present()
         except Exception:  # noqa: BLE001 - a liveness-check failure must not fake a disconnect
             return True
+
+    def announce_reboot(self) -> None:
+        """Declare the link down because we just told the companion to reboot.
+
+        Called *after* the reboot command was sent (never before: the watcher it wakes
+        cancels the screen that sent it, and a cancel mid-write could leave the command half
+        out). From then on the device is not ours to talk to until it comes back, so the
+        session's disconnect watcher (:meth:`link_going_down`) fires at once and the
+        reconnect dialog takes over — rather than hoping a liveness poll catches the drop,
+        which misses a quick reboot entirely where the serial port never goes away.
+        """
+        self.reboot_in_progress = True
+        self._link_going_down.set()
+
+    async def link_going_down(self) -> None:
+        """Resolve once :meth:`announce_reboot` has declared the link down."""
+        await self._link_going_down.wait()
+
+    def take_reboot(self) -> bool:
+        """Consume a pending reboot announcement, returning whether there was one.
+
+        Clears both halves, so a later, genuine disconnect goes back to the generic
+        wording and the next watcher waits for a real drop again.
+        """
+        pending = self.reboot_in_progress
+        self.reboot_in_progress = False
+        self._link_going_down.clear()
+        return pending
 
     @property
     def ui(self) -> Ui:
