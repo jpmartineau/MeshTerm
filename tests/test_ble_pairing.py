@@ -276,7 +276,7 @@ def test_the_pin_is_withheld_from_bleak_on_linux(monkeypatch: pytest.MonkeyPatch
 
 
 def test_the_pin_is_withheld_from_bleak_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
-    """bleak's WinRT ``pair()`` is Just Works only, so a PIN handed to it bonds *without* one.
+    """Bleak's WinRT ``pair()`` is Just Works only, so a PIN handed to it bonds *without* one.
 
     After our own PIN pairing failed on a mistyped PIN, that fallback left Windows holding an
     unauthenticated bond, and the next attempt — right PIN — reused it and was refused.

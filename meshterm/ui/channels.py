@@ -569,12 +569,12 @@ def _slot_text(
 ) -> Text:
     """Build one channel's list row as fixed-width, colour-coded lanes.
 
-    Alignment carries the readability — slot index (right-aligned, muted), glyph, name, send scope, unread badge,
-    last-message age, total messages, and the activity sparkline each sit in their own lane
-    under the
-    :func:`_lanes_header` line. Colour stays light and purposeful: the name is the row's
-    focus in the base colour, the descriptive lanes are muted, the unread ``●`` badge is
-    red with its count in warn (the conversation picker's language), and the sparkline
+    Alignment carries the readability — slot index (right-aligned, muted), glyph, name,
+    send scope, unread badge, last-message age, total messages, and the activity
+    sparkline each sit in their own lane under the :func:`_lanes_header` line. Colour
+    stays light and purposeful: the name is the row's focus in the base colour, the
+    descriptive lanes are muted, the unread ``●`` badge is red with its count in warn
+    (the conversation picker's language), and the sparkline
     draws in the ok green over a faint flatline. A muted channel shows a muted ``🔕`` in
     the unread lane instead of a count — muting zeros its unread and stops it accruing, so
     that lane is always free to carry the state. The scope is the region name in the
@@ -645,9 +645,7 @@ def _menu_items(
         # A drawn scope lane is never narrower than its label — a long name gives up cells
         # before the lane would crowd ``SCOPE`` against ``UNREAD``.
         budget = _NAME_SCOPE_BUDGET - (slot_w + 2)
-        scope_w = (
-            max(len("SCOPE"), min(budget - name_w, max(*scopes))) if any(scopes) else 0
-        )
+        scope_w = max(len("SCOPE"), min(budget - name_w, max(*scopes))) if any(scopes) else 0
         name_w = min(name_w, budget - scope_w)
         # The lane names are this block's only landmark (its section carries no ── heading ──),
         # so they pin overhead while the slots scroll and give way to Organize/Add a channel.

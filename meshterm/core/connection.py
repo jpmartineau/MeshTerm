@@ -153,6 +153,7 @@ def _forget_reboot_write(write: asyncio.Future) -> None:
     if not write.cancelled() and write.exception() is not None:
         _log.debug("reboot write ended after the device went away: %s", write.exception())
 
+
 #: Bound on the forced transport close that follows an abandoned graceful teardown (seconds).
 #: ``_DISCONNECT_TIMEOUT_S + _FORCE_DISCONNECT_TIMEOUT_S`` stays under the exit watchdog.
 _FORCE_DISCONNECT_TIMEOUT_S = 1.5
@@ -2006,28 +2007,28 @@ class MeshCoreDevice(Device):
         """
         from meshcore import BLEConnection
 
-        # bleak never gets the PIN, on any platform. On macOS: handed one, ``BLEConnection.connect`` calls bleak's
-        # ``client.pair()``, and CoreBluetooth has no pairing API at all — the macOS
-        # backend raises ``NotImplementedError`` outright — whereupon the library
-        # disconnects and re-raises, so supplying a *correct* PIN is what breaks the
-        # connection. Apple's model is that pairing is the OS's to run, not ours: the
-        # companion firmware puts its UART characteristic at ENC+MITM
+        # bleak never gets the PIN, on any platform. On macOS: handed one,
+        # ``BLEConnection.connect`` calls bleak's ``client.pair()``, and CoreBluetooth has
+        # no pairing API at all — the macOS backend raises ``NotImplementedError`` outright
+        # — whereupon the library disconnects and re-raises, so supplying a *correct* PIN is
+        # what breaks the connection. Apple's model is that pairing is the OS's to run, not
+        # ours: the companion firmware puts its UART characteristic at ENC+MITM
         # (``SECMODE_ENC_WITH_MITM`` on nRF52, ``ESP_GATT_PERM_*_ENC_MITM`` on ESP32), so
-        # the unbonded subscribe below is answered with "Insufficient Authentication",
-        # and macOS reacts by running Passkey Entry and prompting for the code itself.
-        # Saying nothing here is therefore what *lets* a PIN-protected companion bond;
-        # the OS keeps the bond, and later connections need no PIN (a firmware that guards
-        # only the write gets there too, via :func:`_record_write_refusals`).
-        # Linux is the same story from the other side: bleak's BlueZ ``pair()`` ignores the
-        # PIN and pairs through whatever system agent there is (a desktop dialog, or nothing
-        # at all), so MeshTerm pairs there itself beforehand (see :meth:`_pair_ble_bluez`).
-        # Handing bleak the PIN would only start a second pairing we can't answer.
-        # And Windows: bleak's WinRT ``pair()`` is hardcoded to CONFIRM_ONLY
-        # ("Just Works") and never sends a PIN, so after a PIN pairing of our own that failed
-        # (a mistyped PIN), handing bleak the PIN made it bond *without* one — and Windows
-        # kept that unauthenticated bond. The next attempt, with the right PIN, then reused
-        # it and was refused, until the bond was removed by hand. Pairing is ours to run on
-        # every platform that has an API for it (see :meth:`_pair_ble`).
+        # the unbonded subscribe below is answered with "Insufficient Authentication", and
+        # macOS reacts by running Passkey Entry and prompting for the code itself. Saying
+        # nothing here is therefore what *lets* a PIN-protected companion bond; the OS keeps
+        # the bond, and later connections need no PIN (a firmware that guards only the write
+        # gets there too, via :func:`_record_write_refusals`). Linux is the same story from
+        # the other side: bleak's BlueZ ``pair()`` ignores the PIN and pairs through
+        # whatever system agent there is (a desktop dialog, or nothing at all), so MeshTerm
+        # pairs there itself beforehand (see :meth:`_pair_ble_bluez`). Handing bleak the PIN
+        # would only start a second pairing we can't answer. And Windows: bleak's WinRT
+        # ``pair()`` is hardcoded to CONFIRM_ONLY ("Just Works") and never sends a PIN, so
+        # after a PIN pairing of our own that failed (a mistyped PIN), handing bleak the PIN
+        # made it bond *without* one — and Windows kept that unauthenticated bond. The next
+        # attempt, with the right PIN, then reused it and was refused, until the bond was
+        # removed by hand. Pairing is ours to run on every platform that has an API for it
+        # (see :meth:`_pair_ble`).
         connection = BLEConnection(address=self._address, device=self._ble_device, pin=None)
         seen = _hold_disconnects_while_connecting(connection)
         refused = _record_write_refusals(connection)

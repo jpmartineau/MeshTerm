@@ -1191,7 +1191,9 @@ async def _animate_dialog(session: TuiSession, dialog: ReconnectDialog) -> None:
         session.invalidate()
 
 
-async def _auto_reconnect(ctx: AppContext, dialog: ReconnectDialog, *, settle_s: float = 0.0) -> None:
+async def _auto_reconnect(
+    ctx: AppContext, dialog: ReconnectDialog, *, settle_s: float = 0.0
+) -> None:
     """Poll for the device to return, reconnect when it does, then dismiss ``dialog``.
 
     The dead link is released up front (:meth:`~meshterm.context.AppContext.release_link`) so
