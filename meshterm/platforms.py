@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """The platform seam: a frozen spec every consumer binds to once, at boot.
 
-MeshTerm runs two flavours from one codebase — the regular desktop terminal and the
-PicoCalc's 53-column framebuffer console — with no forked screens and no runtime layer.
+MeshTerm runs its flavours from one codebase — the regular desktop terminal, the
+PicoCalc's 53-column framebuffer console, and the Cardputer Zero's 53×14 panel — with no
+forked screens and no runtime layer.
 A :class:`Platform` is resolved once, at process start, and held in a module-level
 singleton; everything downstream (the theme, the frame compositor, the header, the
 session's width handling) reads it at *its own* construction/call time and binds its
@@ -33,7 +34,7 @@ class Platform:
     outside this module and the small set of binding points documented at each field.
 
     Attributes:
-        name: Stable identifier — ``"regular"`` or ``"picocalc"`` — used for
+        name: Stable identifier — ``"regular"``, ``"picocalc"`` or ``"cardputer"`` — used for
             ``--platform``/``MESHTERM_PLATFORM`` matching and diagnostics.
         readable_cols: The readability standard (CLAUDE.md's "screens stay readable at
             N columns") and the dual-platform gallery's test width.
@@ -66,9 +67,14 @@ class Platform:
         header_atoms: Which segments compose the persistent header, in the vocabulary
             ``"version"``, ``"device"``, ``"badges"``, ``"pulse"``, ``"battery"``. Wired
             into :func:`~meshterm.ui.menu._header` in P4; unconsumed until then.
-        footer_fkeys: Whether the footer is the fixed F1–F5 hint lane (with F6–F10 as
-            their paired opposites) instead of each screen's own ``footer_hint`` string.
-            Wired in P4.
+        lane_deck: Which F-key lane deck the footer deals, by name (see
+            :data:`~meshterm.ui.tui.fkeys.DECKS`), or ``""`` where the footer is each
+            screen's own ``footer_hint`` string instead. A deck is everything about the lane
+            that belongs to one keyboard: which keycodes drive its slots, where its chips sit
+            on the row, how they are drawn, and which of a screen's lane definitions it reads
+            (``Screen.picocalc_lane``, ``Screen.cardputer_lane``). Each handheld names its
+            own, so one can change without the other following. :attr:`footer_fkeys` is the
+            yes/no reading of it.
         width_reclaim: Whether the session may report one extra terminal column (see
             :class:`~meshterm.ui.tui.session._WidthExtendedOutput`). Correctness-critical
             on PicoCalc's exact-width console: a phantom extra column tears the frame, so
@@ -109,11 +115,12 @@ class Platform:
         battery: Which source feeds the header's battery gauge — ``"companion"`` (read
             from the connected MeshCore device) or ``"host"`` (the PicoCalc's own sysfs
             ``power_supply`` driver, confirmed present in P0). Wired in P5.
-        modifier_watch: Whether the optional keyboard-lib/evdev Shift-state watcher may
-            engage, flipping the displayed F-key lane live while Shift is held. An
-            experiment gated to PicoCalc only — desktop terminals have no such lane to
-            flip, and the watcher needs ``/dev/input`` access this platform is known to
-            have (the deploy user in the ``input`` group). Always optional and lazy; wired in P4.
+        modifier_watch: The keyboard whose Shift state the optional evdev watcher follows,
+            flipping the displayed F-key lane live while Shift is held — a case-insensitive
+            substring of the input device's name, or ``""`` to leave the watcher off.
+            Handhelds only: desktop terminals have no lane to flip, and the watcher needs
+            ``/dev/input`` access a handheld's deploy user has (the ``input`` group). Always
+            optional and lazy; wired in P4.
     """
 
     name: str
@@ -123,7 +130,7 @@ class Platform:
     menu_icons: bool
     dialog_margin: int
     header_atoms: tuple[str, ...]
-    footer_fkeys: bool
+    lane_deck: str
     width_reclaim: bool
     emoji: bool
     ascii_fold: bool
@@ -132,7 +139,12 @@ class Platform:
     tick_s: float
     spinner_tick_s: float
     battery: str
-    modifier_watch: bool
+    modifier_watch: str
+
+    @property
+    def footer_fkeys(self) -> bool:
+        """Whether the footer is an F-key lane rather than each screen's hint string."""
+        return bool(self.lane_deck)
 
 
 #: Exactly today's behaviour — the desktop/ssh terminal, unchanged by this seam's arrival.
@@ -144,7 +156,7 @@ REGULAR = Platform(
     menu_icons=True,
     dialog_margin=6,
     header_atoms=("version", "device", "badges", "pulse", "battery"),
-    footer_fkeys=False,
+    lane_deck="",
     width_reclaim=True,
     emoji=True,
     ascii_fold=False,
@@ -153,7 +165,7 @@ REGULAR = Platform(
     tick_s=1.0,
     spinner_tick_s=0.12,
     battery="companion",
-    modifier_watch=False,
+    modifier_watch="",
 )
 
 #: The PicoCalc/Lyra/Calculinux framebuffer console. Field values not yet consumed by a
@@ -171,7 +183,7 @@ PICOCALC = Platform(
     # "MeshTerm vX" — rather than naming the device/port (on a soldered radio the port
     # never changes), and the activity pulse takes whatever room remains.
     header_atoms=("version", "badges", "pulse", "battery"),
-    footer_fkeys=True,
+    lane_deck="picocalc",
     width_reclaim=False,
     emoji=False,
     ascii_fold=True,
@@ -180,10 +192,43 @@ PICOCALC = Platform(
     tick_s=2.0,
     spinner_tick_s=0.5,
     battery="host",
-    modifier_watch=True,
+    modifier_watch="picocalc",
 )
 
-_BY_NAME = {p.name: p for p in (REGULAR, PICOCALC)}
+#: M5Stack's Cardputer Zero: a 320×170 panel drawn in 6×12 cells (53×14), under a
+#: 46-key keyboard whose number keys 4–8 sit right below the display. Being ported on the
+#: ``cardputer-zero`` branch, hardware not yet in hand (2026-09-30), so this is chosen by
+#: ``--platform cardputer`` / ``MESHTERM_PLATFORM`` only — no device-tree auto-detection
+#: until the device reports its own model string.
+#:
+#: The same 53 columns as the PicoCalc, which is why most of its flavour carries over; the
+#: new constraint is rows. It has its own F-key lane deck (Fn+4…8, chips centred over their
+#: keys), dealing the PicoCalc's lanes for now (JP, 2026-09-30). The panel is drawn by a
+#: console host that paints RGB565 pixels itself, so it is not held to a 16-slot palette
+#: (``truecolor``). Provisional until measured on the device: the cadences, taken from the
+#: PicoCalc; ``effects`` off; and the battery, read from the companion until the host's
+#: gauge (a BQ27220) has a known ``power_supply`` name.
+CARDPUTER = Platform(
+    name="cardputer",
+    readable_cols=53,
+    readable_rows=14,
+    frame_border=False,
+    menu_icons=False,
+    dialog_margin=4,
+    header_atoms=("version", "badges", "pulse", "battery"),
+    lane_deck="cardputer",
+    width_reclaim=False,
+    emoji=False,
+    ascii_fold=False,
+    truecolor=True,
+    effects=False,
+    tick_s=2.0,
+    spinner_tick_s=0.5,
+    battery="companion",
+    modifier_watch="tca8418c",
+)
+
+_BY_NAME = {p.name: p for p in (REGULAR, PICOCALC, CARDPUTER)}
 
 #: The active platform. Do not import this name directly (see the module docstring) —
 #: read it through :func:`get_platform`, and change it only through :func:`set_platform`.
@@ -367,6 +412,7 @@ __all__ = [
     "Platform",
     "REGULAR",
     "PICOCALC",
+    "CARDPUTER",
     "without_emoji",
     "PLATFORM",
     "get_platform",

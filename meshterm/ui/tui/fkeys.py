@@ -1,7 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The PicoCalc F-key lane: a fixed footer row of five coloured chips, F1-F5.
+"""The F-key lane: a handheld's fixed footer row of coloured chips, one per function key.
 
-The PicoCalc keyboard has five dedicated function keys; its MCU translates Shift+F1..F5
+**Each platform deals its own lane** (JP, 2026-09-30). What a lane *is* — slots of
+:class:`FPair`, dimmed or live, stripped from a dialog's hint — is shared; everything that
+belongs to one keyboard is a :class:`LaneDeck`, named by ``Platform.lane_deck``: which
+keycodes drive the slots, where the chips sit on the row, how they are drawn, and which of
+a screen's lane definitions it reads. A screen states its lane per deck —
+``Screen.picocalc_lane``, ``Screen.cardputer_lane`` — and the Cardputer's follows the
+PicoCalc's until a screen says otherwise. Both decks having five slots is a coincidence of
+two keyboards, not a rule, and nothing here assumes it: a deck's slot count is its keys.
+
+The rest of this docstring is the PicoCalc deck's design, which the Cardputer's deals for
+now. The PicoCalc keyboard has five dedicated function keys; its MCU translates Shift+F1..F5
 into plain F6-F10 keycodes (measured in P0), so "Shift+key = the opposite action" is
 literal hardware behaviour and the app simply binds all ten.
 
@@ -55,17 +65,17 @@ can never swallow a key that would have worked.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
+from operator import attrgetter
+from typing import Any
 
 from rich.text import Text
 
-#: Every chip is exactly this many cells: a 2-cell key label, a space, a 6-cell
-#: description. Five chips plus four 2-cell gaps sum to exactly 53 — the PicoCalc's
-#: readable width — with nothing left over.
-_CHIP_WIDTH = 9
+from ...platforms import Platform, on_platform
+
+#: A chip's label budget: every lane label is written to fit six cells.
 _DESC_WIDTH = 6
-_GAP = "  "
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,62 +163,172 @@ def default_lane(*, nav: bool = True) -> tuple[FPair | None, ...]:
     )
 
 
-def action_for(lane: Lane, number: int) -> str | None:
-    """The action F-key ``number`` (1-10) resolves to on this lane, or ``None``.
+@dataclass(frozen=True, slots=True)
+class LaneDeck:
+    """One platform's F-key lane: the keys that drive it, where it draws, whose lanes it reads.
 
-    F1-F5 take the slot's plain-key action, F6-F10 (the physical Shift bank) take its
-    companion — or resolve to nothing when the slot has none (a lone slot, or an
-    unassigned one). A *dimmed* slot still resolves: dimming is how the lane draws an
-    action the screen would no-op anyway, and resolving it regardless keeps a lane built
-    from stale metrics from ever swallowing a key that works (see the module docstring).
+    The slots are left to right, and every per-slot tuple here has one entry per slot.
+
+    Attributes:
+        name: What ``Platform.lane_deck`` calls this deck.
+        keys: The F-key number each slot's plain key arrives as.
+        shift_keys: The F-key number each slot's Shift companion arrives as.
+        captions: How each slot's plain key is named on the row: leading a captioned
+            chip, and standing alone, muted, in a slot with nothing assigned.
+        shift_captions: The same, for the Shift bank.
+        columns: The column each chip starts at.
+        chip_width: Cells per chip.
+        captioned: Whether a live chip leads with its key's caption (``F1 Zoom +``) or
+            is its label alone, centred — for a keyboard whose key sits right under the
+            chip, where naming it again only costs the label cells.
+        fill: The theme style of a live chip in the plain bank.
+        shift_fill: The same, while the Shift watcher reports Shift held.
+        read_lane: Reads a screen's lane for this deck.
     """
-    index = (number - 1) % 5
-    if index >= len(lane) or lane[index] is None:
-        return None
-    pair = lane[index]
-    if number > 5:
-        return pair.opp_action or None
-    return pair.action
 
+    name: str
+    keys: tuple[int, ...]
+    shift_keys: tuple[int, ...]
+    captions: tuple[str, ...]
+    shift_captions: tuple[str, ...]
+    columns: tuple[int, ...]
+    chip_width: int
+    captioned: bool
+    fill: str
+    shift_fill: str
+    read_lane: Callable[[Any], Lane]
 
-def _chip(number: int, label: str) -> str:
-    """The exact 9-cell chip body: ``F1 Zoom +`` (``10`` stands in for ``F10``)."""
-    key = f"F{number}" if number < 10 else "10"
-    return f"{key} {label[:_DESC_WIDTH]:<{_DESC_WIDTH}}"
+    def is_shift_key(self, number: int) -> bool:
+        """Whether F-key ``number`` is one of this deck's Shift-bank keys."""
+        return number in self.shift_keys
 
+    def action_for(self, lane: Lane, number: int) -> str | None:
+        """The action F-key ``number`` resolves to on this lane, or ``None``.
 
-def lane_text(lane: Lane, *, shifted: bool = False) -> Text:
-    """Render the lane as five 9-cell chips: coloured fill, white text, 2-cell gaps.
-
-    Args:
-        lane: The five slots.
-        shifted: Show the Shift-bank chips (F6-F10) in the green fill; the plain bank
-            (F1-F5) renders in the gray fill.
-
-    Returns:
-        A one-line :class:`Text`, exactly 53 cells: five 9-cell chips and four 2-cell
-        gaps.
-    """
-    fill = "fkey.chip.shift" if shifted else "fkey.chip"
-    row = Text()
-    for index in range(5):
-        if index:
-            row.append(_GAP)
+        A plain key takes its slot's action, a Shift-bank key its companion — or nothing,
+        where the slot has none (a lone slot, or an unassigned one), and where the key is
+        not one of this deck's at all. A *dimmed* slot still resolves: dimming is how the
+        lane draws an action the screen would no-op anyway, and resolving it regardless
+        keeps a lane built from stale metrics from ever swallowing a key that works (see
+        the module docstring).
+        """
+        if number in self.keys:
+            index, shifted = self.keys.index(number), False
+        elif number in self.shift_keys:
+            index, shifted = self.shift_keys.index(number), True
+        else:
+            return None
         pair = lane[index] if index < len(lane) else None
-        number = index + 6 if shifted else index + 1
-        label = (pair.opp_label if shifted else pair.label) if pair else ""
-        if not label:
-            # Unassigned (no slot, or a lone slot's empty Shift bank): the bare key
-            # number, unfilled — nothing to press here.
-            key = f"F{number}" if number < 10 else "10"
-            row.append(f"{key}{' ' * (_CHIP_WIDTH - len(key))}", style="muted")
-            continue
-        live = pair.opp_enabled if shifted else pair.enabled
-        # A dimmed slot drops the fill and keeps the label, landing in the same muted
-        # "nothing to press" class as an unassigned one — while still saying what the
-        # key is for once it becomes available.
-        row.append(_chip(number, label), style=fill if live else "muted")
-    return row
+        if pair is None:
+            return None
+        if shifted:
+            return pair.opp_action or None
+        return pair.action
+
+    def lane_text(self, lane: Lane, *, shifted: bool = False) -> Text:
+        """Render the lane as this deck's chips: coloured fill, white text, each at its column.
+
+        Args:
+            lane: The slots; any past this deck's last are not drawn.
+            shifted: Show the Shift bank, in :attr:`shift_fill`; the plain bank renders
+                in :attr:`fill`.
+
+        Returns:
+            A one-line :class:`Text`, ending with the last chip.
+        """
+        fill = self.shift_fill if shifted else self.fill
+        captions = self.shift_captions if shifted else self.captions
+        row = Text()
+        for index, column in enumerate(self.columns):
+            row.append(" " * (column - row.cell_len))
+            pair = lane[index] if index < len(lane) else None
+            label = (pair.opp_label if shifted else pair.label) if pair else ""
+            if not label:
+                # Unassigned (no slot, or a lone slot's empty Shift bank): the bare key
+                # caption, unfilled — nothing to press here.
+                row.append(self._body(captions[index]), style="muted")
+                continue
+            live = pair.opp_enabled if shifted else pair.enabled
+            body = f"{captions[index]} {label[:_DESC_WIDTH]:<{_DESC_WIDTH}}"
+            # A dimmed slot drops the fill and keeps the label, landing in the same muted
+            # "nothing to press" class as an unassigned one — while still saying what the
+            # key is for once it becomes available.
+            row.append(
+                self._body(body if self.captioned else label[:_DESC_WIDTH]),
+                style=fill if live else "muted",
+            )
+        return row
+
+    def _body(self, text: str) -> str:
+        """``text`` padded to exactly one chip: left-aligned when captioned, else centred."""
+        if self.captioned:
+            return f"{text:<{self.chip_width}}"
+        return f"{text:^{self.chip_width}}"
+
+
+def _centred_columns(centres_px: tuple[int, ...], *, cell_px: int, width: int) -> tuple[int, ...]:
+    """The start column of a ``width``-cell chip centred on each pixel position."""
+    return tuple(round((centre - width * cell_px / 2) / cell_px) for centre in centres_px)
+
+
+#: The PicoCalc's five dedicated function keys. Its keyboard MCU sends Shift+F1..F5 as
+#: plain F6-F10, so the Shift bank is keys of its own. Every chip is a 2-cell key caption,
+#: a space and a 6-cell label; five chips and four 2-cell gaps sum to exactly 53, the
+#: console's width, with nothing left over.
+PICOCALC_DECK = LaneDeck(
+    name="picocalc",
+    keys=(1, 2, 3, 4, 5),
+    shift_keys=(6, 7, 8, 9, 10),
+    captions=("F1", "F2", "F3", "F4", "F5"),
+    shift_captions=("F6", "F7", "F8", "F9", "10"),
+    columns=(0, 11, 22, 33, 44),
+    chip_width=9,
+    captioned=True,
+    fill="fkey.chip",
+    shift_fill="fkey.chip.shift",
+    read_lane=attrgetter("picocalc_lane"),
+)
+
+#: The Cardputer Zero's number keys 4-8, which sit right under the display: Fn+4..8 are
+#: F4-F8, never the bare digits, since a digit must stay a digit on a screen that takes
+#: typing (JP, 2026-09-30). The keyboard driver sends Shift as a key of its own, and the
+#: console host encodes Shift+Fn+4..8 the way xterm encodes Shift+F4..F8, which
+#: prompt_toolkit reads as F16-F20 — so a desktop terminal with ``--platform cardputer``
+#: drives the same bank. Each chip is centred over its key: M5's own screen-key drawing puts
+#: the five at x = 48, 104, 160, 216 and 272 of the 320-pixel panel, 56 px apart, which in
+#: 6-pixel cells is too tight a pitch for a 9-cell chip to keep a gap, so a chip is its
+#: label alone, centred in eight cells — the key under it needs no naming. It reads the
+#: PicoCalc's lanes for now (see :meth:`~meshterm.ui.tui.screen.Screen.cardputer_lane`).
+CARDPUTER_DECK = LaneDeck(
+    name="cardputer",
+    keys=(4, 5, 6, 7, 8),
+    shift_keys=(16, 17, 18, 19, 20),
+    captions=("F4", "F5", "F6", "F7", "F8"),
+    shift_captions=("F4", "F5", "F6", "F7", "F8"),
+    columns=_centred_columns((48, 104, 160, 216, 272), cell_px=6, width=8),
+    chip_width=8,
+    captioned=False,
+    fill="fkey.chip.cardputer",
+    shift_fill="fkey.chip.cardputer.shift",
+    read_lane=attrgetter("cardputer_lane"),
+)
+
+#: Every deck, by the name ``Platform.lane_deck`` gives it.
+DECKS: dict[str, LaneDeck] = {deck.name: deck for deck in (PICOCALC_DECK, CARDPUTER_DECK)}
+
+_DECK: LaneDeck | None = None
+
+
+def active_deck() -> LaneDeck | None:
+    """The active platform's deck, or ``None`` where its footer is a hint line instead."""
+    return _DECK
+
+
+@on_platform
+def _bind(platform: Platform) -> None:
+    """Deal the platform's deck (see :attr:`~meshterm.platforms.Platform.lane_deck`)."""
+    global _DECK
+    _DECK = DECKS[platform.lane_deck] if platform.lane_deck else None
 
 
 #: The screen action each key notation in a footer hint dispatches — the vocabulary the

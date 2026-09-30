@@ -84,29 +84,33 @@ def note_shift_bank_key() -> None:
     _last_shift_bank_at = time.monotonic()
 
 
-def _find_keyboard() -> Path | None:
-    """The PicoCalc keyboard's event device, or ``None`` when it isn't this machine."""
+def _find_keyboard(keyboard: str) -> Path | None:
+    """The event device whose name contains ``keyboard``, or ``None`` when it isn't this machine."""
     try:
         for entry in sorted(_SYS_INPUT.glob("event*")):
             name = (entry / "device" / "name").read_text().strip().lower()
-            if "picocalc" in name:
+            if keyboard.lower() in name:
                 return Path("/dev/input") / entry.name
     except OSError:
         pass
     return None
 
 
-def start(on_change: Callable[[], None]) -> bool:
+def start(on_change: Callable[[], None], keyboard: str) -> bool:
     """Start the watcher thread if this machine has the keyboard; ``True`` if it engaged.
 
     Args:
         on_change: Called (from the watcher thread) whenever the Shift state flips —
             the session wraps this in a thread-safe repaint request.
+        keyboard: The platform's keyboard, as its input device names itself
+            (``Platform.modifier_watch``): ``picocalc`` on the PicoCalc, ``tca8418c`` on the
+            Cardputer Zero, whose driver holds Shift down in the event stream for as long
+            as its sticky Shift is armed, so a tapped Shift flips the lane as a held one does.
     """
     global _thread
     if _thread is not None:
         return True
-    device = _find_keyboard()
+    device = _find_keyboard(keyboard)
     if device is None:
         return False
     try:

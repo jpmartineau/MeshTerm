@@ -128,16 +128,16 @@ def test_packet_viewer_lane_names_the_ends_of_the_list_not_the_body() -> None:
 
     lone = PacketViewer([old], 0, resolve=lambda h: "")
     lone.note_metrics(4, 20)  # a short body in a roomy box: nothing to page either
-    assert [pair.opp_label for pair in lone.fkey_lane[3:]] == ["Oldest", "Newest"]
-    assert not any(pair.enabled or pair.opp_enabled for pair in lone.fkey_lane[3:])
+    assert [pair.opp_label for pair in lone.picocalc_lane[3:]] == ["Oldest", "Newest"]
+    assert not any(pair.enabled or pair.opp_enabled for pair in lone.picocalc_lane[3:])
 
     # A second packet lights the jumps on their own — the pager still needs a tall body.
     pair_view = PacketViewer([newer, old], 0, resolve=lambda h: "")
     pair_view.note_metrics(4, 20)
-    assert [pair.opp_enabled for pair in pair_view.fkey_lane[3:]] == [True, True]
-    assert [pair.enabled for pair in pair_view.fkey_lane[3:]] == [False, False]
+    assert [pair.opp_enabled for pair in pair_view.picocalc_lane[3:]] == [True, True]
+    assert [pair.enabled for pair in pair_view.picocalc_lane[3:]] == [False, False]
     pair_view.note_metrics(80, 20)
-    assert [pair.enabled for pair in pair_view.fkey_lane[3:]] == [True, True]
+    assert [pair.enabled for pair in pair_view.picocalc_lane[3:]] == [True, True]
 
 
 def test_packet_viewer_follows_the_stream_off_the_top_of_a_live_list() -> None:
@@ -203,7 +203,7 @@ def test_packet_viewer_home_resumes_the_stream() -> None:
 
     lone = PacketViewer(feed[:1], 0, resolve=lambda h: "", source=lambda: feed[:1])
     lone.note_metrics(4, 20)  # a short body in a roomy box: nothing to page
-    assert [pair.opp_enabled for pair in lone.fkey_lane[3:]] == [True, True]
+    assert [pair.opp_enabled for pair in lone.picocalc_lane[3:]] == [True, True]
 
 
 def test_packet_viewer_without_a_source_stays_a_snapshot() -> None:

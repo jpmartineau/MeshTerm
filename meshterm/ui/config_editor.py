@@ -532,7 +532,7 @@ class _ConfigMenu(SelectScreen):
         return splice_hint(base, f"{REVEAL_KEY} {verb} PIN")
 
     @property
-    def fkey_lane(self):
+    def picocalc_lane(self):
         """The list's lane with the reveal on F3 — the slot a delete-less list leaves free.
 
         F1/F2 are this grouped list's section jumps, F4/F5 the pager; F3 is what a select
@@ -542,7 +542,7 @@ class _ConfigMenu(SelectScreen):
         """
         from .tui.fkeys import FPair
 
-        lane = list(super().fkey_lane)
+        lane = list(super().picocalc_lane)
         if self._conceals:
             lane[2] = FPair("Hide" if self._revealed else "Reveal", "reveal")
         return lane

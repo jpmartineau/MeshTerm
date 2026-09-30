@@ -582,14 +582,14 @@ async def test_ctrl_r_reads_only_a_highlighted_setting() -> None:
     menu.future = loop.create_future()
     assert menu._current_choice().value == "name"
     assert menu.footer_hint.endswith("Enter select · ^R read · Esc back")
-    assert menu.fkey_lane[2].label == "Read" and menu.fkey_lane[2].enabled
+    assert menu.picocalc_lane[2].label == "Read" and menu.picocalc_lane[2].enabled
     menu.handle("retry")
     assert menu.future.result() == ReadOne("name")
 
     menu.future = loop.create_future()
     menu.handle("end")  # the last action row: nothing there to read
     assert "^R" not in menu.footer_hint
-    assert not menu.fkey_lane[2].enabled
+    assert not menu.picocalc_lane[2].enabled
     menu.handle("retry")
     assert not menu.future.done()
 

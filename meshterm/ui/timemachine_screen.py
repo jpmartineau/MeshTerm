@@ -238,7 +238,7 @@ class TimeMachineScreen(Screen):
         return f"↑↓ PgUp/PgDn scroll · w window{scope} · Esc back"
 
     @property
-    def fkey_lane(self):
+    def picocalc_lane(self):
         """The shared pager, plus the window cycle on F3.
 
         ``w`` is the whole point of this screen — the same history at several spans — and

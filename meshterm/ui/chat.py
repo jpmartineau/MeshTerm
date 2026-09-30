@@ -74,7 +74,7 @@ class ChatScreen(Screen):
     floating = False
 
     @property
-    def fkey_lane(self):
+    def picocalc_lane(self):
         """The PicoCalc lane in the transcript's own words: Latest/Oldest, Paths, Retry.
 
         The shared lane's Shift bank dispatches the plain ``end``/``home`` actions, but

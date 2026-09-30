@@ -579,9 +579,12 @@ derived sweep that runs **every** registered command twice, once plain and once 
 
 ### Platforms
 
-One codebase, two flavours: **regular** (desktop/ssh, 72 cols, truecolor, emoji) and
+One codebase, three flavours: **regular** (desktop/ssh, 72 cols, truecolor, emoji),
 **picocalc** (the PicoCalc's 53×26/53×40 framebuffer console, 16 palette slots, a
-512-glyph font, no emoji). A frozen `Platform` spec (`meshterm/platforms.py`) resolves
+512-glyph font, no emoji), and **cardputer** (M5Stack's Cardputer Zero, 53×14 in 6×12
+cells on a 320×170 panel a console host paints itself, truecolor, no emoji — being ported
+on the `cardputer-zero` branch, hardware not yet in hand, so it is chosen by flag only).
+A frozen `Platform` spec (`meshterm/platforms.py`) resolves
 once at boot; consumers bind at platform-switch time via `platforms.on_platform` — never
 branch on the platform per frame, and never `from meshterm.platforms import PLATFORM`.
 
@@ -642,7 +645,21 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   anything the desktop reaches by a chord or a bare letter (a list's `^PgUp/^PgDn` section
   jumps, the Time Machine's `w`, the map's `^U`, a row's `Del`) earns a slot — otherwise
   it is undiscoverable on the device.
+- **Each handheld deals its own lane.** Everything about the lane that belongs to one
+  keyboard is a `LaneDeck` (`fkeys.PICOCALC_DECK`, `fkeys.CARDPUTER_DECK`), named by
+  `Platform.lane_deck`: which keycodes drive the slots, where the chips sit on the row, how
+  they are drawn, and which of a screen's definitions it reads. A screen defines
+  `picocalc_lane`, and `cardputer_lane` follows it until that screen overrides it (JP,
+  2026-09-30: same entries for now, Fn+L/M being an awkward reach for paging). Override
+  the per-deck property, never `fkey_lane`, which only resolves the active deck; resolve a
+  key or draw a row through the deck (`deck.action_for`, `deck.lane_text`), never by
+  assuming F1–F5. Both decks having five slots is a coincidence, not a rule. The
+  Cardputer's lane is **Fn+4…8** (F4–F8), never the bare digits, since a digit must stay a
+  digit where the app takes typing; Shift with them arrives as F16–F20 (xterm's encoding,
+  which the console host copies). Each chip is centred over its key, eight cells of label,
+  white on the fn key's orange-red, and white on dark blue while Shift is held.
 - `meshterm specimen` prints the whole visual language through the real funnels — the
   acceptance card on-device, a preview under `--platform picocalc` on the desktop.
-- Dev loop: `meshterm --mock --platform picocalc` in a 53×40 window; the gallery and
-  `tests/test_theme16.py` carry the contracts.
+- Dev loop: `meshterm --mock --platform picocalc` in a 53×40 window, or
+  `--platform cardputer` in a 53×14 one; the gallery and `tests/test_theme16.py` carry the
+  contracts.

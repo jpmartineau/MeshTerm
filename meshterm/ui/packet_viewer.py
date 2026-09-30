@@ -404,7 +404,7 @@ class PacketViewer(Screen):
     grow_only = True
 
     @property
-    def fkey_lane(self):
+    def picocalc_lane(self):
         """The shared pager over the body, with the jumps renamed for what they land on.
 
         Home and End here don't reach the ends of a *body* — they reach the ends of the

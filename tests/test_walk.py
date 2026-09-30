@@ -428,11 +428,11 @@ def test_walk_echoes_the_find_query_above_the_matches_it_narrows() -> None:
 
 def test_walk_fkey_lane_gives_you_its_own_slot_over_the_pagers_ends() -> None:
     """``You`` is a verb of this screen (F3), not an end of the list the pager scrolls."""
-    from meshterm.ui.tui.fkeys import action_for
+    from meshterm.ui.tui.fkeys import PICOCALC_DECK
 
     screen = _screen(_topo())
     screen.render_body(80)
-    lane = screen.fkey_lane
+    lane = screen.picocalc_lane
 
     assert [pair.label if pair else None for pair in lane] == [
         None,
@@ -441,26 +441,26 @@ def test_walk_fkey_lane_gives_you_its_own_slot_over_the_pagers_ends() -> None:
         "Page ↓",
         "Page ↑",
     ]
-    assert action_for(lane, 3) == "locate"
+    assert PICOCALC_DECK.action_for(lane, 3) == "locate"
     assert lane[2].opp_label == ""  # nothing is the opposite of going home
     # And the pager's Shift bank means what it means everywhere else: the list's two ends.
-    assert lane[4].opp_label == "Top" and action_for(lane, 10) == "home"
-    assert lane[3].opp_label == "Bottom" and action_for(lane, 9) == "end"
+    assert lane[4].opp_label == "Top" and PICOCALC_DECK.action_for(lane, 10) == "home"
+    assert lane[3].opp_label == "Bottom" and PICOCALC_DECK.action_for(lane, 9) == "end"
 
 
 def test_walk_you_dims_once_the_focus_is_already_us() -> None:
     """Dim says *a thing here, just not right now* — there is nowhere to come back from."""
     screen = _screen(_topo())
     screen.render_body(80)
-    assert screen.fkey_lane[2].enabled is False  # opens on us, trail of one
+    assert screen.picocalc_lane[2].enabled is False  # opens on us, trail of one
 
     screen.handle("enter")  # walked away: now there is
-    assert screen.fkey_lane[2].enabled is True
+    assert screen.picocalc_lane[2].enabled is True
 
     screen.handle("locate")
-    assert screen.fkey_lane[2].enabled is False
+    assert screen.picocalc_lane[2].enabled is False
     screen.handle("text", "a")  # a find narrows the list off our own neighbours too
-    assert screen.fkey_lane[2].enabled is True
+    assert screen.picocalc_lane[2].enabled is True
 
 
 def test_walk_the_fan_is_all_east_and_holds_no_came_from() -> None:

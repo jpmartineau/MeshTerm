@@ -216,7 +216,7 @@ class MessagePathsScreen(Screen):
         return " · ".join(parts)
 
     @property
-    def fkey_lane(self):
+    def picocalc_lane(self):
         """The shared pager, dimmed while every arrival is already on screen.
 
         Both banks move the *selection* here — the pager by a windowful, the jumps to the

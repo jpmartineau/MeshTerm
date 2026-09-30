@@ -137,7 +137,7 @@ class MapScreen(Screen):
     find_enabled = True
 
     @property
-    def fkey_lane(self):
+    def picocalc_lane(self):
         r"""The PicoCalc lane: three ways to frame the view, then the zoom rocker.
 
         The map is the one screen that repurposes the nav actions wholesale: PgUp/PgDn
@@ -1032,7 +1032,7 @@ class MapScreen(Screen):
         """Our own node among the markers, or ``None`` when the map can't place us.
 
         A device with no location fix of its own is simply absent from the marker list, so
-        ``You`` has nowhere to go and its chip dims (see :attr:`fkey_lane`).
+        ``You`` has nowhere to go and its chip dims (see :attr:`picocalc_lane`).
         """
         return next((m for m in self._markers if m.is_self), None)
 
@@ -1130,7 +1130,7 @@ class LocationPickScreen(MapScreen):
     find_enabled = False
 
     @property
-    def fkey_lane(self):  # type: ignore[override]
+    def picocalc_lane(self):  # type: ignore[override]
         """The map's lane minus the two verbs a picker has no use for.
 
         ``Frame`` goes because find is off here — nothing can ever be typed to frame, so

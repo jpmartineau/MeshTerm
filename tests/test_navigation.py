@@ -974,16 +974,16 @@ def test_the_main_menu_lane_puts_the_way_out_on_f3() -> None:
     """``Quit?`` on F3 asks; its Shift half, F8, is ``Quit!``, which doesn't."""
     from meshterm.ui.menu import _MainMenu
     from meshterm.ui.menus import section_heading
-    from meshterm.ui.tui.fkeys import action_for
+    from meshterm.ui.tui.fkeys import PICOCALC_DECK
 
     menu = _MainMenu(
         "menu",
         [section_heading("A"), Choice("alpha", 1), section_heading("B"), Choice("beta", 2)],
     )
-    lane = menu.fkey_lane
+    lane = menu.picocalc_lane
     assert (lane[2].label, lane[2].opp_label) == ("Quit?", "Quit!")
-    assert action_for(lane, 3) == "quit"
-    assert action_for(lane, 8) == "quit_now"
+    assert PICOCALC_DECK.action_for(lane, 3) == "quit"
+    assert PICOCALC_DECK.action_for(lane, 8) == "quit_now"
     assert lane[0].label == "Sect ↑", "the section jumps keep F1/F2"
 
 

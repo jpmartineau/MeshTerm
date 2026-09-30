@@ -126,12 +126,14 @@ _KEY_ACTIONS: dict[Any, str] = {
     Keys.Delete: "delete",
     Keys.Tab: "tab",
     Keys.BackTab: "shift_tab",
-    # The function keys, for the PicoCalc's F-key lane (F6–F10 are its Shift bank —
-    # the MCU translates Shift+F1..F5 into these plain keycodes). The session resolves
-    # them against the top screen's lane in _dispatch; on platforms without the lane
-    # they resolve to nothing and fall away. Alt+Fn is the kernel's VT switch on the
-    # device and must never be bound.
-    **{getattr(Keys, f"F{n}"): f"f{n}" for n in range(1, 11)},
+    # The function keys, for a handheld's F-key lane. All of them, since which keycodes
+    # drive the lane is the platform's deck's business, not this table's: the PicoCalc's
+    # MCU sends its Shift bank as F6–F10, the Cardputer's console host sends Shift+F4..F8
+    # as xterm does, which prompt_toolkit reads as F16–F20. The session resolves them
+    # against the top screen's lane in _dispatch; a key the deck doesn't use, or a
+    # platform without a lane, resolves to nothing and falls away. Alt+Fn is the kernel's
+    # VT switch on the PicoCalc and must never be bound.
+    **{getattr(Keys, f"F{n}"): f"f{n}" for n in range(1, 25)},
     # The Ctrl-letter chords, generated from the one table above so a chord can never be
     # bound without its right-Ctrl rescue (or rescued into an action nothing binds).
     **{
@@ -1641,12 +1643,13 @@ class TuiSession:
             main: The coroutine driving the session (typically the menu loop).
         """
         self._app = self._build_app()
-        if get_platform().modifier_watch:
+        keyboard = get_platform().modifier_watch
+        if keyboard:
             # The Shift watcher flips the F-key lane's labels live. It reports from its
             # own thread; hop onto the app loop for the repaint. Failure to engage (no
             # device, no permission) just leaves the lane static — see the module doc.
             loop = asyncio.get_running_loop()
-            modifier_watch.start(lambda: loop.call_soon_threadsafe(self.invalidate))
+            modifier_watch.start(lambda: loop.call_soon_threadsafe(self.invalidate), keyboard)
         box: dict[str, BaseException] = {}
         task: dict[str, asyncio.Future] = {}
 
@@ -1995,9 +1998,10 @@ class TuiSession:
         slots whose action would do nothing, and that reading comes from the scroll
         metrics this paint is about to record (see :func:`~meshterm.ui.tui.fkeys.default_lane`).
         """
-        if not get_platform().footer_fkeys:
+        deck = fkeys.active_deck()
+        if deck is None:
             return None
-        return lambda: fkeys.lane_text(active.fkey_lane, shifted=modifier_watch.shift_down())
+        return lambda: deck.lane_text(active.fkey_lane, shifted=modifier_watch.shift_down())
 
     def _render_float_layer(self, index: int) -> ANSI:
         """Render the ``index``-th floating dialog (bottom-to-top) as a centered box."""
@@ -2077,18 +2081,21 @@ class TuiSession:
         the terminal may draw narrower than pt reserves for it (an emoji) upgrades itself to a
         full repaint at compose time — see :meth:`_emit`.
         """
-        # An F-key resolves against the top screen's lane (see ui.tui.fkeys) into a
-        # normal screen action; an unassigned slot, or a platform without the lane,
-        # drops the press here.
+        # An F-key resolves against the top screen's lane on the platform's deck (see
+        # ui.tui.fkeys) into a normal screen action; an unassigned slot, a key the deck
+        # doesn't use, or a platform without a lane drops the press here.
         if len(action) in (2, 3) and action[0] == "f" and action[1:].isdigit():
             number = int(action[1:])
-            if number > 5:
+            deck = fkeys.active_deck()
+            if deck is None:
+                return
+            if deck.is_shift_key(number):
                 # However this resolves, the code only exists because Shift was
-                # physically down for the MCU to emit it — latch the lane's shifted
+                # physically down for the keyboard to emit it — latch the lane's shifted
                 # display against the release/re-assert flicker (see modifier_watch).
                 modifier_watch.note_shift_bank_key()
             top = self.top or self._base_screen()
-            resolved = fkeys.action_for(top.fkey_lane, number) if top else None
+            resolved = deck.action_for(top.fkey_lane, number) if top else None
             if resolved is None:
                 return
             action = resolved

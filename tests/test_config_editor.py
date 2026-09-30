@@ -234,11 +234,11 @@ def test_the_lane_chip_and_the_key_are_one_behaviour() -> None:
     One behaviour reached two ways, not a second copy of it.
     """
     screen = _info_screen(_SNAPSHOT)
-    assert screen.fkey_lane[2].label == "Reveal"
+    assert screen.picocalc_lane[2].label == "Reveal"
 
     screen.handle("reveal")
     assert "123456" in _pin_row(screen.render_body(72))
-    assert screen.fkey_lane[2].label == "Hide"
+    assert screen.picocalc_lane[2].label == "Hide"
 
 
 def test_the_footer_names_what_the_press_would_do_now() -> None:
@@ -257,9 +257,9 @@ def test_a_page_with_no_pin_advertises_no_key_for_it() -> None:
     """
     screen = _info_screen({k: v for k, v in _SNAPSHOT.items() if k != "ble_pin"})
     assert "PIN" not in screen.footer_hint
-    assert screen.fkey_lane[2] is None
+    assert screen.picocalc_lane[2] is None
     screen.handle("reveal")
-    assert screen.fkey_lane[2] is None
+    assert screen.picocalc_lane[2] is None
 
 
 def test_uncovering_the_pin_keeps_the_reader_where_they_were() -> None:
@@ -321,12 +321,12 @@ def test_the_editor_reveals_on_the_same_chord_as_the_info_page() -> None:
     """
     menu = _editor(_SNAPSHOT)
     assert f"{REVEAL_KEY} show PIN" in menu.footer_hint
-    assert menu.fkey_lane[2].label == "Reveal"
+    assert menu.picocalc_lane[2].label == "Reveal"
 
     menu.handle("reveal")
     assert "123456" in _pin_row(menu.render_body(72))
     assert f"{REVEAL_KEY} hide PIN" in menu.footer_hint
-    assert menu.fkey_lane[2].label == "Hide"
+    assert menu.picocalc_lane[2].label == "Hide"
 
 
 def test_revealing_keeps_the_filter_and_the_row_the_reader_was_on() -> None:
@@ -350,7 +350,7 @@ def test_an_editor_over_a_device_with_no_pin_offers_no_reveal() -> None:
     """An editor over a device with no PIN offers no reveal either, footer or lane."""
     menu = _editor({k: v for k, v in _SNAPSHOT.items() if k != "ble_pin"})
     assert "PIN" not in menu.footer_hint
-    assert menu.fkey_lane[2] is None
+    assert menu.picocalc_lane[2] is None
 
 
 # -- contact share URL ----------------------------------------------------------

@@ -145,11 +145,11 @@ class RegionMenu(SelectScreen):
         return current is not None and current.deletable
 
     @property
-    def fkey_lane(self):
+    def picocalc_lane(self):
         """The list's lane with ``Read`` on F3 and ``Remove`` behind it."""
         from .tui.fkeys import FPair
 
-        lane = list(super().fkey_lane)
+        lane = list(super().picocalc_lane)
         lane[2] = FPair(
             "Read",
             "retry",

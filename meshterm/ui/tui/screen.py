@@ -122,7 +122,32 @@ class Screen:
 
     @property
     def fkey_lane(self):
-        """The screen's F-key lane (the PicoCalc footer; see :mod:`~meshterm.ui.tui.fkeys`).
+        """The screen's F-key lane on the active platform (see :mod:`~meshterm.ui.tui.fkeys`).
+
+        Each handheld deals its own: this reads whichever of the screen's lane definitions
+        the platform's deck names (:attr:`picocalc_lane`, :attr:`cardputer_lane`). A
+        platform with no lane — the desktop, whose footer is the hint line — gets an empty
+        one. Override the per-deck definitions, never this.
+        """
+        from .fkeys import EMPTY_LANE, active_deck
+
+        deck = active_deck()
+        return EMPTY_LANE if deck is None else deck.read_lane(self)
+
+    @property
+    def cardputer_lane(self):
+        """The screen's lane on the Cardputer Zero: the PicoCalc's, for now.
+
+        JP, 2026-09-30: the Cardputer deals the same entries as the PicoCalc until decided
+        otherwise — its Page Up/Down are real keys, but Fn+L/M is an awkward reach. Both
+        having five slots is a coincidence of two keyboards, so this is the one place the
+        two are tied; a screen whose Cardputer lane should differ overrides this.
+        """
+        return self.picocalc_lane
+
+    @property
+    def picocalc_lane(self):
+        """The screen's lane on the PicoCalc (see :mod:`~meshterm.ui.tui.fkeys`).
 
         Five slots, F1–F5, each with an optional F6–F10 Shift-bank companion. A slot is
         for functionality that is otherwise hard to reach — Enter/Esc never appear, since
@@ -613,7 +638,7 @@ class ScrollScreen(Screen):
     """
 
     @property
-    def fkey_lane(self):
+    def picocalc_lane(self):
         """The shared lane, its nav slots dimmed when the content already fits.
 
         Every nav key here scrolls and nothing else, so a result window short enough to
@@ -719,7 +744,7 @@ class BusyScreen(Screen):
     modal = True  # work in flight owns the keyboard; ^W must not unwind out from under it
 
     @property
-    def fkey_lane(self):
+    def picocalc_lane(self):
         """No lane at all: this screen swallows every key, so none of them do anything."""
         from .fkeys import EMPTY_LANE
 

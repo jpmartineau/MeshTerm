@@ -975,10 +975,10 @@ def test_screen_cycles_windows_and_caches(tmp_path: Path) -> None:
     # The F-key chip is the same behaviour under another name — the only way a platform
     # that draws no hint line can learn that `w` exists at all. It names the span it takes
     # you *to*, since the title already says where you are.
-    assert screen.fkey_lane[2].label == "▸ all"
+    assert screen.picocalc_lane[2].label == "▸ all"
     screen.handle("window")
     assert "all time" in screen.title
-    assert screen.fkey_lane[2].label == "▸ 24 h"  # the ring wraps back around
+    assert screen.picocalc_lane[2].label == "▸ 24 h"  # the ring wraps back around
 
 
 def test_picocalc_window_ring_stops_at_30_days() -> None:
@@ -996,7 +996,7 @@ def test_picocalc_window_ring_stops_at_30_days() -> None:
     assert "7 d" in screen.title  # opens on 7 d, as everywhere
     screen.handle("text", "w")
     assert "30 d" in screen.title
-    assert screen.fkey_lane[2].label == "▸ 24 h"  # never "▸ all" on this ring
+    assert screen.picocalc_lane[2].label == "▸ 24 h"  # never "▸ all" on this ring
     screen.handle("window")
     assert "24 h" in screen.title  # wrapped straight past where all time would sit
 

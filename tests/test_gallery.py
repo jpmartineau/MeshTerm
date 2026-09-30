@@ -1533,8 +1533,8 @@ def test_gallery_screen_fits_its_platform(
     # hint strings at all: the fixed F-key lane replaces them (Platform.footer_fkeys),
     # so what must fit there is the screen's lane.
     if platform.footer_fkeys:
-        lane = fkeys.lane_text(screen.fkey_lane)
-        shifted = fkeys.lane_text(screen.fkey_lane, shifted=True)
+        lane = fkeys.PICOCALC_DECK.lane_text(screen.picocalc_lane)
+        shifted = fkeys.PICOCALC_DECK.lane_text(screen.picocalc_lane, shifted=True)
         assert cell_len(lane.plain) <= cols, f"F-lane {cell_len(lane.plain)} cells: {lane.plain!r}"
         assert cell_len(shifted.plain) <= cols, (
             f"shifted F-lane {cell_len(shifted.plain)} cells: {shifted.plain!r}"

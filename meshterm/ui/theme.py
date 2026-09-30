@@ -185,6 +185,12 @@ MESH_THEME = Theme(
         # only PicoCalc's footer_fkeys ever asks for them.
         "fkey.chip": "bold #ffffff on #475569",
         "fkey.chip.shift": "bold #ffffff on #16a34a",
+        # The Cardputer Zero deck's fills, taken from its own keyboard (JP, 2026-09-30):
+        # the orange-red the fn key and its F4–F8 legends are printed in (#ff6633, the
+        # sticker artwork's flat value), and while Shift is held, the dark blue of the
+        # Shift key in M5's product photo.
+        "fkey.chip.cardputer": "bold #ffffff on #ff6633",
+        "fkey.chip.cardputer.shift": "bold #ffffff on #0f72bd",
         # The prose voices — what a markdown page's inline marks are drawn in (see
         # ui.markdown). Headings borrow the styles the rest of the app already heads
         # sections with (``brand``, ``accent``), so only the *body* marks need names of
@@ -378,6 +384,11 @@ MESH_THEME_16 = Theme(
         # Shift bank, white text on both.
         "fkey.chip": "bold color(15) on color(7)",
         "fkey.chip.shift": "bold color(15) on color(2)",
+        # The Cardputer deck's fills, for name parity: that panel is truecolor, so these
+        # are only its colours' nearest slots — red for the fn key's orange, blue for the
+        # Shift blue.
+        "fkey.chip.cardputer": "bold color(15) on color(1)",
+        "fkey.chip.cardputer.shift": "bold color(15) on color(4)",
         # Prose on the console. The page's body text is the default light grey (slot 7),
         # so emphasis is the one place the VT's bold-is-brightness rule *is* the design:
         # ``md.strong`` says bold on purpose and lands on white, exactly the step up the

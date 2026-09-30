@@ -244,7 +244,7 @@ class _KeylessDialog(Screen):
     modal = True
 
     @property
-    def fkey_lane(self):
+    def picocalc_lane(self):
         """No slots: nothing on a prompt pages, jumps, or needs promoting off a chord."""
         from .fkeys import EMPTY_LANE
 

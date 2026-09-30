@@ -265,7 +265,7 @@ class TracingDialog(Screen):
     footer_hint = "Enter/Esc abort"
 
     @property
-    def fkey_lane(self):
+    def picocalc_lane(self):
         """No lane: the dialog's only verb is abort, and it already answers to Enter and Esc."""
         from .tui.fkeys import EMPTY_LANE
 
