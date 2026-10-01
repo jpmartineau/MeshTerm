@@ -107,7 +107,7 @@ def grab(env: dict[str, str], fb: str) -> bytes:
     except subprocess.TimeoutExpired:
         sys.exit(f"picocalc_shot: {host} stopped answering mid-capture")
     if done.returncode == 255:
-        sys.exit(f"picocalc_shot: can't reach {user}@{host} over SSH — is the PicoCalc on and "
+        sys.exit(f"picocalc_shot: can't reach {user}@{host} over SSH. Is the PicoCalc on and "
                  f"on Wi-Fi?\n{done.stderr.decode(errors='replace').strip()}")
     if done.returncode != 0:
         sys.exit(f"picocalc_shot: the device side failed (exit {done.returncode}):\n"
@@ -216,7 +216,7 @@ def main() -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(png(w, h, rows))
     if not any(p != b"\x00\x00\x00" for p in pixels):
-        print("picocalc_shot: the frame is entirely black — the console may be blanked",
+        print("picocalc_shot: the frame is entirely black; the console may be blanked",
               file=sys.stderr)
     print(f"{w}x{h} from the panel", file=sys.stderr)
     print(target)
