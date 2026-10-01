@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Render a string as a scannable QR code in the terminal, using half-block characters.
+"""Render a string as a scannable QR code in the terminal, in half blocks or in braille.
 
 Each character cell stacks two vertical modules — ``▀`` (upper only), ``▄`` (lower only),
 ``█`` (both), space (neither) — so a code renders at half the row height of a full-block
-one. Where the console font's braille is solid (:attr:`~meshterm.platforms.Platform.
-solid_braille`, the PicoCalc), a code too big for its frame in half blocks steps down to
-**braille**, two modules across and four down in every cell: half the module, a quarter
-of the area, and still every module touching its neighbours, which is what a camera
-needs of it. Modules are always drawn **white on black**: the code's dark modules as white ink,
+one. Where the console font draws braille solid (:attr:`~meshterm.platforms.Platform.
+solid_braille`, the PicoCalc), every code is drawn in **braille** instead: one module a
+dot, eight a cell, two across and four down — a quarter of the area, with every module
+still touching its neighbours, which is what a camera needs of it. Modules are always
+drawn **white on black**: the code's dark modules as white ink,
 its light modules and quiet zone as a black field, whatever colour theme the terminal is
 running. A phone camera reads contrast, and pure white on pure black is the most of it a
 screen has; a light-on-dark code is what every scanner made this decade expects to meet
@@ -63,8 +63,8 @@ _STYLE = "qr"
 #: The fits a code tries, in order, until one is small enough for the frame drawing it:
 #: the standard code first, then a lighter error level (a screen is never smudged, so the
 #: redundancy buys nothing a camera needs), then the narrower quiet zone. A contact card
-#: — a name, a 64-hex key — is 57 cells across and 29 rows tall at the standard fit; the
-#: PicoCalc panel is 53 across, and a regular terminal is 24 rows.
+#: — a name, a 64-hex key — is 57 cells across and 29 rows tall at the standard fit in half
+#: blocks (29 by 15 in braille); a regular terminal is 24 rows.
 _FITS: tuple[tuple[str, int], ...] = (("m", 4), ("l", 4), ("m", 2), ("l", 2))
 
 
@@ -105,20 +105,20 @@ class _Grid:
 #: One module a cell, two a row — the code every terminal can draw.
 _HALF_BLOCK = _Grid(across=1, down=2, glyph=lambda block: _GLYPH[(block[0][0], block[1][0])])
 
-#: Two modules a cell, four a row — half the module, so only where braille is solid.
+#: One module a dot: two a cell, four a row — only where the font draws braille solid.
 _BRAILLE = _Grid(across=2, down=4, glyph=_braille)
 
-#: The grids a fitted code may be drawn on, largest module first: a code tries every one
-#: of :data:`_FITS` on a grid before it shrinks to the next. Bound per platform — the
-#: braille grid is only offered where the font draws braille solid.
-_GRIDS: tuple[_Grid, ...] = (_HALF_BLOCK,)
+#: The grid every code on this platform is drawn on. Bound per platform: braille where the
+#: font tiles it, since a desktop font's braille is dotted and a code drawn in it scans as
+#: nothing.
+_GRID = _HALF_BLOCK
 
 
 @on_platform
 def _bind(platform: Platform) -> None:
-    """Offer the braille grid where the console font tiles it (now and on switches)."""
-    global _GRIDS
-    _GRIDS = (_HALF_BLOCK, _BRAILLE) if platform.solid_braille else (_HALF_BLOCK,)
+    """Draw codes in braille where the console font tiles it (now and on switches)."""
+    global _GRID
+    _GRID = _BRAILLE if platform.solid_braille else _HALF_BLOCK
 
 
 @lru_cache(maxsize=8)
@@ -129,8 +129,8 @@ def _make(data: str, error: str) -> segno.QRCode:
     return segno.make(data, error=error)
 
 
-def _draw(code: segno.QRCode, border: int, grid: _Grid = _HALF_BLOCK, *, indent: int = 0) -> Text:
-    """Draw a segno code on ``grid``, ``border`` light modules around it.
+def _draw(code: segno.QRCode, border: int, *, indent: int = 0) -> Text:
+    """Draw a segno code on the platform's grid, ``border`` light modules around it.
 
     ``indent`` is the one way a code is ever moved across a line: the same run of bare
     cells in front of *every* row. A code must never be justified — Rich's centring
@@ -138,6 +138,7 @@ def _draw(code: segno.QRCode, border: int, grid: _Grid = _HALF_BLOCK, *, indent:
     modules loses cells and lands a column off its neighbours, and a finder square one
     row skewed is a code no camera can lock on to.
     """
+    grid = _GRID
     rows = [[bool(v) for v in row] for row in code.matrix_iter(border=border)]
     cols, _ = grid.cells(len(rows))
     # Pad the right and the bottom out to whole cells with light modules, so the last
@@ -162,7 +163,7 @@ def _draw(code: segno.QRCode, border: int, grid: _Grid = _HALF_BLOCK, *, indent:
 
 
 def qr_text(data: str, *, error: str = "m", border: int = _BORDER) -> Text:
-    """Render ``data`` as a QR code built from half-block characters.
+    """Render ``data`` as a QR code, in half blocks or — where braille is solid — braille.
 
     Args:
         data: The string to encode (e.g. a ``meshcore://channel/add`` share URL).
@@ -176,31 +177,27 @@ def qr_text(data: str, *, error: str = "m", border: int = _BORDER) -> Text:
     return _draw(_make(data, error), border)
 
 
-def _fit(data: str, width: int, height: int | None) -> tuple[segno.QRCode, int, _Grid] | None:
-    """The first fit within ``width`` cells and ``height`` rows, as (code, border, grid).
+def _fit(data: str, width: int, height: int | None) -> tuple[segno.QRCode, int] | None:
+    """The first of :data:`_FITS` within ``width`` cells and ``height`` rows, as (code, border).
 
-    Every one of :data:`_FITS` on the largest grid, then on the next of :data:`_GRIDS`: on
-    a screen a lighter error level or a narrower quiet zone costs a camera nothing it
-    needs, and a module half the size is the one step that does. ``None`` when no fit is
-    that small — the caller decides what to relax.
+    ``None`` when no fit is that small — the caller decides what to relax.
     """
-    for grid in _GRIDS:
-        for error, border in _FITS:
-            code = _make(data, error)
-            cols, rows = grid.cells(code.symbol_size(border=border)[0])
-            if cols <= width and (height is None or rows <= height):
-                return code, border, grid
+    for error, border in _FITS:
+        code = _make(data, error)
+        cols, rows = _GRID.cells(code.symbol_size(border=border)[0])
+        if cols <= width and (height is None or rows <= height):
+            return code, border
     return None
 
 
-def _smallest(data: str) -> tuple[segno.QRCode, int, _Grid]:
-    """The last of :data:`_FITS` on the last of :data:`_GRIDS` — for a frame too small for any."""
+def _smallest(data: str) -> tuple[segno.QRCode, int]:
+    """The last of :data:`_FITS` — what a frame too small for any fit gets anyway."""
     error, border = _FITS[-1]
-    return _make(data, error), border, _GRIDS[-1]
+    return _make(data, error), border
 
 
 def fit_qr(data: str, width: int, height: int | None = None) -> Text:
-    """The code for ``data`` at the first fit that fits the space given (see :func:`_fit`).
+    """The code for ``data`` at the first of :data:`_FITS` that fits the space given.
 
     A code that fits at no fit is drawn at the smallest anyway: a cut code is not
     scannable, but neither is no code, and a larger terminal is one resize away.
@@ -211,11 +208,10 @@ def fit_qr(data: str, width: int, height: int | None = None) -> Text:
         height: Rows available, or ``None`` to fit the width alone.
 
     Returns:
-        The code, white on black, in half blocks or — where the platform's braille is
-        solid and half blocks do not fit — in braille.
+        The code, as :func:`qr_text` draws it.
     """
-    code, border, grid = _fit(data, width, height) or _smallest(data)
-    return _draw(code, border, grid)
+    code, border = _fit(data, width, height) or _smallest(data)
+    return _draw(code, border)
 
 
 class QrScreen(ScrollScreen):
@@ -255,16 +251,16 @@ class QrScreen(ScrollScreen):
         rows = self._scroll_viewport
         link = Text(self.url, style="accent", justify="center")
         link_rows = len(render_lines(link, width))
-        code, border, grid = (
+        code, border = (
             _fit(self.url, width, rows - 1 - link_rows)
             or _fit(self.url, width, rows)
             or _fit(self.url, width, None)
             or _smallest(self.url)
         )
         # Centred as a block — one indent for every row (see _draw), never justified.
-        cols, _ = grid.cells(code.symbol_size(border=border)[0])
+        cols, _ = _GRID.cells(code.symbol_size(border=border)[0])
         indent = max(0, (width - cols) // 2)
-        self.replace_content(Group(_draw(code, border, grid, indent=indent), Text(""), link))
+        self.replace_content(Group(_draw(code, border, indent=indent), Text(""), link))
         return super().render_body(width)
 
 

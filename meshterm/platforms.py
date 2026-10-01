@@ -90,9 +90,9 @@ class Platform:
         solid_braille: Whether the console font draws a braille cell's eight dots as solid
             tiles with no gap between them or between neighbouring cells — the PicoCalc's
             built fonts (``scripts/picocalc``) do — so braille is a true 2×4 pixel grid,
-            fine enough for what must stay contiguous. It is what lets a QR code step down
-            to braille when the half-block code does not fit (:mod:`~meshterm.ui.qr`). A
-            desktop font's braille is dotted, and a code drawn in it scans as nothing.
+            fine enough for what must stay contiguous. It is what lets every QR code be
+            drawn in braille, one module a dot (:mod:`~meshterm.ui.qr`). A desktop font's
+            braille is dotted, and a code drawn in it scans as nothing.
         effects: Whether animated/decorative rendering runs at all — the braille spinner,
             which drops to a ``LINE`` fallback. Cheaper on a console where a repaint is
             dear. The header battery gauge is deliberately *not* behind it: its sweep is
