@@ -275,6 +275,46 @@ def test_the_share_screen_refits_its_code_to_the_frame_every_paint() -> None:
     assert len(code_rows(53, 26)) <= 26  # the PicoCalc: likewise
 
 
+def test_where_braille_is_solid_every_code_is_drawn_in_it() -> None:
+    """On the PicoCalc a code is braille, one module a dot — eight to a cell.
+
+    So the contact card is 29 cells by 15 rows at the standard fit and shares the 53x26
+    panel with its link, where half blocks sent the link a page down; and a page's code
+    is braille too. Every module has to survive the packing, so the braille is decoded
+    back and held against the code's own matrix. A desktop font's braille is dotted, so
+    the regular platform never draws a code in it.
+    """
+    import segno
+
+    from meshterm.platforms import PICOCALC, set_platform
+
+    def is_braille(text: str) -> bool:
+        return any("⠀" <= ch <= "⣿" for ch in text)
+
+    url = "meshcore://contact/add?name=YUL-Cartierville&public_key=" + "ab" * 32 + "&type=2"
+    channel = "meshcore://channel/add?name=Test&secret=" + "ab" * 16
+    assert not is_braille(fit_qr(url, 53, 22).plain) and not is_braille(qr_text(channel).plain)
+
+    set_platform(PICOCALC)
+    assert is_braille(qr_text(channel).plain) and "█" not in qr_text(channel).plain
+    screen = QrScreen(url, title="Share YUL-Cartierville")
+    screen.note_viewport(26)
+    lines = [_ANSI.sub("", line) for line in screen.render_body(53)]
+    assert len(lines) <= 26 and url[:40] in "".join(lines), "code and link share the panel"
+    blank = next(i for i in range(len(lines) - 1, -1, -1) if not lines[i].strip())
+    cells = [line.lstrip(" ") for line in lines[:blank]]
+    assert (len(cells[0]), len(cells)) == (29, 15)
+
+    dots = ((0x01, 0x02, 0x04, 0x40), (0x08, 0x10, 0x20, 0x80))
+    decoded = [
+        [bool((ord(row[x // 2]) - 0x2800) & dots[x % 2][y % 4]) for x in range(57)]
+        for y in range(57)
+        for row in [cells[y // 4]]
+    ]
+    matrix = [[bool(v) for v in row] for row in segno.make(url, error="m").matrix_iter(border=4)]
+    assert decoded == matrix, "a module was lost packing the code into braille"
+
+
 # -- channel slot model -------------------------------------------------------
 
 
