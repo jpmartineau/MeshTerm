@@ -186,10 +186,12 @@ MESH_THEME = Theme(
         "fkey.chip": "bold #ffffff on #475569",
         "fkey.chip.shift": "bold #ffffff on #16a34a",
         # The Cardputer Zero deck's fills, taken from its own keyboard (JP, 2026-09-30):
-        # the orange-red the fn key and its F4–F8 legends are printed in (#ff6633, the
-        # sticker artwork's flat value), and while Shift is held, the dark blue of the
-        # Shift key in M5's product photo.
-        "fkey.chip.cardputer": "bold #ffffff on #ff6633",
+        # the orange-red the fn key and its F4–F8 legends are printed in, and while Shift
+        # is held, the dark blue of the Shift key in M5's product photo. The print's
+        # #ff6633 holds white text at only 2.9:1, so the chip is that colour a step darker
+        # in OKLab at the same hue and chroma (L 0.70 → 0.62, h 38°): 4.0:1, still a
+        # vermilion — chroma is in gamut all the way down, so nothing greys it to brown.
+        "fkey.chip.cardputer": "bold #ffffff on #e34b0f",
         "fkey.chip.cardputer.shift": "bold #ffffff on #0f72bd",
         # The prose voices — what a markdown page's inline marks are drawn in (see
         # ui.markdown). Headings borrow the styles the rest of the app already heads
