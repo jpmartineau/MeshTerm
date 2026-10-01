@@ -67,10 +67,6 @@ The checkerboard flicker in the panel's top two rows will not appear in the scre
 That is an electrical artefact of the panel, not something in the framebuffer, so the
 screenshot is cleaner than the device itself. That is expected; don't try to reproduce it.
 
-**Not yet run against the device**: the script was written while the PicoCalc was
-offline and tested only against a simulated framebuffer. On the first real run, check the
-orientation and the colours against the panel, then delete this note.
-
 ## How it works
 
 `scripts/picocalc_shot.py` sends a short Python program to the device, base64-encoded so
