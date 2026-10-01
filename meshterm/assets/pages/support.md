@@ -39,9 +39,9 @@ https://patreon.com/MeshTerm
 ## Other ways to help
 
 - Spread the word and let others know how awesome **MeshTerm** is!
-- Join the Discord community!
+- Join the **Discord** community!
+- Open an issue on **Discord** when you encounter a bug or problem!
 - Give this project a Star **⭐** on **GitHub**!
-- Open an issue on **GitHub** when you encounter a bug or problem!
 
     *https://github.com/jpmartineau/MeshTerm*
 
