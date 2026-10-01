@@ -8,8 +8,9 @@ Each entry below builds one full-screen :class:`~meshterm.ui.tui.screen.Screen` 
 hand-built (simulator-shaped) data — the same "fake session, real screen" approach every
 individual screen's own test file already uses — then renders it, both directly
 (``render_body``) and through the real frame compositor (``compose_base``), at REGULAR's
-72x24 and at PICOCALC's two live/lux row counts (53x26, the actual on-device floor; 53x40,
-the boot-font/6x8-font-B case). No rendered line may exceed its terminal's width.
+72x24, at PICOCALC's two live/lux row counts (53x26, the actual on-device floor; 53x40,
+the boot-font/6x8-font-B case), and at the CARDPUTER's 53x14. No rendered line may exceed
+its terminal's width.
 
 This is the platform-parity harness the PicoCalc work was built around: a
 screen added here without surviving both platforms is meant to fail CI by default, so the
@@ -57,7 +58,7 @@ from meshterm.core.regions import frame_scope, region_key, scope_body, transport
 from meshterm.core.remote_store import CachedValue
 from meshterm.core.watch_store import WatchStore
 from meshterm.persistence.repository import DiscoveredPath
-from meshterm.platforms import PICOCALC, REGULAR, Platform, get_platform, set_platform
+from meshterm.platforms import CARDPUTER, PICOCALC, REGULAR, Platform, get_platform, set_platform
 from meshterm.services.courier import CourierService
 from meshterm.services.message_paths import Arrival
 from meshterm.services.monitor_service import ACTIVITY_BUCKETS
@@ -1450,11 +1451,15 @@ _ENTRIES: list[_Entry] = [
 #: (platform, cols, rows) combos every entry above renders under. PicoCalc gets both its
 #: live floor (53x26, the on-device measurement — see the plan's P0 appendix) and the lux
 #: case (53x40, today's boot fbcon font / a future 6x8 font). Regular is unchanged by this
-#: seam's arrival, so it stays the existing 72x24 standard.
+#: seam's arrival, so it stays the existing 72x24 standard. The Cardputer Zero renders at its
+#: one size, 53x14: the same width gate as the PicoCalc, so every case is a hard gate there
+#: too. Rows are not gated — a body scrolls — so which screens are *cramped* at 14 rows is a
+#: judged worklist, not an xfail list (see the port's logbook).
 _COMBOS: list[tuple[Platform, int, int]] = [
     (REGULAR, REGULAR.readable_cols, REGULAR.readable_rows),
     (PICOCALC, PICOCALC.readable_cols, PICOCALC.readable_rows),
     (PICOCALC, PICOCALC.readable_cols, 40),
+    (CARDPUTER, CARDPUTER.readable_cols, CARDPUTER.readable_rows),
 ]
 
 #: Entries that overflow PICOCALC's 53 columns today (a width overflow doesn't depend on
@@ -1533,8 +1538,9 @@ def test_gallery_screen_fits_its_platform(
     # hint strings at all: the fixed F-key lane replaces them (Platform.footer_fkeys),
     # so what must fit there is the screen's lane.
     if platform.footer_fkeys:
-        lane = fkeys.PICOCALC_DECK.lane_text(screen.picocalc_lane)
-        shifted = fkeys.PICOCALC_DECK.lane_text(screen.picocalc_lane, shifted=True)
+        deck = fkeys.DECKS[platform.lane_deck]
+        lane = deck.lane_text(screen.fkey_lane)
+        shifted = deck.lane_text(screen.fkey_lane, shifted=True)
         assert cell_len(lane.plain) <= cols, f"F-lane {cell_len(lane.plain)} cells: {lane.plain!r}"
         assert cell_len(shifted.plain) <= cols, (
             f"shifted F-lane {cell_len(shifted.plain)} cells: {shifted.plain!r}"
@@ -1561,6 +1567,17 @@ def test_gallery_screen_fits_its_platform(
     # addressed as plain 30-37/90-97/40-47 codes), and no character outside the 512-glyph
     # console font. Together these are the parity gate that catches a stray emoji or hex
     # colour the moment a screen grows one, instead of as tofu found on-device.
+    # A platform without emoji (both handhelds) may emit none: every icon funnel routes
+    # through the compact glyph map there, so a pictograph in the output is one that
+    # bypassed it. The PicoCalc's font gate below is stricter still; the Cardputer's
+    # glyph contract waits on the console host's font.
+    if not platform.emoji:
+        for i, line in enumerate(_plain(composed).splitlines()):
+            pictographs = {ch for ch in line if ord(ch) >= 0x1F000 or ch == "️"}
+            assert not pictographs, (
+                f"{entry.name} line {i} draws emoji on {platform.name}: {sorted(pictographs)!r}"
+            )
+
     if platform.name == "picocalc":
         for where, ansi_lines in (
             ("render_body", screen.render_body(cols)),
