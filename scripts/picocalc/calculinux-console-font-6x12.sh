@@ -84,12 +84,16 @@ import struct
 PSF2_MAGIC = 0x864AB572
 
 # --- braille: 2-wide dot grid; the codepoint's low byte says which dots lit ------------
-COLS = [[1, 2], [4, 5]]
+# MeshTerm never sets braille to be read: every braille cell it draws is pixels -- a chart,
+# the map, a meter. So each dot is a solid tile of its whole share of the cell, half the
+# width by a quarter of the height, with no gap between dots or between neighbouring
+# cells, and a run of lit dots reads as one continuous mark instead of a dotted one.
+COLS = [[0, 1, 2], [3, 4, 5]]
 BIT = {0: (0, 0), 1: (0, 1), 2: (0, 2), 6: (0, 3),
        3: (1, 0), 4: (1, 1), 5: (1, 2), 7: (1, 3)}
 
-#: Dot-row bands per cell height: 3px pitch at 6x12, 2px at 6x8.
-BANDS12 = [[0, 1], [3, 4], [6, 7], [9, 10]]
+#: Dot-row bands per cell height: four 3px rows at 6x12, four 2px rows at 6x8.
+BANDS12 = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11]]
 BANDS8 = [[0, 1], [2, 3], [4, 5], [6, 7]]
 
 
