@@ -132,6 +132,7 @@ from .widgets import (
     highlighted_hash,
     node_type_legend,
     tab_air,
+    tab_compact,
     tab_strip,
 )
 
@@ -762,7 +763,12 @@ class NodeDetailScreen(Screen):
             lines.extend([""] * tab_air())
             lines.extend(
                 render_lines(
-                    tab_strip([t.name for t in self._tabs], self._tab_index, width),
+                    tab_strip(
+                        [t.name for t in self._tabs],
+                        self._tab_index,
+                        width,
+                        compact=tab_compact(viewport),
+                    ),
                     width,
                     no_wrap=True,
                 )
@@ -831,7 +837,9 @@ class NodeDetailScreen(Screen):
 
         ``budget`` is the viewport lines left for the whole stage; the vitals rows never
         truncate — it is the preview that flexes, taking whatever they and its caption
-        leave, clamped to ``[_MAP_MIN_ROWS, _MAP_MAX_ROWS]``. Every row but the key hangs
+        leave up to ``_MAP_MAX_ROWS``, and left out altogether where that is less than
+        ``_MAP_MIN_ROWS`` (a short frame keeps its header and actions on screen instead).
+        Every row but the key hangs
         under itself when it wraps; the key holds its one line and scrolls (see
         :meth:`_key_line`), so a row count the preview sizes against can't move as a reader
         walks a long key.
@@ -850,12 +858,15 @@ class NodeDetailScreen(Screen):
                 )
             )
         if self._minimap is not None:
-            lines.append("")
             caption = 1 if self._map_caption is not None else 0
-            rows = max(_MAP_MIN_ROWS, min(_MAP_MAX_ROWS, budget - len(lines) - caption))
-            lines.extend(self._minimap.render(width, rows))
-            if self._map_caption is not None:
-                lines.extend(render_lines(self._map_caption, width, no_wrap=True))
+            room = budget - len(lines) - 1 - caption  # less the blank above it
+            # Below its floor the preview steps aside rather than push the identity header
+            # and the actions off a short frame (the Cardputer's 14 rows leave it two).
+            if room >= _MAP_MIN_ROWS:
+                lines.append("")
+                lines.extend(self._minimap.render(width, min(_MAP_MAX_ROWS, room)))
+                if self._map_caption is not None:
+                    lines.extend(render_lines(self._map_caption, width, no_wrap=True))
         return lines
 
     def _key_line(self, label: str, value: Text, width: int) -> str:

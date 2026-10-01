@@ -1247,7 +1247,20 @@ def tab_air() -> int:
     return _TAB_AIR
 
 
-def tab_strip(labels: Sequence[str], active: int, width: int) -> Group:
+#: The viewport, in rows, below which a tabbed page draws its strip on one row (see
+#: :func:`tab_strip`'s ``compact``). The boxed strip costs three rows and its air; on the
+#: Cardputer's 11-row viewport that was the difference between a page's actions on screen
+#: and below the fold. Read from the viewport rather than the platform, so a desktop
+#: terminal dragged short gets the same answer the handheld does.
+COMPACT_TABS_BELOW = 16
+
+
+def tab_compact(viewport: int) -> bool:
+    """Whether a page with ``viewport`` rows draws its tab strip compact (one row)."""
+    return viewport < COMPACT_TABS_BELOW
+
+
+def tab_strip(labels: Sequence[str], active: int, width: int, *, compact: bool = False) -> Group:
     """A boxed tab strip: every tab always boxed on top, the active one open into the page.
 
     THE navigation header for a screen that pages one full-height view at a time between a
@@ -1277,19 +1290,37 @@ def tab_strip(labels: Sequence[str], active: int, width: int) -> Group:
     owning screen switches the active index (``Tab``/``Shift+Tab``); the strip itself is
     pure presentation.
 
+    Where rows are scarcer than that (``compact``, see :func:`tab_compact`) the same strip is
+    drawn on its own bottom rule, in one row: ``──┤ Info ├── Routes ──────``. The active tab
+    stands on the rule between tees, lit; an inactive one is its label on the rule, faint.
+    Every tab is the same width in either state, so switching still never moves a label.
+
     Args:
         labels: The tab names in display order.
         active: Index of the lit tab.
         width: The strip's render width — the closing rule fills out to it.
+        compact: Draw the strip on one row instead of three.
 
     Returns:
-        A :class:`~rich.console.Group` of one line (a lone tab, or none) or three (the shared
-        top border, the boxed labels, and the shared bottom rule).
+        A :class:`~rich.console.Group` of one line (a lone tab, none, or a compact strip) or
+        three (the shared top border, the boxed labels, and the shared bottom rule).
     """
     if not labels:
         return Group(Text(""))
     if len(labels) == 1:
         return Group(Text(f"── {labels[0]} ──", style="accent", no_wrap=True))
+    if compact:
+        row = Text("──", style="accent", no_wrap=True)
+        for i, label in enumerate(labels):
+            if i == active:
+                row.append(f"┤ {label} ├", style="accent")
+            else:
+                row.append("─", style="accent")
+                row.append(f" {label} ", style="faint")
+                row.append("─", style="accent")
+            row.append("─", style="accent")
+        row.append("─" * max(0, width - len(row.plain)), style="accent")
+        return Group(row)
 
     n = len(labels)
     inner = [f"  {label}  " for label in labels]

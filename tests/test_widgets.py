@@ -287,3 +287,17 @@ def test_every_advert_type_has_one_name() -> None:
     assert node_type_label(4) == "sensor"
     assert node_type_label(9) == "type 9"  # an advert type MeshTerm does not know yet
     assert node_type_label(None) is None
+
+
+def test_a_compact_tab_strip_is_one_row_and_never_moves_a_label() -> None:
+    """Below COMPACT_TABS_BELOW rows the strip draws on its rule, every tab a fixed width."""
+    from meshterm.ui.widgets import COMPACT_TABS_BELOW, tab_compact, tab_strip
+
+    assert tab_compact(COMPACT_TABS_BELOW - 1) and not tab_compact(COMPACT_TABS_BELOW)
+    rows = [tab_strip(["Info", "Routes", "Area"], i, 40, compact=True) for i in range(3)]
+    plains = [group.renderables[0].plain for group in rows]
+    assert all(len(group.renderables) == 1 for group in rows)
+    assert plains[0].startswith("──┤ Info ├") and plains[1].startswith("─── Info ──┤ Routes ├")
+    for label in ("Info", "Routes", "Area"):
+        assert len({plain.index(label) for plain in plains}) == 1, label
+    assert all(len(plain) == 40 for plain in plains)

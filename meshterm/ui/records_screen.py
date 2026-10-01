@@ -63,6 +63,7 @@ from .widgets import (
     route_graph_style,
     self_marker,
     tab_air,
+    tab_compact,
     tab_strip,
 )
 
@@ -647,7 +648,10 @@ class RecordScreen(Screen):
         # air (see widgets.tab_air) — the node page's identity header and strip.
         lines: list[str] = [render_to_ansi(self._header(), width, no_wrap=True)]
         lines.extend([""] * tab_air())
-        lines.extend(render_lines(tab_strip(self._tabs, self._tab_index, width), width))
+        strip = tab_strip(
+            self._tabs, self._tab_index, width, compact=tab_compact(self._scroll_viewport)
+        )
+        lines.extend(render_lines(strip, width))
         lines.extend([""] * tab_air())
         if self._tab == _TAB_AREA:
             self._cursor = None
