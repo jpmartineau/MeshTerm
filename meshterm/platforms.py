@@ -93,6 +93,13 @@ class Platform:
             fine enough for what must stay contiguous. It is what lets every QR code be
             drawn in braille, one module a dot (:mod:`~meshterm.ui.qr`). A desktop font's
             braille is dotted, and a code drawn in it scans as nothing.
+        url_codes: Whether a chat message's URLs are drawn as QR codes under it, side by
+            side (:meth:`~meshterm.ui.chat.ChatScreen._body_lines`) — so a link read on the
+            handheld opens on a phone without being typed out. The PicoCalc's alone: it
+            takes braille codes (:attr:`solid_braille`) to be small enough to sit in a
+            transcript at all, a quarter the area of the half blocks a desktop draws, and
+            it takes rows — a short link's code is 9 of them, which the Cardputer's 14
+            cannot spare under every message that carries one (JP, 2026-10-01).
         effects: Whether animated/decorative rendering runs at all — the braille spinner,
             which drops to a ``LINE`` fallback. Cheaper on a console where a repaint is
             dear. The header battery gauge is deliberately *not* behind it: its sweep is
@@ -135,6 +142,7 @@ class Platform:
     ascii_fold: bool
     truecolor: bool
     solid_braille: bool
+    url_codes: bool
     effects: bool
     tick_s: float
     spinner_tick_s: float
@@ -157,6 +165,7 @@ REGULAR = Platform(
     ascii_fold=False,
     truecolor=True,
     solid_braille=False,
+    url_codes=False,
     effects=True,
     tick_s=1.0,
     spinner_tick_s=0.12,
@@ -185,6 +194,7 @@ PICOCALC = Platform(
     ascii_fold=True,
     truecolor=False,
     solid_braille=True,
+    url_codes=True,
     effects=False,
     tick_s=2.0,
     spinner_tick_s=0.5,

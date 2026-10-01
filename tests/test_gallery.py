@@ -541,6 +541,26 @@ def _chat_channel_scoped(cols: int, rows: int) -> Screen:
     )
 
 
+def _chat_urls(cols: int, rows: int) -> Screen:
+    """A channel message carrying two links: on the PicoCalc, two codes side by side under it.
+
+    The longest pair that still sits side by side in the 44 cells after the body's indent,
+    so the width gate sees the widest band a transcript draws; regular draws no codes.
+    """
+    conv = Conversation(label="Lakeside emergency", is_channel=True, channel_idx=2)
+    messages = [
+        ChatMessage(
+            text=(
+                "Alice: shelters on https://meshterm.net/map and the road list at "
+                "https://github.com/jpmartineau/MeshTerm"
+            ),
+            is_channel=True,
+        ),
+        ChatMessage(text="thanks, on it", outbound=True, is_channel=True),
+    ]
+    return ChatScreen(conv, messages, send=None, names={}, session=_GallerySession(cols, rows))
+
+
 class _PickerChat:
     """The unread counter the picker rows read live."""
 
@@ -1405,6 +1425,7 @@ _ENTRIES: list[_Entry] = [
     _Entry("map_find", _map_find),
     _Entry("chat", _chat),
     _Entry("chat_channel_scoped", _chat_channel_scoped),
+    _Entry("chat_urls", _chat_urls),
     _Entry("chat_picker", _chat_picker),
     _Entry("channels_manager", _channels_manager),
     _Entry("channel_detail", _channel_detail),
