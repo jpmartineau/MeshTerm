@@ -17,6 +17,7 @@ screen is open.
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
@@ -28,6 +29,8 @@ from ..core.connection import ContactNotOnDeviceError
 from ..core.events import EventKind, MeshEvent
 from ..core.models import ChatMessage, Contact, Conversation, Message, utcnow
 from ..core.regions import WILDCARD
+from ..platforms import Platform, on_platform
+from .qr import qr_strip
 from .theme import name_style, snr_style
 from .tui.prompt import (
     CHANNEL_BYTE_LIMIT,
@@ -51,6 +54,47 @@ if TYPE_CHECKING:
 #: spinner instead (see :meth:`ChatScreen._delivery_glyph`).
 _DELIVERED = ("✓", "ok")
 _FAILED = ("✗", "err")
+
+#: A URL in a message body: a scheme, ``://``, and everything up to the next space. A
+#: scheme rather than a list of them, so a ``meshcore://`` share pasted into a chat gets
+#: its code as surely as a web link does.
+_URL = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s<>\"]+", re.IGNORECASE)
+
+#: Punctuation that follows a URL in a sentence and isn't part of it.
+_TRAILING = ".,;:!?'\""
+
+#: Each closing bracket and its opener: a closer ends a URL only when it has no opener
+#: inside it, so ``(see https://example.com/a_(b))`` keeps the ``)`` that belongs to it.
+_CLOSERS = {")": "(", "]": "[", "}": "{"}
+
+#: Whether a message's URLs are drawn as QR codes under it (``Platform.url_codes``, the
+#: PicoCalc's alone). Bound per platform, never asked per frame.
+_URL_CODES = False
+
+
+@on_platform
+def _bind(platform: Platform) -> None:
+    """Hang codes under URLs where the platform draws them (now and on switches)."""
+    global _URL_CODES
+    _URL_CODES = platform.url_codes
+
+
+def _urls(body: str) -> list[str]:
+    """Every URL in ``body`` in reading order, each only once, without trailing punctuation."""
+    found: list[str] = []
+    for match in _URL.finditer(body):
+        url = match.group()
+        while url:
+            last = url[-1]
+            if last in _TRAILING or (
+                last in _CLOSERS and url.count(last) > url.count(_CLOSERS[last])
+            ):
+                url = url[:-1]
+            else:
+                break
+        if not url.endswith("://") and url not in found:
+            found.append(url)
+    return found
 
 
 class ChatScreen(Screen):
@@ -211,6 +255,9 @@ class ChatScreen(Screen):
         # focused), plus the body line it rendered on so the frame keeps it in view.
         self._selected: int | None = None
         self._selected_line: int | None = None
+        # One past the picked message's last rendered row, so its whole block is kept in
+        # view, not just its head (see render_body).
+        self._selected_end: int | None = None
         # Memoizes _render_grouped's output per message, so a repaint triggered by
         # something outside the transcript (a keystroke, the 1s idle tick, a spinner
         # frame) only re-renders the rows that actually changed. See _render_grouped.
@@ -266,6 +313,7 @@ class ChatScreen(Screen):
     def render_body(self, width: int) -> list[str]:
         """Render the transcript, a divider, the input line, and any status."""
         self._selected_line = None
+        self._selected_end = None
         if not self._messages:
             lines = render_lines(Text("No messages yet — say hello!", style="muted"), width)
         else:
@@ -301,6 +349,14 @@ class ChatScreen(Screen):
         # to the final lines (input + latest messages). Scrolling up clears the stick.
         if self._stick:
             self.scroll = len(lines)
+        elif self._selected_end is not None:
+            # The pick keeps its *whole* message in view, the codes hanging under its text
+            # included. The frame holds only the one line cursor_line names, the message's
+            # head, so a pick walking down would park the head on the bottom row and leave
+            # its codes below the fold. Scroll far enough to show the message's last row
+            # (one spare for the day divider pinned over the top); the frame then raises
+            # the view again only if that would push the head off the top.
+            self.scroll = max(self.scroll, self._selected_end - self._scroll_viewport + 1)
         return lines
 
     def cursor_line(self) -> int | None:
@@ -453,6 +509,8 @@ class ChatScreen(Screen):
                     # title bar's ↑ lit over a transcript with nothing above it.
                     self._selected_line = 0 if idx == 0 else len(lines)
                 lines += self._body_lines(body, message, width, selected=selected)
+                if selected:
+                    self._selected_end = len(lines)
             prev_group, prev_day = group, day
             ids.append(id(message))
             ackeds.append(message.acked)
@@ -512,13 +570,21 @@ class ChatScreen(Screen):
         A long body wraps with a hanging indent so continuation lines align under the body
         rather than under the timestamp gutter. When ``selected``, the line is marked as the
         reply target (matching the select screen's ``❯`` pointer and cursor highlight).
+
+        Where the platform draws them (:data:`_URL_CODES`, the PicoCalc), each URL in the
+        body gets a QR code under it, side by side and hanging at the body's indent, so a
+        link read on the handheld can be opened on a phone instead of typed out.
         """
         stamp = message.created_at.astimezone()
         prefix = Text()
         prefix.append("❯ " if selected else "  ", style="cursor" if selected else None)
         prefix.append(f"{stamp:%H:%M}  ", style="cursor" if selected else "muted")
         body_text = self._body_text(body, message, selected=selected)
-        return render_hanging(prefix, body_text, width, indent=prefix.cell_len)
+        lines = render_hanging(prefix, body_text, width, indent=prefix.cell_len)
+        urls = _urls(body) if _URL_CODES else []
+        if urls:
+            lines += render_lines(qr_strip(urls, width, indent=prefix.cell_len), width)
+        return lines
 
     def _body_text(self, body: str, message: ChatMessage, *, selected: bool) -> Text:
         """Build the styled body of a message: mentions colored, then any trailing glyphs."""

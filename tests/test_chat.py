@@ -2310,3 +2310,127 @@ def test_chat_fkey_lane_steps_by_day_on_the_free_left_pair() -> None:
     assert fkeys.PICOCALC_DECK.action_for(spread.picocalc_lane, 1) == "ctrl_pageup"
     spread.handle(fkeys.PICOCALC_DECK.action_for(spread.picocalc_lane, 1))
     assert spread._selected == 0  # jumped to the first message of the older day
+
+
+# -- URL codes (the PicoCalc) ---------------------------------------------------
+
+
+def _code_rows(lines: list[str]) -> list[str]:
+    """The rendered rows that carry braille — a QR code's, in a transcript."""
+    return [ln for ln in lines if any("⠀" <= ch <= "⣿" for ch in ln)]
+
+
+def _decode_braille(rows: list[str], left: int, size: int) -> list[list[bool]]:
+    """The ``size``-module code drawn in braille from cell ``left`` of ``rows``."""
+    dots = ((0x01, 0x02, 0x04, 0x40), (0x08, 0x10, 0x20, 0x80))
+    return [
+        [
+            bool((ord(rows[y // 4][left + x // 2]) - 0x2800) & dots[x % 2][y % 4])
+            for x in range(size)
+        ]
+        for y in range(size)
+    ]
+
+
+def test_urls_are_found_whole_once_and_without_the_sentence_around_them() -> None:
+    """A URL ends where its sentence's punctuation begins, and keeps a bracket it opened."""
+    from meshterm.ui.chat import _urls
+
+    body = (
+        "map at https://meshterm.net. see (https://en.wikipedia.org/wiki/Foo_(bar)), "
+        "'https://example.org/a?b=1' and meshcore://channel/add?name=Ops&secret=ab — "
+        "again https://meshterm.net! nothing here: https:// or note:x"
+    )
+    assert _urls(body) == [
+        "https://meshterm.net",
+        "https://en.wikipedia.org/wiki/Foo_(bar)",
+        "https://example.org/a?b=1",
+        "meshcore://channel/add?name=Ops&secret=ab",
+    ]
+
+
+def test_on_the_picocalc_each_url_hangs_a_code_under_its_message_side_by_side() -> None:
+    """Two links, two braille codes on the same rows, hung at the body's own indent.
+
+    Every module has to survive the packing: each code is decoded back out of the braille
+    and held against segno's matrix for its URL, at the standard fit.
+    """
+    import segno
+
+    from meshterm.platforms import PICOCALC, set_platform
+
+    set_platform(PICOCALC)
+    first, second = "https://meshterm.net", "https://github.com/jpmartineau/MeshTerm"
+    conv = Conversation(label="#ops", is_channel=True, channel_idx=1)
+    message = ChatMessage(text=f"Alice: map at {first}, code at {second}!", is_channel=True)
+    screen = ChatScreen(conv, [message], send=None, names={}, session=_StubSession())
+    rows = _code_rows(_strip_ansi(screen._render_grouped(53)).splitlines())
+
+    indent = 9  # "  HH:MM  " — the body's hanging indent
+    assert rows and all(len(row) <= 53 and row.startswith(" " * indent) for row in rows)
+    cells = [row[indent:].ljust(53 - indent) for row in rows]
+    left, tallest = 0, 0
+    for url in (first, second):
+        matrix = [
+            [bool(v) for v in row] for row in segno.make(url, error="m").matrix_iter(border=4)
+        ]
+        assert _decode_braille(cells, left, len(matrix)) == matrix, url
+        left += -(-len(matrix) // 2) + 1  # its cells, then the one-cell gap
+        tallest = max(tallest, -(-len(matrix) // 4))
+    assert len(rows) == tallest  # one band, as tall as its taller code
+
+
+def test_a_regular_terminal_hangs_no_code_under_a_url() -> None:
+    """Half-block codes are four times the area; under every link they'd swamp the chat."""
+    conv = Conversation(label="#ops", is_channel=True, channel_idx=1)
+    message = ChatMessage(text="Alice: map at https://meshterm.net", is_channel=True)
+    screen = ChatScreen(conv, [message], send=None, names={}, session=_StubSession())
+    rendered = _strip_ansi(screen._render_grouped(72))
+    assert "https://meshterm.net" in rendered
+    assert not _code_rows(rendered.splitlines())
+    assert not any(ch in "▀▄█" for ch in rendered)
+
+
+def test_codes_that_outrun_the_line_start_a_new_band() -> None:
+    """Two short links fit beside each other in the 44 cells after the indent; a third wraps."""
+    import segno
+
+    from meshterm.platforms import PICOCALC, set_platform
+    from meshterm.ui.qr import qr_strip
+
+    set_platform(PICOCALC)
+    urls = [f"https://meshterm.net/{c}" for c in "abc"]
+    size = segno.make(urls[0], error="m").symbol_size(border=4)[0]
+    cols, height = -(-size // 2), -(-size // 4)
+    rows = qr_strip(urls, 53, indent=9).plain.splitlines()
+
+    assert len(rows) == 2 * height and all(len(row) <= 53 for row in rows)
+    assert all(row[9 + cols] == " " and row[9 + cols + 1] != " " for row in rows[:height])
+    assert all(row[9 + cols :].strip() == "" for row in rows[height:])
+
+
+def test_a_picked_message_keeps_its_codes_in_view() -> None:
+    """Walking the pick down onto a link shows its code, not just the message's first row."""
+    from meshterm.platforms import PICOCALC, set_platform
+    from meshterm.ui.tui import frame
+
+    set_platform(PICOCALC)
+    conv = Conversation(label="#ops", is_channel=True, channel_idx=1)
+    messages = [ChatMessage(text=f"Alice: line {i}", is_channel=True) for i in range(12)]
+    messages.insert(6, ChatMessage(text="Bob: map at https://meshterm.net", is_channel=True))
+    screen = ChatScreen(conv, messages, send=None, names={}, session=_StubSession())
+    viewport = 16
+
+    def paint() -> list[str]:
+        visible, _above, _below = frame._visible_slice(screen, screen.render_body(53), viewport)
+        return _strip_ansi(visible).splitlines()
+
+    paint()
+    screen.handle("ctrl_home")  # the oldest message, then walk down onto the link
+    for _ in range(6):
+        paint()
+        screen.handle("down")
+    shown = paint()
+    whole = _code_rows(_strip_ansi(screen._render_grouped(53)).splitlines())
+    assert any("map at https://meshterm.net" in row for row in shown)
+    assert len(_code_rows(shown)) == len(whole)  # every row of the code, none below the fold

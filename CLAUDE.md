@@ -243,10 +243,14 @@ deliberately, one at a time, and say why in the code.
   narrower quiet zone, before it would ever be cut (a contact card is 57 cells and 29
   rows at the standard fit in half blocks; a regular terminal is 24 tall), and when code
   and URL can't share the frame the code is whole at the top and the URL a page down.
-  The one exception is a ` ```qr ` fence in a written page, where the code is an
-  illustration drawn in the prose where the fence is. Where the font draws braille solid
-  (`Platform.solid_braille`: the PicoCalc's built fonts, the Cardputer's console host,
-  `host/font.BRAILLE`) every code — share screen and page fence alike — is drawn in
+  Two codes sit inline instead: a ` ```qr ` fence in a written page, where the code is an
+  illustration drawn in the prose where the fence is, and — on the PicoCalc alone
+  (`Platform.url_codes`) — a chat message's URLs, each drawn as a code under the message
+  at its body's indent, side by side, wrapping onto a new band when the line is full
+  (`qr.qr_strip`). A picked message keeps the codes under it in view. Where the font
+  draws braille solid (`Platform.solid_braille`: the PicoCalc's built fonts, the
+  Cardputer's console host, `host/font.BRAILLE`) every code — share screen, page fence
+  and chat alike — is drawn in
   **braille**, one module a dot, eight a cell (`qr._GRID`), so the contact card is 29
   cells by 15 rows there and shares the 53×26 panel with its URL at the standard fit.
 

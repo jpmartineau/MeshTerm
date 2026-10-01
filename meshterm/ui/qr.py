@@ -16,9 +16,10 @@ on a screen.
 When the code *is* the answer it is a **full-screen** thing: :func:`share_screen` puts it
 on a bare frame — no header, no footer, no title, no box — with nothing beside it but the
 URL it encodes, so the whole panel is contrast for the camera and the one line a reader
-might type out instead. The one place a code sits *inside* a page is a ``qr`` fence in a
+might type out instead. A code sits *inside* a page in two places: a ``qr`` fence in a
 written page (:mod:`~meshterm.ui.markdown`), which draws :func:`qr_text` in the flow of
-its prose.
+its prose, and — on the PicoCalc — a chat message carrying URLs, which hangs a code for
+each under its text, side by side (:func:`qr_strip`).
 """
 
 from __future__ import annotations
@@ -138,6 +139,21 @@ def _draw(code: segno.QRCode, border: int, *, indent: int = 0) -> Text:
     modules loses cells and lands a column off its neighbours, and a finder square one
     row skewed is a code no camera can lock on to.
     """
+    text = Text(no_wrap=True)
+    for i, line in enumerate(_glyph_rows(code, border)):
+        if i:
+            text.append("\n")
+        if indent:
+            text.append(" " * indent)
+        text.append(line, style=_STYLE)
+    return text
+
+
+def _glyph_rows(code: segno.QRCode, border: int) -> list[str]:
+    """A segno code packed onto the platform's grid, one string of glyphs per cell row.
+
+    Every row is the same number of cells, so codes set side by side stay square.
+    """
     grid = _GRID
     rows = [[bool(v) for v in row] for row in code.matrix_iter(border=border)]
     cols, _ = grid.cells(len(rows))
@@ -146,20 +162,13 @@ def _draw(code: segno.QRCode, border: int, *, indent: int = 0) -> Text:
     span = cols * grid.across
     rows = [row + [False] * (span - len(row)) for row in rows]
     rows += [[False] * span for _ in range(-len(rows) % grid.down)]
-
-    text = Text(no_wrap=True)
-    for i, top in enumerate(range(0, len(rows), grid.down)):
-        if i:
-            text.append("\n")
-        if indent:
-            text.append(" " * indent)
-        band = rows[top : top + grid.down]
-        line = "".join(
-            grid.glyph([row[x : x + grid.across] for row in band])
+    return [
+        "".join(
+            grid.glyph([row[x : x + grid.across] for row in rows[top : top + grid.down]])
             for x in range(0, span, grid.across)
         )
-        text.append(line, style=_STYLE)
-    return text
+        for top in range(0, len(rows), grid.down)
+    ]
 
 
 def qr_text(data: str, *, error: str = "m", border: int = _BORDER) -> Text:
@@ -212,6 +221,69 @@ def fit_qr(data: str, width: int, height: int | None = None) -> Text:
     """
     code, border = _fit(data, width, height) or _smallest(data)
     return _draw(code, border)
+
+
+#: Blank cells between two codes set side by side. Each code's own quiet zone is what
+#: keeps a camera from reading two as one; the gap only says where one code's field ends.
+_GAP = 1
+
+
+@lru_cache(maxsize=64)
+def _fitted_rows(data: str, width: int, grid: _Grid) -> tuple[str, ...]:
+    """``data``'s code at its first fit within ``width`` cells, as glyph rows.
+
+    Cached because a transcript asks for the same code on every paint of a message it
+    can't reuse (the picked one). ``grid`` is in the key so a platform switch never
+    serves a code packed for the other one.
+    """
+    code, border = _fit(data, width, None) or _smallest(data)
+    return tuple(_glyph_rows(code, border))
+
+
+def qr_strip(data: Sequence[str], width: int, *, indent: int = 0) -> Text:
+    """A code for each of ``data``, side by side, wrapping onto a new band when full.
+
+    Each code takes the first fit within the room after ``indent``, as a frame's code does
+    (:data:`_FITS`), and the codes run left to right, :data:`_GAP` apart. One that would
+    pass the right edge starts the next band, top-aligned with any others on it. There is
+    no blank row between bands, because the quiet zones above and below already separate
+    them.
+
+    Args:
+        data: The strings to encode, in reading order.
+        width: Cells across the whole line, ``indent`` included.
+        indent: Bare cells in front of every row, so the strip can hang under a text block.
+
+    Returns:
+        The codes as one no-wrap :class:`~rich.text.Text`, white on black like every code.
+    """
+    room = max(1, width - indent)
+    bands: list[list[tuple[str, ...]]] = []
+    used = 0
+    for datum in data:
+        rows = _fitted_rows(datum, room, _GRID)
+        cols = len(rows[0])
+        if bands and used + _GAP + cols <= room:
+            bands[-1].append(rows)
+            used += _GAP + cols
+        else:
+            bands.append([rows])
+            used = cols
+
+    text = Text(no_wrap=True)
+    for band in bands:
+        for y in range(max(len(rows) for rows in band)):
+            if text:
+                text.append("\n")
+            text.append(" " * indent)
+            for i, rows in enumerate(band):
+                if i:
+                    text.append(" " * _GAP)
+                if y < len(rows):
+                    text.append(rows[y], style=_STYLE)
+                else:  # a shorter code on the band: bare cells under it, not its field
+                    text.append(" " * len(rows[0]))
+    return text
 
 
 class QrScreen(ScrollScreen):
