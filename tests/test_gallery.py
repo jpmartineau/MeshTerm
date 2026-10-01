@@ -79,7 +79,7 @@ from meshterm.ui.contacts_screen import ContactsScreen
 from meshterm.ui.courier_screen import CourierOutboxScreen
 from meshterm.ui.dashboard_screen import DashboardScreen
 from meshterm.ui.device_info_screen import DeviceInfoScreen
-from meshterm.ui.fontset import FONT_CODEPOINTS
+from meshterm.ui.fontset import FONTS
 from meshterm.ui.livefeed_screen import LiveFeedScreen
 from meshterm.ui.map_render import MapMarker
 from meshterm.ui.map_screen import MapScreen
@@ -1567,33 +1567,29 @@ def test_gallery_screen_fits_its_platform(
     # addressed as plain 30-37/90-97/40-47 codes), and no character outside the 512-glyph
     # console font. Together these are the parity gate that catches a stray emoji or hex
     # colour the moment a screen grows one, instead of as tofu found on-device.
-    # A platform without emoji (both handhelds) may emit none: every icon funnel routes
-    # through the compact glyph map there, so a pictograph in the output is one that
-    # bypassed it. The PicoCalc's font gate below is stricter still; the Cardputer's
-    # glyph contract waits on the console host's font.
-    if not platform.emoji:
-        for i, line in enumerate(_plain(composed).splitlines()):
-            pictographs = {ch for ch in line if ord(ch) >= 0x1F000 or ch == "️"}
-            assert not pictographs, (
-                f"{entry.name} line {i} draws emoji on {platform.name}: {sorted(pictographs)!r}"
-            )
-
-    if platform.name == "picocalc":
+    # A handheld may emit nothing outside its own font (Platform.font): the PicoCalc's
+    # 512-glyph console font, or what the Cardputer's console host draws. And a console
+    # with 16 slots (the PicoCalc's) may carry no truecolor or 256-colour SGR either.
+    # Together these are the parity gate that catches a stray emoji or hex colour the
+    # moment a screen grows one, instead of as tofu found on-device.
+    if platform.font:
+        font = FONTS[platform.font]
         for where, ansi_lines in (
             ("render_body", screen.render_body(cols)),
             ("compose_base", composed.split("\n")),
         ):
             for i, line in enumerate(ansi_lines):
-                assert "[38;2;" not in line and "[48;2;" not in line, (
-                    f"{entry.name} {where} line {i} emits truecolor SGR: {line!r}"
-                )
-                assert "[38;5;" not in line and "[48;5;" not in line, (
-                    f"{entry.name} {where} line {i} emits 256-colour SGR: {line!r}"
-                )
-                strays = {ch for ch in line if ord(ch) >= 0x20 and ord(ch) not in FONT_CODEPOINTS}
+                if not platform.truecolor:
+                    assert "[38;2;" not in line and "[48;2;" not in line, (
+                        f"{entry.name} {where} line {i} emits truecolor SGR: {line!r}"
+                    )
+                    assert "[38;5;" not in line and "[48;5;" not in line, (
+                        f"{entry.name} {where} line {i} emits 256-colour SGR: {line!r}"
+                    )
+                strays = {ch for ch in line if ord(ch) >= 0x20 and ord(ch) not in font}
                 assert not strays, (
-                    f"{entry.name} {where} line {i} has characters outside the console "
-                    f"font: {sorted(strays)!r} in {line!r}"
+                    f"{entry.name} {where} line {i} has characters outside the "
+                    f"{platform.name} font: {sorted(strays)!r} in {line!r}"
                 )
 
 

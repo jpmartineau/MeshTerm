@@ -86,8 +86,13 @@ class Platform:
             (:func:`~meshterm.ui.tui.emoji_width.install`) or the column pinning
             (:mod:`~meshterm.ui.tui.colsnap`). Once no emoji are ever drawn, every glyph on
             screen is one the console font has verified, and the stock widths are exact.
-        ascii_fold: Whether names and message bodies are NFKD-folded (accents stripped) at
-            the render boundary before display. Storage is never touched. Wired in P3.
+        font: The glyph inventory the screen is drawn in, by name (see
+            :data:`~meshterm.ui.fontset.FONTS`), or ``""`` where a terminal draws whatever
+            it is sent. A handheld's every frame is folded down to its font at the render
+            boundary (:func:`~meshterm.ui.theme.fold_text`) — an accent the font lacks
+            stripped, an emoji turned to its compact glyph, anything else still missing a
+            narrow ``?`` — so nothing the panel can't draw is ever sent to it. Storage is
+            never touched.
         truecolor: Whether the theme may use arbitrary 24-bit SGR colour. ``False`` selects
             a 16-slot palette theme instead (the console's real ceiling — no per-cell RGB),
             and quantizes the two scales that would otherwise spend a gradient — the
@@ -115,6 +120,10 @@ class Platform:
         battery: Which source feeds the header's battery gauge — ``"companion"`` (read
             from the connected MeshCore device) or ``"host"`` (the PicoCalc's own sysfs
             ``power_supply`` driver, confirmed present in P0). Wired in P5.
+        console_host: Whether the screen is drawn by MeshTerm's own console host
+            (:mod:`meshterm.host`) rather than a terminal — where the app is its own
+            terminal, nothing about the one it was started from (a classic Windows console
+            to move out of, a font to offer) is its business.
         modifier_watch: The keyboard whose Shift state the optional evdev watcher follows,
             flipping the displayed F-key lane live while Shift is held — a case-insensitive
             substring of the input device's name, or ``""`` to leave the watcher off.
@@ -133,12 +142,13 @@ class Platform:
     lane_deck: str
     width_reclaim: bool
     emoji: bool
-    ascii_fold: bool
+    font: str
     truecolor: bool
     effects: bool
     tick_s: float
     spinner_tick_s: float
     battery: str
+    console_host: bool
     modifier_watch: str
 
     @property
@@ -159,17 +169,18 @@ REGULAR = Platform(
     lane_deck="",
     width_reclaim=True,
     emoji=True,
-    ascii_fold=False,
+    font="",
     truecolor=True,
     effects=True,
     tick_s=1.0,
     spinner_tick_s=0.12,
     battery="companion",
+    console_host=False,
     modifier_watch="",
 )
 
 #: The PicoCalc/Lyra/Calculinux framebuffer console. Field values not yet consumed by a
-#: binding point (header_atoms, ascii_fold, truecolor, effects beyond the
+#: binding point (header_atoms, font, truecolor, effects beyond the
 #: two P1 bindings, tick_s, battery, modifier_watch) are P2–P5's targets, recorded here
 #: now so the seam exists before the flavour work lands.
 PICOCALC = Platform(
@@ -186,12 +197,13 @@ PICOCALC = Platform(
     lane_deck="picocalc",
     width_reclaim=False,
     emoji=False,
-    ascii_fold=True,
+    font="picocalc",
     truecolor=False,
     effects=False,
     tick_s=2.0,
     spinner_tick_s=0.5,
     battery="host",
+    console_host=False,
     modifier_watch="picocalc",
 )
 
@@ -219,12 +231,13 @@ CARDPUTER = Platform(
     lane_deck="cardputer",
     width_reclaim=False,
     emoji=False,
-    ascii_fold=False,
+    font="cardputer",
     truecolor=True,
     effects=False,
     tick_s=2.0,
     spinner_tick_s=0.5,
     battery="companion",
+    console_host=True,
     modifier_watch="tca8418c",
 )
 
@@ -395,8 +408,8 @@ def without_emoji(platform: Platform) -> Platform:
     A terminal that cannot draw emoji is not a different *flavour* — the classic Windows
     console has the desktop's width, colour depth and keyboard, and wants every other
     thing :data:`REGULAR` says. Only the one flag moves, which is what the seam's flags
-    being independent is for: ``ascii_fold`` stays off, so accents and the rest of the
-    BMP still come through.
+    being independent is for: ``font`` stays unset, so accents and the rest of the BMP
+    still come through.
 
     Args:
         platform: The resolved platform.

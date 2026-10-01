@@ -366,7 +366,7 @@ def _has_wide_glyph(text: str) -> bool:
     like anywhere else. Reading ``emoji`` here instead would have skipped the scan on a
     frame that genuinely needed it, and smeared the row.
     """
-    if get_platform().ascii_fold:
+    if get_platform().font:
         return False
     return any(ord(ch) >= 0x1100 and get_cwidth(ch) == 2 for ch in text)
 

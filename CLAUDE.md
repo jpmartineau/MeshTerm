@@ -659,6 +659,19 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   which the console host copies). Each chip is centred over its key, eight cells of label,
   white on the fn key's orange-red (a step darker than the print, same hue, so the white
   holds 4:1), and white on dark blue while Shift is held.
+- **The Cardputer draws its own pixels** (`meshterm/host/`): the stock image leaves an app
+  no text console, only the framebuffer and the keyboard's event device. The console host
+  runs the ordinary TUI in-process — prompt_toolkit's app session pointed at a fixed 53×14
+  output whose bytes feed the host's own VT parser (`host/vt.py`), and a pipe the host
+  types into (`host/keys.py`, xterm's spelling, so Shift+F4–F8 parse as F16–F20) — then
+  draws the cells in Terminus 6×12 with MeshTerm's marks over it (`host/font.py`). The
+  front end is the only part that differs: the framebuffer and evdev on the device
+  (`host/device.py`, written ahead of the hardware), a Tk window on the desktop
+  (`host/sim.py`): `python -m meshterm.host --mock`, after
+  `python scripts/cardputer/fetch-terminus.py` once. Its glyph contract is
+  `fontset.CARDPUTER_CODEPOINTS`, named by `Platform.font` as the PicoCalc's is; the fold
+  derives everything from the platform's font (accents, emoji, the `?` net) and quantizes
+  colour only where `truecolor` is off.
 - `meshterm specimen` prints the whole visual language through the real funnels — the
   acceptance card on-device, a preview under `--platform picocalc` on the desktop.
 - Dev loop: `meshterm --mock --platform picocalc` in a 53×40 window, or

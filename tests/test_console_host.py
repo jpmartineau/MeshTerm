@@ -1,0 +1,260 @@
+# SPDX-License-Identifier: Apache-2.0
+"""The Cardputer's console host: its terminal, keys, font, pixels, and a whole run."""
+
+from __future__ import annotations
+
+import threading
+import time
+
+from prompt_toolkit.input.vt100_parser import Vt100Parser
+from prompt_toolkit.keys import Keys
+
+from meshterm.host.device import KeyState
+from meshterm.host.font import CELL_H, MARKS, MISSING, build_font, load_bdf
+from meshterm.host.keys import Key, encode
+from meshterm.host.raster import PANEL_H, PANEL_W, Raster, rgb565
+from meshterm.host.run import host_output, run
+from meshterm.host.sim import key_from_tk
+from meshterm.host.vt import BOLD, REVERSE, UNDERLINE, Terminal
+from meshterm.ui.tui.fkeys import CARDPUTER_DECK
+
+_BDF = """STARTFONT 2.1
+FONT test
+SIZE 12 72 72
+FONTBOUNDINGBOX 6 12 0 -2
+FONT_ASCENT 10
+FONT_DESCENT 2
+CHARS 1
+STARTCHAR A
+ENCODING 65
+BBX 6 12 0 -2
+BITMAP
+00
+00
+70
+88
+88
+88
+F8
+88
+88
+88
+00
+00
+ENDCHAR
+ENDFONT
+"""
+
+
+def _parsed(data: str) -> list[Keys | str]:
+    keys: list[Keys | str] = []
+    parser = Vt100Parser(lambda press: keys.append(press.key))
+    parser.feed(data)
+    parser.flush()
+    return keys
+
+
+# --- the terminal ---------------------------------------------------------------------
+
+
+def test_text_lands_where_the_cursor_is_and_wraps_at_the_edge() -> None:
+    """Printing starts at the cursor and wraps onto the next row at the right edge."""
+    term = Terminal(6, 3)
+    term.feed("\x1b[2;3Habcdef")
+    assert term.line(1) == "  abcd"
+    assert term.line(2) == "ef    "
+
+
+def test_erase_and_cursor_moves() -> None:
+    """Erase-to-end and erase-to-start clear what they name and nothing else."""
+    term = Terminal(8, 2)
+    term.feed("abcdefgh\r\nijklmnop\x1b[1;4H\x1b[K\x1b[2;2H\x1b[1K")
+    assert term.text() == "abc     \n  klmnop"
+
+
+def test_sgr_in_every_colour_depth() -> None:
+    """16-colour, 256-colour and truecolor SGR, with either separator, and the flags."""
+    term = Terminal(8, 1, palette=[(i, i, i) for i in range(16)])
+    term.feed("\x1b[31ma\x1b[38;5;196mb\x1b[38;2;1;2;3mc\x1b[38:2::4:5:6md\x1b[1;4;7me\x1b[0mf")
+    styles = [style for _, style in term.screen[0][:6]]
+    assert styles[0].fg == (1, 1, 1)  # palette slot 1
+    assert styles[1].fg == (255, 0, 0)  # the 256-colour cube's pure red
+    assert styles[2].fg == (1, 2, 3) and styles[3].fg == (4, 5, 6)
+    assert styles[4].flags == BOLD | UNDERLINE | REVERSE
+    assert styles[5].fg is None and styles[5].flags == 0
+
+
+def test_unknown_sequences_are_skipped_whole() -> None:
+    """A sequence the parser doesn't model leaves nothing of itself on screen."""
+    term = Terminal(10, 1)
+    term.feed("\x1b]0;a title\x07\x1b[?2004h\x1b[>4;2m\x1bPq#0;\x1b\\x\x1b(By")
+    assert term.line(0) == "xy        "
+
+
+def test_the_alternate_screen_keeps_the_main_one() -> None:
+    """Leaving the alternate screen brings the main one back as it was."""
+    term = Terminal(4, 1)
+    term.feed("main\x1b[?1049h\x1b[2J\x1b[Halt")
+    assert term.line(0) == "alt "
+    term.feed("\x1b[?1049l")
+    assert term.line(0) == "main"
+
+
+def test_only_changed_rows_are_dirty() -> None:
+    """A one-cell change marks one row for redrawing."""
+    term = Terminal(4, 3)
+    term.take_dirty()
+    term.feed("\x1b[3;1Hx")
+    assert term.take_dirty() == {2}
+
+
+def test_prompt_toolkit_draws_into_it() -> None:
+    """The output the host hands prompt_toolkit really does land in the grid."""
+    term = Terminal(20, 2)
+    frames: list[int] = []
+    output = host_output(term, threading.Lock(), lambda: frames.append(1))
+    output.cursor_goto(2, 4)  # 1-based, as a terminal counts
+    output.write("hello")
+    output.flush()
+    assert term.line(1).startswith("   hello") and frames
+    assert output.get_size().columns == 20 and output.get_size().rows == 2
+
+
+# --- keys -----------------------------------------------------------------------------
+
+
+def test_the_lane_keys_reach_prompt_toolkit_as_the_deck_expects() -> None:
+    """Fn+4..8 parse as F4-F8 and Shift with them as F16-F20, the Cardputer deck's banks."""
+    plain = [_parsed(encode(Key(name=f"f{n}")))[0] for n in range(4, 9)]
+    shifted = [_parsed(encode(Key(name=f"f{n}", shift=True)))[0] for n in range(4, 9)]
+    assert [k.value for k in plain] == [f"f{n}" for n in CARDPUTER_DECK.keys]
+    assert [k.value for k in shifted] == [f"f{n}" for n in CARDPUTER_DECK.shift_keys]
+
+
+def test_modified_navigation_and_control_letters() -> None:
+    """Ctrl+PgUp (the section jump), arrows, Shift+Tab, and the C0 control letters."""
+    assert _parsed(encode(Key(name="pageup", ctrl=True))) == [Keys.ControlPageUp]
+    assert _parsed(encode(Key(name="up"))) == [Keys.Up]
+    assert _parsed(encode(Key(name="tab", shift=True))) == [Keys.BackTab]
+    assert encode(Key(text="q", ctrl=True)) == "\x11"
+    assert encode(Key(text="w", ctrl=True)) == "\x17"
+    assert encode(Key(name="escape")) == "\x1b"
+    assert encode(Key(name="backspace")) == "\x7f"
+
+
+def test_tk_events_become_keys() -> None:
+    """The simulator reads Shift, Ctrl and text off Tk's events."""
+    assert key_from_tk("F4", "", 0x0001) == Key(name="f4", shift=True)
+    assert key_from_tk("q", "\x11", 0x0004) == Key(text="q", ctrl=True)
+    assert key_from_tk("a", "a", 0) == Key(text="a")
+    assert key_from_tk("Shift_L", "", 0) is None
+
+
+def test_the_device_keyboard_types_what_its_keycaps_say() -> None:
+    """Letters and digits as printed, Sym's placeholder codes as M5's keymap names them."""
+    keys = KeyState()
+    assert keys.event(30, 1) == Key(text="a")  # KEY_A
+    keys.event(42, 1)  # Shift down — the driver holds it for a sticky Shift too
+    assert keys.event(30, 1) == Key(text="A")
+    assert keys.event(62, 1) == Key(name="f4", shift=True)  # Shift+Fn+4
+    keys.event(42, 0)
+    assert keys.event(26, 1) == Key(text="!")  # Sym+1 arrives as KEY_LEFTBRACE
+    assert keys.event(93, 1) == Key(text="?")  # Sym+M
+    assert keys.event(389, 1) is None  # the Fn key itself (KEY_DVD) types nothing
+    assert keys.event(30, 0) is None  # a release types nothing
+
+
+# --- the font and the pixels ------------------------------------------------------------
+
+
+def test_a_bdf_glyph_lands_in_the_cell(tmp_path) -> None:
+    """A BDF glyph is set into the 6x12 cell where its bounding box says."""
+    path = tmp_path / "t.bdf"
+    path.write_text(_BDF)
+    glyph = load_bdf(path)[65]
+    assert len(glyph) == CELL_H
+    assert glyph[2] == 0x70 and glyph[6] == 0xF8
+
+
+def test_meshterm_marks_draw_over_the_base_and_gaps_show() -> None:
+    """MeshTerm's marks win over the base font, and a missing glyph draws as a box."""
+    font = build_font({0x2605: bytes(12)})
+    assert font.glyph("★") == MARKS[0x2605]  # the mark wins over the base's glyph
+    assert font.glyph("⋯") == MARKS[0x2026]  # aliased, as on the PicoCalc
+    assert font.glyph("一") == MISSING
+
+
+def test_the_raster_draws_a_cell_in_its_colours() -> None:
+    """A cell's ink and paper land in the right pixels, and only dirty rows redraw."""
+    term = Terminal(53, 14)
+    font = build_font({0x41: bytes([0, 0, 0x70, 0x88, 0x88, 0x88, 0xF8, 0x88, 0x88, 0x88, 0, 0])})
+    raster = Raster(term, font, pack=rgb565, default_bg=(0, 0, 0))
+    term.feed("\x1b[38;2;255;255;255m\x1b[48;2;0;0;255mA")
+    bands = raster.update()
+    assert bands == [(raster.top, raster.top + 12 * 14)]  # the first paint is every row
+    assert len(raster.pixels) == PANEL_W * PANEL_H * 2
+
+    def pixel(x: int, y: int) -> bytes:
+        at = (raster.top + y) * raster.stride + (raster.left + x) * 2
+        return bytes(raster.pixels[at : at + 2])
+
+    assert pixel(1, 2) == rgb565((255, 255, 255))  # ink: the A's top bar
+    assert pixel(0, 2) == rgb565((0, 0, 255))  # paper beside it
+    term.feed("\x1b[14;1Hz")
+    assert raster.update() == [(raster.top + 13 * 12, raster.top + 14 * 12)]
+
+
+# --- a whole run ----------------------------------------------------------------------
+
+
+def test_meshterm_runs_inside_the_host(monkeypatch) -> None:
+    """The ordinary CLI, hosted: the menu draws at 53x14 with the Cardputer's lane, ^Q^Q leaves."""
+    from meshterm.ui import menu
+
+    # Quitting arms a watchdog that hard-exits the process if teardown wedges — right for
+    # the host, which ends with the TUI, but fatal to the test run it is hosted in here.
+    monkeypatch.setattr(menu, "_arm_exit_watchdog", lambda *args, **kwargs: None)
+    seen: dict[str, str] = {}
+
+    class Headless:
+        def __init__(self, terminal, lock, type_text):
+            self._terminal, self._lock = terminal, lock
+
+            def drive():
+                deadline = time.monotonic() + 30
+                while time.monotonic() < deadline:
+                    with self._lock:
+                        text = terminal.text()
+                    if "What would you like to do?" in text:
+                        seen["menu"] = text
+                        break
+                    time.sleep(0.1)
+                type_text("\x11")
+                time.sleep(0.3)
+                type_text("\x11")
+
+            threading.Thread(target=drive, daemon=True).start()
+
+        def frame_ready(self):
+            pass
+
+        def close(self):
+            pass
+
+    assert run(["--mock"], Headless) == 0
+    menu = seen["menu"].splitlines()
+    assert len(menu) == 14 and all(len(line) == 53 for line in menu)
+    assert "Quit?" in menu[-1]  # the main menu's lane, drawn by the Cardputer deck
+
+
+def test_the_cardputer_inventory_is_what_the_host_draws() -> None:
+    """``fontset.CARDPUTER_CODEPOINTS`` holds every mark, and the installed font exactly."""
+    from meshterm.host.font import ALIASES, font_dir, load_bdf
+    from meshterm.ui.fontset import CARDPUTER_CODEPOINTS
+
+    assert set(MARKS) | set(ALIASES) <= CARDPUTER_CODEPOINTS
+    installed = font_dir() / "ter-u12n.bdf"
+    if not installed.is_file():
+        return  # no Terminus on this machine (CI): the marks are the part that is ours
+    drawn = {cp for cp in load_bdf(installed) if cp >= 0x20} | set(MARKS) | set(ALIASES)
+    assert drawn == CARDPUTER_CODEPOINTS
