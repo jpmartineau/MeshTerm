@@ -62,8 +62,8 @@ from .widgets import (
     node_type_legend,
     route_graph_style,
     self_marker,
+    short_frame,
     tab_air,
-    tab_compact,
     tab_strip,
 )
 
@@ -649,7 +649,7 @@ class RecordScreen(Screen):
         lines: list[str] = [render_to_ansi(self._header(), width, no_wrap=True)]
         lines.extend([""] * tab_air())
         strip = tab_strip(
-            self._tabs, self._tab_index, width, compact=tab_compact(self._scroll_viewport)
+            self._tabs, self._tab_index, width, compact=short_frame(self._scroll_viewport)
         )
         lines.extend(render_lines(strip, width))
         lines.extend([""] * tab_air())

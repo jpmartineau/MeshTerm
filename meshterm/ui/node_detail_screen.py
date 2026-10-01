@@ -131,8 +131,8 @@ from .widgets import (
     format_ago,
     highlighted_hash,
     node_type_legend,
+    short_frame,
     tab_air,
-    tab_compact,
     tab_strip,
 )
 
@@ -767,7 +767,7 @@ class NodeDetailScreen(Screen):
                         [t.name for t in self._tabs],
                         self._tab_index,
                         width,
-                        compact=tab_compact(viewport),
+                        compact=short_frame(viewport),
                     ),
                     width,
                     no_wrap=True,

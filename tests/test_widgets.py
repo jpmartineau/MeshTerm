@@ -290,10 +290,10 @@ def test_every_advert_type_has_one_name() -> None:
 
 
 def test_a_compact_tab_strip_is_one_row_and_never_moves_a_label() -> None:
-    """Below COMPACT_TABS_BELOW rows the strip draws on its rule, every tab a fixed width."""
-    from meshterm.ui.widgets import COMPACT_TABS_BELOW, tab_compact, tab_strip
+    """Below SHORT_FRAME_BELOW rows the strip draws on its rule, every tab a fixed width."""
+    from meshterm.ui.widgets import SHORT_FRAME_BELOW, short_frame, tab_strip
 
-    assert tab_compact(COMPACT_TABS_BELOW - 1) and not tab_compact(COMPACT_TABS_BELOW)
+    assert short_frame(SHORT_FRAME_BELOW - 1) and not short_frame(SHORT_FRAME_BELOW)
     rows = [tab_strip(["Info", "Routes", "Area"], i, 40, compact=True) for i in range(3)]
     plains = [group.renderables[0].plain for group in rows]
     assert all(len(group.renderables) == 1 for group in rows)

@@ -1247,17 +1247,19 @@ def tab_air() -> int:
     return _TAB_AIR
 
 
-#: The viewport, in rows, below which a tabbed page draws its strip on one row (see
-#: :func:`tab_strip`'s ``compact``). The boxed strip costs three rows and its air; on the
-#: Cardputer's 11-row viewport that was the difference between a page's actions on screen
-#: and below the fold. Read from the viewport rather than the platform, so a desktop
-#: terminal dragged short gets the same answer the handheld does.
-COMPACT_TABS_BELOW = 16
+#: The viewport, in rows, below which a frame is *short* and spends its rows on content:
+#: a tabbed page draws its strip on one row (see :func:`tab_strip`'s ``compact``), and a
+#: graph's caption and node-type key step aside so the list under it gets the rows. The
+#: boxed strip alone costs three; on the Cardputer's 11-row viewport that was the
+#: difference between a page's actions on screen and below the fold. Read from the
+#: viewport rather than the platform, so a desktop terminal dragged short gets the same
+#: answer the handheld does.
+SHORT_FRAME_BELOW = 16
 
 
-def tab_compact(viewport: int) -> bool:
-    """Whether a page with ``viewport`` rows draws its tab strip compact (one row)."""
-    return viewport < COMPACT_TABS_BELOW
+def short_frame(viewport: int) -> bool:
+    """Whether a page with ``viewport`` rows is short (see :data:`SHORT_FRAME_BELOW`)."""
+    return viewport < SHORT_FRAME_BELOW
 
 
 def tab_strip(labels: Sequence[str], active: int, width: int, *, compact: bool = False) -> Group:
@@ -1290,7 +1292,7 @@ def tab_strip(labels: Sequence[str], active: int, width: int, *, compact: bool =
     owning screen switches the active index (``Tab``/``Shift+Tab``); the strip itself is
     pure presentation.
 
-    Where rows are scarcer than that (``compact``, see :func:`tab_compact`) the same strip is
+    Where rows are scarcer than that (``compact``, see :func:`short_frame`) the same strip is
     drawn on its own bottom rule, in one row: ``──┤ Info ├── Routes ──────``. The active tab
     stands on the rule between tees, lit; an inactive one is its label on the rule, faint.
     Every tab is the same width in either state, so switching still never moves a label.

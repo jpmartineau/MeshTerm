@@ -76,7 +76,7 @@ from .theme import mark_rgb, name_style, snr_style
 from .trace_screen import snr_bar
 from .tui.render import crop_cells, query_line, render_to_ansi
 from .tui.screen import ListWindow, Screen
-from .widgets import DEFAULT_GLYPH, NODE_GLYPHS, format_age, highlighted_hash
+from .widgets import DEFAULT_GLYPH, NODE_GLYPHS, format_age, highlighted_hash, short_frame
 
 if TYPE_CHECKING:
     from ..context import AppContext
@@ -557,14 +557,18 @@ class WalkScreen(Screen):
         viewport = self._scroll_viewport  # recorded by the frame before this render
 
         header = self._header_lines(width, depths)
-        chrome = len(header) + 3 + self._query_row()  # legend, blank, list heading (+find echo)
+        # The legend and the blank under it go on a short frame, where the rows are the
+        # list's (see widgets.short_frame); the list's heading stays either way.
+        keyed = not short_frame(viewport)
+        chrome = len(header) + (3 if keyed else 1) + self._query_row()  # (+find echo)
         canvas_h = self._canvas_height(viewport, chrome)
         list_win = max(1, viewport - chrome - canvas_h)
 
         lines: list[str] = list(header)
         lines.extend(self._canvas_lines(width, canvas_h, selected))
-        lines.append(render_to_ansi(self._legend(), width, no_wrap=True))
-        lines.append("")
+        if keyed:
+            lines.append(render_to_ansi(self._legend(), width, no_wrap=True))
+            lines.append("")
         lines.extend(self._list_lines(width, rows, depths, list_win))
         self._scroll_total = max(1, len(lines))
         return lines
