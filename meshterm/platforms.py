@@ -64,6 +64,12 @@ class Platform:
             twelfth of the whole display, and it costs content: a packet card's reception
             row folds ``rssi`` onto a line of its own for want of two cells (JP, on-device,
             2026-08-10). Two columns a side still reads as floating and buys them back.
+        dialog_row_margin: Rows a floating dialog leaves to the frame around it — the header
+            above and the footer below, which a dialog never covers, plus any blank row
+            between them and the box. One row of air above and below is what lets a box read
+            as floating on a 24-row terminal (4 in all); on the Cardputer's 14 rows those two
+            rows are a fifth of what a dialog could show, and its side gutters already say
+            it floats, so the box runs from the header to the lane (2).
         header_atoms: Which segments compose the persistent header, in the vocabulary
             ``"version"``, ``"device"``, ``"badges"``, ``"pulse"``, ``"battery"``. Wired
             into :func:`~meshterm.ui.menu._header` in P4; unconsumed until then.
@@ -138,6 +144,7 @@ class Platform:
     frame_border: bool
     menu_icons: bool
     dialog_margin: int
+    dialog_row_margin: int
     header_atoms: tuple[str, ...]
     lane_deck: str
     width_reclaim: bool
@@ -165,6 +172,7 @@ REGULAR = Platform(
     frame_border=True,
     menu_icons=True,
     dialog_margin=6,
+    dialog_row_margin=4,
     header_atoms=("version", "device", "badges", "pulse", "battery"),
     lane_deck="",
     width_reclaim=True,
@@ -190,6 +198,7 @@ PICOCALC = Platform(
     frame_border=False,
     menu_icons=False,
     dialog_margin=4,
+    dialog_row_margin=4,
     # JP's call (2026-08-01, post-P7 review): the handheld's header brands the app —
     # "MeshTerm vX" — rather than naming the device/port (on a soldered radio the port
     # never changes), and the activity pulse takes whatever room remains.
@@ -227,6 +236,7 @@ CARDPUTER = Platform(
     frame_border=False,
     menu_icons=False,
     dialog_margin=4,
+    dialog_row_margin=2,
     header_atoms=("version", "badges", "pulse", "battery"),
     lane_deck="cardputer",
     width_reclaim=False,

@@ -634,8 +634,11 @@ def _dialog_layout(screen: Screen, cols: int, rows: int) -> tuple[int, int, int,
     cap = min(cols - get_platform().dialog_margin, 100)
     natural = getattr(screen, "dialog_width", None)
     max_w = cap if natural is None else max(24, min(cap, screen.ratchet_width(natural)))
-    # Rows the box may spend between its borders — on body lines and breathing room alike.
-    budget = max(3, rows - 6)
+    # Rows the box may spend between its borders — on body lines and breathing room alike:
+    # the frame less the two borders and the rows it leaves to the frame around it (the
+    # header, the footer, and on a tall enough frame a row of air each side — see
+    # Platform.dialog_row_margin).
+    budget = max(3, rows - 2 - get_platform().dialog_row_margin)
     # Record the budget as the provisional viewport before the body renders, so a
     # dialog that windows a list inside itself (the path composer) can size to what
     # it may spend; the slice records the real, body-sized viewport afterwards.
