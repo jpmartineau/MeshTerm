@@ -241,9 +241,13 @@ deliberately, one at a time, and say why in the code.
   encodes, sat a little above centre; Esc leaves, as everywhere. The code **fits itself
   to the frame every paint**, width and rows both: a lighter error level, then a
   narrower quiet zone, before it would ever be cut (a contact card is 57 cells and 29
-  rows at the standard fit; the PicoCalc is 53 across and a regular terminal 24 tall),
-  and when code and URL can't share the frame the code is whole at the top and the URL
-  a page down. The one exception is a ` ```qr ` fence in a written page, where the code
+  rows at the standard fit; the PicoCalc is 53 across and a regular terminal 24 tall).
+  Where the font draws braille solid (`Platform.solid_braille`, the PicoCalc's built
+  fonts) those fits are then tried again in **braille**, two modules a cell and four a
+  row (`qr._GRIDS`): half the module, the one step that costs a camera anything, so it
+  comes after the free ones — and it is what puts the contact card on the 53×26 panel
+  whole, standard fit and URL together. When code and URL still can't share the frame
+  the code is whole at the top and the URL a page down. The one exception is a ` ```qr ` fence in a written page, where the code
   is an illustration drawn in the prose where the fence is.
 
 ### Written pages

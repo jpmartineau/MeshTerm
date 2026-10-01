@@ -87,6 +87,12 @@ class Platform:
             and quantizes the two scales that would otherwise spend a gradient — the
             per-node key hue (:func:`~meshterm.ui.theme.node_style`) and the heard-age heat
             (:func:`~meshterm.ui.widgets._recency_style`). Wired in P3.
+        solid_braille: Whether the console font draws a braille cell's eight dots as solid
+            tiles with no gap between them or between neighbouring cells — the PicoCalc's
+            built fonts (``scripts/picocalc``) do — so braille is a true 2×4 pixel grid,
+            fine enough for what must stay contiguous. It is what lets a QR code step down
+            to braille when the half-block code does not fit (:mod:`~meshterm.ui.qr`). A
+            desktop font's braille is dotted, and a code drawn in it scans as nothing.
         effects: Whether animated/decorative rendering runs at all — the braille spinner,
             which drops to a ``LINE`` fallback. Cheaper on a console where a repaint is
             dear. The header battery gauge is deliberately *not* behind it: its sweep is
@@ -128,6 +134,7 @@ class Platform:
     emoji: bool
     ascii_fold: bool
     truecolor: bool
+    solid_braille: bool
     effects: bool
     tick_s: float
     spinner_tick_s: float
@@ -149,6 +156,7 @@ REGULAR = Platform(
     emoji=True,
     ascii_fold=False,
     truecolor=True,
+    solid_braille=False,
     effects=True,
     tick_s=1.0,
     spinner_tick_s=0.12,
@@ -176,6 +184,7 @@ PICOCALC = Platform(
     emoji=False,
     ascii_fold=True,
     truecolor=False,
+    solid_braille=True,
     effects=False,
     tick_s=2.0,
     spinner_tick_s=0.5,
