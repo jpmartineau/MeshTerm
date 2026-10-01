@@ -656,9 +656,10 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   assuming F1–F5. Both decks having five slots is a coincidence, not a rule. The
   Cardputer's lane is **Fn+4…8** (F4–F8), never the bare digits, since a digit must stay a
   digit where the app takes typing; Shift with them arrives as F16–F20 (xterm's encoding,
-  which the console host copies). Each chip is centred over its key, eight cells of label,
-  white on the fn key's orange-red (a step darker than the print, same hue, so the white
-  holds 4:1), and white on dark blue while Shift is held.
+  which the console host copies). Its chips are laid out exactly as the PicoCalc's — key
+  caption, 9-cell chip, 2-cell gaps — captioned F4–F8 in both banks, white on the fn key's
+  orange-red (a step darker than the print, same hue, so the white holds 4:1), and white on
+  dark blue while Shift is held.
 - **The Cardputer draws its own pixels** (`meshterm/host/`): the stock image leaves an app
   no text console, only the framebuffer and the keyboard's event device. The console host
   runs the ordinary TUI in-process — prompt_toolkit's app session pointed at a fixed 53×14

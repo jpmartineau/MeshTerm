@@ -20,9 +20,6 @@ from meshterm.ui.tui.fkeys import (
 )
 from meshterm.ui.tui.screen import ScrollScreen
 
-#: Where M5's own screen-key drawing centres the labels for keys 4-8, in panel pixels.
-_KEY_CENTRES_PX = (48, 104, 160, 216, 272)
-
 
 class _OwnCardputerLane(ScrollScreen):
     """A screen that has decided its Cardputer lane for itself."""
@@ -85,32 +82,26 @@ def test_the_session_binds_every_key_a_deck_can_use() -> None:
             assert session._KEY_ACTIONS[getattr(Keys, f"F{number}")] == f"f{number}"
 
 
-def test_cardputer_chips_sit_over_their_keys() -> None:
-    """Each chip is centred on its key's label position, a label alone in eight cells."""
+def test_cardputer_chips_are_laid_out_as_the_picocalcs() -> None:
+    """The PicoCalc's chips — caption, 9-cell width, 2-cell gaps — under the Cardputer's keys."""
+    assert CARDPUTER_DECK.columns == PICOCALC_DECK.columns
+    assert CARDPUTER_DECK.chip_width == PICOCALC_DECK.chip_width
     lane = (FPair("Region", "home"), FPair("You", "locate", enabled=False), None, *DEFAULT_LANE[3:])
     row = CARDPUTER_DECK.lane_text(lane)
-    for column, centre_px in zip(CARDPUTER_DECK.columns, _KEY_CENTRES_PX, strict=True):
-        chip_centre_px = (column + CARDPUTER_DECK.chip_width / 2) * 6
-        assert abs(chip_centre_px - centre_px) <= 2  # within a third of a cell
-    starts = CARDPUTER_DECK.columns
-    assert all(
-        b - a > CARDPUTER_DECK.chip_width for a, b in zip(starts, starts[1:], strict=False)
-    ), "a gap"
-    assert cell_len(row.plain) <= CARDPUTER.readable_cols
-    chips = [row.plain[c : c + CARDPUTER_DECK.chip_width] for c in starts]
-    assert chips[0] == " Region " and chips[3] == " Page ↓ "
-    assert chips[2].strip() == "F6"  # an unassigned slot shows its key, unfilled
+    assert cell_len(row.plain) == CARDPUTER.readable_cols
+    chips = [row.plain[c : c + CARDPUTER_DECK.chip_width] for c in CARDPUTER_DECK.columns]
+    assert chips == ["F4 Region", "F5 You   ", "F6       ", "F7 Page ↓", "F8 Page ↑"]
     styles = {row.plain[s.start : s.end].strip(): str(s.style) for s in row.spans}
-    assert styles["Region"] == "fkey.chip.cardputer"
-    assert styles["You"] == "muted" and styles["F6"] == "muted"
+    assert styles["F4 Region"] == "fkey.chip.cardputer"
+    assert styles["F5 You"] == "muted" and styles["F6"] == "muted"
 
 
 def test_cardputer_shift_bank_draws_in_its_own_fill() -> None:
-    """Shifted, the companions show in the Shift fill; a lone slot shows its bare key."""
+    """Shifted, the companions show in the Shift fill under the same keys' captions."""
     row = CARDPUTER_DECK.lane_text(DEFAULT_LANE, shifted=True)
     styles = {row.plain[s.start : s.end].strip(): str(s.style) for s in row.spans}
-    assert styles["Bottom"] == "fkey.chip.cardputer.shift"
-    assert styles["Top"] == "fkey.chip.cardputer.shift"
+    assert styles["F7 Bottom"] == "fkey.chip.cardputer.shift"
+    assert styles["F8 Top"] == "fkey.chip.cardputer.shift"
     assert styles["F4"] == "muted"
 
 

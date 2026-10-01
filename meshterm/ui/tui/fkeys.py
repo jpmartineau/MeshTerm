@@ -266,11 +266,6 @@ class LaneDeck:
         return f"{text:^{self.chip_width}}"
 
 
-def _centred_columns(centres_px: tuple[int, ...], *, cell_px: int, width: int) -> tuple[int, ...]:
-    """The start column of a ``width``-cell chip centred on each pixel position."""
-    return tuple(round((centre - width * cell_px / 2) / cell_px) for centre in centres_px)
-
-
 #: The PicoCalc's five dedicated function keys. Its keyboard MCU sends Shift+F1..F5 as
 #: plain F6-F10, so the Shift bank is keys of its own. Every chip is a 2-cell key caption,
 #: a space and a 6-cell label; five chips and four 2-cell gaps sum to exactly 53, the
@@ -294,20 +289,20 @@ PICOCALC_DECK = LaneDeck(
 #: typing (JP, 2026-09-30). The keyboard driver sends Shift as a key of its own, and the
 #: console host encodes Shift+Fn+4..8 the way xterm encodes Shift+F4..F8, which
 #: prompt_toolkit reads as F16-F20 — so a desktop terminal with ``--platform cardputer``
-#: drives the same bank. Each chip is centred over its key: M5's own screen-key drawing puts
-#: the five at x = 48, 104, 160, 216 and 272 of the 320-pixel panel, 56 px apart, which in
-#: 6-pixel cells is too tight a pitch for a 9-cell chip to keep a gap, so a chip is its
-#: label alone, centred in eight cells — the key under it needs no naming. It reads the
-#: PicoCalc's lanes for now (see :meth:`~meshterm.ui.tui.screen.Screen.cardputer_lane`).
+#: drives the same bank. The chips are laid out exactly as the PicoCalc's — the key's
+#: caption leading a 6-cell label, nine cells a chip, two between (JP, 2026-09-30) — and
+#: the Shift bank keeps the same captions, since it is the same keys with Shift held; its
+#: blue fill is what says so. It reads the PicoCalc's lanes for now (see
+#: :meth:`~meshterm.ui.tui.screen.Screen.cardputer_lane`).
 CARDPUTER_DECK = LaneDeck(
     name="cardputer",
     keys=(4, 5, 6, 7, 8),
     shift_keys=(16, 17, 18, 19, 20),
     captions=("F4", "F5", "F6", "F7", "F8"),
     shift_captions=("F4", "F5", "F6", "F7", "F8"),
-    columns=_centred_columns((48, 104, 160, 216, 272), cell_px=6, width=8),
-    chip_width=8,
-    captioned=False,
+    columns=PICOCALC_DECK.columns,
+    chip_width=PICOCALC_DECK.chip_width,
+    captioned=True,
     fill="fkey.chip.cardputer",
     shift_fill="fkey.chip.cardputer.shift",
     read_lane=attrgetter("cardputer_lane"),
