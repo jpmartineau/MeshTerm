@@ -245,10 +245,10 @@ deliberately, one at a time, and say why in the code.
   and URL can't share the frame the code is whole at the top and the URL a page down.
   The one exception is a ` ```qr ` fence in a written page, where the code is an
   illustration drawn in the prose where the fence is. Where the font draws braille solid
-  (`Platform.solid_braille`, the PicoCalc's built fonts) every code — share screen and
-  page fence alike — is drawn in **braille**, one module a dot, eight a cell
-  (`qr._GRID`), so the contact card is 29 cells by 15 rows there and shares the 53×26
-  panel with its URL at the standard fit.
+  (`Platform.solid_braille`: the PicoCalc's built fonts, the Cardputer's console host,
+  `host/font.BRAILLE`) every code — share screen and page fence alike — is drawn in
+  **braille**, one module a dot, eight a cell (`qr._GRID`), so the contact card is 29
+  cells by 15 rows there and shares the 53×26 panel with its URL at the standard fit.
 
 ### Written pages
 

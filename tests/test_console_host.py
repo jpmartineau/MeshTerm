@@ -184,6 +184,21 @@ def test_meshterm_marks_draw_over_the_base_and_gaps_show() -> None:
     assert font.glyph("一") == MISSING
 
 
+def test_braille_draws_as_solid_tiles_with_no_gap() -> None:
+    """Braille is pixels here, as on the PicoCalc: each dot a 3x3 tile, the cell tiled whole.
+
+    The base's dotted braille loses to the tiles, and so does the bold smear, which would
+    only close the seam between a cell's two columns.
+    """
+    dotted = bytes([0x6C, 0x6C, 0, 0x6C, 0x6C, 0, 0x6C, 0x6C, 0, 0x6C, 0x6C, 0])
+    font = build_font({0x28FF: dotted})
+    assert font.glyph("⣿") == bytes([0xFC] * 12)  # every dot: the cell, solid
+    assert font.glyph("⣿", bold=True) == bytes([0xFC] * 12)
+    assert font.glyph("⡇") == bytes([0xE0] * 12)  # the left column: three pixels wide
+    assert font.glyph("⠉") == bytes([0xFC] * 3 + [0] * 9)  # the top row: three tall
+    assert font.glyph("⢀", bold=True) == bytes([0] * 9 + [0x1C] * 3)  # dot 8, unsmeared
+
+
 def test_the_raster_draws_a_cell_in_its_colours() -> None:
     """A cell's ink and paper land in the right pixels, and only dirty rows redraw."""
     term = Terminal(53, 14)
@@ -249,12 +264,13 @@ def test_meshterm_runs_inside_the_host(monkeypatch) -> None:
 
 def test_the_cardputer_inventory_is_what_the_host_draws() -> None:
     """``fontset.CARDPUTER_CODEPOINTS`` holds every mark, and the installed font exactly."""
-    from meshterm.host.font import ALIASES, font_dir, load_bdf
+    from meshterm.host.font import ALIASES, BRAILLE, font_dir, load_bdf
     from meshterm.ui.fontset import CARDPUTER_CODEPOINTS
 
-    assert set(MARKS) | set(ALIASES) <= CARDPUTER_CODEPOINTS
+    ours = set(MARKS) | set(ALIASES) | set(BRAILLE)
+    assert ours <= CARDPUTER_CODEPOINTS
     installed = font_dir() / "ter-u12n.bdf"
     if not installed.is_file():
         return  # no Terminus on this machine (CI): the marks are the part that is ours
-    drawn = {cp for cp in load_bdf(installed) if cp >= 0x20} | set(MARKS) | set(ALIASES)
+    drawn = {cp for cp in load_bdf(installed) if cp >= 0x20} | ours
     assert drawn == CARDPUTER_CODEPOINTS

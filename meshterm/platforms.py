@@ -252,6 +252,9 @@ CARDPUTER = Platform(
     emoji=False,
     font="cardputer",
     truecolor=True,
+    # The console host draws its own braille, as the PicoCalc's built fonts do: solid
+    # tiles, no gap between dots (meshterm/host/font.py, BRAILLE).
+    solid_braille=True,
     effects=False,
     tick_s=2.0,
     spinner_tick_s=0.5,

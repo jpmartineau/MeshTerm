@@ -6,7 +6,8 @@ read alike, and at 1,356 glyphs it covers everything MeshTerm draws on this plat
 handful of its own marks. The host is not a kernel console, so nothing caps the glyph count
 at 512 — no donor slots, no folding braille away. MeshTerm's marks are drawn over the base
 from the same pixel art the PicoCalc's font build uses (:data:`MARKS`), so ``★``, ``❯``,
-``⚿`` and the rest look the same on both devices.
+``⚿`` and the rest look the same on both devices; and so is its braille (:data:`BRAILLE`),
+solid tiles where Terminus draws the dots apart.
 
 Terminus is licensed under the SIL Open Font License, so it is never shipped inside
 MeshTerm: the host loads it from a BDF file on the machine (:func:`find_font`). On the
@@ -100,6 +101,33 @@ MARKS: dict[int, bytes] = {
         "##..##", "##..##", "######", "######", "......", "......"]),
 }
 # fmt: on
+
+#: Which byte bit lights which pixel columns, and which pixel rows, for each braille dot:
+#: two columns of three pixels and four rows of three, tiling the whole cell.
+_BRAILLE_COLS = (0xE0, 0x1C)
+_BRAILLE_ROWS = ((0, 1, 2), (3, 4, 5), (6, 7, 8), (9, 10, 11))
+
+#: Dot bit per (column, row) within a braille cell — the Unicode standard layout.
+_BRAILLE_DOTS = ((0x01, 0x02, 0x04, 0x40), (0x08, 0x10, 0x20, 0x80))
+
+
+def _braille(value: int) -> bytes:
+    """The braille cell whose low byte is ``value``, each dot a solid 3×3 tile."""
+    rows = [0] * CELL_H
+    for col, bits in enumerate(_BRAILLE_DOTS):
+        for row, bit in enumerate(bits):
+            if value & bit:
+                for y in _BRAILLE_ROWS[row]:
+                    rows[y] |= _BRAILLE_COLS[col]
+    return bytes(rows)
+
+
+#: Every braille cell, drawn over the base font as solid tiles with no gap between dots or
+#: between neighbouring cells — the same tiles as the PicoCalc's font build
+#: (``scripts/picocalc/calculinux-console-font-6x12.sh``, ``BANDS12``). MeshTerm never sets
+#: braille to be read: every braille cell is pixels, a chart, the map, a QR code, and a
+#: dotted one breaks every line it draws into beads.
+BRAILLE: dict[int, bytes] = {0x2800 + value: _braille(value) for value in range(256)}
 
 #: Codepoints drawn as another's glyph, as the PicoCalc's font aliases them.
 ALIASES: dict[int, int] = {
@@ -197,15 +225,18 @@ class Font:
 
 
 def build_font(regular: dict[int, bytes], bold: dict[int, bytes] | None = None) -> Font:
-    """A :class:`Font` from base glyph tables, with MeshTerm's marks drawn over both.
+    """A :class:`Font` from base glyph tables, with MeshTerm's marks and braille over both.
 
-    A missing bold face reuses the regular one, emboldened by a one-pixel smear.
+    A missing bold face reuses the regular one, emboldened by a one-pixel smear — all but
+    the braille, which is pixels rather than letters, so bold has no weight to add to it
+    and the smear would only close the seam between a cell's two columns.
     """
-    regular = {**regular, **MARKS}
+    regular = {**regular, **MARKS, **BRAILLE}
     if bold is None:
         bold = {code: bytes(row | row >> 1 for row in rows) for code, rows in regular.items()}
+        bold.update(BRAILLE)
     else:
-        bold = {**bold, **MARKS}
+        bold = {**bold, **MARKS, **BRAILLE}
     return Font(regular=regular, bold=bold)
 
 
