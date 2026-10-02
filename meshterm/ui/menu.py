@@ -48,7 +48,7 @@ from .tui import (
     TuiSession,
 )
 from .tui.emoji_width import install as install_emoji_widths
-from .tui.fkeys import FPair
+from .tui.fkeys import EMPTY_LANE, FPair
 from .tui.spinner import spinner_interval
 from .widgets import battery_cell
 
@@ -514,6 +514,12 @@ async def _confirm_quit(ctx: AppContext, session: TuiSession) -> bool:
     if await _can_unpair(ctx):
         buttons.append(("Unpair & quit", "unpair"))
     buttons.append(("Quit", "quit"))
+    # On a handheld the question keeps the chip that asked it: F3, where the menu's
+    # ``Quit?`` sat, reads ``Quit!`` here and sends the same ``quit`` — which, while this
+    # confirm is up, leaves at once (see TuiSession.request_quit), as a second ^Q does.
+    # So the way out from the menu is one key pressed twice (JP, 2026-10-02).
+    lane = list(EMPTY_LANE)
+    lane[2] = FPair("Quit!", "quit")
     choice = await session.button_dialog(
         "Are you sure you want to quit?",
         buttons,
@@ -526,6 +532,7 @@ async def _confirm_quit(ctx: AppContext, session: TuiSession) -> bool:
         button_style="selected",
         button_idle_style="muted",
         border_style="warn",
+        lane=lane,
     )
     if choice == "unpair":
         ctx.unpair_on_exit = True

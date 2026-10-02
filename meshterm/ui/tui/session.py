@@ -1360,6 +1360,7 @@ class TuiSession:
         button_style: str = "selected",
         button_idle_style: str = "muted",
         border_style: str = "accent",
+        lane: Sequence[fkeys.FPair | None] | None = None,
     ) -> Any:
         """Show a centered button dialog; return the chosen value or ``None`` if cancelled.
 
@@ -1380,6 +1381,7 @@ class TuiSession:
             button_style=button_style,
             button_idle_style=button_idle_style,
             border_style=border_style,
+            lane=lane,
         )
         result = await self.run_dialog(screen)
         return None if result is CANCEL else result

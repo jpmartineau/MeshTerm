@@ -8,7 +8,8 @@ prompt shares the framework's look, layering, resize, and Esc-to-cancel behavior
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING
 
 from rich.cells import cell_len
 from rich.console import Group, RenderableType
@@ -18,6 +19,9 @@ from ..marks import MASK_MARK
 from .render import render_lines, right_aligned_tail
 from .screen import Screen
 from .spinner import Spinner
+
+if TYPE_CHECKING:
+    from .fkeys import FPair
 
 #: A validator returns ``True`` when the input is acceptable, or an error message to show.
 Validator = Callable[[str], "bool | str"]
@@ -506,6 +510,7 @@ class ButtonDialog(_KeylessDialog):
         button_style: str = "selected",
         button_idle_style: str = "muted",
         border_style: str = "accent",
+        lane: Sequence[FPair | None] | None = None,
     ) -> None:
         """Build a button dialog.
 
@@ -525,8 +530,12 @@ class ButtonDialog(_KeylessDialog):
             button_style: Rich style for the highlighted button.
             button_idle_style: Rich style for the un-highlighted buttons.
             border_style: Rich style for the dialog border (read by the frame compositor).
+            lane: An F-key lane for the one question that has a chip worth offering — the
+                quit confirm's, whose F3 is the chip that asked it, pressed again (see
+                ``menu._confirm_quit``). ``None`` keeps a prompt's empty lane.
         """
         super().__init__()
+        self._lane = tuple(lane) if lane is not None else None
         self.title = title
         self.footer_hint = footer_hint
         self.border_style = border_style
@@ -549,6 +558,14 @@ class ButtonDialog(_KeylessDialog):
         if isinstance(self._prompt, Text):
             return list(self._prompt.split("\n")) or [Text("")]
         return [Text(self._prompt, style=self._prompt_style)]
+
+    @property
+    def picocalc_lane(self):
+        """The caller's lane where one was given, else a prompt's empty one.
+
+        The per-deck definition, as every screen's is; the Cardputer's deck follows it.
+        """
+        return self._lane if self._lane is not None else super().picocalc_lane
 
     @property
     def _button_row_width(self) -> int:

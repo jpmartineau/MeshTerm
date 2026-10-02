@@ -157,7 +157,9 @@ deliberately, one at a time, and say why in the code.
   on the main menu's own hint, where Esc is inert and the reader looks for the way out.
   On picocalc that atom rides the title bar's tail (`frame._way_out`), and the menu's lane
   puts the way out on F3: `Quit?` asks, its Shift half F8 `Quit!` leaves without asking
-  (`quit_now`, the one door that skips the confirm, and only on the menu).
+  (`quit_now`, the one door that skips the confirm, and only on the menu). The confirm
+  keeps the chip that asked: its F3 reads `Quit!` and sends the same `quit`, which with
+  the question up is the leaving — one key pressed twice, as ^Q is.
   `test_navigation` walks every string literal in the package to keep them out of the rest
   of the UI.
 - **Esc at the main menu does nothing** but peel a typed filter: the menu is the bottom of
@@ -660,7 +662,8 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   rides the Shift half of the very pager heading for it** (F10 Top behind F5 Page ↑, F9
   Bottom behind F4 Page ↓), because Home and End *are* on this keyboard and only ever
   wanted a chip for consistency. That leaves **F1–F3 free on every screen** for its own
-  verbs, and `EMPTY_LANE` for a screen with none at all (every dialog). **A chip names an
+  verbs, and `EMPTY_LANE` for a screen with none at all (every dialog but the quit
+  confirm, whose F3 is the chip that asked, pressed again). **A chip names an
   action, never a key** — `Page ↑`, not `PgUp`; `Latest` on a transcript; `Region` on the
   map, whose Home reframes and whose paging zooms. **A directional pair rises toward its
   outer key**: where two adjacent chips are opposite ends of one axis, the *up · in ·

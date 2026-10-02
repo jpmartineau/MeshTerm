@@ -123,3 +123,27 @@ def test_no_icon_lane_leaves_the_bare_word_flush_with_the_titles(tools: list) ->
     assert items[-1].value == menu._QUIT_VALUE
     assert items[-1].title.plain == "Quit"
     assert set(starts.values()) == {0}
+
+
+def test_the_quit_confirm_keeps_the_chip_that_asked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The confirm's F3 reads ``Quit!`` and sends ``quit`` — the menu's own F3, again."""
+    import asyncio
+
+    from meshterm.ui.tui import fkeys
+
+    asked: dict = {}
+
+    class Session:
+        async def button_dialog(self, prompt, buttons, **kwargs):  # noqa: ANN001, ANN202
+            asked.update(kwargs)
+            return "cancel"
+
+    async def no_bond(ctx) -> bool:  # noqa: ANN001
+        return False
+
+    monkeypatch.setattr(menu, "_can_unpair", no_bond)
+    assert asyncio.run(menu._confirm_quit(SimpleNamespace(), Session())) is False
+    assert asked["lane"][2].label == "Quit!"
+    assert fkeys.PICOCALC_DECK.action_for(asked["lane"], 3) == "quit"  # F3
+    assert fkeys.CARDPUTER_DECK.action_for(asked["lane"], 6) == "quit"  # Fn+6, its middle chip
+    assert [slot for i, slot in enumerate(asked["lane"]) if i != 2] == [None] * 4
