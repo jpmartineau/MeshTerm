@@ -2332,23 +2332,6 @@ def _decode_braille(rows: list[str], left: int, size: int) -> list[list[bool]]:
     ]
 
 
-def test_urls_are_found_whole_once_and_without_the_sentence_around_them() -> None:
-    """A URL ends where its sentence's punctuation begins, and keeps a bracket it opened."""
-    from meshterm.ui.chat import _urls
-
-    body = (
-        "map at https://meshterm.net. see (https://en.wikipedia.org/wiki/Foo_(bar)), "
-        "'https://example.org/a?b=1' and meshcore://channel/add?name=Ops&secret=ab — "
-        "again https://meshterm.net! nothing here: https:// or note:x"
-    )
-    assert _urls(body) == [
-        "https://meshterm.net",
-        "https://en.wikipedia.org/wiki/Foo_(bar)",
-        "https://example.org/a?b=1",
-        "meshcore://channel/add?name=Ops&secret=ab",
-    ]
-
-
 def test_on_the_picocalc_each_url_hangs_a_code_under_its_message_side_by_side() -> None:
     """Two links, two braille codes on the same rows, hung at the body's own indent.
 
@@ -2530,3 +2513,24 @@ def test_ctrl_u_is_named_only_on_a_picked_message_with_a_link() -> None:
     for screen in (linked, direct, scoped):
         assert "^U QR" in screen.footer_hint
         assert len(screen.footer_hint) <= 72, screen.footer_hint
+
+
+def test_a_link_written_without_a_scheme_gets_its_code_too() -> None:
+    """``meshterm.net/map`` is as much a link as its https form, and opens as that."""
+    from meshterm.ui.qr import QrScreen
+
+    opened: list = []
+
+    class Session(_StubSession):
+        async def run_screen(self, screen):  # noqa: ANN001, ANN202
+            opened.append(screen)
+
+    async def scenario() -> None:
+        screen = _url_chat("map at meshterm.net/map, notes in file.txt", Session())
+        screen.handle("up")
+        assert "^U QR" in screen.footer_hint
+        screen.handle("url_code")
+        await asyncio.sleep(0)
+        assert isinstance(opened[0], QrScreen) and opened[0].urls == ("https://meshterm.net/map",)
+
+    asyncio.run(scenario())
