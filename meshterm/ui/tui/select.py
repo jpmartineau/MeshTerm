@@ -202,8 +202,8 @@ class Separator:
             — unlike :attr:`Choice.title`'s zero-argument callable — so a column header can
             size its labels to the terminal it is being drawn on (see
             :func:`~meshterm.ui.menus.column_header`).
-        style: Theme style a *string* title is drawn in. Section headings pass ``"accent"``
-            so they read as highlighted landmarks; the default ``"muted"`` fits the
+        style: Theme style a *string* title is drawn in. Section headings pass ``"heading"``
+            so they read as landmarks; the default ``"muted"`` fits the
             structural rows (blank spacers, column-header lines, inline notes). A ``Text``
             title styles itself, so this is unused for one.
         pinned: Whether this row stays on screen for the *whole* list once scrolled past,

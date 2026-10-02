@@ -72,11 +72,11 @@ def test_menu_rows_keep_a_styled_label_styled() -> None:
     assert any(span.style == "err" for span in title.spans)
 
 
-def test_section_heading_wears_the_dashes_and_accent() -> None:
-    """Grouped-list headings read ── Label ── in the accent style, everywhere."""
+def test_section_heading_wears_the_dashes_and_the_heading_grey() -> None:
+    """Grouped-list headings read ── Label ── in the heading grey, never the frame's accent."""
     sep = section_heading("Outbox")
     assert sep.title == "── Outbox ──"
-    assert sep.style == "accent"
+    assert sep.style == "heading"
 
 
 def test_changes_phrase_pluralizes() -> None:

@@ -120,6 +120,11 @@ MESH_THEME = Theme(
         # A step darker than ``muted`` for placeholder dashes (a node's missing packet count /
         # age) that should recede below the real, muted values around them.
         "faint": "#64748b",
+        # A section heading's ``── Label ──`` — a grouped list's, a chat's day divider. A
+        # dark grey, never the frame's accent: in the border's own colour a heading's rule
+        # read as part of the frame it sits in (JP, 2026-10-02). Bold, so the label still
+        # reads as a landmark at that shade.
+        "heading": "bold #64748b",
         # A further step darker than ``faint``, for a meter's unlit track (the SNR quality
         # bars): dark enough to read as background, not as a dimmer version of the reading.
         "track": "#334155",
@@ -332,6 +337,8 @@ MESH_THEME_16 = Theme(
         "hint.ok": "not bold color(2)",
         "hint.brand": "not bold color(6)",
         "faint": "color(8)",
+        # The console's one dark grey; slot 8 is already the bright bank, so bold moves nothing.
+        "heading": "bold color(8)",
         "track": "color(8)",
         "snr.good": "bold color(10)",
         "snr.ok": "bold color(11)",
