@@ -1242,3 +1242,41 @@ async def test_the_busy_dialog_is_one_card_however_deeply_it_nests() -> None:
         await asyncio.wait_for(session.run(main()), timeout=5)
 
     assert depths == [2, 2, 2, 1]  # pushed once, popped once, hub still underneath
+
+
+async def test_the_chip_that_asked_to_quit_leaves_when_pressed_again() -> None:
+    """On a handheld, F3 asks from the menu and the confirm keeps F3: a second press leaves.
+
+    The confirm's lane carries ``Quit!`` on the slot the menu's ``Quit?`` sat on, sending
+    the same ``quit`` — which, with the question up, is the leaving, as a second ^Q is.
+    """
+    from meshterm.platforms import PICOCALC, set_platform
+    from meshterm.ui.tui.fkeys import EMPTY_LANE, FPair
+
+    set_platform(PICOCALC)
+    lane = list(EMPTY_LANE)
+    lane[2] = FPair("Quit!", "quit")
+    with create_pipe_input() as inp:
+        session = _session(inp)
+
+        async def ask() -> bool:
+            dialog = ButtonDialog("Quit?", [("Cancel", "cancel"), ("Quit", "quit")], lane=lane)
+            return await session.run_dialog(dialog) == "quit"
+
+        session.set_quit_confirm(ask)
+        torn_down: list[str] = []
+
+        async def main() -> None:
+            session.push(ScrollScreen("the menu"))
+            try:
+                session._dispatch("quit")  # the menu's Quit? chip
+                for _ in range(5):
+                    await asyncio.sleep(0)
+                assert isinstance(session.top, ButtonDialog), "the confirm is up"
+                session._dispatch("f3")  # the same chip, on the confirm's lane
+                await asyncio.sleep(5)  # the leaving cancels this
+            finally:
+                torn_down.append("services closed")
+
+        await asyncio.wait_for(session.run(main()), timeout=5)
+    assert torn_down == ["services closed"]
