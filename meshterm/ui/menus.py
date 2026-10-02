@@ -594,7 +594,7 @@ async def run_wizard(
 
 
 def section_heading(label: str) -> Separator:
-    """A ``── Label ──`` accent section heading for a grouped select list.
+    """A ``── Label ──`` section heading for a grouped select list, in the ``heading`` grey.
 
     The one form every grouped list's headings take (the main menu's categories, the
     config editor's setting groups, Watchtower's Alerts/Watched nodes, Courier's
@@ -609,8 +609,11 @@ def section_heading(label: str) -> Separator:
     on a platform that draws no icon lane, exactly as a command row does — a heading is the
     same kind of label, and a stand-in glyph beside the rule already drawing ``──`` reads as
     noise (see :func:`command_label`).
+
+    Grey, never the frame's accent: a rule in the border's own colour reads as part of the
+    frame rather than as a heading inside it.
     """
-    return Separator(f"── {command_label(label)} ──", style="accent", heading=True)
+    return Separator(f"── {command_label(label)} ──", style="heading", heading=True)
 
 
 def fit_cells(text: str, width: int, *, align: str = "left") -> str:

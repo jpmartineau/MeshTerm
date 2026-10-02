@@ -213,8 +213,9 @@ deliberately, one at a time, and say why in the code.
   with no reverse of its own**, which cycles or it dead-ends — Tab on a button row, and
   the picocalc F-lane's single-chip advancers (`Sort →`, the node page's tab chip, the
   Time Machine's window chip). Those state it in the code.
-- Grouped-list section headings use `section_heading("Label")` → `── Label ──` accent.
-  That is also what makes a heading *sticky* (it pins to the top row while its section
+- Grouped-list section headings use `section_heading("Label")` → `── Label ──` in the
+  bold `heading` grey, never the frame's accent: a rule in the border's colour reads as
+  part of the frame. A chat's day divider wears the same dress. That is also what makes a heading *sticky* (it pins to the top row while its section
   scrolls, and the ^PgUp/^PgDn jumps step by it), so build them through it — a hand-rolled
   `Separator` is no landmark. Prose written *directly under* a heading (a description of
   what the section holds) is its preamble and pins with it, in order, as each row scrolls
