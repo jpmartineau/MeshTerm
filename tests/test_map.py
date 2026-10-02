@@ -1891,7 +1891,7 @@ def test_map_screen_scrubs_right_edge_after_move() -> None:
     braille = MapScreen(_StubSession(80, 24), markers, _StubSource(), 14)
     braille.render_body(80)
     braille.handle("right")  # a move flags the edge for a scrub
-    assert braille.consume_edge_scrub() == 2  # right padding + border columns
+    assert braille.consume_edge_scrub() == 1  # the border column: the map is flush
     assert braille.consume_edge_scrub() == 0  # consumed — not repeated without another move
 
 

@@ -158,6 +158,7 @@ def _panel_box(
     more_below: bool,
     border: str,
     caption: str = "",
+    flush: bool = False,
 ) -> Panel:
     """Wrap already-sliced body lines in a titled, scroll-aware panel.
 
@@ -179,6 +180,8 @@ def _panel_box(
         more_below: Whether content continues below the slice.
         border: Border style name (``"accent"`` for the focused screen).
         caption: A short muted credit for the bottom rule's right end (empty for none).
+        flush: Drop the one-column padding inside each side border, for a body that fills
+            the frame (see :attr:`~meshterm.ui.tui.screen.Screen.flush`).
 
     Returns:
         A Rich :class:`Panel` of exactly ``len(visible) + 2`` rows.
@@ -196,8 +199,18 @@ def _panel_box(
         subtitle=subtitle,
         subtitle_align="right" if caption else "center",
         border_style=border,
-        padding=(0, 1),
+        padding=(0, 0 if flush else 1),
     )
+
+
+def panel_inset(flush: bool) -> int:
+    """Columns the bordered base frame takes from the body's width.
+
+    Its two side borders, plus the padding column inside each unless the screen is
+    :attr:`~meshterm.ui.tui.screen.Screen.flush`. One definition, because the session sizes
+    a screen against this frame before the frame is drawn (``base_body_size``).
+    """
+    return 2 if flush else 4
 
 
 #: The last framed base composition: ``(content key, rendered lines)``. Re-parsing the
@@ -358,7 +371,7 @@ def compose_base(
         # list inside itself (see :class:`~meshterm.ui.tui.screen.ListWindow`) can size
         # its chrome to the frame it is about to be sliced into.
         base.note_viewport(viewport)
-        body_lines = base.render_body(cols - 4)
+        body_lines = base.render_body(cols - panel_inset(base.flush))
         visible, more_above, more_below = _visible_slice(base, body_lines, viewport)
         # The panel wrap is a pure function of what's between its borders: memoize it so
         # the repaints that change nothing below the header (the 1 Hz tick) skip the
@@ -372,11 +385,12 @@ def compose_base(
         caption = base.bottom_caption
         # Rich sets the padded title into the rule's inner ``cols - 4`` cells.
         title = fitted_title(base, cols - 4 - 2)
-        key = (cols, rows, title, caption, footer_hint, more_above, more_below, *visible)
+        flush = base.flush
+        key = (cols, rows, title, caption, flush, footer_hint, more_above, more_below, *visible)
         if footer_lane is None and _BASE_BOX_CACHE is not None and _BASE_BOX_CACHE[0] == key:
             body = _BASE_BOX_CACHE[1]
         else:
-            panel = _panel_box(title, visible, more_above, more_below, "accent", caption)
+            panel = _panel_box(title, visible, more_above, more_below, "accent", caption, flush)
             body = render_lines(Group(panel, footer_row()), cols)
             if footer_lane is None:
                 _BASE_BOX_CACHE = (key, body)

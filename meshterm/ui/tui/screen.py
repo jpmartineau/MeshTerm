@@ -106,12 +106,19 @@ class Screen:
             screen may change it as its state changes. Drawn only where the platform's
             frame *has* a bottom rule — the borderless one has none, and a screen wanting
             a mark there puts it in its own body instead.
+        flush: Whether, as the base screen in a bordered frame, the body runs right up to
+            the panel's side borders instead of sitting one blank column in from each. The
+            padding is air between a border and a row of *text*; a picture that fills the
+            frame (the map) has no text edge to keep off the border, and those two columns
+            are drawing it would otherwise give up for nothing (JP, 2026-10-01). Moot where
+            the platform's frame has no border — the body is the full width there already.
     """
 
     title: str = ""
     short_title: str = ""
     footer_hint: str = "Esc back"
     bottom_caption: str = ""
+    flush: bool = False
     floating: bool = True
     modal: bool = False
     grow_only: bool = False
