@@ -222,6 +222,12 @@ deliberately, one at a time, and say why in the code.
 - Label + description command rows go through `menu_rows` (two cell-aligned lanes,
   description muted). Editor rows (setting/value/description) go through `lane_row`.
 - A row that opens further prompts ends with `…`; a row that acts immediately doesn't.
+- **A bare-letter shortcut only where nothing is typed.** A screen that filters, finds or
+  composes as you type has no free letters, so its verbs are Ctrl chords — one table,
+  `session._CTRL_LETTER_CHORDS`, each letter the mnemonic of its action (`^P` paths,
+  `^U` URL, `^Y` you). A screen that takes no typing may spend a bare letter instead (the
+  Time Machine's `w`, the dashboard's `s`, the device splash's `h`). Either way the key
+  is named where it acts: in the hint, and on the PicoCalc's lane.
 - Empty states are lowercase muted, optionally `— explanation`, never parenthesized.
 - Body section headings inside screens: accent title, optional muted `  ·  note`.
 - A find-as-you-type screen echoes its live query as `/query` in `warn`, on its own body
@@ -243,6 +249,11 @@ deliberately, one at a time, and say why in the code.
   narrower quiet zone, before it would ever be cut (a contact card is 57 cells and 29
   rows at the standard fit in half blocks; a regular terminal is 24 tall), and when code
   and URL can't share the frame the code is whole at the top and the URL a page down.
+  A chat message's links open there too, on every platform: ^U on the picked message,
+  and with several, one code at a time that ←→ step through, clamped. That screen's URL
+  line is flanked `←`/`→`, lit toward another code and dim at an end — the one mark the
+  bare frame carries beyond the code and its URL, because nothing else could say the
+  others are there.
   Two codes sit inline instead: a ` ```qr ` fence in a written page, where the code is an
   illustration drawn in the prose where the fence is, and — on the PicoCalc alone
   (`Platform.url_codes`) — a chat message's URLs, each drawn as a code under the message
@@ -441,6 +452,10 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
 ### Layout
 
 - Wrapped labelled rows hang under their value block (two-column grid), never column 0.
+  The one exception is a **URL, which is never cut where the screen can hold it**: one too
+  long for its hanging lane steps out to the gutter on a line of its own
+  (`render_hanging(whole=…, gutter=…)`), since a terminal opens a link, and a reader
+  copies one, only while it sits on one line. Only a URL wider than the screen folds.
 - Dialogs anchor slightly above true centre, sized for their populated state.
 - Radio traffic: single transmissions or a user-chosen sample count with cooldown pacing
   — never bursts.

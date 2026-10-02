@@ -19,7 +19,8 @@ URL it encodes, so the whole panel is contrast for the camera and the one line a
 might type out instead. A code sits *inside* a page in two places: a ``qr`` fence in a
 written page (:mod:`~meshterm.ui.markdown`), which draws :func:`qr_text` in the flow of
 its prose, and — on the PicoCalc — a chat message carrying URLs, which hangs a code for
-each under its text, side by side (:func:`qr_strip`).
+each under its text, side by side (:func:`qr_strip`). The same message's links also open
+on the share screen (^U), on every platform, one code at a time.
 """
 
 from __future__ import annotations
@@ -300,20 +301,58 @@ class QrScreen(ScrollScreen):
     nothing. The fit is asked to hold the code *and* the URL first; failing that, the
     code alone, with the URL a page down; failing that, the smallest code there is, and
     the frame windows it from the top so a larger terminal shows it whole.
+
+    Given **several** URLs (a chat message's links), it is still one screen, showing one
+    code at a time: ←→ step through them in order and stop at either end, and the URL
+    line is flanked by ``←``/``→`` — lit where there is another code that way, dim where
+    there isn't — the one mark the bare frame carries beyond the code and its URL,
+    because nothing else on it could say the others are there.
     """
 
     bare = True
 
-    def __init__(self, url: str, *, title: str) -> None:
-        """Set up the share screen for ``url``.
+    def __init__(self, *urls: str, title: str) -> None:
+        """Set up the share screen for ``urls``, showing the first.
 
         Args:
-            url: The ``meshcore://…`` share URL, encoded as the code and printed under it.
+            urls: The URLs to show, in order — one share URL (``meshcore://…``), or the
+                links a chat message carries. Each is encoded as the code and printed
+                under it.
             title: ``Share {name}`` — never drawn on the bare frame; the screen's name
                 for the log and the stack.
         """
         super().__init__(Text(""), title=title, floating=False)
-        self.url = url
+        self.urls = urls
+        self._index = 0
+
+    @property
+    def url(self) -> str:
+        """The URL whose code is showing."""
+        return self.urls[self._index]
+
+    def _link(self) -> Text:
+        """The URL line: the URL, and with several, the ←→ that step to the others."""
+        link = Text(justify="center")
+        several = len(self.urls) > 1
+        if several:
+            link.append("←  ", style="accent" if self._index > 0 else "muted")
+        link.append(self.url, style="accent")
+        if several:
+            last = len(self.urls) - 1
+            link.append("  →", style="accent" if self._index < last else "muted")
+        return link
+
+    def handle(self, action: str, data: str = "") -> None:
+        """Step to the previous or next URL's code on ←→, or behave as a result window."""
+        if action in ("left", "right"):
+            # Clamped like every cursor in the app: held arrows settle at an end.
+            step = -1 if action == "left" else 1
+            index = max(0, min(len(self.urls) - 1, self._index + step))
+            if index != self._index:
+                self._index = index
+                self.scroll_to_top()
+            return
+        super().handle(action, data)
 
     def render_body(self, width: int) -> list[str]:
         """The code fitted to ``width`` and the frame's rows, then a blank row, then the URL."""
@@ -321,7 +360,7 @@ class QrScreen(ScrollScreen):
         # this is the whole terminal's rows; before any paint it is the default 1, and
         # the smallest code stands in until the first paint corrects it.
         rows = self._scroll_viewport
-        link = Text(self.url, style="accent", justify="center")
+        link = self._link()
         link_rows = len(render_lines(link, width))
         code, border = (
             _fit(self.url, width, rows - 1 - link_rows)

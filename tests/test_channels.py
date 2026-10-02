@@ -275,6 +275,36 @@ def test_the_share_screen_refits_its_code_to_the_frame_every_paint() -> None:
     assert len(code_rows(53, 26)) <= 26  # the PicoCalc: likewise
 
 
+def test_several_links_are_one_share_screen_that_arrows_step_through() -> None:
+    """←→ move between the codes and stop at the ends; the URL line says which way has more.
+
+    One link draws no arrows at all — there is nowhere to step — so a share card keeps
+    its bare frame exactly as it was.
+    """
+    first, second = "https://meshterm.net", "https://github.com/jpmartineau/MeshTerm"
+    screen = QrScreen(first, second, title="Links")
+    screen.note_viewport(24)
+
+    def link_line() -> str:
+        lines = [_ANSI.sub("", line) for line in screen.render_body(72)]
+        return next(line for line in lines if "https://" in line).strip()
+
+    assert screen.url == first and link_line() == f"←  {first}  →"
+    screen.handle("left")  # clamped: already at the first
+    assert screen.url == first
+    screen.handle("right")
+    assert screen.url == second and link_line() == f"←  {second}  →"
+    screen.handle("right")  # clamped at the last, never back round to the first
+    assert screen.url == second
+    assert "→" in screen._link().plain and screen._link().spans[-1].style == "muted"
+    assert screen._link().spans[0].style == "accent"  # ← lit: the first is that way
+
+    single = QrScreen(first, title="Share Lakeside")
+    single.note_viewport(24)
+    lines = [_ANSI.sub("", line) for line in single.render_body(72)]
+    assert next(line for line in lines if "https://" in line).strip() == first
+
+
 def test_where_braille_is_solid_every_code_is_drawn_in_it() -> None:
     """On the PicoCalc a code is braille, one module a dot — eight to a cell.
 
