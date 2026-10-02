@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 from rich.console import Group, RenderableType
 from rich.text import Text
 
+from ..core import links
 from ..core.channels import MENTION, split_channel_sender
 from ..core.connection import ContactNotOnDeviceError
 from ..core.events import EventKind, MeshEvent
@@ -55,18 +56,6 @@ if TYPE_CHECKING:
 _DELIVERED = ("✓", "ok")
 _FAILED = ("✗", "err")
 
-#: A URL in a message body: a scheme, ``://``, and everything up to the next space. A
-#: scheme rather than a list of them, so a ``meshcore://`` share pasted into a chat gets
-#: its code as surely as a web link does.
-_URL = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s<>\"]+", re.IGNORECASE)
-
-#: Punctuation that follows a URL in a sentence and isn't part of it.
-_TRAILING = ".,;:!?'\""
-
-#: Each closing bracket and its opener: a closer ends a URL only when it has no opener
-#: inside it, so ``(see https://example.com/a_(b))`` keeps the ``)`` that belongs to it.
-_CLOSERS = {")": "(", "]": "[", "}": "{"}
-
 #: A whitespace-delimited word — the unit the wrap moves whole, so the run a URL must not be
 #: cut across is the word it sits in, any bracket or full stop beside it included.
 _WORD = re.compile(r"\S+")
@@ -85,24 +74,6 @@ def _bind(platform: Platform) -> None:
     """Hang codes under URLs where the platform draws them (now and on switches)."""
     global _URL_CODES
     _URL_CODES = platform.url_codes
-
-
-def _urls(body: str) -> list[str]:
-    """Every URL in ``body`` in reading order, each only once, without trailing punctuation."""
-    found: list[str] = []
-    for match in _URL.finditer(body):
-        url = match.group()
-        while url:
-            last = url[-1]
-            if last in _TRAILING or (
-                last in _CLOSERS and url.count(last) > url.count(_CLOSERS[last])
-            ):
-                url = url[:-1]
-            else:
-                break
-        if not url.endswith("://") and url not in found:
-            found.append(url)
-    return found
 
 
 class ChatScreen(Screen):
@@ -609,11 +580,11 @@ class ChatScreen(Screen):
         prefix.append("❯ " if selected else "  ", style="cursor" if selected else None)
         prefix.append(f"{stamp:%H:%M}  ", style="cursor" if selected else "muted")
         body_text = self._body_text(body, message, selected=selected)
-        whole = [m.span() for m in _WORD.finditer(body_text.plain) if _URL.search(m.group())]
+        whole = [m.span() for m in _WORD.finditer(body_text.plain) if links.urls(m.group())]
         lines = render_hanging(
             prefix, body_text, width, indent=prefix.cell_len, whole=whole, gutter=_URL_GUTTER
         )
-        urls = _urls(body) if _URL_CODES else []
+        urls = links.urls(body) if _URL_CODES else []
         if urls:
             lines += render_lines(qr_strip(urls, width, indent=prefix.cell_len), width)
         return lines
@@ -836,7 +807,7 @@ class ChatScreen(Screen):
         if self._selected is None or not self._messages:
             return []
         message = self._messages[max(0, min(self._selected, len(self._messages) - 1))]
-        return _urls(self._sender_and_body(message)[1])
+        return links.urls(self._sender_and_body(message)[1])
 
     def _open_codes(self) -> None:
         """Show the picked message's links as QR codes on the share screen (^U).

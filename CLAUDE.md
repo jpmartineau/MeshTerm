@@ -459,6 +459,11 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   long for its hanging lane steps out to the gutter on a line of its own
   (`render_hanging(whole=…, gutter=…)`), since a terminal opens a link, and a reader
   copies one, only while it sits on one line. Only a URL wider than the screen folds.
+  **A link is what `core/links.py` finds**, and nothing guesses beside it: a scheme
+  (`scheme://…`), or a host written without one where nothing else could be meant —
+  starting `www.`, or ending in a TLD IANA has delegated (`assets/tlds.txt`, the registry
+  verbatim; refreshing it is downloading it again). So `meshterm.net` is a link and
+  `file.txt` is not. A scheme-less link opens, and encodes, as `https://…`.
 - Dialogs anchor slightly above true centre, sized for their populated state.
 - Radio traffic: single transmissions or a user-chosen sample count with cooldown pacing
   — never bursts.
