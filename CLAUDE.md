@@ -253,7 +253,9 @@ deliberately, one at a time, and say why in the code.
   and with several, one code at a time that ←→ step through, clamped. That screen's URL
   line is flanked `←`/`→`, lit toward another code and dim at an end — the one mark the
   bare frame carries beyond the code and its URL, because nothing else could say the
-  others are there.
+  others are there. On the Cardputer it is the *only* way to a link's code, as on the
+  desktop: its 14 rows have none to spare under every message that carries one, and its
+  braille code is small enough that a link and its code share the panel.
   Two codes sit inline instead: a ` ```qr ` fence in a written page, where the code is an
   illustration drawn in the prose where the fence is, and — on the PicoCalc alone
   (`Platform.url_codes`) — a chat message's URLs, each drawn as a code under the message

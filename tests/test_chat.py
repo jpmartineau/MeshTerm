@@ -2530,3 +2530,27 @@ def test_ctrl_u_is_named_only_on_a_picked_message_with_a_link() -> None:
     for screen in (linked, direct, scoped):
         assert "^U QR" in screen.footer_hint
         assert len(screen.footer_hint) <= 72, screen.footer_hint
+
+
+def test_on_the_cardputer_a_link_takes_the_share_screen_as_on_the_desktop() -> None:
+    """Its 14 rows can't spare a code under every message, so ^U is the way to one.
+
+    No code hangs under the message, the lane deals QR on its Shift bank (Shift+Fn+5),
+    and the share screen draws the code in braille — small enough that a link and its
+    code share the 53x14 panel, URL under the code, nothing a page down.
+    """
+    from meshterm.platforms import CARDPUTER, set_platform
+    from meshterm.ui.qr import QrScreen
+
+    set_platform(CARDPUTER)
+    url = "https://github.com/jpmartineau/MeshTerm"
+    screen = _url_chat(f"the road list is at {url}")
+    assert not _code_rows(_strip_ansi(screen._render_grouped(53)).splitlines())
+    screen.handle("up")
+    assert fkeys.CARDPUTER_DECK.action_for(screen.cardputer_lane, 17) == "url_code"
+
+    share = QrScreen(url, title="Links")
+    share.note_viewport(14)
+    lines = _strip_ansi(share.render_body(53)).splitlines()
+    assert len(lines) <= 14 and lines[-1].strip() == url
+    assert _code_rows(lines), "the code is braille, one module a dot"
