@@ -344,9 +344,9 @@ _HINT_KEY_ACTIONS: dict[str, str] = {
 }
 
 #: Marks a word as *some* key notation even where it isn't one this module can map: a
-#: chord (``^U``), a shifted key (``⇧Tab``), or a bare glyph key (``⌫``). An atom whose
+#: chord (``^Y``), a shifted key (``⇧Tab``), or a bare glyph key (``⌫``). An atom whose
 #: verb half carries one of these names more than the keys it opened with, so it is never
-#: dropped on the strength of the ones it did name (the map's ``Home/^U region/you``).
+#: dropped on the strength of the ones it did name (the map's ``Home/^Y region/you``).
 _KEYISH = ("^", "⇧", "⌫", "↑", "↓", "←", "→")
 
 

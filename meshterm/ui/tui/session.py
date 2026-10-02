@@ -64,8 +64,8 @@ from .spinner import spinner_interval
 #: ``m``/``i``/``h`` are not free: prompt_toolkit spells Enter, Tab and Backspace as
 #: ``Keys.ControlM``/``ControlI``/``ControlH``, so claiming them here would rebind those keys.
 #: A chord's letter is the mnemonic of the *action*, not of one screen's word for it —
-#: ``locate`` is ^U for **you** (JP, 2026-08-09), the same key on the map and in the mesh
-#: walk, because what it names on both is our own node.
+#: ``locate`` is ^Y for **you** (JP, 2026-08-09; ^U until 2026-10-01), the same key on the
+#: map and in the mesh walk, because what it names on both is our own node.
 #:
 #: Two of these are app-wide rather than a screen's: ``to_menu`` (^W) unwinds the whole
 #: navigation stack back to the main menu, and ``quit`` (^Q, alongside the older ^C) asks
@@ -85,9 +85,9 @@ _CTRL_LETTER_CHORDS: dict[str, str] = {
     # ^S is XOFF's key, and safe here for the same reason ^Q is not XON (see above): raw
     # mode clears IXON/IXOFF, so the terminal never eats it to freeze the screen.
     "s": "reveal",
-    "u": "locate",
     "v": "paste_clipboard",
     "w": "to_menu",
+    "y": "locate",
 }
 
 #: Maps prompt_toolkit keys to the normalized action names screens understand.

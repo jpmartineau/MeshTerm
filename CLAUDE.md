@@ -651,7 +651,7 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   thing that just isn't available this paint. Dimming is presentational — `handle` stays
   the authority and no-ops. The lane is also the *only* affordance advertisement here, so
   anything the desktop reaches by a chord or a bare letter (a list's `^PgUp/^PgDn` section
-  jumps, the Time Machine's `w`, the map's `^U`, a row's `Del`) earns a slot — otherwise
+  jumps, the Time Machine's `w`, the map's `^Y`, a row's `Del`) earns a slot — otherwise
   it is undiscoverable on the device.
 - **Each handheld deals its own lane.** Everything about the lane that belongs to one
   keyboard is a `LaneDeck` (`fkeys.PICOCALC_DECK`, `fkeys.CARDPUTER_DECK`), named by
