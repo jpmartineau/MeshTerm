@@ -647,7 +647,7 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   thing that just isn't available this paint. Dimming is presentational — `handle` stays
   the authority and no-ops. The lane is also the *only* affordance advertisement here, so
   anything the desktop reaches by a chord or a bare letter (a list's `^PgUp/^PgDn` section
-  jumps, the Time Machine's `w`, the map's `^U`, a row's `Del`) earns a slot — otherwise
+  jumps, the Time Machine's `w`, the map's `^Y`, a row's `Del`) earns a slot — otherwise
   it is undiscoverable on the device.
 - `meshterm specimen` prints the whole visual language through the real funnels — the
   acceptance card on-device, a preview under `--platform picocalc` on the desktop.
