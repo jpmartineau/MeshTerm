@@ -562,6 +562,29 @@ def _chat_urls(cols: int, rows: int) -> Screen:
     return ChatScreen(conv, messages, send=None, names={}, session=_GallerySession(cols, rows))
 
 
+def _chat_long_url(cols: int, rows: int) -> Screen:
+    """A picked message whose link outruns the body lane: it steps out whole, and ^U is named.
+
+    Regular's 72-cell gate sees the link start at the gutter and the hint carrying
+    ``^U QR``; on the PicoCalc the same link folds under the indent (it is wider than the
+    whole panel) with its code hung below, and the lane lights ``QR``.
+    """
+    conv = Conversation(label="Lakeside emergency", is_channel=True, channel_idx=2)
+    messages = [
+        ChatMessage(
+            text=(
+                "Alice: the full road list is at "
+                "https://github.com/jpmartineau/MeshTerm/blob/main/meshterm/ui/chat.py "
+                "if anyone needs it"
+            ),
+            is_channel=True,
+        ),
+    ]
+    screen = ChatScreen(conv, messages, send=None, names={}, session=_GallerySession(cols, rows))
+    screen.handle("up")
+    return screen
+
+
 class _PickerChat:
     """The unread counter the picker rows read live."""
 
@@ -1411,6 +1434,15 @@ def _share_qr(cols: int, rows: int) -> Screen:
     return QrScreen(url, title="Share Lakeside")
 
 
+def _links_qr(cols: int, rows: int) -> Screen:
+    """A chat message's two links on the share screen: one code, ←→ flanking its URL."""
+    from meshterm.ui.qr import QrScreen
+
+    return QrScreen(
+        "https://meshterm.net/map", "https://github.com/jpmartineau/MeshTerm", title="Links"
+    )
+
+
 _ENTRIES: list[_Entry] = [
     _Entry("dashboard", _dashboard),
     _Entry("dashboard-scoped", _dashboard_scoped),
@@ -1427,6 +1459,7 @@ _ENTRIES: list[_Entry] = [
     _Entry("chat", _chat),
     _Entry("chat_channel_scoped", _chat_channel_scoped),
     _Entry("chat_urls", _chat_urls),
+    _Entry("chat_long_url", _chat_long_url),
     _Entry("chat_picker", _chat_picker),
     _Entry("channels_manager", _channels_manager),
     _Entry("channel_detail", _channel_detail),
@@ -1466,6 +1499,7 @@ _ENTRIES: list[_Entry] = [
     _Entry("join_discord", _join_discord),
     _Entry("support_project", _support_project),
     _Entry("share_qr", _share_qr),
+    _Entry("links_qr", _links_qr),
     _Entry("diagnostics", _diagnostics),
 ]
 

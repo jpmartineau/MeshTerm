@@ -13,6 +13,7 @@ automatically when the terminal is resized.
 from __future__ import annotations
 
 from collections import OrderedDict
+from collections.abc import Sequence
 from io import StringIO
 
 from rich.cells import cell_len
@@ -362,7 +363,15 @@ def crop_cells(text: Text, start: int, width: int) -> Text:
     return out
 
 
-def render_hanging(prefix: Text, body: Text, width: int, *, indent: int) -> list[str]:
+def render_hanging(
+    prefix: Text,
+    body: Text,
+    width: int,
+    *,
+    indent: int,
+    whole: Sequence[tuple[int, int]] = (),
+    gutter: int = 0,
+) -> list[str]:
     """Render ``prefix + body`` at ``width``, wrapping the body with a hanging indent.
 
     The first visual line carries ``prefix`` followed by the body; every wrapped
@@ -370,11 +379,22 @@ def render_hanging(prefix: Text, body: Text, width: int, *, indent: int) -> list
     than falling back to column zero. Used by the chat transcript so a wrapped message
     lines up with its own first line instead of with the timestamp gutter.
 
+    ``whole`` names runs of the body that must not be cut where the screen can hold them —
+    a URL, which a terminal can only open, and a reader only copy, while it sits on one
+    line. A run that fits the hanging lane needs nothing: the wrap already moves a word
+    to the next line rather than splitting it. One that outruns the lane but not the
+    screen steps out of the block onto a line of its own, starting at ``gutter`` (or as
+    far right of it as still fits); the body resumes under its indent after it, unless
+    what follows is short enough to finish the run's own line. Only a run wider than the
+    whole screen is folded, as before, since no line could hold it.
+
     Args:
         prefix: The leading run (e.g. a pointer + timestamp) shown once, on the first line.
         body: The wrappable message text; styling (mentions, glyphs) is preserved.
         width: Total render width in columns.
         indent: Columns to indent continuation lines by (typically ``prefix.cell_len``).
+        whole: ``(start, end)`` offsets into ``body.plain`` of runs to keep on one line.
+        gutter: The column a run too wide for the lane starts at, when it can.
 
     Returns:
         The rendered lines, newline-free.
@@ -382,12 +402,49 @@ def render_hanging(prefix: Text, body: Text, width: int, *, indent: int) -> list
     width = max(1, width)
     console = _console(width)
     avail = max(1, width - indent)
-    wrapped = list(body.wrap(console, avail)) or [Text("")]
-    pad = " " * indent
+    plain = body.plain
+    # The runs that need the step out: wider than the lane, no wider than the screen.
+    out = [
+        (start, end) for start, end in sorted(whole) if avail < cell_len(plain[start:end]) <= width
+    ]
+    rows: list[tuple[int, Text]] = []  # (left pad, line); the first row's pad is the prefix
+
+    def hang(start: int, end: int) -> None:
+        """Wrap ``body[start:end]`` under the indent, trimming the seams beside a run."""
+        if out:
+            while start < end and plain[start].isspace() and start:
+                start += 1
+            while end > start and plain[end - 1].isspace():
+                end -= 1
+        lines = list(body[start:end].wrap(console, avail)) if end > start else []
+        if not rows and not lines:
+            lines = [Text("")]  # the prefix's line, even when the body opens on a run
+        rows.extend((indent, line) for line in lines)
+
+    pos = 0
+    for i, (start, end) in enumerate(out):
+        if start < pos:
+            continue
+        hang(pos, start)
+        length = cell_len(plain[start:end])
+        pad = gutter if length + gutter <= width else width - length
+        line = body[start:end]
+        # What follows up to the next run joins this line when it fits whole: a delivery
+        # mark or an SNR left alone on a line of its own reads as a stray.
+        upto = out[i + 1][0] if i + 1 < len(out) else len(plain)
+        tail = plain[end:upto].rstrip()
+        if tail and "\n" not in tail and pad + length + cell_len(tail) <= width:
+            line.append_text(body[end : end + len(tail)])
+            end = upto
+        rows.append((pad, line))
+        pos = end
+    if pos < len(plain) or not rows:
+        hang(pos, len(plain))
+
     combined = Text()
-    for i, line in enumerate(wrapped):
+    for i, (pad, line) in enumerate(rows):
         if i:
             combined.append("\n")
-        combined.append_text(prefix if i == 0 else Text(pad))
+        combined.append_text(prefix if i == 0 else Text(" " * pad))
         combined.append_text(line)
     return render_lines(combined, width)

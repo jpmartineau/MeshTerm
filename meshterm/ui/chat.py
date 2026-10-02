@@ -30,7 +30,7 @@ from ..core.events import EventKind, MeshEvent
 from ..core.models import ChatMessage, Contact, Conversation, Message, utcnow
 from ..core.regions import WILDCARD
 from ..platforms import Platform, on_platform
-from .qr import qr_strip
+from .qr import QrScreen, qr_strip
 from .theme import name_style, snr_style
 from .tui.prompt import (
     CHANNEL_BYTE_LIMIT,
@@ -66,6 +66,14 @@ _TRAILING = ".,;:!?'\""
 #: Each closing bracket and its opener: a closer ends a URL only when it has no opener
 #: inside it, so ``(see https://example.com/a_(b))`` keeps the ``)`` that belongs to it.
 _CLOSERS = {")": "(", "]": "[", "}": "{"}
+
+#: A whitespace-delimited word — the unit the wrap moves whole, so the run a URL must not be
+#: cut across is the word it sits in, any bracket or full stop beside it included.
+_WORD = re.compile(r"\S+")
+
+#: The column a URL too long to hang under its body starts at instead: the timestamp's,
+#: clear of the ``❯`` the picked message's first line carries in front of it.
+_URL_GUTTER = 2
 
 #: Whether a message's URLs are drawn as QR codes under it (``Platform.url_codes``, the
 #: PicoCalc's alone). Bound per platform, never asked per frame.
@@ -106,8 +114,8 @@ class ChatScreen(Screen):
     Enter sends the current line, or acts on a picked message: in a channel it primes
     a reply ``@mention``, in a direct chat it opens the message's delivery paths. ^P
     opens the picked message's paths in either kind — a path belongs to one message, so
-    with nothing picked there is nothing to show. Esc leaves the chat once nothing is
-    picked.
+    with nothing picked there is nothing to show — and ^U its links as QR codes, on the
+    share screen. Esc leaves the chat once nothing is picked.
 
     A channel with a send scope names its region in the title (``#ops · yul``), and ^R there
     resends a message *unscoped* — the picked one, or with nothing picked the newest — the
@@ -149,6 +157,10 @@ class ChatScreen(Screen):
         outside ``Day ↓``, matching both the pager on the right and the list it echoes.
         Lit only with more than one day to step between: a conversation held in an
         afternoon has sections the way a one-section list does — none.
+
+        ``QR`` (^U) rides F2's Shift half, beside ``Retry`` on F3's, the two being things
+        to do *to* the picked message: its links' codes on a share screen, larger than
+        the ones hung under it in the transcript. Lit while the pick carries a URL.
         """
         from .tui.fkeys import FPair, default_lane
 
@@ -161,7 +173,14 @@ class ChatScreen(Screen):
             != self._messages[-1].created_at.astimezone().date()
         )
         lane[0] = FPair("Day ↑", "ctrl_pageup", enabled=days)
-        lane[1] = FPair("Day ↓", "ctrl_pagedown", enabled=days)
+        lane[1] = FPair(
+            "Day ↓",
+            "ctrl_pagedown",
+            "QR",
+            "url_code",
+            enabled=days,
+            opp_enabled=bool(self._picked_urls()),
+        )
         lane[3] = FPair("Page ↓", "pagedown", "Latest", "ctrl_end", enabled=live, opp_enabled=live)
         lane[4] = FPair("Page ↑", "pageup", "Oldest", "ctrl_home", enabled=live, opp_enabled=live)
         if not self._is_channel:
@@ -249,6 +268,7 @@ class ChatScreen(Screen):
         self._status = ""
         self._stick = True  # keep the newest message in view until the user scrolls up
         self._paths_open = False  # one paths dialog at a time
+        self._codes_open = False  # one links share screen at a time
         self._paste_open = False  # one paste-confirm dialog at a time
         self._resend_open = False  # one resend-unscoped confirm at a time
         # The pick: index of the highlighted message (or None when the compose line is
@@ -280,18 +300,22 @@ class ChatScreen(Screen):
         """Key hint, reflecting whether a message is picked and what Enter does to it.
 
         Only keys that would act appear: ``^P paths`` needs a picked message to show the
-        paths *of*, and ``^R retry failed`` needs something to retry (see
-        :meth:`_retry_target`) — the same rules the F-key lane dims its slots by.
+        paths *of*, ``^U QR`` a picked message with a URL in it (see :meth:`_picked_urls`),
+        and ``^R retry failed`` something to retry (see :meth:`_retry_target`) — the same
+        rules the F-key lane dims its slots by.
         """
         if self._selected is not None:
+            code = " · ^U QR" if self._picked_urls() else ""
             if self._is_channel and self._retry_target() is not None:
                 # A picked scoped message of ours can be resent unscoped, and that key has
                 # to be named; the reply's "(@mention)" and ^End give way to keep the line
-                # inside 72 (Esc still cancels the pick, and Enter still says what it does).
-                return "Enter reply · ^P paths · ^R resend unscoped · ↑↓ pick · Esc cancel"
+                # inside 72 (Esc still cancels the pick, and Enter still says what it does),
+                # and ↑↓ too when a link's code is also there to name.
+                pick = "" if code else " · ↑↓ pick"
+                return f"Enter reply · ^P paths{code} · ^R resend unscoped{pick} · Esc cancel"
             if self._is_channel:
-                return "Enter reply (@mention) · ^P paths · ↑↓ pick · ^End/Esc cancel"
-            return "Enter paths · ↑↓ pick · ^End/Esc cancel"
+                return f"Enter reply (@mention) · ^P paths{code} · ↑↓ pick · ^End/Esc cancel"
+            return f"Enter paths{code} · ↑↓ pick · ^End/Esc cancel"
         if self._retry_target() is not None:
             if self._is_channel:
                 return "Enter send · ↑ pick a message · ^R resend unscoped · Esc back"
@@ -571,6 +595,11 @@ class ChatScreen(Screen):
         rather than under the timestamp gutter. When ``selected``, the line is marked as the
         reply target (matching the select screen's ``❯`` pointer and cursor highlight).
 
+        A URL is never cut where the screen can hold it: one too long for the body's lane
+        steps out to the timestamp's column on a line of its own (see
+        :func:`~meshterm.ui.tui.render.render_hanging`), since a terminal opens a link, and
+        a reader copies one, only while it sits on one line.
+
         Where the platform draws them (:data:`_URL_CODES`, the PicoCalc), each URL in the
         body gets a QR code under it, side by side and hanging at the body's indent, so a
         link read on the handheld can be opened on a phone instead of typed out.
@@ -580,7 +609,10 @@ class ChatScreen(Screen):
         prefix.append("❯ " if selected else "  ", style="cursor" if selected else None)
         prefix.append(f"{stamp:%H:%M}  ", style="cursor" if selected else "muted")
         body_text = self._body_text(body, message, selected=selected)
-        lines = render_hanging(prefix, body_text, width, indent=prefix.cell_len)
+        whole = [m.span() for m in _WORD.finditer(body_text.plain) if _URL.search(m.group())]
+        lines = render_hanging(
+            prefix, body_text, width, indent=prefix.cell_len, whole=whole, gutter=_URL_GUTTER
+        )
         urls = _urls(body) if _URL_CODES else []
         if urls:
             lines += render_lines(qr_strip(urls, width, indent=prefix.cell_len), width)
@@ -722,9 +754,10 @@ class ChatScreen(Screen):
         ↑↓, PgUp/PgDn (a screenful), Ctrl+Home (the very first message), and
         Ctrl+PgUp/PgDn (day dividers), carrying the view with it. Enter on a picked
         message primes a reply ``@mention`` in a channel and opens the delivery paths
-        in a direct chat; ^P opens the picked message's paths in either kind, and does
-        nothing while nothing is picked. ^End (or moving past the newest) returns to the
-        compose line; Esc peels the pick first, the screen second.
+        in a direct chat; ^P opens the picked message's paths in either kind, and ^U its
+        links' QR codes, each doing nothing while nothing is picked. ^End (or moving past
+        the newest) returns to the compose line; Esc peels the pick first, the screen
+        second.
         """
         if action == "enter":
             if self._selected is not None:
@@ -738,6 +771,8 @@ class ChatScreen(Screen):
             self._begin_paste(data)
         elif action == "paths":
             self._open_paths(self._selected)
+        elif action == "url_code":
+            self._open_codes()
         elif action == "retry":
             if self._is_channel:
                 self._begin_resend_unscoped()
@@ -792,6 +827,36 @@ class ChatScreen(Screen):
                 await self._paths(message)
             finally:
                 self._paths_open = False
+                self._session.invalidate()
+
+        self._session.run_detached(run())
+
+    def _picked_urls(self) -> list[str]:
+        """The URLs in the picked message's body, in reading order; none with nothing picked."""
+        if self._selected is None or not self._messages:
+            return []
+        message = self._messages[max(0, min(self._selected, len(self._messages) - 1))]
+        return _urls(self._sender_and_body(message)[1])
+
+    def _open_codes(self) -> None:
+        """Show the picked message's links as QR codes on the share screen (^U).
+
+        The share screen a channel or a contact card gets (:class:`~meshterm.ui.qr.
+        QrScreen`), full-frame, so a phone can take a link read here and open it. Several
+        links are one screen that ←→ steps through, in the order the message gives them.
+        Like ^P it acts on the *pick*: a link belongs to one message, and with nothing
+        picked there is no telling which. One share screen at a time.
+        """
+        urls = self._picked_urls()
+        if not urls or self._codes_open:
+            return
+        self._codes_open = True
+
+        async def run() -> None:
+            try:
+                await self._session.run_screen(QrScreen(*urls, title="Links"))
+            finally:
+                self._codes_open = False
                 self._session.invalidate()
 
         self._session.run_detached(run())

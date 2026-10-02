@@ -2434,3 +2434,99 @@ def test_a_picked_message_keeps_its_codes_in_view() -> None:
     whole = _code_rows(_strip_ansi(screen._render_grouped(53)).splitlines())
     assert any("map at https://meshterm.net" in row for row in shown)
     assert len(_code_rows(shown)) == len(whole)  # every row of the code, none below the fold
+
+
+# -- URLs kept whole, and their codes on ^U --------------------------------------------
+
+#: A link longer than the regular body lane (72 - the 9-cell gutter) but not the screen.
+_LONG_URL = "https://github.com/jpmartineau/MeshTerm/blob/main/meshterm/ui/chat.py"
+
+
+def _url_chat(text: str, session=None) -> ChatScreen:  # noqa: ANN001
+    conv = Conversation(label="#ops", is_channel=True, channel_idx=1)
+    message = ChatMessage(text=f"Alice: {text}", is_channel=True)
+    return ChatScreen(conv, [message], send=None, names={}, session=session or _StubSession())
+
+
+def test_a_url_too_long_to_hang_steps_out_to_the_gutter_whole() -> None:
+    """A link the body lane can't hold, but the screen can, is drawn on one line, uncut.
+
+    It starts under the timestamp — clear of the picked message's ``❯`` — and the body
+    resumes at its own indent after it, so only the link leaves the block.
+    """
+    screen = _url_chat(f"look at {_LONG_URL} and tell me what you think of it all")
+    rows = _strip_ansi(screen._render_grouped(72)).splitlines()
+    link = next(row for row in rows if _LONG_URL[:20] in row)
+    assert link == "  " + _LONG_URL  # whole, at the gutter
+    after = rows[rows.index(link) + 1]
+    assert after.startswith(" " * 9 + "and tell me")  # back under the body's indent
+
+    screen.handle("up")  # picked: the ❯ is on the first line, never the link's
+    rows = _strip_ansi(screen._render_grouped(72)).splitlines()
+    assert "  " + _LONG_URL in rows
+
+
+def test_a_short_tail_finishes_the_links_line_and_a_too_wide_link_still_folds() -> None:
+    """What fits after a stepped-out link stays on its line; a link no screen holds folds."""
+    url = "https://meshterm.net/" + "a" * 46  # 67 cells: wider than the 63-cell lane
+    rows = _strip_ansi(_url_chat(f"see {url} ok")._render_grouped(72)).splitlines()
+    assert "  " + url + " ok" in rows  # 2 + 67 + 3: exactly the screen
+    rows = _strip_ansi(_url_chat(f"see {url} ok!")._render_grouped(72)).splitlines()
+    assert "  " + url in rows and " " * 9 + "ok!" in rows  # a cell too many: below it
+
+    wide = "https://meshterm.net/" + "b" * 60  # 81 cells: wider than the screen
+    rows = _strip_ansi(_url_chat(f"see {wide}")._render_grouped(72)).splitlines()
+    assert not any(wide in row for row in rows)  # cut, as before
+    assert all(row.startswith(" " * 9) for row in rows if "bbb" in row)  # hanging, as before
+
+
+def test_ctrl_u_opens_the_picked_messages_links_on_one_share_screen() -> None:
+    """^U shows the pick's links as QR codes, all of them, in the order the message gives."""
+    from meshterm.ui.qr import QrScreen
+
+    opened: list = []
+
+    class Session(_StubSession):
+        async def run_screen(self, screen):  # noqa: ANN001, ANN202
+            opened.append(screen)
+
+    async def scenario() -> None:
+        screen = _url_chat(f"map at https://meshterm.net, code at {_LONG_URL}!", Session())
+        screen.handle("url_code")  # nothing picked: no telling which message's links
+        await asyncio.sleep(0)
+        assert opened == []
+
+        screen.handle("up")
+        screen.handle("url_code")
+        await asyncio.sleep(0)
+        assert len(opened) == 1 and isinstance(opened[0], QrScreen)
+        assert opened[0].urls == ("https://meshterm.net", _LONG_URL)
+
+    asyncio.run(scenario())
+
+
+def test_ctrl_u_is_named_only_on_a_picked_message_with_a_link() -> None:
+    """The hint names ^U where it acts and stays inside 72; the lane lights QR the same way."""
+    plain = _url_chat("no links here")
+    linked = _url_chat("map at https://meshterm.net")
+    assert "^U" not in linked.footer_hint  # nothing picked yet
+    linked.handle("up")
+    plain.handle("up")
+    assert "^U QR" in linked.footer_hint and "^U" not in plain.footer_hint
+    assert fkeys.PICOCALC_DECK.action_for(linked.picocalc_lane, 7) == "url_code"  # Shift+F2
+    assert linked.picocalc_lane[1].opp_enabled and not plain.picocalc_lane[1].opp_enabled
+
+    # Every pick state's hint, with a link in it, inside the 72-cell budget.
+    direct = _screen(
+        _StubSession(),
+        send=None,
+        messages=[ChatMessage(text="see https://meshterm.net", peer="d4e5f6a7")],
+    )
+    direct.handle("up")
+    scoped = _url_chat("x")
+    scoped._retry_target = lambda: 0  # a resendable pick, the longest hint there is
+    scoped._messages[0] = ChatMessage(text="see https://meshterm.net", is_channel=True)
+    scoped.handle("up")
+    for screen in (linked, direct, scoped):
+        assert "^U QR" in screen.footer_hint
+        assert len(screen.footer_hint) <= 72, screen.footer_hint
