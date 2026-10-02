@@ -169,19 +169,24 @@ def test_record_dialog_shows_the_node_type_legend() -> None:
     assert "★ you" in body and "▲ repeater" in body and "◉ sensor" in body
 
 
-def test_record_dialog_legend_breaks_between_entries_on_a_picocalc_width() -> None:
-    """At 53 cells the legend takes two lines, and no mark is parted from its name.
+def test_record_dialog_legend_is_one_line_on_a_handheld_and_breaks_between_entries() -> None:
+    """At 53 cells the whole key fits one line; narrower, no mark is parted from its name.
 
-    The full names run to 59 cells on one line, so cropping would cut "sensor" off the
-    PicoCalc; breaking inside an entry would leave a glyph at the end of one line and its
-    name at the start of the next.
+    ``room`` rather than ``room server`` brings the key to 52 cells, inside the PicoCalc's
+    and the Cardputer's 53. Where it still has to break, it breaks between entries: inside
+    one would leave a glyph at the end of a line and its name at the start of the next.
     """
     screen = _dialog(_record())
     screen.handle("tab")  # the Route tab
-    body = _plain(screen.render_body(53))
-    for entry in ("★ you", "▲ repeater", "● companion", "■ room server", "◉ sensor"):
-        assert entry in body
-    assert all(cell_len(line) <= 53 for line in body.splitlines())
+    entries = ("★ you", "▲ repeater", "● companion", "■ room", "◉ sensor")
+    body = _plain(screen.render_body(53)).splitlines()
+    assert any(all(entry in line for entry in entries) for line in body)
+    assert not any("room server" in line for line in body)
+
+    narrow = _plain(screen.render_body(40))
+    for entry in entries:
+        assert entry in narrow
+    assert all(cell_len(line) <= 40 for line in narrow.splitlines())
 
 
 def test_record_graph_marks_a_repeater_relay_with_its_triangle() -> None:
