@@ -449,6 +449,41 @@ def _banner_lines(banner: Sequence[str], cols: int) -> list[str]:
     return _center(padded, cols)
 
 
+#: The wordmark as the splash last drew it: ``(banner, cols)`` and what that came to. One
+#: slot, because there is one splash and one terminal size at a time.
+_BANNER_CACHE: tuple[tuple, tuple[list[str], int]] | None = None
+
+
+def _fitted_banner(banner: Sequence[str], cols: int) -> tuple[list[str], int]:
+    """The wordmark drawn at ``cols`` — fitted, folded and centred — and the art's width.
+
+    Fitting the mark is the dearest thing the splash draws: a mark wider than the terminal
+    sends :func:`~meshterm.ui.logo.load_logo` back to the disk for every size until one
+    fits, each one parsed and measured, and then every row is decoded again to centre it.
+    None of that moves from one paint to the next, and the splash paints on every keystroke
+    and every idle tick. Done fresh each time it was nine-tenths of a splash frame at
+    53×26, which on the PicoCalc put a visible wait behind every ↑↓ on the device list.
+
+    Args:
+        banner: The wordmark rows the screen names (usually the full-size mark).
+        cols: Terminal width.
+
+    Returns:
+        The centred rows to draw — shared with the memo, so never mutate them — and the
+        display width of the mark actually chosen, for hanging the footnote off its edge.
+    """
+    global _BANNER_CACHE
+    key = (tuple(banner), cols)
+    if _BANNER_CACHE is not None and _BANNER_CACHE[0] == key:
+        return _BANNER_CACHE[1]
+    raw = list(banner)
+    if raw and logo_width(raw) > cols:
+        raw = load_logo(cols)
+    fitted = (_banner_lines(raw, cols), logo_width(raw))
+    _BANNER_CACHE = (key, fitted)
+    return fitted
+
+
 def fit_hint(hint: str, width: int, *, shed_first: Sequence[str] = ()) -> str:
     """Drop ``·`` atoms from a footer hint, right to left, until it fits ``width``.
 
@@ -508,16 +543,11 @@ def compose_startup(screen: Screen, cols: int, rows: int) -> str:
     """
     # A screen names its wordmark; the width to draw it at is only known here, so this is
     # where the size is chosen — a narrow terminal gets a narrow mark rather than a torn one.
-    raw_banner = screen.banner or []
-    if raw_banner and logo_width(raw_banner) > cols:
-        raw_banner = load_logo(cols)
-    banner = _banner_lines(raw_banner, cols)
+    # ``logo_w`` is the chosen mark's own width, so the footnote below can hang off its right
+    # edge (the wordmark is centered as one block, so every row shares one left margin).
+    banner, logo_w = _fitted_banner(screen.banner or (), cols)
     banner_h = len(banner)
     gap = 1 if banner else 0  # the blank line under the banner
-
-    # The logo's own left margin and width, so the footnote below can hang off its right edge
-    # (the wordmark is centered as one block, so every row shares this margin).
-    logo_w = logo_width(raw_banner)
     logo_right = max(0, (cols - logo_w) // 2) + logo_w
 
     # Size the box to its widest real row (probe at a generous width, then measure), never
@@ -851,7 +881,8 @@ def _bind(platform: Platform) -> None:
     Registered at module bottom so the immediate first run (see
     :func:`~meshterm.platforms.on_platform`) finds every cache already defined.
     """
-    global _BASE_BOX_CACHE
+    global _BASE_BOX_CACHE, _BANNER_CACHE
     _BASE_BOX_CACHE = None
+    _BANNER_CACHE = None
     _DIALOG_CACHE.clear()
     _OVERLAY_CACHE.clear()

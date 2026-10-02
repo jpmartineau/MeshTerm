@@ -1187,16 +1187,23 @@ def _sort_header(label: str, column: str, sort: ContactsSort) -> str:
     return f"[cursor]{label} {triangle}[/]"
 
 
+#: The legend's word for each node type: the type's one name (:data:`NODE_TYPE_LABELS`),
+#: except where a shorter word is unmistakable beside its glyph — ``room`` for a room
+#: server (JP, 2026-10-02). The name everywhere else, the CLI's included, stays whole.
+_LEGEND_WORDS = {**NODE_TYPE_LABELS, NODE_TYPE_ROOM: "room"}
+
+
 def node_type_legend(indent: str = "", width: int | None = None) -> Text:
     """The key to the node-type marks: ``★ you   ▲ repeater   ● companion   …``.
 
     Every glyph in its shared map colour (see :data:`NODE_GLYPHS`), each named muted after
-    it. THE legend for any surface that draws typed node markers — the contacts list under its
-    table, the route graph under its lanes — so one glyph means one thing app-wide.
+    it (:data:`_LEGEND_WORDS`). THE legend for any surface that draws typed node markers —
+    the contacts list under its table, the route graph under its lanes — so one glyph means
+    one thing app-wide.
 
-    One line where it fits. Where it does not — the full names run to 59 cells, and the
-    PicoCalc has 53 — it breaks onto a second line between entries, never inside one, so
-    a mark is never parted from its name and no name is cropped.
+    One line where it fits: 52 cells, inside the handhelds' 53. Where it does not — an
+    indent, a narrower box — it breaks onto a second line between entries, never inside
+    one, so a mark is never parted from its name and no name is cropped.
 
     Args:
         indent: Leading spaces to sit the legend under a table or graph body.
@@ -1205,7 +1212,7 @@ def node_type_legend(indent: str = "", width: int | None = None) -> Text:
     entries = [Text.assemble((SELF_MARK[0], SELF_MARK[1]), (" you", "muted"))]
     for node_type in (NODE_TYPE_REPEATER, NODE_TYPE_CHAT, NODE_TYPE_ROOM, NODE_TYPE_SENSOR):
         glyph, color = NODE_GLYPHS[node_type]
-        entries.append(Text.assemble((glyph, color), (f" {NODE_TYPE_LABELS[node_type]}", "muted")))
+        entries.append(Text.assemble((glyph, color), (f" {_LEGEND_WORDS[node_type]}", "muted")))
 
     gap = "   "
     legend = Text(indent)
