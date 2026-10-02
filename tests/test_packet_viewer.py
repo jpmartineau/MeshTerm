@@ -264,7 +264,9 @@ def test_packet_viewer_shows_full_raw_field_labels() -> None:
 def test_packet_viewer_draws_a_relayed_packets_route_graph() -> None:
     """A packet that crossed relays gets THE route graph — braille edges, caption, legend."""
     entry = PacketEntry(when=utcnow(), kind="packet", path="3d63,a1b2")
-    body = _plain(_viewer(entry).render_body(80))
+    viewer = _viewer(entry)
+    viewer.note_viewport(30)  # the frame records this before every real paint
+    body = _plain(viewer.render_body(80))
     assert "origin → you" in body  # the graph caption
     assert "★ you" in body and "▲ repeater" in body  # the node-type legend
     assert any("⠀" <= ch <= "⣿" for ch in body)  # braille edges are drawn
@@ -566,3 +568,12 @@ def test_packet_viewer_counts_one_walked_hop_in_the_singular() -> None:
         raw={"payload_typename": "TRACE", "trace_snrs": [13.25]},
     )
     assert "1 hop walked" in _plain(_viewer(entry).render_body(80))
+
+
+def test_packet_viewer_legend_steps_aside_on_a_short_frame() -> None:
+    """Under a short frame's route graph the caption stays and the node-type key goes."""
+    entry = PacketEntry(when=utcnow(), kind="packet", path="3d63,a1b2")
+    viewer = _viewer(entry)
+    viewer.note_viewport(10)  # the Cardputer's dialog budget
+    body = _plain(viewer.render_body(49))
+    assert "origin → you" in body and "▲ repeater" not in body

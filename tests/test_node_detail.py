@@ -1263,3 +1263,26 @@ def test_toggling_the_lock_rewrites_the_rows_and_keeps_the_cursor_on_it() -> Non
     screen.handle("enter")
     assert resolved == ["lock", "unlock"]
     assert [a.key for a in screen._info_actions] == ["timemachine", "unlock", "remove"]
+
+
+def test_routes_legend_steps_aside_on_a_short_frame() -> None:
+    """The node-type key is drawn under the fan, except on a short frame like the Cardputer's.
+
+    There the rows go to the graph and the route list, as under the message paths' fan.
+    """
+    view = _RoutesView(
+        routes=[_Route(draw=("3d" * 6,), spec="3d,f2", path=Text("via 3d"), context=Text(""))],
+        glyph_of=lambda n: ("▲", "#ffffff"),
+        label_of=lambda n: n[:2],
+        label_rgb_of=lambda n: (200, 200, 200),
+        legend=True,
+    )
+
+    def stage(viewport: int) -> str:
+        screen = _screen(routes=view, tabs=[_Tab("Info", "info"), _Tab("Routes", "routes")])
+        screen.handle("tab")  # onto Routes
+        screen.note_viewport(viewport)
+        return _plain(screen.render_body(53))
+
+    assert "▲ repeater" in stage(22)  # the PicoCalc's body
+    assert "▲ repeater" not in stage(11)  # the Cardputer's

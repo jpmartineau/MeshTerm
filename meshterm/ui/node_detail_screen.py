@@ -936,10 +936,13 @@ class NodeDetailScreen(Screen):
         # a multi-pass graph layout — is a pure function of the width, the row budget,
         # and which route is emphasized. One slot suffices: the key only moves on a
         # selection change or a resize, and then the previous layout is dead anyway.
-        caption_lines = (1 if _GRAPH_CAPTION else 0) + (1 if rv.legend else 0)
+        # The node-type key steps aside on a short frame, as the message paths' does: the
+        # marks mean one thing app-wide, and the rows go to the graph and the list.
+        legend = rv.legend and not short_frame(self._scroll_viewport)
+        caption_lines = (1 if _GRAPH_CAPTION else 0) + (1 if legend else 0)
         list_need = min(sum(len(block) for block in route_blocks), _LIST_MIN_LINES)
         max_rows = max(_GRAPH_MIN_ROWS, min(_PATH_MAX_ROWS, budget - caption_lines - list_need))
-        stage_key = (width, max_rows, sel)
+        stage_key = (width, max_rows, sel, legend)
         if self._stage_memo is not None and self._stage_memo[0] == stage_key:
             return self._stage_memo[1]
         # Priority is fixed by evidence order (route 0, the best-evidence route, is always the
@@ -978,7 +981,7 @@ class NodeDetailScreen(Screen):
         else:
             while lines and not _SGR.sub("", lines[0]).strip():
                 lines.pop(0)
-        if rv.legend:
+        if legend:
             lines.extend(render_lines(node_type_legend(width=width), width, no_wrap=True))
         self._stage_memo = (stage_key, lines)
         return lines
