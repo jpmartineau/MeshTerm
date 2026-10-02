@@ -743,6 +743,22 @@ def test_compose_base_fills_exactly_terminal_height() -> None:
         assert out.count("\n") + 1 == rows
 
 
+def test_a_flush_screen_draws_up_to_the_side_borders() -> None:
+    """A ``flush`` base gets the two padding columns back; an ordinary one keeps its air."""
+
+    class Fill(Screen):
+        floating = False
+
+        def render_body(self, width: int) -> list[str]:
+            return ["#" * width] * 3
+
+    for flush, row in ((True, "│" + "#" * 78 + "│"), (False, "│ " + "#" * 76 + " │")):
+        screen = Fill()
+        screen.flush = flush
+        lines = [_plain(ln) for ln in frame.compose_base(Text("h"), screen, "", 80, 12).split("\n")]
+        assert row in lines, (flush, lines)
+
+
 def test_compose_dialog_is_bounded() -> None:
     """A dialog for a huge renderable never exceeds the terminal height."""
     tall = Text("\n".join(f"row {i}" for i in range(200)))

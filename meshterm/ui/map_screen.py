@@ -130,6 +130,9 @@ class MapScreen(Screen):
     """A full-screen, keyboard-driven map of the mesh's located nodes over an OSM basemap."""
 
     floating = False
+    #: The drawing runs right up to the panel's side borders: a picture has no text edge
+    #: to keep off them, so the padding columns would only be map given up.
+    flush = True
 
     #: Whether printable keys feed the find-as-you-type node filter. The location
     #: picker turns this off: there, typing has no job and a silent filter would
@@ -299,17 +302,18 @@ class MapScreen(Screen):
         """Right-edge columns the session should force-repaint on the next paint (0 = none).
 
         A braille glyph the terminal font lacks is substituted by a *double-width* fallback,
-        which shoves the row and smears the panel's right padding and border. The map body
-        itself redraws wholesale as it pans, so those cells self-heal — but the static edge
-        does not change frame-to-frame, so prompt_toolkit's differential paint never rewrites
-        it and the smear lingers there. After a move we ask the session to force just those
-        two columns (right padding + border) to repaint, scrubbing the smear without the
-        whole-frame flicker a full repaint would cause.
+        which shoves the row and smears the panel's right border. The map body itself
+        redraws wholesale as it pans, so its cells self-heal — but the static border does
+        not change frame-to-frame, so prompt_toolkit's differential paint never rewrites it
+        and the smear lingers there. After a move we ask the session to force just that
+        column to repaint, scrubbing the smear without the whole-frame flicker a full
+        repaint would cause. (The map is :attr:`flush`, so there is no padding column
+        between the drawing and the border to scrub as well.)
         """
         if not self._needs_scrub:
             return 0
         self._needs_scrub = False
-        return 2  # the panel's right padding cell and its right border cell
+        return 1  # the panel's right border cell
 
     def set_markers(self, markers: list[MapMarker]) -> None:
         """Replace the plotted nodes on the open map — nodes that arrived after it opened.
