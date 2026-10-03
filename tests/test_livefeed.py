@@ -263,14 +263,14 @@ def test_livefeed_column_header_sits_over_the_lanes_it_names() -> None:
     """The header names each lane, and every label lands on the values beneath it."""
     screen = _screen(seed=[_obs(node="3d63", kind="telemetry", snr=12.8, rssi=-105.0)])
     header, row = _stripped(screen.render_body(90))[:2]
-    assert header.split() == ["WHEN", "CLASS", "SUBJECT", "SCOPE", "SNR", "RSSI"]
+    assert header.split() == ["TIME", "CLASS", "SUBJECT", "SCOPE", "SNR", "RSSI"]
     # Measured in display cells, not characters — the class icon is one character wide
     # but two cells, so a character index would report every later lane one column early.
     # The clock is read off the row itself: a literal needle would only match during the
     # minute it was written in.
     stamp = re.search(r"\d\d:\d\d:\d\d", row)
     assert stamp is not None
-    assert _col(header, "WHEN") == _col(row, stamp.group(0))
+    assert _col(header, "TIME") == _col(row, stamp.group(0))
     assert _col(header, "CLASS") == _col(row, "telemetry") - _ICON_LANE
     assert _col(header, "SUBJECT") == _col(row, "Hub")
     # Each reading's label starts where its lane does, like every other label.
@@ -285,7 +285,7 @@ def test_livefeed_column_header_is_pinned_and_carries_no_sort_cue() -> None:
     screen = _screen(seed=[_obs(node=f"n{i}", age_s=i) for i in range(40)])
     screen.note_viewport(12)
     lines = _stripped(screen.render_body(100))
-    assert "WHEN" in lines[0]
+    assert "TIME" in lines[0]
     assert not any(mark in lines[0] for mark in ("▲", "▼"))  # nothing here sorts
     screen.handle("end")  # the list's last row — Back
     screen.handle("up")  # …and one up from it, the oldest packet: the window scrolls
@@ -475,7 +475,7 @@ def test_livefeed_windows_inside_the_fixed_screen() -> None:
     lines = screen.render_body(100)
     assert len(lines) <= 24  # column header + feed window == the viewport, never more
     body = _plain(lines)
-    assert "WHEN" in body  # the pinned column header is still there
+    assert "TIME" in body  # the pinned column header is still there
     assert "↓" in body and "more" in body  # hidden feed rows are counted below
 
 

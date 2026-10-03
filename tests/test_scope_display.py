@@ -218,7 +218,7 @@ def test_the_picocalc_feed_names_the_class_without_an_icon() -> None:
     try:
         screen = _feed(_scoped("harbour"))
         header, row = _stripped(screen.render_body(53))[:2]
-        assert header.split()[:2] == ["WHEN", "CLASS"]
+        assert header.split()[:2] == ["TIME", "CLASS"]
         assert _col(header, "CLASS") == _col(row, "chan text")
     finally:
         set_platform(REGULAR)

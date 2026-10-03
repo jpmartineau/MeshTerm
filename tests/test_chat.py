@@ -1806,14 +1806,14 @@ async def test_picker_pins_its_column_header_over_the_group_heading(
         screen.handle("down")
     visible, above, _below = frame._visible_slice(screen, screen.render_body(72), 8)
     top = [ansi.sub("", row).strip() for row in visible[:2]]
-    assert top[0].startswith("CONVERSATION") and top[0].endswith("LAST MESSAGE")
-    assert top[0].split()[1:3] == ["NEW", "WHEN"]  # short words over a badge and an age
+    # Short words over a badge and an age, then the message itself.
+    assert top[0].split() == ["CONVERSATION", "NEW", "LAST", "MESSAGE"]
     assert top[1] == "── 👤 Direct ──"
     assert above is True
     # Too narrow for the whole line, the trailing label shortens — never wraps. The
     # lane is sized to these six-cell names now, so the squeeze starts well below any
     # real terminal: the fallback is what is under test, not the width it happens at.
-    assert header.text(40).endswith("LAST MSG")
+    assert header.text(36).endswith(" MSG")
     assert "\n" not in header.text(30)
 
 

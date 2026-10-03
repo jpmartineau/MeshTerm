@@ -588,7 +588,7 @@ class LiveFeedScreen(Screen):
 
         Laid out lane for lane against :meth:`_feed_row`, the pointer column included, so
         every label sits over the values it names. Nothing here sorts — the feed is a
-        stream, and its one order (newest first) is what the ``WHEN`` lane reads down — so
+        stream, and its one order (newest first) is what the ``TIME`` lane reads down — so
         no column carries the contact list's sort triangle or its lit active-column style;
         these are signposts, not controls. On a terminal too narrow for the class label
         the header drops its ``CLASS`` too, leaving the icon lane unlabelled rather than
@@ -600,7 +600,7 @@ class LiveFeedScreen(Screen):
         down the whole column.
         """
         header = Text("  ", style="muted")  # the pointer lane
-        header.append(fit_cells("WHEN", _TIME_LANE))
+        header.append(fit_cells("TIME", _TIME_LANE))
         header.append(fit_cells("CLASS", _ICON_LANE + _FEED_CLASS_WIDTH + _LANE_GAP))
         header.append(fit_cells("SUBJECT", lanes.subject + _LANE_GAP))
         header.append(fit_cells("SCOPE", _SCOPE_LANE))
