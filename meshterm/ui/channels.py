@@ -540,7 +540,7 @@ def _lanes_header(slot_w: int, name_w: int, scope_w: int, width: int) -> str:
             Lane("SLOT", slot_w + 2 + cell_len(channel_glyph("Public", None)) + 1),
             Lane("CHANNEL", name_w + 2),
             *([Lane("SCOPE", scope_w + 2)] if scope_w else []),
-            Lane("UNREAD", _BADGE_WIDTH + 2),
+            Lane("NEW", _BADGE_WIDTH + 2),
             # Right-aligned, because the values under them are: an age and a count are
             # padded to the right edge of their lane, so a left-aligned label would sit
             # off the digits it names.

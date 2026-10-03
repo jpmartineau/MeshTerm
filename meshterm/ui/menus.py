@@ -364,7 +364,7 @@ class Lane:
             terminal. Only a lane the line actually overruns is ever shortened.
         width: Cells the label is padded to — the lane's own width *plus* the gap before
             the next lane, so a label wider than its column absorbs that gap instead of
-            shifting every lane after it right (``UNREAD`` over a narrower badge lane).
+            shifting every lane after it right (``WHEN`` over the chat picker's 3-cell ages).
             Zero (the default) for a trailing lane, which just runs to the edge.
     """
 
