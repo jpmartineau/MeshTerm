@@ -695,7 +695,7 @@ _BADGE_WIDTH = 5
 _AGE_WIDTH = 3
 #: Floor for the conversation lane. The header word is ``CONVERSATION`` (12 cells) and the
 #: lane carries a two-cell gap after it, so anything narrower than this runs the heading
-#: straight into ``UNREAD`` on a mesh whose every name is ``Bob``.
+#: straight into ``NEW`` on a mesh whose every name is ``Bob``.
 _LABEL_MIN = 12
 #: Ceiling for it. The lane is sized to the longest name it actually holds (see
 #: :func:`_lanes`), and this is where that stops paying: one very long name would otherwise
@@ -767,8 +767,10 @@ def _picker_header(lanes: _Lanes, width: int) -> str:
 
     The indent covers the select screen's pointer column (2 cells, drawn on choice rows but
     not separators) plus the marker lane, so each header lands exactly over its column.
-    UNREAD borrows its lane's trailing gap — the badge lane itself is one cell too narrow
-    for the word — which still leaves a space before the age column.
+    ``NEW`` counts the unread messages and ``WHEN`` is the last message's age — short words,
+    because the lanes under them are a badge and an age, and a heading longer than its lane
+    runs into the next one's. ``WHEN`` still borrows its lane's trailing gap (the age lane is
+    three cells), which leaves a space before the preview.
 
     Resolved against the render width (the header row is pinned, so it must stay one row):
     on a terminal too narrow for the whole line, ``LAST MESSAGE`` gives its cells back a
@@ -778,8 +780,8 @@ def _picker_header(lanes: _Lanes, width: int) -> str:
     return column_header(
         [
             Lane("CONVERSATION", lanes.label + 2),
-            Lane("UNREAD", _BADGE_WIDTH + 2),
-            Lane("TIME", _AGE_WIDTH + 2),
+            Lane("NEW", _BADGE_WIDTH + 2),
+            Lane("WHEN", _AGE_WIDTH + 2),
             Lane(("LAST MESSAGE", "LAST MSG", "LAST")),
         ],
         width,

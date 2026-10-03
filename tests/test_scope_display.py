@@ -218,7 +218,7 @@ def test_the_picocalc_feed_names_the_class_without_an_icon() -> None:
     try:
         screen = _feed(_scoped("harbour"))
         header, row = _stripped(screen.render_body(53))[:2]
-        assert header.split()[:2] == ["TIME", "CLASS"]
+        assert header.split()[:2] == ["WHEN", "CLASS"]
         assert _col(header, "CLASS") == _col(row, "chan text")
     finally:
         set_platform(REGULAR)
@@ -411,12 +411,12 @@ def _channel_header(scopes: dict[int, str]) -> str:
 
 def test_the_channel_list_draws_scope_only_when_a_channel_has_one() -> None:
     """A column of blanks says nothing; one scoped channel brings the lane back."""
-    assert _channel_header({}).split() == ["SLOT", "CHANNEL", "UNREAD", "LAST", "MSGS", "ACTIVITY"]
+    assert _channel_header({}).split() == ["SLOT", "CHANNEL", "NEW", "LAST", "MSGS", "ACTIVITY"]
     assert _channel_header({1: "harbour"}).split() == [
         "SLOT",
         "CHANNEL",
         "SCOPE",
-        "UNREAD",
+        "NEW",
         "LAST",
         "MSGS",
         "ACTIVITY",

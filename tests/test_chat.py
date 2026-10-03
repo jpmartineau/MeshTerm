@@ -1807,6 +1807,7 @@ async def test_picker_pins_its_column_header_over_the_group_heading(
     visible, above, _below = frame._visible_slice(screen, screen.render_body(72), 8)
     top = [ansi.sub("", row).strip() for row in visible[:2]]
     assert top[0].startswith("CONVERSATION") and top[0].endswith("LAST MESSAGE")
+    assert top[0].split()[1:3] == ["NEW", "WHEN"]  # short words over a badge and an age
     assert top[1] == "── 👤 Direct ──"
     assert above is True
     # Too narrow for the whole line, the trailing label shortens — never wraps. The
