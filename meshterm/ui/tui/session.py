@@ -1827,10 +1827,8 @@ class TuiSession:
         Returns:
             The inner content width and the body viewport height, both in character cells.
         """
-        from .render import render_lines
-
         cols, rows = self._size()
-        header_h = len(render_lines(self._header(cols), cols, no_wrap=True))
+        header_h = len(frame.header_lines(self._header(cols), cols))
         if get_platform().frame_border:
             base = self._base_screen()
             inset = frame.panel_inset(base is not None and base.flush)

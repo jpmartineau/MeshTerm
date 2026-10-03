@@ -628,6 +628,14 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   pair that appeared and vanished, half of it a blank cell, asked the reader to compare
   the row against a memory of itself; fixed furniture means the bar never changes width
   as the body scrolls either.
+- **The Cardputer has no header row** (`Platform.header_row`): the header's badges and
+  battery ride the title bar's right end, after the way out —
+  `↑↓ ── Title ──── Esc back ● 3 ⣷ 87%`, the top-right corner they always had, one row
+  up — and the wordmark is the main menu's title (`menu._menu_title`). The status never
+  gives way: the way out sheds first, then the title is cut on an ellipsis. A tall dialog
+  draws over the bar (`dialog_row_margin` 1) but never over the lane, which is the
+  dialog's own; the bar's ends either side of the box are blanked
+  (`frame.composite_float`), since a stray `7%` would read as the battery.
 - **Never emit a raw emoji or bare hex colour into picocalc output.** Icons go through
   `theme.glyph()` (the compact map); everything else is caught by the render-boundary
   fold (`theme.fold_text`, applied in `tui/render.render_to_ansi` and

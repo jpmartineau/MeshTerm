@@ -223,13 +223,18 @@ def test_the_raster_draws_a_cell_in_its_colours() -> None:
 
 
 def test_meshterm_runs_inside_the_host(monkeypatch) -> None:
-    """The ordinary CLI, hosted: the menu draws at 53x14 with the Cardputer's lane, ^Q^Q leaves."""
+    """The ordinary CLI, hosted: the menu draws at 53x14 with the Cardputer's lane, ^Q^Q leaves.
+
+    No header row: the title bar is the top row, and the menu's title is the wordmark.
+    """
+    from meshterm import __version__
     from meshterm.ui import menu
 
     # Quitting arms a watchdog that hard-exits the process if teardown wedges — right for
     # the host, which ends with the TUI, but fatal to the test run it is hosted in here.
     monkeypatch.setattr(menu, "_arm_exit_watchdog", lambda *args, **kwargs: None)
     seen: dict[str, str] = {}
+    wordmark = f"MeshTerm v{__version__}"
 
     class Headless:
         def __init__(self, terminal, lock, type_text):
@@ -240,7 +245,7 @@ def test_meshterm_runs_inside_the_host(monkeypatch) -> None:
                 while time.monotonic() < deadline:
                     with self._lock:
                         text = terminal.text()
-                    if "What would you like to do?" in text:
+                    if text.startswith("↑↓") and wordmark in text.splitlines()[0]:
                         seen["menu"] = text
                         break
                     time.sleep(0.1)

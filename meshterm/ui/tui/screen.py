@@ -175,6 +175,16 @@ class Screen:
 
         return DEFAULT_LANE
 
+    def bar_title(self, title: str, style: str) -> Text:
+        """The heading as the borderless title bar draws it: ``title`` in the bar's ``style``.
+
+        ``title`` is whichever form the bar chose (:func:`~meshterm.ui.tui.frame.fitted_title`).
+        A heading that is a *mark* rather than words keeps the mark's own colours by
+        overriding this — the main menu's wordmark, on a frame with no header row to carry
+        it (see :attr:`~meshterm.platforms.Platform.header_row`).
+        """
+        return Text(title, style=style)
+
     def __init__(self) -> None:
         """Initialize scroll state and the (later-assigned) result future."""
         self.scroll = 0

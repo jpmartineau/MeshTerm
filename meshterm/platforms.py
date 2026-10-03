@@ -65,14 +65,25 @@ class Platform:
             row folds ``rssi`` onto a line of its own for want of two cells (JP, on-device,
             2026-08-10). Two columns a side still reads as floating and buys them back.
         dialog_row_margin: Rows a floating dialog leaves to the frame around it — the header
-            above and the footer below, which a dialog never covers, plus any blank row
-            between them and the box. One row of air above and below is what lets a box read
-            as floating on a 24-row terminal (4 in all); on the Cardputer's 14 rows those two
-            rows are a fifth of what a dialog could show, and its side gutters already say
-            it floats, so the box runs from the header to the lane (2).
+            above and the footer below, plus any blank row between them and the box. One row
+            of air above and below is what lets a box read as floating on a 24-row terminal
+            (4 in all). On the Cardputer's 14 rows every row a dialog gives up is a row it
+            can't show, its side gutters already say it floats, and there is no header row
+            above the title bar, so a tall box runs from the top row to the lane (1),
+            drawing over the bar — whose ends either side of the box are blanked rather than
+            left as fragments (see :func:`~meshterm.ui.tui.frame.composite_float`). Never
+            over the lane: a dialog's lane is the dialog's own, and the keys on it are named
+            nowhere else.
         header_atoms: Which segments compose the persistent header, in the vocabulary
             ``"version"``, ``"device"``, ``"badges"``, ``"pulse"``, ``"battery"``. Wired
             into :func:`~meshterm.ui.menu._header` in P4; unconsumed until then.
+        header_row: Whether the persistent header has a row of its own above the frame.
+            Where it doesn't (the Cardputer, JP 2026-10-03), the header's atoms ride the
+            borderless title bar's right end, after the way out — so its badges and battery
+            sit in the top-right corner they always had, one row up, and every screen gets
+            that row back — and the wordmark becomes the main menu's title (see
+            :func:`~meshterm.ui.menu._menu_title`). Only a borderless frame can fold it: the
+            bordered panel has no bar to carry it.
         lane_deck: Which F-key lane deck the footer deals, by name (see
             :data:`~meshterm.ui.tui.fkeys.DECKS`), or ``""`` where the footer is each
             screen's own ``footer_hint`` string instead. A deck is everything about the lane
@@ -159,6 +170,7 @@ class Platform:
     dialog_margin: int
     dialog_row_margin: int
     header_atoms: tuple[str, ...]
+    header_row: bool
     lane_deck: str
     width_reclaim: bool
     emoji: bool
@@ -189,6 +201,7 @@ REGULAR = Platform(
     dialog_margin=6,
     dialog_row_margin=4,
     header_atoms=("version", "device", "badges", "pulse", "battery"),
+    header_row=True,
     lane_deck="",
     width_reclaim=True,
     emoji=True,
@@ -220,6 +233,7 @@ PICOCALC = Platform(
     # "MeshTerm vX" — rather than naming the device/port (on a soldered radio the port
     # never changes), and the activity pulse takes whatever room remains.
     header_atoms=("version", "badges", "pulse", "battery"),
+    header_row=True,
     lane_deck="picocalc",
     width_reclaim=False,
     emoji=False,
@@ -255,8 +269,12 @@ CARDPUTER = Platform(
     frame_border=False,
     menu_icons=False,
     dialog_margin=4,
-    dialog_row_margin=2,
-    header_atoms=("version", "badges", "pulse", "battery"),
+    dialog_row_margin=1,
+    # No header row (JP, 2026-10-03): the badges and battery ride the title bar's right
+    # end, the wordmark is the main menu's title, and the pulse, which only ever had the
+    # header's leftover cells, goes — the dashboard draws the mesh's activity in full.
+    header_atoms=("badges", "battery"),
+    header_row=False,
     lane_deck="cardputer",
     width_reclaim=False,
     emoji=False,
