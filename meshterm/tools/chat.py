@@ -767,22 +767,23 @@ def _picker_header(lanes: _Lanes, width: int) -> str:
 
     The indent covers the select screen's pointer column (2 cells, drawn on choice rows but
     not separators) plus the marker lane, so each header lands exactly over its column.
-    ``NEW`` counts the unread messages and ``WHEN`` is the last message's age — short words,
-    because the lanes under them are a badge and an age, and a heading longer than its lane
-    runs into the next one's. ``WHEN`` still borrows its lane's trailing gap (the age lane is
-    three cells), which leaves a space before the preview.
+    ``NEW`` counts the unread messages, ``LAST`` is the last message's age, and ``MESSAGE``
+    is that message — short words, because the lanes under the first two are a badge and an
+    age, and a heading longer than its lane runs into the next one's. ``LAST`` still borrows
+    its lane's trailing gap (the age lane is three cells), which leaves a space before the
+    preview.
 
     Resolved against the render width (the header row is pinned, so it must stay one row):
-    on a terminal too narrow for the whole line, ``LAST MESSAGE`` gives its cells back a
-    word at a time rather than the line wrapping or losing the label (see
+    on a terminal too narrow for the whole line, ``MESSAGE`` gives its cells back as ``MSG``
+    rather than the line wrapping or losing the label (see
     :func:`~meshterm.ui.menus.column_header`).
     """
     return column_header(
         [
             Lane("CONVERSATION", lanes.label + 2),
             Lane("NEW", _BADGE_WIDTH + 2),
-            Lane("WHEN", _AGE_WIDTH + 2),
-            Lane(("LAST MESSAGE", "LAST MSG", "LAST")),
+            Lane("LAST", _AGE_WIDTH + 2),
+            Lane(("MESSAGE", "MSG")),
         ],
         width,
         indent=2 + lanes.marker,
