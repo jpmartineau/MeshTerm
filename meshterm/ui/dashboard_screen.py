@@ -53,6 +53,7 @@ from ..core.events import MeshEvent
 from ..core.models import NODE_TYPE_REPEATER, Observation, utcnow
 from ..core.regions import Scope
 from ..persistence.repository import OBSERVATION_WINDOW
+from ..platforms import Platform, on_platform
 from ..services.monitor_service import ACTIVITY_BUCKET_S, ACTIVITY_BUCKETS
 from .braillechart import axis_chart, axis_chrome, axis_label_w, meter, timeline_rows
 from .packet_viewer import KIND_STYLES, payload_marks
@@ -124,6 +125,24 @@ _GRID_LABEL_W = 9
 
 #: The screen's title, before any scope atom.
 _TITLE = "Dashboard — mesh overview"
+
+#: What the whole-mesh activity chart counts, as the heading's aside says it. The desktop
+#: adds the chart's unit, ``one minute per dot column``; a font that draws braille solid
+#: (the PicoCalc's, the Cardputer's — :attr:`~meshterm.platforms.Platform.solid_braille`)
+#: has no dots to count, and on 53 columns the words cost the heading its line
+#: (JP, 2026-10-04). The axis under the chart still marks the minutes.
+_ACTIVITY_ASIDE = "every packet heard · one minute per dot column"
+
+
+@on_platform
+def _bind_activity_aside(platform: Platform) -> None:
+    """Bind the activity heading's aside to the platform's braille (runs now and on switch)."""
+    global _ACTIVITY_ASIDE
+    _ACTIVITY_ASIDE = (
+        "every packet heard"
+        if platform.solid_braille
+        else "every packet heard · one minute per dot column"
+    )
 
 
 class _ScopeDigest(NamedTuple):
@@ -429,11 +448,7 @@ class DashboardScreen(Screen):
         heading = Text("Activity", style="accent")
         # A narrowed view spends the aside on what it counts, which the reader has to be
         # told; the minute per column is on the axis beneath either way.
-        what = (
-            "floods in this scope · last 2 h"
-            if self._scope
-            else "every packet heard · one minute per dot column"
-        )
+        what = "floods in this scope · last 2 h" if self._scope else _ACTIVITY_ASIDE
         heading.append(f"  ·  {what}", style="muted")
         # Buckets seeded from a previous session's stored history draw grey; only
         # what this session heard itself pulses green.

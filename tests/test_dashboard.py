@@ -89,6 +89,24 @@ def test_dashboard_renders_all_three_sections() -> None:
     assert "advert" in body and "Alice" in body  # traffic class + the busiest node
 
 
+def test_the_activity_aside_names_dot_columns_only_where_braille_has_dots() -> None:
+    """The handhelds draw braille solid, so the heading drops ``one minute per dot column``.
+
+    There are no dots there to count, and on 53 columns the words cost the heading its
+    line. The desktop keeps them; both keep what the chart counts.
+    """
+    from meshterm.platforms import PICOCALC, REGULAR, set_platform
+
+    def heading(width: int) -> str:
+        body = _plain(_screen(histogram=[1] * ACTIVITY_BUCKETS).render_body(width))
+        return next(line for line in body.splitlines() if "Activity" in line)
+
+    set_platform(PICOCALC)
+    assert heading(53).strip() == "Activity  ·  every packet heard"
+    set_platform(REGULAR)
+    assert heading(72).strip() == "Activity  ·  every packet heard · one minute per dot column"
+
+
 def test_dashboard_activity_chart_reads_newest_right_with_mirrored_scale() -> None:
     """'now' anchors the right edge and the scale marks mirror on both gutters.
 
