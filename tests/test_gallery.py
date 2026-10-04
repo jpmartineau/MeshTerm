@@ -103,7 +103,7 @@ from meshterm.ui.theme import name_style
 from meshterm.ui.timemachine_screen import TimeMachineScreen
 from meshterm.ui.trace_screen import TraceScreen
 from meshterm.ui.tui import Screen, SelectScreen, fkeys, frame
-from meshterm.ui.tui.prompt import CountdownDialog
+from meshterm.ui.tui.prompt import CountdownDialog, ReconnectDialog
 from meshterm.ui.tx_screen import TxSweepScreen
 from meshterm.ui.walk_screen import WalkScreen
 from meshterm.ui.widgets import (
@@ -1342,6 +1342,29 @@ def _cooldown_countdown(cols: int, rows: int) -> Screen:
     return CountdownDialog("Flood advert", 47.0, reason="a flood advert reaches the whole mesh")
 
 
+def _reconnect_reason(cols: int, rows: int) -> Screen:
+    """The reconnect dialog once a refusal has persisted: the reason wraps under the spinner.
+
+    Sized from its own content like the countdown, with the longest reason a reconnect can
+    meet on a serial port — Linux's, which goes on to name ModemManager.
+    """
+    from meshterm.core.connection import DeviceCommandError
+    from meshterm.ui.device_picker import connect_failure_text
+
+    dialog = ReconnectDialog("Still trying to reconnect…")
+    dialog.set_detail(
+        connect_failure_text(
+            DeviceCommandError(
+                "/dev/ttyACM0 is in use by another program — the MeshCore app, a flasher, or "
+                "a serial monitor. Close it and try again. On Linux this is often "
+                "ModemManager, which probes new USB serial devices: `sudo systemctl stop "
+                "ModemManager` and try again."
+            )
+        )
+    )
+    return dialog
+
+
 def _about_meshterm(cols: int, rows: int) -> Screen:
     return AboutPage("About MeshTerm", about_meshterm())
 
@@ -1507,6 +1530,7 @@ _ENTRIES: list[_Entry] = [
     _Entry("preferences", _preferences),
     _Entry("preferences-weekly-advert", _preferences_weekly_advert),
     _Entry("cooldown_countdown", _cooldown_countdown),
+    _Entry("reconnect_reason", _reconnect_reason),
     _Entry("about_meshterm", _about_meshterm),
     _Entry("about_author", _about_author),
     _Entry("join_discord", _join_discord),

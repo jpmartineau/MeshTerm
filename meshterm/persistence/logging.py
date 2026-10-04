@@ -76,6 +76,26 @@ def log_path(log_dir: Path) -> Path:
     return log_dir / LOG_FILENAME
 
 
+def log_file_for(level: int) -> Path | None:
+    """Return the file a record at ``level`` is written to, or ``None`` if none takes it.
+
+    For a message that wants to say "the full error is in …": it may say so only when the
+    record really went there, and the ``log_level`` preference decides that — a reader who
+    turned the file down to ``ERROR`` has no warnings in it to be sent looking for.
+
+    Args:
+        level: The level the record was logged at.
+
+    Returns:
+        The log file's path, or ``None`` when logging isn't configured or the file's level
+        is above ``level``.
+    """
+    for handler in logging.getLogger(_LOGGER_NAME).handlers:
+        if isinstance(handler, logging.FileHandler) and handler.level <= level:
+            return Path(handler.baseFilename)
+    return None
+
+
 def configure_logging(
     console: Console,
     log_dir: Path,

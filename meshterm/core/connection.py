@@ -15,9 +15,11 @@ Two implementations are provided:
 from __future__ import annotations
 
 import asyncio
+import errno
 import logging
 import random
 import re
+import socket
 import sys
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable, Iterable
@@ -306,6 +308,18 @@ class DeviceAuthenticationError(DeviceCommandError):
         """
         super().__init__(message)
         self.hint = hint
+
+
+class UnrecognisedConnectError(DeviceCommandError):
+    """A connect failed in a way MeshTerm has no name for.
+
+    Every failure MeshTerm recognises has a sentence of its own, naming what happened and
+    what to do. This is the one it doesn't: rather than let a bare library error through —
+    which a dialog could only call "didn't answer", and which used to leave nothing in the
+    log — it says what was being opened, at which step, and the error's own words, and the
+    full traceback is logged beside it (see :func:`_unrecognised`), so a dialog can say where
+    to find that. Raised in place of the original, which stays its ``__cause__``.
+    """
 
 
 class FloodScopeError(DeviceCommandError):
@@ -761,6 +775,100 @@ def _serial_open_message(port: str, exc: BaseException) -> str | None:
     if code in _ERRNO_GONE or "cannot find the file" in text or "no such file" in text:
         return f"{port} isn't there — the device was unplugged, or came back under another name."
     return None
+
+
+#: ``errno`` values a TCP connect fails with when no route leads to the host: POSIX's own
+#: constants, and Winsock's (WSAENETUNREACH, WSAEHOSTUNREACH), which Windows reports as-is.
+_ERRNO_UNREACHABLE = {errno.ENETUNREACH, errno.EHOSTUNREACH, 10051, 10065}
+
+
+def _tcp_open_message(host: str, port: int | None, exc: BaseException) -> str | None:
+    """Name why a TCP connection to a companion wouldn't open, or ``None`` if unrecognised.
+
+    Each of these used to be reported as "no response from a MeshCore companion", which
+    sent the reader to the companion when the fault was the address, the port, or the
+    network between them — and each has a different fix.
+
+    Args:
+        host: The host, as the message names it.
+        port: The TCP port.
+        exc: What opening the socket raised.
+
+    Returns:
+        The actionable sentence, or ``None`` to report it as unrecognised.
+    """
+    if isinstance(exc, socket.gaierror):
+        return f"couldn't find a host named {host} — check the spelling, or use its IP address."
+    if isinstance(exc, ConnectionRefusedError):
+        return (
+            f"nothing is accepting connections on port {port} at {host} — check the port "
+            "number, and that the companion, or the bridge in front of it, is running."
+        )
+    if isinstance(exc, (ConnectionResetError, ConnectionAbortedError)):
+        return (
+            f"{host}:{port} closed the connection as it opened — a network companion serves "
+            "one client at a time, so another may already be connected to it."
+        )
+    if isinstance(exc, OSError) and exc.errno in _ERRNO_UNREACHABLE:
+        return (
+            f"there's no route to {host} from this computer — check the address, and that "
+            "this computer is on the companion's network (or its VPN)."
+        )
+    if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
+        return (
+            f"no answer from {host} on port {port} — check that it is powered on and on this "
+            "computer's network. A firewall can also hold a connection without refusing it."
+        )
+    return None
+
+
+def _ble_stalled_message(where: str, seconds: float | None = None) -> str:
+    """Say that a Bluetooth connect ran out of time, and what usually stalls one.
+
+    Args:
+        where: The device, as the message names it.
+        seconds: The window it ran out of, when the caller set one.
+
+    Returns:
+        The actionable sentence.
+    """
+    took = f"took longer than {seconds:.0f}s" if seconds else "timed out"
+    return (
+        f"connecting to {where} over Bluetooth {took} — the link, pairing, or service "
+        "discovery stalled. Move closer, restart the device, and try again."
+    )
+
+
+def _error_words(exc: BaseException) -> str:
+    """The error's own message, or its type's name where it has none (a bare ``TimeoutError``)."""
+    return str(exc).strip() or type(exc).__name__
+
+
+#: The unrecognised failures whose traceback is already in the log. The reconnect dialog
+#: retries every couple of seconds against whatever is refusing it, and one traceback says
+#: everything the next three hundred would.
+_TRACED: set[str] = set()
+
+
+def _unrecognised(what: str, exc: BaseException) -> UnrecognisedConnectError:
+    """Build the error for a connect failure MeshTerm has no sentence for, and log it whole.
+
+    Logged at warning, with the traceback the first time it is met, because that is what
+    the dialog then points at: the sentence carries the error's own words, and the log
+    carries where they came from.
+
+    Args:
+        what: What was being done, as the start of the sentence ("couldn't open COM5").
+        exc: The unrecognised error.
+
+    Returns:
+        The error to raise, from ``exc``.
+    """
+    words = _error_words(exc)
+    message = f"{what}: {words}"
+    _log.warning("%s", message, exc_info=exc if message not in _TRACED else None)
+    _TRACED.add(message)
+    return UnrecognisedConnectError(message)
 
 
 class _ConnectingClients(list):
@@ -1749,30 +1857,48 @@ class MeshCoreDevice(Device):
                 "--mock for the simulator."
             ) from exc
 
+        # Every transport leaves here with a sentence: a failure it recognises is named with
+        # its remedy, and one it doesn't is still said in words, as what was being opened and
+        # the error's own message, with the traceback logged (see _unrecognised). A bare
+        # library error used to escape instead, and a dialog could only call it "didn't
+        # answer". The original stays the cause, so is_connection_lost still sees it.
         if self._transport == "ble":
-            self._mc = await self._create_ble(MeshCore)
+            where = self._address or "the selected Bluetooth device"
+            try:
+                self._mc = await self._create_ble(MeshCore)
+            except DeviceCommandError:
+                raise
+            except (TimeoutError, asyncio.TimeoutError) as exc:
+                _log.warning("BLE connect to %s timed out", where)
+                raise DeviceCommandError(_ble_stalled_message(where)) from exc
+            except Exception as exc:  # noqa: BLE001 - said in words, logged whole
+                raise _unrecognised(f"couldn't connect to {where} over Bluetooth", exc) from exc
         elif self._transport == "tcp":
             try:
                 self._mc = await MeshCore.create_tcp(
                     self._host, self._tcp_port, default_timeout=self._connect_timeout
                 )
-            except (OSError, asyncio.TimeoutError) as exc:
-                # The socket couldn't be opened — host unreachable, connection refused, name
-                # not resolved, or the connect timed out. That's not a MeshCore-level failure,
-                # so translate it into a clean, actionable message (naming the host:port and
-                # the things to check) rather than letting a raw socket traceback escape.
-                raise DeviceCommandError(self._no_response_message()) from exc
+            except Exception as exc:  # noqa: BLE001 - named when recognised, else said in words
+                # The socket couldn't be opened, which is not a MeshCore-level failure: the
+                # name didn't resolve, nothing listens on the port, no route reaches the host,
+                # or the connect timed out — four faults with four different fixes.
+                message = _tcp_open_message(self._host or "the host", self._tcp_port, exc)
+                if message is None:
+                    raise _unrecognised(f"couldn't connect to {self.endpoint}", exc) from exc
+                _log.warning("couldn't connect to %s: %s", self.endpoint, exc)
+                raise DeviceCommandError(message) from exc
         else:
             try:
                 self._mc = await MeshCore.create_serial(
                     self._port, self._baudrate, default_timeout=self._connect_timeout
                 )
-            except Exception as exc:  # noqa: BLE001 - named when recognised, else re-raised
+            except Exception as exc:  # noqa: BLE001 - named when recognised, else said in words
                 # The port refused to open at all — which says nothing about whether a
                 # companion is on it, and used to be reported as if it had said exactly that.
-                message = _serial_open_message(self._port or "the serial port", exc)
+                port = self._port or "the serial port"
+                message = _serial_open_message(port, exc)
                 if message is None:
-                    raise
+                    raise _unrecognised(f"couldn't connect to the device on {port}", exc) from exc
                 _log.warning("couldn't open %s: %s", self._port, exc)
                 raise DeviceCommandError(message) from exc
         # ``create_*`` returns ``None`` (after cleaning up its own connection) when the node
@@ -2562,11 +2688,13 @@ class MeshCoreDevice(Device):
                 "with another app."
             )
         if self._transport == "tcp":
+            # The socket opened (one that didn't has its own message), so the address and
+            # the network are not the question here — what is listening on the port is.
             where = self.endpoint or "the selected network device"
             return (
-                f"no response from a MeshCore companion at {where}; check the host and port, "
-                "and that the device is powered on, reachable on the network, and not already "
-                "connected to another client."
+                f"the connection to {where} opened, but nothing answered as a MeshCore "
+                "companion — the port may belong to another service, or the companion may "
+                "be busy with another client."
             )
         # ModemManager opens without locking, so the port opens fine and the handshake is
         # what it spoils — which makes this, not the open error, where it has to be named.
@@ -5231,7 +5359,8 @@ async def _probe(device: MeshCoreDevice, timeout: float) -> tuple[MeshCoreDevice
         DeviceCommandError: On an *actionable* failure the user can fix — e.g. a Bluetooth
             companion that needs a pairing PIN. This is deliberately distinct from ``None``
             (an unremarkable "not a companion" miss) so the caller can show the real remedy
-            instead of a generic "didn't answer".
+            instead of a generic "didn't answer". A failure with no name of its own comes
+            as :class:`UnrecognisedConnectError`, in the error's own words.
     """
     # ``timeout`` is the handshake window handed to the client, so a non-MeshCore endpoint is
     # rejected in ~``timeout`` seconds and the client cleans up its own connection. The outer
@@ -5245,18 +5374,22 @@ async def _probe(device: MeshCoreDevice, timeout: float) -> tuple[MeshCoreDevice
         info = await asyncio.wait_for(device.get_self_info(), timeout)
     except asyncio.TimeoutError as exc:
         await _safe_disconnect(device)
-        if getattr(device, "transport", None) != "ble":
+        transport = getattr(device, "transport", None)
+        if transport == "tcp" and stage == "connect":
+            # The OS gives a silent host twenty seconds or more before it gives up, so it is
+            # this window that runs out first, and it means the same thing the OS's would.
+            where = getattr(device, "_host", None) or "the host"
+            _log.warning("TCP probe of %s timed out connecting", device.endpoint)
+            message = _tcp_open_message(where, getattr(device, "_tcp_port", None), exc)
+            raise DeviceCommandError(message or str(exc)) from exc
+        if transport != "ble":
             return None
         # A Bluetooth connect has more stages than a serial one (link, pairing, service
         # discovery, the identity reply), so saying which one ran out of time is what
         # tells a device out of range apart from one that connected and then went quiet.
         where = device.endpoint or "the selected Bluetooth device"
         if stage == "connect":
-            message = (
-                f"connecting to {where} over Bluetooth took longer than {timeout + 4.0:.0f}s — "
-                "the link, pairing, or service discovery stalled. Move closer, restart the "
-                "device, and try again."
-            )
+            message = _ble_stalled_message(where, timeout + 4.0)
         else:
             message = (
                 f"connected to {where} over Bluetooth, but it didn't answer the identity query "
@@ -5270,12 +5403,19 @@ async def _probe(device: MeshCoreDevice, timeout: float) -> tuple[MeshCoreDevice
         # through so the picker surfaces the remedy rather than hiding it behind "didn't answer".
         await _safe_disconnect(device)
         raise
-    except Exception as exc:  # noqa: BLE001 - any other failure just means "not confirmed"
-        # Still "not confirmed" to the picker, but said in the log: this used to be the one
-        # failure that left no trace, so a report from another machine had nothing to show.
-        _log.warning("probe of %s failed: %r", getattr(device, "endpoint", None), exc)
+    except Exception as exc:  # noqa: BLE001 - said in words, logged whole
+        # A failure nothing above recognised. It used to come back as "not confirmed", and
+        # the picker called the device one that "didn't answer as a MeshCore device" — a
+        # claim the probe never had grounds for, with the one clue left in the log. Now it
+        # is said in the error's own words, and the log holds the traceback.
         await _safe_disconnect(device)
-        return None
+        where = getattr(device, "endpoint", None) or "the device"
+        what = (
+            f"couldn't connect to {where}"
+            if stage == "connect"
+            else f"connected to {where}, but reading its identity failed"
+        )
+        raise _unrecognised(what, exc) from exc
     if not info:
         await _safe_disconnect(device)
         return None

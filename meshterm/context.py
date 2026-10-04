@@ -524,6 +524,11 @@ class AppContext:
         connection there had never been — and ``--port NOSUCHPORT`` is the most common way
         to reach this line.
 
+        A device that failed to open is not kept. It used to stay as :attr:`_device`, so
+        :attr:`is_connected` said yes, the next :meth:`device` handed it back unopened, and
+        every tool after a failed start failed with "not connected" instead of the reason.
+        Dropped, the next caller tries the connection again and meets the real answer.
+
         Args:
             what: The thing being opened, for the message (a port, an address, a host).
 
@@ -535,6 +540,11 @@ class AppContext:
         try:
             await self._device.connect()
         except Exception as exc:  # noqa: BLE001 - reclassified, then re-raised
+            failed, self._device = self._device, None
+            try:
+                await failed.disconnect()  # whatever half of it did open
+            except Exception:  # noqa: BLE001 - best-effort; it never connected
+                pass
             raise DeviceSelectionError(f"could not open {what}: {exc}") from exc
 
     async def device(self) -> Device:

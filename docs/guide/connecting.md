@@ -2,13 +2,29 @@
 
 MeshTerm talks to a MeshCore companion over USB, Bluetooth, or TCP, or runs the node itself
 on a radio on the SPI bus. When a connection fails, MeshTerm says which step failed and what
-to do about it, in the device picker and on the command line alike. This page collects those
-messages, so you can look one up before you meet it, or search for the one you have.
+to do about it. This page collects those messages, so you can look one up before you meet
+it, or search for the one you have.
+
+You see the same message wherever the connection fails:
+
+- **In the device picker**, when you choose a device.
+- **When MeshTerm starts**, if you named the device on the command line (`--port`, `--ble`,
+  `--tcp`, or `--profile`). MeshTerm shows the message, then opens the menu without a
+  radio. A tool that needs the radio tries to connect again when you open it.
+- **While MeshTerm waits for a device to come back**, after it was unplugged or rebooted.
+  If the device comes back but still won't connect, the message appears under the
+  spinner, so you are not left waiting for something that will not happen. Fix the
+  problem, and MeshTerm connects without you doing anything else.
+- **On the command line**, as the error message.
 
 Every failure is also written to the log file, `~/.meshterm/meshterm.log` (see
 [Where MeshTerm keeps its state](../cli/README.md#where-meshterm-keeps-its-state)). Attach it to a
 bug report. For more detail, set the **Log detail** preference to `DEBUG` (`meshterm
 preferences set log_level DEBUG`) and run it again.
+
+Sometimes MeshTerm meets a failure it has no name for. Then the message is the error in
+its own words, and a second line says where the log file is. The log holds the full
+error, which is what a bug report needs.
 
 - [Bluetooth](#bluetooth)
   - [Who does the pairing](#who-does-the-pairing)
@@ -79,7 +95,7 @@ diagnosis.
 | **Windows couldn't reach** / **Linux couldn't reach … to pair it** | The system could not find the companion when it came to pair. | As for a link that never opened: range, power, or another connection. |
 | **paired with …, but the device still refuses the connection** | Pairing succeeded, yet the companion still refuses. It is holding an old pairing for this computer. | Restart the companion, [forget the pairing](#forgetting-a-pairing), and try again. |
 | **was not paired. macOS asks for the pairing code in its own dialog** | macOS had not finished pairing. | Type the PIN into the macOS dialog when it appears. If none appears, check the terminal's Bluetooth permission (above). |
-| **connecting … took longer than** | The link, the pairing, or the service discovery stalled. | Move closer, restart the companion, and try again. |
+| **connecting … took longer than** / **connecting … timed out** | The link, the pairing, or the service discovery stalled. | Move closer, restart the companion, and try again. |
 | **connected …, but it didn't answer the identity query** | The link came up and the companion went quiet. | It may be busy with another app. Restart it and try again. |
 | **connected …, but it never answered as a MeshCore companion** | Something answered, but not as a companion. | It may be running repeater or room server firmware, which has no companion interface. |
 
@@ -114,10 +130,17 @@ cellular modem.
 
 ## TCP
 
-**no response from a MeshCore companion at HOST:PORT** means nothing answered there. Check
-the host and the port (MeshTerm's default is `5000`), that the companion is powered on and
-reachable on your network, and that no other client is already connected to it. Like
-Bluetooth, a network companion serves one client at a time.
+Like Bluetooth, a network companion serves one client at a time. MeshTerm's default port
+is `5000`.
+
+| The message starts with… | What happened | What to do |
+| --- | --- | --- |
+| **couldn't find a host named** | The name didn't lead to any address. | Check the spelling, or use the companion's IP address instead. |
+| **nothing is accepting connections on port** | The computer was reached, but nothing is listening on that port. | Check the port number, and that the companion, or the bridge in front of it, is running. |
+| **there's no route to** | Your computer can't reach that address at all. | Check the address, and that your computer is on the companion's network (or its VPN). |
+| **no answer from … on port** | Nothing answered in time. | Check that the companion is powered on and on your network. A firewall can also hold a connection without refusing it. |
+| **… closed the connection as it opened** | The companion hung up straight away. | Another client is probably connected to it. Disconnect that one first. |
+| **the connection to … opened, but nothing answered as a MeshCore companion** | Something is listening on the port, but it isn't a companion. | Check the port number. If it is right, the companion may be busy with another client. |
 
 ---
 

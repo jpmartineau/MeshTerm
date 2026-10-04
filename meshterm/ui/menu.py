@@ -21,6 +21,7 @@ from typing import Any
 
 from rich.cells import cell_len
 from rich.logging import RichHandler
+from rich.markup import escape
 from rich.text import Text
 
 from .. import __version__
@@ -84,6 +85,11 @@ _BLE_RESCAN_PAUSE_S = 1.0
 #: board has necessarily started restarting; a port that stays put through the reboot would
 #: otherwise be reopened against the old session, which dies under it a moment later.
 _REBOOT_SETTLE_S = 1.5
+
+#: How many reconnect attempts in a row must fail before the dialog says why. The device is
+#: there by then (each attempt waits for its port or its advertisement), but a board can
+#: refuse once while it boots, and that is not worth announcing.
+_REASON_AFTER_FAILURES = 2
 
 
 def _arm_exit_watchdog(seconds: float = _EXIT_WATCHDOG_S) -> None:
@@ -908,7 +914,9 @@ async def _startup(ctx: AppContext) -> bool:
     # the radio — a slow, silent step that would otherwise leave the screen blank for a beat.
     # Float the skeleton card across that gap on any real link (see _busy_over_link).
     async with _busy_over_link(ctx, title="Starting up"):
-        await _resume_monitor(ctx)
+        failure = await _resume_monitor(ctx)
+    if failure is not None:
+        await _report_startup_failure(ctx, failure)
     # A forgetful device (a firmware-less radio bridge) may have lost settings you saved through
     # MeshTerm; offer to reconcile them on the splash before the menu paints. Quiet unless a
     # connected device actually drifts from what's remembered (see settings_offer).
@@ -918,7 +926,26 @@ async def _startup(ctx: AppContext) -> bool:
     return True
 
 
-async def _resume_monitor(ctx: AppContext) -> None:
+async def _report_startup_failure(ctx: AppContext, failure: Exception) -> None:
+    """Say why the radio named on the command line didn't open, before the menu paints.
+
+    With ``--port``, ``--ble``, ``--tcp`` or ``--profile`` there is no device picker to say
+    it, and this used to be said nowhere: the menu opened on "no device", and the reason
+    came out only when a tool was opened, worded as that tool's failure.
+
+    Args:
+        ctx: The shared application context.
+        failure: What starting the radio raised.
+    """
+    from .device_picker import connect_failure_text
+    from .logo import load_logo
+
+    notice = connect_failure_text(failure)
+    notice.append("\nThe menu opens without a radio; a tool that needs one tries again.")
+    await ctx.ui.notify_startup(notice, title="Can't connect yet", banner=load_logo())
+
+
+async def _resume_monitor(ctx: AppContext) -> Exception | None:
     """Start always-on background listening and history recording.
 
     Recording has no switch: the monitor registers its hub subscription up front — a
@@ -926,12 +953,14 @@ async def _resume_monitor(ctx: AppContext) -> None:
     from the moment the radio opens. The hub itself (a MeshCore client must always be
     listening) is started eagerly here unless the ``connect_on_start`` setting defers
     it, in which case it opens lazily when a tool first needs the radio and recording
-    picks up then. A failure to start the hub (typically no companion device selected)
-    is non-fatal; the header reflects the resulting state, so nothing needs to be
-    printed here.
+    picks up then. A failure to start the hub is non-fatal — the menu opens without a
+    radio — but it is returned, for the caller to say why once the startup card is down.
 
     Args:
         ctx: The shared application context.
+
+    Returns:
+        What starting the hub raised, or ``None`` when it started or was deferred.
     """
     await ctx.monitor.start()
     # The advert scheduler is safe to run from launch regardless of the connect policy:
@@ -951,18 +980,23 @@ async def _resume_monitor(ctx: AppContext) -> None:
     # and skips quietly without a device, so it too is safe to run from launch.
     await ctx.battery.start()
     if not ctx.settings.connect_on_start:
-        return
+        return None
+    failure: Exception | None = None
     try:
         await ctx.events.start()
-    except Exception:  # noqa: BLE001 - surface via the header, don't crash the menu
-        pass
+    except Exception as exc:  # noqa: BLE001 - reported by the caller, never crashes the menu
+        get_logger().warning("couldn't start the radio: %s", exc)
+        failure = exc
     # Record inbound messages from launch so the inbox and unread badge stay current
     # even before the chat screen is opened. Deferred (like the hub) when connect on
-    # start is off; the chat screen starts it lazily then.
-    try:
-        await ctx.chat.start()
-    except Exception:  # noqa: BLE001 - surface via the header, don't crash the menu
-        pass
+    # start is off; the chat screen starts it lazily then. Skipped when the hub couldn't
+    # open the radio: it would only try the same connection again and wait out the same
+    # failure a second time.
+    if failure is None:
+        try:
+            await ctx.chat.start()
+        except Exception:  # noqa: BLE001 - surface via the header, don't crash the menu
+            pass
     # Warm the map tile source's metadata behind the menu too: the first ``.max_zoom`` touch
     # resolves the TileJSON over the network, and the Map / Node-detail location preview would
     # otherwise pay that round-trip on the navigation path (a stall on opening a located node's
@@ -976,6 +1010,7 @@ async def _resume_monitor(ctx: AppContext) -> None:
     # connect (connect_on_start off) returns above and warms lazily on first use instead.
     if ctx.is_connected:
         ctx.devstate.prewarm()
+    return failure
 
 
 def _warm_basemap(ctx: AppContext) -> None:
@@ -1042,7 +1077,9 @@ async def _run_selection(ctx: AppContext, name: str) -> None:
         name: The selected tool's name.
     """
     from ..core.connection import is_connection_lost
+    from ..core.selection import DeviceSelectionError
     from ..tools import get_tool
+    from .device_picker import connect_failure_text
 
     tool = get_tool(name)
     if tool is None:  # pragma: no cover - registry and menu are always in sync
@@ -1063,7 +1100,11 @@ async def _run_selection(ctx: AppContext, name: str) -> None:
                 return
             result = await tool.execute(ctx, params)
     except Exception as exc:  # noqa: BLE001 - surface errors without crashing the menu
-        if is_connection_lost(exc):
+        # A radio that never opened can't have been lost, however its error reads — and the
+        # watcher, with nothing connected to watch, would never prompt for it. That case is
+        # said here, in the connection's own sentence, rather than dropped.
+        never_opened = isinstance(exc, DeviceSelectionError)
+        if is_connection_lost(exc) and not never_opened:
             ctx.ui.discard()  # drop the half-built output; the watcher will prompt to reconnect
             return
         # A tool that failed is a *caution*, not a loss: the run is over, nothing it was
@@ -1071,7 +1112,14 @@ async def _run_selection(ctx: AppContext, name: str) -> None:
         # takes the amber tone rather than the reserved red — the same tier a danger dialog
         # uses — and the message dialog reads that tone off the note to frame itself
         # (see :func:`~meshterm.ui.tui.session._message_border`).
-        ctx.ui.note(f"[warn]⚠ {title} failed:[/warn] {exc}")
+        if never_opened:
+            reason = Text("⚠ ", style="warn")
+            reason.append_text(connect_failure_text(exc))
+            ctx.ui.show(reason)
+        else:
+            # Escaped: an error carries a library's own words, and `[org.bluez.Error.Failed]`
+            # read as markup is a tag that silently swallows the most telling part of it.
+            ctx.ui.note(f"[warn]⚠ {title} failed:[/warn] {escape(str(exc))}")
         await ctx.ui.present(title=title)
         return
 
@@ -1255,9 +1303,10 @@ async def _auto_reconnect(
     which fails fast against an absent endpoint.
 
     A failed attempt (the device is back but the board isn't ready yet, or it dropped again)
-    just loops and retries. On the first success the dialog's future is resolved with
-    ``"reconnected"``, dismissing the popup. Runs until it succeeds or the task is cancelled
-    (the user quit).
+    loops and retries; once :data:`_REASON_AFTER_FAILURES` have failed in a row, the dialog
+    says why under its spinner, in the connection's own sentence. On the first success the
+    dialog's future is resolved with ``"reconnected"``, dismissing the popup. Runs until it
+    succeeds or the task is cancelled (the user quit).
 
     Args:
         ctx: The shared application context.
@@ -1269,6 +1318,20 @@ async def _auto_reconnect(
     """
     from ..core.connection import serial_port_present
     from ..core.discovery import find_ble_device
+    from .device_picker import connect_failure_text
+
+    failures = 0
+    last_reason = ""
+    waiting_message = dialog.message
+
+    def gone_again() -> None:
+        # The device went away again, so what refused it last is no longer the question:
+        # back to waiting, until it returns and refuses (or doesn't) afresh.
+        nonlocal failures
+        if failures:
+            failures = 0
+            dialog.set_message(waiting_message)
+            dialog.set_detail(None)
 
     # Put the dead link down before going looking for the device. A Bluetooth companion we are
     # still nominally connected to does not advertise, so the scan below would wait out a
@@ -1285,6 +1348,7 @@ async def _auto_reconnect(
             # Off the loop: the probe enumerates ports, which blocks long enough to stall
             # the very spinner this dialog is showing while it waits.
             if port is not None and not await asyncio.to_thread(serial_port_present, port):
+                gone_again()
                 await asyncio.sleep(_LIVENESS_POLL_S)
                 continue
         elif transport == "ble":
@@ -1295,11 +1359,24 @@ async def _auto_reconnect(
                     # The scan window is itself the wait — it just spent several seconds
                     # listening — so only a brief pause is needed to keep a scan that fails
                     # instantly (Bluetooth switched off mid-session) from spinning.
+                    gone_again()
                     await asyncio.sleep(_BLE_RESCAN_PAUSE_S)
                     continue
         try:
             await ctx.reconnect(ble_device=ble_device)
-        except Exception:  # noqa: BLE001 - not reachable yet; keep the popup up and retry
+        except Exception as exc:  # noqa: BLE001 - not reachable yet; keep the popup up and retry
+            # A board can refuse once while it boots, so the first failure is only retried.
+            # One that persists is said under the spinner — another program holding the
+            # port, a pairing gone stale — or the reader waits on it forever. Logged once
+            # per reason, not once per attempt.
+            failures += 1
+            reason = connect_failure_text(exc)
+            if reason.plain != last_reason:
+                last_reason = reason.plain
+                get_logger().warning("reconnect failed: %s", last_reason)
+            if failures >= _REASON_AFTER_FAILURES:
+                dialog.set_message("Still trying to reconnect…")
+                dialog.set_detail(reason)
             await asyncio.sleep(_LIVENESS_POLL_S)
             continue
         dialog.resolve("reconnected")

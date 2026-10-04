@@ -794,7 +794,15 @@ class ReconnectDialog(_KeylessDialog):
     cyan) — the same fill as the quit-confirmation dialog — so every popup dialog reads alike.
     The animation is the reusable :class:`~meshterm.ui.tui.spinner.Spinner`, advanced by
     :meth:`tick` from the session's animation timer.
+
+    Once the device is back but the reconnect keeps failing, the reason sits under the
+    spinner line (:meth:`set_detail`) — a port another program took while we waited, a
+    pairing that went stale — since a spinner alone would wait on it forever.
     """
+
+    #: The widest a reason runs before it wraps: a sentence or two at a reading measure,
+    #: rather than a box stretched to the terminal's edges to hold it on one line.
+    DETAIL_MEASURE = 56
 
     def __init__(
         self,
@@ -821,34 +829,57 @@ class ReconnectDialog(_KeylessDialog):
         self._message = message
         self._prompt_style = prompt_style
         self._spinner = Spinner()
+        self._detail: Text | None = None
 
     @property
     def dialog_width(self) -> int:
         """Natural outer width so the frame sizes the box to its content (see ButtonDialog)."""
+        detail = 0
+        if self._detail is not None:
+            widest = max(cell_len(line.plain) for line in self._detail.split("\n"))
+            detail = min(widest, self.DETAIL_MEASURE)
         inner = max(
             cell_len(self._message),
             cell_len(self.title),
             cell_len(self.footer_hint),
             len("  Abort  "),
+            detail,
         )
         return inner + 12  # panel padding + border, plus horizontal breathing room
+
+    @property
+    def message(self) -> str:
+        """The line shown beside the spinner."""
+        return self._message
 
     def set_message(self, message: str) -> None:
         """Replace the line shown beside the spinner (e.g. to note a stalled retry)."""
         self._message = message
+
+    def set_detail(self, detail: Text | None) -> None:
+        """Show why the reconnect keeps failing, under the spinner line; ``None`` clears it."""
+        self._detail = detail
 
     def tick(self) -> None:
         """Advance the spinner to its next frame (driven by the session's animation timer)."""
         self._spinner.tick()
 
     def render_body(self, width: int) -> list[str]:
-        """Render the spinner and message centered above a single Abort button."""
+        """Render the spinner and message, then any reason, centered above an Abort button."""
         line = self._spinner.text()
         line.append("  ")
         line.append(self._message, style=self._prompt_style)
         row = Text()
         row.append("  Abort  ", style="selected")
-        return render_lines(Group(_center(line, width), Text(""), _center(row, width)), width)
+        parts: list[Text] = [_center(line, width)]
+        if self._detail is not None:
+            # Wrapped and centred line by line; it holds no chip, so Rich's own centring
+            # is safe here (see _center for the one case it isn't).
+            detail = self._detail.copy()
+            detail.justify = "center"
+            parts += [Text(""), detail]
+        parts += [Text(""), _center(row, width)]
+        return render_lines(Group(*parts), width)
 
     def handle(self, action: str, data: str = "") -> None:
         """Abort only on Enter; ignore everything else, Esc included (the app auto-dismisses)."""

@@ -10,7 +10,9 @@ against the :class:`MockDevice` simulator; no hardware required.
 from __future__ import annotations
 
 import asyncio
+import errno
 import io
+import socket
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -697,6 +699,139 @@ async def test_serial_connect_raises_the_named_failure(monkeypatch) -> None:
         await dev.connect()
     assert "dialout" in str(excinfo.value)
     assert isinstance(excinfo.value.__cause__, SerialException)
+
+
+def _fake_meshcore(monkeypatch, **factories) -> None:  # noqa: ANN003
+    """Stand a ``meshcore`` module in whose ``create_*`` factories are the ones given."""
+    import types
+
+    module = types.ModuleType("meshcore")
+    module.MeshCore = type("MeshCore", (), {k: staticmethod(v) for k, v in factories.items()})
+    monkeypatch.setitem(sys.modules, "meshcore", module)
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected"),
+    [
+        (socket.gaierror(11001, "getaddrinfo failed"), "couldn't find a host named meshbox"),
+        (ConnectionRefusedError(111, "Connection refused"), "nothing is accepting connections"),
+        (ConnectionResetError(104, "Connection reset by peer"), "one client at a time"),
+        (OSError(errno.EHOSTUNREACH, "No route to host"), "no route to meshbox"),
+        (OSError(10065, "A socket operation was attempted to an unreachable host"), "no route"),
+        (TimeoutError(110, "Connection timed out"), "no answer from meshbox on port 5000"),
+        (asyncio.TimeoutError(), "no answer from meshbox"),
+    ],
+)
+def test_tcp_open_failures_are_named(exc: BaseException, expected: str) -> None:
+    """Each way a socket refuses has its own sentence, not "no response from a companion"."""
+    message = connection._tcp_open_message("meshbox", 5000, exc)
+    assert message is not None and expected in message
+
+
+def test_an_unrecognised_tcp_failure_is_left_to_the_caller() -> None:
+    """A failure that isn't one of the socket's own is not given a name it hasn't earned."""
+    assert connection._tcp_open_message("meshbox", 5000, ValueError("odd")) is None
+
+
+async def test_tcp_connect_raises_the_named_failure(monkeypatch) -> None:
+    """``connect`` says a refused port is a refused port, keeping the socket error as cause."""
+
+    async def create_tcp(*_args, **_kwargs):
+        raise ConnectionRefusedError(111, "Connection refused")
+
+    _fake_meshcore(monkeypatch, create_tcp=create_tcp)
+    dev = connection.MeshCoreDevice(transport="tcp", host="10.0.0.9", tcp_port=5000)
+    with pytest.raises(DeviceCommandError) as excinfo:
+        await dev.connect()
+    assert "port 5000 at 10.0.0.9" in str(excinfo.value)
+    assert isinstance(excinfo.value.__cause__, ConnectionRefusedError)
+
+
+async def test_a_tcp_companion_that_never_answers_is_told_from_one_never_reached(
+    monkeypatch,
+) -> None:
+    """A socket that opened onto silence names the listener, not the address or the network."""
+
+    async def create_tcp(*_args, **_kwargs):
+        return None  # meshcore's answer when the handshake goes unanswered
+
+    _fake_meshcore(monkeypatch, create_tcp=create_tcp)
+    dev = connection.MeshCoreDevice(transport="tcp", host="10.0.0.9", tcp_port=5000)
+    with pytest.raises(DeviceCommandError) as excinfo:
+        await dev.connect()
+    assert "opened, but nothing answered" in str(excinfo.value)
+
+
+async def test_an_unrecognised_connect_failure_is_said_in_its_own_words(
+    monkeypatch, caplog
+) -> None:
+    """A failure with no name is still a sentence, and its traceback is logged — once."""
+    monkeypatch.setattr(connection, "_TRACED", set())
+
+    async def create_serial(*_args, **_kwargs):
+        raise ValueError("unsupported baud rate")
+
+    _fake_meshcore(monkeypatch, create_serial=create_serial)
+    dev = connection.MeshCoreDevice(port="/dev/ttyACM0")
+    caplog.set_level("WARNING", logger="meshterm.core.connection")
+    for _ in range(2):  # a reconnect retrying against the same fault
+        with pytest.raises(connection.UnrecognisedConnectError) as excinfo:
+            await dev.connect()
+    assert str(excinfo.value) == (
+        "couldn't connect to the device on /dev/ttyACM0: unsupported baud rate"
+    )
+    assert isinstance(excinfo.value.__cause__, ValueError)
+    records = [r for r in caplog.records if "unsupported baud rate" in r.getMessage()]
+    assert len(records) == 2
+    assert records[0].exc_info is not None  # the traceback, the first time
+    assert records[1].exc_info is None  # and only the line after that
+
+
+async def test_a_ble_connect_timeout_is_named_as_a_stall(monkeypatch) -> None:
+    """A Bluetooth stack's own timeout says what stalls, rather than a bare ``TimeoutError``."""
+    dev = connection.MeshCoreDevice(transport="ble", address=_OPEN_ADDR)
+
+    async def _create_ble(_mesh_core):
+        raise TimeoutError
+
+    dev._create_ble = _create_ble  # type: ignore[method-assign]
+    _fake_meshcore(monkeypatch)
+    with pytest.raises(DeviceCommandError) as excinfo:
+        await dev.connect()
+    assert "timed out" in str(excinfo.value) and "Move closer" in str(excinfo.value)
+
+
+async def test_a_tcp_probe_that_runs_out_of_time_says_so() -> None:
+    """The probe's own window runs out before the OS gives up on a silent host: named too."""
+    dev = connection.MeshCoreDevice(transport="tcp", host="10.0.0.9", tcp_port=5000)
+
+    async def _connect() -> None:
+        raise asyncio.TimeoutError
+
+    dev.connect = _connect  # type: ignore[method-assign]
+    with pytest.raises(DeviceCommandError) as excinfo:
+        await connection._probe(dev, 1.0)
+    assert "no answer from 10.0.0.9 on port 5000" in str(excinfo.value)
+
+
+async def test_the_probe_names_a_failure_it_does_not_recognise(monkeypatch) -> None:
+    """An odd failure is said in its own words, not called "not a MeshCore device"."""
+    monkeypatch.setattr(connection, "_TRACED", set())
+    dev = connection.MeshCoreDevice(port="COM5")
+
+    async def _connect() -> None:
+        pass
+
+    async def _self_info() -> dict:
+        raise RuntimeError("frame decode failed")
+
+    dev.connect = _connect  # type: ignore[method-assign]
+    dev.get_self_info = _self_info  # type: ignore[method-assign]
+    with pytest.raises(connection.UnrecognisedConnectError) as excinfo:
+        await connection._probe(dev, 1.0)
+    assert str(excinfo.value) == (
+        "connected to COM5, but reading its identity failed: frame decode failed"
+    )
 
 
 def test_ble_address_int_parses_macs_and_rejects_others() -> None:
@@ -1636,3 +1771,292 @@ async def test_a_healthy_bluetooth_teardown_still_releases_the_client() -> None:
     assert healthy.disconnected
     assert not healthy.force_stopped  # the graceful path was enough, as it always was
     assert live.disconnect_calls == 1  # and the client is released regardless
+
+
+# --- What the reader is told when a connection won't open --------------------------------------
+
+
+def _refusal() -> Exception:
+    """A connect failure as the context raises it: its own wrapper round the named sentence."""
+    from meshterm.core.selection import DeviceSelectionError
+
+    try:
+        try:
+            raise DeviceCommandError(
+                "COM_TEST is in use by another program — the MeshCore app, a flasher, or a "
+                "serial monitor. Close it and try again."
+            )
+        except DeviceCommandError as cause:
+            raise DeviceSelectionError(f"could not open serial port COM_TEST: {cause}") from cause
+    except DeviceSelectionError as exc:
+        return exc
+
+
+async def test_a_device_that_failed_to_open_is_not_kept(tmp_path: Path, monkeypatch) -> None:
+    """After a failed open, nothing claims to be connected, and the next caller tries again.
+
+    The device used to stay behind unopened: ``is_connected`` said yes, and every tool after
+    a failed start was handed it and failed with "not connected" instead of the reason.
+    """
+    from meshterm.core.selection import DeviceSelectionError
+
+    ctx = _make_ctx(tmp_path)
+    ctx.mock = False
+    ctx.tcp_override = "10.0.0.9:5000"
+    built: list = []
+
+    class _Refusing:
+        transport = "tcp"
+        disconnects = 0
+
+        async def connect(self) -> None:
+            raise DeviceCommandError("nothing is accepting connections on port 5000 at 10.0.0.9")
+
+        async def disconnect(self) -> None:
+            self.disconnects += 1
+
+    def fake_make_device(**_kw):
+        built.append(_Refusing())
+        return built[-1]
+
+    monkeypatch.setattr(context_module, "make_device", fake_make_device)
+    try:
+        for attempt in (1, 2):
+            with pytest.raises(DeviceSelectionError, match="port 5000"):
+                await ctx.device()
+            assert not ctx.is_connected
+            assert len(built) == attempt  # a fresh attempt each time, not the dead one back
+        assert built[0].disconnects == 1  # whatever half of it opened was put down
+    finally:
+        ctx.repo.close()
+
+
+def test_a_failure_reads_as_the_connection_s_own_sentence() -> None:
+    """The dialog shows the named sentence, not the context's wrapper repeating the endpoint."""
+    from meshterm.ui.device_picker import connect_failure_text
+
+    text = connect_failure_text(_refusal())
+    assert text.plain.startswith("COM_TEST is in use by another program")
+    assert "could not open serial port" not in text.plain
+    assert "The full error" not in text.plain  # a named failure: the log has nothing more
+
+
+@pytest.mark.parametrize(
+    ("sentence", "shown"),
+    [
+        ("couldn't open a Bluetooth link to X", "Couldn't open a Bluetooth link to X"),
+        ("no permission to open COM5.", "No permission to open COM5."),
+        ("meshbox.local:5000 closed the connection", "meshbox.local:5000 closed the connection"),
+        ("/dev/ttyACM0 isn't there", "/dev/ttyACM0 isn't there"),
+        ("c0:ff:ee:00:00:01 rejected the PIN", "c0:ff:ee:00:00:01 rejected the PIN"),
+    ],
+)
+def test_a_dialog_capitalises_a_plain_word_and_never_a_name(sentence: str, shown: str) -> None:
+    """A dialog capitalises the command line's lowercase sentence, but never a name.
+
+    A sentence that starts with a port, a host, or an address keeps that spelling, since it
+    is the reader's to match against their own.
+    """
+    from meshterm.ui.device_picker import connect_failure_text
+
+    assert connect_failure_text(DeviceCommandError(sentence)).plain == shown
+
+
+def test_an_unrecognised_failure_says_where_the_log_is(monkeypatch, tmp_path: Path) -> None:
+    """Only a failure MeshTerm couldn't name points at the log, and only if the log took it."""
+    from meshterm.ui import device_picker
+
+    log = tmp_path / "meshterm.log"
+    odd = connection.UnrecognisedConnectError("couldn't connect to COM5: [WinError 31] odd")
+    monkeypatch.setattr(device_picker, "log_file_for", lambda level: log)
+    text = device_picker.connect_failure_text(odd)
+    assert text.plain == f"Couldn't connect to COM5: [WinError 31] odd\nThe full error is in {log}"
+
+    monkeypatch.setattr(device_picker, "log_file_for", lambda level: None)  # log level ERROR
+    assert "The full error" not in device_picker.connect_failure_text(odd).plain
+
+
+async def test_reconnect_says_why_once_the_failure_persists(tmp_path: Path, monkeypatch) -> None:
+    """A device that is back but refuses gets its reason under the spinner, not a silent wait.
+
+    The first failure is let go (a board can refuse once while it boots), so the reason
+    appears from the second.
+    """
+    from rich.text import Text
+
+    from meshterm.ui.tui import ReconnectDialog
+
+    ctx = _make_ctx(tmp_path)
+    ctx.mock = False
+    ctx._device = object()
+    ctx._active_port = "COM_TEST"
+    dialog = ReconnectDialog("Waiting for your device — reconnect it to resume.")
+    dialog.future = asyncio.get_running_loop().create_future()
+    seen: list[str] = []
+
+    def body() -> str:
+        return Text.from_ansi("\n".join(dialog.render_body(68))).plain
+
+    async def fake_reconnect(self: AppContext, *, ble_device: object | None = None) -> None:
+        seen.append(body())
+        if len(seen) <= 2:
+            raise _refusal()
+
+    async def fake_release(self: AppContext) -> None:
+        pass
+
+    monkeypatch.setattr(connection, "serial_port_present", lambda port: True)
+    monkeypatch.setattr(AppContext, "reconnect", fake_reconnect)
+    monkeypatch.setattr(AppContext, "release_link", fake_release)
+    monkeypatch.setattr(menu, "_LIVENESS_POLL_S", 0.0)
+    try:
+        await asyncio.wait_for(menu._auto_reconnect(ctx, dialog), timeout=2.0)
+        assert dialog.future.result() == "reconnected"
+        assert "in use by another program" not in seen[1]  # one failure: just retried
+        assert "in use by another program" in seen[2]  # two: said
+        assert "Still trying to reconnect" in seen[2]
+    finally:
+        ctx.repo.close()
+
+
+async def test_reconnect_forgets_the_reason_when_the_device_goes_again(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Unplugged after it refused, the device is waited for again, not still called refusing."""
+    from rich.text import Text
+
+    from meshterm.ui.tui import ReconnectDialog
+
+    ctx = _make_ctx(tmp_path)
+    ctx.mock = False
+    ctx._device = object()
+    ctx._active_port = "COM_TEST"
+    dialog = ReconnectDialog("Waiting for your device — reconnect it to resume.")
+    dialog.future = asyncio.get_running_loop().create_future()
+    present = iter([True, True, False, True])  # refuses twice, is pulled, comes back
+    bodies: list[str] = []
+
+    def port_present(_port: str) -> bool:
+        bodies.append(Text.from_ansi("\n".join(dialog.render_body(68))).plain)
+        return next(present)
+
+    attempts = {"n": 0}
+
+    async def fake_reconnect(self: AppContext, *, ble_device: object | None = None) -> None:
+        attempts["n"] += 1
+        if attempts["n"] <= 2:
+            raise _refusal()
+
+    async def fake_release(self: AppContext) -> None:
+        pass
+
+    monkeypatch.setattr(connection, "serial_port_present", port_present)
+    monkeypatch.setattr(AppContext, "reconnect", fake_reconnect)
+    monkeypatch.setattr(AppContext, "release_link", fake_release)
+    monkeypatch.setattr(menu, "_LIVENESS_POLL_S", 0.0)
+    try:
+        await asyncio.wait_for(menu._auto_reconnect(ctx, dialog), timeout=2.0)
+        assert "in use by another program" in bodies[2]  # said, while it was refusing
+        assert "in use by another program" not in bodies[3]  # gone again: waited for
+        assert "Waiting for your device" in bodies[3]
+    finally:
+        ctx.repo.close()
+
+
+async def test_a_radio_that_will_not_start_is_reported_before_the_menu(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """With the device named on the command line there is no picker, so startup says why."""
+    ctx = _make_ctx(tmp_path)
+    notes: list = []
+
+    async def failing_start() -> None:
+        raise _refusal()
+
+    async def notify_startup(renderable, *, title="", banner=None, footnote=None):
+        notes.append((title, renderable.plain))
+
+    monkeypatch.setattr(ctx.events, "start", failing_start)
+    monkeypatch.setattr(menu, "_warm_basemap", lambda _ctx: None)
+    monkeypatch.setattr(ctx, "ui", SimpleNamespace(notify_startup=notify_startup))
+    try:
+        failure = await menu._resume_monitor(ctx)
+        assert failure is not None
+        assert not ctx.chat.active  # not a second try at the same refusal
+        await menu._report_startup_failure(ctx, failure)
+        [(title, plain)] = notes
+        assert title == "Can't connect yet"
+        assert plain.startswith("COM_TEST is in use by another program")
+        assert "The menu opens without a radio" in plain
+    finally:
+        await ctx.aclose()
+
+
+class _ToolUi:
+    """Collects what a tool run leaves for its result dialog."""
+
+    def __init__(self) -> None:
+        self.buffer: list = []
+        self.presented = False
+
+    def note(self, markup: str) -> None:
+        from rich.text import Text
+
+        self.buffer.append(Text.from_markup(markup))
+
+    def show(self, *renderables) -> None:  # noqa: ANN002
+        self.buffer.extend(renderables)
+
+    def discard(self) -> None:
+        self.buffer = []
+
+    async def present(self, *, title: str = "") -> None:
+        self.presented = True
+
+
+async def _run_failing_tool(tmp_path: Path, monkeypatch, exc: Exception) -> _ToolUi:
+    """Run a menu tool that raises ``exc``, and return what it left to show."""
+    from meshterm import tools
+
+    class _Tool:
+        name = title = "Contacts"
+
+        async def prompt_params(self, _ctx):
+            raise exc
+
+    ctx = _make_ctx(tmp_path)
+    ui = _ToolUi()
+    monkeypatch.setattr(tools, "get_tool", lambda name: _Tool())
+    monkeypatch.setattr(ctx, "ui", ui)
+    try:
+        await menu._run_selection(ctx, "contacts")
+    finally:
+        ctx.repo.close()
+    return ui
+
+
+async def test_a_tool_whose_radio_never_opened_says_why(tmp_path: Path, monkeypatch) -> None:
+    """A connect that failed reads as the connection's sentence, even if it looks like a lost link.
+
+    The watcher has nothing connected to notice, so nothing else would say it.
+    """
+    from meshterm.core.selection import DeviceSelectionError
+
+    try:
+        raise DeviceSelectionError("could not open BLE companion X") from OSError(
+            "input/output error"
+        )
+    except DeviceSelectionError as raised:
+        exc = raised
+    assert is_connection_lost(exc)
+    ui = await _run_failing_tool(tmp_path, monkeypatch, exc)
+    assert ui.presented
+    assert [t.plain for t in ui.buffer] == ["⚠ Could not open BLE companion X"]
+
+
+async def test_a_tool_failure_shows_the_error_s_brackets(tmp_path: Path, monkeypatch) -> None:
+    """A library's bracketed words are shown, not swallowed as a markup tag."""
+    exc = RuntimeError("[org.bluez.Error.Failed] le-connection-abort-by-local")
+    ui = await _run_failing_tool(tmp_path, monkeypatch, exc)
+    [text] = ui.buffer
+    assert text.plain == "⚠ Contacts failed: [org.bluez.Error.Failed] le-connection-abort-by-local"

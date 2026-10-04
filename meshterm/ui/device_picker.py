@@ -29,6 +29,8 @@ is connected to again.
 from __future__ import annotations
 
 import asyncio
+import logging
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING
 
@@ -36,7 +38,11 @@ from rich.cells import cell_len
 from rich.text import Text
 
 from ..core.config import DeviceProfile
-from ..core.connection import DeviceAuthenticationError, DeviceCommandError
+from ..core.connection import (
+    DeviceAuthenticationError,
+    DeviceCommandError,
+    UnrecognisedConnectError,
+)
 from ..core.device_store import DeviceStore, RememberedDevice
 from ..core.discovery import (
     DEFAULT_TCP_PORT,
@@ -48,6 +54,7 @@ from ..core.discovery import (
     tcp_device,
 )
 from ..core.spiradio import spi_radios
+from ..persistence.logging import log_file_for
 from ..platforms import get_platform
 from .logo import load_logo
 from .menus import Lane, align_icons, column_header, fit_cells
@@ -223,6 +230,50 @@ def _model_from(info: dict) -> str:
     return str(info.get("model") or "")
 
 
+#: A connect failure's sentence starts lowercase, written for the command line's
+#: ``meshterm: …``. A dialog shows it as a sentence, so a plain leading word is capitalised —
+#: and only a plain word: a port, an address, or a host name opening it keeps its spelling.
+_LEADING_WORD = re.compile(r"^[a-z][a-z']*(?=\s)")
+
+
+def connect_failure_text(exc: BaseException) -> Text:
+    """The reason a connection failed, as a dialog shows it.
+
+    The sentence is the connection's own: the first
+    :class:`~meshterm.core.connection.DeviceCommandError` in the chain, under whatever wraps
+    it (the context's ``could not open …`` only repeats the endpoint the sentence names). It
+    is plain text in the ``warn`` tone, so brackets in a library's words are shown rather
+    than read as markup. Where MeshTerm had no name for the failure
+    (:class:`~meshterm.core.connection.UnrecognisedConnectError`), a muted line follows
+    saying where the log is, since the log holds the traceback; a named failure gets none,
+    because there the dialog already says everything the log does.
+
+    Args:
+        exc: What the connection attempt raised.
+
+    Returns:
+        The dialog's lines.
+    """
+    named: DeviceCommandError | None = None
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, DeviceCommandError):
+            named = current
+            break
+        current = current.__cause__ or current.__context__
+    sentence = str(named or exc).strip() or type(exc).__name__
+    sentence = _LEADING_WORD.sub(lambda word: word.group().capitalize(), sentence, count=1)
+    text = Text()
+    text.append(sentence, style="warn")  # a span, not the base: what callers add stays plain
+    if isinstance(named, UnrecognisedConnectError):
+        log = log_file_for(logging.WARNING)
+        if log is not None:
+            text.append(f"\nThe full error is in {log}", style="muted")
+    return text
+
+
 async def _smoke_test(
     ui: Ui,
     chosen: DiscoveredDevice,
@@ -277,10 +328,8 @@ async def _smoke_test(
             pin = entered
             continue
         except DeviceCommandError as exc:
-            # A different actionable failure (not a PIN): show its remedy verbatim, then back to
-            # the list. Plain styled text so the message's own punctuation isn't parsed as markup.
-            notice = Text()
-            notice.append(str(exc), style="warn")
+            # A different actionable failure (not a PIN): show its remedy, then back to the list.
+            notice = connect_failure_text(exc)
             notice.append("\nChoose another device.")
             await ui.notify_startup(notice, title="Can't connect yet", banner=load_logo())
             return None
