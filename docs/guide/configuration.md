@@ -24,10 +24,10 @@ delete a line and the default takes over again.
 and remembers the last good default. A network (TCP) companion isn't discoverable, so reach
 it with `--tcp host:port`, a TCP profile, or the picker's "add a network device" prompt.
 A LoRa radio on this machine's own SPI bus is listed on the picker when its device node
-exists, or reached with `--spi`; see [the uConsole manual](uconsole.md).
+exists, or reached with `--spi`; see [the uConsole manual](../devices/uconsole.md).
 Write a config file only to give your hardware stable aliases.
 
-Copy [`config.example.toml`](../config.example.toml) to `~/.meshterm/config.toml`:
+Copy [`config.example.toml`](../../config.example.toml) to `~/.meshterm/config.toml`:
 
 ```toml
 # default_profile = "s3"   # uncomment and name your own profile to make it the default
@@ -64,7 +64,7 @@ history, the outbox, the contact and channel caches, stored admin passwords, and
 or a `--mock` session — without touching the one you use every day. `--db` moves the
 database alone; the rest stays where it was. A `--mock` run that names neither writes to
 `meshterm-mock.db` beside the real history, so the simulator's invented nodes never enter
-it. [`docs/cli.md`](cli.md#where-meshterm-keeps-its-state)
+it. [`docs/cli.md`](../cli/README.md#where-meshterm-keeps-its-state)
 lists every file.
 
 Timestamps are stored as UTC and rendered in your local time. Heard packets older than the
@@ -76,7 +76,7 @@ and at the start of each `meshterm monitor` run. Nothing else is pruned.
 Some boards put the LoRa chip straight on the computer's SPI bus, with no firmware in front
 of it: the uConsole's AIO board, and LoRa HATs for the Raspberry Pi. MeshTerm drives these
 itself — it runs the node while it is connected and lets go of the radio when it quits.
-It needs Linux and the radio library; [the uConsole manual](uconsole.md#step-2--install-the-radio-library)
+It needs Linux and the radio library; [the uConsole manual](../devices/uconsole.md#step-2--install-the-radio-library)
 shows how to install that.
 
 **An AIO v1 needs no configuration.** Its wiring is MeshTerm's default, so whenever
@@ -115,7 +115,7 @@ between a Pi 4/CM4 and a Pi 5/CM5 and has moved between kernel releases on the l
 Left out, it defaults to `-1`, and MeshTerm finds the header's chip by its label
 (`pinctrl-rp1`, `pinctrl-bcm2711`, `pinctrl-bcm2835`) — falling back to chip `0` on a board
 whose chips carry none of them. `gpiodetect` lists every chip with its label. The
-[uConsole guide](uconsole.md#which-gpio-chip) has the whole story.
+[uConsole guide](../devices/uconsole.md#which-gpio-chip) has the whole story.
 
 **State every pin and both switches.** Where a `meshtasticd` file leaves a key out, it means
 "none" or "off". Where the `spi` table leaves a key out, it means *the AIO's value* — IRQ on
@@ -145,7 +145,7 @@ use_dio3_tcxo = false   # no TCXO on this board
 
 A `spi` table is enough to make it an SPI profile; `transport = "spi"` says so outright and
 is what an AIO profile with no table uses. Every key, with the AIO defaults, is in
-[the uConsole manual's wiring table](uconsole.md#board-wiring). A key MeshTerm doesn't know,
+[the uConsole manual's wiring table](../devices/uconsole.md#board-wiring). A key MeshTerm doesn't know,
 or a value of the wrong type, stops it at startup with the profile named — a misspelt pin
 is never quietly ignored.
 

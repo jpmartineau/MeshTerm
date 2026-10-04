@@ -1,7 +1,7 @@
 # What MeshTerm does
 
 Every screen the menu offers, and the command that does the same job without it. This is
-the catalogue; [the command line](cli.md) is the manual for the scripted half of it.
+the catalogue; [the command line](../cli/README.md) is the manual for the scripted half of it.
 
 MeshTerm's menu asks one question — *what would you like to do?* — and its six sections
 answer it in two halves. The first three name a **doing**: Message, Watch, Explore. The

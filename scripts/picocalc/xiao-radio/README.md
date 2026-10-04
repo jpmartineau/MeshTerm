@@ -4,7 +4,7 @@ A Seeed XIAO nRF52840 + Wio-SX1262 wired to the Luckfox Lyra's UART1, running Me
 companion firmware on `Serial1`, so MeshTerm on the PicoCalc opens `/dev/ttyS1` like any
 other serial companion. No BLE, no USB host, no SD-slot sacrifice.
 
-**The step-by-step guide is [`docs/picocalc.md`, Phase 3](../../../docs/picocalc.md#phase-3--add-the-radio)** — parts,
+**The step-by-step guide is [`docs/devices/picocalc-lyra.md`, Phase 3](../../../docs/devices/picocalc-lyra.md#phase-3--add-the-radio)** — parts,
 the firmware build and the patch explained, flashing, wiring, the Lyra setup, and what has
 only been proven on one bench. What the register poke does is in `uart1-mux.py`'s own
 header. This page is the bench card.

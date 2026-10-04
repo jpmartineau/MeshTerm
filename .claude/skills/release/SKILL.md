@@ -125,11 +125,11 @@ types it.
 
 `github-release.yml` now attaches a **version-less copy of every binary** beside the
 stamped one, so `releases/latest/download/meshterm-macos-arm64` is a URL that never moves —
-which is what the README and `docs/uconsole.md` use. Nothing in either names a version.
+which is what the README and `docs/devices/uconsole.md` use. Nothing in either names a version.
 Leave them alone, and if you find yourself adding a version to an install command, add an
 alias to the gather step instead.
 
-What *does* still carry the number: `docs/cli.md` has a sample document with a `"version"`
+What *does* still carry the number: `docs/cli/README.md` has a sample document with a `"version"`
 field, which is the live `{version}` placeholder and must show the new one.
 
 ## 5. Commit, tag, push

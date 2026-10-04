@@ -1,8 +1,8 @@
 # How the code is laid out
 
 A map of the package for anyone reading it for the first time. The house rules that
-govern what goes where are in [CLAUDE.md](../CLAUDE.md), which is the real style guide;
-[CONTRIBUTING.md](../CONTRIBUTING.md) has the dev install and the gates a change has to
+govern what goes where are in [CLAUDE.md](../../CLAUDE.md), which is the real style guide;
+[CONTRIBUTING.md](../../CONTRIBUTING.md) has the dev install and the gates a change has to
 pass.
 
 MeshTerm is layered so a new feature is one file in `meshterm/tools/`:

@@ -100,7 +100,7 @@ exclude = [
     "/.git-blame-ignore-revs",
     "/.gitattributes",
     "/CLAUDE.md",
-    "/docs/survey-*.md",
+    "/docs/development/survey-*.md",
     "/packaging",
     "/scripts",
 ]

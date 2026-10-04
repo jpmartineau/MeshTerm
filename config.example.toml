@@ -77,7 +77,7 @@ transport = "spi"
 
 # Any other board states its whole wiring — every pin and both switches, because a key
 # left out keeps the AIO's value. Read them off the board's meshtasticd config; the
-# values here are an illustration only. docs/configuration.md has the key-by-key mapping.
+# values here are an illustration only. docs/guide/configuration.md has the key-by-key mapping.
 # [profiles.hat.spi]
 # bus_id = 0              # /dev/spidev0.0
 # cs_id = 0

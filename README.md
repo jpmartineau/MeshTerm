@@ -149,7 +149,7 @@ install Microsoft's [Cascadia Mono PL](https://github.com/microsoft/cascadia-cod
 for you — no administrator rights, nothing downloaded.
 
 Preferences → Display → Console setup turns all of this off if you'd rather stay put.
-[Terminals, icons, and the Windows console](docs/terminals.md) explains why any of it is
+[Terminals, icons, and the Windows console](docs/guide/terminals.md) explains why any of it is
 necessary.
 
 > **Trying a build without touching your real data.** MeshTerm keeps everything in
@@ -196,18 +196,18 @@ Setting up for development instead? That's in [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## Documentation
 
-**[The documentation index](docs/README.md)** lists everything, including the two code
-surveys kept as a historical record. The short version:
+**[The documentation index](docs/README.md)** lists everything, including the code survey
+kept as a historical record. The short version:
 
 | Read | For |
 | --- | --- |
-| **[The command line](docs/cli.md)** | Every subcommand and option, what each prints on the plain and JSON faces, the exit statuses, recipes. |
-| **[What MeshTerm does](docs/features.md)** | Every screen the menu offers, and the command that does the same job without it. |
-| [The CLI cookbook](docs/cookbook.md) | Common one-liners, by the thing you're trying to do. |
-| [Configuring MeshTerm](docs/configuration.md) | Preferences, device profiles, and everything kept under `~/.meshterm`. |
-| [When a companion won't connect](docs/connecting.md) | Bluetooth pairing on each system, finding the PIN, USB permissions, and every connection error, with what to do about it. |
-| [MeshTerm on hardware](docs/hardware.md) | Which handheld manual is yours — the [PicoCalc](docs/picocalc.md) build, or the [uConsole](docs/uconsole.md), whose LoRa chip MeshTerm can drive directly. |
-| [How the code is laid out](docs/architecture.md) | The layering, and where a new feature goes. |
+| **[The command line](docs/cli/README.md)** | Every subcommand and option, what each prints on the plain and JSON faces, the exit statuses, recipes. |
+| **[What MeshTerm does](docs/guide/features.md)** | Every screen the menu offers, and the command that does the same job without it. |
+| [The CLI cookbook](docs/cli/cookbook.md) | Common one-liners, by the thing you're trying to do. |
+| [Configuring MeshTerm](docs/guide/configuration.md) | Preferences, device profiles, and everything kept under `~/.meshterm`. |
+| [When a companion won't connect](docs/guide/connecting.md) | Bluetooth pairing on each system, finding the PIN, USB permissions, and every connection error, with what to do about it. |
+| [MeshTerm on hardware](docs/devices/README.md) | Which handheld manual is yours — the [PicoCalc](docs/devices/picocalc-lyra.md) build, or the [uConsole](docs/devices/uconsole.md), whose LoRa chip MeshTerm can drive directly. The [Cardputer Zero](docs/devices/cardputer-zero.md) is **not supported yet**. |
+| [How the code is laid out](docs/development/architecture.md) | The layering, and where a new feature goes. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | The development setup and the house rules. |
 | [CHANGELOG.md](CHANGELOG.md) | What changed, newest first. |
 
@@ -237,15 +237,16 @@ meshterm specimen
 ```
 
 Putting MeshTerm on a handheld has its own manuals. **[MeshTerm on the
-PicoCalc](docs/picocalc.md)** takes a stock PicoCalc from the shopping list to a Linux
-handheld with a LoRa radio soldered inside; **[MeshTerm on the uConsole](docs/uconsole.md)**
-drives a uConsole's SPI LoRa board directly with `--spi`, or through a small bridge if you
-want the node on the mesh all the time. The device-side scripts both manuals run are in
-[`scripts/`](scripts/); not sure which manual is yours?
-[`docs/hardware.md`](docs/hardware.md) says.
+PicoCalc](docs/devices/picocalc-lyra.md)** takes a stock PicoCalc from the shopping list to a
+Linux handheld with a LoRa radio soldered inside; **[MeshTerm on the
+uConsole](docs/devices/uconsole.md)** drives a uConsole's SPI LoRa board directly with
+`--spi`, or through a small bridge if you want the node on the mesh all the time. M5Stack's
+Cardputer Zero has a page too, but it is **[not supported yet](docs/devices/cardputer-zero.md)**.
+The device-side scripts the manuals run are in [`scripts/`](scripts/); not sure which
+manual is yours? [`docs/devices/README.md`](docs/devices/README.md) says.
 
 A companion that won't connect? **[When a companion won't
-connect](docs/connecting.md)** covers Bluetooth pairing on Windows, Linux, and macOS, the
+connect](docs/guide/connecting.md)** covers Bluetooth pairing on Windows, Linux, and macOS, the
 `dialout` group and ModemManager for USB on Linux, and every error message MeshTerm gives.
 
 ## What it does
@@ -261,7 +262,7 @@ Nearly every one of them has a mirror `meshterm` subcommand — the same registr
 the menu and the CLI, so they can't drift apart. The live screens, such as the map and
 the dashboard, are only in the menu.
 
-**[What MeshTerm does](docs/features.md)** is the full catalogue: every screen, what it
+**[What MeshTerm does](docs/guide/features.md)** is the full catalogue: every screen, what it
 does, and its scripted equivalent where one exists.
 
 ## Scripting it
@@ -286,9 +287,9 @@ meshterm config set radio_sf 9
 meshterm monitor --seconds 60
 ```
 
-**[The command line](docs/cli.md)** is the manual — every command and option, what each
+**[The command line](docs/cli/README.md)** is the manual — every command and option, what each
 prints on both faces, and the exit statuses.
-**[The CLI cookbook](docs/cookbook.md)** has more one-liners like these.
+**[The CLI cookbook](docs/cli/cookbook.md)** has more one-liners like these.
 
 ## How this project is run
 
@@ -383,7 +384,7 @@ short form throughout. The About page inside the app spells out the licence URL.
 MeshTerm ships **Cascadia Mono PL**, © 2019–present Microsoft Corporation, redistributed
 unmodified under the [SIL Open Font License 1.1](meshterm/assets/fonts/CascadiaMono-OFL.txt).
 It's offered to Windows users whose console can't draw the charts — see
-[Terminals, icons, and the Windows console](docs/terminals.md). Microsoft doesn't endorse MeshTerm; the font is
+[Terminals, icons, and the Windows console](docs/guide/terminals.md). Microsoft doesn't endorse MeshTerm; the font is
 simply the right tool, being one of the very few monospace faces that carries the braille
 block the timelines are drawn from.
 

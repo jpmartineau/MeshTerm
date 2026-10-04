@@ -1,14 +1,14 @@
 # The CLI cookbook
 
-Common one-liners, by the thing you are trying to do. [The command line](cli.md) is the
+Common one-liners, by the thing you are trying to do. [The command line](README.md) is the
 full manual — every command, every option, both output faces, the exit statuses — and its
-own [Recipes](cli.md#recipes) section goes further than this one, into `jq` pipelines and
+own [Recipes](README.md#recipes) section goes further than this one, into `jq` pipelines and
 shell loops.
 
 Nearly every menu option is also a subcommand — ideal for scripting, cron, and bots. The
 live pictures stay in the menu, where their meaning is (the map, dashboard, live feed,
 watchtower, and mesh walk); everything else has a command, and every command speaks
-`--json`. **[`docs/cli.md`](cli.md) is the full manual**: every command and option,
+`--json`. **[`docs/cli.md`](README.md) is the full manual**: every command and option,
 what each one prints on both faces, and the exit statuses. A taste:
 
 ```bash
@@ -60,7 +60,7 @@ same run.
 
 ## Two output faces
 
-*(The short version — [`docs/cli.md`](cli.md) has the whole of it.)*
+*(The short version — [`docs/cli.md`](README.md) has the whole of it.)*
 
 The **plain face** is for a person at a prompt. It prints like a standard Unix utility —
 no colour, no borders, one record per line, nothing wrapped except the four written
@@ -93,7 +93,7 @@ Anything structural should go through `--json` and `jq`. The plain face is for l
 `0` success · `1` failure · `2` usage error · `3` no device found (nothing was
 transmitted) · `4` the device was reached but the operation failed · `5` nothing to
 report. The table with its full wording is printed under `meshterm --help` and explained
-in [`docs/cli.md`](cli.md#exit-status).
+in [`docs/cli.md`](README.md#exit-status).
 
 `5` is the one worth knowing about: it lets a script tell "found nothing" from "worked"
 without counting output lines.

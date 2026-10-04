@@ -755,7 +755,7 @@ class AppContext:
             f"{what}, and --spi doesn't say which.\n"
             + "\n".join(rows)
             + "\nChoose one with -p <PROFILE>. A radio with no profile needs one first — see "
-            "'Adding a radio on the SPI bus' in docs/configuration.md."
+            "'Adding a radio on the SPI bus' in docs/guide/configuration.md."
         )
 
     def spi_wiring_for(self, spidev: str) -> SpiWiring:

@@ -6,7 +6,7 @@ to do about it, in the device picker and on the command line alike. This page co
 messages, so you can look one up before you meet it, or search for the one you have.
 
 Every failure is also written to the log file, `~/.meshterm/meshterm.log` (see
-[Where MeshTerm keeps its state](cli.md#where-meshterm-keeps-its-state)). Attach it to a
+[Where MeshTerm keeps its state](../cli/README.md#where-meshterm-keeps-its-state)). Attach it to a
 bug report. For more detail, set the **Log detail** preference to `DEBUG` (`meshterm
 preferences set log_level DEBUG`) and run it again.
 
@@ -125,4 +125,4 @@ Bluetooth, a network companion serves one client at a time.
 
 A radio MeshTerm drives itself (`--spi`) is not a companion. It has no pairing and no port,
 and its failures are about the node MeshTerm starts. Its own guides cover them:
-[the uConsole](uconsole.md) and [adding a radio on the SPI bus](configuration.md#adding-a-radio-on-the-spi-bus).
+[the uConsole](../devices/uconsole.md) and [adding a radio on the SPI bus](configuration.md#adding-a-radio-on-the-spi-bus).

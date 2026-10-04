@@ -262,7 +262,7 @@ def main_callback(
         # wins, because naming a database is a deliberate claim about where a run records.
         # ``$MESHTERM_HOME`` remains the only thing that isolates a run whole: the contact
         # and channel caches, the outbox and the remembered devices live beside the
-        # database either way (see docs/cli.md).
+        # database either way (see docs/cli/README.md).
         settings.db_path = settings.config_dir / MOCK_DB_FILENAME
 
     # Two front ends, two consoles, and which one this process gets is settled here — a

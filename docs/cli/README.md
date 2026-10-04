@@ -53,9 +53,9 @@ With no command, MeshTerm launches the interactive menu instead.
 | `-p`, `--profile NAME` | Use a named device profile from `config.toml`. |
 | `--port PORT` | Serial port to connect to (`COM5`, `/dev/ttyACM0`), overriding the profile. |
 | `--ble ADDRESS` | Bluetooth address of a companion; selects the Bluetooth transport. |
-| `--ble-pin PIN` | Pairing PIN, if the Bluetooth companion asks for one. MeshTerm pairs with it itself on Windows and Linux; on macOS the system asks for the code in its own dialog, and this option has no effect. See [When a companion won't connect](connecting.md#bluetooth). |
+| `--ble-pin PIN` | Pairing PIN, if the Bluetooth companion asks for one. MeshTerm pairs with it itself on Windows and Linux; on macOS the system asks for the code in its own dialog, and this option has no effect. See [When a companion won't connect](../guide/connecting.md#bluetooth). |
 | `--tcp HOST[:PORT]` | Network address of a TCP companion; selects the TCP transport. Default port 5000. |
-| `--spi` | The LoRa radio on this machine's own SPI bus; selects the SPI transport. MeshTerm runs the node for the length of the command. With one radio attached, that's the one, profile or not; with none attached, the one SPI profile, else the uConsole AIO's wiring. With two, it refuses (exit `3`) and lists them — pick one with `-p`. See [Adding a radio on the SPI bus](configuration.md#adding-a-radio-on-the-spi-bus). Linux only. |
+| `--spi` | The LoRa radio on this machine's own SPI bus; selects the SPI transport. MeshTerm runs the node for the length of the command. With one radio attached, that's the one, profile or not; with none attached, the one SPI profile, else the uConsole AIO's wiring. With two, it refuses (exit `3`) and lists them — pick one with `-p`. See [Adding a radio on the SPI bus](../guide/configuration.md#adding-a-radio-on-the-spi-bus). Linux only. |
 | `--mock` | Use the built-in simulator instead of real hardware. Nothing transmits, and the run records to `meshterm-mock.db` rather than your real history. |
 | `--db PATH` | Use this SQLite database instead of `~/.meshterm/meshterm.db` (or `meshterm-mock.db`, under `--mock`). **It moves the database and nothing else** — see [Where MeshTerm keeps its state](#where-meshterm-keeps-its-state). |
 | `--json` | Print the answer as JSON instead of aligned text. |
@@ -489,7 +489,7 @@ $ echo $?
 
 The sentence names the cause and the remedy: a port that is missing, in use by another
 program, or not yours to open, and for Bluetooth a link that never opened, a pairing that is
-out of date, or a PIN that was wrong. [When a companion won't connect](connecting.md) lists
+out of date, or a PIN that was wrong. [When a companion won't connect](../guide/connecting.md) lists
 every one of them.
 
 With nothing named and more than one candidate attached, the same `3` arrives as a list

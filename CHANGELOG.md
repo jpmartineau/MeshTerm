@@ -161,7 +161,7 @@ companion pairs on Linux, and a connection that fails says which step failed and
   refusal a wrong PIN. A USB port says whether it is missing, in use by another program
   (ModemManager, on Linux), or not yours to open (the `dialout` group). Every message, and
   what to do about it, is in
-  [When a companion won't connect](https://github.com/jpmartineau/MeshTerm/blob/main/docs/connecting.md).
+  [When a companion won't connect](https://github.com/jpmartineau/MeshTerm/blob/main/docs/guide/connecting.md).
 - **Clock sync explains a radio whose clock is ahead, instead of calling it malformed.**
   MeshCore firmware never sets its clock back, so once a radio's clock ran ahead of the
   computer's — a GPS fix, another app, drift — every sync was refused and logged as "the
