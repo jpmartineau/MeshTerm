@@ -270,15 +270,15 @@ def test_axis_chart_mirrors_marks_where_the_platform_affords_them() -> None:
     rows = timeline_rows([9] * 8, rows=2)
     out = axis_chart(rows, 9, 4, lambda f: "now" if f >= 1.0 else "old")
     assert len(out) == 4  # 2 chart rows + bottom border + caption
-    assert out[0].plain == "8 ┤⣿⣿⣿⣿├ 8"  # ticked-dot values, mirrored on the desktop
-    assert out[1].plain == "3 ┤⣿⣿⣿⣿├ 3"
-    assert out[2].plain.startswith("  └") and out[2].plain.endswith("┘")
+    assert out[0].plain == "  8 ┤⣿⣿⣿⣿├ 8"  # ticked-dot values, mirrored on the desktop
+    assert out[1].plain == "  3 ┤⣿⣿⣿⣿├ 3"  # (in the 3-cell minimum gutter)
+    assert out[2].plain.startswith("    └") and out[2].plain.endswith("┘")
     assert axis_chrome(1) == 2 * (1 + 2)  # what a caller must budget beside the cells
 
     set_platform(PICOCALC)
     tight = axis_chart(timeline_rows([9] * 8, rows=2), 9, 4, lambda f: "x")
-    assert tight[0].plain == "8 ┤⣿⣿⣿⣿├"  # the tick survives; the label's cells don't
-    assert tight[1].plain == "3 ┤⣿⣿⣿⣿├"
+    assert tight[0].plain == "  8 ┤⣿⣿⣿⣿├"  # the tick survives; the label's cells don't
+    assert tight[1].plain == "  3 ┤⣿⣿⣿⣿├"
     assert axis_chrome(1) == 1 + 3
 
 
@@ -311,11 +311,30 @@ def test_y_axis_labels_signed_span_quotes_both_extremes() -> None:
 
 
 def test_axis_chart_floor_frames_a_signed_chart_and_widens_the_gutter() -> None:
-    """A signed floor draws negative marks and sizes the gutter for the widest one."""
-    rows = timeline_rows([5, -5], rows=3, span=(-5, 5))
-    out = axis_chart(rows, 5, 1, lambda f: "x", floor=-5)
-    assert out[0].plain.startswith(" 4 ┤")  # gutter widened to two cells by the floor
-    assert out[2].plain.startswith("-4 ┤")  # a negative mark near the floor
+    """A signed floor draws negative marks and sizes the gutter for the widest one.
+
+    ``-107`` takes four cells, one past the three every gutter is given anyway, so the
+    floor is what widens it here.
+    """
+    rows = timeline_rows([150, -150], rows=3, span=(-150, 150))
+    out = axis_chart(rows, 150, 1, lambda f: "x", floor=-150)
+    assert out[0].plain.startswith(" 125 ┤")  # gutter widened to four cells by the floor
+    assert out[2].plain.startswith("-107 ┤")  # a negative mark near the floor
+
+
+def test_every_gutter_is_at_least_three_cells() -> None:
+    """A low peak's one-digit marks still get three cells, so the chart never slides.
+
+    Sized to the widest mark alone, the gutter grew under the reader as a busy minute
+    took the peak from ``9`` to ``10`` to ``100`` (JP, 2026-10-04).
+    """
+    from meshterm.ui.braillechart import AXIS_LABEL_MIN, axis_label_w
+
+    assert AXIS_LABEL_MIN == 3
+    assert axis_label_w(2, 3) == axis_label_w(90, 3) == axis_label_w(900, 3) == 3
+    assert axis_label_w(9000, 3) == 3  # compacted to "8k", still inside the three
+    rows = timeline_rows([2] * 8, rows=2)
+    assert axis_chart(rows, 2, 4, lambda f: "x")[0].plain.startswith("  2 ┤")
 
 
 def test_axis_chart_honours_a_shared_label_width() -> None:
@@ -336,8 +355,8 @@ def test_axis_chart_ticks_notch_the_border_and_centre_labels() -> None:
     """Explicit column ticks draw a ``┬`` on the border with the label centred beneath."""
     rows = timeline_rows([9] * 8, rows=1)
     out = axis_chart(rows, 9, 4, ticks=[(0, "A"), (3, "D")])
-    assert out[1].plain == "  └┬──┬┘"  # ticks at chart cells 0 and 3
-    assert out[2].plain == "   A  D"  # labels centred under their ticks
+    assert out[1].plain == "    └┬──┬┘"  # ticks at chart cells 0 and 3
+    assert out[2].plain == "     A  D"  # labels centred under their ticks
 
 
 def test_axis_chart_continuous_axis_notches_ticks_under_its_labels() -> None:
@@ -346,7 +365,7 @@ def test_axis_chart_continuous_axis_notches_ticks_under_its_labels() -> None:
     out = axis_chart(rows, 9, 20, lambda f: "now" if f >= 1.0 else str(round(f * 100)))
     border, caption = out[1].plain, out[2].plain
     assert "┬" in border  # the continuous axis is ticked, not a plain rule
-    assert border.startswith("  └") and border.endswith("┘")
+    assert border.startswith("    └") and border.endswith("┘")
     assert border[-2] == "┬"  # the rightmost tick sits at the 'now' edge
     assert "now" in caption and "0" in caption
 

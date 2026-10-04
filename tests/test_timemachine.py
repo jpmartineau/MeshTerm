@@ -1326,6 +1326,16 @@ def test_the_scope_chip_is_the_word_alone_in_all_six_cells() -> None:
         assert cell_len(chip) == 6 and chip.endswith("…") and "▸" not in chip
 
 
+def test_the_rhythm_heading_names_its_slices_only_where_the_line_has_room() -> None:
+    """On 53 columns the slice width goes rather than wrap the heading onto a second row."""
+    from meshterm.ui.timemachine_screen import _rhythm_heading
+
+    what = "receptions by local time of day"
+    assert _rhythm_heading(what, 20, 72).plain == f"Rhythm  ·  {what} · 20-min slices"
+    assert _rhythm_heading(what, 60, 72).plain.endswith("· 1 h slices")
+    assert _rhythm_heading(what, 20, 53).plain == f"Rhythm  ·  {what}"
+
+
 def test_a_page_with_no_scope_offers_no_cycle() -> None:
     """A node's page is its adverts, which carry no scope: no hint, no chip, no cycle."""
     screen = TimeMachineScreen(
