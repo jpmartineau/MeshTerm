@@ -74,7 +74,7 @@ python scripts/cardputer-zero/fetch-terminus.py
 and start the simulator:
 
 ```bash
-python -m meshterm.host --mock
+python -m meshterm.emulator --mock
 ```
 
 Point `MESHTERM_HOME` at an empty folder first, so the simulated radio's made-up nodes

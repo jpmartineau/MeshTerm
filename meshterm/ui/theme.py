@@ -769,7 +769,7 @@ def _glyph_compact(icon: str) -> str:
 # -- the render-boundary fold (the handhelds) ------------------------------------------
 
 #: The active platform's glyph inventory (``Platform.font``), bound in :func:`_bind`: the
-#: PicoCalc's 512-glyph console font, or what the Cardputer's console host draws.
+#: PicoCalc's 512-glyph console font, or what the Cardputer's emulator draws.
 _FOLD_FONT: frozenset[int] = FONT_CODEPOINTS
 
 #: What may survive the fold: every font codepoint, plus the C0 controls the rendered

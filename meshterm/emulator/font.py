@@ -1,16 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The 6×12 bitmap font the console host draws cells in.
+"""The 6×12 bitmap font the emulator draws cells in.
 
 Terminus at 12 pixels is the base: it is the PicoCalc's base too, so the two handhelds
 read alike, and at 1,356 glyphs it covers everything MeshTerm draws on this platform but a
-handful of its own marks. The host is not a kernel console, so nothing caps the glyph count
+handful of its own marks. The emulator is not a kernel console, so nothing caps the glyph count
 at 512 — no donor slots, no folding braille away. MeshTerm's marks are drawn over the base
 from the same pixel art the PicoCalc's font build uses (:data:`MARKS`), so ``★``, ``❯``,
 ``⚿`` and the rest look the same on both devices; and so is its braille (:data:`BRAILLE`),
 solid tiles where Terminus draws the dots apart.
 
 Terminus is licensed under the SIL Open Font License, so it is never shipped inside
-MeshTerm: the host loads it from a BDF file on the machine (:func:`find_font`). On the
+MeshTerm: the emulator loads it from a BDF file on the machine (:func:`find_font`). On the
 desktop, ``scripts/cardputer-zero/fetch-terminus.py`` puts the two 12-pixel BDFs, with their
 licence, where :func:`find_font` looks.
 """
@@ -31,8 +31,8 @@ CELL_H = 12
 REGULAR_BDF = "ter-u12n.bdf"
 BOLD_BDF = "ter-u12b.bdf"
 
-#: Where a font lives when ``MESHTERM_HOST_FONTS`` names no other directory.
-FONT_ENV = "MESHTERM_HOST_FONTS"
+#: Where a font lives when ``MESHTERM_EMULATOR_FONTS`` names no other directory.
+FONT_ENV = "MESHTERM_EMULATOR_FONTS"
 
 
 def _art(rows: list[str]) -> bytes:
@@ -241,13 +241,13 @@ def build_font(regular: dict[int, bytes], bold: dict[int, bytes] | None = None) 
 
 
 def font_dir() -> Path:
-    """Where :func:`find_font` looks: ``$MESHTERM_HOST_FONTS``, else ``fonts`` in the config dir."""
+    """Where :func:`find_font` looks: ``$MESHTERM_EMULATOR_FONTS``, else the config ``fonts``."""
     override = os.environ.get(FONT_ENV, "").strip()
     return Path(override) if override else default_config_dir() / "fonts"
 
 
 def find_font() -> Font:
-    """Load the host font from :func:`font_dir`.
+    """Load the emulator's font from :func:`font_dir`.
 
     Raises:
         FileNotFoundError: There is no regular face there, with how to fetch one.

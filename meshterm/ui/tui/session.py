@@ -130,7 +130,7 @@ _KEY_ACTIONS: dict[Any, str] = {
     Keys.BackTab: "shift_tab",
     # The function keys, for a handheld's F-key lane. All of them, since which keycodes
     # drive the lane is the platform's deck's business, not this table's: the PicoCalc's
-    # MCU sends its Shift bank as F6–F10, the Cardputer's console host sends Shift+F4..F8
+    # MCU sends its Shift bank as F6–F10, the Cardputer's emulator sends Shift+F4..F8
     # as xterm does, which prompt_toolkit reads as F16–F20. The session resolves them
     # against the top screen's lane in _dispatch; a key the deck doesn't use, or a
     # platform without a lane, resolves to nothing and falls away. Alt+Fn is the kernel's

@@ -287,7 +287,7 @@ PICOCALC_LYRA_DECK = LaneDeck(
 #: The Cardputer Zero's number keys 4-8, which sit right under the display: Fn+4..8 are
 #: F4-F8, never the bare digits, since a digit must stay a digit on a screen that takes
 #: typing (JP, 2026-09-30). The keyboard driver sends Shift as a key of its own, and the
-#: console host encodes Shift+Fn+4..8 the way xterm encodes Shift+F4..F8, which
+#: emulator encodes Shift+Fn+4..8 the way xterm encodes Shift+F4..F8, which
 #: prompt_toolkit reads as F16-F20 — so a desktop terminal with ``--platform cardputer-zero``
 #: drives the same bank. The chips are laid out exactly as the PicoCalc's — the key's
 #: caption leading a 6-cell label, nine cells a chip, two between (JP, 2026-09-30) — and

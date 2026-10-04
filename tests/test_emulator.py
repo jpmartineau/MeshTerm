@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The Cardputer's console host: its terminal, keys, font, pixels, and a whole run."""
+"""The Cardputer's emulator: its terminal, keys, font, pixels, and a whole run."""
 
 from __future__ import annotations
 
@@ -9,13 +9,13 @@ import time
 from prompt_toolkit.input.vt100_parser import Vt100Parser
 from prompt_toolkit.keys import Keys
 
-from meshterm.host.device import KeyState
-from meshterm.host.font import CELL_H, MARKS, MISSING, build_font, load_bdf
-from meshterm.host.keys import Key, encode
-from meshterm.host.raster import PANEL_H, PANEL_W, Raster, rgb565
-from meshterm.host.run import host_output, run
-from meshterm.host.sim import key_from_tk
-from meshterm.host.vt import BOLD, REVERSE, UNDERLINE, Terminal
+from meshterm.emulator.font import CELL_H, MARKS, MISSING, build_font, load_bdf
+from meshterm.emulator.framebuffer import KeyState
+from meshterm.emulator.keys import Key, encode
+from meshterm.emulator.raster import PANEL_H, PANEL_W, Raster, rgb565
+from meshterm.emulator.run import panel_output, run
+from meshterm.emulator.vt import BOLD, REVERSE, UNDERLINE, Terminal
+from meshterm.emulator.window import key_from_tk
 from meshterm.ui.tui.fkeys import CARDPUTER_ZERO_DECK
 
 _BDF = """STARTFONT 2.1
@@ -112,7 +112,7 @@ def test_prompt_toolkit_draws_into_it() -> None:
     """The output the host hands prompt_toolkit really does land in the grid."""
     term = Terminal(20, 2)
     frames: list[int] = []
-    output = host_output(term, threading.Lock(), lambda: frames.append(1))
+    output = panel_output(term, threading.Lock(), lambda: frames.append(1))
     output.cursor_goto(2, 4)  # 1-based, as a terminal counts
     output.write("hello")
     output.flush()
@@ -143,7 +143,7 @@ def test_modified_navigation_and_control_letters() -> None:
 
 
 def test_tk_events_become_keys() -> None:
-    """The simulator reads Shift, Ctrl and text off Tk's events."""
+    """The window reads Shift, Ctrl and text off Tk's events."""
     assert key_from_tk("F4", "", 0x0001) == Key(name="f4", shift=True)
     assert key_from_tk("q", "\x11", 0x0004) == Key(text="q", ctrl=True)
     assert key_from_tk("a", "a", 0) == Key(text="a")
@@ -269,7 +269,7 @@ def test_meshterm_runs_inside_the_host(monkeypatch) -> None:
 
 def test_the_cardputer_inventory_is_what_the_host_draws() -> None:
     """``fontset.CARDPUTER_ZERO_CODEPOINTS`` holds every mark, and the installed font exactly."""
-    from meshterm.host.font import ALIASES, BRAILLE, font_dir, load_bdf
+    from meshterm.emulator.font import ALIASES, BRAILLE, font_dir, load_bdf
     from meshterm.ui.fontset import CARDPUTER_ZERO_CODEPOINTS
 
     ours = set(MARKS) | set(ALIASES) | set(BRAILLE)

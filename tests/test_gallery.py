@@ -1637,7 +1637,7 @@ def test_gallery_screen_fits_its_platform(
     # console font. Together these are the parity gate that catches a stray emoji or hex
     # colour the moment a screen grows one, instead of as tofu found on-device.
     # A handheld may emit nothing outside its own font (Platform.font): the PicoCalc's
-    # 512-glyph console font, or what the Cardputer's console host draws. And a console
+    # 512-glyph console font, or what the Cardputer's emulator draws. And a console
     # with 16 slots (the PicoCalc's) may carry no truecolor or 256-colour SGR either.
     # Together these are the parity gate that catches a stray emoji or hex colour the
     # moment a screen grows one, instead of as tofu found on-device.

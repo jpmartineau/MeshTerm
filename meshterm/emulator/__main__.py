@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""``python -m meshterm.host`` — run MeshTerm in the Cardputer Zero's console host.
+"""``python -m meshterm.emulator`` — run MeshTerm in the Cardputer Zero's emulator.
 
-    python -m meshterm.host [--sim [--scale N] | --device] [MESHTERM ARGS...]
+    python -m meshterm.emulator [--sim [--scale N] | --device] [MESHTERM ARGS...]
 
 ``--sim`` (the default off the device) opens the desktop simulator; ``--device`` draws to
 the framebuffer and reads the keyboard, and is the default wherever the launcher has named
@@ -17,8 +17,8 @@ import sys
 
 
 def main(argv: list[str]) -> int:
-    """Parse the host's own flags, pass the rest to MeshTerm, and run it."""
-    from .device import FB_ENV
+    """Parse the emulator's own flags, pass the rest to MeshTerm, and run it."""
+    from .framebuffer import FB_ENV
     from .run import run
 
     device = bool(os.environ.get(FB_ENV))
@@ -35,9 +35,9 @@ def main(argv: list[str]) -> int:
         else:
             rest.append(arg)
     if device:
-        from .device import front_end
+        from .framebuffer import front_end
     else:
-        from .sim import front_end as sim_front_end
+        from .window import front_end as sim_front_end
 
         def front_end():
             return sim_front_end(scale)
@@ -45,7 +45,7 @@ def main(argv: list[str]) -> int:
     try:
         build = front_end()
     except FileNotFoundError as missing:
-        print(f"meshterm host: {missing}", file=sys.stderr)
+        print(f"meshterm emulator: {missing}", file=sys.stderr)
         return 1
     return run(rest, build)
 

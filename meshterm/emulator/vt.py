@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The terminal the console host draws: a VT byte stream parsed into a grid of cells.
+"""The terminal the emulator draws: a VT byte stream parsed into a grid of cells.
 
 Small on purpose. Its one producer is MeshTerm itself — prompt_toolkit's ``Vt100_Output``
 and the session's own fast row writer — so it understands what those emit and the handful
@@ -11,7 +11,7 @@ whole escape sequence, never part of one — so an unknown sequence can never le
 parameters onto the screen as text.
 
 The grid is the source of truth for the pixels: :class:`Terminal` records which rows
-changed since the host last drew (:meth:`Terminal.take_dirty`), so a keystroke that moves
+changed since the emulator last drew (:meth:`Terminal.take_dirty`), so a keystroke that moves
 the highlight one row repaints two rows of the panel, not fourteen.
 """
 
@@ -53,7 +53,7 @@ Cell = tuple[str, Style]
 
 _BLANK: Cell = (" ", PLAIN)
 
-#: A conventional 16-colour palette, for a host that passes none of its own.
+#: A conventional 16-colour palette, for an emulator that passes none of its own.
 _DEFAULT_PALETTE: tuple[RGB, ...] = (
     (0, 0, 0), (205, 0, 0), (0, 205, 0), (205, 205, 0),
     (0, 0, 238), (205, 0, 205), (0, 205, 205), (229, 229, 229),
@@ -123,7 +123,7 @@ class Terminal:
         self._params = ""
         self._dirty: set[int] = set(range(rows))
 
-    # --- the grid, as the host reads it ------------------------------------------------
+    # --- the grid, as the emulator reads it ------------------------------------------------
 
     def _fresh_screen(self) -> list[list[Cell]]:
         return [[_BLANK] * self.cols for _ in range(self.rows)]

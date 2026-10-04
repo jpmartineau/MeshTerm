@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Cells to pixels: the panel the console host shows, drawn from a :class:`~.vt.Terminal`.
+"""Cells to pixels: the panel the emulator shows, drawn from a :class:`~.vt.Terminal`.
 
 The panel is 320×170; 53 columns of 6 pixels and 14 rows of 12 leave a two-pixel margin
 right and bottom, which this splits evenly so the grid sits centred. Pixels are packed

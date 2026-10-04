@@ -65,12 +65,12 @@ def in_font(char: str) -> bool:
     return ord(char) in FONT_CODEPOINTS
 
 
-#: The Cardputer Zero's inventory: what its console host draws (:mod:`meshterm.host.font`)
+#: The Cardputer Zero's inventory: what its emulator draws (:mod:`meshterm.emulator.font`)
 #: — Terminus 4.49's 12-pixel face, every one of its 1,356 glyphs, with MeshTerm's own
 #: marks drawn over it and ``⋯`` aliased onto the ellipsis, as on the PicoCalc. No 512-glyph
 #: cap here, so braille, the powerline chevrons and accented Latin are all simply present.
 #: Generated from ``ter-u12n.bdf`` plus the host's ``MARKS`` and ``ALIASES``; if either
-#: changes, this table moves in the same commit (``tests/test_console_host.py`` checks the
+#: changes, this table moves in the same commit (``tests/test_emulator.py`` checks the
 #: marks, and the font itself wherever it is installed).
 # fmt: off
 CARDPUTER_RANGES: tuple[tuple[int, int], ...] = (

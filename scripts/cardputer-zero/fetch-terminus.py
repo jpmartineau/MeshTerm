@@ -5,7 +5,7 @@
 Terminus is licensed under the SIL Open Font License, so MeshTerm never ships it: this
 downloads the upstream release, checks it is the archive it should be, and extracts
 ``ter-u12n.bdf``, ``ter-u12b.bdf`` and the licence beside them into the directory the host
-reads (``$MESHTERM_HOST_FONTS``, else ``fonts`` under the MeshTerm config directory).
+reads (``$MESHTERM_EMULATOR_FONTS``, else ``fonts`` under the MeshTerm config directory).
 
 Run it once on a machine that will run the host or its desktop simulator:
 
@@ -28,7 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from meshterm.host.font import BOLD_BDF, REGULAR_BDF, font_dir  # noqa: E402
+from meshterm.emulator.font import BOLD_BDF, REGULAR_BDF, font_dir  # noqa: E402
 
 URL = (
     "https://sourceforge.net/projects/terminus-font/files/terminus-font-4.49/"

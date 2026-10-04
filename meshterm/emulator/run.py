@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Run MeshTerm inside the console host: the TUI unchanged, its terminal ours.
+"""Run MeshTerm inside the emulator: the TUI unchanged, its terminal ours.
 
-:func:`run` builds the three pieces every host shares — the :class:`~.vt.Terminal` the
+:func:`run` builds the three pieces every front end shares — the :class:`~.vt.Terminal` the
 TUI's bytes land in, a :class:`HostOutput` prompt_toolkit writes to, and a pipe input the
-host's keys go into — sets them as prompt_toolkit's app session, and calls the ordinary
+the keys go into — sets them as prompt_toolkit's app session, and calls the ordinary
 CLI with ``--platform cardputer-zero`` exactly as a shell would. A *front end* is the part that
 differs: where the pixels go and where the keys come from. It is handed the terminal, the
 lock that guards it and a way to type, starts whatever threads it needs, and is told each
@@ -73,10 +73,10 @@ class _Sink:
         return True
 
     def fileno(self) -> int:
-        raise OSError("the console host's output has no file descriptor")
+        raise OSError("the emulator's output has no file descriptor")
 
 
-def host_output(
+def panel_output(
     terminal: Terminal, lock: threading.Lock, on_frame: Callable[[], None]
 ) -> Vt100_Output:
     """A prompt_toolkit output drawing into ``terminal``: fixed size, 24-bit colour."""
@@ -91,7 +91,7 @@ def host_output(
 
 
 class FrontEnd(Protocol):
-    """Where a host's pixels go and its keys come from."""
+    """Where the pixels go and its keys come from."""
 
     def frame_ready(self) -> None:
         """A complete frame has landed in the terminal; draw it when convenient."""
@@ -105,7 +105,7 @@ FrontEndFactory = Callable[[Terminal, threading.Lock, Callable[[str], None]], Fr
 
 
 def run(argv: Sequence[str], front_end: FrontEndFactory) -> int:
-    """Run the MeshTerm CLI with ``argv`` inside the host, drawn by ``front_end``.
+    """Run the MeshTerm CLI with ``argv`` inside the emulator, drawn by ``front_end``.
 
     Returns:
         The CLI's exit status.
@@ -121,7 +121,7 @@ def run(argv: Sequence[str], front_end: FrontEndFactory) -> int:
             reply=pipe.send_text,
         )
         end = front_end(terminal, lock, pipe.send_text)
-        output = host_output(terminal, lock, end.frame_ready)
+        output = panel_output(terminal, lock, end.frame_ready)
         try:
             with create_app_session(input=pipe, output=output):
                 # Standalone, as a shell would run it: the CLI reports its own errors and

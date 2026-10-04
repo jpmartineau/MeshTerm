@@ -153,10 +153,11 @@ class Platform:
         battery: Which source feeds the header's battery gauge — ``"companion"`` (read
             from the connected MeshCore device) or ``"host"`` (the PicoCalc's own sysfs
             ``power_supply`` driver, confirmed present in P0). Wired in P5.
-        console_host: Whether the screen is drawn by MeshTerm's own console host
-            (:mod:`meshterm.host`) rather than a terminal — where the app is its own
-            terminal, nothing about the one it was started from (a classic Windows console
-            to move out of, a font to offer) is its business.
+        own_display: Whether MeshTerm draws this display itself (:mod:`meshterm.emulator`)
+            rather than running in a terminal — where the app is its own terminal, nothing
+            about the one it was started from (a classic Windows console to move out of, a
+            font to offer) is its business. True on the Cardputer Zero, whose launcher gives
+            an app no console; and for any platform while the emulator shows it in a window.
         modifier_watch: The keyboard whose Shift state the optional evdev watcher follows,
             flipping the displayed F-key lane live while Shift is held — a case-insensitive
             substring of the input device's name, or ``""`` to leave the watcher off.
@@ -185,7 +186,7 @@ class Platform:
     tick_s: float
     spinner_tick_s: float
     battery: str
-    console_host: bool
+    own_display: bool
     modifier_watch: str
 
     @property
@@ -216,7 +217,7 @@ REGULAR = Platform(
     tick_s=1.0,
     spinner_tick_s=0.12,
     battery="companion",
-    console_host=False,
+    own_display=False,
     modifier_watch="",
 )
 
@@ -248,7 +249,7 @@ PICOCALC_LYRA = Platform(
     tick_s=2.0,
     spinner_tick_s=0.5,
     battery="host",
-    console_host=False,
+    own_display=False,
     modifier_watch="picocalc",
 )
 
@@ -259,11 +260,11 @@ PICOCALC_LYRA = Platform(
 #:
 #: The same 53 columns as the PicoCalc, which is why most of its flavour carries over; the
 #: new constraint is rows. It has its own F-key lane deck (Fn+4…8, chips centred over their
-#: keys), dealing the PicoCalc's lanes for now (JP, 2026-09-30). The panel is drawn by a
-#: console host that paints RGB565 pixels itself, so it is not held to a 16-slot palette
+#: keys), dealing the PicoCalc's lanes for now (JP, 2026-09-30). MeshTerm draws the panel
+#: itself in RGB565 (:mod:`meshterm.emulator`), so it is not held to a 16-slot palette
 #: (``truecolor``). Provisional until measured on the device: the cadences, taken from the
-#: PicoCalc; ``effects`` off; and the battery, read from the companion until the host's
-#: gauge (a BQ27220) has a known ``power_supply`` name.
+#: PicoCalc; ``effects`` off; and the battery, read from the companion until the device's
+#: own gauge (a BQ27220) has a known ``power_supply`` name.
 CARDPUTER_ZERO = Platform(
     name="cardputer-zero",
     readable_cols=53,
@@ -282,15 +283,15 @@ CARDPUTER_ZERO = Platform(
     emoji=False,
     font="cardputer-zero",
     truecolor=True,
-    # The console host draws its own braille, as the PicoCalc's built fonts do: solid
-    # tiles, no gap between dots (meshterm/host/font.py, BRAILLE).
+    # The emulator draws its own braille, as the PicoCalc's built fonts do: solid
+    # tiles, no gap between dots (meshterm/emulator/font.py, BRAILLE).
     solid_braille=True,
     url_codes=False,
     effects=False,
     tick_s=2.0,
     spinner_tick_s=0.5,
     battery="companion",
-    console_host=True,
+    own_display=True,
     modifier_watch="tca8418c",
 )
 

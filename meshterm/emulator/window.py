@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The desktop simulator: the Cardputer Zero's panel in a window, keys from the desktop.
+"""The emulator's desktop window: the device's panel in a window, keys from the desktop.
 
 Everything between the two ends is the device's own code — the terminal, the font, the
 rasterizer, the key encoding — so what the window shows is the panel's pixels, scaled up
@@ -79,7 +79,7 @@ def key_from_tk(keysym: str, char: str, state: int) -> Key | None:
     return None
 
 
-class Simulator:
+class EmulatorWindow:
     """A window showing the panel, typing the desktop's keys into the TUI."""
 
     def __init__(
@@ -212,15 +212,15 @@ class Simulator:
 
 
 def front_end(scale: int = 3):
-    """The simulator as a :data:`~.run.FrontEndFactory`, loading the host font first."""
+    """The window as a :data:`~.run.FrontEndFactory`, loading the emulator's font first."""
     from .font import find_font
 
     font = find_font()
 
     def build(terminal: Terminal, lock: threading.Lock, type_text: Callable[[str], None]):
-        return Simulator(terminal, lock, type_text, font=font, scale=scale)
+        return EmulatorWindow(terminal, lock, type_text, font=font, scale=scale)
 
     return build
 
 
-__all__ = ["Simulator", "front_end", "key_from_tk"]
+__all__ = ["EmulatorWindow", "front_end", "key_from_tk"]

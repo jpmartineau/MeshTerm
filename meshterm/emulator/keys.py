@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Keys to the bytes a terminal sends for them — what the console host types into MeshTerm.
+"""Keys to the bytes a terminal sends for them — what the emulator types into MeshTerm.
 
-Both ends of the host meet here: the device reads key codes off the keyboard's event
-device, the simulator reads them off a desktop window, and each turns its own events into
+Both front ends meet here: the device reads key codes off the keyboard's event
+device, the window reads them off the desktop, and each turns its own events into
 a :class:`Key` for :func:`encode` to spell the way xterm does. xterm's spelling is the
 contract because it is what prompt_toolkit parses, and what a desktop terminal running
 ``--platform cardputer-zero`` sends too, so the TUI cannot tell the three apart:

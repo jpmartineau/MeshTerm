@@ -50,7 +50,7 @@ _shift_down = False
 _thread: threading.Thread | None = None
 
 #: The session's repaint request, kept from :func:`start` even where no input device was
-#: found, so a Shift report from the console host (:func:`report_shift`) still repaints.
+#: found, so a Shift report from the emulator (:func:`report_shift`) still repaints.
 _on_change: Callable[[], None] | None = None
 
 #: How long a resolved F6–F10 keycode keeps :func:`shift_down` latched ``True`` after the
@@ -80,7 +80,7 @@ def shift_down() -> bool:
 def report_shift(down: bool) -> None:
     """Set the Shift state from a source that knows it first-hand, and repaint on a change.
 
-    The console host reads the keyboard itself — the simulator's window, the device's event
+    The emulator reads the keyboard itself — the simulator's window, the device's event
     stream — so it knows when Shift goes down before any F-key arrives, and tells the lane
     here rather than leaving a second reader to find the same keyboard.
     """

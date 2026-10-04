@@ -278,7 +278,7 @@ deliberately, one at a time, and say why in the code.
   at its body's indent, side by side, wrapping onto a new band when the line is full
   (`qr.qr_strip`). A picked message keeps the codes under it in view. Where the font
   draws braille solid (`Platform.solid_braille`: the PicoCalc's built fonts, the
-  Cardputer's console host, `host/font.BRAILLE`) every code — share screen, page fence
+  Cardputer's emulator, `emulator/font.BRAILLE`) every code — share screen, page fence
   and chat alike — is drawn in
   **braille**, one module a dot, eight a cell (`qr._GRID`), so the contact card is 29
   cells by 15 rows there and shares the 53×26 panel with its URL at the standard fit.
@@ -634,7 +634,7 @@ derived sweep that runs **every** registered command twice, once plain and once 
 One codebase, three flavours: **regular** (desktop/ssh, 72 cols, truecolor, emoji),
 **picocalc-lyra** (the PicoCalc's 53×26/53×40 framebuffer console, 16 palette slots, a
 512-glyph font, no emoji), and **cardputer-zero** (M5Stack's Cardputer Zero, 53×14 in 6×12
-cells on a 320×170 panel a console host paints itself, truecolor, no emoji — hardware not
+cells on a 320×170 panel MeshTerm paints itself, truecolor, no emoji — hardware not
 yet in hand, so it is chosen by flag only).
 A frozen `Platform` spec (`meshterm/platforms.py`) resolves
 once at boot; consumers bind at platform-switch time via `platforms.on_platform` — never
@@ -717,19 +717,19 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   assuming F1–F5. Both decks having five slots is a coincidence, not a rule. The
   Cardputer's lane is **Fn+4…8** (F4–F8), never the bare digits, since a digit must stay a
   digit where the app takes typing; Shift with them arrives as F16–F20 (xterm's encoding,
-  which the console host copies). Its chips are laid out exactly as the PicoCalc's — key
+  which the emulator copies). Its chips are laid out exactly as the PicoCalc's — key
   caption, 9-cell chip, 2-cell gaps — captioned F4–F8 in both banks, white on the fn key's
   orange-red (a step darker than the print, same hue, so the white holds 4:1), and white on
   dark blue while Shift is held.
-- **The Cardputer draws its own pixels** (`meshterm/host/`): the stock image leaves an app
-  no text console, only the framebuffer and the keyboard's event device. The console host
+- **The Cardputer draws its own pixels** (`meshterm/emulator/`): the stock image leaves an app
+  no text console, only the framebuffer and the keyboard's event device. The emulator
   runs the ordinary TUI in-process — prompt_toolkit's app session pointed at a fixed 53×14
-  output whose bytes feed the host's own VT parser (`host/vt.py`), and a pipe the host
-  types into (`host/keys.py`, xterm's spelling, so Shift+F4–F8 parse as F16–F20) — then
-  draws the cells in Terminus 6×12 with MeshTerm's marks over it (`host/font.py`). The
+  output whose bytes feed the host's own VT parser (`emulator/vt.py`), and a pipe the host
+  types into (`emulator/keys.py`, xterm's spelling, so Shift+F4–F8 parse as F16–F20) — then
+  draws the cells in Terminus 6×12 with MeshTerm's marks over it (`emulator/font.py`). The
   front end is the only part that differs: the framebuffer and evdev on the device
-  (`host/device.py`, written ahead of the hardware), a Tk window on the desktop
-  (`host/sim.py`): `python -m meshterm.host --mock`, after
+  (`emulator/framebuffer.py`, written ahead of the hardware), a Tk window on the desktop
+  (`emulator/window.py`): `python -m meshterm.emulator --mock`, after
   `python scripts/cardputer-zero/fetch-terminus.py` once. Its glyph contract is
   `fontset.CARDPUTER_ZERO_CODEPOINTS`, named by `Platform.font` as the PicoCalc's is; the fold
   derives everything from the platform's font (accents, emoji, the `?` net) and quantizes

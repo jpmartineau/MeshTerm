@@ -411,7 +411,7 @@ def _offer_a_console_that_can_draw_meshterm(console: Console, prefs: Preferences
     """
     from .ui.termfont import classic_console
 
-    if get_platform().console_host:
+    if get_platform().own_display:
         return False
     if not classic_console() or prefs.get("console_setup") == "off":
         return False
