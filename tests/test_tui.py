@@ -3628,14 +3628,23 @@ def _drive_picker(tmp_path, monkeypatch, *, serial_rounds, ble_rounds=None, hide
         store.hide(stable)
 
     redraws: list = []
+    # Scans to let run: every scripted round, then enough more that the last round's redraw
+    # has happened (a round redraws before the next scan starts) and the Bluetooth duty
+    # cycle — one listen per few polls — has had room to show.
+    scans = len(serial) + 5
 
     class _Ui:
         async def select_startup(  # noqa: ANN001, ANN201, ANN003
             self, title, items, *, default=None, banner=None, footnote=None, live=None, **_kw
         ):
             task = asyncio.ensure_future(live(redraws.append))
-            # Long enough for the script to run several times over at this cadence.
-            await asyncio.sleep(0.05)
+            # Wait for the scans themselves, never for a span of time: a fixed 50 ms held a
+            # handful of rounds on a quiet machine and sometimes only one under a full run,
+            # since Windows rounds each 1 ms sleep up to its ~15 ms timer tick.
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + 10.0
+            while calls["serial"] < scans and loop.time() < deadline:
+                await asyncio.sleep(0.001)
             task.cancel()
             try:
                 await task
@@ -3647,6 +3656,7 @@ def _drive_picker(tmp_path, monkeypatch, *, serial_rounds, ble_rounds=None, hide
         raise AssertionError("verify should not run when selection is skipped")
 
     asyncio.run(device_picker.prompt_device(_Ui(), list(serial[0]), store, _never))
+    assert calls["serial"] >= scans, f"the rescan ran {calls['serial']} of {scans} scans in 10 s"
     return redraws, calls
 
 
