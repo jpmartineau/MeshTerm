@@ -1139,6 +1139,28 @@ def test_serial_port_present_platform_uart_by_path(monkeypatch) -> None:
     assert not connection.serial_port_present("/dev/ttyUSB9")  # node gone -> absent (unplug)
 
 
+async def test_serial_link_check_walks_the_ports_off_the_event_loop(monkeypatch) -> None:
+    """The liveness poll never runs the port walk on the loop the screen paints from.
+
+    The walk is hundreds of small sysfs reads, each one waiting its turn for the GIL; with
+    a map frame being drawn on a worker thread, running it on the loop froze the PicoCalc's
+    screen for up to 1.2 s every two seconds.
+    """
+    import threading
+
+    device = connection.MeshCoreDevice(port="/dev/ttyS1")
+    device._mc = SimpleNamespace(is_connected=True)
+    walked_on: list[threading.Thread] = []
+
+    def walk(port: str) -> bool:
+        walked_on.append(threading.current_thread())
+        return True
+
+    monkeypatch.setattr(connection, "serial_port_present", walk)
+    assert await device.link_present()
+    assert walked_on and walked_on[0] is not threading.main_thread()
+
+
 async def test_wait_for_disconnect_fires_when_port_vanishes(tmp_path: Path, monkeypatch) -> None:
     """The liveness watcher resolves once the connected device's port leaves enumeration."""
     ctx = _make_ctx(tmp_path)

@@ -2723,7 +2723,12 @@ class MeshCoreDevice(Device):
                 return True
         if not self._port:
             return True  # no port recorded (shouldn't happen once connected) — can't tell
-        return serial_port_present(self._port)
+        # Off the event loop, like every other caller of the port walk. It is ~30 ms of
+        # sysfs reads on the PicoCalc when nothing else is running, but each of its hundreds
+        # of small reads hands the GIL back and has to wait its turn to take it again — and
+        # with a map frame being drawn on a worker thread that turn is up to 5 ms away. On
+        # the loop, this check every two seconds froze the screen for up to 1.2 s a time.
+        return await asyncio.to_thread(serial_port_present, self._port)
 
     async def disconnect(self) -> None:
         """Close the connection and release resources. Idempotent, and bounded in time.
