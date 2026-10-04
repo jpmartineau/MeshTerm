@@ -250,10 +250,9 @@ PICOCALC = Platform(
 )
 
 #: M5Stack's Cardputer Zero: a 320×170 panel drawn in 6×12 cells (53×14), under a
-#: 46-key keyboard whose number keys 4–8 sit right below the display. Being ported on the
-#: ``cardputer-zero`` branch, hardware not yet in hand (2026-09-30), so this is chosen by
-#: ``--platform cardputer`` / ``MESHTERM_PLATFORM`` only — no device-tree auto-detection
-#: until the device reports its own model string.
+#: 46-key keyboard whose number keys 4–8 sit right below the display. Hardware not yet in
+#: hand (2026-10-04), so this is chosen by ``--platform cardputer`` / ``MESHTERM_PLATFORM``
+#: only — no device-tree auto-detection until the device reports its own model string.
 #:
 #: The same 53 columns as the PicoCalc, which is why most of its flavour carries over; the
 #: new constraint is rows. It has its own F-key lane deck (Fn+4…8, chips centred over their

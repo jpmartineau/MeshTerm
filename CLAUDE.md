@@ -634,8 +634,8 @@ derived sweep that runs **every** registered command twice, once plain and once 
 One codebase, three flavours: **regular** (desktop/ssh, 72 cols, truecolor, emoji),
 **picocalc** (the PicoCalc's 53×26/53×40 framebuffer console, 16 palette slots, a
 512-glyph font, no emoji), and **cardputer** (M5Stack's Cardputer Zero, 53×14 in 6×12
-cells on a 320×170 panel a console host paints itself, truecolor, no emoji — being ported
-on the `cardputer-zero` branch, hardware not yet in hand, so it is chosen by flag only).
+cells on a 320×170 panel a console host paints itself, truecolor, no emoji — hardware not
+yet in hand, so it is chosen by flag only).
 A frozen `Platform` spec (`meshterm/platforms.py`) resolves
 once at boot; consumers bind at platform-switch time via `platforms.on_platform` — never
 branch on the platform per frame, and never `from meshterm.platforms import PLATFORM`.
