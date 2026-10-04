@@ -11,11 +11,15 @@ picocalc-lyra`` and ``--platform picocalc-lyra`` say the same device.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from prompt_toolkit.output.color_depth import ColorDepth
 
 from ..platforms import CARDPUTER_ZERO, PICOCALC_LYRA, Platform
 from .keys import Key
+
+if TYPE_CHECKING:
+    from ..ui.tui.fkeys import LaneDeck
 
 
 @dataclass(frozen=True)
@@ -30,8 +34,10 @@ class EmulatedDevice:
             panel's top-left, bold as bright, the palette's slot 7 on slot 0 as the default
             colours, and sixteen colours out — rather than MeshTerm in truecolour.
         lane_keys: The keys under the panel that drive the F-key lane, as ``(label,
-            centre)`` pairs in panel pixels, drawn under the window's panel so a chip that
-            drifts off its key shows. Empty for a device whose lane keys sit elsewhere.
+            centre)`` pairs in panel pixels, one per slot of the :attr:`deck`, left to
+            right — drawn under the window's panel so a chip that drifts off its key
+            shows, and pressed there with the mouse. Empty for a device whose lane keys
+            sit elsewhere.
         shifted: The desktop's Shift+F-key as the key the device's keyboard sends instead.
             The PicoCalc's keyboard sends F6–F10 for Shift+F1–F5; the Cardputer Zero's sends
             a shifted F4–F8, which needs no translating.
@@ -53,6 +59,13 @@ class EmulatedDevice:
     def color_depth(self) -> ColorDepth:
         """What prompt_toolkit may send: sixteen colours to a console, truecolour otherwise."""
         return ColorDepth.DEPTH_4_BIT if self.console else ColorDepth.TRUE_COLOR
+
+    @property
+    def deck(self) -> LaneDeck:
+        """The F-key lane the device's platform deals (:mod:`~meshterm.ui.tui.fkeys`)."""
+        from ..ui.tui.fkeys import DECKS
+
+        return DECKS[self.platform.lane_deck]
 
     def translate(self, key: Key) -> Key:
         """The key as the device's keyboard would send it (see :attr:`shifted`)."""

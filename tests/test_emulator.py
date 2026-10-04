@@ -6,6 +6,7 @@ from __future__ import annotations
 import threading
 import time
 
+import pytest
 from prompt_toolkit.input.vt100_parser import Vt100Parser
 from prompt_toolkit.keys import Keys
 
@@ -412,3 +413,94 @@ def test_emulate_hands_the_global_options_to_the_meshterm_it_runs(monkeypatch, t
     ((name, argv, kw),) = calls
     assert name == "picocalc-lyra" and "--mock" in argv and kw["scale"] == 2
     assert "--platform" not in argv  # the emulator names the platform itself
+
+
+# --- the lane under the mouse --------------------------------------------------------------
+
+
+def test_a_clicked_lane_key_types_its_slot_or_with_shift_its_companion() -> None:
+    """A click types what the desktop's F-key would: the deck's plain bank, Shift its own."""
+    from meshterm.emulator.devices import DEVICES
+    from meshterm.emulator.window import lane_press
+
+    for emulated in DEVICES.values():
+        deck = emulated.deck
+        for slot, (plain, shifted) in enumerate(zip(deck.keys, deck.shift_keys, strict=True)):
+            assert _parsed(lane_press(emulated, slot, shift=False))[0].value == f"f{plain}"
+            assert _parsed(lane_press(emulated, slot, shift=True))[0].value == f"f{shifted}"
+
+
+def test_a_click_finds_the_chip_under_it_only_on_a_drawn_lane() -> None:
+    """Any cell of a chip is that slot, in either bank.
+
+    A gap between chips, another row, or a frame with no lane on its last row is nothing.
+    """
+    from meshterm.emulator.window import chip_at
+    from meshterm.ui.tui.fkeys import DEFAULT_LANE, PICOCALC_LYRA_DECK
+
+    deck = PICOCALC_LYRA_DECK
+    term = Terminal(53, 3)
+    term.feed("\x1b[3;1H" + deck.lane_text(DEFAULT_LANE).plain)
+    assert [chip_at(term, deck, col, 2) for col in (0, 8, 11, 44, 52)] == [0, 0, 1, 4, 4]
+    assert chip_at(term, deck, 9, 2) is None  # the gap between two chips
+    assert chip_at(term, deck, 0, 1) is None  # not the lane's row
+    term.feed("\x1b[3;1H" + deck.lane_text(DEFAULT_LANE, shifted=True).plain)
+    assert chip_at(term, deck, 46, 2) == 4  # F10, captioned "10"
+    term.feed("\x1b[3;1H\x1b[2Kscan me")
+    assert chip_at(term, deck, 0, 2) is None  # a bare frame's last row
+
+
+def test_the_drawn_keys_wear_the_lane_s_fills() -> None:
+    """The Cardputer's own fn orange and Shift blue; a console's chips are palette slots."""
+    from meshterm.emulator.devices import CARDPUTER_ZERO_DEVICE, PICOCALC_LYRA_DEVICE
+    from meshterm.emulator.run import _palette
+    from meshterm.emulator.window import lane_fills
+
+    assert lane_fills(CARDPUTER_ZERO_DEVICE) == ("#e34b0f", "#0f72bd")
+    palette = _palette()
+    plain, shifted = (f"#{r:02x}{g:02x}{b:02x}" for r, g, b in (palette[7], palette[2]))
+    assert lane_fills(PICOCALC_LYRA_DEVICE) == (plain, shifted)
+
+
+@pytest.mark.parametrize("name", ["cardputer-zero", "picocalc-lyra"])
+def test_a_shift_click_on_the_menu_s_quit_chip_leaves_at_once(monkeypatch, name) -> None:
+    """A click reaches the lane as the key would: Shift on ``Quit?`` is ``Quit!``, no question."""
+    from meshterm.emulator.devices import device
+    from meshterm.emulator.window import chip_at, lane_press
+    from meshterm.ui import menu
+
+    monkeypatch.setattr(menu, "_arm_exit_watchdog", lambda *args, **kwargs: None)
+    emulated = device(name)
+    seen: dict[str, object] = {}
+    closed = threading.Event()
+
+    class Headless:
+        def __init__(self, terminal, lock, type_text):
+            def drive():
+                last = terminal.rows - 1
+                deadline = time.monotonic() + 30
+                while time.monotonic() < deadline and "slot" not in seen:
+                    with lock:
+                        lane = terminal.line(last)
+                        if "Quit?" in lane:
+                            col = lane.index("Quit?")
+                            seen["slot"] = chip_at(terminal, emulated.deck, col, last)
+                    time.sleep(0.1)
+                type_text(lane_press(emulated, 2, shift=True))
+                if not closed.wait(5):
+                    seen["stuck"] = True  # still running: leave the way the window does
+                    type_text("\x11")
+                    time.sleep(0.3)
+                    type_text("\x11")
+
+            threading.Thread(target=drive, daemon=True).start()
+
+        def frame_ready(self):
+            pass
+
+        def close(self):
+            closed.set()
+
+    assert run(["--mock"], Headless, emulated) == 0
+    assert seen["slot"] == 2  # the click on Quit? lands on its chip …
+    assert "stuck" not in seen  # … and Shift with it leaves without asking

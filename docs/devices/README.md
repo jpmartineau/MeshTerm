@@ -98,6 +98,8 @@ what the window reproduces.
 
 Your keyboard's F-keys stand in for the lane's keys: **F1** to **F5** for the PicoCalc's,
 and **F4** to **F8** for the Cardputer Zero's **Fn+4** to **Fn+8**. Hold **Shift** for the
+second set. You can also click them: click a coloured key at the bottom of the screen, or
+one of the Cardputer Zero's keys drawn under it, and hold **Shift** while you click for the
 second set. Everything you type after the device's name goes to the MeshTerm in the window:
 `--mock` for the simulated radio, or `--port`, `--ble` or `--tcp` for a real one. `--scale`
 sets the zoom, **Ctrl+Shift+S** saves a screenshot at the screen's real size, and closing

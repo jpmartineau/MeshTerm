@@ -88,7 +88,9 @@ meshterm emulate cardputer-zero --mock
 made-up nodes stay out of your real history. `--scale 4` makes the window bigger.
 
 In the window, your keyboard's **F4** to **F8** stand in for **Fn+4** to **Fn+8**, and
-holding **Shift** shows the second set. **Ctrl+Shift+S** saves a screenshot at the screen's
+holding **Shift** shows the second set. You can click the keys instead, either the ones
+drawn under the screen or the coloured keys along its bottom row; hold **Shift** while you
+click for the second set. **Ctrl+Shift+S** saves a screenshot at the screen's
 real size. Closing the window quits MeshTerm.
 
 ## Radios

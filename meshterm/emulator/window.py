@@ -11,8 +11,14 @@ the maker's drawing gives them, so a chip that drifts off its key is visible.
 The desktop's own F-keys stand in for the device's lane keys — F4–F8 for the Cardputer
 Zero's Fn+4…8, F1–F5 for the PicoCalc's — and Shift with them is the second bank; the
 window also reports Shift to the lane as it goes down and up, so the bank flips on screen
-the way it will on the device. Closing the window leaves MeshTerm at once, as ^Q twice
-would. Ctrl+Shift+S saves the panel at its true size as a PNG in the working directory.
+the way it will on the device. The mouse presses them too: a click on a drawn key, or on
+a chip of the lane itself, types that slot's key, and Shift held through the click types
+its Shift companion — the app reads the bank off the key that arrives, never off the
+Shift it saw, so the window sends the shifted key itself (:func:`lane_press`). The drawn
+keys wear the lane's own fill, and take its Shift fill while Shift is down, as the chips
+above them do (:func:`lane_fills`). Closing the window leaves MeshTerm at once, as ^Q
+twice would. Ctrl+Shift+S saves the panel at its true size as a PNG in the working
+directory.
 
 Tk runs on a thread of its own, the TUI on the main thread; the two meet only through the
 terminal's lock, a flag saying a frame is ready, and the function that types.
@@ -27,12 +33,14 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..services import modifier_watch
+from ..ui.theme import MESH_THEME, MESH_THEME_16
+from ..ui.tui.fkeys import LaneDeck
 from .devices import EmulatedDevice
-from .font import Font
+from .font import CELL_H, CELL_W, Font
 from .keys import Key, encode
 from .raster import Raster
-from .run import default_colours
-from .vt import Terminal
+from .run import _palette, default_colours
+from .vt import Terminal, _xterm_256
 
 _NAMED = {
     "Up": "up",
@@ -56,6 +64,10 @@ _NAMED = {
 
 _SHIFTS = ("Shift_L", "Shift_R")
 
+#: A drawn lane key's cap, and the ink of the digit printed on it.
+_KEY_BODY = "#1d2025"
+_KEY_DIGIT = "#eef1f4"
+
 #: Tk's modifier bits: Shift and Control everywhere, Alt where the platform puts it.
 _SHIFT_BIT = 0x0001
 _CTRL_BIT = 0x0004
@@ -76,6 +88,64 @@ def key_from_tk(keysym: str, char: str, state: int) -> Key | None:
         return Key(text=" ", ctrl=True, alt=alt)
     if char and char.isprintable():
         return Key(text=char, alt=alt)
+    return None
+
+
+def lane_press(device: EmulatedDevice, slot: int, *, shift: bool) -> str:
+    """What pressing lane slot ``slot`` types on ``device``, with Shift held or not.
+
+    The slot's plain key, spelled as the desktop's F-key standing in for it would be —
+    so Shift becomes the PicoCalc's F6–F10 and the Cardputer Zero's shifted F4–F8 just as
+    it does from the keyboard (:meth:`~.devices.EmulatedDevice.translate`).
+    """
+    key = Key(name=f"f{device.deck.keys[slot]}", shift=shift)
+    return encode(device.translate(key))
+
+
+def lane_fills(device: EmulatedDevice) -> tuple[str, str]:
+    """The lane's chip fills on ``device`` as Tk colours: the plain bank's, then Shift's.
+
+    Resolved from the deck's own styles in the theme the device runs, through the palette
+    the panel is drawn with — a numbered colour is a palette slot, as the console's every
+    colour is, and anything else its own RGB — so a drawn key is the colour the chip
+    above it is.
+    """
+    theme = MESH_THEME if device.platform.truecolor else MESH_THEME_16
+    palette = _palette()
+    deck = device.deck
+
+    def fill(style: str) -> str:
+        colour = theme.styles[style].bgcolor
+        if colour is None:
+            return _KEY_BODY
+        if colour.number is not None:
+            red, green, blue = _xterm_256(colour.number, palette)
+        else:
+            red, green, blue = colour.get_truecolor()
+        return f"#{red:02x}{green:02x}{blue:02x}"
+
+    return fill(deck.fill), fill(deck.shift_fill)
+
+
+def chip_at(terminal: Terminal, deck: LaneDeck, col: int, row: int) -> int | None:
+    """The lane slot whose chip is drawn at cell ``(col, row)``, or ``None``.
+
+    The lane is the frame's footer, its last row, and every chip there opens on its key's
+    caption — a live chip, a dimmed one and an unassigned slot's bare caption alike — so
+    a caption at the chip's own column is what says the lane is drawn. A frame without
+    one (a bare share screen, the chromeless splash) leaves the row to its own content,
+    and a click there presses nothing.
+    """
+    if row != terminal.rows - 1:
+        return None
+    cells = terminal.screen[row]
+    for slot, start in enumerate(deck.columns):
+        if not start <= col < start + deck.chip_width:
+            continue
+        for caption in (deck.captions[slot], deck.shift_captions[slot]):
+            if "".join(char for char, _ in cells[start : start + len(caption)]) == caption:
+                return slot
+        return None
     return None
 
 
@@ -110,6 +180,10 @@ class EmulatorWindow:
             top_left=device.console,
             bold_is_bright=device.console,
         )
+        self._margin = 6 * scale
+        self._fills = lane_fills(device)
+        self._shifted = False
+        self._pressed: int | None = None
         self._ready = threading.Event()
         self._ready.set()
         self._closing = False
@@ -134,7 +208,7 @@ class EmulatorWindow:
 
         scale = self._scale
         panel_w, panel_h = self._device.panel
-        margin = 6 * scale
+        margin = self._margin
         keys_h = 26 * scale if self._device.lane_keys else 0
         root = tk.Tk()
         root.title(f"MeshTerm — {self._device.name} emulator")
@@ -149,10 +223,14 @@ class EmulatorWindow:
         base = tk.PhotoImage(width=panel_w, height=panel_h)
         shown = base.zoom(scale, scale)
         canvas.create_image(margin, margin, image=shown, anchor="nw", tags="panel")
-        self._draw_keys(canvas, margin, scale)
+        canvas.tag_bind("panel", "<ButtonPress-1>", self._on_panel_click)
         self._tk = (root, canvas, base, shown)
+        self._draw_keys(canvas, margin, scale)
         root.bind("<KeyPress>", self._on_press)
         root.bind("<KeyRelease>", self._on_release)
+        # A Shift let go in another window never reaches this one; leaving it held here
+        # would keep the lane and the drawn keys in the Shift bank.
+        root.bind("<FocusOut>", lambda _: self._set_shift(False))
         root.protocol("WM_DELETE_WINDOW", self._on_close)
         root.focus_force()
         self._started.set()
@@ -162,21 +240,76 @@ class EmulatorWindow:
     def _draw_keys(self, canvas, margin: int, scale: int) -> None:
         top = margin + self._device.panel[1] * scale + 4 * scale
         size = 18 * scale
-        for number, centre in self._device.lane_keys:
+        for slot, (number, centre) in enumerate(self._device.lane_keys):
             x = margin + centre * scale
-            canvas.create_line(x, top - 3 * scale, x, top, fill="#e34b0f", width=scale)
+            key = f"key{slot}"
+            canvas.create_line(x, top - 3 * scale, x, top, width=scale, tags="tick")
             canvas.create_rectangle(
                 x - size // 2, top, x + size // 2, top + size,
-                fill="#1d2025", outline="#e34b0f", width=scale,
+                width=scale, tags=(key, f"cap{slot}"),
             )  # fmt: skip
             canvas.create_text(
-                x, top + 5 * scale, text=f"F{number}", fill="#ff6633",
-                font=("Consolas", 4 * scale, "bold"),
+                x, top + 5 * scale, font=("Consolas", 4 * scale, "bold"),
+                tags=(key, f"legend{slot}"),
             )  # fmt: skip
             canvas.create_text(
-                x, top + 12 * scale, text=str(number), fill="#eef1f4",
-                font=("Consolas", 6 * scale, "bold"),
+                x, top + 12 * scale, text=str(number), fill=_KEY_DIGIT,
+                font=("Consolas", 6 * scale, "bold"), tags=key,
             )  # fmt: skip
+            canvas.tag_bind(key, "<ButtonPress-1>", lambda event, n=slot: self._press_key(n, event))
+            canvas.tag_bind(key, "<ButtonRelease-1>", lambda _: self._release_key())
+            canvas.tag_bind(key, "<Enter>", lambda _: canvas.configure(cursor="hand2"))
+            canvas.tag_bind(key, "<Leave>", lambda _: canvas.configure(cursor=""))
+        self._paint_keys()
+
+    def _paint_keys(self) -> None:
+        """Colour the drawn keys in the lane's bank: its fill, and its captions.
+
+        A key held down under the mouse is filled the way its chip is, white on the fill.
+        """
+        canvas = self._tk[1]
+        deck = self._device.deck
+        fill = self._fills[self._shifted]
+        captions = deck.shift_captions if self._shifted else deck.captions
+        canvas.itemconfigure("tick", fill=fill)
+        for slot in range(len(self._device.lane_keys)):
+            down = slot == self._pressed
+            canvas.itemconfigure(f"cap{slot}", outline=fill, fill=fill if down else _KEY_BODY)
+            canvas.itemconfigure(
+                f"legend{slot}", text=captions[slot], fill=_KEY_DIGIT if down else fill
+            )
+
+    def _press_key(self, slot: int, event) -> None:
+        self._pressed = slot
+        self._paint_keys()
+        self._press_lane(slot, event.state)
+
+    def _release_key(self) -> None:
+        self._pressed = None
+        self._paint_keys()
+
+    def _on_panel_click(self, event) -> None:
+        """A click on the panel presses the lane chip it lands on, if it lands on one."""
+        x = (event.x - self._margin) // self._scale - self._raster.left
+        y = (event.y - self._margin) // self._scale - self._raster.top
+        if x < 0 or y < 0:
+            return
+        with self._lock:
+            slot = chip_at(self._terminal, self._device.deck, x // CELL_W, y // CELL_H)
+        if slot is not None:
+            self._press_lane(slot, event.state)
+
+    def _press_lane(self, slot: int, state: int) -> None:
+        data = lane_press(self._device, slot, shift=bool(state & _SHIFT_BIT))
+        if data:
+            self._type(data)
+
+    def _set_shift(self, down: bool) -> None:
+        """Tell the lane Shift went down or up, and flip the drawn keys' bank with it."""
+        modifier_watch.report_shift(down)
+        if down != self._shifted:
+            self._shifted = down
+            self._paint_keys()
 
     def _tick(self) -> None:
         root, canvas, base, _ = self._tk
@@ -199,7 +332,7 @@ class EmulatorWindow:
 
     def _on_press(self, event) -> None:
         if event.keysym in _SHIFTS:
-            modifier_watch.report_shift(True)
+            self._set_shift(True)
             return
         if event.keysym in ("S", "s") and event.state & _CTRL_BIT and event.state & _SHIFT_BIT:
             self._save()
@@ -212,7 +345,7 @@ class EmulatorWindow:
 
     def _on_release(self, event) -> None:
         if event.keysym in _SHIFTS:
-            modifier_watch.report_shift(False)
+            self._set_shift(False)
 
     def _on_close(self) -> None:
         # ^Q asks; a second ^Q while it asks leaves at once.
@@ -251,4 +384,4 @@ def front_end(device: EmulatedDevice, scale: int = 3):
     return build
 
 
-__all__ = ["EmulatorWindow", "front_end", "key_from_tk"]
+__all__ = ["EmulatorWindow", "chip_at", "front_end", "key_from_tk", "lane_fills", "lane_press"]
