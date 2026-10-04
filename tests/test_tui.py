@@ -262,6 +262,26 @@ def test_select_hscroll_highlight_keeps_the_natural_row() -> None:
     assert "start ⋯ end" in body  # the unhighlighted row fitted itself
 
 
+def test_select_hscroll_highlight_draws_a_fitted_row_fitted() -> None:
+    """A row whose fitted form is complete (``Choice.fitted``) stays fitted under the highlight.
+
+    The Channels list's rows shorten their trailing chart to the width; drawn natural under
+    the highlight, the chart came back cut off on exactly the row being read. Nothing past
+    such a row's edge is worth sliding to, so it doesn't claim to overflow either: no ←→
+    atom, and → leaves it where it is.
+    """
+
+    def chart_row(width: int) -> str:
+        return "lanes " + "⣀" * max(0, min(12, width - 6))
+
+    screen = SelectScreen("pick", [Choice(chart_row, 1, fitted=True)], hscroll=True)
+    lines = [Text.from_ansi(line).plain for line in screen.render_body(14)]
+    assert lines[0] == "❯ lanes " + "⣀" * 6  # fitted to the 12-cell content area
+    assert not screen._selected_overflows()
+    screen.handle("right")
+    assert [Text.from_ansi(line).plain for line in screen.render_body(14)] == lines
+
+
 def test_select_filter_matches_callable_title() -> None:
     """Type-to-filter matches against a callable title's current text."""
     screen = SelectScreen("pick", [Choice(lambda: "alpha", 1), Choice("beta", 2)])
