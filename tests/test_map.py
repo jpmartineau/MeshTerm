@@ -243,10 +243,7 @@ def test_polygon_fill_lights_exactly_the_dots_a_scan_of_every_edge_would() -> No
 
     def reference(canvas: MapCanvas, rings, stipple: int) -> None:
         edges = [
-            (x0, y0, x1, y1)
-            for ring in rings
-            for (x0, y0), (x1, y1) in pairwise(ring)
-            if y0 != y1
+            (x0, y0, x1, y1) for ring in rings for (x0, y0), (x1, y1) in pairwise(ring) if y0 != y1
         ]
         for y in range(0, canvas.dot_h, stipple):
             yc = y + 0.5
@@ -1288,7 +1285,9 @@ def test_basemap_source_holds_decoded_tiles_to_a_byte_budget(tmp_path: Path) -> 
 
     tile = decode_tile(_FIXTURE.read_bytes())
     one = resident_bytes(tile)
-    src = BasemapSource(tmp_path / "cache", tilejson_url="http://127.0.0.1:1/none", memo_bytes=one * 5 // 2)
+    src = BasemapSource(
+        tmp_path / "cache", tilejson_url="http://127.0.0.1:1/none", memo_bytes=one * 5 // 2
+    )
     for i in range(5):
         src._remember((14, i, 0), tile)
 

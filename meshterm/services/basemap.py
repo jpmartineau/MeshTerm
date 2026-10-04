@@ -124,6 +124,7 @@ def _memo_budget() -> int:
         return _MEMO_CEILING
     return max(_MEMO_FLOOR, min(_MEMO_CEILING, physical // _MEMO_SHARE))
 
+
 #: How long a failed TileJSON resolve stands before the source will ask again. The PicoCalc
 #: brings its Wi-Fi up some 40 seconds into the boot, well after the app it was started
 #: alongside can reach the menu — so "offline" asked once at open is a verdict on the
