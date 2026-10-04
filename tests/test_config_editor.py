@@ -491,6 +491,12 @@ class _StubSource:
     def answered_empty(self, z: int, x: int, y: int) -> bool:
         return False  # offline is silence, never the source saying "nothing there"
 
+    def resident(self, z: int, x: int, y: int):
+        return None  # nothing is ever held in RAM
+
+    def warm(self, z: int, x: int, y: int) -> None:
+        return None
+
 
 def _picker(markers=None, initial=None):
     from meshterm.ui.map_screen import LocationPickScreen

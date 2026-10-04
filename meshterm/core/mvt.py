@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import gzip
 import marshal
+import struct
 from collections.abc import Container
 from dataclasses import dataclass, field
 from typing import Any
@@ -391,3 +392,52 @@ def loads_layers(blob: bytes, *, stamp: str = "") -> list[Layer] | None:
         ]
     except Exception:  # noqa: BLE001 - any malformed blob is simply a cache miss
         return None
+
+
+# -- what a decoded tile weighs ------------------------------------------------------
+
+#: What a decoded tile costs in RAM, in pointer widths: per point (its ``(x, y)`` tuple,
+#: the ints in it, its slot in the ring), per feature (the object, its tag dict, its ring
+#: lists), and per tag. Fitted by least squares against ``tracemalloc`` over every tile in
+#: the PicoCalc's cache (32-bit) and the same tiles decoded on a 64-bit desktop, which came
+#: out at the same counts of words to within a few percent: 15-16 a point, 42-44 a
+#: feature, 1.5-2 a tag.
+_POINT_WORDS = 16
+_FEATURE_WORDS = 44
+_TAG_WORDS = 2
+
+#: A pointer, in bytes — the unit the above are counted in. A tag's string *value* costs
+#: half of one per UTF-8 byte (2.1 bytes measured on the device, 3.4 on the desktop).
+_WORD = struct.calcsize("P")
+
+
+def resident_bytes(layers: list[Layer]) -> int:
+    """Roughly how much RAM ``layers`` hold, for a cache that must budget in bytes.
+
+    A tile's weight is no use counted in *tiles*: on the PicoCalc a decoded tile runs from
+    1 MB (a suburb at z10) to 4.6 MB (a coastline at z7), and a cache bounded by count held
+    50-odd MB of them on a 100 MB device, which ended in the SD-card swap — the map frozen
+    for fifteen seconds while the kernel paged the interpreter back in.
+
+    Points alone are not the measure either: a zoomed-out tile is mostly place labels, each
+    carrying its name in dozens of languages, and a z2 tile weighing 1.6 MB has almost no
+    geometry at all. So the tags count too, and their text. The walk never touches a
+    coordinate, so it is cheap beside the decode that produced the layers.
+
+    An estimate: on the device's 157 cached tiles it lands from 1% under to 9% over what
+    ``tracemalloc`` measures, and from 6% under to 21% over on a 64-bit desktop.
+    """
+    points = features = tags = text = 0
+    for layer in layers:
+        for feat in layer.features:
+            features += 1
+            tags += len(feat.tags)
+            for value in feat.tags.values():
+                if isinstance(value, str):
+                    # Bytes, not characters: a name in another script is stored wider,
+                    # and those are what fill a zoomed-out tile.
+                    text += len(value.encode())
+            for ring in feat.rings:
+                points += len(ring)
+    words = points * _POINT_WORDS + features * _FEATURE_WORDS + tags * _TAG_WORDS
+    return words * _WORD + text * _WORD // 2

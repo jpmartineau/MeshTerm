@@ -25,6 +25,7 @@ from __future__ import annotations
 import math
 from collections import Counter
 from dataclasses import dataclass, field
+from operator import itemgetter
 
 from ..core.geo import Viewport
 from ..core.models import MapMarker
@@ -432,6 +433,10 @@ def _compose(
     return canvas
 
 
+#: A point's y, for ``min``/``max`` to read in C (see ``on_view`` in :func:`_draw_tile`).
+_Y = itemgetter(1)
+
+
 def _draw_tile(frame: _Frame, layers: list[Layer], z: int, x: int, y: int) -> None:
     """Draw one decoded tile's geometry and collect its label candidates."""
     vp = frame.canvas
@@ -444,12 +449,43 @@ def _draw_tile(frame: _Frame, layers: list[Layer], z: int, x: int, y: int) -> No
     # vertex is worth removing.
     transforms: dict[int, tuple[float, float, float]] = {}
 
-    def project(ring: list[tuple[int, int]], extent: int) -> list[tuple[float, float]]:
+    def transform(extent: int) -> tuple[float, float, float]:
         t = transforms.get(extent)
         if t is None:
             t = transforms[extent] = frame.viewport.tile_transform(x, y, z, extent)
-        bx, by, step = t
+        return t
+
+    def project(ring: list[tuple[int, int]], extent: int) -> list[tuple[float, float]]:
+        bx, by, step = transform(extent)
         return [(bx + lx * step, by + ly * step) for lx, ly in ring]
+
+    # The canvas as a window in this tile's own units, a dot wider all round, so a ring can
+    # be tested before a single point of it is projected. A zoomed-out view sees a sliver
+    # of tiles whose coastlines and land cover run to tens of thousands of points, and
+    # projecting all of them was half of a z7 frame. Skipping a ring wholly outside is
+    # exact, never an approximation: a line there lights nothing, and a closed ring's
+    # crossings on every scanline come in pairs off the canvas, so the even-odd fill of
+    # whatever it shares a polygon with is unchanged (see MapCanvas.fill_polygon).
+    windows: dict[int, tuple[float, float, float, float]] = {}
+
+    def on_view(ring: list[tuple[int, int]], extent: int) -> bool:
+        w = windows.get(extent)
+        if w is None:
+            bx, by, step = transform(extent)
+            w = windows[extent] = (
+                (-1 - bx) / step,
+                (vp.dot_w + 1 - bx) / step,
+                (-1 - by) / step,
+                (vp.dot_h + 1 - by) / step,
+            )
+        lo_x, hi_x, lo_y, hi_y = w
+        # min/max over the tuples run in C: the first element decides, so they are x.
+        return not (
+            max(ring)[0] < lo_x
+            or min(ring)[0] > hi_x
+            or max(ring, key=_Y)[1] < lo_y
+            or min(ring, key=_Y)[1] > hi_y
+        )
 
     # A tile's palette is a handful of colours shared by tens of thousands of features, so
     # every one of them is resolved once here rather than per feature. mark_rgb memoizes,
@@ -477,37 +513,20 @@ def _draw_tile(frame: _Frame, layers: list[Layer], z: int, x: int, y: int) -> No
                 rgb, prio = green_rgb, green_prio
             else:
                 continue
-            vp.fill_polygon([project(r, layer.extent) for r in feat.rings], rgb, prio)
+            ext = layer.extent
+            vp.fill_polygon([project(r, ext) for r in feat.rings if on_view(r, ext)], rgb, prio)
 
     # Buildings, as a stippled texture under the streets.
     building = by_name.get("building")
     if building is not None and frame.viewport.zoom >= _BUILDING_MIN_ZOOM and not frame.coarse:
         rgb = mark_rgb(_BUILDING_FILL[0])
-        # One tile-local unit is a fixed number of dots, so the visible slab of the tile
-        # is a rectangle in tile coordinates: work out its bounds once and reject each
-        # footprint on its own bounds before projecting a single point. A downtown tile
-        # holds thousands of footprints and a zoomed-in view shows a few dozen of them.
+        # A downtown tile holds thousands of footprints and a zoomed-in view shows a few
+        # dozen of them, so each is rejected on its own bounds before it is projected.
         ext = building.extent
-        x0, y0 = frame.viewport.feature_to_dot(x, y, z, ext, 0, 0)
-        x1, y1 = frame.viewport.feature_to_dot(x, y, z, ext, ext, ext)
-        if x1 != x0 and y1 != y0:
-            lo_x, hi_x = sorted((-x0 * ext / (x1 - x0), (vp.dot_w - x0) * ext / (x1 - x0)))
-            lo_y, hi_y = sorted((-y0 * ext / (y1 - y0), (vp.dot_h - y0) * ext / (y1 - y0)))
-        else:  # a degenerate projection can't be culled against; draw it all.
-            lo_x = lo_y = -math.inf
-            hi_x = hi_y = math.inf
         for feat in building.features:
             if feat.geom_type != GEOM_POLYGON:
                 continue
-            keep = []
-            for ring in feat.rings:
-                if len(ring) < 4:
-                    continue
-                rxs = [p[0] for p in ring]
-                rys = [p[1] for p in ring]
-                if max(rxs) < lo_x or min(rxs) > hi_x or max(rys) < lo_y or min(rys) > hi_y:
-                    continue
-                keep.append(ring)
+            keep = [ring for ring in feat.rings if len(ring) >= 4 and on_view(ring, ext)]
             if keep:
                 vp.fill_polygon(
                     [project(r, ext) for r in keep],
@@ -530,7 +549,7 @@ def _draw_tile(frame: _Frame, layers: list[Layer], z: int, x: int, y: int) -> No
                 continue
             rgb, prio = style
             for ring in feat.rings:
-                if len(ring) >= 2:
+                if len(ring) >= 2 and on_view(ring, waterway.extent):
                     vp.draw_line(project(ring, waterway.extent), rgb, prio)
             if feat.name and not frame.coarse:
                 _add_line_label(
@@ -555,7 +574,7 @@ def _draw_tile(frame: _Frame, layers: list[Layer], z: int, x: int, y: int) -> No
             if frame.coarse and prio < _COARSE_ROAD_PRIORITY:
                 continue  # the back streets are the bulk of the lines and the last to matter
             for ring in feat.rings:
-                if len(ring) >= 2:
+                if len(ring) >= 2 and on_view(ring, transportation.extent):
                     vp.draw_line(project(ring, transportation.extent), rgb, prio)
 
     # Boundaries (admin) as a faint hint.
@@ -570,7 +589,7 @@ def _draw_tile(frame: _Frame, layers: list[Layer], z: int, x: int, y: int) -> No
             except (TypeError, ValueError):
                 continue
             for ring in feat.rings:
-                if len(ring) >= 2:
+                if len(ring) >= 2 and on_view(ring, boundary.extent):
                     vp.draw_line(project(ring, boundary.extent), boundary_rgb, 14)
 
     if frame.coarse:

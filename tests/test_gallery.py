@@ -399,6 +399,12 @@ class _StubTileSource:
     def answered_empty(self, z: int, x: int, y: int) -> bool:  # noqa: ANN001
         return False  # offline is silence, never the source saying "nothing there"
 
+    def resident(self, z: int, x: int, y: int):  # noqa: ANN001
+        return None  # nothing is ever held in RAM
+
+    def warm(self, z: int, x: int, y: int) -> None:  # noqa: ANN001
+        return None
+
 
 def _map_body_rows(rows: int) -> int:
     """The body height the map would be handed in the frame these specimens compose into.

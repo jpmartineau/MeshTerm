@@ -80,17 +80,13 @@ def _loop_running() -> bool:
     return True
 
 
-#: How many screens' worth of decoded tiles to keep resident, as a multiple of what the
-#: current view needs. A decoded tile costs ~0.9 MB on the PicoCalc (62 bytes a point,
-#: measured) against a device that has ~100 MB in total, so a map panned far enough would
-#: otherwise fill memory with ground the user has left behind. Keeping the screen plus one
-#: screen of history costs almost nothing to get wrong: an evicted tile comes back from
-#: the decoded cache in ~25-50 ms, having already been parsed once.
-_TILE_CACHE_SCREENS = 2
-
-#: Floor on that budget, so a zoomed-out view needing one or two tiles still keeps enough
-#: history for a pan away and back to be instant.
-_MIN_TILE_CACHE = 8
+#: How many tiles may be loading at once. A load is a network fetch (waiting, which threads
+#: overlap well) then a decode (pure Python, which they don't — the GIL runs one at a time,
+#: and each holds the tile's whole decoded weight while it does). Two lets a fetch overlap a
+#: decode; more only multiplies what is in memory at the moment the reader is moving
+#: fastest, and spends the turns the paint needs. It is also what gives a fast pan's
+#: abandoned tiles a queue to be dropped from (see :meth:`MapScreen._load`).
+_TILE_LOADS = 2
 
 #: Whether a moved view is answered with the **rough first pass** before its finished
 #: frame — the ground fills, the watercourses and the through-roads, in a quarter of the
@@ -245,10 +241,12 @@ class MapScreen(Screen):
         #: zooming" clause of OSMF's guideline. A visit's worth of state, not a session's:
         #: a map reopened is a map arrived at again.
         self._untouched = True
-        # Decoded tiles, least-recently-shown first — see :meth:`_trim_tiles`. A stored
+        # The view's decoded tiles, and nothing more — see :meth:`_trim_tiles`. A stored
         # ``None`` is the source's own answer that there is nothing at those coordinates.
-        self._tiles: OrderedDict[tuple[int, int, int], list[Layer] | None] = OrderedDict()
+        self._tiles: dict[tuple[int, int, int], list[Layer] | None] = {}
         self._pending: set[tuple[int, int, int]] = set()
+        # The turns tile loads take (see :data:`_TILE_LOADS`), shared with the prefetcher.
+        self._tile_gate = asyncio.Semaphore(_TILE_LOADS)
         # Tiles the source gave no answer about, and when each may be asked for again —
         # a cooldown, not a verdict (see :meth:`_load`).
         self._unanswered: dict[tuple[int, int, int], float] = {}
@@ -704,12 +702,18 @@ class MapScreen(Screen):
         :data:`~meshterm.services.basemap.TILE_RETRY_SECONDS` in
         :attr:`_unanswered` and is then asked for again — see :meth:`_load` for why that
         isn't the same as a tile it answered "nothing here" about.
+
+        A tile the source already holds in RAM is taken here and now, with no thread
+        between: ground panned back onto is drawn in the very raster the move asks for,
+        rather than drawn without it first and again once a round trip to memory returned.
         """
         wanted = vp.tiles(self._max_tile_zoom)
+        self._trim_tiles(wanted)
         for t in wanted:
-            if t in self._tiles:
-                self._tiles.move_to_end(t)  # on screen now, so last in line to be dropped
-        self._trim_tiles(len(wanted))
+            if t not in self._tiles:
+                layers = self._source.resident(*t)
+                if layers is not None:
+                    self._tiles[t] = layers
         if not _loop_running():  # nothing to fetch onto — a static render draws what it has
             return
         self._expire_cooldowns()
@@ -878,48 +882,54 @@ class MapScreen(Screen):
             self._speculated.popitem(last=False)
 
     async def _prefetch(self, tile: tuple[int, int, int], vp: Viewport) -> None:
-        """Warm one tile into the source's cache, then take the next guess.
+        """Warm one tile into the source's disk cache, then take the next guess.
 
-        The result is thrown away on purpose. A prefetched tile is not this screen's to
-        hold — :attr:`_tiles` is the view's working set and has a budget sized to it — and
-        it does not need to be: the fetch has written the tile and its decoded form to
-        disk and left it in the source's resident memo, so the paint that finally wants it
-        gets it in tens of milliseconds instead of a second and a half.
+        Disk, not memory (:meth:`~meshterm.services.basemap.BasemapSource.warm`). A
+        prefetched tile is not this screen's to hold — :attr:`_tiles` is the view's working
+        set — and not the source's RAM's either: that budget is the history of where the
+        reader *has* been, and twelve guesses at up to 4.6 MB each would evict all of it
+        for ground they may never visit. What a guess saves is the network and the decode,
+        and the sidecar on disk is the whole of both, so the paint that finally wants the
+        tile reads it back in a tenth of a second instead of waiting out a second and a
+        half. A tile whose sidecar is already written costs the guess nothing at all.
+
+        It takes a turn at the tile gate like any load (:data:`_TILE_LOADS`), so a reader
+        who moves while it runs still has a turn waiting for the tiles they moved onto.
 
         No repaint either way: nothing on screen changed, and the whole point of doing
         this early was to not spend the user's time.
         """
-        try:
-            await asyncio.to_thread(self._source.load_tile, *tile)
-        except Exception:  # noqa: BLE001 - a guess that didn't pay off is not an error
-            pass
+        async with self._tile_gate:
+            try:
+                await asyncio.to_thread(self._source.warm, *tile)
+            except Exception:  # noqa: BLE001 - a guess that didn't pay off is not an error
+                pass
         self._speculating = False
         if self._viewport is vp:  # still the same view, so the same plan: keep going
             self._ensure_prefetch(vp)
 
-    def _trim_tiles(self, in_view: int) -> None:
-        """Release the least recently shown tiles once the view's budget is exceeded.
+    def _trim_tiles(self, wanted: list[tuple[int, int, int]]) -> None:
+        """Let go of every tile holding geometry that the view no longer shows.
 
-        Only tiles holding geometry are counted or dropped. An entry whose value is
-        ``None`` is the source's word that the tile is absent — a settled answer costing a
-        dict slot rather than a megabyte, so it stays; dropping it would only buy a
-        pointless re-request on the next repaint. A tile we got no answer about isn't here
-        at all: it waits out its cooldown in :attr:`_unanswered` and is asked for again.
+        The history a pan back needs lives in the source, whose memory is budgeted in
+        bytes against the machine's RAM (see :meth:`~meshterm.services.basemap.
+        BasemapSource.resident`) — so a tile held here as well would be held *outside* that
+        budget. That is how the map used to freeze on the PicoCalc: eight-odd tiles of
+        history here, at up to 4.6 MB each, on top of the source's own, pushed a 100 MB
+        device into swapping to its SD card.
+
+        Only tiles holding geometry are dropped. An entry whose value is ``None`` is the
+        source's word that the tile is absent — a settled answer costing a dict slot rather
+        than a megabyte, so it stays; dropping it would only buy a pointless re-request on
+        the next repaint. A tile we got no answer about isn't here at all: it waits out its
+        cooldown in :attr:`_unanswered` and is asked for again.
 
         Args:
-            in_view: How many tiles the current viewport needs, which sets the budget.
+            wanted: The tiles the current viewport needs.
         """
-        budget = max(_MIN_TILE_CACHE, in_view * _TILE_CACHE_SCREENS)
-        loaded = sum(1 for layers in self._tiles.values() if layers)
-        if loaded <= budget:
-            return
-        # Oldest first; everything on screen was just moved to the end, so it is safe.
-        for key in list(self._tiles):
-            if loaded <= budget:
-                break
-            if self._tiles[key]:
-                del self._tiles[key]
-                loaded -= 1
+        keep = set(wanted)
+        for key in [k for k, layers in self._tiles.items() if layers and k not in keep]:
+            del self._tiles[key]
 
     async def _load(self, t: tuple[int, int, int]) -> None:
         """Fetch+decode one tile off the event loop, then repaint.
@@ -936,11 +946,23 @@ class MapScreen(Screen):
         That distinction is only visible on a link that actually drops. On the PicoCalc it
         is the difference between a map and a map with holes in it (JP, 2026-08-18: tiles
         black at the two highest zooms, where one z14 tile is the whole screen).
+
+        A load waits its turn (:data:`_TILE_LOADS`), and a tile the view has left by the
+        time its turn comes is **dropped unloaded**. A fast pan or a run of zoom steps asks
+        for every view it passes through, and loading all of them — each a decode of a
+        second or more, the zoomed-out ones the heaviest — was the backlog that kept the map
+        behind the keys long after they stopped. Dropped is not written off: nothing is
+        recorded, so the next paint that wants the tile asks for it like any other.
         """
-        try:
-            layers = await asyncio.to_thread(self._source.load_tile, *t)
-        except Exception:  # noqa: BLE001 - a failed tile is just an absent one
-            layers = None
+        async with self._tile_gate:
+            vp = self._viewport
+            if vp is not None and t not in vp.tiles(self._max_tile_zoom):
+                self._pending.discard(t)
+                return
+            try:
+                layers = await asyncio.to_thread(self._source.load_tile, *t)
+            except Exception:  # noqa: BLE001 - a failed tile is just an absent one
+                layers = None
         self._pending.discard(t)
         if layers is not None or self._source.answered_empty(*t):
             self._tiles[t] = layers

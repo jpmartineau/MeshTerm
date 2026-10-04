@@ -37,6 +37,8 @@ can't decode are pruned on read, which heals a cache already poisoned this way.
 
 Fetches are blocking (stdlib ``urllib``); callers on an event loop should run
 :meth:`BasemapSource.load_tile` via ``asyncio.to_thread`` so the UI stays responsive.
+:meth:`BasemapSource.resident` is the one question that never blocks — what is already in
+RAM — and the only one a paint may ask.
 """
 
 from __future__ import annotations
@@ -56,7 +58,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from .. import __version__
-from ..core.mvt import Layer, decode_tile, dumps_layers, loads_layers
+from ..core.mvt import Layer, decode_tile, dumps_layers, loads_layers, resident_bytes
 
 #: OpenFreeMap planet TileJSON — its ``tiles`` array holds the current versioned template.
 DEFAULT_TILEJSON_URL = "https://tiles.openfreemap.org/planet"
@@ -96,10 +98,31 @@ _DEFAULT_MAX_DECODED_BYTES = 64 * 1024 * 1024
 #: the directory, which is slow on the SD card the PicoCalc runs from.
 _PRUNE_AFTER_BYTES = 8 * 1024 * 1024
 
-#: Decoded tiles held in RAM. A viewport spans at most a handful of tiles, so this covers
-#: the view plus the ring a pan or a zoom step reaches into, and little more — the PicoCalc
-#: has 100 MB of RAM in total and decoded layers are not small.
-_MEMO_TILES = 24
+#: The share of the machine's memory that decoded tiles may hold — one part in this many.
+#: Budgeted in bytes because a tile's weight varies fourfold (see
+#: :func:`~meshterm.core.mvt.resident_bytes`), and scaled to the machine because the one
+#: running it may be a desktop or a 100 MB handheld: there an eighth is ~13 MB, the view
+#: and a pan's worth of history, and the rest of the RAM stays free for the interpreter.
+#: Overrunning it is not a slow map but a stopped one — the PicoCalc swaps to its SD card,
+#: and a process whose code pages are being read back off it does nothing else meanwhile.
+_MEMO_SHARE = 8
+
+#: The budget's bounds: a floor so a small machine still keeps a view's worth, and a
+#: ceiling past which more history buys a desktop nothing it would notice. A machine that
+#: cannot say how much memory it has (Windows has no ``sysconf``) gets the ceiling.
+_MEMO_FLOOR = 8 * 1024 * 1024
+_MEMO_CEILING = 128 * 1024 * 1024
+
+
+def _memo_budget() -> int:
+    """How many bytes of decoded tiles this machine can hold in RAM (see :data:`_MEMO_SHARE`)."""
+    try:
+        physical = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    except (AttributeError, ValueError, OSError):
+        return _MEMO_CEILING
+    if physical <= 0:
+        return _MEMO_CEILING
+    return max(_MEMO_FLOOR, min(_MEMO_CEILING, physical // _MEMO_SHARE))
 
 #: How long a failed TileJSON resolve stands before the source will ask again. The PicoCalc
 #: brings its Wi-Fi up some 40 seconds into the boot, well after the app it was started
@@ -197,6 +220,7 @@ class BasemapSource:
         timeout: float = 12.0,
         layers: Container[str] | None = None,
         max_decoded_bytes: int = _DEFAULT_MAX_DECODED_BYTES,
+        memo_bytes: int | None = None,
     ) -> None:
         """Open a tile source backed by an on-disk cache.
 
@@ -210,6 +234,8 @@ class BasemapSource:
                 later renderer can widen without re-fetching anything.
             max_decoded_bytes: Ceiling on the decoded sidecar cache, which is derived data
                 and so is the one part of the cache that can be thrown away freely.
+            memo_bytes: Ceiling on the decoded tiles held in RAM; ``None`` sizes it to the
+                machine (see :data:`_MEMO_SHARE`).
         """
         self.cache_dir = cache_dir
         self._tilejson_url = tilejson_url
@@ -229,12 +255,16 @@ class BasemapSource:
         # than on disk so the claim expires with the process: a blank tile is cheap to
         # re-ask about, and a stale one on disk is a permanent hole in the map.
         self._blank: set[tuple[int, int, int]] = set()
-        # Decoded layers kept in RAM, most-recently-used last. The sidecar already spares
-        # the protobuf decode, but a marshal load off the SD card is still ~96 ms on the
-        # PicoCalc — and a map paints its whole viewport's worth of tiles on *every*
-        # frame, so panning one dot re-read every tile that had not moved. Bounded because
-        # decoded layers are the fattest thing this class holds.
-        self._memo: OrderedDict[tuple[int, int, int], list[Layer]] = OrderedDict()
+        # Decoded layers kept in RAM with what each weighs, most-recently-used last. The
+        # sidecar already spares the protobuf decode, but a marshal load off the SD card is
+        # still ~96 ms on the PicoCalc — and a map paints its whole viewport's worth of
+        # tiles on *every* frame, so panning one dot re-read every tile that had not moved.
+        # Bounded in bytes because decoded layers are the fattest thing this class holds,
+        # and locked because the map's worker threads fill it while its paints read it.
+        self._memo: OrderedDict[tuple[int, int, int], tuple[list[Layer], int]] = OrderedDict()
+        self._memo_bytes = 0
+        self._memo_budget = _memo_budget() if memo_bytes is None else memo_bytes
+        self._memo_lock = threading.Lock()
 
     # -- metadata ---------------------------------------------------------------
 
@@ -356,24 +386,59 @@ class BasemapSource:
             The decoded layers, or ``None`` if the tile is unavailable (offline and
             uncached, or a genuinely empty/missing tile).
         """
-        key = (z, x, y)
-        if key in self._blank:
+        if (z, x, y) in self._blank:
             return None
-        hot = self._memo.get(key)
+        hot = self.resident(z, x, y)
         if hot is not None:
-            self._memo.move_to_end(key)
             return hot
-        ready = self._read_decoded(z, x, y)
-        if ready is not None:
-            self._remember(key, ready)
-            return ready
+        layers = self._read_decoded(z, x, y)
+        if layers is None:
+            layers = self._build(z, x, y)
+        if layers is not None:
+            self._remember((z, x, y), layers)
+        return layers
+
+    def resident(self, z: int, x: int, y: int) -> list[Layer] | None:
+        """A tile's decoded layers if they are already in RAM, else ``None`` — never I/O.
+
+        The one question a paint may put to the source. A map moving back over ground it
+        has drawn would otherwise send every tile of it through a worker thread to fetch
+        what is sitting in memory, and draw its first frame without them while it waited.
+        """
+        with self._memo_lock:
+            hit = self._memo.get((z, x, y))
+            if hit is None:
+                return None
+            self._memo.move_to_end((z, x, y))
+            return hit[0]
+
+    def warm(self, z: int, x: int, y: int) -> None:
+        """Make a tile cheap to load later — fetched, decoded and written down — holding nothing.
+
+        What a guess at the next move is for: the slow part of a tile nobody has looked at
+        yet is the network and the decode, and the sidecar on disk is the whole of the
+        answer to both. Holding the result in RAM as well spent the memory budget on tiles
+        that may never be looked at, evicting ones that were, so a tile that already has
+        its sidecar is passed over without being read.
+        """
+        if (z, x, y) in self._blank or self.resident(z, x, y) is not None:
+            return
+        if self._decoded_path(z, x, y).exists():
+            return
+        self._build(z, x, y)
+
+    def _build(self, z: int, x: int, y: int) -> list[Layer] | None:
+        """Decode a tile from its raw bytes — cached, else fetched — writing both caches.
+
+        Holds nothing in RAM; that is :meth:`load_tile`'s decision, not this one's.
+        """
+        key = (z, x, y)
         path = self._tile_path(z, x, y)
         cached = self._read_cached(path)
         if cached is not None:
             layers = self._decode(cached, key)
             if layers is not None:
                 self._write_decoded(z, x, y, layers)
-                self._remember(key, layers)
                 return layers
             # Nothing drawable came out: a zero-byte marker from a build that cached
             # network failures, or bytes truncated by a link (or a power cut) mid-write.
@@ -389,15 +454,24 @@ class BasemapSource:
             return None
         self._write_cached(path, raw)
         self._write_decoded(z, x, y, layers)
-        self._remember(key, layers)
         return layers
 
     def _remember(self, key: tuple[int, int, int], layers: list[Layer]) -> None:
-        """Hold a decoded tile in RAM, evicting the least recently used past the budget."""
-        self._memo[key] = layers
-        self._memo.move_to_end(key)
-        while len(self._memo) > _MEMO_TILES:
-            self._memo.popitem(last=False)
+        """Hold a decoded tile in RAM, evicting the least recently used past the budget.
+
+        The newest tile always stays, even alone over budget: it was loaded because a view
+        needs it, and evicting it would only send that view back to the disk for it.
+        """
+        cost = resident_bytes(layers)
+        with self._memo_lock:
+            old = self._memo.pop(key, None)
+            if old is not None:
+                self._memo_bytes -= old[1]
+            self._memo[key] = (layers, cost)
+            self._memo_bytes += cost
+            while self._memo_bytes > self._memo_budget and len(self._memo) > 1:
+                _, (_, dropped) = self._memo.popitem(last=False)
+                self._memo_bytes -= dropped
 
     # -- the decoded sidecar ----------------------------------------------------
 

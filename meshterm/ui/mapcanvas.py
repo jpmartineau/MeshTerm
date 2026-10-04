@@ -15,6 +15,7 @@ truecolour ANSI lines, which is exactly what the TUI frame consumes.
 
 from __future__ import annotations
 
+import math
 import unicodedata
 from dataclasses import dataclass
 from itertools import pairwise
@@ -227,26 +228,36 @@ class MapCanvas:
                 cells. ``2`` lights a quarter of the dots, enough to read as tone while
                 leaving room for a road to stay a legible line through it. ``1``, the
                 default, is the ordinary solid fill.
+
+        Each edge is filed under the scanlines it actually crosses, rather than every
+        scanline testing every edge. The two give the same dots, but the second costs rows
+        times edges, and a zoomed-out view is exactly where a polygon is a coastline or a
+        province with tens of thousands of edges: on the PicoCalc a z7 frame spent 6.8 of
+        its 7.8 s here, almost all of it asking edges about rows they come nowhere near.
         """
-        edges: list[tuple[float, float, float, float]] = []
-        ys: list[float] = []
+        last_row = self.dot_h - 1
+        crossings: dict[int, list[float]] = {}
         for ring in rings:
             for (x0, y0), (x1, y1) in pairwise(ring):
-                if y0 != y1:
-                    edges.append((x0, y0, x1, y1))
-                    ys.extend((y0, y1))
-        if not edges:
-            return
-        y_start = max(0, int(min(ys)))
-        y_end = min(self.dot_h - 1, int(max(ys)))
-        if stipple > 1:
-            y_start += -y_start % stipple
-        for y in range(y_start, y_end + 1, stipple):
-            yc = y + 0.5
-            xs: list[float] = []
-            for x0, y0, x1, y1 in edges:
-                if (y0 <= yc < y1) or (y1 <= yc < y0):
-                    xs.append(x0 + (yc - y0) * (x1 - x0) / (y1 - y0))
+                if y0 == y1:
+                    continue
+                # The scanline through a row's middle, yc = y + 0.5, crosses this edge when
+                # it lies in [low, high) — half-open, so a vertex shared by two edges is
+                # counted once. Solved for the row, clipped to the canvas.
+                low, high = (y0, y1) if y0 < y1 else (y1, y0)
+                first = max(0, math.ceil(low - 0.5))
+                last = min(last_row, math.ceil(high - 0.5) - 1)
+                if stipple > 1:
+                    first += -first % stipple
+                if first > last:
+                    continue
+                dx, dy = x1 - x0, y1 - y0
+                for y in range(first, last + 1, stipple):
+                    row = crossings.get(y)
+                    if row is None:
+                        row = crossings[y] = []
+                    row.append(x0 + (y + 0.5 - y0) * dx / dy)
+        for y, xs in crossings.items():
             xs.sort()
             for i in range(0, len(xs) - 1, 2):
                 x_from = max(0, int(round(xs[i])))

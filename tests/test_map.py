@@ -190,6 +190,100 @@ def test_offscreen_buildings_do_not_change_the_frame() -> None:
     assert frame([here]) == frame([here, far])
 
 
+def test_offscreen_rings_do_not_change_the_frame() -> None:
+    """Every layer skips the rings its view cannot reach, and the skip is just as invisible.
+
+    A zoomed-out view sees a sliver of tiles whose coastlines and land cover run to tens of
+    thousands of points, and projecting every one of them was half of a z7 frame on the
+    PicoCalc. A hole far off screen in a lake that covers the view, and a road and a river
+    that never come near it, must render byte-identically to their absence — the hole most
+    of all, since it shares an even-odd fill with the lake around it.
+    """
+    from meshterm.core.mvt import Feature
+    from meshterm.ui.map_render import render_map
+
+    # At z16 a z14 tile is 1024 dots across, four tile units a dot: the 106x104-dot view
+    # spans 424x416 units around its centre, so 400 units out is beyond it on every side.
+    vp = Viewport(45.4995, -73.5690, 16, 53 * 2, 26 * 4)
+    cx, cy = _tile_local_of_view_centre(vp, 14, 4843, 5861)
+
+    def square(x0, y0, x1, y1):
+        return [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)]
+
+    lake = square(cx - 600, cy - 600, cx + 600, cy + 600)
+    island = square(cx - 20, cy - 20, cx + 20, cy + 20)  # a hole the view does show
+    far_hole = square(cx - 590, cy - 590, cx - 500, cy - 500)
+    far_road = [(cx - 590, cy + 300), (cx - 400, cy + 590)]
+    far_river = [(cx + 450, cy - 590), (cx + 590, cy + 590)]
+
+    def frame(water_rings, roads, rivers):
+        layers = [
+            Layer("water", 4096, [Feature(GEOM_POLYGON, water_rings, {})]),
+            Layer("transportation", 4096, [Feature(GEOM_LINE, roads, {"class": "primary"})]),
+            Layer("waterway", 4096, [Feature(GEOM_LINE, rivers, {"class": "river"})]),
+        ]
+        return render_map(vp, {(14, 4843, 5861): layers}, [])
+
+    near_road = [(cx - 300, cy), (cx + 300, cy)]
+    near_river = [(cx, cy - 300), (cx, cy + 300)]
+    bare = frame([lake, island], [near_road], [near_river])
+    assert _plain(bare).strip(), "the lake, the road and the river should all draw"
+    assert bare == frame([lake, island, far_hole], [near_road, far_road], [near_river, far_river])
+
+
+def test_polygon_fill_lights_exactly_the_dots_a_scan_of_every_edge_would() -> None:
+    """Filing each edge under the rows it crosses is a speed-up, so it must not move a dot.
+
+    The reference is the fill as it was: every scanline asking every edge whether it is
+    crossed. That costs rows times edges, which a coastline at z7 made 6.8 s of a frame on
+    the PicoCalc; the answer it gave is the specification.
+    """
+    import random
+    from itertools import pairwise
+
+    def reference(canvas: MapCanvas, rings, stipple: int) -> None:
+        edges = [
+            (x0, y0, x1, y1)
+            for ring in rings
+            for (x0, y0), (x1, y1) in pairwise(ring)
+            if y0 != y1
+        ]
+        for y in range(0, canvas.dot_h, stipple):
+            yc = y + 0.5
+            xs = sorted(
+                x0 + (yc - y0) * (x1 - x0) / (y1 - y0)
+                for x0, y0, x1, y1 in edges
+                if y0 <= yc < y1 or y1 <= yc < y0
+            )
+            for i in range(0, len(xs) - 1, 2):
+                lo = max(0, int(round(xs[i])))
+                hi = min(canvas.dot_w - 1, int(round(xs[i + 1])))
+                if stipple > 1:
+                    lo += -lo % stipple
+                for x in range(lo, hi + 1, stipple):
+                    canvas.plot(x, y, (1, 2, 3), 5)
+
+    def coordinate(rnd: random.Random) -> float:
+        # Mostly anywhere, including well off the canvas; sometimes exactly on a row's
+        # middle or a dot's edge, which is where an off-by-one would show.
+        if rnd.random() < 0.5:
+            return rnd.uniform(-30.0, 110.0)
+        return rnd.randint(-5, 90) + rnd.choice((0.0, 0.5, -0.5))
+
+    rnd = random.Random(7)
+    for _ in range(500):
+        w, h = rnd.randint(1, 40), rnd.randint(1, 20)
+        rings = []
+        for _ in range(rnd.randint(1, 3)):
+            ring = [(coordinate(rnd), coordinate(rnd)) for _ in range(rnd.randint(2, 10))]
+            rings.append(ring + ring[:1] if rnd.random() < 0.7 else ring)
+        stipple = rnd.choice((1, 1, 2, 3))
+        fast, slow = MapCanvas(w, h), MapCanvas(w, h)
+        fast.fill_polygon(rings, (1, 2, 3), 5, stipple=stipple)
+        reference(slow, rings, stipple)
+        assert fast._bits == slow._bits, (w, h, stipple, rings)
+
+
 # -- projection / viewport ----------------------------------------------------
 
 
@@ -1162,6 +1256,91 @@ def test_basemap_source_prunes_the_decoded_cache_to_its_budget(tmp_path: Path) -
     assert left == ["3", "4", "5"], "the oldest sidecars go first"
 
 
+def test_resident_bytes_tracks_what_a_decoded_tile_really_holds() -> None:
+    """The memory budget is only as good as its scale, so the scale is checked against RAM.
+
+    A count of tiles was the old measure, and a tile weighs anywhere from 1 to 4.6 MB on the
+    PicoCalc; the estimate has to land near what ``tracemalloc`` sees, on this build's word
+    size, or the budget it feeds is a guess.
+    """
+    import gc
+    import tracemalloc
+
+    from meshterm.core.mvt import dumps_layers, loads_layers, resident_bytes
+    from meshterm.ui.map_render import DRAWN_LAYERS
+
+    blob = dumps_layers(decode_tile(_FIXTURE.read_bytes(), layers=DRAWN_LAYERS))
+    gc.collect()
+    tracemalloc.start()
+    try:
+        layers = loads_layers(blob)
+        held, _ = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert layers
+    assert 0.8 <= resident_bytes(layers) / held <= 1.4
+
+
+def test_basemap_source_holds_decoded_tiles_to_a_byte_budget(tmp_path: Path) -> None:
+    """Decoded tiles in RAM are budgeted in bytes: the oldest go first, the newest always stays."""
+    from meshterm.core.mvt import resident_bytes
+    from meshterm.services.basemap import BasemapSource
+
+    tile = decode_tile(_FIXTURE.read_bytes())
+    one = resident_bytes(tile)
+    src = BasemapSource(tmp_path / "cache", tilejson_url="http://127.0.0.1:1/none", memo_bytes=one * 5 // 2)
+    for i in range(5):
+        src._remember((14, i, 0), tile)
+
+    assert [key[1] for key in src._memo] == [3, 4], "the two newest fit; the rest went oldest first"
+    assert src._memo_bytes == 2 * one
+    assert src.resident(14, 4, 0) is tile
+    assert src.resident(14, 0, 0) is None
+
+    # A tile heavier than the whole budget is still kept, alone: a view asked for it.
+    tight = BasemapSource(tmp_path / "cache", tilejson_url="http://127.0.0.1:1/none", memo_bytes=1)
+    tight._remember((14, 0, 0), tile)
+    tight._remember((14, 1, 0), tile)
+    assert list(tight._memo) == [(14, 1, 0)]
+
+
+def test_basemap_memory_budget_scales_with_the_machine(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An eighth of the RAM, within bounds — the PicoCalc's 100 MB gets ~13 MB of tiles."""
+    from meshterm.services import basemap
+
+    def machine(pages: int):
+        sizes = {"SC_PAGE_SIZE": 4096, "SC_PHYS_PAGES": pages}
+        monkeypatch.setattr(basemap.os, "sysconf", sizes.__getitem__, raising=False)
+
+    machine(26142)  # the PicoCalc's 104568 kB
+    assert basemap._memo_budget() == 4096 * 26142 // basemap._MEMO_SHARE
+    machine(4 * 1024 * 1024)  # a 16 GB desktop
+    assert basemap._memo_budget() == basemap._MEMO_CEILING
+    machine(1024)  # 4 MB: too small to hold a view at an eighth
+    assert basemap._memo_budget() == basemap._MEMO_FLOOR
+    monkeypatch.delattr(basemap.os, "sysconf", raising=False)  # Windows
+    assert basemap._memo_budget() == basemap._MEMO_CEILING
+
+
+def test_basemap_warm_writes_a_tile_down_and_holds_nothing(tmp_path: Path) -> None:
+    """A prefetch buys the decode, on disk, and leaves the RAM to where the reader has been."""
+    cache = tmp_path / "cache"
+    tile = cache / "tiles" / "14" / "4843" / "5861.pbf"
+    tile.parent.mkdir(parents=True)
+    tile.write_bytes(_FIXTURE.read_bytes())
+
+    src = _offline_source(cache)
+    src.warm(14, 4843, 5861)
+    assert (cache / "decoded" / "14" / "4843" / "5861.bin").exists()
+    assert src.resident(14, 4843, 5861) is None, "a guess was held in RAM"
+
+    # A tile already written down costs a second guess nothing: not even a read.
+    reads: list[Path] = []
+    src._read_cached = lambda path: reads.append(path)  # type: ignore[method-assign]
+    src.warm(14, 4843, 5861)
+    assert reads == []
+
+
 def test_basemap_source_remembers_a_blank_tile_for_the_session(tmp_path: Path) -> None:
     """An answered-empty tile isn't re-requested this session (but isn't written down)."""
     from meshterm.services import basemap as basemap_mod
@@ -1377,6 +1556,12 @@ class _StubSource:
     def answered_empty(self, z: int, x: int, y: int) -> bool:
         return False  # offline is silence, never the source saying "nothing there"
 
+    def resident(self, z: int, x: int, y: int):
+        return None  # nothing is ever held in RAM
+
+    def warm(self, z: int, x: int, y: int) -> None:
+        return None
+
 
 def _loaded_tile() -> list[Layer]:
     """A stand-in for a decoded tile: truthy, which is all the budget cares about."""
@@ -1395,26 +1580,21 @@ def _map_screen_with_tiles(count: int) -> MapScreen:
     return screen
 
 
-def _budget(screen) -> int:  # noqa: ANN001 - the screen's own arithmetic, mirrored
-    from meshterm.ui.map_screen import _MIN_TILE_CACHE, _TILE_CACHE_SCREENS
+def test_map_holds_only_the_tiles_its_view_shows() -> None:
+    """Panning far leaves no decoded ground behind on the screen.
 
-    in_view = len(screen._viewport.tiles(14))
-    return max(_MIN_TILE_CACHE, in_view * _TILE_CACHE_SCREENS)
-
-
-def test_map_tile_cache_stays_bounded_while_panning() -> None:
-    """Panning far doesn't accumulate decoded tiles without limit.
-
-    One decoded tile is ~0.9 MB on the PicoCalc, which has ~100 MB in total, so an
-    unbounded cache turns a long pan into an out-of-memory kill.
+    A decoded tile is 1-4.6 MB on the PicoCalc, which has ~100 MB in total. The history a
+    pan back needs is the source's, budgeted in bytes; a tile the screen kept as well would
+    sit outside that budget, which is how a fast map once swapped the device to a standstill.
     """
     screen = _map_screen_with_tiles(200)
     for _ in range(12):
         screen.handle("right")
         screen.render_body(80)
 
-    held = sum(1 for layers in screen._tiles.values() if layers)
-    assert held <= _budget(screen), f"{held} decoded tiles held, over budget"
+    visible = set(screen._viewport.tiles(14))
+    held = {k for k, layers in screen._tiles.items() if layers}
+    assert held <= visible, f"{len(held - visible)} decoded tiles held off screen"
 
 
 def test_map_tile_cache_never_drops_what_is_on_screen() -> None:
@@ -2076,6 +2256,9 @@ class _CountingSource(_StubSource):
         self.asked.append((z, x, y))
         return _loaded_tile()
 
+    def warm(self, z: int, x: int, y: int) -> None:
+        self.asked.append((z, x, y))  # a guess is an ask too, just one that holds nothing
+
 
 def _settled_map(source, zoom: int = 13):
     """A map screen with its own view drawn and every visible tile in hand."""
@@ -2262,6 +2445,50 @@ def test_map_keeps_no_speculated_tile_of_its_own() -> None:
     visible = set(screen._viewport.tiles(14))
     assert set(screen._tiles) <= visible, "speculated tiles landed in the view's working set"
     assert screen._speculated, "nothing was speculated at all"
+
+
+def test_map_takes_a_tile_already_in_memory_without_a_round_trip() -> None:
+    """Ground panned back onto is in the very first raster, not a thread hop later."""
+
+    class _HeldSource(_CountingSource):
+        def resident(self, z: int, x: int, y: int):
+            return _loaded_tile()
+
+    source = _HeldSource()
+
+    async def drive():
+        screen = _settled_map(source)
+        screen.render_body(80)
+        return screen
+
+    screen = asyncio.run(drive())
+    visible = screen._viewport.tiles(14)
+    assert all(screen._tiles.get(t) for t in visible), "a held tile was not taken"
+    assert not screen._pending and not source.asked, "a held tile was sent to a thread"
+
+
+def test_map_drops_a_tile_the_view_left_before_its_turn() -> None:
+    """A fast pan asks for every view it passes; only where it stopped is worth loading.
+
+    Loading the rest — a decode of a second or more each, on the PicoCalc — was the backlog
+    that kept the map behind the keys long after they stopped.
+    """
+    source = _CountingSource()
+
+    async def drive():
+        screen = _settled_map(source)
+        screen.render_body(80)  # asks for the opening view's tiles
+        opening = set(screen._pending)
+        for _ in range(8):  # gone, before any load has had its turn
+            screen.handle("right")
+        await asyncio.sleep(0.05)
+        return screen, opening
+
+    screen, opening = asyncio.run(drive())
+    left_behind = opening - set(screen._viewport.tiles(14))
+    assert left_behind, "the pan never left the opening view"
+    assert not left_behind & set(source.asked), "a tile the view had left was loaded anyway"
+    assert not left_behind & screen._pending, "a dropped tile is still counted as on its way"
 
 
 # --- the coarse first pass -----------------------------------------------------------
