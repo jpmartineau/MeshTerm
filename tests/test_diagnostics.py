@@ -231,9 +231,9 @@ def test_the_save_is_advertised_on_both_platforms(ctx: AppContext) -> None:
     page = _page(ctx)
     assert f"{SAVE_KEY} save" in page.footer_hint
     assert page.footer_hint.endswith("Esc back")
-    assert page.fkey_lane[2] is not None
-    assert page.fkey_lane[2].label == "Save"
-    assert page.fkey_lane[2].action == SAVE_ACTION
+    assert page.picocalc_lane[2] is not None
+    assert page.picocalc_lane[2].label == "Save"
+    assert page.picocalc_lane[2].action == SAVE_ACTION
 
 
 # --- saving it ------------------------------------------------------------------------

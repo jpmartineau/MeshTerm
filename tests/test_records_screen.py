@@ -115,6 +115,7 @@ def test_record_dialog_shows_stats_route_and_the_trace_action() -> None:
 def test_record_dialog_draws_the_walk_as_a_route_graph() -> None:
     """The walk is drawn on THE route graph — us starred at both ends, over a caption."""
     screen = _dialog(_record())
+    screen.note_viewport(40)  # the frame records this before every real paint
     screen.handle("tab")  # the Route tab
     lines = _plain(screen.render_body(60)).splitlines()
     legend = next(i for i, line in enumerate(lines) if "▲ repeater" in line)
@@ -145,6 +146,7 @@ def test_record_dialog_route_runs_unlabelled_across_the_whole_card() -> None:
     our own two ends stand on the ★ the graph above already marks us with.
     """
     dialog = _dialog(_record(route=tuple([HUB_ID, FAR_ID] * 4)))
+    dialog.note_viewport(40)  # the frame records this before every real paint
     dialog.handle("tab")  # the Route tab
     body = _plain(dialog.render_body(60)).splitlines()
     # The route closes the Route tab's stage: it runs from under the graph's legend to
@@ -164,6 +166,7 @@ def test_record_dialog_route_runs_unlabelled_across_the_whole_card() -> None:
 def test_record_dialog_shows_the_node_type_legend() -> None:
     """The standard node-type key sits under the graph, so its markers read."""
     screen = _dialog(_record())
+    screen.note_viewport(40)  # the frame records this before every real paint
     screen.handle("tab")  # the Route tab
     body = _plain(screen.render_body(60))
     assert "★ you" in body and "▲ repeater" in body and "◉ sensor" in body
@@ -177,6 +180,7 @@ def test_record_dialog_legend_is_one_line_on_a_handheld_and_breaks_between_entri
     one would leave a glyph at the end of a line and its name at the start of the next.
     """
     screen = _dialog(_record())
+    screen.note_viewport(40)  # the frame records this before every real paint
     screen.handle("tab")  # the Route tab
     entries = ("★ you", "▲ repeater", "● companion", "■ room", "◉ sensor")
     body = _plain(screen.render_body(53)).splitlines()
@@ -187,6 +191,15 @@ def test_record_dialog_legend_is_one_line_on_a_handheld_and_breaks_between_entri
     for entry in entries:
         assert entry in narrow
     assert all(cell_len(line) <= 40 for line in narrow.splitlines())
+
+
+def test_record_dialog_legend_steps_aside_on_a_short_frame() -> None:
+    """On the Cardputer's 11 rows the Route tab keeps its graph and route, not the key."""
+    screen = _dialog(_record())
+    screen.handle("tab")  # the Route tab
+    screen.note_viewport(11)
+    body = _plain(screen.render_body(53))
+    assert "you → … → you" in body and "▲ repeater" not in body
 
 
 def test_record_graph_marks_a_repeater_relay_with_its_triangle() -> None:
@@ -407,6 +420,7 @@ def test_record_route_tab_draws_the_walk_and_enter_traces_it() -> None:
     so the tab carries that action alone; the page's Delete stays on Info.
     """
     screen = _dialog(_record(), far_label="Far", shape=_loop_shape())
+    screen.note_viewport(40)  # the frame records this before every real paint
     screen.handle("tab")
     lines = _plain(screen.render_body(58)).splitlines()
     stage = [line for line in lines[_strip_end(lines) :] if line]

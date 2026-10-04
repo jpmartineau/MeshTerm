@@ -8,8 +8,9 @@ Each entry below builds one full-screen :class:`~meshterm.ui.tui.screen.Screen` 
 hand-built (simulator-shaped) data — the same "fake session, real screen" approach every
 individual screen's own test file already uses — then renders it, both directly
 (``render_body``) and through the real frame compositor (``compose_base``), at REGULAR's
-72x24 and at PICOCALC's two live/lux row counts (53x26, the actual on-device floor; 53x40,
-the boot-font/6x8-font-B case). No rendered line may exceed its terminal's width.
+72x24, at PICOCALC's two live/lux row counts (53x26, the actual on-device floor; 53x40,
+the boot-font/6x8-font-B case), and at the CARDPUTER's 53x14. No rendered line may exceed
+its terminal's width.
 
 This is the platform-parity harness the PicoCalc work was built around: a
 screen added here without surviving both platforms is meant to fail CI by default, so the
@@ -57,7 +58,7 @@ from meshterm.core.regions import frame_scope, region_key, scope_body, transport
 from meshterm.core.remote_store import CachedValue
 from meshterm.core.watch_store import WatchStore
 from meshterm.persistence.repository import DiscoveredPath
-from meshterm.platforms import PICOCALC, REGULAR, Platform, get_platform, set_platform
+from meshterm.platforms import CARDPUTER, PICOCALC, REGULAR, Platform, get_platform, set_platform
 from meshterm.services.courier import CourierService
 from meshterm.services.message_paths import Arrival
 from meshterm.services.monitor_service import ACTIVITY_BUCKETS
@@ -78,7 +79,7 @@ from meshterm.ui.contacts_screen import ContactsScreen
 from meshterm.ui.courier_screen import CourierOutboxScreen
 from meshterm.ui.dashboard_screen import DashboardScreen
 from meshterm.ui.device_info_screen import DeviceInfoScreen
-from meshterm.ui.fontset import FONT_CODEPOINTS
+from meshterm.ui.fontset import FONTS
 from meshterm.ui.livefeed_screen import LiveFeedScreen
 from meshterm.ui.map_render import MapMarker
 from meshterm.ui.map_screen import MapScreen
@@ -326,12 +327,17 @@ def _archived(cols: int, rows: int) -> Screen:
     )
 
 
-def _node_detail_header() -> Text:
+def _node_detail_mark() -> Text:
     # Through the app's own marker and name styles, not a hand-spelled hex: the gallery is
     # a specimen of what the platform draws, so a stub colour would hide a palette bug.
     glyph, glyph_style = NODE_GLYPHS[NODE_TYPE_REPEATER]
-    header = Text(f"{glyph} ", style=glyph_style)
-    header.append("Hilltop-Repeater", style=name_style("Hilltop-Repeater", _HUB_KEY))
+    mark = Text(f"{glyph} ", style=glyph_style)
+    mark.append("Hilltop-Repeater", style=name_style("Hilltop-Repeater", _HUB_KEY))
+    return mark
+
+
+def _node_detail_header() -> Text:
+    header = _node_detail_mark()
     header.append("   repeater", style="muted")
     return header
 
@@ -370,6 +376,7 @@ def _node_detail(cols: int, rows: int, *, with_minimap: bool = False) -> Screen:
             _Action("remove", "🗑", "err", "Remove contact…"),
         ],
         trace_action=_Action("trace", "\U0001f3af", "", "Trace — auto route …"),
+        mark=_node_detail_mark(),
     )
 
 
@@ -1505,11 +1512,15 @@ _ENTRIES: list[_Entry] = [
 #: (platform, cols, rows) combos every entry above renders under. PicoCalc gets both its
 #: live floor (53x26, the on-device measurement — see the plan's P0 appendix) and the lux
 #: case (53x40, today's boot fbcon font / a future 6x8 font). Regular is unchanged by this
-#: seam's arrival, so it stays the existing 72x24 standard.
+#: seam's arrival, so it stays the existing 72x24 standard. The Cardputer Zero renders at its
+#: one size, 53x14: the same width gate as the PicoCalc, so every case is a hard gate there
+#: too. Rows are not gated — a body scrolls — so which screens are *cramped* at 14 rows is a
+#: judged worklist, not an xfail list (see the port's logbook).
 _COMBOS: list[tuple[Platform, int, int]] = [
     (REGULAR, REGULAR.readable_cols, REGULAR.readable_rows),
     (PICOCALC, PICOCALC.readable_cols, PICOCALC.readable_rows),
     (PICOCALC, PICOCALC.readable_cols, 40),
+    (CARDPUTER, CARDPUTER.readable_cols, CARDPUTER.readable_rows),
 ]
 
 #: Entries that overflow PICOCALC's 53 columns today (a width overflow doesn't depend on
@@ -1588,8 +1599,9 @@ def test_gallery_screen_fits_its_platform(
     # hint strings at all: the fixed F-key lane replaces them (Platform.footer_fkeys),
     # so what must fit there is the screen's lane.
     if platform.footer_fkeys:
-        lane = fkeys.lane_text(screen.fkey_lane)
-        shifted = fkeys.lane_text(screen.fkey_lane, shifted=True)
+        deck = fkeys.DECKS[platform.lane_deck]
+        lane = deck.lane_text(screen.fkey_lane)
+        shifted = deck.lane_text(screen.fkey_lane, shifted=True)
         assert cell_len(lane.plain) <= cols, f"F-lane {cell_len(lane.plain)} cells: {lane.plain!r}"
         assert cell_len(shifted.plain) <= cols, (
             f"shifted F-lane {cell_len(shifted.plain)} cells: {shifted.plain!r}"
@@ -1616,22 +1628,29 @@ def test_gallery_screen_fits_its_platform(
     # addressed as plain 30-37/90-97/40-47 codes), and no character outside the 512-glyph
     # console font. Together these are the parity gate that catches a stray emoji or hex
     # colour the moment a screen grows one, instead of as tofu found on-device.
-    if platform.name == "picocalc":
+    # A handheld may emit nothing outside its own font (Platform.font): the PicoCalc's
+    # 512-glyph console font, or what the Cardputer's console host draws. And a console
+    # with 16 slots (the PicoCalc's) may carry no truecolor or 256-colour SGR either.
+    # Together these are the parity gate that catches a stray emoji or hex colour the
+    # moment a screen grows one, instead of as tofu found on-device.
+    if platform.font:
+        font = FONTS[platform.font]
         for where, ansi_lines in (
             ("render_body", screen.render_body(cols)),
             ("compose_base", composed.split("\n")),
         ):
             for i, line in enumerate(ansi_lines):
-                assert "[38;2;" not in line and "[48;2;" not in line, (
-                    f"{entry.name} {where} line {i} emits truecolor SGR: {line!r}"
-                )
-                assert "[38;5;" not in line and "[48;5;" not in line, (
-                    f"{entry.name} {where} line {i} emits 256-colour SGR: {line!r}"
-                )
-                strays = {ch for ch in line if ord(ch) >= 0x20 and ord(ch) not in FONT_CODEPOINTS}
+                if not platform.truecolor:
+                    assert "[38;2;" not in line and "[48;2;" not in line, (
+                        f"{entry.name} {where} line {i} emits truecolor SGR: {line!r}"
+                    )
+                    assert "[38;5;" not in line and "[48;5;" not in line, (
+                        f"{entry.name} {where} line {i} emits 256-colour SGR: {line!r}"
+                    )
+                strays = {ch for ch in line if ord(ch) >= 0x20 and ord(ch) not in font}
                 assert not strays, (
-                    f"{entry.name} {where} line {i} has characters outside the console "
-                    f"font: {sorted(strays)!r} in {line!r}"
+                    f"{entry.name} {where} line {i} has characters outside the "
+                    f"{platform.name} font: {sorted(strays)!r} in {line!r}"
                 )
 
 

@@ -161,12 +161,12 @@ def test_without_emoji_moves_one_flag_and_nothing_else() -> None:
 
     The classic Windows console has the desktop's width, colour depth, borders and
     keyboard — only the icons have to change. Every other field must survive, and
-    ``ascii_fold`` above all: folding there would strip accents from names the console
-    renders perfectly well.
+    ``font`` above all: folding to a handheld's font there would strip accents from names
+    the console renders perfectly well.
     """
     plain = without_emoji(REGULAR)
     assert plain.emoji is False
-    assert plain.ascii_fold is False
+    assert plain.font == ""
     assert plain.truecolor is True
     assert plain.readable_cols == REGULAR.readable_cols
     assert plain.footer_fkeys is REGULAR.footer_fkeys

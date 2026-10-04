@@ -1554,10 +1554,10 @@ def test_map_fkey_lane_names_its_three_destinations_and_the_zoom() -> None:
     """The map repurposes the nav keys, so its lane labels them — and offers no dead key."""
     from meshterm.ui.map_render import MapMarker
     from meshterm.ui.map_screen import MapScreen
-    from meshterm.ui.tui.fkeys import action_for
+    from meshterm.ui.tui.fkeys import PICOCALC_DECK
 
     screen = MapScreen(_StubSession(80, 24), [MapMarker("A", 45.5, -73.6)], _StubSource(), 14)
-    lane = screen.fkey_lane
+    lane = screen.picocalc_lane
 
     # PgUp/PgDn zoom here and Home reframes — the shared paging labels would all be lies,
     # and "end" is bound to nothing at all, so no jump rides the zoom rocker's Shift bank.
@@ -1569,12 +1569,21 @@ def test_map_fkey_lane_names_its_three_destinations_and_the_zoom() -> None:
         "Zoom -",
         "Zoom +",
     ]
-    assert action_for(lane, 1) == "home" and action_for(lane, 5) == "pageup"
-    assert action_for(lane, 2) == "locate" and action_for(lane, 3) == "frame"
+    assert (
+        PICOCALC_DECK.action_for(lane, 1) == "home"
+        and PICOCALC_DECK.action_for(lane, 5) == "pageup"
+    )
+    assert (
+        PICOCALC_DECK.action_for(lane, 2) == "locate"
+        and PICOCALC_DECK.action_for(lane, 3) == "frame"
+    )
     # Two slots carry a Shift half along their own axis: You + homes in on us zoomed,
     # Clear drops the find query. The other three Shift keys stay unbound.
-    assert action_for(lane, 7) == "locate_zoom" and action_for(lane, 8) == "clear_find"
-    assert all(action_for(lane, n) is None for n in (6, 9, 10))
+    assert (
+        PICOCALC_DECK.action_for(lane, 7) == "locate_zoom"
+        and PICOCALC_DECK.action_for(lane, 8) == "clear_find"
+    )
+    assert all(PICOCALC_DECK.action_for(lane, n) is None for n in (6, 9, 10))
     # Region and the zoom always act; the other two only where they'd land somewhere —
     # and each Shift half gates with its own axis (no self marker, no query typed).
     assert [pair.enabled for pair in lane] == [True, False, False, True, True]
@@ -1596,7 +1605,7 @@ def test_map_locate_recenters_on_our_own_node_at_the_current_zoom() -> None:
     zoom = screen._viewport.zoom
     screen.handle("left")  # and pan away from wherever we are
 
-    assert screen.fkey_lane[1].enabled is True  # we're on the map, so You can act
+    assert screen.picocalc_lane[1].enabled is True  # we're on the map, so You can act
     screen.handle("locate")
     assert screen._viewport.center_lat == pytest.approx(45.40)
     assert screen._viewport.center_lon == pytest.approx(-73.50)
@@ -1607,7 +1616,7 @@ def test_map_locate_recenters_on_our_own_node_at_the_current_zoom() -> None:
     away.render_body(80)
     before = away._viewport
     away.handle("locate")
-    assert away.fkey_lane[1].enabled is False and away._viewport is before
+    assert away.picocalc_lane[1].enabled is False and away._viewport is before
 
 
 def test_map_echoes_the_find_query_in_the_body_only_where_the_footer_is_gone() -> None:
@@ -1691,18 +1700,18 @@ def test_map_frame_chip_lights_only_with_matches_to_frame() -> None:
     screen.render_body(80)
     before = screen._viewport
     screen.handle("frame")  # no query typed: nothing to frame, so nothing moves
-    assert screen.fkey_lane[2].enabled is False and screen._viewport is before
+    assert screen.picocalc_lane[2].enabled is False and screen._viewport is before
 
     for ch in "ali":
         screen.handle("text", ch)
-    assert screen.fkey_lane[2].enabled is True
+    assert screen.picocalc_lane[2].enabled is True
     screen.handle("frame")
     assert screen._viewport.center_lat == pytest.approx(45.40)
 
     # A query nothing matches has no extent either — the chip goes back to dim.
     for ch in "zzz":
         screen.handle("text", ch)
-    assert screen._matches() == [] and screen.fkey_lane[2].enabled is False
+    assert screen._matches() == [] and screen.picocalc_lane[2].enabled is False
 
 
 def test_map_screen_find_filters_frames_and_clears() -> None:

@@ -144,5 +144,6 @@ def test_the_quit_confirm_keeps_the_chip_that_asked(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(menu, "_can_unpair", no_bond)
     assert asyncio.run(menu._confirm_quit(SimpleNamespace(), Session())) is False
     assert asked["lane"][2].label == "Quit!"
-    assert fkeys.action_for(asked["lane"], 3) == "quit"
+    assert fkeys.PICOCALC_DECK.action_for(asked["lane"], 3) == "quit"  # F3
+    assert fkeys.CARDPUTER_DECK.action_for(asked["lane"], 6) == "quit"  # Fn+6, its middle chip
     assert [slot for i, slot in enumerate(asked["lane"]) if i != 2] == [None] * 4

@@ -75,6 +75,7 @@ from .widgets import (
     revisit_note,
     route_graph_style,
     scope_text,
+    short_frame,
 )
 
 if TYPE_CHECKING:
@@ -216,7 +217,7 @@ class MessagePathsScreen(Screen):
         return " · ".join(parts)
 
     @property
-    def fkey_lane(self):
+    def picocalc_lane(self):
         """The shared pager, dimmed while every arrival is already on screen.
 
         Both banks move the *selection* here — the pager by a windowful, the jumps to the
@@ -326,20 +327,25 @@ class MessagePathsScreen(Screen):
         # No blank line above the graph: its canvas already opens with air over the
         # topmost lane, so a spacer here would read as two rows of margin.
         revisit = self._revisit_line(width)
-        # The fan's own trailing chrome (caption, node-type key, the revisit note) plus the
-        # blank that sets the list apart — all struck from the budget before the ceiling is.
-        chrome = 2 + len(revisit) + 1
-        room = viewport - len(lines) - chrome - min(sum(heights), _LIST_MIN_LINES)
-        graph = self._graph_lines(width, max(_GRAPH_MIN_ROWS, min(_GRAPH_MAX_ROWS, room)))
-        if graph:
-            lines.extend(graph)
+        # The fan's caption and node-type key, which a short frame leaves out: the marks
+        # mean one thing app-wide, and the rows go to the list (see widgets.short_frame).
+        key: list[str] = []
+        if not short_frame(viewport):
             far = "you" if not self._destination else self._destination
             caption = Text(
                 f"origin → {far} · white = selected path · labels = hash byte",
                 style="faint",
             )
-            lines.append(render_to_ansi(caption, width, no_wrap=True))
-            lines.extend(render_lines(node_type_legend(width=width), width, no_wrap=True))
+            key.append(render_to_ansi(caption, width, no_wrap=True))
+            key.extend(render_lines(node_type_legend(width=width), width, no_wrap=True))
+        # The fan's own trailing chrome (that key, the revisit note) plus the blank that
+        # sets the list apart — all struck from the budget before the ceiling is.
+        chrome = len(key) + len(revisit) + 1
+        room = viewport - len(lines) - chrome - min(sum(heights), _LIST_MIN_LINES)
+        graph = self._graph_lines(width, max(_GRAPH_MIN_ROWS, min(_GRAPH_MAX_ROWS, room)))
+        if graph:
+            lines.extend(graph)
+            lines.extend(key)
             lines.extend(revisit)
         lines.append("")
 

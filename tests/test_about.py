@@ -201,12 +201,12 @@ def test_the_console_lane_claims_the_section_step_only_while_the_page_scrolls() 
     try:
         screen = AboutPage("About MeshTerm", about_meshterm())
         screen.note_metrics(12, 40)  # the whole page fits
-        assert [pair.label for pair in screen.fkey_lane[:2]] == ["Sect ↑", "Sect ↓"]
-        assert not any(pair.enabled for pair in screen.fkey_lane[:2])
+        assert [pair.label for pair in screen.picocalc_lane[:2]] == ["Sect ↑", "Sect ↓"]
+        assert not any(pair.enabled for pair in screen.picocalc_lane[:2])
 
         screen.note_metrics(60, 20)  # taller than the viewport
-        assert all(pair.enabled for pair in screen.fkey_lane[:2])
-        assert [pair.action for pair in screen.fkey_lane[:2]] == [
+        assert all(pair.enabled for pair in screen.picocalc_lane[:2])
+        assert [pair.action for pair in screen.picocalc_lane[:2]] == [
             "ctrl_pageup",
             "ctrl_pagedown",
         ]

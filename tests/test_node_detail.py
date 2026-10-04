@@ -864,6 +864,90 @@ def test_node_detail_routes_stage_spends_the_caption_and_top_air_on_the_fan() ->
     assert len(pico) == len(drawn) + 2
 
 
+def _mark() -> Text:
+    mark = Text("▲ ", style="type.repeater")
+    mark.append("Hub", style="#ff8800")
+    return mark
+
+
+def _busy_routes() -> _RoutesView:
+    """Four routes over a shared relay: a fan the row ceiling, not its own height, sizes."""
+    return _RoutesView(
+        routes=[
+            _Route(
+                draw=(h * 12, "f2" * 6),
+                spec=f"{h}{h},f2",
+                path=Text(f"via {h}{h}"),
+                context=Text(""),
+            )
+            for h in "1234"
+        ],
+        glyph_of=lambda n: ("●", "#ffffff"),
+        label_of=lambda n: n[:2],
+        label_rgb_of=lambda n: (200, 200, 200),
+    )
+
+
+def test_a_short_frame_wears_the_identity_in_the_title_bar() -> None:
+    """On the Cardputer the bar reads ``▲ Hub`` in the node's colours; the identity line goes.
+
+    The glyph stands in for the word ``Node`` and the name wears its own hue, so the line
+    under the bar that said the same would only say it twice (JP, 2026-10-04). A tall
+    frame keeps both as they were.
+    """
+    from meshterm.platforms import CARDPUTER, set_platform
+    from meshterm.ui.tui import frame
+
+    set_platform(CARDPUTER)
+    screen = _screen(mark=_mark())
+    screen.note_viewport(12)  # the Cardputer's body, under the bar and over the lane
+    body = _plain(screen.render_body(53))
+    assert screen.title == "▲ Hub"
+    assert "repeater" not in body  # the identity line is gone…
+    assert body.splitlines()[0].startswith("──┤ Info ├")  # …the tab strip leads the page
+    bar = frame._title_bar(screen, 53, False, False)
+    start = bar.plain.index("▲")
+    styles = {str(s.style) for s in bar.spans if s.start <= start < s.end}
+    assert "type.repeater" in styles
+    hub = bar.plain.index("Hub")
+    assert "#ff8800" in {str(s.style) for s in bar.spans if s.start <= hub < s.end}
+
+    tall = _screen(mark=_mark())
+    tall.note_viewport(30)
+    body = _plain(tall.render_body(53))
+    assert tall.title == "Node — Hub" and "repeater" in body
+    # Without a mark to wear, a short frame keeps its title and the identity line.
+    bare = _screen()
+    bare.note_viewport(12)
+    assert "repeater" in _plain(bare.render_body(53)) and bare.title == "Node — Hub"
+
+
+def test_a_short_frame_gives_the_route_graph_the_rows_it_freed() -> None:
+    """No identity line and no rule under the graph: both rows go to the graph.
+
+    Between the tab strip and the route list there is nothing but the fan, which takes
+    every row the list's guaranteed window leaves it.
+    """
+    from meshterm.platforms import CARDPUTER, set_platform
+
+    set_platform(CARDPUTER)
+    screen = _screen(mark=_mark(), routes=_busy_routes())
+    screen.handle("tab")  # onto Routes
+    screen.note_viewport(12)
+    lines = [_plain([line]) for line in screen.render_body(53)]
+    assert "Routes ├" in lines[0]
+    first_route = next(i for i, line in enumerate(lines) if "via 11" in line)
+    graph = lines[1:first_route]
+    assert not any(set(line.strip()) == {"─"} for line in graph)  # no rule under the fan
+    assert len(graph) == 12 - 1 - 4  # all but the strip and the list's four rows
+    assert [line.strip() for line in lines[first_route:]] == [
+        "❯ via 11 …",
+        "via 22 …",
+        "via 33 …",
+        "via 44 …",
+    ]
+
+
 def test_node_detail_screen_context_hangs_under_the_pathline() -> None:
     """The weakest/samples/tag context draws on its own line, indented under the pathline."""
     routes = _RoutesView(
@@ -1260,12 +1344,12 @@ def test_node_detail_screen_tabs_switch_the_stage() -> None:
     assert screen.consume_edge_scrub() == 2
 
     # The F-key chip names where the switch would take you, so it flips with the stage.
-    assert screen.fkey_lane[2].label == "Routes"
+    assert screen.picocalc_lane[2].label == "Routes"
     screen.handle("tab")  # switch to the Routes tab
     body = _plain(screen.render_body(72))
     assert "│  Routes  │" in body and "no route observed yet" in body
     assert screen.consume_edge_scrub() == 0  # the braille preview isn't showing now
-    assert screen.fkey_lane[2].label == "Info"
+    assert screen.picocalc_lane[2].label == "Info"
 
 
 def test_node_detail_single_tab_hides_the_switch_hint() -> None:
@@ -1274,7 +1358,7 @@ def test_node_detail_single_tab_hides_the_switch_hint() -> None:
     assert "←→ tab" not in screen.footer_hint
     assert "↑↓ move" in screen.footer_hint and screen.footer_hint.endswith("Esc back")
     # Nothing to switch to, so the lane leaves the slot empty rather than dimming it.
-    assert screen.fkey_lane[2] is None
+    assert screen.picocalc_lane[2] is None
 
 
 def test_toggling_the_lock_rewrites_the_rows_and_keeps_the_cursor_on_it() -> None:
@@ -1302,3 +1386,26 @@ def test_toggling_the_lock_rewrites_the_rows_and_keeps_the_cursor_on_it() -> Non
     screen.handle("enter")
     assert resolved == ["lock", "unlock"]
     assert [a.key for a in screen._info_actions] == ["timemachine", "unlock", "remove"]
+
+
+def test_routes_legend_steps_aside_on_a_short_frame() -> None:
+    """The node-type key is drawn under the fan, except on a short frame like the Cardputer's.
+
+    There the rows go to the graph and the route list, as under the message paths' fan.
+    """
+    view = _RoutesView(
+        routes=[_Route(draw=("3d" * 6,), spec="3d,f2", path=Text("via 3d"), context=Text(""))],
+        glyph_of=lambda n: ("▲", "#ffffff"),
+        label_of=lambda n: n[:2],
+        label_rgb_of=lambda n: (200, 200, 200),
+        legend=True,
+    )
+
+    def stage(viewport: int) -> str:
+        screen = _screen(routes=view, tabs=[_Tab("Info", "info"), _Tab("Routes", "routes")])
+        screen.handle("tab")  # onto Routes
+        screen.note_viewport(viewport)
+        return _plain(screen.render_body(53))
+
+    assert "▲ repeater" in stage(22)  # the PicoCalc's body
+    assert "▲ repeater" not in stage(11)  # the Cardputer's

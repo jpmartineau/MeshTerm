@@ -74,6 +74,7 @@ from .widgets import (
     revisit_note,
     route_graph_style,
     scope_text,
+    short_frame,
 )
 
 #: Reads a frame's scope from its raw payload — ``ctx.region_store.scope_of`` in the app:
@@ -404,7 +405,7 @@ class PacketViewer(Screen):
     grow_only = True
 
     @property
-    def fkey_lane(self):
+    def picocalc_lane(self):
         """The shared pager over the body, with the jumps renamed for what they land on.
 
         Home and End here don't reach the ends of a *body* — they reach the ends of the
@@ -710,7 +711,9 @@ class PacketViewer(Screen):
         # while the card is open (a repeater's list arriving, a name typed) names a code
         # that read as unknown a moment ago. The store memoizes the lookup, so asking it
         # every paint costs a dict hit.
-        key = (id(entry), width, age_minute, self._entry_scope(entry))
+        # …and of whether the frame is short, which sets the node-type key aside.
+        short = short_frame(self._scroll_viewport)
+        key = (id(entry), width, age_minute, self._entry_scope(entry), short)
         cached = self._body_cache.get(key)
         if cached is not None:
             self._body_cache.move_to_end(key)
@@ -726,7 +729,8 @@ class PacketViewer(Screen):
             lines.extend(graph)
             caption = Text("origin → you · labels = hash byte", style="faint")
             lines.append(render_to_ansi(caption, width, no_wrap=True))
-            lines.extend(render_lines(node_type_legend(width=width), width, no_wrap=True))
+            if not short:  # the key steps aside on a short frame (see widgets.short_frame)
+                lines.extend(render_lines(node_type_legend(width=width), width, no_wrap=True))
             if tail:
                 lines.append("")
         lines.extend(self._grid_lines(tail, width, label_w))

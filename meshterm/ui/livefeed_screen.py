@@ -265,7 +265,7 @@ class LiveFeedScreen(Screen):
     floating = False
 
     @property
-    def fkey_lane(self):
+    def picocalc_lane(self):
         """The shared lane, gated on there being packets to walk.
 
         Every nav key here moves the *cursor* over the feed rather than a scroll offset,

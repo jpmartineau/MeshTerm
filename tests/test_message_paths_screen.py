@@ -323,6 +323,7 @@ def test_an_outgoing_message_ends_on_its_recipient_not_on_us() -> None:
         source="Homestead",
         destination="Bob",
     )
+    screen.note_viewport(40)  # the frame records this before every real paint
     body = _plain(screen.render_body(72))
     assert "Hilltop-Repeater" in body
     assert body.count("Homestead") == 1, "our name belongs at one end of a send, not both"
@@ -345,6 +346,7 @@ def test_a_received_message_still_ends_on_us() -> None:
         summary="heard once",
         source="Alice",
     )
+    screen.note_viewport(40)  # the frame records this before every real paint
     body = _plain(screen.render_body(72))
     assert "Alice" in body and "Homestead" in body
     assert "origin → you" in body

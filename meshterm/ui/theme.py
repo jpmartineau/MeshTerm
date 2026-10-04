@@ -22,7 +22,7 @@ from rich.console import Console
 from rich.theme import Theme
 
 from ..platforms import Platform, on_platform
-from .fontset import FONT_CODEPOINTS
+from .fontset import FONT_CODEPOINTS, FONTS
 
 MESH_THEME = Theme(
     {
@@ -190,6 +190,14 @@ MESH_THEME = Theme(
         # only PicoCalc's footer_fkeys ever asks for them.
         "fkey.chip": "bold #ffffff on #475569",
         "fkey.chip.shift": "bold #ffffff on #16a34a",
+        # The Cardputer Zero deck's fills, taken from its own keyboard (JP, 2026-09-30):
+        # the orange-red the fn key and its F4–F8 legends are printed in, and while Shift
+        # is held, the dark blue of the Shift key in M5's product photo. The print's
+        # #ff6633 holds white text at only 2.9:1, so the chip is that colour a step darker
+        # in OKLab at the same hue and chroma (L 0.70 → 0.62, h 38°): 4.0:1, still a
+        # vermilion — chroma is in gamut all the way down, so nothing greys it to brown.
+        "fkey.chip.cardputer": "bold #ffffff on #e34b0f",
+        "fkey.chip.cardputer.shift": "bold #ffffff on #0f72bd",
         # The prose voices — what a markdown page's inline marks are drawn in (see
         # ui.markdown). Headings borrow the styles the rest of the app already heads
         # sections with (``brand``, ``accent``), so only the *body* marks need names of
@@ -385,6 +393,11 @@ MESH_THEME_16 = Theme(
         # Shift bank, white text on both.
         "fkey.chip": "bold color(15) on color(7)",
         "fkey.chip.shift": "bold color(15) on color(2)",
+        # The Cardputer deck's fills, for name parity: that panel is truecolor, so these
+        # are only its colours' nearest slots — red for the fn key's orange, blue for the
+        # Shift blue.
+        "fkey.chip.cardputer": "bold color(15) on color(1)",
+        "fkey.chip.cardputer.shift": "bold color(15) on color(4)",
         # Prose on the console. The page's body text is the default light grey (slot 7),
         # so emphasis is the one place the VT's bold-is-brightness rule *is* the design:
         # ``md.strong`` says bold on purpose and lands on white, exactly the step up the
@@ -753,11 +766,19 @@ def _glyph_compact(icon: str) -> str:
     return _GLYPH_MAP.get(icon, icon)
 
 
-# -- the render-boundary fold (PicoCalc) ----------------------------------------------
+# -- the render-boundary fold (the handhelds) ------------------------------------------
+
+#: The active platform's glyph inventory (``Platform.font``), bound in :func:`_bind`: the
+#: PicoCalc's 512-glyph console font, or what the Cardputer's console host draws.
+_FOLD_FONT: frozenset[int] = FONT_CODEPOINTS
 
 #: What may survive the fold: every font codepoint, plus the C0 controls the rendered
 #: ANSI itself is built from (ESC in its sequences, the newlines between lines).
-_FOLD_ALLOWED: frozenset[int] = FONT_CODEPOINTS.union(range(0x00, 0x20))
+_FOLD_ALLOWED: frozenset[int] = _FOLD_FONT.union(range(0x00, 0x20))
+
+#: Whether the fold also quantizes embedded truecolor/256-colour SGR to the 16 slots — a
+#: console that has no more (the PicoCalc's), never a panel the host paints in 24 bits.
+_FOLD_QUANTIZE = True
 
 #: Width-1 characters outside the font with a natural width-1 stand-in. Applied by the
 #: fold's translation table (storage is never touched). Characters *in* the font —
@@ -898,7 +919,12 @@ def _quantize_params(match: _re.Match[str]) -> str:
 
 
 def _build_fold_table() -> dict[int, str]:
-    """Compose the full translation table (see :data:`_FOLD_TABLE`)."""
+    """Compose the full translation table (see :data:`_FOLD_TABLE`).
+
+    Only for what the active font lacks: a character it draws passes as itself, so the
+    Cardputer keeps the accents, chevrons and the rest Terminus has that the PicoCalc's
+    512 glyphs don't.
+    """
     import unicodedata
 
     table: dict[int, str] = {}
@@ -907,17 +933,19 @@ def _build_fold_table() -> dict[int, str]:
     # clean single ASCII survivor. é→e, Å→A, ＃→#, ﬁ→(skipped: two chars).
     for first, last in ((0x00A1, 0x024F), (0x1E00, 0x1EFF), (0xFF01, 0xFF5E)):
         for cp in range(first, last + 1):
-            if cp in FONT_CODEPOINTS:
+            if cp in _FOLD_FONT:
                 continue
             decomposed = unicodedata.normalize("NFKD", chr(cp))
             base = "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
             if len(base) == 1 and base.isascii() and base.isprintable():
                 table[cp] = base
     for char, replacement in _FOLD_SINGLES.items():
-        table[ord(char)] = replacement
+        if ord(char) not in _FOLD_FONT:
+            table[ord(char)] = replacement
     for emoji, compact in _GLYPH_MAP.items():
-        pad = max(0, cell_len(emoji) - cell_len(compact))
-        table[ord(emoji)] = compact + " " * pad
+        if ord(emoji) not in _FOLD_FONT:
+            pad = max(0, cell_len(emoji) - cell_len(compact))
+            table[ord(emoji)] = compact + " " * pad
     return table
 
 
@@ -937,7 +965,7 @@ def _fold_to_font(text: str) -> str:
     global _FOLD_TABLE
     if _FOLD_TABLE is None:
         _FOLD_TABLE = _build_fold_table()
-    folded = _quantize_sgr(text).translate(_FOLD_TABLE)
+    folded = (_quantize_sgr(text) if _FOLD_QUANTIZE else text).translate(_FOLD_TABLE)
     if folded.isascii():
         return folded
     if all(ord(ch) in _FOLD_ALLOWED for ch in folded):
@@ -1003,10 +1031,16 @@ _STYLE_RGB: dict[str, tuple[int, int, int]] = {}
 def _bind(platform: Platform) -> None:
     """Bind the theme's platform-dependent choices (runs now and on every switch)."""
     global _ACTIVE_THEME, _node_impl, _glyph_impl, _fold_impl, _FOLD_TABLE
+    global _FOLD_FONT, _FOLD_ALLOWED, _FOLD_QUANTIZE
     _ACTIVE_THEME = MESH_THEME if platform.truecolor else MESH_THEME_16
     _node_impl = _node_style_spectrum if platform.truecolor else _node_style_quantized
     _glyph_impl = _glyph_identity if platform.emoji else _glyph_compact
-    _fold_impl = _fold_to_font if platform.ascii_fold else _no_fold
+    font = FONTS.get(platform.font)
+    if font is not None:
+        _FOLD_FONT = font
+        _FOLD_ALLOWED = font.union(range(0x00, 0x20))
+    _FOLD_QUANTIZE = not platform.truecolor
+    _fold_impl = _fold_to_font if font is not None else _no_fold
     _STYLE_RGB.clear()
     # The fold table's emoji pads are computed with cell_len at build time. Cell widths
     # can be re-measured/patched (the emoji-width calibration on the regular platform),

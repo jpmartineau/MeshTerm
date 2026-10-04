@@ -131,6 +131,7 @@ from .widgets import (
     format_ago,
     highlighted_hash,
     node_type_legend,
+    short_frame,
     tab_air,
     tab_strip,
 )
@@ -381,7 +382,7 @@ class NodeDetailScreen(Screen):
     floating = False
 
     @property
-    def fkey_lane(self):
+    def picocalc_lane(self):
         """The shared pager over the route list, plus the tab switch on F3.
 
         The strip shows *that* there are two views; nothing on screen says the key that
@@ -405,6 +406,28 @@ class NodeDetailScreen(Screen):
             lane[2] = FPair(nxt.name, "tab")
         return lane
 
+    @property
+    def title(self) -> str:  # type: ignore[override]
+        """``Node — <name>``, or on a short frame the identity mark, ``▲ <name>``.
+
+        On a short frame (the Cardputer's 14 rows, JP 2026-10-04) the title bar *is* the
+        identity: the type glyph stands in for the word ``Node`` and the name wears its own
+        hue (:meth:`bar_title`), so the identity line under the bar would only say it twice,
+        and its row goes to the stage instead (see :meth:`render_body`). Read after the paint
+        that decided it, as the frame draws the bar after the body.
+        """
+        return self._mark.plain if self._compact and self._mark is not None else self._title
+
+    @title.setter
+    def title(self, value: str) -> None:
+        self._title = value
+
+    def bar_title(self, title: str, style: str) -> Text:
+        """The identity mark keeps its glyph's type colour and the name's hue in the bar."""
+        if self._mark is not None and title == self._mark.plain:
+            return self._mark.copy()
+        return super().bar_title(title, style)
+
     def __init__(
         self,
         *,
@@ -417,12 +440,16 @@ class NodeDetailScreen(Screen):
         routes: _RoutesView | None = None,
         info_actions: list[_Action] | None = None,
         trace_action: _Action | None = None,
+        mark: Text | None = None,
     ) -> None:
         """Build the page over resolved display data.
 
         Args:
             title: The screen heading (``Node — <name>``).
             header: The identity line: type glyph, the coloured name, its type label.
+            mark: The identity as the title bar wears it on a short frame — the type glyph
+                in its type colour and the name in its own hue, ``▲ Hilltop-Repeater`` (see
+                :attr:`title`). ``None`` keeps the plain title and the identity line there.
             info_rows: ``(label, value)`` pairs for the Info tab's vitals block; each
                 renders as a muted label lane with the value hanging under itself when it
                 wraps.
@@ -441,6 +468,9 @@ class NodeDetailScreen(Screen):
         """
         super().__init__()
         self.title = title
+        self._mark = mark
+        #: Whether the last paint was on a short frame with a mark to wear (see :attr:`title`).
+        self._compact = False
         self._header = header
         self._info_rows = info_rows
         self._tabs = tabs
@@ -761,17 +791,28 @@ class NodeDetailScreen(Screen):
             self._row_index %= len(focus)
         self._cursor = None
         self._list_hidden = False
+        short = short_frame(viewport)
+        # On a short frame the title bar wears the identity (see :attr:`title`), so the
+        # identity line under it is dropped, and so is the rule under the route graph:
+        # both rows go to the graph, whose ceiling is struck from what is left.
+        self._compact = short and self._mark is not None
 
         # -- pinned chrome: the identity header, then the tab strip (a lone tab collapses
         # to one line; a multi-tab strip boxes the active tab across three). The budget
         # below is struck from ``len(lines)`` after this, so either shape sizes correctly.
         lines: list[str] = []
-        lines.extend(render_lines(self._header, width))
+        if not self._compact:
+            lines.extend(render_lines(self._header, width))
         if self._tabs:
             lines.extend([""] * tab_air())
             lines.extend(
                 render_lines(
-                    tab_strip([t.name for t in self._tabs], self._tab_index, width),
+                    tab_strip(
+                        [t.name for t in self._tabs],
+                        self._tab_index,
+                        width,
+                        compact=short,
+                    ),
                     width,
                     no_wrap=True,
                 )
@@ -798,11 +839,15 @@ class NodeDetailScreen(Screen):
                     # The bare note pays for its own air under the strip — where the
                     # platform affords the strip any air at all.
                     lines.extend([""] * tab_air())
-                budget = viewport - len(lines) - action_lines - 1  # the rule's line
+                rule = 0 if short else 1  # a short frame's graph keeps the rule's line
+                budget = viewport - len(lines) - action_lines - rule
                 lines.extend(self._routes_stage(width, budget, route_blocks))
             # The rule closes the stage, so the drawn view and the rows below it read as
-            # separate bands rather than one run-on column.
-            lines.append(render_to_ansi(Text("─" * width, style="faint"), width))
+            # separate bands rather than one run-on column. A short frame's Routes tab goes
+            # without (JP, 2026-10-04): the selected route's white line and the list's own
+            # cursor already part the two, and the row is worth more to the graph.
+            if tab.kind == "info" or not short:
+                lines.append(render_to_ansi(Text("─" * width, style="faint"), width))
 
         # -- the route list, windowed into whatever the stage left.
         if route_blocks:
@@ -840,7 +885,9 @@ class NodeDetailScreen(Screen):
 
         ``budget`` is the viewport lines left for the whole stage; the vitals rows never
         truncate — it is the preview that flexes, taking whatever they and its caption
-        leave, clamped to ``[_MAP_MIN_ROWS, _MAP_MAX_ROWS]``. Every row but the key hangs
+        leave up to ``_MAP_MAX_ROWS``, and left out altogether where that is less than
+        ``_MAP_MIN_ROWS`` (a short frame keeps its header and actions on screen instead).
+        Every row but the key hangs
         under itself when it wraps; the key holds its one line and scrolls (see
         :meth:`_key_line`), so a row count the preview sizes against can't move as a reader
         walks a long key.
@@ -859,12 +906,15 @@ class NodeDetailScreen(Screen):
                 )
             )
         if self._minimap is not None:
-            lines.append("")
             caption = 1 if self._map_caption is not None else 0
-            rows = max(_MAP_MIN_ROWS, min(_MAP_MAX_ROWS, budget - len(lines) - caption))
-            lines.extend(self._minimap.render(width, rows))
-            if self._map_caption is not None:
-                lines.extend(render_lines(self._map_caption, width, no_wrap=True))
+            room = budget - len(lines) - 1 - caption  # less the blank above it
+            # Below its floor the preview steps aside rather than push the identity header
+            # and the actions off a short frame (the Cardputer's 14 rows leave it two).
+            if room >= _MAP_MIN_ROWS:
+                lines.append("")
+                lines.extend(self._minimap.render(width, min(_MAP_MAX_ROWS, room)))
+                if self._map_caption is not None:
+                    lines.extend(render_lines(self._map_caption, width, no_wrap=True))
         return lines
 
     def _key_line(self, label: str, value: Text, width: int) -> str:
@@ -934,10 +984,13 @@ class NodeDetailScreen(Screen):
         # a multi-pass graph layout — is a pure function of the width, the row budget,
         # and which route is emphasized. One slot suffices: the key only moves on a
         # selection change or a resize, and then the previous layout is dead anyway.
-        caption_lines = (1 if _GRAPH_CAPTION else 0) + (1 if rv.legend else 0)
+        # The node-type key steps aside on a short frame, as the message paths' does: the
+        # marks mean one thing app-wide, and the rows go to the graph and the list.
+        legend = rv.legend and not short_frame(self._scroll_viewport)
+        caption_lines = (1 if _GRAPH_CAPTION else 0) + (1 if legend else 0)
         list_need = min(sum(len(block) for block in route_blocks), _LIST_MIN_LINES)
         max_rows = max(_GRAPH_MIN_ROWS, min(_PATH_MAX_ROWS, budget - caption_lines - list_need))
-        stage_key = (width, max_rows, sel)
+        stage_key = (width, max_rows, sel, legend)
         if self._stage_memo is not None and self._stage_memo[0] == stage_key:
             return self._stage_memo[1]
         # Priority is fixed by evidence order (route 0, the best-evidence route, is always the
@@ -976,7 +1029,7 @@ class NodeDetailScreen(Screen):
         else:
             while lines and not _SGR.sub("", lines[0]).strip():
                 lines.pop(0)
-        if rv.legend:
+        if legend:
             lines.extend(render_lines(node_type_legend(width=width), width, no_wrap=True))
         self._stage_memo = (stage_key, lines)
         return lines
@@ -1252,9 +1305,11 @@ async def open_node_detail(
     else:
         glyph, glyph_style = NODE_GLYPHS.get(node_type, DEFAULT_GLYPH)
         name_hue = name_style(name, key) if name else "muted"
-    header = Text()
-    header.append(f"{glyph} ", style=glyph_style)
-    header.append(name or "unknown", style=name_hue)
+    # The mark is the identity a short frame's title bar wears; the header line adds the type.
+    mark = Text()
+    mark.append(f"{glyph} ", style=glyph_style)
+    mark.append(name or "unknown", style=name_hue)
+    header = mark.copy()
     type_label = NODE_TYPE_LABELS.get(node_type) if node_type is not None else None
     if you:
         header.append("   your node", style="muted")
@@ -1467,6 +1522,7 @@ async def open_node_detail(
         routes=routes_view,
         info_actions=info_actions,
         trace_action=trace_action,
+        mark=mark,
     )
     async with session.stay(screen) as visit:
         while True:

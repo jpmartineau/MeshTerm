@@ -49,6 +49,10 @@ _SYS_INPUT = Path("/sys/class/input")
 _shift_down = False
 _thread: threading.Thread | None = None
 
+#: The session's repaint request, kept from :func:`start` even where no input device was
+#: found, so a Shift report from the console host (:func:`report_shift`) still repaints.
+_on_change: Callable[[], None] | None = None
+
 #: How long a resolved F6–F10 keycode keeps :func:`shift_down` latched ``True`` after the
 #: raw signal drops — long enough to bridge the MCU's release/re-assert flicker around a
 #: chord, short enough that letting Shift go for real still reads as released well within
@@ -73,6 +77,25 @@ def shift_down() -> bool:
     )
 
 
+def report_shift(down: bool) -> None:
+    """Set the Shift state from a source that knows it first-hand, and repaint on a change.
+
+    The console host reads the keyboard itself — the simulator's window, the device's event
+    stream — so it knows when Shift goes down before any F-key arrives, and tells the lane
+    here rather than leaving a second reader to find the same keyboard.
+    """
+    global _shift_down
+    if down == _shift_down:
+        return
+    _shift_down = down
+    callback = _on_change
+    if callback is not None:
+        try:
+            callback()
+        except Exception:  # noqa: BLE001 - a repaint hiccup must not break the host's input
+            pass
+
+
 def note_shift_bank_key() -> None:
     """Record that an F6–F10 keycode just resolved — proof Shift was physically down.
 
@@ -84,29 +107,34 @@ def note_shift_bank_key() -> None:
     _last_shift_bank_at = time.monotonic()
 
 
-def _find_keyboard() -> Path | None:
-    """The PicoCalc keyboard's event device, or ``None`` when it isn't this machine."""
+def _find_keyboard(keyboard: str) -> Path | None:
+    """The event device whose name contains ``keyboard``, or ``None`` when it isn't this machine."""
     try:
         for entry in sorted(_SYS_INPUT.glob("event*")):
             name = (entry / "device" / "name").read_text().strip().lower()
-            if "picocalc" in name:
+            if keyboard.lower() in name:
                 return Path("/dev/input") / entry.name
     except OSError:
         pass
     return None
 
 
-def start(on_change: Callable[[], None]) -> bool:
+def start(on_change: Callable[[], None], keyboard: str) -> bool:
     """Start the watcher thread if this machine has the keyboard; ``True`` if it engaged.
 
     Args:
         on_change: Called (from the watcher thread) whenever the Shift state flips —
             the session wraps this in a thread-safe repaint request.
+        keyboard: The platform's keyboard, as its input device names itself
+            (``Platform.modifier_watch``): ``picocalc`` on the PicoCalc, ``tca8418c`` on the
+            Cardputer Zero, whose driver holds Shift down in the event stream for as long
+            as its sticky Shift is armed, so a tapped Shift flips the lane as a held one does.
     """
-    global _thread
+    global _thread, _on_change
+    _on_change = on_change
     if _thread is not None:
         return True
-    device = _find_keyboard()
+    device = _find_keyboard(keyboard)
     if device is None:
         return False
     try:

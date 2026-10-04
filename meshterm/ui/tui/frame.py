@@ -264,7 +264,13 @@ def _way_out(hint: str) -> str:
     return found.group(1) if found else ""
 
 
-def _title_bar(screen: Screen, cols: int, more_above: bool, more_below: bool) -> Text:
+def _title_bar(
+    screen: Screen,
+    cols: int,
+    more_above: bool,
+    more_below: bool,
+    status: Text | None = None,
+) -> Text:
     """The borderless frame's one-row title bar: clip arrows, a centered title, the way out.
 
     The Panel border's whole vocabulary — where you are (title) and whether the body
@@ -300,19 +306,42 @@ def _title_bar(screen: Screen, cols: int, more_above: bool, more_below: bool) ->
     long title would be crowded, the atom drops to its bare key and then out
     altogether — the title is what the reader came for, and the arrows are two cells
     nothing else can spend.
+
+    Where the platform has **no header row** (the Cardputer, JP 2026-10-03), the header's
+    atoms arrive as ``status`` and are pinned to the bar's right end, after the way out:
+    ``↑↓ ── Title ──── Esc back ● 3 ⣷ 87%``. That is the top-right corner the badges and
+    battery always had, one row up, and every screen gets the header's row back. The status
+    gives way to nothing — an unread count and a dying battery are what it exists to say —
+    so the way out sheds first, as it does for a long title, and a title too long even then
+    is cut short on an ellipsis rather than pushing the status off the end of the row.
+
+    Args:
+        screen: The screen whose heading the bar carries.
+        cols: Bar width in cells.
+        more_above: Whether the body continues above the viewport.
+        more_below: Whether the body continues below it.
+        status: The header's atoms, for a platform without a header row; ``None`` (or
+            empty: nothing unread, no pack) draws the bar exactly as it is with a header.
     """
     border = "accent"
     head_span = 3  # the arrow pair, plus the space parting it from the rule
+    status = status if status is not None and status.cell_len else None
+    stat_span = status.cell_len + 1 if status else 0  # the space in front of the status
     # The short form is chosen against the bar with no Esc tail at all: the title is what
     # the reader came for, so the tail gives way to it before it gives way to the tail.
-    title = fitted_title(screen, cols - head_span - 2 - 2 * _MIN_RULE)
+    title = fitted_title(screen, cols - head_span - stat_span - 2 - 2 * _MIN_RULE)
     label_w = cell_len(title) + 2 if title else 0  # a space either side
     atom = _way_out(screen.footer_hint)
     for esc in (atom, atom.split()[0] if atom else "", ""):
         tail_span = cell_len(esc) + 1 if esc else 0  # the space in front of the tail
-        if not esc or cols - head_span - tail_span - label_w >= 2 * _MIN_RULE:
+        if not esc or cols - head_span - tail_span - stat_span - label_w >= 2 * _MIN_RULE:
             break
-    rule_span = max(0, cols - head_span - tail_span)
+    rule_span = max(0, cols - head_span - tail_span - stat_span)
+    heading = screen.bar_title(title, title_style(border)) if title else Text()
+    if status and label_w > rule_span - 2:
+        # A rule cell either side, and whatever is left for the title; the status stays.
+        heading.truncate(max(1, rule_span - 4), overflow="ellipsis")
+        label_w = heading.cell_len + 2
 
     bar = Text()
     bar.append("↑", style=border if more_above else "muted")
@@ -323,19 +352,37 @@ def _title_bar(screen: Screen, cols: int, more_above: bool, more_below: bool) ->
         right = max(1, rule_span - label_w - left)
         bar.append("─" * left, style=border)
         bar.append(" ", style=None)
-        bar.append(title, style=title_style(border))
+        bar.append_text(heading)
         bar.append(" ", style=None)
         bar.append("─" * right, style=border)
     else:
         bar.append("─" * rule_span, style=border)
     if esc:
         bar.append(" " + esc, style=hint_style(border))
+    if status:
+        bar.append(" ")
+        bar.append_text(status)
     bar.truncate(cols)
     return bar
 
 
+def header_lines(header: Text, cols: int) -> list[str]:
+    """The header's rows above the frame: its one line, or none where it has no row.
+
+    The header is a single status line, cropped to one row so a narrow terminal never wraps
+    it onto a second (which would push the panel down and misreport its height). A platform
+    without a header row (:attr:`~meshterm.platforms.Platform.header_row`) draws none here —
+    the title bar carries the header's atoms instead (see :func:`_title_bar`) — and this is
+    the one place that says so, for :func:`compose_base` and for the session sizing a body
+    against it alike.
+    """
+    if not get_platform().header_row:
+        return []
+    return render_lines(header, cols, no_wrap=True)
+
+
 def compose_base(
-    header: RenderableType,
+    header: Text,
     base: Screen,
     footer_hint: str,
     cols: int,
@@ -345,7 +392,9 @@ def compose_base(
     """Compose the full-screen ANSI view: header, the base screen's panel, and a footer.
 
     Args:
-        header: The persistent header renderable (banner + live status).
+        header: The persistent header (banner + live status) — a row of its own, or, on a
+            platform without a header row, the title bar's right end (see
+            :func:`header_lines`).
         base: The screen filling the background (the deepest non-floating layer).
         footer_hint: The active screen's key hint, shown at the very bottom.
         cols: Terminal width.
@@ -360,10 +409,8 @@ def compose_base(
     """
     global _BASE_BOX_CACHE
     platform = get_platform()
-    # The header is a single status line: crop it to one row so a narrow terminal never
-    # wraps it onto a second line (which would push the panel down and misreport its height).
-    header_lines = render_lines(header, cols, no_wrap=True)
-    header_h = len(header_lines)
+    head = header_lines(header, cols)
+    header_h = len(head)
 
     def footer_row() -> RenderableType:
         """The bottom line: the platform's F-key lane, else the muted hint string."""
@@ -407,13 +454,14 @@ def compose_base(
         base.note_viewport(viewport)
         body_lines = base.render_body(cols)
         visible, more_above, more_below = _visible_slice(base, body_lines, viewport)
-        bar = _title_bar(base, cols, more_above, more_below)
+        status = None if platform.header_row else header
+        bar = _title_bar(base, cols, more_above, more_below, status)
         body = (
             render_lines(bar, cols, no_wrap=True)
             + visible
             + render_lines(footer_row(), cols, no_wrap=True)
         )
-    lines = header_lines + body
+    lines = head + body
     # Guarantee we never exceed the terminal height (pt would otherwise clip unpredictably).
     if len(lines) > rows:
         lines = lines[:rows]
@@ -684,8 +732,11 @@ def _dialog_layout(screen: Screen, cols: int, rows: int) -> tuple[int, int, int,
     cap = min(cols - get_platform().dialog_margin, 100)
     natural = getattr(screen, "dialog_width", None)
     max_w = cap if natural is None else max(24, min(cap, screen.ratchet_width(natural)))
-    # Rows the box may spend between its borders — on body lines and breathing room alike.
-    budget = max(3, rows - 6)
+    # Rows the box may spend between its borders — on body lines and breathing room alike:
+    # the frame less the two borders and the rows it leaves to the frame around it (the
+    # header, the footer, and on a tall enough frame a row of air each side — see
+    # Platform.dialog_row_margin).
+    budget = max(3, rows - 2 - get_platform().dialog_row_margin)
     # Record the budget as the provisional viewport before the body renders, so a
     # dialog that windows a list inside itself (the path composer) can size to what
     # it may spend; the slice records the real, body-sized viewport afterwards.
@@ -861,6 +912,13 @@ def composite_float(base_rows: list[str], box: str, cols: int, rows: int) -> lis
         cols: Terminal width.
         rows: Terminal height.
 
+    A box that lands on the borderless frame's **title bar** takes the whole row: the
+    cells either side of it are blanked instead of letting the bar show through. Every
+    other row's gutter is the backdrop the box floats over, and reads as one; a bar cut by a
+    box is fragments of chrome — the base's clip arrows, the last letters of its way out,
+    and, where the bar carries the header's atoms (the Cardputer, whose tall dialogs draw
+    over the bar), the tail of a battery gauge, where a stray ``7%`` reads as a reading.
+
     Returns:
         A new list of rows with the box merged in. Rows the box doesn't reach are passed
         through untouched — the same strings, so the row diff skips them for free.
@@ -873,18 +931,27 @@ def composite_float(base_rows: list[str], box: str, cols: int, rows: int) -> lis
     for i, line in enumerate(lines):
         y = top + i
         if 0 <= y < len(out):
-            out[y] = _overlay_row(out[y], line, left, cols)
+            under = "" if y == _BAR_ROW else out[y]
+            out[y] = _overlay_row(under, line, left, cols)
     return out
+
+
+#: The row the borderless frame's title bar sits on — under the header's one line, or
+#: the top row where the platform has no header row — or ``None`` on a bordered frame,
+#: whose top rule is the panel's own and has no fragments to leave (bound in :func:`_bind`).
+_BAR_ROW: int | None = None
 
 
 @on_platform
 def _bind(platform: Platform) -> None:
     """Drop the composition memos on a platform switch — their output bakes the theme in.
 
+    Also binds where the title bar sits (:data:`_BAR_ROW`), which only the platform decides.
     Registered at module bottom so the immediate first run (see
     :func:`~meshterm.platforms.on_platform`) finds every cache already defined.
     """
-    global _BASE_BOX_CACHE, _BANNER_CACHE
+    global _BASE_BOX_CACHE, _BANNER_CACHE, _BAR_ROW
+    _BAR_ROW = None if platform.frame_border else int(platform.header_row)
     _BASE_BOX_CACHE = None
     _BANNER_CACHE = None
     _DIALOG_CACHE.clear()

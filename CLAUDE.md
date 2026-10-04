@@ -269,16 +269,19 @@ deliberately, one at a time, and say why in the code.
   and with several, one code at a time that ←→ step through, clamped. That screen's URL
   line is flanked `←`/`→`, lit toward another code and dim at an end — the one mark the
   bare frame carries beyond the code and its URL, because nothing else could say the
-  others are there.
+  others are there. On the Cardputer it is the *only* way to a link's code, as on the
+  desktop: its 14 rows have none to spare under every message that carries one, and its
+  braille code is small enough that a link and its code share the panel.
   Two codes sit inline instead: a ` ```qr ` fence in a written page, where the code is an
   illustration drawn in the prose where the fence is, and — on the PicoCalc alone
   (`Platform.url_codes`) — a chat message's URLs, each drawn as a code under the message
   at its body's indent, side by side, wrapping onto a new band when the line is full
   (`qr.qr_strip`). A picked message keeps the codes under it in view. Where the font
-  draws braille solid (`Platform.solid_braille`, the PicoCalc's built fonts) every code —
-  share screen, page fence and chat alike — is drawn in **braille**, one module a dot,
-  eight a cell (`qr._GRID`), so the contact card is 29 cells by 15 rows there and shares
-  the 53×26 panel with its URL at the standard fit.
+  draws braille solid (`Platform.solid_braille`: the PicoCalc's built fonts, the
+  Cardputer's console host, `host/font.BRAILLE`) every code — share screen, page fence
+  and chat alike — is drawn in
+  **braille**, one module a dot, eight a cell (`qr._GRID`), so the contact card is 29
+  cells by 15 rows there and shares the 53×26 panel with its URL at the standard fit.
 
 ### Written pages
 
@@ -628,9 +631,12 @@ derived sweep that runs **every** registered command twice, once plain and once 
 
 ### Platforms
 
-One codebase, two flavours: **regular** (desktop/ssh, 72 cols, truecolor, emoji) and
+One codebase, three flavours: **regular** (desktop/ssh, 72 cols, truecolor, emoji),
 **picocalc** (the PicoCalc's 53×26/53×40 framebuffer console, 16 palette slots, a
-512-glyph font, no emoji). A frozen `Platform` spec (`meshterm/platforms.py`) resolves
+512-glyph font, no emoji), and **cardputer** (M5Stack's Cardputer Zero, 53×14 in 6×12
+cells on a 320×170 panel a console host paints itself, truecolor, no emoji — being ported
+on the `cardputer-zero` branch, hardware not yet in hand, so it is chosen by flag only).
+A frozen `Platform` spec (`meshterm/platforms.py`) resolves
 once at boot; consumers bind at platform-switch time via `platforms.on_platform` — never
 branch on the platform per frame, and never `from meshterm.platforms import PLATFORM`.
 
@@ -641,6 +647,14 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   pair that appeared and vanished, half of it a blank cell, asked the reader to compare
   the row against a memory of itself; fixed furniture means the bar never changes width
   as the body scrolls either.
+- **The Cardputer has no header row** (`Platform.header_row`): the header's badges and
+  battery ride the title bar's right end, after the way out —
+  `↑↓ ── Title ──── Esc back ● 3 ⣷ 87%`, the top-right corner they always had, one row
+  up — and the wordmark is the main menu's title (`menu._menu_title`). The status never
+  gives way: the way out sheds first, then the title is cut on an ellipsis. A tall dialog
+  draws over the bar (`dialog_row_margin` 1) but never over the lane, which is the
+  dialog's own; the bar's ends either side of the box are blanked
+  (`frame.composite_float`), since a stray `7%` would read as the battery.
 - **Never emit a raw emoji or bare hex colour into picocalc output.** Icons go through
   `theme.glyph()` (the compact map); everything else is caught by the render-boundary
   fold (`theme.fold_text`, applied in `tui/render.render_to_ansi` and
@@ -692,7 +706,36 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   anything the desktop reaches by a chord or a bare letter (a list's `^PgUp/^PgDn` section
   jumps, the Time Machine's `w`, the map's `^Y`, a row's `Del`) earns a slot — otherwise
   it is undiscoverable on the device.
+- **Each handheld deals its own lane.** Everything about the lane that belongs to one
+  keyboard is a `LaneDeck` (`fkeys.PICOCALC_DECK`, `fkeys.CARDPUTER_DECK`), named by
+  `Platform.lane_deck`: which keycodes drive the slots, where the chips sit on the row, how
+  they are drawn, and which of a screen's definitions it reads. A screen defines
+  `picocalc_lane`, and `cardputer_lane` follows it until that screen overrides it (JP,
+  2026-09-30: same entries for now, Fn+L/M being an awkward reach for paging). Override
+  the per-deck property, never `fkey_lane`, which only resolves the active deck; resolve a
+  key or draw a row through the deck (`deck.action_for`, `deck.lane_text`), never by
+  assuming F1–F5. Both decks having five slots is a coincidence, not a rule. The
+  Cardputer's lane is **Fn+4…8** (F4–F8), never the bare digits, since a digit must stay a
+  digit where the app takes typing; Shift with them arrives as F16–F20 (xterm's encoding,
+  which the console host copies). Its chips are laid out exactly as the PicoCalc's — key
+  caption, 9-cell chip, 2-cell gaps — captioned F4–F8 in both banks, white on the fn key's
+  orange-red (a step darker than the print, same hue, so the white holds 4:1), and white on
+  dark blue while Shift is held.
+- **The Cardputer draws its own pixels** (`meshterm/host/`): the stock image leaves an app
+  no text console, only the framebuffer and the keyboard's event device. The console host
+  runs the ordinary TUI in-process — prompt_toolkit's app session pointed at a fixed 53×14
+  output whose bytes feed the host's own VT parser (`host/vt.py`), and a pipe the host
+  types into (`host/keys.py`, xterm's spelling, so Shift+F4–F8 parse as F16–F20) — then
+  draws the cells in Terminus 6×12 with MeshTerm's marks over it (`host/font.py`). The
+  front end is the only part that differs: the framebuffer and evdev on the device
+  (`host/device.py`, written ahead of the hardware), a Tk window on the desktop
+  (`host/sim.py`): `python -m meshterm.host --mock`, after
+  `python scripts/cardputer/fetch-terminus.py` once. Its glyph contract is
+  `fontset.CARDPUTER_CODEPOINTS`, named by `Platform.font` as the PicoCalc's is; the fold
+  derives everything from the platform's font (accents, emoji, the `?` net) and quantizes
+  colour only where `truecolor` is off.
 - `meshterm specimen` prints the whole visual language through the real funnels — the
   acceptance card on-device, a preview under `--platform picocalc` on the desktop.
-- Dev loop: `meshterm --mock --platform picocalc` in a 53×40 window; the gallery and
-  `tests/test_theme16.py` carry the contracts.
+- Dev loop: `meshterm --mock --platform picocalc` in a 53×40 window, or
+  `--platform cardputer` in a 53×14 one; the gallery and `tests/test_theme16.py` carry the
+  contracts.

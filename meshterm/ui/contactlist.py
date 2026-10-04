@@ -491,7 +491,7 @@ class ContactListScreen(SelectScreen):
     floating = False
 
     @property
-    def fkey_lane(self):
+    def picocalc_lane(self):
         """The select list's lane, with the whole sort added on F3/F8.
 
         Four columns is a short ring — walking it backwards saves at most two presses, so
@@ -510,7 +510,7 @@ class ContactListScreen(SelectScreen):
         """
         from .tui.fkeys import FPair
 
-        lane = list(super().fkey_lane)
+        lane = list(super().picocalc_lane)
         descend = self._sort.ascending  # ascending now, so the flip lands descending
         lane[2] = FPair(
             "Sort →",

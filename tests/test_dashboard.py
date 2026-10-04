@@ -534,6 +534,6 @@ def test_no_scope_view_is_offered_without_a_flood_to_narrow_to() -> None:
     """A window of direct frames only offers nothing to cycle: no hint atom, no chip."""
     screen = _scoped_screen([_flood(None, "TEXT_MSG")])
     assert "scope" not in screen.footer_hint
-    assert screen.fkey_lane[2] is None or not getattr(screen.fkey_lane[2], "label", "")
+    assert screen.picocalc_lane[2] is None or not getattr(screen.picocalc_lane[2], "label", "")
     screen.handle("text", "s")
     assert screen.title == "Dashboard — mesh overview"

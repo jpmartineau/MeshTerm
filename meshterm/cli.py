@@ -36,7 +36,7 @@ from .core.preferences import (
 from .core.selection import DeviceSelectionError
 from .persistence.logging import configure_logging, get_logger, level_from_name, log_path
 from .persistence.repository import Repository
-from .platforms import Resolution, resolve, set_platform, without_emoji
+from .platforms import Resolution, get_platform, resolve, set_platform, without_emoji
 from .tools import all_tools
 from .tools.base import Tool, ToolResult
 from .ui import renderers, script
@@ -408,6 +408,8 @@ def _offer_a_console_that_can_draw_meshterm(console: Console, prefs: Preferences
     """
     from .ui.termfont import classic_console
 
+    if get_platform().console_host:
+        return False
     if not classic_console() or prefs.get("console_setup") == "off":
         return False
     if _move_to_windows_terminal(console):

@@ -62,6 +62,7 @@ from .widgets import (
     node_type_legend,
     route_graph_style,
     self_marker,
+    short_frame,
     tab_air,
     tab_strip,
 )
@@ -306,7 +307,7 @@ class RecordScreen(Screen):
         # Each tab's composed stage above its action rows, per width — and the Area tab's
         # drawing per (width, rows) — all pure functions of the frozen record.
         self._info_cache: tuple[int, list[str]] | None = None
-        self._route_cache: tuple[int, list[str]] | None = None
+        self._route_cache: tuple[tuple[int, bool], list[str]] | None = None
         self._area_cache: tuple[tuple[int, int], list[str]] | None = None
         # The page opens at the top, reading down; the arrows drive (and follow) the action
         # cursor, while PgUp/PgDn/Home/End scroll the body free of it (see cursor_line).
@@ -332,11 +333,11 @@ class RecordScreen(Screen):
         return ()
 
     @property
-    def fkey_lane(self):
+    def picocalc_lane(self):
         """The shared pager, dimmed where nothing scrolls, plus the tab switch on F3.
 
         The chip names the tab it would take you *to*, never the one you are on — the node
-        page's rule (see :attr:`~meshterm.ui.node_detail_screen.NodeDetailScreen.fkey_lane`).
+        page's rule (see :attr:`~meshterm.ui.node_detail_screen.NodeDetailScreen.picocalc_lane`).
         The Area tab is a picture sized to the viewport, so the pager is dim there.
         """
         from .tui.fkeys import FPair, default_lane
@@ -656,7 +657,10 @@ class RecordScreen(Screen):
         # air (see widgets.tab_air) — the node page's identity header and strip.
         lines: list[str] = [render_to_ansi(self._header(), width, no_wrap=True)]
         lines.extend([""] * tab_air())
-        lines.extend(render_lines(tab_strip(self._tabs, self._tab_index, width), width))
+        strip = tab_strip(
+            self._tabs, self._tab_index, width, compact=short_frame(self._scroll_viewport)
+        )
+        lines.extend(render_lines(strip, width))
         lines.extend([""] * tab_air())
         if self._tab == _TAB_AREA:
             self._cursor = None
@@ -671,8 +675,9 @@ class RecordScreen(Screen):
                 self._info_cache = cached
         else:
             cached = self._route_cache
-            if cached is None or cached[0] != width:
-                cached = (width, self._route_lines(width))
+            short = short_frame(self._scroll_viewport)
+            if cached is None or cached[0] != (width, short):
+                cached = ((width, short), self._route_lines(width, short=short))
                 self._route_cache = cached
         lines.extend(cached[1])
 
@@ -717,13 +722,18 @@ class RecordScreen(Screen):
         lines.extend(render_to_ansi(lane, width, no_wrap=True) for lane in self._stat_lanes())
         return lines
 
-    def _route_lines(self, width: int) -> list[str]:
-        """The Route tab above its action row: THE route graph, its key, then the route line."""
+    def _route_lines(self, width: int, *, short: bool = False) -> list[str]:
+        """The Route tab above its action row: THE route graph, its key, then the route line.
+
+        On a short frame the node-type key steps aside (see :func:`~meshterm.ui.widgets.
+        short_frame`), as it does under every route graph: the rows go to the route.
+        """
         record = self._record
         lines = self._graph_lines(width)
         caption = Text("you → … → you · labels = hash byte", style="faint")
         lines.append(render_to_ansi(caption, width, no_wrap=True))
-        lines.extend(render_lines(node_type_legend(width=width), width, no_wrap=True))
+        if not short:
+            lines.extend(render_lines(node_type_legend(width=width), width, no_wrap=True))
 
         # The walk itself, on THE path widget, across the card's whole width. No ``route``
         # label lane: the line under a route graph captioned "you → … → you" is the route,

@@ -10,10 +10,9 @@ from meshterm.platforms import PICOCALC, REGULAR, set_platform
 from meshterm.ui.tui import frame
 from meshterm.ui.tui.fkeys import (
     DEFAULT_LANE,
+    PICOCALC_DECK,
     FPair,
-    action_for,
     default_lane,
-    lane_text,
     strip_lane_atoms,
 )
 from meshterm.ui.tui.screen import ScrollScreen
@@ -218,14 +217,20 @@ def test_fkey_lane_resolution_and_banks() -> None:
     lane = DEFAULT_LANE
     # F4/F5 (paging — no physical key at all) carry the pager, and each jump rides the
     # Shift half of the very pager heading for it: Home behind Page ↑, End behind Page ↓.
-    assert action_for(lane, 4) == "pagedown" and action_for(lane, 9) == "end"
-    assert action_for(lane, 5) == "pageup" and action_for(lane, 10) == "home"
+    assert (
+        PICOCALC_DECK.action_for(lane, 4) == "pagedown"
+        and PICOCALC_DECK.action_for(lane, 9) == "end"
+    )
+    assert (
+        PICOCALC_DECK.action_for(lane, 5) == "pageup"
+        and PICOCALC_DECK.action_for(lane, 10) == "home"
+    )
     # F1-F3 are free on every screen — the shared lane claims none of them.
     for number in (1, 2, 3, 6, 7, 8):
-        assert action_for(lane, number) is None
+        assert PICOCALC_DECK.action_for(lane, number) is None
     # Enter/Esc never occupy a slot — both keys are already close at hand.
-    assert "enter" not in {action_for(lane, n) for n in range(1, 11)}
-    assert "escape" not in {action_for(lane, n) for n in range(1, 11)}
+    assert "enter" not in {PICOCALC_DECK.action_for(lane, n) for n in range(1, 11)}
+    assert "escape" not in {PICOCALC_DECK.action_for(lane, n) for n in range(1, 11)}
 
 
 def test_fkey_lane_text_fits_and_flips() -> None:
@@ -234,8 +239,8 @@ def test_fkey_lane_text_fits_and_flips() -> None:
     The directional pair rises toward its outer key, and a free slot draws as a bare
     key number rather than an empty gap.
     """
-    primary = lane_text(DEFAULT_LANE)
-    shifted = lane_text(DEFAULT_LANE, shifted=True)
+    primary = PICOCALC_DECK.lane_text(DEFAULT_LANE)
+    shifted = PICOCALC_DECK.lane_text(DEFAULT_LANE, shifted=True)
     assert cell_len(primary.plain) == 53 and cell_len(shifted.plain) == 53
     # A directional pair rises to the right: down/out left, up/in right — and each
     # companion keeps its slot's end of that axis.
@@ -246,15 +251,15 @@ def test_fkey_lane_text_fits_and_flips() -> None:
         assert f"F{number}    " in primary.plain
         assert f"F{number + 5}    " in shifted.plain
     wide = [FPair("Muchtoolonglabel", "a", "Muchtoolonglabel", "b")] * 5
-    assert cell_len(lane_text(wide).plain) == 53  # clipped to the slot budget
-    assert cell_len(lane_text(wide, shifted=True).plain) == 53
+    assert cell_len(PICOCALC_DECK.lane_text(wide).plain) == 53  # clipped to the slot budget
+    assert cell_len(PICOCALC_DECK.lane_text(wide, shifted=True).plain) == 53
 
 
 def test_fkey_slot_dims_when_its_action_is_unavailable() -> None:
     """An unavailable slot keeps its label and drops its fill — it never offers a dead key."""
     lane = [FPair("Paths", "paths", "Retry", "retry", enabled=False)] + [None] * 4
-    primary = lane_text(lane)
-    shifted = lane_text(lane, shifted=True)
+    primary = PICOCALC_DECK.lane_text(lane)
+    shifted = PICOCALC_DECK.lane_text(lane, shifted=True)
 
     # The label survives: the lane still says what F1 is for, just not that it acts now.
     assert "F1 Paths" in primary.plain and _slot_style(primary, 0) == "muted"
@@ -263,7 +268,7 @@ def test_fkey_slot_dims_when_its_action_is_unavailable() -> None:
     # The row is still exactly the lane's width, dim chips and all.
     assert cell_len(primary.plain) == 53 and cell_len(shifted.plain) == 53
     # Dimming is presentational: the key still resolves, and the screen's handler no-ops.
-    assert action_for(lane, 1) == "paths"
+    assert PICOCALC_DECK.action_for(lane, 1) == "paths"
 
 
 def test_default_lane_dims_every_nav_slot_when_nothing_moves() -> None:
@@ -273,11 +278,13 @@ def test_default_lane_dims_every_nav_slot_when_nothing_moves() -> None:
 
     assert [pair.label for pair in dim if pair] == ["Page ↓", "Page ↑"]
     assert not any(pair.enabled or pair.opp_enabled for pair in dim if pair)
-    row = lane_text(dim)
+    row = PICOCALC_DECK.lane_text(dim)
     assert cell_len(row.plain) == 53 and "F4 Page ↓" in row.plain and "F5 Page ↑" in row.plain
     assert {str(span.style) for span in row.spans} == {"muted"}
     # Both banks dim together: the jump behind a dead pager is just as dead.
-    assert {str(span.style) for span in lane_text(dim, shifted=True).spans} == {"muted"}
+    assert {str(span.style) for span in PICOCALC_DECK.lane_text(dim, shifted=True).spans} == {
+        "muted"
+    }
 
 
 def test_lane_is_built_after_the_body_renders() -> None:
@@ -287,8 +294,8 @@ def test_lane_is_built_after_the_body_renders() -> None:
     seen: dict[str, bool] = {}
 
     def build() -> Text:
-        seen["nav"] = all(pair.enabled for pair in screen.fkey_lane if pair)
-        return lane_text(screen.fkey_lane)
+        seen["nav"] = all(pair.enabled for pair in screen.picocalc_lane if pair)
+        return PICOCALC_DECK.lane_text(screen.picocalc_lane)
 
     composed = frame.compose_base(Text("hdr"), screen, "hint", 53, 26, footer_lane=build)
 
@@ -300,9 +307,9 @@ def test_scroll_screen_lane_tracks_whether_its_body_overflows() -> None:
     """The result window's nav slots light only once there is something to scroll to."""
     screen = _screen()
     screen.note_metrics(4, 20)  # the whole body fits the viewport
-    assert not any(pair.enabled for pair in screen.fkey_lane if pair)
+    assert not any(pair.enabled for pair in screen.picocalc_lane if pair)
     screen.note_metrics(80, 20)  # taller than the viewport
-    assert all(pair.enabled for pair in screen.fkey_lane if pair)
+    assert all(pair.enabled for pair in screen.picocalc_lane if pair)
 
 
 def test_select_lane_promotes_the_section_jumps_only_where_there_are_sections() -> None:
@@ -312,8 +319,8 @@ def test_select_lane_promotes_the_section_jumps_only_where_there_are_sections() 
     flat = SelectScreen("Flat", [Choice("one", 1), Choice("two", 2)])
     # No headings anywhere: sections are not a thing on this list, so the slots are empty
     # rather than dim — and F1/F2 resolve to nothing at all.
-    assert flat.fkey_lane[0] is None and flat.fkey_lane[1] is None
-    assert action_for(flat.fkey_lane, 1) is None
+    assert flat.picocalc_lane[0] is None and flat.picocalc_lane[1] is None
+    assert PICOCALC_DECK.action_for(flat.picocalc_lane, 1) is None
 
     grouped = SelectScreen(
         "Grouped",
@@ -325,17 +332,20 @@ def test_select_lane_promotes_the_section_jumps_only_where_there_are_sections() 
             Choice("gamma", 3),
         ],
     )
-    lane = grouped.fkey_lane
+    lane = grouped.picocalc_lane
     assert [pair.label for pair in lane[:2]] == ["Sect ↑", "Sect ↓"]
     # A pair rises toward its outer key: on this left-edge pair, up takes F1.
-    assert action_for(lane, 1) == "ctrl_pageup" and action_for(lane, 2) == "ctrl_pagedown"
+    assert (
+        PICOCALC_DECK.action_for(lane, 1) == "ctrl_pageup"
+        and PICOCALC_DECK.action_for(lane, 2) == "ctrl_pagedown"
+    )
     assert all(pair.enabled for pair in lane[:2])
 
     # A filter that collapses the list onto one section keeps the labels and dims them:
     # the sections are still a thing here, they just have nowhere to jump right now.
     for ch in "gam":
         grouped.handle("text", ch)
-    dim = grouped.fkey_lane
+    dim = grouped.picocalc_lane
     assert [pair.label for pair in dim[:2]] == ["Sect ↑", "Sect ↓"]
     assert not any(pair.enabled for pair in dim[:2])
 
@@ -350,8 +360,8 @@ def test_dialogs_draw_no_lane_at_all() -> None:
         ConfirmScreen("Sure?"),
         ButtonDialog("Reboot the node?", ["Cancel", "Reboot"]),
     ):
-        assert list(screen.fkey_lane) == list(EMPTY_LANE)
-        row = lane_text(screen.fkey_lane)
+        assert list(screen.picocalc_lane) == list(EMPTY_LANE)
+        row = PICOCALC_DECK.lane_text(screen.picocalc_lane)
         assert cell_len(row.plain) == 53
         assert {str(span.style) for span in row.spans} == {"muted"}
 

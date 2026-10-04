@@ -229,7 +229,7 @@ class AdminMenu(SelectScreen):
         return splice_hint(base, READ_ONE_HINT) if self._readable_key() else base
 
     @property
-    def fkey_lane(self):
+    def picocalc_lane(self):
         """The list's lane with ``Read`` on F3 and ``Forget`` behind it — dim where inert.
 
         F1/F2 are this grouped list's section jumps and F4/F5 the pager; F3 is the slot a
@@ -241,7 +241,7 @@ class AdminMenu(SelectScreen):
         """
         from .tui.fkeys import FPair
 
-        lane = list(super().fkey_lane)
+        lane = list(super().picocalc_lane)
         lane[2] = FPair(
             "Read",
             "retry",

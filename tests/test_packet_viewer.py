@@ -128,16 +128,16 @@ def test_packet_viewer_lane_names_the_ends_of_the_list_not_the_body() -> None:
 
     lone = PacketViewer([old], 0, resolve=lambda h: "")
     lone.note_metrics(4, 20)  # a short body in a roomy box: nothing to page either
-    assert [pair.opp_label for pair in lone.fkey_lane[3:]] == ["Oldest", "Newest"]
-    assert not any(pair.enabled or pair.opp_enabled for pair in lone.fkey_lane[3:])
+    assert [pair.opp_label for pair in lone.picocalc_lane[3:]] == ["Oldest", "Newest"]
+    assert not any(pair.enabled or pair.opp_enabled for pair in lone.picocalc_lane[3:])
 
     # A second packet lights the jumps on their own — the pager still needs a tall body.
     pair_view = PacketViewer([newer, old], 0, resolve=lambda h: "")
     pair_view.note_metrics(4, 20)
-    assert [pair.opp_enabled for pair in pair_view.fkey_lane[3:]] == [True, True]
-    assert [pair.enabled for pair in pair_view.fkey_lane[3:]] == [False, False]
+    assert [pair.opp_enabled for pair in pair_view.picocalc_lane[3:]] == [True, True]
+    assert [pair.enabled for pair in pair_view.picocalc_lane[3:]] == [False, False]
     pair_view.note_metrics(80, 20)
-    assert [pair.enabled for pair in pair_view.fkey_lane[3:]] == [True, True]
+    assert [pair.enabled for pair in pair_view.picocalc_lane[3:]] == [True, True]
 
 
 def test_packet_viewer_follows_the_stream_off_the_top_of_a_live_list() -> None:
@@ -203,7 +203,7 @@ def test_packet_viewer_home_resumes_the_stream() -> None:
 
     lone = PacketViewer(feed[:1], 0, resolve=lambda h: "", source=lambda: feed[:1])
     lone.note_metrics(4, 20)  # a short body in a roomy box: nothing to page
-    assert [pair.opp_enabled for pair in lone.fkey_lane[3:]] == [True, True]
+    assert [pair.opp_enabled for pair in lone.picocalc_lane[3:]] == [True, True]
 
 
 def test_packet_viewer_without_a_source_stays_a_snapshot() -> None:
@@ -264,7 +264,9 @@ def test_packet_viewer_shows_full_raw_field_labels() -> None:
 def test_packet_viewer_draws_a_relayed_packets_route_graph() -> None:
     """A packet that crossed relays gets THE route graph — braille edges, caption, legend."""
     entry = PacketEntry(when=utcnow(), kind="packet", path="3d63,a1b2")
-    body = _plain(_viewer(entry).render_body(80))
+    viewer = _viewer(entry)
+    viewer.note_viewport(30)  # the frame records this before every real paint
+    body = _plain(viewer.render_body(80))
     assert "origin → you" in body  # the graph caption
     assert "★ you" in body and "▲ repeater" in body  # the node-type legend
     assert any("⠀" <= ch <= "⣿" for ch in body)  # braille edges are drawn
@@ -566,3 +568,12 @@ def test_packet_viewer_counts_one_walked_hop_in_the_singular() -> None:
         raw={"payload_typename": "TRACE", "trace_snrs": [13.25]},
     )
     assert "1 hop walked" in _plain(_viewer(entry).render_body(80))
+
+
+def test_packet_viewer_legend_steps_aside_on_a_short_frame() -> None:
+    """Under a short frame's route graph the caption stays and the node-type key goes."""
+    entry = PacketEntry(when=utcnow(), kind="packet", path="3d63,a1b2")
+    viewer = _viewer(entry)
+    viewer.note_viewport(10)  # the Cardputer's dialog budget
+    body = _plain(viewer.render_body(49))
+    assert "origin → you" in body and "▲ repeater" not in body

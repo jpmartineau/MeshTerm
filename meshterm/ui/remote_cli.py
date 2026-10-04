@@ -47,7 +47,7 @@ class RemoteCliScreen(Screen):
     floating = False
 
     @property
-    def fkey_lane(self):
+    def picocalc_lane(self):
         """The pager over the transcript, with no jumps behind it.
 
         Home and End never reach the transcript here: they fall through to the compose

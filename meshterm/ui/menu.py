@@ -168,6 +168,11 @@ def _header(ctx: AppContext, cache: dict, width: int) -> Text:
         width: The terminal width in columns; the sparkline soaks up whatever the
             fixed segments leave of it.
 
+    Where the platform has no header row (:attr:`~meshterm.platforms.Platform.header_row`,
+    the Cardputer), the same atoms ride the title bar's right end instead, so this returns
+    them alone — the badges, then the battery, a space apart, no padding and no pulse: the
+    bar places them, and the wordmark is the main menu's title there (:func:`_menu_title`).
+
     Returns:
         A Rich :class:`Text` shown at the top of every screen. The frame crops it to a
         single line (see ``frame.compose_base``), so a too-narrow terminal chops the
@@ -176,11 +181,14 @@ def _header(ctx: AppContext, cache: dict, width: int) -> Text:
     # Which items compose at all is platform data (see Platform.header_atoms): the
     # PicoCalc's 53 columns drop the version mark and the pulse, keeping device, badges
     # and battery. Read live — set_platform runs before the session, but tests swap.
-    atoms = get_platform().header_atoms
+    platform = get_platform()
+    atoms = platform.header_atoms
     # The battery gauge is pinned to the row's right edge, so reserve its width (plus a
     # leading separator) before the pulse claims the rest; a wider separator estimate for
     # the fit decision is harmless slack.
     battery = _battery_segment(ctx) if "battery" in atoms else Text()
+    if not platform.header_row:
+        return Text(" ").join(seg for seg in (*_header_segments(ctx, cache), battery) if seg)
     # The separator choice changes only the *joins*, never the segments themselves, so the
     # segments are built once and each candidate width is arithmetic: one separator per
     # segment (each is preceded by one, and a trailing one leads into the pulse). Building
@@ -271,6 +279,16 @@ def _battery_segment(ctx: AppContext) -> Text:
     return battery_cell(reading.percent, charging=reading.charging, frame=frame)
 
 
+def _wordmark() -> Text:
+    """The app's mark as the header draws it: ``MeshTerm`` in brand, its version muted."""
+    # Built per append rather than under a base style, which would blanket the version
+    # in the mark's brand.
+    mark = Text()
+    mark.append("MeshTerm", style="brand")
+    mark.append(f" v{__version__}", style="muted")
+    return mark
+
+
 def _header_segments(ctx: AppContext, cache: dict) -> list[Text]:
     """The header's fixed segments — everything left of the pulse — unjoined.
 
@@ -292,10 +310,7 @@ def _header_segments(ctx: AppContext, cache: dict) -> list[Text]:
     # passed to the constructor would instead blanket everything appended after it, layering
     # the mark's brand under the version's muted.
     if "version" in atoms:
-        mark = Text()
-        mark.append("MeshTerm", style="brand")
-        mark.append(f" v{__version__}", style="muted")
-        segments.append(mark)
+        segments.append(_wordmark())
 
     if "device" in atoms:
         device = Text()
@@ -539,6 +554,22 @@ async def _confirm_quit(ctx: AppContext, session: TuiSession) -> bool:
     return choice in ("unpair", "quit")
 
 
+#: The main menu's heading wherever a header row carries the wordmark above it.
+_MENU_PROMPT = "What would you like to do?"
+
+
+def _menu_title() -> str:
+    """The main menu's heading: the question, or the wordmark where no header row carries it.
+
+    On a platform without a header row (the Cardputer), the header's badges and battery ride
+    the title bar and its wordmark has nowhere left to go, so the root screen — the one the
+    app opens on and every ^W lands back on — wears it as its title instead (JP,
+    2026-10-03). Every other screen names what it is; the menu's question names nothing the
+    reader doesn't already know, and is the one heading worth trading.
+    """
+    return _MENU_PROMPT if get_platform().header_row else _wordmark().plain
+
+
 class _MainMenu(SelectScreen):
     """The main menu's list, on which Esc peels a typed filter and otherwise does nothing.
 
@@ -559,8 +590,13 @@ class _MainMenu(SelectScreen):
             return
         super().handle(action, data)
 
+    def bar_title(self, title: str, style: str) -> Text:
+        """The wordmark keeps the header's colours where it is the title (:func:`_menu_title`)."""
+        mark = _wordmark()
+        return mark if title == mark.plain else super().bar_title(title, style)
+
     @property
-    def fkey_lane(self):
+    def picocalc_lane(self):
         """The list's own lane, with the way out on F3: ``Quit?`` asks, ``Quit!`` doesn't.
 
         The PicoCalc has no hint line, so the lane is where the menu's way out has to be
@@ -569,7 +605,7 @@ class _MainMenu(SelectScreen):
         half, F8, leaves without asking — a two-key reach on the menu alone, for the reader
         who already decided (JP, 2026-09-29).
         """
-        lane = list(super().fkey_lane)
+        lane = list(super().picocalc_lane)
         lane[2] = FPair("Quit?", "quit", "Quit!", "quit_now")
         return lane
 
@@ -708,7 +744,7 @@ async def _menu_loop(ctx: AppContext, session: TuiSession) -> None:
     # stack while the quit dialog floats over it: the confirm is drawn as a centered box
     # on top of the still-visible menu, not as a screen that replaces it.
     menu = _MainMenu(
-        "What would you like to do?",
+        _menu_title(),
         items,
         # The one place the quit chord is named: the menu is where a reader looks for the
         # way out, and with Esc inert here the footer would otherwise name none. Everywhere

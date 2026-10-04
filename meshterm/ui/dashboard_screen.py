@@ -190,7 +190,7 @@ class DashboardScreen(Screen):
         return " · ".join([*atoms, "Esc back"])
 
     @property
-    def fkey_lane(self):
+    def picocalc_lane(self):
         """The shared lane, dimmed on the same gate the hint above uses, plus the scope cycle.
 
         The PicoCalc draws no hint line at all — the lane *is* the footer — so the rule

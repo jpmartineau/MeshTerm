@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """The platform seam: a frozen spec every consumer binds to once, at boot.
 
-MeshTerm runs two flavours from one codebase — the regular desktop terminal and the
-PicoCalc's 53-column framebuffer console — with no forked screens and no runtime layer.
+MeshTerm runs its flavours from one codebase — the regular desktop terminal, the
+PicoCalc's 53-column framebuffer console, and the Cardputer Zero's 53×14 panel — with no
+forked screens and no runtime layer.
 A :class:`Platform` is resolved once, at process start, and held in a module-level
 singleton; everything downstream (the theme, the frame compositor, the header, the
 session's width handling) reads it at *its own* construction/call time and binds its
@@ -33,7 +34,7 @@ class Platform:
     outside this module and the small set of binding points documented at each field.
 
     Attributes:
-        name: Stable identifier — ``"regular"`` or ``"picocalc"`` — used for
+        name: Stable identifier — ``"regular"``, ``"picocalc"`` or ``"cardputer"`` — used for
             ``--platform``/``MESHTERM_PLATFORM`` matching and diagnostics.
         readable_cols: The readability standard (CLAUDE.md's "screens stay readable at
             N columns") and the dual-platform gallery's test width.
@@ -63,12 +64,34 @@ class Platform:
             twelfth of the whole display, and it costs content: a packet card's reception
             row folds ``rssi`` onto a line of its own for want of two cells (JP, on-device,
             2026-08-10). Two columns a side still reads as floating and buys them back.
+        dialog_row_margin: Rows a floating dialog leaves to the frame around it — the header
+            above and the footer below, plus any blank row between them and the box. One row
+            of air above and below is what lets a box read as floating on a 24-row terminal
+            (4 in all). On the Cardputer's 14 rows every row a dialog gives up is a row it
+            can't show, its side gutters already say it floats, and there is no header row
+            above the title bar, so a tall box runs from the top row to the lane (1),
+            drawing over the bar — whose ends either side of the box are blanked rather than
+            left as fragments (see :func:`~meshterm.ui.tui.frame.composite_float`). Never
+            over the lane: a dialog's lane is the dialog's own, and the keys on it are named
+            nowhere else.
         header_atoms: Which segments compose the persistent header, in the vocabulary
             ``"version"``, ``"device"``, ``"badges"``, ``"pulse"``, ``"battery"``. Wired
             into :func:`~meshterm.ui.menu._header` in P4; unconsumed until then.
-        footer_fkeys: Whether the footer is the fixed F1–F5 hint lane (with F6–F10 as
-            their paired opposites) instead of each screen's own ``footer_hint`` string.
-            Wired in P4.
+        header_row: Whether the persistent header has a row of its own above the frame.
+            Where it doesn't (the Cardputer, JP 2026-10-03), the header's atoms ride the
+            borderless title bar's right end, after the way out — so its badges and battery
+            sit in the top-right corner they always had, one row up, and every screen gets
+            that row back — and the wordmark becomes the main menu's title (see
+            :func:`~meshterm.ui.menu._menu_title`). Only a borderless frame can fold it: the
+            bordered panel has no bar to carry it.
+        lane_deck: Which F-key lane deck the footer deals, by name (see
+            :data:`~meshterm.ui.tui.fkeys.DECKS`), or ``""`` where the footer is each
+            screen's own ``footer_hint`` string instead. A deck is everything about the lane
+            that belongs to one keyboard: which keycodes drive its slots, where its chips sit
+            on the row, how they are drawn, and which of a screen's lane definitions it reads
+            (``Screen.picocalc_lane``, ``Screen.cardputer_lane``). Each handheld names its
+            own, so one can change without the other following. :attr:`footer_fkeys` is the
+            yes/no reading of it.
         width_reclaim: Whether the session may report one extra terminal column (see
             :class:`~meshterm.ui.tui.session._WidthExtendedOutput`). Correctness-critical
             on PicoCalc's exact-width console: a phantom extra column tears the frame, so
@@ -80,8 +103,13 @@ class Platform:
             (:func:`~meshterm.ui.tui.emoji_width.install`) or the column pinning
             (:mod:`~meshterm.ui.tui.colsnap`). Once no emoji are ever drawn, every glyph on
             screen is one the console font has verified, and the stock widths are exact.
-        ascii_fold: Whether names and message bodies are NFKD-folded (accents stripped) at
-            the render boundary before display. Storage is never touched. Wired in P3.
+        font: The glyph inventory the screen is drawn in, by name (see
+            :data:`~meshterm.ui.fontset.FONTS`), or ``""`` where a terminal draws whatever
+            it is sent. A handheld's every frame is folded down to its font at the render
+            boundary (:func:`~meshterm.ui.theme.fold_text`) — an accent the font lacks
+            stripped, an emoji turned to its compact glyph, anything else still missing a
+            narrow ``?`` — so nothing the panel can't draw is ever sent to it. Storage is
+            never touched.
         truecolor: Whether the theme may use arbitrary 24-bit SGR colour. ``False`` selects
             a 16-slot palette theme instead (the console's real ceiling — no per-cell RGB),
             and quantizes the two scales that would otherwise spend a gradient — the
@@ -122,11 +150,16 @@ class Platform:
         battery: Which source feeds the header's battery gauge — ``"companion"`` (read
             from the connected MeshCore device) or ``"host"`` (the PicoCalc's own sysfs
             ``power_supply`` driver, confirmed present in P0). Wired in P5.
-        modifier_watch: Whether the optional keyboard-lib/evdev Shift-state watcher may
-            engage, flipping the displayed F-key lane live while Shift is held. An
-            experiment gated to PicoCalc only — desktop terminals have no such lane to
-            flip, and the watcher needs ``/dev/input`` access this platform is known to
-            have (the deploy user in the ``input`` group). Always optional and lazy; wired in P4.
+        console_host: Whether the screen is drawn by MeshTerm's own console host
+            (:mod:`meshterm.host`) rather than a terminal — where the app is its own
+            terminal, nothing about the one it was started from (a classic Windows console
+            to move out of, a font to offer) is its business.
+        modifier_watch: The keyboard whose Shift state the optional evdev watcher follows,
+            flipping the displayed F-key lane live while Shift is held — a case-insensitive
+            substring of the input device's name, or ``""`` to leave the watcher off.
+            Handhelds only: desktop terminals have no lane to flip, and the watcher needs
+            ``/dev/input`` access a handheld's deploy user has (the ``input`` group). Always
+            optional and lazy; wired in P4.
     """
 
     name: str
@@ -135,11 +168,13 @@ class Platform:
     frame_border: bool
     menu_icons: bool
     dialog_margin: int
+    dialog_row_margin: int
     header_atoms: tuple[str, ...]
-    footer_fkeys: bool
+    header_row: bool
+    lane_deck: str
     width_reclaim: bool
     emoji: bool
-    ascii_fold: bool
+    font: str
     truecolor: bool
     solid_braille: bool
     url_codes: bool
@@ -147,7 +182,13 @@ class Platform:
     tick_s: float
     spinner_tick_s: float
     battery: str
-    modifier_watch: bool
+    console_host: bool
+    modifier_watch: str
+
+    @property
+    def footer_fkeys(self) -> bool:
+        """Whether the footer is an F-key lane rather than each screen's hint string."""
+        return bool(self.lane_deck)
 
 
 #: Exactly today's behaviour — the desktop/ssh terminal, unchanged by this seam's arrival.
@@ -158,11 +199,13 @@ REGULAR = Platform(
     frame_border=True,
     menu_icons=True,
     dialog_margin=6,
+    dialog_row_margin=4,
     header_atoms=("version", "device", "badges", "pulse", "battery"),
-    footer_fkeys=False,
+    header_row=True,
+    lane_deck="",
     width_reclaim=True,
     emoji=True,
-    ascii_fold=False,
+    font="",
     truecolor=True,
     solid_braille=False,
     url_codes=False,
@@ -170,11 +213,12 @@ REGULAR = Platform(
     tick_s=1.0,
     spinner_tick_s=0.12,
     battery="companion",
-    modifier_watch=False,
+    console_host=False,
+    modifier_watch="",
 )
 
 #: The PicoCalc/Lyra/Calculinux framebuffer console. Field values not yet consumed by a
-#: binding point (header_atoms, ascii_fold, truecolor, effects beyond the
+#: binding point (header_atoms, font, truecolor, effects beyond the
 #: two P1 bindings, tick_s, battery, modifier_watch) are P2–P5's targets, recorded here
 #: now so the seam exists before the flavour work lands.
 PICOCALC = Platform(
@@ -184,14 +228,16 @@ PICOCALC = Platform(
     frame_border=False,
     menu_icons=False,
     dialog_margin=4,
+    dialog_row_margin=4,
     # JP's call (2026-08-01, post-P7 review): the handheld's header brands the app —
     # "MeshTerm vX" — rather than naming the device/port (on a soldered radio the port
     # never changes), and the activity pulse takes whatever room remains.
     header_atoms=("version", "badges", "pulse", "battery"),
-    footer_fkeys=True,
+    header_row=True,
+    lane_deck="picocalc",
     width_reclaim=False,
     emoji=False,
-    ascii_fold=True,
+    font="picocalc",
     truecolor=False,
     solid_braille=True,
     url_codes=True,
@@ -199,10 +245,54 @@ PICOCALC = Platform(
     tick_s=2.0,
     spinner_tick_s=0.5,
     battery="host",
-    modifier_watch=True,
+    console_host=False,
+    modifier_watch="picocalc",
 )
 
-_BY_NAME = {p.name: p for p in (REGULAR, PICOCALC)}
+#: M5Stack's Cardputer Zero: a 320×170 panel drawn in 6×12 cells (53×14), under a
+#: 46-key keyboard whose number keys 4–8 sit right below the display. Being ported on the
+#: ``cardputer-zero`` branch, hardware not yet in hand (2026-09-30), so this is chosen by
+#: ``--platform cardputer`` / ``MESHTERM_PLATFORM`` only — no device-tree auto-detection
+#: until the device reports its own model string.
+#:
+#: The same 53 columns as the PicoCalc, which is why most of its flavour carries over; the
+#: new constraint is rows. It has its own F-key lane deck (Fn+4…8, chips centred over their
+#: keys), dealing the PicoCalc's lanes for now (JP, 2026-09-30). The panel is drawn by a
+#: console host that paints RGB565 pixels itself, so it is not held to a 16-slot palette
+#: (``truecolor``). Provisional until measured on the device: the cadences, taken from the
+#: PicoCalc; ``effects`` off; and the battery, read from the companion until the host's
+#: gauge (a BQ27220) has a known ``power_supply`` name.
+CARDPUTER = Platform(
+    name="cardputer",
+    readable_cols=53,
+    readable_rows=14,
+    frame_border=False,
+    menu_icons=False,
+    dialog_margin=4,
+    dialog_row_margin=1,
+    # No header row (JP, 2026-10-03): the badges and battery ride the title bar's right
+    # end, the wordmark is the main menu's title, and the pulse, which only ever had the
+    # header's leftover cells, goes — the dashboard draws the mesh's activity in full.
+    header_atoms=("badges", "battery"),
+    header_row=False,
+    lane_deck="cardputer",
+    width_reclaim=False,
+    emoji=False,
+    font="cardputer",
+    truecolor=True,
+    # The console host draws its own braille, as the PicoCalc's built fonts do: solid
+    # tiles, no gap between dots (meshterm/host/font.py, BRAILLE).
+    solid_braille=True,
+    url_codes=False,
+    effects=False,
+    tick_s=2.0,
+    spinner_tick_s=0.5,
+    battery="companion",
+    console_host=True,
+    modifier_watch="tca8418c",
+)
+
+_BY_NAME = {p.name: p for p in (REGULAR, PICOCALC, CARDPUTER)}
 
 #: The active platform. Do not import this name directly (see the module docstring) —
 #: read it through :func:`get_platform`, and change it only through :func:`set_platform`.
@@ -369,8 +459,8 @@ def without_emoji(platform: Platform) -> Platform:
     A terminal that cannot draw emoji is not a different *flavour* — the classic Windows
     console has the desktop's width, colour depth and keyboard, and wants every other
     thing :data:`REGULAR` says. Only the one flag moves, which is what the seam's flags
-    being independent is for: ``ascii_fold`` stays off, so accents and the rest of the
-    BMP still come through.
+    being independent is for: ``font`` stays unset, so accents and the rest of the BMP
+    still come through.
 
     Args:
         platform: The resolved platform.
@@ -386,6 +476,7 @@ __all__ = [
     "Platform",
     "REGULAR",
     "PICOCALC",
+    "CARDPUTER",
     "without_emoji",
     "PLATFORM",
     "get_platform",

@@ -288,7 +288,7 @@ class SelectScreen(Screen):
     _HSCROLL_STEP = 8
 
     @property
-    def fkey_lane(self):
+    def picocalc_lane(self):
         """The shared pager, the section jumps on F1/F2, and row deletion on F3.
 
         Ctrl+PageUp/PageDown step the highlight heading by heading — and on the PicoCalc
@@ -562,7 +562,7 @@ class SelectScreen(Screen):
     def _all_section_starts(self) -> list[int]:
         """The section starts of the *unfiltered* list — whether this list has sections at all.
 
-        The F-key lane needs both questions answered separately (see :attr:`fkey_lane`):
+        The F-key lane needs both questions answered separately (see :attr:`picocalc_lane`):
         a flat list never offers a section jump, while a grouped one whose filter has
         collapsed it to one section offers it again the moment the filter is edited.
         """
@@ -1012,7 +1012,7 @@ class ReorderScreen(Screen):
     _HINT_GRABBED = "↑↓ move row · Enter drop · Esc cancel"
 
     @property
-    def fkey_lane(self):
+    def picocalc_lane(self):
         """No lane: the whole screen is ↑↓ and Enter, three keys already on the keyboard."""
         from .fkeys import EMPTY_LANE
 
