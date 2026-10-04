@@ -196,8 +196,8 @@ MESH_THEME = Theme(
         # #ff6633 holds white text at only 2.9:1, so the chip is that colour a step darker
         # in OKLab at the same hue and chroma (L 0.70 → 0.62, h 38°): 4.0:1, still a
         # vermilion — chroma is in gamut all the way down, so nothing greys it to brown.
-        "fkey.chip.cardputer": "bold #ffffff on #e34b0f",
-        "fkey.chip.cardputer.shift": "bold #ffffff on #0f72bd",
+        "fkey.chip.cardputer_zero": "bold #ffffff on #e34b0f",
+        "fkey.chip.cardputer_zero.shift": "bold #ffffff on #0f72bd",
         # The prose voices — what a markdown page's inline marks are drawn in (see
         # ui.markdown). Headings borrow the styles the rest of the app already heads
         # sections with (``brand``, ``accent``), so only the *body* marks need names of
@@ -256,8 +256,8 @@ _VT_SLOTS: tuple[tuple[int, str, str], ...] = (
 #: The custom 16-slot remap P3 originally shipped (tailwind-family RGBs programmed via
 #: ``setvtrgb``) — **archived, not installed**: JP chose the standard palette but asked
 #: to keep this in case he changes his mind. Reinstall with
-#: ``MESHTERM_CUSTOM_PALETTE=1 sh scripts/picocalc/calculinux-console-font-6x12.sh`` (whose opt-in
-#: block a test keeps byte-identical to :func:`vtrgb_lines`); MESH_THEME_16 would then
+#: ``MESHTERM_CUSTOM_PALETTE=1 sh scripts/picocalc-lyra/calculinux-console-font-6x12.sh``
+#: (whose opt-in block a test keeps byte-identical to :func:`vtrgb_lines`); MESH_THEME_16 would then
 #: want re-tuning against it (see git history at c6485c6 for the matching theme).
 _VT_SLOTS_CUSTOM: tuple[tuple[int, str, str], ...] = (
     (0, "background slate", "#0f172a"),
@@ -396,8 +396,8 @@ MESH_THEME_16 = Theme(
         # The Cardputer deck's fills, for name parity: that panel is truecolor, so these
         # are only its colours' nearest slots — red for the fn key's orange, blue for the
         # Shift blue.
-        "fkey.chip.cardputer": "bold color(15) on color(1)",
-        "fkey.chip.cardputer.shift": "bold color(15) on color(4)",
+        "fkey.chip.cardputer_zero": "bold color(15) on color(1)",
+        "fkey.chip.cardputer_zero.shift": "bold color(15) on color(4)",
         # Prose on the console. The page's body text is the default light grey (slot 7),
         # so emphasis is the one place the VT's bold-is-brightness rule *is* the design:
         # ``md.strong`` says bold on purpose and lands on white, exactly the step up the

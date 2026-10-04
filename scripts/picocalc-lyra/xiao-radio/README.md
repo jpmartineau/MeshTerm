@@ -17,13 +17,13 @@ Three steps on two machines:
 
 ```bash
 # 1. dev machine: build (needs git + PlatformIO)
-cd scripts/picocalc/xiao-radio && sh build-firmware.sh
+cd scripts/picocalc-lyra/xiao-radio && sh build-firmware.sh
 
 # 2. dev machine: flash, with the XIAO's own USB-C plugged in
 python flash.py            # double-tap reset if the touch doesn't take
 
 # 3. the Lyra, as root
-sh scripts/picocalc/xiao-radio/lyra-setup.sh          # MT_USER=meshterm by default
+sh scripts/picocalc-lyra/xiao-radio/lyra-setup.sh          # MT_USER=meshterm by default
 
 # then, as that user
 meshterm

@@ -1073,18 +1073,20 @@ async def test_chat_fkey_lane_dims_retry_and_the_nav_slots() -> None:
         return message
 
     empty = _screen(_StubSession(), send=None, resend=resend)
-    assert not any(pair.enabled for pair in empty.picocalc_lane if pair)  # nothing to walk
+    assert not any(pair.enabled for pair in empty.picocalc_lyra_lane if pair)  # nothing to walk
 
     failed = ChatMessage(text="oops", outbound=True, peer="d4e5f6a7", acked=False)
     screen = _screen(_StubSession(), send=None, messages=[failed], resend=resend)
-    assert all(pair.enabled for pair in screen.picocalc_lane[3:])  # the pager walks the pick
-    assert screen.picocalc_lane[2].opp_enabled is True  # F8 Retry: the message never acked
+    assert all(pair.enabled for pair in screen.picocalc_lyra_lane[3:])  # the pager walks the pick
+    assert screen.picocalc_lyra_lane[2].opp_enabled is True  # F8 Retry: the message never acked
 
     screen.handle("retry")
     await asyncio.sleep(0)
     assert failed.acked is True
-    assert screen.picocalc_lane[2].opp_enabled is False  # acknowledged — nothing left to retry
-    assert screen.picocalc_lane[2].opp_label == "Retry"  # dim, not gone: it belongs on this screen
+    assert screen.picocalc_lyra_lane[2].opp_enabled is False  # acknowledged — nothing left to retry
+    assert (
+        screen.picocalc_lyra_lane[2].opp_label == "Retry"
+    )  # dim, not gone: it belongs on this screen
 
 
 def test_chat_fkey_lane_speaks_the_transcript_and_drops_channel_retry() -> None:
@@ -1095,10 +1097,10 @@ def test_chat_fkey_lane_speaks_the_transcript_and_drops_channel_retry() -> None:
     # Not "Bottom"/"Top": what the Shift bank does to a conversation is come back to the
     # latest message and the compose line, or reach back to its oldest one. Relabelled in
     # place, so each jump still rides the pager heading for it.
-    assert [pair.opp_label for pair in direct.picocalc_lane[3:]] == ["Latest", "Oldest"]
-    assert [pair.opp_action for pair in direct.picocalc_lane[3:]] == ["ctrl_end", "ctrl_home"]
-    assert [pair.label for pair in direct.picocalc_lane[3:]] == ["Page ↓", "Page ↑"]
-    assert direct.picocalc_lane[2].opp_label == "Retry"
+    assert [pair.opp_label for pair in direct.picocalc_lyra_lane[3:]] == ["Latest", "Oldest"]
+    assert [pair.opp_action for pair in direct.picocalc_lyra_lane[3:]] == ["ctrl_end", "ctrl_home"]
+    assert [pair.label for pair in direct.picocalc_lyra_lane[3:]] == ["Page ↓", "Page ↑"]
+    assert direct.picocalc_lyra_lane[2].opp_label == "Retry"
 
     channel = ChatScreen(
         Conversation(label="#general", is_channel=True, channel_id="1"),
@@ -1109,8 +1111,8 @@ def test_chat_fkey_lane_speaks_the_transcript_and_drops_channel_retry() -> None:
     )
     # A channel message is never acknowledged, so retrying one isn't a thing here: the
     # slot is empty rather than dimmed, and its key resolves to nothing.
-    assert channel.picocalc_lane[2].opp_label == ""
-    assert fkeys.PICOCALC_DECK.action_for(channel.picocalc_lane, 8) is None
+    assert channel.picocalc_lyra_lane[2].opp_label == ""
+    assert fkeys.PICOCALC_LYRA_DECK.action_for(channel.picocalc_lyra_lane, 8) is None
 
 
 def test_chat_screen_up_picks_and_ctrl_end_returns_to_compose() -> None:
@@ -1311,7 +1313,7 @@ async def test_chat_paths_key_needs_a_picked_message() -> None:
     await asyncio.sleep(0)
     assert shown == []
     assert "^P" not in screen.footer_hint
-    assert screen.picocalc_lane[2].enabled is False
+    assert screen.picocalc_lyra_lane[2].enabled is False
 
     screen.handle("up")
     screen.handle("up")  # pick the older message
@@ -1321,7 +1323,7 @@ async def test_chat_paths_key_needs_a_picked_message() -> None:
     # With a pick, paths are on offer — here on Enter, since a direct chat has no reply
     # to prime (a channel's hint keeps the ^P atom beside its Enter reply).
     assert "Enter paths" in screen.footer_hint
-    assert screen.picocalc_lane[2].enabled is True
+    assert screen.picocalc_lyra_lane[2].enabled is True
 
 
 async def test_chat_direct_enter_on_a_pick_opens_paths() -> None:
@@ -1870,7 +1872,7 @@ def test_picker_marker_lane_lines_the_two_groups_up(repo: Repository) -> None:
     padded to whatever it actually measures rather than to a written-down width: a
     hard-coded pad left every channel row a cell adrift of every direct row on the PicoCalc.
     """
-    from meshterm.platforms import PICOCALC, REGULAR, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
     from meshterm.tools.chat import _lanes
 
     channel = Conversation(label="Public", is_channel=True, channel_idx=0, channel_id="c0")
@@ -1879,7 +1881,7 @@ def test_picker_marker_lane_lines_the_two_groups_up(repo: Repository) -> None:
     )
     ctx = _RowCtx(repo)
     try:
-        for platform in (REGULAR, PICOCALC):
+        for platform in (REGULAR, PICOCALC_LYRA):
             set_platform(platform)
             lanes = _lanes([channel, contact])
             rows = [_title(ctx, c, {}, _NO_KEYS, lanes).plain for c in (channel, contact)]
@@ -2293,9 +2295,14 @@ def test_chat_fkey_lane_steps_by_day_on_the_free_left_pair() -> None:
     now = utcnow()
     one_day = [ChatMessage(text="hi", peer="d4e5f6a7", created_at=now)]
     single = _screen(_StubSession(), send=None, messages=one_day)
-    assert [pair.label for pair in single.picocalc_lane[:2]] == ["Day ↑", "Day ↓"]
-    assert [pair.action for pair in single.picocalc_lane[:2]] == ["ctrl_pageup", "ctrl_pagedown"]
-    assert not any(pair.enabled for pair in single.picocalc_lane[:2])  # one day: nowhere to step
+    assert [pair.label for pair in single.picocalc_lyra_lane[:2]] == ["Day ↑", "Day ↓"]
+    assert [pair.action for pair in single.picocalc_lyra_lane[:2]] == [
+        "ctrl_pageup",
+        "ctrl_pagedown",
+    ]
+    assert not any(
+        pair.enabled for pair in single.picocalc_lyra_lane[:2]
+    )  # one day: nowhere to step
 
     spread = _screen(
         _StubSession(),
@@ -2305,11 +2312,11 @@ def test_chat_fkey_lane_steps_by_day_on_the_free_left_pair() -> None:
             ChatMessage(text="now", peer="d4e5f6a7", created_at=now),
         ],
     )
-    assert all(pair.enabled for pair in spread.picocalc_lane[:2])
+    assert all(pair.enabled for pair in spread.picocalc_lyra_lane[:2])
     # A left-hand pair rises toward F1, so stepping *back* through the transcript is the
     # outer key — the same handedness as the pager's on the right.
-    assert fkeys.PICOCALC_DECK.action_for(spread.picocalc_lane, 1) == "ctrl_pageup"
-    spread.handle(fkeys.PICOCALC_DECK.action_for(spread.picocalc_lane, 1))
+    assert fkeys.PICOCALC_LYRA_DECK.action_for(spread.picocalc_lyra_lane, 1) == "ctrl_pageup"
+    spread.handle(fkeys.PICOCALC_LYRA_DECK.action_for(spread.picocalc_lyra_lane, 1))
     assert spread._selected == 0  # jumped to the first message of the older day
 
 
@@ -2341,9 +2348,9 @@ def test_on_the_picocalc_each_url_hangs_a_code_under_its_message_side_by_side() 
     """
     import segno
 
-    from meshterm.platforms import PICOCALC, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, set_platform
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     first, second = "https://meshterm.net", "https://github.com/jpmartineau/MeshTerm"
     conv = Conversation(label="#ops", is_channel=True, channel_idx=1)
     message = ChatMessage(text=f"Alice: map at {first}, code at {second}!", is_channel=True)
@@ -2379,10 +2386,10 @@ def test_codes_that_outrun_the_line_start_a_new_band() -> None:
     """Two short links fit beside each other in the 44 cells after the indent; a third wraps."""
     import segno
 
-    from meshterm.platforms import PICOCALC, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, set_platform
     from meshterm.ui.qr import qr_strip
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     urls = [f"https://meshterm.net/{c}" for c in "abc"]
     size = segno.make(urls[0], error="m").symbol_size(border=4)[0]
     cols, height = -(-size // 2), -(-size // 4)
@@ -2395,10 +2402,10 @@ def test_codes_that_outrun_the_line_start_a_new_band() -> None:
 
 def test_a_picked_message_keeps_its_codes_in_view() -> None:
     """Walking the pick down onto a link shows its code, not just the message's first row."""
-    from meshterm.platforms import PICOCALC, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, set_platform
     from meshterm.ui.tui import frame
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     conv = Conversation(label="#ops", is_channel=True, channel_idx=1)
     messages = [ChatMessage(text=f"Alice: line {i}", is_channel=True) for i in range(12)]
     messages.insert(6, ChatMessage(text="Bob: map at https://meshterm.net", is_channel=True))
@@ -2497,8 +2504,10 @@ def test_ctrl_u_is_named_only_on_a_picked_message_with_a_link() -> None:
     linked.handle("up")
     plain.handle("up")
     assert "^U QR" in linked.footer_hint and "^U" not in plain.footer_hint
-    assert fkeys.PICOCALC_DECK.action_for(linked.picocalc_lane, 7) == "url_code"  # Shift+F2
-    assert linked.picocalc_lane[1].opp_enabled and not plain.picocalc_lane[1].opp_enabled
+    assert (
+        fkeys.PICOCALC_LYRA_DECK.action_for(linked.picocalc_lyra_lane, 7) == "url_code"
+    )  # Shift+F2
+    assert linked.picocalc_lyra_lane[1].opp_enabled and not plain.picocalc_lyra_lane[1].opp_enabled
 
     # Every pick state's hint, with a link in it, inside the 72-cell budget.
     direct = _screen(
@@ -2523,15 +2532,15 @@ def test_on_the_cardputer_a_link_takes_the_share_screen_as_on_the_desktop() -> N
     and the share screen draws the code in braille — small enough that a link and its
     code share the 53x14 panel, URL under the code, nothing a page down.
     """
-    from meshterm.platforms import CARDPUTER, set_platform
+    from meshterm.platforms import CARDPUTER_ZERO, set_platform
     from meshterm.ui.qr import QrScreen
 
-    set_platform(CARDPUTER)
+    set_platform(CARDPUTER_ZERO)
     url = "https://github.com/jpmartineau/MeshTerm"
     screen = _url_chat(f"the road list is at {url}")
     assert not _code_rows(_strip_ansi(screen._render_grouped(53)).splitlines())
     screen.handle("up")
-    assert fkeys.CARDPUTER_DECK.action_for(screen.cardputer_lane, 17) == "url_code"
+    assert fkeys.CARDPUTER_ZERO_DECK.action_for(screen.cardputer_zero_lane, 17) == "url_code"
 
     share = QrScreen(url, title="Links")
     share.note_viewport(14)

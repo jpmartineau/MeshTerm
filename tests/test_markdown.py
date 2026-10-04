@@ -16,7 +16,7 @@ from rich.cells import cell_len
 from rich.padding import Padding
 from rich.text import Text
 
-from meshterm.platforms import PICOCALC, REGULAR, set_platform
+from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 from meshterm.ui.fontset import FONT_CODEPOINTS
 from meshterm.ui.markdown import MarkdownDoc, render_markdown
 from meshterm.ui.tui.render import render_lines
@@ -45,7 +45,7 @@ maps and a ~~telepathic~~ courier queue over the top.
 > Nothing here transmits without being asked.
 
 ```
-meshterm --mock --platform picocalc
+meshterm --mock --platform picocalc-lyra
 ```
 
 | Platform | Cols | Colours |
@@ -300,14 +300,14 @@ def test_every_construct_survives_the_picocalc() -> None:
     every construct a page *could* grow, so a table or a code fence added to one of them
     is a known quantity rather than tofu found on-device.
     """
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     try:
-        rendered = render_lines(render_markdown(KITCHEN_SINK), PICOCALC.readable_cols)
+        rendered = render_lines(render_markdown(KITCHEN_SINK), PICOCALC_LYRA.readable_cols)
     finally:
         set_platform(REGULAR)
 
     for index, line in enumerate(rendered):
-        assert cell_len(plain(line)) <= PICOCALC.readable_cols, (index, line)
+        assert cell_len(plain(line)) <= PICOCALC_LYRA.readable_cols, (index, line)
         assert "[38;2;" not in line and "[38;5;" not in line, (index, line)
         strays = {ch for ch in plain(line) if ord(ch) >= 0x20 and ord(ch) not in FONT_CODEPOINTS}
         assert not strays, (index, sorted(strays), line)

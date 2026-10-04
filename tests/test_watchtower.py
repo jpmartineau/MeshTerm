@@ -345,7 +345,7 @@ def test_watchtower_actions_start_every_label_in_the_same_cell() -> None:
     from rich.cells import cell_len
 
     from meshterm.core.watch_store import Alert
-    from meshterm.platforms import PICOCALC, REGULAR, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
     from meshterm.ui.watchtower_screen import _ACK_ALL, _CLEAR, _TOGGLE_NEW, _WATCH, _menu_items
 
     assert {cell_len("✓"), cell_len("⭐")} == {1, 2}, "a list of one icon width proves nothing"
@@ -361,7 +361,7 @@ def test_watchtower_actions_start_every_label_in_the_same_cell() -> None:
     }
     assert set(_word_starts(_menu_items(alerts, {}, True), words).values()) == {3}
     try:
-        set_platform(PICOCALC)
+        set_platform(PICOCALC_LYRA)
         assert set(_word_starts(_menu_items(alerts, {}, True), words).values()) == {0}
     finally:
         set_platform(REGULAR)
@@ -375,14 +375,14 @@ def test_node_rules_start_every_label_and_value_in_the_same_cell() -> None:
     here too: whatever the icon column measures, the values stay in one column.
     """
     from meshterm.core.watch_store import WatchedNode
-    from meshterm.platforms import PICOCALC, REGULAR, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
     from meshterm.ui.watchtower_screen import _rule_items
 
     entry = WatchedNode(key="a1" * 6, name="Roof", silence_hours=12, snr_watch=True)
     words = {"silence": "Silence", "snr": "SNR", "unwatch": "Stop"}
     values = {"silence": "after 12 h", "snr": "on"}
     try:
-        for platform, start in ((REGULAR, 3), (PICOCALC, 0)):
+        for platform, start in ((REGULAR, 3), (PICOCALC_LYRA, 0)):
             set_platform(platform)
             items = _rule_items(entry)
             assert set(_word_starts(items, words).values()) == {start}

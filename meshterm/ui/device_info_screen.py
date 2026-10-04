@@ -86,7 +86,7 @@ class DeviceInfoScreen(ScrollScreen):
         return " · ".join(atoms)
 
     @property
-    def picocalc_lane(self):
+    def picocalc_lyra_lane(self):
         """The shared pager, plus the reveal on F3 — this screen's own verb slot.
 
         The chip is the only place the PicoCalc can learn the key exists, and it names the

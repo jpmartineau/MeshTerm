@@ -344,9 +344,9 @@ def test_menu_rows_line_up_mixed_icon_widths_without_being_told() -> None:
 
 def test_align_icons_pads_nothing_where_the_platform_draws_no_icons() -> None:
     """No icon lane: the icons go, and no padding is left standing in their place."""
-    from meshterm.platforms import PICOCALC, REGULAR, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     try:
         labels = align_icons([f"{_NARROW} Archive contacts…", f"{_WIDE} View archived"])
         assert [_plain(label) for label in labels] == ["Archive contacts…", "View archived"]
@@ -390,9 +390,9 @@ def test_an_iconless_platform_collapses_the_column_and_keeps_the_tint(
     A destructive row announces itself by its red mark; drop the mark and the claim has to
     land somewhere, or a delete reads like any other action.
     """
-    from meshterm.platforms import PICOCALC, REGULAR, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     try:
         assert icon_lane((_NARROW, _WIDE)) == 0
         assert icon_mark(_NARROW, "err", 0).plain == ""

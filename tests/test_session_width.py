@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 from prompt_toolkit.data_structures import Size
 
-from meshterm.platforms import PICOCALC, REGULAR, set_platform
+from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 from meshterm.ui.tui.session import TuiSession, _WidthExtendedOutput
 
 
@@ -71,18 +71,18 @@ def test_session_pins_the_real_terminal_inside_the_width_extension(monkeypatch) 
 
 
 def test_session_leaves_the_bare_terminal_on_picocalc(monkeypatch) -> None:
-    """PICOCALC's exact-width console → no reclaim: a phantom column would tear the frame."""
+    """PICOCALC_LYRA's exact-width console → no reclaim: a phantom column would tear the frame."""
     monkeypatch.delenv("MESHTERM_FULL_WIDTH", raising=False)
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     assert TuiSession()._resolve_output() is None
 
 
 def test_env_override_forces_reclaim_on_despite_picocalc(monkeypatch) -> None:
-    """``MESHTERM_FULL_WIDTH=1`` wins over PICOCALC's off-by-default."""
+    """``MESHTERM_FULL_WIDTH=1`` wins over PICOCALC_LYRA's off-by-default."""
     fake = SimpleNamespace(get_size=lambda: Size(rows=30, columns=100))
     monkeypatch.setattr("prompt_toolkit.output.defaults.create_output", lambda: fake)
     monkeypatch.setenv("MESHTERM_FULL_WIDTH", "1")
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     assert isinstance(TuiSession()._resolve_output(), _WidthExtendedOutput)
 
 

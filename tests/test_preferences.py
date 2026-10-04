@@ -681,10 +681,10 @@ def test_a_newly_watched_node_takes_the_preferred_silence_rule(tmp_path: Path) -
 
 def test_the_last_column_preference_overrules_the_platform() -> None:
     """``full_width`` steps aside on ``auto`` and decides otherwise (env still wins over both)."""
-    from meshterm.platforms import PICOCALC, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, set_platform
     from meshterm.ui.tui.session import _reclaim_last_column
 
-    set_platform(PICOCALC)  # a platform that defaults the reclaim off
+    set_platform(PICOCALC_LYRA)  # a platform that defaults the reclaim off
     prefs = Preferences()
     install(prefs)
     try:

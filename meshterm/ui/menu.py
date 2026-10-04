@@ -596,7 +596,7 @@ class _MainMenu(SelectScreen):
         return mark if title == mark.plain else super().bar_title(title, style)
 
     @property
-    def picocalc_lane(self):
+    def picocalc_lyra_lane(self):
         """The list's own lane, with the way out on F3: ``Quit?`` asks, ``Quit!`` doesn't.
 
         The PicoCalc has no hint line, so the lane is where the menu's way out has to be
@@ -605,7 +605,7 @@ class _MainMenu(SelectScreen):
         half, F8, leaves without asking — a two-key reach on the menu alone, for the reader
         who already decided (JP, 2026-09-29).
         """
-        lane = list(super().picocalc_lane)
+        lane = list(super().picocalc_lyra_lane)
         lane[2] = FPair("Quit?", "quit", "Quit!", "quit_now")
         return lane
 

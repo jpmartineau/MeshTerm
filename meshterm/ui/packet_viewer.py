@@ -245,7 +245,7 @@ class PacketEntry:
 def kind_icon(kind: str) -> str:
     """The icon for a packet class (a fallback for unknown classes).
 
-    Returns the emoji on REGULAR; on PICOCALC, the emoji is mapped to a single-cell
+    Returns the emoji on REGULAR; on PICOCALC_LYRA, the emoji is mapped to a single-cell
     glyph from the 512-glyph font via :func:`~meshterm.ui.theme.glyph`.
     """
     emoji = KIND_ICONS.get(kind, DEFAULT_ICON)
@@ -278,7 +278,7 @@ def class_marks(entry: PacketEntry) -> tuple[str, str]:
     frame arrived in, not the thing it carries; a typename this table has never heard of
     keeps the fallback mark and shows the raw typename; a class-less frame stays a plain
     ``packet``. Every other kind is its own class (``advert``, ``message``, …) under the
-    shared :data:`KIND_ICONS` glyph. The emoji are mapped to single glyphs on PICOCALC.
+    shared :data:`KIND_ICONS` glyph. The emoji are mapped to single glyphs on PICOCALC_LYRA.
     """
     if entry.kind == "packet":
         raw = entry.raw if isinstance(entry.raw, dict) else {}
@@ -405,7 +405,7 @@ class PacketViewer(Screen):
     grow_only = True
 
     @property
-    def picocalc_lane(self):
+    def picocalc_lyra_lane(self):
         """The shared pager over the body, with the jumps renamed for what they land on.
 
         Home and End here don't reach the ends of a *body* — they reach the ends of the

@@ -16,7 +16,7 @@ from meshterm.host.raster import PANEL_H, PANEL_W, Raster, rgb565
 from meshterm.host.run import host_output, run
 from meshterm.host.sim import key_from_tk
 from meshterm.host.vt import BOLD, REVERSE, UNDERLINE, Terminal
-from meshterm.ui.tui.fkeys import CARDPUTER_DECK
+from meshterm.ui.tui.fkeys import CARDPUTER_ZERO_DECK
 
 _BDF = """STARTFONT 2.1
 FONT test
@@ -127,8 +127,8 @@ def test_the_lane_keys_reach_prompt_toolkit_as_the_deck_expects() -> None:
     """Fn+4..8 parse as F4-F8 and Shift with them as F16-F20, the Cardputer deck's banks."""
     plain = [_parsed(encode(Key(name=f"f{n}")))[0] for n in range(4, 9)]
     shifted = [_parsed(encode(Key(name=f"f{n}", shift=True)))[0] for n in range(4, 9)]
-    assert [k.value for k in plain] == [f"f{n}" for n in CARDPUTER_DECK.keys]
-    assert [k.value for k in shifted] == [f"f{n}" for n in CARDPUTER_DECK.shift_keys]
+    assert [k.value for k in plain] == [f"f{n}" for n in CARDPUTER_ZERO_DECK.keys]
+    assert [k.value for k in shifted] == [f"f{n}" for n in CARDPUTER_ZERO_DECK.shift_keys]
 
 
 def test_modified_navigation_and_control_letters() -> None:
@@ -268,14 +268,14 @@ def test_meshterm_runs_inside_the_host(monkeypatch) -> None:
 
 
 def test_the_cardputer_inventory_is_what_the_host_draws() -> None:
-    """``fontset.CARDPUTER_CODEPOINTS`` holds every mark, and the installed font exactly."""
+    """``fontset.CARDPUTER_ZERO_CODEPOINTS`` holds every mark, and the installed font exactly."""
     from meshterm.host.font import ALIASES, BRAILLE, font_dir, load_bdf
-    from meshterm.ui.fontset import CARDPUTER_CODEPOINTS
+    from meshterm.ui.fontset import CARDPUTER_ZERO_CODEPOINTS
 
     ours = set(MARKS) | set(ALIASES) | set(BRAILLE)
-    assert ours <= CARDPUTER_CODEPOINTS
+    assert ours <= CARDPUTER_ZERO_CODEPOINTS
     installed = font_dir() / "ter-u12n.bdf"
     if not installed.is_file():
         return  # no Terminus on this machine (CI): the marks are the part that is ours
     drawn = {cp for cp in load_bdf(installed) if cp >= 0x20} | ours
-    assert drawn == CARDPUTER_CODEPOINTS
+    assert drawn == CARDPUTER_ZERO_CODEPOINTS

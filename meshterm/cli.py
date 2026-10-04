@@ -196,7 +196,10 @@ def main_callback(
     platform: str | None = typer.Option(
         None,
         "--platform",
-        help="Force the UI platform (regular|picocalc) instead of auto-detecting it",
+        help=(
+            "Force the UI platform (regular|picocalc-lyra|cardputer-zero) "
+            "instead of auto-detecting it"
+        ),
     ),
 ) -> None:
     """Build the application context and dispatch to the menu or a subcommand.
@@ -664,7 +667,7 @@ def specimen_command() -> None:
 
     Every mark, icon funnel, colour scale and fold on one card, drawn through the same
     theme and glyph machinery the TUI uses — so on the PicoCalc console it is the
-    font/palette acceptance screen, and with ``--platform picocalc`` on a desktop it
+    font/palette acceptance screen, and with ``--platform picocalc-lyra`` on a desktop it
     previews that flavour. See :mod:`meshterm.ui.specimen`.
 
     The one command that keeps its colour, and it builds its own themed console to do it

@@ -238,7 +238,7 @@ def _reclaim_last_column() -> bool:
     This is a gate, not a certainty: it is *correct* only when the probe under-reports. On a
     terminal whose width probe is already right, the extra column falls off the real screen and
     the frame would wrap and tear — which is exactly PicoCalc's exact-width console, so
-    :data:`~meshterm.platforms.PICOCALC` defaults this off.
+    :data:`~meshterm.platforms.PICOCALC_LYRA` defaults this off.
 
     Three sources, in confidence order, because the person at the keyboard can see the
     column and the platform can only guess at it: ``MESHTERM_FULL_WIDTH=0``/``=1`` for a

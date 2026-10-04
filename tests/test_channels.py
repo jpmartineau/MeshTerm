@@ -316,7 +316,7 @@ def test_where_braille_is_solid_every_code_is_drawn_in_it() -> None:
     """
     import segno
 
-    from meshterm.platforms import PICOCALC, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, set_platform
 
     def is_braille(text: str) -> bool:
         return any("⠀" <= ch <= "⣿" for ch in text)
@@ -325,7 +325,7 @@ def test_where_braille_is_solid_every_code_is_drawn_in_it() -> None:
     channel = "meshcore://channel/add?name=Test&secret=" + "ab" * 16
     assert not is_braille(fit_qr(url, 53, 22).plain) and not is_braille(qr_text(channel).plain)
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     assert is_braille(qr_text(channel).plain) and "█" not in qr_text(channel).plain
     screen = QrScreen(url, title="Share YUL-Cartierville")
     screen.note_viewport(26)
@@ -844,7 +844,7 @@ async def test_the_detail_summary_sheds_atoms_rather_than_wrapping(ctx: AppConte
     this screen from — never the channel's own identity.
     """
     from meshterm.core.models import ChatMessage
-    from meshterm.platforms import PICOCALC, REGULAR, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
     from meshterm.ui.channels import _detail_summary, _LiveStats
 
     device = await ctx.device()
@@ -857,7 +857,7 @@ async def test_the_detail_summary_sheds_atoms_rather_than_wrapping(ctx: AppConte
     ctx.chat._unread[slot.conversation.key] = 2
 
     try:
-        for platform in (REGULAR, PICOCALC):
+        for platform in (REGULAR, PICOCALC_LYRA):
             set_platform(platform)
             line = _detail_summary(ctx, slot, _LiveStats(ctx))
             assert cell_len(line) <= platform.readable_cols, (platform.name, line)

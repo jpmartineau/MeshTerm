@@ -17,7 +17,7 @@ def test_spdx_headers():
     python_files = []
 
     # Collect all Python files from the required directories
-    for directory in ["meshterm", "tests", "packaging", "scripts/picocalc/xiao-radio"]:
+    for directory in ["meshterm", "tests", "packaging", "scripts/picocalc-lyra/xiao-radio"]:
         dir_path = repo_root / directory
         if dir_path.exists():
             if directory == "packaging":

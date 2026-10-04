@@ -79,7 +79,7 @@ class DiagnosticsPage(AboutPage):
         return f"{scroll}{SAVE_KEY} save · Esc back"
 
     @property
-    def picocalc_lane(self):
+    def picocalc_lyra_lane(self):
         """The About page's lane, with ``Save`` on the slot it leaves free.
 
         F1/F2 are the section pair and F4/F5 the pager, so F3 is the one free primary slot
@@ -88,7 +88,7 @@ class DiagnosticsPage(AboutPage):
         """
         from .tui.fkeys import FPair
 
-        lane = list(super().picocalc_lane)
+        lane = list(super().picocalc_lyra_lane)
         lane[2] = FPair("Save", SAVE_ACTION)
         return lane
 

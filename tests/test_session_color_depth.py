@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from prompt_toolkit.output.color_depth import ColorDepth
 
-from meshterm.platforms import PICOCALC, REGULAR, set_platform
+from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 from meshterm.ui.tui.session import _color_depth
 
 
@@ -61,7 +61,7 @@ def test_picocalc_is_never_promoted(monkeypatch) -> None:
     """A 16-slot console addresses its palette by index; RGB has nowhere to land there."""
     _auto(monkeypatch)
     monkeypatch.setenv("COLORTERM", "truecolor")
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     assert _color_depth() is None
 
 

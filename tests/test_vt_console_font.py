@@ -29,7 +29,7 @@ from meshterm.core.config import Settings
 from meshterm.core.device_store import DeviceStore
 from meshterm.core.preferences import Preferences, by_group, get_spec
 from meshterm.persistence.repository import Repository
-from meshterm.platforms import PICOCALC, REGULAR, set_platform
+from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 from meshterm.services import consolefont
 from meshterm.tools.preferences import PreferencesTool
 from meshterm.ui.theme import active_theme
@@ -53,7 +53,7 @@ class _Recorder:
 @pytest.fixture
 def device(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
     """Make the process look like MeshTerm running on the handheld's own VT."""
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     monkeypatch.setattr(os, "ttyname", lambda fd: "/dev/tty1", raising=False)
     monkeypatch.setattr(consolefont.shutil, "which", lambda name: "/usr/bin/setfont")
     recorder = _Recorder()
@@ -204,14 +204,14 @@ def test_a_failed_remember_leaves_nothing_to_restore(
 def test_the_preference_is_offered_on_the_handheld_only() -> None:
     """A row about hardware the desktop does not have is a question it cannot answer."""
     spec = get_spec("console_font")
-    assert spec.offered_on("picocalc") is True
+    assert spec.offered_on("picocalc-lyra") is True
     assert spec.offered_on("regular") is False
     # Everything else is offered everywhere; the gate is the exception, not the rule.
     gated = {s.key for _, specs in by_group() for s in specs if s.platforms is not None}
     assert gated == {"console_font"}
 
 
-@pytest.mark.parametrize("platform", [REGULAR, PICOCALC])
+@pytest.mark.parametrize("platform", [REGULAR, PICOCALC_LYRA])
 def test_the_preference_round_trips_on_every_platform(tmp_path: Path, platform: Any) -> None:
     """A file written on the handheld loads, keeps its value, and saves back on a desktop."""
     set_platform(platform)
@@ -232,7 +232,7 @@ def test_the_page_draws_the_row_on_the_handheld_and_not_on_the_desktop() -> None
     """The gate's one visible effect: a Display row that exists on one platform."""
     from meshterm.ui.preferences import _menu_items
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     _, items = _menu_items(Preferences(), {})
     assert "console_font" in [getattr(item, "value", None) for item in items]
 

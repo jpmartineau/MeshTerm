@@ -68,7 +68,7 @@ You need a copy of MeshTerm's source code (see
 the screen is drawn in:
 
 ```bash
-python scripts/cardputer/fetch-terminus.py
+python scripts/cardputer-zero/fetch-terminus.py
 ```
 
 and start the simulator:

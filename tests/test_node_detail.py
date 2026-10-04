@@ -675,7 +675,7 @@ def test_the_remove_row_is_tinted_and_keeps_its_tint_where_the_icon_lane_goes() 
     """
     import re
 
-    from meshterm.platforms import PICOCALC, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, set_platform
 
     remove = _Action("remove", "🗑", "err", "Remove contact…")
     screen = _screen(info_actions=[remove])
@@ -683,7 +683,7 @@ def test_the_remove_row_is_tinted_and_keeps_its_tint_where_the_icon_lane_goes() 
     line = screen._action_line(remove, selected=False, width=40)
     assert "🗑" in line and "Remove contact…" in _plain([line])
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     screen = _screen(info_actions=[remove])
     screen.note_viewport(30)
     folded = screen._action_line(remove, selected=False, width=40)
@@ -820,7 +820,7 @@ def test_node_detail_routes_stage_spends_the_caption_and_top_air_on_the_fan() ->
     The graph's own end padding leaves a whole empty canvas row above its topmost label; the
     stage draws one row over its ceiling and peels that row off, so the peel pays for itself.
     """
-    from meshterm.platforms import PICOCALC, REGULAR, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 
     # A fan busy enough that the row ceiling — not its own ideal height — is what sizes it,
     # so the reclaimed rows show up as lanes rather than as slack.
@@ -849,7 +849,7 @@ def test_node_detail_routes_stage_spends_the_caption_and_top_air_on_the_fan() ->
         )
         return [_plain([ln]) for ln in lines[strip_idx + 2 : rule_idx]]  # past the strip's own rule
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     pico = _stage(22)
     assert pico[0].strip(), "no blank row between the tab strip and the fan"
     assert not any("selected route" in line for line in pico), "the caption is dropped"
@@ -895,10 +895,10 @@ def test_a_short_frame_wears_the_identity_in_the_title_bar() -> None:
     under the bar that said the same would only say it twice (JP, 2026-10-04). A tall
     frame keeps both as they were.
     """
-    from meshterm.platforms import CARDPUTER, set_platform
+    from meshterm.platforms import CARDPUTER_ZERO, set_platform
     from meshterm.ui.tui import frame
 
-    set_platform(CARDPUTER)
+    set_platform(CARDPUTER_ZERO)
     screen = _screen(mark=_mark())
     screen.note_viewport(12)  # the Cardputer's body, under the bar and over the lane
     body = _plain(screen.render_body(53))
@@ -928,9 +928,9 @@ def test_a_short_frame_gives_the_route_graph_the_rows_it_freed() -> None:
     Between the tab strip and the route list there is nothing but the fan, which takes
     every row the list's guaranteed window leaves it.
     """
-    from meshterm.platforms import CARDPUTER, set_platform
+    from meshterm.platforms import CARDPUTER_ZERO, set_platform
 
-    set_platform(CARDPUTER)
+    set_platform(CARDPUTER_ZERO)
     screen = _screen(mark=_mark(), routes=_busy_routes())
     screen.handle("tab")  # onto Routes
     screen.note_viewport(12)
@@ -1344,12 +1344,12 @@ def test_node_detail_screen_tabs_switch_the_stage() -> None:
     assert screen.consume_edge_scrub() == 2
 
     # The F-key chip names where the switch would take you, so it flips with the stage.
-    assert screen.picocalc_lane[2].label == "Routes"
+    assert screen.picocalc_lyra_lane[2].label == "Routes"
     screen.handle("tab")  # switch to the Routes tab
     body = _plain(screen.render_body(72))
     assert "│  Routes  │" in body and "no route observed yet" in body
     assert screen.consume_edge_scrub() == 0  # the braille preview isn't showing now
-    assert screen.picocalc_lane[2].label == "Info"
+    assert screen.picocalc_lyra_lane[2].label == "Info"
 
 
 def test_node_detail_single_tab_hides_the_switch_hint() -> None:
@@ -1358,7 +1358,7 @@ def test_node_detail_single_tab_hides_the_switch_hint() -> None:
     assert "←→ tab" not in screen.footer_hint
     assert "↑↓ move" in screen.footer_hint and screen.footer_hint.endswith("Esc back")
     # Nothing to switch to, so the lane leaves the slot empty rather than dimming it.
-    assert screen.picocalc_lane[2] is None
+    assert screen.picocalc_lyra_lane[2] is None
 
 
 def test_toggling_the_lock_rewrites_the_rows_and_keeps_the_cursor_on_it() -> None:

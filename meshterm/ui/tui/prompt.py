@@ -248,7 +248,7 @@ class _KeylessDialog(Screen):
     modal = True
 
     @property
-    def picocalc_lane(self):
+    def picocalc_lyra_lane(self):
         """No slots: nothing on a prompt pages, jumps, or needs promoting off a chord."""
         from .fkeys import EMPTY_LANE
 
@@ -560,12 +560,12 @@ class ButtonDialog(_KeylessDialog):
         return [Text(self._prompt, style=self._prompt_style)]
 
     @property
-    def picocalc_lane(self):
+    def picocalc_lyra_lane(self):
         """The caller's lane where one was given, else a prompt's empty one.
 
         The per-deck definition, as every screen's is; the Cardputer's deck follows it.
         """
-        return self._lane if self._lane is not None else super().picocalc_lane
+        return self._lane if self._lane is not None else super().picocalc_lyra_lane
 
     @property
     def _button_row_width(self) -> int:

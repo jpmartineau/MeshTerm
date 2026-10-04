@@ -195,18 +195,18 @@ def test_the_console_lane_claims_the_section_step_only_while_the_page_scrolls() 
     never advertises a key that would do nothing (``CLAUDE.md``) — and a page you can
     see whole has no section to step to.
     """
-    from meshterm.platforms import PICOCALC, REGULAR, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     try:
         screen = AboutPage("About MeshTerm", about_meshterm())
         screen.note_metrics(12, 40)  # the whole page fits
-        assert [pair.label for pair in screen.picocalc_lane[:2]] == ["Sect ↑", "Sect ↓"]
-        assert not any(pair.enabled for pair in screen.picocalc_lane[:2])
+        assert [pair.label for pair in screen.picocalc_lyra_lane[:2]] == ["Sect ↑", "Sect ↓"]
+        assert not any(pair.enabled for pair in screen.picocalc_lyra_lane[:2])
 
         screen.note_metrics(60, 20)  # taller than the viewport
-        assert all(pair.enabled for pair in screen.picocalc_lane[:2])
-        assert [pair.action for pair in screen.picocalc_lane[:2]] == [
+        assert all(pair.enabled for pair in screen.picocalc_lyra_lane[:2])
+        assert [pair.action for pair in screen.picocalc_lyra_lane[:2]] == [
             "ctrl_pageup",
             "ctrl_pagedown",
         ]
@@ -228,12 +228,12 @@ def test_menu_rows_carry_the_icon_and_the_titles_do_not() -> None:
 
 def test_every_page_icon_has_a_picocalc_glyph() -> None:
     """No emoji reaches the console: each icon folds to a font character (CLAUDE.md)."""
-    from meshterm.platforms import PICOCALC, REGULAR, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
     from meshterm.tools import get_tool
     from meshterm.ui.fontset import FONT_CODEPOINTS
     from meshterm.ui.theme import glyph
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     try:
         for name in ("about", "about-author", "discord", "support"):
             tool = get_tool(name)

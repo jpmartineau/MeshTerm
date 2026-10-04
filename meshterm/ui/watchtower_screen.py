@@ -130,7 +130,7 @@ async def open_watchtower(ctx: AppContext) -> dict[str, Any] | None:
         # alert actually overflows the width (see SelectScreen.hscroll_hint) — and it
         # slides the *message* alone: each row pins its own lanes (see _alert_lanes).
         # The two section headings below earn the list its ^PgUp/^PgDn jumps and their
-        # F1/F2 chips for free (SelectScreen.picocalc_lane); the hint has no room to name
+        # F1/F2 chips for free (SelectScreen.picocalc_lyra_lane); the hint has no room to name
         # them beside the ←→ atom, and no other grouped list spells them out either.
         footer_hint="↑↓ move · Enter select/acknowledge · Esc back",
     )

@@ -109,7 +109,7 @@ def _is_frame_bucket(bucket: str) -> bool:
 def _traffic_chrome(bucket: str) -> tuple[str, str]:
     """One traffic bucket's ``(icon, label)`` — the live feed's, from the same function.
 
-    Icons are mapped to single glyphs on PICOCALC via :func:`~meshterm.ui.theme.glyph`.
+    Icons are mapped to single glyphs on PICOCALC_LYRA via :func:`~meshterm.ui.theme.glyph`.
     """
     typename = bucket.split(":", 1)[1] if ":" in bucket else None
     return payload_marks(typename)
@@ -190,7 +190,7 @@ class DashboardScreen(Screen):
         return " · ".join([*atoms, "Esc back"])
 
     @property
-    def picocalc_lane(self):
+    def picocalc_lyra_lane(self):
         """The shared lane, dimmed on the same gate the hint above uses, plus the scope cycle.
 
         The PicoCalc draws no hint line at all — the lane *is* the footer — so the rule

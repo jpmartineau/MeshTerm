@@ -262,7 +262,7 @@ PYEOF
 
 # --- the 6x8 companion, out of its own (GPL-2.0) file -----------------------------------
 # Kept separate because its base bitmap is the kernel's font_6x8 and the produced PSF is
-# therefore GPL-2.0 -- see scripts/picocalc/calculinux-console-font-6x8.sh and scripts/picocalc/LICENSE.GPL-2.0.
+# therefore GPL-2.0 -- see scripts/picocalc-lyra/calculinux-console-font-6x8.sh and scripts/picocalc-lyra/LICENSE.GPL-2.0.
 # It re-uses the shared generator block above rather than carrying a second copy of the
 # donor/alias/keeper tables, so a run here still produces both fonts, as it always did.
 # A failure there is not a failure here: the 6x12 default is the font the device boots in.
@@ -271,7 +271,7 @@ if [ "${SKIP_6X8:-0}" = 1 ]; then
 elif [ -f "$BUILD8" ]; then
     sh "$BUILD8" || echo "warning: the 6x8 build failed; $OUT is installed either way" >&2
 else
-    echo "note: $BUILD8 not found -- only $OUT was built (copy the whole scripts/picocalc/ dir)" >&2
+    echo "note: $BUILD8 not found -- only $OUT was built (copy the whole scripts/picocalc-lyra/ dir)" >&2
 fi
 
 # --- apply live: setfont re-renders the whole console immediately -----------------------

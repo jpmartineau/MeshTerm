@@ -382,7 +382,7 @@ class NodeDetailScreen(Screen):
     floating = False
 
     @property
-    def picocalc_lane(self):
+    def picocalc_lyra_lane(self):
         """The shared pager over the route list, plus the tab switch on F3.
 
         The strip shows *that* there are two views; nothing on screen says the key that

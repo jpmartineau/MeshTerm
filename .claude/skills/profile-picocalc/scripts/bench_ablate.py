@@ -26,7 +26,7 @@ from prompt_toolkit.input.defaults import create_pipe_input
 from prompt_toolkit.output.vt100 import Vt100_Output
 from rich.text import Text
 
-from meshterm.platforms import PICOCALC, REGULAR, set_platform
+from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 from meshterm.ui.tui.session import TuiSession
 
 
@@ -149,11 +149,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="")
     ap.add_argument("--reps", type=int, default=20)
-    ap.add_argument("--platform", default="picocalc")
+    ap.add_argument("--platform", default="picocalc-lyra")
     args = ap.parse_args()
 
-    set_platform(PICOCALC if args.platform == "picocalc" else REGULAR)
-    cols, rows = (53, 26) if args.platform == "picocalc" else (72, 24)
+    set_platform(PICOCALC_LYRA if args.platform == "picocalc-lyra" else REGULAR)
+    cols, rows = (53, 26) if args.platform == "picocalc-lyra" else (72, 24)
 
     from tests import test_gallery as g
 

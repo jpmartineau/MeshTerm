@@ -15,7 +15,7 @@ bridges that: the session calls it whenever an F6–F10 press actually resolves,
 :func:`shift_down` latches ``True`` for a short grace window after, so a momentary dip in
 the raw signal can't flip the display mid-keystroke. The window is generous enough to
 outlast the flicker without noticeably outlasting the actual key release — the lane still
-self-corrects within one idle repaint (the 2 s picocalc tick) either way.
+self-corrects within one idle repaint (the 2 s picocalc-lyra tick) either way.
 
 Strictly an experiment layered over a working static lane, and built to disappear: it
 only ever engages when the platform asks for it (``Platform.modifier_watch``), the input

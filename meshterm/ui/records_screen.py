@@ -333,11 +333,12 @@ class RecordScreen(Screen):
         return ()
 
     @property
-    def picocalc_lane(self):
+    def picocalc_lyra_lane(self):
         """The shared pager, dimmed where nothing scrolls, plus the tab switch on F3.
 
         The chip names the tab it would take you *to*, never the one you are on — the node
-        page's rule (see :attr:`~meshterm.ui.node_detail_screen.NodeDetailScreen.picocalc_lane`).
+        page's rule (see
+        :attr:`~meshterm.ui.node_detail_screen.NodeDetailScreen.picocalc_lyra_lane`).
         The Area tab is a picture sized to the viewport, so the pager is dim there.
         """
         from .tui.fkeys import FPair, default_lane

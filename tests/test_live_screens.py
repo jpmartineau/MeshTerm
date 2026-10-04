@@ -473,7 +473,7 @@ def _words_start(row: str) -> int:
     return cell_len(row[: next(i for i, ch in enumerate(row) if ch.isalnum())])
 
 
-@pytest.mark.parametrize("platform_name", ["regular", "picocalc"])
+@pytest.mark.parametrize("platform_name", ["regular", "picocalc-lyra"])
 def test_every_action_row_starts_its_words_in_one_cell_in_both_modes(platform_name: str) -> None:
     """Every action the screen can draw, in either mode, lit or not, shares one word column.
 
@@ -489,10 +489,10 @@ def test_every_action_row_starts_its_words_in_one_cell_in_both_modes(platform_na
     how a two-cell icon lands in a one-cell column. On the PicoCalc the lane is dropped
     whole, so every word starts straight after the pointer.
     """
-    from meshterm.platforms import PICOCALC, REGULAR, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
     from meshterm.ui.trace_screen import _ACTION_ICONS
 
-    platform = {"regular": REGULAR, "picocalc": PICOCALC}[platform_name]
+    platform = {"regular": REGULAR, "picocalc-lyra": PICOCALC_LYRA}[platform_name]
     set_platform(platform)
     starts: set[int] = set()
     marks: set[str] = set()

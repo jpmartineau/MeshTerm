@@ -34,13 +34,16 @@ class Platform:
     outside this module and the small set of binding points documented at each field.
 
     Attributes:
-        name: Stable identifier — ``"regular"``, ``"picocalc"`` or ``"cardputer"`` — used for
-            ``--platform``/``MESHTERM_PLATFORM`` matching and diagnostics.
+        name: Stable identifier — ``"regular"``, ``"picocalc-lyra"`` or ``"cardputer-zero"``
+            — used for ``--platform``/``MESHTERM_PLATFORM`` matching and diagnostics. A
+            handheld's is its product and the variant that sets it apart from its siblings:
+            M5Stack makes three Cardputers and only the Zero runs Linux, and the PicoCalc
+            takes several cores and only the Luckfox Lyra runs MeshTerm.
         readable_cols: The readability standard (CLAUDE.md's "screens stay readable at
             N columns") and the dual-platform gallery's test width.
         readable_rows: The row *floor* a screen designs to. PicoCalc's live console is
             53×26 (custom 6×12 font); a 6×8 font rebuild (P5) gives 53×40. Screens design
-            to this floor and exploit extra rows fluidly; the gallery renders picocalc at
+            to this floor and exploit extra rows fluidly; the gallery renders picocalc-lyra at
             both 26 and 40 rows.
         frame_border: Whether the base screen draws inside a bordered ``Panel``. ``False``
             swaps it for a title-bar row instead (+4 cols, +1 row reclaimed) — a PicoCalc
@@ -89,7 +92,7 @@ class Platform:
             screen's own ``footer_hint`` string instead. A deck is everything about the lane
             that belongs to one keyboard: which keycodes drive its slots, where its chips sit
             on the row, how they are drawn, and which of a screen's lane definitions it reads
-            (``Screen.picocalc_lane``, ``Screen.cardputer_lane``). Each handheld names its
+            (``Screen.picocalc_lyra_lane``, ``Screen.cardputer_zero_lane``). Each handheld names its
             own, so one can change without the other following. :attr:`footer_fkeys` is the
             yes/no reading of it.
         width_reclaim: Whether the session may report one extra terminal column (see
@@ -117,7 +120,7 @@ class Platform:
             (:func:`~meshterm.ui.widgets._recency_style`). Wired in P3.
         solid_braille: Whether the console font draws a braille cell's eight dots as solid
             tiles with no gap between them or between neighbouring cells — the PicoCalc's
-            built fonts (``scripts/picocalc``) do — so braille is a true 2×4 pixel grid,
+            built fonts (``scripts/picocalc-lyra``) do — so braille is a true 2×4 pixel grid,
             fine enough for what must stay contiguous. It is what lets every QR code be
             drawn in braille, one module a dot (:mod:`~meshterm.ui.qr`). A desktop font's
             braille is dotted, and a code drawn in it scans as nothing.
@@ -221,8 +224,8 @@ REGULAR = Platform(
 #: binding point (header_atoms, font, truecolor, effects beyond the
 #: two P1 bindings, tick_s, battery, modifier_watch) are P2–P5's targets, recorded here
 #: now so the seam exists before the flavour work lands.
-PICOCALC = Platform(
-    name="picocalc",
+PICOCALC_LYRA = Platform(
+    name="picocalc-lyra",
     readable_cols=53,
     readable_rows=26,
     frame_border=False,
@@ -234,10 +237,10 @@ PICOCALC = Platform(
     # never changes), and the activity pulse takes whatever room remains.
     header_atoms=("version", "badges", "pulse", "battery"),
     header_row=True,
-    lane_deck="picocalc",
+    lane_deck="picocalc-lyra",
     width_reclaim=False,
     emoji=False,
-    font="picocalc",
+    font="picocalc-lyra",
     truecolor=False,
     solid_braille=True,
     url_codes=True,
@@ -251,7 +254,7 @@ PICOCALC = Platform(
 
 #: M5Stack's Cardputer Zero: a 320×170 panel drawn in 6×12 cells (53×14), under a
 #: 46-key keyboard whose number keys 4–8 sit right below the display. Hardware not yet in
-#: hand (2026-10-04), so this is chosen by ``--platform cardputer`` / ``MESHTERM_PLATFORM``
+#: hand (2026-10-04), so this is chosen by ``--platform cardputer-zero`` / ``MESHTERM_PLATFORM``
 #: only — no device-tree auto-detection until the device reports its own model string.
 #:
 #: The same 53 columns as the PicoCalc, which is why most of its flavour carries over; the
@@ -261,8 +264,8 @@ PICOCALC = Platform(
 #: (``truecolor``). Provisional until measured on the device: the cadences, taken from the
 #: PicoCalc; ``effects`` off; and the battery, read from the companion until the host's
 #: gauge (a BQ27220) has a known ``power_supply`` name.
-CARDPUTER = Platform(
-    name="cardputer",
+CARDPUTER_ZERO = Platform(
+    name="cardputer-zero",
     readable_cols=53,
     readable_rows=14,
     frame_border=False,
@@ -274,10 +277,10 @@ CARDPUTER = Platform(
     # header's leftover cells, goes — the dashboard draws the mesh's activity in full.
     header_atoms=("badges", "battery"),
     header_row=False,
-    lane_deck="cardputer",
+    lane_deck="cardputer-zero",
     width_reclaim=False,
     emoji=False,
-    font="cardputer",
+    font="cardputer-zero",
     truecolor=True,
     # The console host draws its own braille, as the PicoCalc's built fonts do: solid
     # tiles, no gap between dots (meshterm/host/font.py, BRAILLE).
@@ -291,7 +294,7 @@ CARDPUTER = Platform(
     modifier_watch="tca8418c",
 )
 
-_BY_NAME = {p.name: p for p in (REGULAR, PICOCALC, CARDPUTER)}
+_BY_NAME = {p.name: p for p in (REGULAR, PICOCALC_LYRA, CARDPUTER_ZERO)}
 
 #: The active platform. Do not import this name directly (see the module docstring) —
 #: read it through :func:`get_platform`, and change it only through :func:`set_platform`.
@@ -448,7 +451,7 @@ def resolve(flag: str | None = None) -> Resolution:
             _lookup(env, source="MESHTERM_PLATFORM"),
         )
     if model == _LYRA_MODEL:
-        return Resolution(flag, env, model, "auto-detect", PICOCALC)
+        return Resolution(flag, env, model, "auto-detect", PICOCALC_LYRA)
     return Resolution(flag, env, model, "default", REGULAR)
 
 
@@ -474,8 +477,8 @@ def without_emoji(platform: Platform) -> Platform:
 __all__ = [
     "Platform",
     "REGULAR",
-    "PICOCALC",
-    "CARDPUTER",
+    "PICOCALC_LYRA",
+    "CARDPUTER_ZERO",
     "without_emoji",
     "PLATFORM",
     "get_platform",

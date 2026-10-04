@@ -120,7 +120,7 @@ def _isolate_config_dir(tmp_path_factory: pytest.TempPathFactory) -> Iterator[No
 def _reset_platform() -> Iterator[None]:
     """Every test starts and ends on :data:`~meshterm.platforms.REGULAR`.
 
-    A test that calls ``set_platform(PICOCALC)`` (directly, or via the gallery harness)
+    A test that calls ``set_platform(PICOCALC_LYRA)`` (directly, or via the gallery harness)
     can't leak that choice into whatever runs next — regular is the suite's baseline, the
     same way it is the default for a process that never passes ``--platform``/
     ``MESHTERM_PLATFORM`` (see :mod:`meshterm.platforms`).

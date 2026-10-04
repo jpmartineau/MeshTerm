@@ -2,11 +2,11 @@
 """The handhelds' glyph inventories — the glyph contract.
 
 The PicoCalc panel draws through the kernel console with one 512-glyph PSF font
-(``meshterm.psf.gz``, built by ``scripts/picocalc/calculinux-console-font-6x12.sh``): the stock
+(``meshterm.psf.gz``, built by ``scripts/picocalc-lyra/calculinux-console-font-6x12.sh``): the stock
 Terminus 6×12 base (a Cyrillic-coverage table — note there are **no accented Latin
 letters**), the full braille block, MeshTerm's own marks drawn into donor slots, and a
 few aliases. A character outside this set renders as a blank on the panel, so *nothing
-outside it may ever be emitted* on the picocalc platform — the render boundary folds
+outside it may ever be emitted* on the picocalc-lyra platform — the render boundary folds
 text down to it (:func:`meshterm.ui.theme.fold_text`), and the dual-platform gallery
 asserts the fold held.
 
@@ -17,7 +17,7 @@ codepoints the build script now repurposes, plus the marks it draws in their pla
 If the build script's ``MARKS``/``DONORS``/``ALIASES`` change, this table must move in
 the same commit — and vice versa.
 
-The Cardputer Zero has a contract of its own, :data:`CARDPUTER_CODEPOINTS`: what its console
+The Cardputer Zero has a contract of its own, :data:`CARDPUTER_ZERO_CODEPOINTS`: what its console
 host draws, which no kernel caps. :data:`FONTS` names both, for ``Platform.font``.
 """
 
@@ -118,12 +118,12 @@ CARDPUTER_RANGES: tuple[tuple[int, int], ...] = (
 # fmt: on
 
 #: The Cardputer's inventory as one frozen set.
-CARDPUTER_CODEPOINTS: frozenset[int] = frozenset(
+CARDPUTER_ZERO_CODEPOINTS: frozenset[int] = frozenset(
     cp for first, last in CARDPUTER_RANGES for cp in range(first, last + 1)
 )
 
 #: Every handheld's glyph inventory, by the name ``Platform.font`` gives it.
 FONTS: dict[str, frozenset[int]] = {
-    "picocalc": FONT_CODEPOINTS,
-    "cardputer": CARDPUTER_CODEPOINTS,
+    "picocalc-lyra": FONT_CODEPOINTS,
+    "cardputer-zero": CARDPUTER_ZERO_CODEPOINTS,
 }

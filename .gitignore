@@ -31,6 +31,6 @@ output/
 # addresses, logins, the local venv path). .dev.env.example is tracked and shows the shape.
 .dev.env
 
-# Built radio firmware (scripts/picocalc/xiao-radio/build-firmware.sh writes it here)
-scripts/picocalc/xiao-radio/*.uf2
-scripts/picocalc/xiao-radio/_meshcore-build/
+# Built radio firmware (scripts/picocalc-lyra/xiao-radio/build-firmware.sh writes it here)
+scripts/picocalc-lyra/xiao-radio/*.uf2
+scripts/picocalc-lyra/xiao-radio/_meshcore-build/

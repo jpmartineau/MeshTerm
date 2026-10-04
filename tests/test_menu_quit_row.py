@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import pytest
 from rich.cells import cell_len
 
-from meshterm.platforms import PICOCALC, REGULAR, set_platform
+from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 from meshterm.tools import all_tools, load_all_tools
 from meshterm.ui import menu
 from meshterm.ui.tui import Choice
@@ -38,9 +38,9 @@ def tools() -> list:
 
 
 @pytest.fixture
-def picocalc() -> Iterator[None]:
+def picocalc_lyra() -> Iterator[None]:
     """Run a test on the PicoCalc platform, restoring the regular one afterwards."""
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     try:
         yield
     finally:
@@ -114,7 +114,7 @@ def test_the_quit_mark_is_measured_into_the_column(monkeypatch: pytest.MonkeyPat
     assert set(starts.values()) == {cell_len(_WIDE) + 1}
 
 
-@pytest.mark.usefixtures("picocalc")
+@pytest.mark.usefixtures("picocalc_lyra")
 def test_no_icon_lane_leaves_the_bare_word_flush_with_the_titles(tools: list) -> None:
     """No icon lane on the PicoCalc: the row is just *Quit*, with no padding left behind."""
     items = menu._menu_items(tools)
@@ -144,6 +144,6 @@ def test_the_quit_confirm_keeps_the_chip_that_asked(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(menu, "_can_unpair", no_bond)
     assert asyncio.run(menu._confirm_quit(SimpleNamespace(), Session())) is False
     assert asked["lane"][2].label == "Quit!"
-    assert fkeys.PICOCALC_DECK.action_for(asked["lane"], 3) == "quit"  # F3
-    assert fkeys.CARDPUTER_DECK.action_for(asked["lane"], 6) == "quit"  # Fn+6, its middle chip
+    assert fkeys.PICOCALC_LYRA_DECK.action_for(asked["lane"], 3) == "quit"  # F3
+    assert fkeys.CARDPUTER_ZERO_DECK.action_for(asked["lane"], 6) == "quit"  # Fn+6, its middle chip
     assert [slot for i, slot in enumerate(asked["lane"]) if i != 2] == [None] * 4

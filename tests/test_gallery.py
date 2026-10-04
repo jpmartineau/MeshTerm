@@ -8,8 +8,8 @@ Each entry below builds one full-screen :class:`~meshterm.ui.tui.screen.Screen` 
 hand-built (simulator-shaped) data — the same "fake session, real screen" approach every
 individual screen's own test file already uses — then renders it, both directly
 (``render_body``) and through the real frame compositor (``compose_base``), at REGULAR's
-72x24, at PICOCALC's two live/lux row counts (53x26, the actual on-device floor; 53x40,
-the boot-font/6x8-font-B case), and at the CARDPUTER's 53x14. No rendered line may exceed
+72x24, at PICOCALC_LYRA's two live/lux row counts (53x26, the actual on-device floor; 53x40,
+the boot-font/6x8-font-B case), and at the CARDPUTER_ZERO's 53x14. No rendered line may exceed
 its terminal's width.
 
 This is the platform-parity harness the PicoCalc work was built around: a
@@ -58,7 +58,14 @@ from meshterm.core.regions import frame_scope, region_key, scope_body, transport
 from meshterm.core.remote_store import CachedValue
 from meshterm.core.watch_store import WatchStore
 from meshterm.persistence.repository import DiscoveredPath
-from meshterm.platforms import CARDPUTER, PICOCALC, REGULAR, Platform, get_platform, set_platform
+from meshterm.platforms import (
+    CARDPUTER_ZERO,
+    PICOCALC_LYRA,
+    REGULAR,
+    Platform,
+    get_platform,
+    set_platform,
+)
 from meshterm.services.courier import CourierService
 from meshterm.services.message_paths import Arrival
 from meshterm.services.monitor_service import ACTIVITY_BUCKETS
@@ -1518,16 +1525,16 @@ _ENTRIES: list[_Entry] = [
 #: judged worklist, not an xfail list (see the port's logbook).
 _COMBOS: list[tuple[Platform, int, int]] = [
     (REGULAR, REGULAR.readable_cols, REGULAR.readable_rows),
-    (PICOCALC, PICOCALC.readable_cols, PICOCALC.readable_rows),
-    (PICOCALC, PICOCALC.readable_cols, 40),
-    (CARDPUTER, CARDPUTER.readable_cols, CARDPUTER.readable_rows),
+    (PICOCALC_LYRA, PICOCALC_LYRA.readable_cols, PICOCALC_LYRA.readable_rows),
+    (PICOCALC_LYRA, PICOCALC_LYRA.readable_cols, 40),
+    (CARDPUTER_ZERO, CARDPUTER_ZERO.readable_cols, CARDPUTER_ZERO.readable_rows),
 ]
 
-#: Entries that overflow PICOCALC's 53 columns today (a width overflow doesn't depend on
-#: row count, so one entry here covers both picocalc combos). P6 emptied it — the whole
+#: Entries that overflow PICOCALC_LYRA's 53 columns today (a width overflow doesn't depend on
+#: row count, so one entry here covers both picocalc-lyra combos). P6 emptied it — the whole
 #: P1 worklist graduated once the F-key lane replaced the per-screen hint strings and the
 #: path composer's wrapped empty-state note stopped smuggling a newline into one row —
-#: so every picocalc case is now a hard gate. A new screen that can't fit 53 goes here
+#: so every picocalc-lyra case is now a hard gate. A new screen that can't fit 53 goes here
 #: only with a ticket, never to stay.
 _KNOWN_WIDE: set[str] = set()
 
@@ -1549,12 +1556,13 @@ def _cases():
         for platform, cols, rows in _COMBOS:
             case_id = f"{entry.name}-{platform.name}-{cols}x{rows}"
             marks = []
-            if platform.name == "picocalc" and entry.name in _KNOWN_WIDE:
+            if platform.name == "picocalc-lyra" and entry.name in _KNOWN_WIDE:
                 marks.append(
                     pytest.mark.xfail(
                         reason=(
-                            f"{entry.name} overflows picocalc's {PICOCALC.readable_cols} cols "
-                            "today -- see _KNOWN_WIDE, the width-reduction worklist"
+                            f"{entry.name} overflows picocalc-lyra's "
+                            f"{PICOCALC_LYRA.readable_cols} cols today -- see _KNOWN_WIDE, "
+                            "the width-reduction worklist"
                         ),
                         strict=False,
                     )
@@ -1624,7 +1632,7 @@ def test_gallery_screen_fits_its_platform(
         assert line.strip() != "Back", f"{entry.name}: an exit row came back: {line!r}"
 
     # P3 assertions, on the *rendered ANSI* (the theme/fold contracts, not the config):
-    # picocalc output may carry no truecolor or 256-colour SGR (the console has 16 slots,
+    # picocalc-lyra output may carry no truecolor or 256-colour SGR (the console has 16 slots,
     # addressed as plain 30-37/90-97/40-47 codes), and no character outside the 512-glyph
     # console font. Together these are the parity gate that catches a stray emoji or hex
     # colour the moment a screen grows one, instead of as tofu found on-device.

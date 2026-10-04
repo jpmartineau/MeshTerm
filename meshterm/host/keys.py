@@ -5,11 +5,11 @@ Both ends of the host meet here: the device reads key codes off the keyboard's e
 device, the simulator reads them off a desktop window, and each turns its own events into
 a :class:`Key` for :func:`encode` to spell the way xterm does. xterm's spelling is the
 contract because it is what prompt_toolkit parses, and what a desktop terminal running
-``--platform cardputer`` sends too, so the TUI cannot tell the three apart:
+``--platform cardputer-zero`` sends too, so the TUI cannot tell the three apart:
 
 * Shift with F4–F8 is xterm's ``CSI 1;2 S`` / ``CSI 15;2 ~`` …, which prompt_toolkit
   reads as F16–F20 — the Cardputer deck's Shift bank
-  (:data:`~meshterm.ui.tui.fkeys.CARDPUTER_DECK`).
+  (:data:`~meshterm.ui.tui.fkeys.CARDPUTER_ZERO_DECK`).
 * A modified arrow, Home, End, Page key or F-key carries xterm's modifier parameter
   (``1 + Shift + 2·Alt + 4·Ctrl``), so Ctrl+PgUp is ``CSI 5;5 ~``, the section jump.
 * Ctrl with a letter is its C0 control; Alt with anything is ESC then the key.

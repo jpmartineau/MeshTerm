@@ -143,7 +143,7 @@ class Screen:
         """The screen's F-key lane on the active platform (see :mod:`~meshterm.ui.tui.fkeys`).
 
         Each handheld deals its own: this reads whichever of the screen's lane definitions
-        the platform's deck names (:attr:`picocalc_lane`, :attr:`cardputer_lane`). A
+        the platform's deck names (:attr:`picocalc_lyra_lane`, :attr:`cardputer_zero_lane`). A
         platform with no lane — the desktop, whose footer is the hint line — gets an empty
         one. Override the per-deck definitions, never this.
         """
@@ -153,7 +153,7 @@ class Screen:
         return EMPTY_LANE if deck is None else deck.read_lane(self)
 
     @property
-    def cardputer_lane(self):
+    def cardputer_zero_lane(self):
         """The screen's lane on the Cardputer Zero: the PicoCalc's, for now.
 
         JP, 2026-09-30: the Cardputer deals the same entries as the PicoCalc until decided
@@ -161,10 +161,10 @@ class Screen:
         having five slots is a coincidence of two keyboards, so this is the one place the
         two are tied; a screen whose Cardputer lane should differ overrides this.
         """
-        return self.picocalc_lane
+        return self.picocalc_lyra_lane
 
     @property
-    def picocalc_lane(self):
+    def picocalc_lyra_lane(self):
         """The screen's lane on the PicoCalc (see :mod:`~meshterm.ui.tui.fkeys`).
 
         Five slots, F1–F5, each with an optional F6–F10 Shift-bank companion. A slot is
@@ -744,7 +744,7 @@ class ScrollScreen(Screen):
     """
 
     @property
-    def picocalc_lane(self):
+    def picocalc_lyra_lane(self):
         """The shared lane, its nav slots dimmed when the content already fits.
 
         Every nav key here scrolls and nothing else, so a result window short enough to
@@ -850,7 +850,7 @@ class BusyScreen(Screen):
     modal = True  # work in flight owns the keyboard; ^W must not unwind out from under it
 
     @property
-    def picocalc_lane(self):
+    def picocalc_lyra_lane(self):
         """No lane at all: this screen swallows every key, so none of them do anything."""
         from .fkeys import EMPTY_LANE
 

@@ -6,11 +6,11 @@ from __future__ import annotations
 from rich.cells import cell_len
 from rich.text import Text
 
-from meshterm.platforms import PICOCALC, REGULAR, set_platform
+from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 from meshterm.ui.tui import frame
 from meshterm.ui.tui.fkeys import (
     DEFAULT_LANE,
-    PICOCALC_DECK,
+    PICOCALC_LYRA_DECK,
     FPair,
     default_lane,
     strip_lane_atoms,
@@ -37,7 +37,7 @@ def test_borderless_frame_swaps_the_panel_for_a_title_bar() -> None:
     It carries the rule, the title, and the clip arrow. No border column is spent, so the
     body starts at column 0 and owns all 53 cells.
     """
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     composed = frame.compose_base(Text("hdr"), _screen(), "hint", 53, 26).split("\n")
     assert len(composed) == 26
     plain = [_plain(line) for line in composed]
@@ -180,7 +180,7 @@ def test_bordered_frame_is_unchanged_on_regular() -> None:
 def test_picocalc_header_brands_the_app_not_the_device() -> None:
     """The PicoCalc header brands the app, not the device.
 
-    Per JP's spec for the ``header_atoms`` wiring: picocalc shows ``MeshTerm vX``,
+    Per JP's spec for the ``header_atoms`` wiring: picocalc-lyra shows ``MeshTerm vX``,
     because a soldered radio's port never changes and so the device segment earns
     nothing. Regular keeps both.
     """
@@ -198,11 +198,11 @@ def test_picocalc_header_brands_the_app_not_the_device() -> None:
         chat = _Badges()
         watchtower = _Badges()
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     text = "".join(seg.plain for seg in _header_segments(_Ctx(), {}))
     assert "MeshTerm" in text
     assert "simulator" not in text  # the device atom is composed out
-    assert "pulse" in PICOCALC.header_atoms  # the sparkline takes the remaining room
+    assert "pulse" in PICOCALC_LYRA.header_atoms  # the sparkline takes the remaining room
     set_platform(REGULAR)
     text = "".join(seg.plain for seg in _header_segments(_Ctx(), {}))
     assert "MeshTerm" in text and "simulator" in text
@@ -218,19 +218,19 @@ def test_fkey_lane_resolution_and_banks() -> None:
     # F4/F5 (paging — no physical key at all) carry the pager, and each jump rides the
     # Shift half of the very pager heading for it: Home behind Page ↑, End behind Page ↓.
     assert (
-        PICOCALC_DECK.action_for(lane, 4) == "pagedown"
-        and PICOCALC_DECK.action_for(lane, 9) == "end"
+        PICOCALC_LYRA_DECK.action_for(lane, 4) == "pagedown"
+        and PICOCALC_LYRA_DECK.action_for(lane, 9) == "end"
     )
     assert (
-        PICOCALC_DECK.action_for(lane, 5) == "pageup"
-        and PICOCALC_DECK.action_for(lane, 10) == "home"
+        PICOCALC_LYRA_DECK.action_for(lane, 5) == "pageup"
+        and PICOCALC_LYRA_DECK.action_for(lane, 10) == "home"
     )
     # F1-F3 are free on every screen — the shared lane claims none of them.
     for number in (1, 2, 3, 6, 7, 8):
-        assert PICOCALC_DECK.action_for(lane, number) is None
+        assert PICOCALC_LYRA_DECK.action_for(lane, number) is None
     # Enter/Esc never occupy a slot — both keys are already close at hand.
-    assert "enter" not in {PICOCALC_DECK.action_for(lane, n) for n in range(1, 11)}
-    assert "escape" not in {PICOCALC_DECK.action_for(lane, n) for n in range(1, 11)}
+    assert "enter" not in {PICOCALC_LYRA_DECK.action_for(lane, n) for n in range(1, 11)}
+    assert "escape" not in {PICOCALC_LYRA_DECK.action_for(lane, n) for n in range(1, 11)}
 
 
 def test_fkey_lane_text_fits_and_flips() -> None:
@@ -239,8 +239,8 @@ def test_fkey_lane_text_fits_and_flips() -> None:
     The directional pair rises toward its outer key, and a free slot draws as a bare
     key number rather than an empty gap.
     """
-    primary = PICOCALC_DECK.lane_text(DEFAULT_LANE)
-    shifted = PICOCALC_DECK.lane_text(DEFAULT_LANE, shifted=True)
+    primary = PICOCALC_LYRA_DECK.lane_text(DEFAULT_LANE)
+    shifted = PICOCALC_LYRA_DECK.lane_text(DEFAULT_LANE, shifted=True)
     assert cell_len(primary.plain) == 53 and cell_len(shifted.plain) == 53
     # A directional pair rises to the right: down/out left, up/in right — and each
     # companion keeps its slot's end of that axis.
@@ -251,15 +251,15 @@ def test_fkey_lane_text_fits_and_flips() -> None:
         assert f"F{number}    " in primary.plain
         assert f"F{number + 5}    " in shifted.plain
     wide = [FPair("Muchtoolonglabel", "a", "Muchtoolonglabel", "b")] * 5
-    assert cell_len(PICOCALC_DECK.lane_text(wide).plain) == 53  # clipped to the slot budget
-    assert cell_len(PICOCALC_DECK.lane_text(wide, shifted=True).plain) == 53
+    assert cell_len(PICOCALC_LYRA_DECK.lane_text(wide).plain) == 53  # clipped to the slot budget
+    assert cell_len(PICOCALC_LYRA_DECK.lane_text(wide, shifted=True).plain) == 53
 
 
 def test_fkey_slot_dims_when_its_action_is_unavailable() -> None:
     """An unavailable slot keeps its label and drops its fill — it never offers a dead key."""
     lane = [FPair("Paths", "paths", "Retry", "retry", enabled=False)] + [None] * 4
-    primary = PICOCALC_DECK.lane_text(lane)
-    shifted = PICOCALC_DECK.lane_text(lane, shifted=True)
+    primary = PICOCALC_LYRA_DECK.lane_text(lane)
+    shifted = PICOCALC_LYRA_DECK.lane_text(lane, shifted=True)
 
     # The label survives: the lane still says what F1 is for, just not that it acts now.
     assert "F1 Paths" in primary.plain and _slot_style(primary, 0) == "muted"
@@ -268,7 +268,7 @@ def test_fkey_slot_dims_when_its_action_is_unavailable() -> None:
     # The row is still exactly the lane's width, dim chips and all.
     assert cell_len(primary.plain) == 53 and cell_len(shifted.plain) == 53
     # Dimming is presentational: the key still resolves, and the screen's handler no-ops.
-    assert PICOCALC_DECK.action_for(lane, 1) == "paths"
+    assert PICOCALC_LYRA_DECK.action_for(lane, 1) == "paths"
 
 
 def test_default_lane_dims_every_nav_slot_when_nothing_moves() -> None:
@@ -278,24 +278,24 @@ def test_default_lane_dims_every_nav_slot_when_nothing_moves() -> None:
 
     assert [pair.label for pair in dim if pair] == ["Page ↓", "Page ↑"]
     assert not any(pair.enabled or pair.opp_enabled for pair in dim if pair)
-    row = PICOCALC_DECK.lane_text(dim)
+    row = PICOCALC_LYRA_DECK.lane_text(dim)
     assert cell_len(row.plain) == 53 and "F4 Page ↓" in row.plain and "F5 Page ↑" in row.plain
     assert {str(span.style) for span in row.spans} == {"muted"}
     # Both banks dim together: the jump behind a dead pager is just as dead.
-    assert {str(span.style) for span in PICOCALC_DECK.lane_text(dim, shifted=True).spans} == {
+    assert {str(span.style) for span in PICOCALC_LYRA_DECK.lane_text(dim, shifted=True).spans} == {
         "muted"
     }
 
 
 def test_lane_is_built_after_the_body_renders() -> None:
     """The frame defers the lane, so its gates read this paint's metrics, not the last one's."""
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     screen = _screen()  # 40 body rows into a 23-row viewport: it overflows
     seen: dict[str, bool] = {}
 
     def build() -> Text:
-        seen["nav"] = all(pair.enabled for pair in screen.picocalc_lane if pair)
-        return PICOCALC_DECK.lane_text(screen.picocalc_lane)
+        seen["nav"] = all(pair.enabled for pair in screen.picocalc_lyra_lane if pair)
+        return PICOCALC_LYRA_DECK.lane_text(screen.picocalc_lyra_lane)
 
     composed = frame.compose_base(Text("hdr"), screen, "hint", 53, 26, footer_lane=build)
 
@@ -307,9 +307,9 @@ def test_scroll_screen_lane_tracks_whether_its_body_overflows() -> None:
     """The result window's nav slots light only once there is something to scroll to."""
     screen = _screen()
     screen.note_metrics(4, 20)  # the whole body fits the viewport
-    assert not any(pair.enabled for pair in screen.picocalc_lane if pair)
+    assert not any(pair.enabled for pair in screen.picocalc_lyra_lane if pair)
     screen.note_metrics(80, 20)  # taller than the viewport
-    assert all(pair.enabled for pair in screen.picocalc_lane if pair)
+    assert all(pair.enabled for pair in screen.picocalc_lyra_lane if pair)
 
 
 def test_select_lane_promotes_the_section_jumps_only_where_there_are_sections() -> None:
@@ -319,8 +319,8 @@ def test_select_lane_promotes_the_section_jumps_only_where_there_are_sections() 
     flat = SelectScreen("Flat", [Choice("one", 1), Choice("two", 2)])
     # No headings anywhere: sections are not a thing on this list, so the slots are empty
     # rather than dim — and F1/F2 resolve to nothing at all.
-    assert flat.picocalc_lane[0] is None and flat.picocalc_lane[1] is None
-    assert PICOCALC_DECK.action_for(flat.picocalc_lane, 1) is None
+    assert flat.picocalc_lyra_lane[0] is None and flat.picocalc_lyra_lane[1] is None
+    assert PICOCALC_LYRA_DECK.action_for(flat.picocalc_lyra_lane, 1) is None
 
     grouped = SelectScreen(
         "Grouped",
@@ -332,12 +332,12 @@ def test_select_lane_promotes_the_section_jumps_only_where_there_are_sections() 
             Choice("gamma", 3),
         ],
     )
-    lane = grouped.picocalc_lane
+    lane = grouped.picocalc_lyra_lane
     assert [pair.label for pair in lane[:2]] == ["Sect ↑", "Sect ↓"]
     # A pair rises toward its outer key: on this left-edge pair, up takes F1.
     assert (
-        PICOCALC_DECK.action_for(lane, 1) == "ctrl_pageup"
-        and PICOCALC_DECK.action_for(lane, 2) == "ctrl_pagedown"
+        PICOCALC_LYRA_DECK.action_for(lane, 1) == "ctrl_pageup"
+        and PICOCALC_LYRA_DECK.action_for(lane, 2) == "ctrl_pagedown"
     )
     assert all(pair.enabled for pair in lane[:2])
 
@@ -345,7 +345,7 @@ def test_select_lane_promotes_the_section_jumps_only_where_there_are_sections() 
     # the sections are still a thing here, they just have nowhere to jump right now.
     for ch in "gam":
         grouped.handle("text", ch)
-    dim = grouped.picocalc_lane
+    dim = grouped.picocalc_lyra_lane
     assert [pair.label for pair in dim[:2]] == ["Sect ↑", "Sect ↓"]
     assert not any(pair.enabled for pair in dim[:2])
 
@@ -360,8 +360,8 @@ def test_dialogs_draw_no_lane_at_all() -> None:
         ConfirmScreen("Sure?"),
         ButtonDialog("Reboot the node?", ["Cancel", "Reboot"]),
     ):
-        assert list(screen.picocalc_lane) == list(EMPTY_LANE)
-        row = PICOCALC_DECK.lane_text(screen.picocalc_lane)
+        assert list(screen.picocalc_lyra_lane) == list(EMPTY_LANE)
+        row = PICOCALC_LYRA_DECK.lane_text(screen.picocalc_lyra_lane)
         assert cell_len(row.plain) == 53
         assert {str(span.style) for span in row.spans} == {"muted"}
 
@@ -407,7 +407,7 @@ def test_dialog_wrap_shrinks_on_picocalc() -> None:
     """A dialog message wraps to fewer cells on the PicoCalc, the screen being narrower."""
     from meshterm.ui.surface import _dialog_wrap_cells
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     assert _dialog_wrap_cells() == 37  # 53 readable - 4 margin - 12 chrome
     set_platform(REGULAR)
     assert _dialog_wrap_cells() == 54  # 72 readable - 6 margin - 12 chrome
@@ -433,13 +433,13 @@ def test_a_dialog_keeps_its_hint_where_the_lane_is_the_footer() -> None:
     screen = _dialog("↑↓ move · Enter select · Esc back")
     set_platform(REGULAR)
     assert frame._dialog_hint(screen) == ""
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     assert "Esc back" in _plain(frame.compose_dialog(screen, 53, 26))
 
 
 def test_the_dialog_hint_drops_what_the_lane_already_says() -> None:
     """An atom whose every key is a chip on the very next row is the same claim twice."""
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     screen = _dialog("↑↓ move · PgUp/PgDn scroll · Home/End ends · Enter select · Esc back")
     # The shared lane pages on F4/F5 and jumps to either end behind their Shift halves.
     assert frame._dialog_hint(screen) == "↑↓ move · Enter select · Esc back"
@@ -452,7 +452,7 @@ def test_the_dialog_hint_is_resolved_on_every_paint() -> None:
     The packet viewer rewrites its own hint as the list it pages through grows past one
     entry (JP, 2026-08-31), and every screen reads its lane fresh each frame.
     """
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     screen = _dialog("Esc close")
     assert frame._dialog_hint(screen) == "Esc close"
     screen._footer_hint = "↑↓ newer/older · PgUp/PgDn scroll · Home/End ends · Esc close"

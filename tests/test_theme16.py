@@ -17,7 +17,7 @@ from pathlib import Path
 from rich.cells import cell_len
 from rich.default_styles import DEFAULT_STYLES
 
-from meshterm.platforms import PICOCALC, REGULAR, set_platform
+from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 from meshterm.ui import theme
 from meshterm.ui.fontset import FONT_CODEPOINTS
 from meshterm.ui.theme import MESH_THEME, MESH_THEME_16, fold_text, glyph, name_style
@@ -25,7 +25,7 @@ from meshterm.ui.theme import MESH_THEME, MESH_THEME_16, fold_text, glyph, name_
 _FONT_SCRIPT = (
     Path(__file__).resolve().parent.parent
     / "scripts"
-    / "picocalc"
+    / "picocalc-lyra"
     / "calculinux-console-font-6x12.sh"
 )
 
@@ -101,7 +101,7 @@ def test_unknown_node_grey_survives_a_selected_row() -> None:
     from rich.console import Console
     from rich.text import Text
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     console = Console(
         theme=MESH_THEME_16,
         width=20,
@@ -190,7 +190,7 @@ def test_glyph_is_identity_on_regular_and_compact_on_picocalc() -> None:
     """
     set_platform(REGULAR)
     assert glyph("📡") == "📡"
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     assert glyph("📡") == "☼"
     assert glyph("★") == "★"  # node/status marks pass through — they are font-native
 
@@ -199,8 +199,8 @@ def test_glyph_is_identity_on_regular_and_compact_on_picocalc() -> None:
 
 
 def test_fold_is_identity_on_regular_even_after_picocalc_used_it() -> None:
-    """The bound impls may not leak cached picocalc folds into a regular render."""
-    set_platform(PICOCALC)
+    """The bound impls may not leak cached picocalc-lyra folds into a regular render."""
+    set_platform(PICOCALC_LYRA)
     assert fold_text("café") == "cafe"
     set_platform(REGULAR)
     assert fold_text("café") == "café"
@@ -212,7 +212,7 @@ def test_fold_strips_accents_and_preserves_cell_widths() -> None:
     An accent drops to its base letter and an emoji becomes its mapped mark, each in
     place, so nothing downstream has to measure the row again.
     """
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     for text in ("café ⚠", "Ĉu vi paroläs", "📡 Advert", "🗑 Clear", "…", "npo Waymarker 🇨🇦"):
         folded = fold_text(text)
         assert cell_len(folded) == cell_len(text), (text, folded)
@@ -222,14 +222,14 @@ def test_fold_strips_accents_and_preserves_cell_widths() -> None:
 
 def test_fold_replaces_the_unmappable_at_width() -> None:
     """CJK and unmapped emoji leave as ``?`` at their own width — never as tofu."""
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     assert fold_text("你好") == "????"
     assert cell_len(fold_text("🦕")) == cell_len("🦕")
 
 
 def test_fold_keeps_ansi_sequences_intact() -> None:
     """The fold rewrites text only: colour escapes and newlines cross it untouched."""
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     line = "\x1b[1;93mwarn é\x1b[0m\nnext"
     folded = fold_text(line)
     assert folded == "\x1b[1;93mwarn e\x1b[0m\nnext"
@@ -237,7 +237,7 @@ def test_fold_keeps_ansi_sequences_intact() -> None:
 
 def test_fold_quantizes_embedded_truecolor_to_the_slots() -> None:
     """Canvas-emitted truecolor (the braille rasters) lands on the nearest palette slot."""
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     folded = fold_text("\x1b[38;2;148;163;184m○\x1b[0m")
     assert "38;2;" not in folded
     # #94a3b8 → nearest stock slot is 7 (#aaaaaa); a dim-bank slot states its intensity.
@@ -255,7 +255,7 @@ def test_fold_quantizes_a_colour_that_shares_its_sequence_with_another() -> None
     The QR module's white-on-black is the case that found it: ``ESC[38;2;…;48;2;…m`` is
     two colours in one list, and a matcher for a colour standing alone saw neither.
     """
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     folded = fold_text("\x1b[38;2;255;255;255;48;2;0;0;0m█\x1b[0m")
     assert "8;2;" not in folded, folded
     assert folded.startswith("\x1b[97;40m"), folded  # bright white ink, black field
@@ -282,7 +282,7 @@ def test_the_qr_style_is_white_on_black_on_both_themes() -> None:
 
 def test_fold_drops_zero_width_machinery() -> None:
     """Variation selectors and zero-width joiners are dropped — they have no cell to occupy."""
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     assert fold_text("🕸️") == fold_text("🕸")
     assert "‍" not in fold_text("a‍b")
 
@@ -292,7 +292,7 @@ def test_fold_drops_zero_width_machinery() -> None:
 
 def test_names_colour_by_key_on_both_platforms() -> None:
     """One rule everywhere: the key picks the hue, and only its first byte does."""
-    for platform in (REGULAR, PICOCALC):
+    for platform in (REGULAR, PICOCALC_LYRA):
         set_platform(platform)
         hue = name_style("Hilltop-Repeater", "3d63c6429436")
         assert hue.startswith("bold #"), platform.name
@@ -310,7 +310,7 @@ def test_picocalc_node_hues_land_on_their_own_palette_slots() -> None:
     Each returned hex is a slot's own RGB, so every downsample on the way out — Rich's,
     and the fold's — lands on that exact slot instead of guessing a neighbour.
     """
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     slots = {hex_: slot for slot, _, hex_ in theme._VT_SLOTS}
     landed = [name_style("n", f"{byte:02x}").removeprefix("bold ") for byte in range(256)]
     assert set(landed) == set(theme._NODE_SLOT_HEXES)
@@ -326,7 +326,7 @@ def test_route_graph_resolves_a_named_marker_colour_to_rgb() -> None:
     """
     from meshterm.ui.widgets import route_graph_style
 
-    for platform in (REGULAR, PICOCALC):
+    for platform in (REGULAR, PICOCALC_LYRA):
         set_platform(platform)
         _glyph_of, _label_of, label_rgb_of = route_graph_style(
             resolve=lambda hop: None,
@@ -339,7 +339,7 @@ def test_route_graph_resolves_a_named_marker_colour_to_rgb() -> None:
 
 def test_node_type_marks_stay_distinct_on_the_console() -> None:
     """Each type mark owns a slot — a naive downsample would grey the repeater's violet."""
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     marks = ("type.node", "type.repeater", "type.room", "type.sensor")
     rgbs = [theme.mark_rgb(name) for name in marks]
     assert len(set(rgbs)) == len(marks)
@@ -354,7 +354,7 @@ def test_heat_ladder_walks_jps_seven_slots_in_order() -> None:
     """
     from meshterm.ui.widgets import _recency_style
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     # fmt: off
     expected = [
         (60, 15), (299, 15),          # under 5 minutes  — white
@@ -383,7 +383,7 @@ def test_canvas_drops_emphasis_where_bold_means_brightness() -> None:
     """
     from meshterm.ui.mapcanvas import MapCanvas
 
-    for platform, expect_bold in ((REGULAR, True), (PICOCALC, False)):
+    for platform, expect_bold in ((REGULAR, True), (PICOCALC_LYRA, False)):
         set_platform(platform)
         canvas = MapCanvas(6, 1)
         canvas.marker(0, 0, "x", (148, 163, 184))  # markers always draw emboldened
@@ -430,7 +430,7 @@ def test_font_script_marks_and_fontset_move_together() -> None:
 
 
 def test_specimen_renders_clean_on_picocalc() -> None:
-    """`meshterm specimen` obeys on picocalc every contract it demonstrates.
+    """`meshterm specimen` obeys on picocalc-lyra every contract it demonstrates.
 
     At most 53 cells per line, 16-slot SGR only, and console-font characters only.
     """
@@ -440,7 +440,7 @@ def test_specimen_renders_clean_on_picocalc() -> None:
 
     from meshterm.ui.specimen import specimen_lines
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     console = Console(
         theme=MESH_THEME_16,
         width=53,
@@ -554,7 +554,7 @@ def test_the_mark_the_console_picks_stays_inside_its_font() -> None:
 
     from meshterm.ui.logo import load_logo
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     rows = load_logo(53)
     assert rows, "the 53-column mark should fit a 53-column console"
     for i, row in enumerate(rows):
@@ -579,7 +579,7 @@ def test_narrow_wordmark_keeps_its_dim_rows_off_the_bright_bank() -> None:
     from meshterm.ui.logo import load_logo
     from meshterm.ui.tui.frame import _banner_lines
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     rows = _banner_lines(load_logo(53), 53)
     assert rows, "the 53-column mark should fit a 53-column console"
     dim = [

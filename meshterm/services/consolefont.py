@@ -39,7 +39,7 @@ from ..core.config import default_config_dir
 from ..persistence.logging import get_logger
 from ..platforms import get_platform
 
-#: Where ``scripts/picocalc/calculinux-console-font-6x12.sh`` and its 6x8 companion install
+#: Where ``scripts/picocalc-lyra/calculinux-console-font-6x12.sh`` and its 6x8 companion install
 #: the fonts.
 FONT_DIR = Path("/usr/share/consolefonts")
 
@@ -92,7 +92,7 @@ def applies() -> bool:
         which one did not — the log is where a font that "did nothing" gets explained.
     """
     platform = get_platform()
-    if platform.name != "picocalc":
+    if platform.name != "picocalc-lyra":
         get_logger().debug("console font: leaving it alone — platform is %s", platform.name)
         return False
     if _controlling_vt() is None:

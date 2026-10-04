@@ -95,13 +95,13 @@ def test_the_activity_aside_names_dot_columns_only_where_braille_has_dots() -> N
     There are no dots there to count, and on 53 columns the words cost the heading its
     line. The desktop keeps them; both keep what the chart counts.
     """
-    from meshterm.platforms import PICOCALC, REGULAR, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 
     def heading(width: int) -> str:
         body = _plain(_screen(histogram=[1] * ACTIVITY_BUCKETS).render_body(width))
         return next(line for line in body.splitlines() if "Activity" in line)
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     assert heading(53).strip() == "Activity  ·  every packet heard"
     set_platform(REGULAR)
     assert heading(72).strip() == "Activity  ·  every packet heard · one minute per dot column"
@@ -534,6 +534,8 @@ def test_no_scope_view_is_offered_without_a_flood_to_narrow_to() -> None:
     """A window of direct frames only offers nothing to cycle: no hint atom, no chip."""
     screen = _scoped_screen([_flood(None, "TEXT_MSG")])
     assert "scope" not in screen.footer_hint
-    assert screen.picocalc_lane[2] is None or not getattr(screen.picocalc_lane[2], "label", "")
+    assert screen.picocalc_lyra_lane[2] is None or not getattr(
+        screen.picocalc_lyra_lane[2], "label", ""
+    )
     screen.handle("text", "s")
     assert screen.title == "Dashboard — mesh overview"

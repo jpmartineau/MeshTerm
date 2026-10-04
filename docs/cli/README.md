@@ -61,7 +61,7 @@ With no command, MeshTerm launches the interactive menu instead.
 | `--json` | Print the answer as JSON instead of aligned text. |
 | `--absolute` | Print times as ISO-8601 instants rather than relative ages, for this run. |
 | `-q`, `--quiet` | Suppress console logging entirely (the log file still records). |
-| `--platform NAME` | Force the UI flavour (`regular`\|`picocalc`) instead of detecting it. |
+| `--platform NAME` | Force the UI flavour (`regular`\|`picocalc-lyra`\|`cardputer-zero`) instead of detecting it. |
 
 **A global option may be typed anywhere** — before the command or after it. `meshterm
 --json contacts` and `meshterm contacts --json` are the same run, because `-o json` goes
@@ -1730,7 +1730,7 @@ Print the visual-language specimen — every mark, icon, colour scale and fold o
 
 **This is the one command that keeps its colour**, and it builds its own themed console to
 do it. That is deliberate: the colour *is* the output. It is the font-and-palette
-acceptance card on the PicoCalc console, and with `--platform picocalc` it previews that
+acceptance card on the PicoCalc console, and with `--platform picocalc-lyra` it previews that
 flavour from a desktop. A monochrome specimen would test nothing.
 
 It is also the one command that **refuses `--json`**, as a usage error (exit `2`). There is

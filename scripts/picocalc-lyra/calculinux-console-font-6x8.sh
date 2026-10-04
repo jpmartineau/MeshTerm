@@ -6,7 +6,7 @@
 # LICENCE -- READ THIS FIRST. The base bitmap embedded below is the Linux kernel's own
 # font_6x8 (lib/fonts/font_6x8.c), which is GPL-2.0. This script is therefore GPL-2.0-only
 # and so is the PSF it produces; the full licence text sits beside it as
-# scripts/picocalc/LICENSE.GPL-2.0. The rest of MeshTerm is Apache-2.0 and stays that way: the
+# scripts/picocalc-lyra/LICENSE.GPL-2.0. The rest of MeshTerm is Apache-2.0 and stays that way: the
 # produced meshterm8.psf.gz is a DATA FILE the Linux kernel console reads with setfont, on
 # the device, at run time. MeshTerm never links it, never bundles it, and never
 # redistributes it -- it is built on the machine it runs on, from this script, and the

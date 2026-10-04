@@ -11,7 +11,7 @@ solid tiles where Terminus draws the dots apart.
 
 Terminus is licensed under the SIL Open Font License, so it is never shipped inside
 MeshTerm: the host loads it from a BDF file on the machine (:func:`find_font`). On the
-desktop, ``scripts/cardputer/fetch-terminus.py`` puts the two 12-pixel BDFs, with their
+desktop, ``scripts/cardputer-zero/fetch-terminus.py`` puts the two 12-pixel BDFs, with their
 licence, where :func:`find_font` looks.
 """
 
@@ -41,7 +41,7 @@ def _art(rows: list[str]) -> bytes:
 
 
 #: MeshTerm's own marks, drawn over the base font. The same pixel art as the PicoCalc's
-#: font build (``scripts/picocalc/calculinux-console-font-6x12.sh``, ``MARKS``), so a mark
+#: font build (``scripts/picocalc-lyra/calculinux-console-font-6x12.sh``, ``MARKS``), so a mark
 #: means one picture on every handheld.
 # fmt: off
 MARKS: dict[int, bytes] = {
@@ -124,7 +124,7 @@ def _braille(value: int) -> bytes:
 
 #: Every braille cell, drawn over the base font as solid tiles with no gap between dots or
 #: between neighbouring cells — the same tiles as the PicoCalc's font build
-#: (``scripts/picocalc/calculinux-console-font-6x12.sh``, ``BANDS12``). MeshTerm never sets
+#: (``scripts/picocalc-lyra/calculinux-console-font-6x12.sh``, ``BANDS12``). MeshTerm never sets
 #: braille to be read: every braille cell is pixels, a chart, the map, a QR code, and a
 #: dotted one breaks every line it draws into beads.
 BRAILLE: dict[int, bytes] = {0x2800 + value: _braille(value) for value in range(256)}
@@ -257,7 +257,7 @@ def find_font() -> Font:
     if not regular_path.is_file():
         raise FileNotFoundError(
             f"no {REGULAR_BDF} in {directory} -- fetch Terminus with "
-            "`python scripts/cardputer/fetch-terminus.py` (or set "
+            "`python scripts/cardputer-zero/fetch-terminus.py` (or set "
             f"{FONT_ENV} to a directory holding it)"
         )
     bold_path = directory / BOLD_BDF

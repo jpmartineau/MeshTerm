@@ -14,7 +14,7 @@ import pytest
 
 import meshterm.platforms as platforms_mod
 from meshterm.platforms import (
-    PICOCALC,
+    PICOCALC_LYRA,
     REGULAR,
     get_platform,
     resolve,
@@ -34,12 +34,12 @@ def test_regular_is_todays_behaviour() -> None:
 
 
 def test_picocalc_is_the_narrower_plainer_flavour() -> None:
-    """PICOCALC never claims a capability the console can't back up."""
-    assert PICOCALC.name == "picocalc"
-    assert PICOCALC.readable_cols < REGULAR.readable_cols
-    assert PICOCALC.width_reclaim is False  # a phantom column would tear the exact-width frame
-    assert PICOCALC.emoji is False
-    assert PICOCALC.truecolor is False
+    """PICOCALC_LYRA never claims a capability the console can't back up."""
+    assert PICOCALC_LYRA.name == "picocalc-lyra"
+    assert PICOCALC_LYRA.readable_cols < REGULAR.readable_cols
+    assert PICOCALC_LYRA.width_reclaim is False  # a phantom column would tear the exact-width frame
+    assert PICOCALC_LYRA.emoji is False
+    assert PICOCALC_LYRA.truecolor is False
 
 
 def test_get_platform_defaults_to_regular() -> None:
@@ -49,8 +49,8 @@ def test_get_platform_defaults_to_regular() -> None:
 
 def test_set_platform_is_visible_through_get_platform() -> None:
     """set_platform takes effect immediately for any caller reading via get_platform()."""
-    set_platform(PICOCALC)
-    assert get_platform() is PICOCALC
+    set_platform(PICOCALC_LYRA)
+    assert get_platform() is PICOCALC_LYRA
     set_platform(REGULAR)
     assert get_platform() is REGULAR
 
@@ -63,8 +63,8 @@ def test_set_platform_reaches_a_dotted_import_too() -> None:
     access (``platforms_mod.PLATFORM``) — and every real binding point in this codebase,
     which reads through :func:`get_platform` — does.
     """
-    set_platform(PICOCALC)
-    assert platforms_mod.PLATFORM is PICOCALC
+    set_platform(PICOCALC_LYRA)
+    assert platforms_mod.PLATFORM is PICOCALC_LYRA
 
 
 def test_resolve_defaults_to_regular_off_device(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -79,27 +79,40 @@ def test_resolve_defaults_to_regular_off_device(monkeypatch: pytest.MonkeyPatch)
 
 def test_resolve_flag_wins_over_everything(monkeypatch: pytest.MonkeyPatch) -> None:
     """An explicit --platform overrides both the env var and auto-detection."""
-    monkeypatch.setenv("MESHTERM_PLATFORM", "picocalc")
+    monkeypatch.setenv("MESHTERM_PLATFORM", "picocalc-lyra")
     monkeypatch.setattr(platforms_mod, "_DEVICE_TREE_MODEL_PATH", Path("/nonexistent/model"))
     r = resolve("regular")
     assert r.platform is REGULAR
     assert r.source == "--platform flag"
-    assert r.env == "picocalc"  # recorded even though it didn't decide the outcome
+    assert r.env == "picocalc-lyra"  # recorded even though it didn't decide the outcome
 
 
 def test_resolve_env_wins_when_no_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     """MESHTERM_PLATFORM decides when --platform wasn't passed."""
-    monkeypatch.setenv("MESHTERM_PLATFORM", "picocalc")
+    monkeypatch.setenv("MESHTERM_PLATFORM", "picocalc-lyra")
     monkeypatch.setattr(platforms_mod, "_DEVICE_TREE_MODEL_PATH", Path("/nonexistent/model"))
     r = resolve(None)
-    assert r.platform is PICOCALC
+    assert r.platform is PICOCALC_LYRA
     assert r.source == "MESHTERM_PLATFORM env var"
 
 
 def test_resolve_matching_is_case_insensitive_and_trims_space() -> None:
     """A flag/env value matches regardless of case or stray whitespace."""
-    assert resolve(" PicoCalc ").platform is PICOCALC
+    assert resolve(" PicoCalc-Lyra ").platform is PICOCALC_LYRA
     assert resolve("REGULAR").platform is REGULAR
+
+
+@pytest.mark.parametrize("old", ["picocalc", "cardputer"])
+def test_the_old_device_names_are_refused_with_the_new_ones_listed(old: str) -> None:
+    """``picocalc`` and ``cardputer`` were renamed for the device variant, with no alias.
+
+    M5Stack makes three Cardputers and the PicoCalc takes several cores, so the bare names
+    were ambiguous. A launcher still passing one fails loudly, naming the real choices,
+    rather than quietly falling back to the desktop layout.
+    """
+    with pytest.raises(ValueError) as exc:
+        resolve(old)
+    assert "picocalc-lyra" in str(exc.value) and "cardputer-zero" in str(exc.value)
 
 
 def test_resolve_unknown_flag_raises_with_the_choices(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -109,7 +122,7 @@ def test_resolve_unknown_flag_raises_with_the_choices(monkeypatch: pytest.Monkey
         resolve("laptop")
     message = str(exc.value)
     assert "laptop" in message and "--platform" in message
-    assert "picocalc" in message and "regular" in message
+    assert "picocalc-lyra" in message and "regular" in message
 
 
 def test_resolve_unknown_env_raises_only_when_it_would_decide(
@@ -134,13 +147,13 @@ def test_resolve_auto_detects_the_lyra_model(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(platforms_mod, "_DEVICE_TREE_MODEL_PATH", _FakePath())
     r = resolve()
-    assert r.platform is PICOCALC
+    assert r.platform is PICOCALC_LYRA
     assert r.source == "auto-detect"
     assert r.detected_model == "Luckfox Lyra"  # trailing space/NUL stripped
 
 
 def test_resolve_auto_detect_is_conservative(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A device tree that exists but names different hardware never guesses picocalc."""
+    """A device tree that exists but names different hardware never guesses picocalc-lyra."""
     monkeypatch.delenv("MESHTERM_PLATFORM", raising=False)
 
     class _FakePath:
@@ -183,9 +196,9 @@ def test_without_emoji_leaves_an_already_compact_platform_alone() -> None:
     """A platform whose icons are already compact comes back untouched.
 
     The same object, not a copy that would compare equal but break every ``is`` check
-    the suite makes against PICOCALC.
+    the suite makes against PICOCALC_LYRA.
     """
-    assert without_emoji(PICOCALC) is PICOCALC
+    assert without_emoji(PICOCALC_LYRA) is PICOCALC_LYRA
 
 
 def test_the_emoji_less_variant_still_drives_the_theme() -> None:

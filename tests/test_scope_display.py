@@ -212,9 +212,9 @@ def test_the_feed_never_collapses_a_lane() -> None:
 
 def test_the_picocalc_feed_names_the_class_without_an_icon() -> None:
     """On the console the class icon is a one-glyph stand-in; the name alone says it."""
-    from meshterm.platforms import PICOCALC, REGULAR, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     try:
         screen = _feed(_scoped("harbour"))
         header, row = _stripped(screen.render_body(53))[:2]

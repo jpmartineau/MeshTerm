@@ -974,16 +974,16 @@ def test_the_main_menu_lane_puts_the_way_out_on_f3() -> None:
     """``Quit?`` on F3 asks; its Shift half, F8, is ``Quit!``, which doesn't."""
     from meshterm.ui.menu import _MainMenu
     from meshterm.ui.menus import section_heading
-    from meshterm.ui.tui.fkeys import PICOCALC_DECK
+    from meshterm.ui.tui.fkeys import PICOCALC_LYRA_DECK
 
     menu = _MainMenu(
         "menu",
         [section_heading("A"), Choice("alpha", 1), section_heading("B"), Choice("beta", 2)],
     )
-    lane = menu.picocalc_lane
+    lane = menu.picocalc_lyra_lane
     assert (lane[2].label, lane[2].opp_label) == ("Quit?", "Quit!")
-    assert PICOCALC_DECK.action_for(lane, 3) == "quit"
-    assert PICOCALC_DECK.action_for(lane, 8) == "quit_now"
+    assert PICOCALC_LYRA_DECK.action_for(lane, 3) == "quit"
+    assert PICOCALC_LYRA_DECK.action_for(lane, 8) == "quit_now"
     assert lane[0].label == "Sect ↑", "the section jumps keep F1/F2"
 
 
@@ -1250,10 +1250,10 @@ async def test_the_chip_that_asked_to_quit_leaves_when_pressed_again() -> None:
     The confirm's lane carries ``Quit!`` on the slot the menu's ``Quit?`` sat on, sending
     the same ``quit`` — which, with the question up, is the leaving, as a second ^Q is.
     """
-    from meshterm.platforms import PICOCALC, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, set_platform
     from meshterm.ui.tui.fkeys import EMPTY_LANE, FPair
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     lane = list(EMPTY_LANE)
     lane[2] = FPair("Quit!", "quit")
     with create_pipe_input() as inp:

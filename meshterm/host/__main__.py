@@ -7,7 +7,7 @@
 the framebuffer and reads the keyboard, and is the default wherever the launcher has named
 a framebuffer (``APPLAUNCH_LINUX_FBDEV_DEVICE``). Everything else is passed to MeshTerm as
 it would be on a command line — ``--mock`` for the simulated mesh, ``--ble``/``--port``/
-``--tcp`` for a companion — with ``--platform cardputer`` supplied by the host.
+``--tcp`` for a companion — with ``--platform cardputer-zero`` supplied by the host.
 """
 
 from __future__ import annotations

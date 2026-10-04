@@ -23,7 +23,7 @@ from prompt_toolkit.data_structures import Size
 from prompt_toolkit.output import DummyOutput
 
 from meshterm.persistence import db
-from meshterm.platforms import PICOCALC, REGULAR, set_platform
+from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 from meshterm.ui.tui.session import _has_wide_glyph
 from meshterm.ui.tui.spinner import Spinner
 
@@ -139,20 +139,20 @@ def test_wide_glyph_scan_short_circuits_without_emoji() -> None:
     """A no-emoji console font has no wide glyph, so the per-frame scan can be skipped."""
     waving = "hi \U0001f44b"
     assert _has_wide_glyph(waving) is True
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     assert _has_wide_glyph(waving) is False
 
 
 def test_spinner_cycle_follows_the_platform() -> None:
     """Braille where effects are on, the plain LINE cycle where they aren't."""
     assert Spinner().frames == Spinner.BRAILLE
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     assert Spinner().frames == Spinner.LINE
 
 
 def test_an_explicit_spinner_cycle_still_wins() -> None:
     """The platform supplies a *default*; a caller that names its frames keeps them."""
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     assert Spinner("ab").frames == "ab"
 
 
@@ -181,10 +181,10 @@ def test_battery_gauge_steps_the_sweep_at_the_platforms_own_cadence(monkeypatch)
             out.append(_battery_segment(ctx).plain[0])  # type: ignore[arg-type]
         return out
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     # A step per 2 s idle repaint: the sweep climbs, and does not alias across skipped frames.
-    assert len(set(_sweep(PICOCALC.tick_s))) == 5
-    assert len(set(_sweep(PICOCALC.tick_s / 2))) < 5  # half a tick apart, some frames repeat
+    assert len(set(_sweep(PICOCALC_LYRA.tick_s))) == 5
+    assert len(set(_sweep(PICOCALC_LYRA.tick_s / 2))) < 5  # half a tick apart, some frames repeat
     set_platform(REGULAR)
     assert len(set(_sweep(REGULAR.tick_s))) == 5
     assert _battery_segment(ctx).plain.endswith("5%")  # type: ignore[arg-type]
@@ -200,10 +200,10 @@ def test_idle_and_spin_cadences_are_slower_where_a_frame_is_dear() -> None:
     """
     assert REGULAR.tick_s == 1.0
     assert REGULAR.spinner_tick_s == 0.12
-    assert PICOCALC.tick_s > REGULAR.tick_s
+    assert PICOCALC_LYRA.tick_s > REGULAR.tick_s
     # A frame costs ~110 ms at the taller 53x40 geometry; a spin cadence under that would
     # queue repaints faster than they can finish.
-    assert PICOCALC.spinner_tick_s > 0.12
+    assert PICOCALC_LYRA.spinner_tick_s > 0.12
 
 
 def test_spinner_interval_reads_the_active_platform() -> None:
@@ -211,8 +211,8 @@ def test_spinner_interval_reads_the_active_platform() -> None:
     from meshterm.ui.tui.spinner import spinner_interval
 
     assert spinner_interval() == REGULAR.spinner_tick_s
-    set_platform(PICOCALC)
-    assert spinner_interval() == PICOCALC.spinner_tick_s
+    set_platform(PICOCALC_LYRA)
+    assert spinner_interval() == PICOCALC_LYRA.spinner_tick_s
 
 
 # --- the direct row-diff renderer ---------------------------------------------------

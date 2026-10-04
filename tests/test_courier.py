@@ -564,9 +564,9 @@ async def test_courier_command_rows_go_bare_where_the_platform_draws_no_icons(
     those rows aligned with one another — while the queue, clear, send and cancel rows lose
     their icons exactly as every other command row does there.
     """
-    from meshterm.platforms import PICOCALC, REGULAR, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     try:
         rows = _outbox_titles(tmp_path / "outbox")
         assert "Queue a message…" in rows and "Clear finished" in rows

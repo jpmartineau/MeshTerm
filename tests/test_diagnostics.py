@@ -149,7 +149,7 @@ def test_states_the_facts_a_bug_report_opens_with(ctx: AppContext) -> None:
     assert values["install"] in {"frozen", "source", "package"}
     assert values["os"] and values["python"] and values["arch"]
     assert "x" in values["terminal_size"]
-    assert values["platform"] in {"regular", "picocalc"}
+    assert values["platform"] in {"regular", "picocalc-lyra"}
     # The simulator answers like a radio, so the device half is populated rather than
     # skipped: this is the shape a real connected run produces.
     assert values["connected"] is True
@@ -231,9 +231,9 @@ def test_the_save_is_advertised_on_both_platforms(ctx: AppContext) -> None:
     page = _page(ctx)
     assert f"{SAVE_KEY} save" in page.footer_hint
     assert page.footer_hint.endswith("Esc back")
-    assert page.picocalc_lane[2] is not None
-    assert page.picocalc_lane[2].label == "Save"
-    assert page.picocalc_lane[2].action == SAVE_ACTION
+    assert page.picocalc_lyra_lane[2] is not None
+    assert page.picocalc_lyra_lane[2].label == "Save"
+    assert page.picocalc_lyra_lane[2].action == SAVE_ACTION
 
 
 # --- saving it ------------------------------------------------------------------------

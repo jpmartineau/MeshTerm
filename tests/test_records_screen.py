@@ -267,7 +267,7 @@ def test_record_dialog_actions_start_both_labels_in_the_same_cell() -> None:
     it is the cell the words land in that the eye compares. Where the platform draws no icon
     lane the marks go, and so must their padding: both labels open right after the pointer.
     """
-    from meshterm.platforms import PICOCALC, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, set_platform
 
     def starts() -> set[int]:
         lines = _plain(_dialog(_record()).render_body(60)).splitlines()
@@ -284,7 +284,7 @@ def test_record_dialog_actions_start_both_labels_in_the_same_cell() -> None:
     assert len(regular) == 1  # one column for both words…
     assert regular == {2 + 2 + 1}  # …after the pointer, the two-cell lane, and its space
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     assert starts() == {2}  # no lane, no leftover padding: the words follow the pointer
 
 

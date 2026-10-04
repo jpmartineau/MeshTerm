@@ -4,7 +4,7 @@
 :func:`run` builds the three pieces every host shares — the :class:`~.vt.Terminal` the
 TUI's bytes land in, a :class:`HostOutput` prompt_toolkit writes to, and a pipe input the
 host's keys go into — sets them as prompt_toolkit's app session, and calls the ordinary
-CLI with ``--platform cardputer`` exactly as a shell would. A *front end* is the part that
+CLI with ``--platform cardputer-zero`` exactly as a shell would. A *front end* is the part that
 differs: where the pixels go and where the keys come from. It is handed the terminal, the
 lock that guards it and a way to type, starts whatever threads it needs, and is told each
 time a frame is complete.
@@ -22,7 +22,7 @@ from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output.color_depth import ColorDepth
 from prompt_toolkit.output.vt100 import Vt100_Output
 
-from ..platforms import CARDPUTER
+from ..platforms import CARDPUTER_ZERO
 from .vt import RGB, Terminal
 
 
@@ -115,8 +115,8 @@ def run(argv: Sequence[str], front_end: FrontEndFactory) -> int:
     lock = threading.Lock()
     with create_pipe_input() as pipe:
         terminal = Terminal(
-            CARDPUTER.readable_cols,
-            CARDPUTER.readable_rows,
+            CARDPUTER_ZERO.readable_cols,
+            CARDPUTER_ZERO.readable_rows,
             palette=_palette(),
             reply=pipe.send_text,
         )
@@ -126,7 +126,7 @@ def run(argv: Sequence[str], front_end: FrontEndFactory) -> int:
             with create_app_session(input=pipe, output=output):
                 # Standalone, as a shell would run it: the CLI reports its own errors and
                 # ends by raising SystemExit with the status.
-                cli.app(args=["--platform", "cardputer", *argv], windows_expand_args=False)
+                cli.app(args=["--platform", "cardputer-zero", *argv], windows_expand_args=False)
             return 0
         except SystemExit as done:
             return done.code if isinstance(done.code, int) else (0 if done.code is None else 1)

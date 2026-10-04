@@ -6,7 +6,7 @@
 belongs to one keyboard is a :class:`LaneDeck`, named by ``Platform.lane_deck``: which
 keycodes drive the slots, where the chips sit on the row, how they are drawn, and which of
 a screen's lane definitions it reads. A screen states its lane per deck —
-``Screen.picocalc_lane``, ``Screen.cardputer_lane`` — and the Cardputer's follows the
+``Screen.picocalc_lyra_lane``, ``Screen.cardputer_zero_lane`` — and the Cardputer's follows the
 PicoCalc's until a screen says otherwise. Both decks having five slots is a coincidence of
 two keyboards, not a rule, and nothing here assumes it: a deck's slot count is its keys.
 
@@ -270,8 +270,8 @@ class LaneDeck:
 #: plain F6-F10, so the Shift bank is keys of its own. Every chip is a 2-cell key caption,
 #: a space and a 6-cell label; five chips and four 2-cell gaps sum to exactly 53, the
 #: console's width, with nothing left over.
-PICOCALC_DECK = LaneDeck(
-    name="picocalc",
+PICOCALC_LYRA_DECK = LaneDeck(
+    name="picocalc-lyra",
     keys=(1, 2, 3, 4, 5),
     shift_keys=(6, 7, 8, 9, 10),
     captions=("F1", "F2", "F3", "F4", "F5"),
@@ -281,35 +281,35 @@ PICOCALC_DECK = LaneDeck(
     captioned=True,
     fill="fkey.chip",
     shift_fill="fkey.chip.shift",
-    read_lane=attrgetter("picocalc_lane"),
+    read_lane=attrgetter("picocalc_lyra_lane"),
 )
 
 #: The Cardputer Zero's number keys 4-8, which sit right under the display: Fn+4..8 are
 #: F4-F8, never the bare digits, since a digit must stay a digit on a screen that takes
 #: typing (JP, 2026-09-30). The keyboard driver sends Shift as a key of its own, and the
 #: console host encodes Shift+Fn+4..8 the way xterm encodes Shift+F4..F8, which
-#: prompt_toolkit reads as F16-F20 — so a desktop terminal with ``--platform cardputer``
+#: prompt_toolkit reads as F16-F20 — so a desktop terminal with ``--platform cardputer-zero``
 #: drives the same bank. The chips are laid out exactly as the PicoCalc's — the key's
 #: caption leading a 6-cell label, nine cells a chip, two between (JP, 2026-09-30) — and
 #: the Shift bank keeps the same captions, since it is the same keys with Shift held; its
 #: blue fill is what says so. It reads the PicoCalc's lanes for now (see
-#: :meth:`~meshterm.ui.tui.screen.Screen.cardputer_lane`).
-CARDPUTER_DECK = LaneDeck(
-    name="cardputer",
+#: :meth:`~meshterm.ui.tui.screen.Screen.cardputer_zero_lane`).
+CARDPUTER_ZERO_DECK = LaneDeck(
+    name="cardputer-zero",
     keys=(4, 5, 6, 7, 8),
     shift_keys=(16, 17, 18, 19, 20),
     captions=("F4", "F5", "F6", "F7", "F8"),
     shift_captions=("F4", "F5", "F6", "F7", "F8"),
-    columns=PICOCALC_DECK.columns,
-    chip_width=PICOCALC_DECK.chip_width,
+    columns=PICOCALC_LYRA_DECK.columns,
+    chip_width=PICOCALC_LYRA_DECK.chip_width,
     captioned=True,
-    fill="fkey.chip.cardputer",
-    shift_fill="fkey.chip.cardputer.shift",
-    read_lane=attrgetter("cardputer_lane"),
+    fill="fkey.chip.cardputer_zero",
+    shift_fill="fkey.chip.cardputer_zero.shift",
+    read_lane=attrgetter("cardputer_zero_lane"),
 )
 
 #: Every deck, by the name ``Platform.lane_deck`` gives it.
-DECKS: dict[str, LaneDeck] = {deck.name: deck for deck in (PICOCALC_DECK, CARDPUTER_DECK)}
+DECKS: dict[str, LaneDeck] = {deck.name: deck for deck in (PICOCALC_LYRA_DECK, CARDPUTER_ZERO_DECK)}
 
 _DECK: LaneDeck | None = None
 

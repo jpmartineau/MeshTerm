@@ -185,7 +185,7 @@ _CONSOLE_SETUP_CHOICES: dict[str, str] = {
     "off": "Leave it alone",
 }
 
-#: The two console fonts ``scripts/picocalc/calculinux-console-font-6x12.sh`` (and its 6x8
+#: The two console fonts ``scripts/picocalc-lyra/calculinux-console-font-6x12.sh`` (and its 6x8
 #: companion) build for the PicoCalc's framebuffer panel. Each is named by its cell and by the
 #: screen that cell buys, because choosing a font here is choosing how much fits — not a bitmap.
 #: Plain ASCII ``x`` and not ``×``: the multiplication sign is not one of the 512 glyphs
@@ -455,7 +455,7 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         # for anyone who would rather see more of a list than read it comfortably.
         default="6x12",
         choices=_CONSOLE_FONT_CHOICES,
-        platforms=frozenset({"picocalc"}),
+        platforms=frozenset({"picocalc-lyra"}),
     ),
     # --- Diagnostics ---------------------------------------------------------------
     PrefSpec(

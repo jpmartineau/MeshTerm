@@ -5,9 +5,9 @@ Repo-side tools. None of these ship in the wheel.
 | Script | What it is for |
 |---|---|
 | `basemap-doctor.py` | Why a user's map has no basemap — certificates, DNS, proxy, or colour depth |
-| `picocalc/` | Calculinux device setup: console font, palette, Wi-Fi; `xiao-radio/` is the XIAO radio kit (firmware build, flashing, UART setup) |
+| `picocalc-lyra/` | Calculinux device setup: console font, palette, Wi-Fi; `xiao-radio/` is the XIAO radio kit (firmware build, flashing, UART setup) |
 | `uconsole/` | The uConsole's always-on SPI bridge service (MeshTerm can also drive that radio directly, with no script at all — see `docs/devices/uconsole.md`) |
-| `cardputer/` | The Cardputer Zero's console host: `fetch-terminus.py` installs the 12-pixel Terminus fonts it draws in (OFL, so never shipped with MeshTerm) |
+| `cardputer-zero/` | The Cardputer Zero's console host: `fetch-terminus.py` installs the 12-pixel Terminus fonts it draws in (OFL, so never shipped with MeshTerm) |
 
 ## basemap-doctor.py
 

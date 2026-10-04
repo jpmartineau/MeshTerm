@@ -664,13 +664,13 @@ async def test_ctrl_r_reads_again_and_f3_is_read_over_remove() -> None:
     menu = RegionMenu(title, items)
     menu.future = asyncio.get_running_loop().create_future()
     assert not menu.floating
-    lane = menu.picocalc_lane
+    lane = menu.picocalc_lyra_lane
     assert (lane[2].label, lane[2].opp_label) == ("Read", "Remove")
     assert not lane[2].opp_enabled  # the wildcard row is highlighted first
     assert "Del remove" not in menu.footer_hint
     menu.handle("down")
     menu.handle("down")  # lakeside-north
-    assert menu.picocalc_lane[2].opp_enabled
+    assert menu.picocalc_lyra_lane[2].opp_enabled
     assert "Del remove" in menu.footer_hint
     menu.handle("retry")
     assert menu.future.result() == region_editor._READ

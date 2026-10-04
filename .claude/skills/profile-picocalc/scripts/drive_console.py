@@ -140,7 +140,7 @@ def main():
     if pid == 0:  # child: become the app
         os.environ["TERM"] = "linux"
         os.environ["MESHTERM_FULL_WIDTH"] = "0"
-        argv = [args.exe, "--platform", "picocalc"]
+        argv = [args.exe, "--platform", "picocalc-lyra"]
         if args.mock:
             argv.append("--mock")
         os.execv(argv[0], argv)

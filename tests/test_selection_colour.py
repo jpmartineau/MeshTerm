@@ -20,7 +20,7 @@ import re
 import pytest
 from rich.text import Text
 
-from meshterm.platforms import PICOCALC, REGULAR, set_platform
+from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 from meshterm.ui.contactlist import _SORT_ACTIVE
 from meshterm.ui.pathline import PathHop, PathLine
 from meshterm.ui.theme import (
@@ -181,7 +181,7 @@ def test_a_name_beside_a_path_line_still_folds() -> None:
     assert node_style("77").removeprefix("bold ") in hues  # …the route did not
 
 
-@pytest.mark.parametrize("platform", [REGULAR, PICOCALC])
+@pytest.mark.parametrize("platform", [REGULAR, PICOCALC_LYRA])
 def test_the_message_paths_dialog_colours_its_picked_route_like_its_graph(platform) -> None:  # noqa: ANN001
     """The end JP asked for: the picked row and the graph above it agree on each node.
 
@@ -244,7 +244,7 @@ def test_the_ansi_cache_tells_a_highlighted_row_from_the_same_row_unhighlighted(
     assert render_to_ansi(_row(selected=False), 60) == plain_ansi  # not clobbered
 
 
-@pytest.mark.parametrize("platform", [REGULAR, PICOCALC])
+@pytest.mark.parametrize("platform", [REGULAR, PICOCALC_LYRA])
 def test_the_fold_speaks_whichever_hue_vocabulary_is_bound(platform) -> None:  # noqa: ANN001
     """PicoCalc quantizes the hue to a palette slot; the rule above it is the same rule."""
     set_platform(platform)
@@ -257,7 +257,7 @@ def test_the_fold_speaks_whichever_hue_vocabulary_is_bound(platform) -> None:  #
 
     assert lit != unlit
     assert "Lakeside" in re.sub(r"\x1b\[[\d;]*m", "", lit)
-    if platform is PICOCALC:
+    if platform is PICOCALC_LYRA:
         assert "\x1b[1;97mLakeside" in lit, lit  # slot 15, the console's white
     else:
         assert "38;2;255;255;255mLakeside" in lit, lit
@@ -266,7 +266,7 @@ def test_the_fold_speaks_whichever_hue_vocabulary_is_bound(platform) -> None:  #
 # -- the vocabulary itself ------------------------------------------------------------
 
 
-@pytest.mark.parametrize("platform", [REGULAR, PICOCALC])
+@pytest.mark.parametrize("platform", [REGULAR, PICOCALC_LYRA])
 def test_every_hue_a_key_can_mint_is_recognised_as_one(platform) -> None:  # noqa: ANN001
     """:func:`node_style` read backwards has to answer for all 256 first bytes.
 
@@ -307,7 +307,7 @@ def test_the_two_platforms_hue_vocabularies_cannot_be_confused() -> None:
     """
     set_platform(REGULAR)
     spectrum = {node_style(f"{byte:02x}") for byte in range(256)}
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     slots = {node_style(f"{byte:02x}") for byte in range(256)}
 
     assert not (spectrum & slots)
@@ -376,7 +376,7 @@ def test_the_active_sort_column_is_lit_in_the_cursor_white() -> None:
 
 def test_the_sort_cue_survives_the_console_s_sixteen_slots() -> None:
     """A bare hex would have been quantized at the fold; a theme name is chosen deliberately."""
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     header = Text("NAME ▲", style=_SORT_ACTIVE)
 
     assert "\x1b[1;97m" in render_to_ansi(header, 20)  # slot 15, not the brand's 14

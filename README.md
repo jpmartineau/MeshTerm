@@ -232,7 +232,7 @@ meshterm --mock
 # On a ClockworkPi PicoCalc (Luckfox Lyra / Calculinux) the handheld flavour is
 # auto-detected: a 53-column layout, a 16-slot palette, a compact glyph language on a
 # custom console font, and an F-key hint lane. Preview it anywhere, or inspect it:
-meshterm --mock --platform picocalc
+meshterm --mock --platform picocalc-lyra
 meshterm specimen
 ```
 

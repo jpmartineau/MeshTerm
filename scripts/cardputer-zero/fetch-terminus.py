@@ -9,12 +9,12 @@ reads (``$MESHTERM_HOST_FONTS``, else ``fonts`` under the MeshTerm config direct
 
 Run it once on a machine that will run the host or its desktop simulator:
 
-    python scripts/cardputer/fetch-terminus.py
+    python scripts/cardputer-zero/fetch-terminus.py
 
 Where Python can't fetch it (a certificate store that rejects the mirror), download the
 archive any other way and hand it over; it is checked against the same digest:
 
-    python scripts/cardputer/fetch-terminus.py --archive terminus-font-4.49.1.tar.gz
+    python scripts/cardputer-zero/fetch-terminus.py --archive terminus-font-4.49.1.tar.gz
 """
 
 from __future__ import annotations

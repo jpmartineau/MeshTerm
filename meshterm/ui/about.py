@@ -121,7 +121,7 @@ class AboutPage(ScrollScreen):
         self._doc = doc
 
     @property
-    def picocalc_lane(self):
+    def picocalc_lyra_lane(self):
         """The shared pager lane, plus the section step on a page that has sections.
 
         A left-hand pair rises toward F1, so ``Sect ↑`` sits outside ``Sect ↓`` — the

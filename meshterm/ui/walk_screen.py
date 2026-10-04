@@ -231,7 +231,7 @@ class WalkScreen(Screen):
     floating = False
 
     @property
-    def picocalc_lane(self):
+    def picocalc_lyra_lane(self):
         """``You`` on the screen's own F3, the shared pager and its two ends on F4/F5.
 
         ``You`` is not an end of the link list — it drops the whole trail and puts the
@@ -442,7 +442,7 @@ class WalkScreen(Screen):
 
         Home/End are the list's own ends here, as on every other scrolling screen; the jump
         back to our own node is ``locate`` (^Y, and the lane's F3), which is not a place in
-        this list at all — see :attr:`picocalc_lane`.
+        this list at all — see :attr:`picocalc_lyra_lane`.
         """
         rows = self._rows()
         if action == "escape":

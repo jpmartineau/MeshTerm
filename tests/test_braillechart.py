@@ -264,7 +264,7 @@ def test_axis_chart_mirrors_marks_where_the_platform_affords_them() -> None:
     The desktop frames a chart with marks on both gutters; the console keeps the right
     ``├`` tick but spends the mirrored label's cells on the chart instead.
     """
-    from meshterm.platforms import PICOCALC, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, set_platform
     from meshterm.ui.braillechart import axis_chrome
 
     rows = timeline_rows([9] * 8, rows=2)
@@ -275,7 +275,7 @@ def test_axis_chart_mirrors_marks_where_the_platform_affords_them() -> None:
     assert out[2].plain.startswith("    └") and out[2].plain.endswith("┘")
     assert axis_chrome(1) == 2 * (1 + 2)  # what a caller must budget beside the cells
 
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     tight = axis_chart(timeline_rows([9] * 8, rows=2), 9, 4, lambda f: "x")
     assert tight[0].plain == "  8 ┤⣿⣿⣿⣿├"  # the tick survives; the label's cells don't
     assert tight[1].plain == "  3 ┤⣿⣿⣿⣿├"

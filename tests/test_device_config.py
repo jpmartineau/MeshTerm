@@ -673,7 +673,7 @@ async def test_sparing_every_row_leaves_the_sweep_with_nothing_to_do() -> None:
     assert victims == []
 
 
-@pytest.mark.parametrize("platform_name", ["regular", "picocalc"])
+@pytest.mark.parametrize("platform_name", ["regular", "picocalc-lyra"])
 def test_the_archive_preview_keeps_its_cursor_in_its_box_walking_both_ways(
     platform_name: str,
 ) -> None:
@@ -689,11 +689,11 @@ def test_the_archive_preview_keeps_its_cursor_in_its_box_walking_both_ways(
 
     from meshterm.core.contact_score import ContactSignals, ScoredContact
     from meshterm.core.models import Contact
-    from meshterm.platforms import PICOCALC, REGULAR, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
     from meshterm.ui.sweep_screen import _preview_screen
     from meshterm.ui.tui.frame import compose_dialog
 
-    platform = {"regular": REGULAR, "picocalc": PICOCALC}[platform_name]
+    platform = {"regular": REGULAR, "picocalc-lyra": PICOCALC_LYRA}[platform_name]
     set_platform(platform)
 
     def scored(index: int) -> ScoredContact:

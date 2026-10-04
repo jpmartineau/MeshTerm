@@ -43,7 +43,7 @@ class ProgressScreen(Screen):
     modal = True  # work in flight owns the keyboard; ^W must not unwind out from under it
 
     @property
-    def picocalc_lane(self):
+    def picocalc_lyra_lane(self):
         """No lane: the dialog is non-interactive, so no key does anything to it."""
         from .fkeys import EMPTY_LANE
 

@@ -7,7 +7,7 @@ everything heard is recorded to SQLite (`meshterm/persistence/`).
 
 Run the tests with `python -m pytest -q`. Screens must stay readable at each platform's
 `readable_cols` — 72 regular, 53 PicoCalc (see **Platforms** below); the dual-platform
-gallery test (`tests/test_gallery.py`) is the enforcement point, and every picocalc case
+gallery test (`tests/test_gallery.py`) is the enforcement point, and every picocalc-lyra case
 is a hard gate.
 
 ## Git workflow
@@ -28,7 +28,7 @@ never `git push` unless explicitly asked in that moment.
   frame's, not the drawing's, wherever the frame has one — **regular** sets the credit into
   the panel's **bottom border rule**, right-justified, one rule cell before the corner, the
   way a title sits in the top rule (`Screen.bottom_caption` → `frame._panel_box`), so the
-  map's cells are untouched; **picocalc**, whose frame has no bottom rule at all, stamps it
+  map's cells are untouched; **picocalc-lyra**, whose frame has no bottom rule at all, stamps it
   over the right end of the drawing's last row instead, overprinting what it covers. The
   minimap always stamps. The split is bound once via `platforms.on_platform`, never asked
   per frame. Never a title atom, never a footer character, never a key. The licence and URL
@@ -155,7 +155,7 @@ deliberately, one at a time, and say why in the code.
   `TuiSession._dispatch`, and neither is advertised — a global verb has no screen to
   belong to, and the F-key lane has only three free slots per screen — except `^Q quit?`
   on the main menu's own hint, where Esc is inert and the reader looks for the way out.
-  On picocalc that atom rides the title bar's tail (`frame._way_out`), and the menu's lane
+  On picocalc-lyra that atom rides the title bar's tail (`frame._way_out`), and the menu's lane
   puts the way out on F3: `Quit?` asks, its Shift half F8 `Quit!` leaves without asking
   (`quit_now`, the one door that skips the confirm, and only on the menu). The confirm
   keeps the chip that asked: its F3 reads `Quit!` and sends the same `quit`, which with
@@ -213,7 +213,7 @@ deliberately, one at a time, and say why in the code.
   that reads as the screen changing under you rather than as one step, and held-down
   arrows should settle at an end rather than loop. The exception is a **forward-only key
   with no reverse of its own**, which cycles or it dead-ends — Tab on a button row, and
-  the picocalc F-lane's single-chip advancers (`Sort →`, the node page's tab chip, the
+  the picocalc-lyra F-lane's single-chip advancers (`Sort →`, the node page's tab chip, the
   Time Machine's window chip). Those state it in the code.
 - **Edge scroll** — what a clamped arrow does instead. With the highlight on the first
   selectable row, ↑ scrolls the page up a line, and on the last, ↓ scrolls it down, until
@@ -335,7 +335,7 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   Where the footer is the hint line (regular) it carries the *top* screen's hint, so a
   floating dialog's border stays silent — the same sentence in the border and at the
   bottom of the terminal was one of them wasted — and its clip arrows fall back to the
-  base frame's `↑↓ more`. Where the footer is the F-key lane (picocalc) there is no hint
+  base frame's `↑↓ more`. Where the footer is the F-key lane (picocalc-lyra) there is no hint
   line, so the border is the only place Enter/Esc/the arrows can be named and it keeps
   the hint, less every atom whose keys are all chips on the lane one row below
   (`fkeys.strip_lane_atoms` via `frame._dialog_hint`, resolved **per paint** — a screen
@@ -632,8 +632,8 @@ derived sweep that runs **every** registered command twice, once plain and once 
 ### Platforms
 
 One codebase, three flavours: **regular** (desktop/ssh, 72 cols, truecolor, emoji),
-**picocalc** (the PicoCalc's 53×26/53×40 framebuffer console, 16 palette slots, a
-512-glyph font, no emoji), and **cardputer** (M5Stack's Cardputer Zero, 53×14 in 6×12
+**picocalc-lyra** (the PicoCalc's 53×26/53×40 framebuffer console, 16 palette slots, a
+512-glyph font, no emoji), and **cardputer-zero** (M5Stack's Cardputer Zero, 53×14 in 6×12
 cells on a 320×170 panel a console host paints itself, truecolor, no emoji — hardware not
 yet in hand, so it is chosen by flag only).
 A frozen `Platform` spec (`meshterm/platforms.py`) resolves
@@ -655,13 +655,13 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   draws over the bar (`dialog_row_margin` 1) but never over the lane, which is the
   dialog's own; the bar's ends either side of the box are blanked
   (`frame.composite_float`), since a stray `7%` would read as the battery.
-- **Never emit a raw emoji or bare hex colour into picocalc output.** Icons go through
+- **Never emit a raw emoji or bare hex colour into picocalc-lyra output.** Icons go through
   `theme.glyph()` (the compact map); everything else is caught by the render-boundary
   fold (`theme.fold_text`, applied in `tui/render.render_to_ansi` and
   `MapCanvas.to_ansi_lines`) — but the fold is the safety net, not the design.
 - The glyph contract is `ui/fontset.py` — the installed console font's exact codepoint
   inventory, device-verified. A character outside it is a test failure, not a tofu box
-  found on-device. The font itself is built by `scripts/picocalc/calculinux-console-font-6x12.sh`;
+  found on-device. The font itself is built by `scripts/picocalc-lyra/calculinux-console-font-6x12.sh`;
   the two files move in the same commit.
 - The 16-slot palette is `theme._VT_SLOTS` (programmed via `/etc/vtrgb`; same script).
   `MESH_THEME_16` speaks `color(0..15)` only; backgrounds stop at slot 7. Both themes
@@ -676,7 +676,7 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   `22;3N`, never a bare `3N`, because `9N` is *how* the console spells bright and adjacent
   art spans (the wordmark's bevels, a raster's neighbouring cells) reset nothing between
   them, so a bare one inherits the intensity bit and lands a bank too high mid-row.
-- On picocalc, the node hue and the heat gradient **quantize** — same rule, coarser
+- On picocalc-lyra, the node hue and the heat gradient **quantize** — same rule, coarser
   resolution: `node_style` snaps the key's hue to its sixth of the wheel
   (`theme._NODE_SLOT_HEXES`, the six chromatic bright slots) and heat to the `heat.*`
   steps. Nothing loses its colour for being on the console. Marks whose hue is *fixed*
@@ -707,10 +707,10 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   jumps, the Time Machine's `w`, the map's `^Y`, a row's `Del`) earns a slot — otherwise
   it is undiscoverable on the device.
 - **Each handheld deals its own lane.** Everything about the lane that belongs to one
-  keyboard is a `LaneDeck` (`fkeys.PICOCALC_DECK`, `fkeys.CARDPUTER_DECK`), named by
+  keyboard is a `LaneDeck` (`fkeys.PICOCALC_LYRA_DECK`, `fkeys.CARDPUTER_ZERO_DECK`), named by
   `Platform.lane_deck`: which keycodes drive the slots, where the chips sit on the row, how
   they are drawn, and which of a screen's definitions it reads. A screen defines
-  `picocalc_lane`, and `cardputer_lane` follows it until that screen overrides it (JP,
+  `picocalc_lyra_lane`, and `cardputer_zero_lane` follows it until that screen overrides it (JP,
   2026-09-30: same entries for now, Fn+L/M being an awkward reach for paging). Override
   the per-deck property, never `fkey_lane`, which only resolves the active deck; resolve a
   key or draw a row through the deck (`deck.action_for`, `deck.lane_text`), never by
@@ -730,12 +730,12 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   front end is the only part that differs: the framebuffer and evdev on the device
   (`host/device.py`, written ahead of the hardware), a Tk window on the desktop
   (`host/sim.py`): `python -m meshterm.host --mock`, after
-  `python scripts/cardputer/fetch-terminus.py` once. Its glyph contract is
-  `fontset.CARDPUTER_CODEPOINTS`, named by `Platform.font` as the PicoCalc's is; the fold
+  `python scripts/cardputer-zero/fetch-terminus.py` once. Its glyph contract is
+  `fontset.CARDPUTER_ZERO_CODEPOINTS`, named by `Platform.font` as the PicoCalc's is; the fold
   derives everything from the platform's font (accents, emoji, the `?` net) and quantizes
   colour only where `truecolor` is off.
 - `meshterm specimen` prints the whole visual language through the real funnels — the
-  acceptance card on-device, a preview under `--platform picocalc` on the desktop.
-- Dev loop: `meshterm --mock --platform picocalc` in a 53×40 window, or
-  `--platform cardputer` in a 53×14 one; the gallery and `tests/test_theme16.py` carry the
+  acceptance card on-device, a preview under `--platform picocalc-lyra` on the desktop.
+- Dev loop: `meshterm --mock --platform picocalc-lyra` in a 53×40 window, or
+  `--platform cardputer-zero` in a 53×14 one; the gallery and `tests/test_theme16.py` carry the
   contracts.

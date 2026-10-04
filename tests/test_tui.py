@@ -1053,11 +1053,11 @@ def test_startup_splash_fits_every_platform_width() -> None:
     the gallery doesn't cover, and it shipped torn there until the narrow mark landed —
     so this is the gate.
     """
-    from meshterm.platforms import PICOCALC, REGULAR, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
     from meshterm.ui.logo import load_logo
 
     try:
-        for platform in (REGULAR, PICOCALC):
+        for platform in (REGULAR, PICOCALC_LYRA):
             set_platform(platform)
             cols = platform.readable_cols
             screen = SelectScreen("Choose a device", [Choice("alpha", 1)])
@@ -3413,7 +3413,7 @@ def test_the_splash_action_rows_share_one_icon_column() -> None:
     """
     from rich.cells import cell_len
 
-    from meshterm.platforms import PICOCALC, REGULAR, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
     from meshterm.ui.device_picker import _ADD_TCP, _QUIT, _action_rows
     from meshterm.ui.tui import Choice
 
@@ -3425,7 +3425,7 @@ def test_the_splash_action_rows_share_one_icon_column() -> None:
         }
 
     assert len(set(starts().values())) == 1
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     try:
         assert set(starts().values()) == {2}, "the icons go, and no padding stays behind"
     finally:
@@ -3504,7 +3504,7 @@ def test_the_splash_scrolls_the_whole_row_it_is_on() -> None:
     """
     from meshterm.core.device_store import RememberedDevice
     from meshterm.core.discovery import serial_device
-    from meshterm.platforms import PICOCALC, REGULAR, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
     from meshterm.ui.device_picker import _build_items
     from meshterm.ui.tui import Choice, SelectScreen
 
@@ -3520,7 +3520,7 @@ def test_the_splash_scrolls_the_whole_row_it_is_on() -> None:
         )
     }
     try:
-        for platform, width in ((REGULAR, 66), (PICOCALC, 47)):
+        for platform, width in ((REGULAR, 66), (PICOCALC_LYRA, 47)):
             set_platform(platform)
             items = _build_items([radio], registry[radio.stable_id], registry)
             screen = SelectScreen(
@@ -3553,14 +3553,14 @@ def test_the_splash_hint_stays_inside_the_box_it_is_drawn_in() -> None:
     from rich.cells import cell_len
 
     from meshterm.core.discovery import serial_device
-    from meshterm.platforms import PICOCALC, REGULAR
+    from meshterm.platforms import PICOCALC_LYRA, REGULAR
     from meshterm.ui.device_picker import _shortcut_hint
     from meshterm.ui.tui.select import splice_hint
 
     base = "↑↓ move · Enter select · Esc bye"  # the splash's own send-off
     radio = serial_device("COM7", name="A Radio")
     common = splice_hint(base, _shortcut_hint(0)(radio))
-    for platform in (REGULAR, PICOCALC):
+    for platform in (REGULAR, PICOCALC_LYRA):
         budget = platform.readable_cols - platform.dialog_margin - 2
         assert cell_len(common) <= budget, (platform.name, common)
 

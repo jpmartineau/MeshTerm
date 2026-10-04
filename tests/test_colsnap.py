@@ -251,10 +251,10 @@ def test_the_row_writer_pins_what_it_writes(monkeypatch) -> None:  # noqa: ANN00
 
 def test_a_platform_that_draws_no_emoji_pins_nothing() -> None:
     """The PicoCalc draws only glyphs its own font has verified, so there is nothing to pin."""
-    from meshterm.platforms import PICOCALC, set_platform
+    from meshterm.platforms import PICOCALC_LYRA, set_platform
 
     assert colsnap.enabled()
-    set_platform(PICOCALC)
+    set_platform(PICOCALC_LYRA)
     assert not colsnap.enabled()
 
 
