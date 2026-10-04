@@ -215,19 +215,25 @@ deliberately, one at a time, and say why in the code.
   with no reverse of its own**, which cycles or it dead-ends — Tab on a button row, and
   the picocalc-lyra F-lane's single-chip advancers (`Sort →`, the node page's tab chip, the
   Time Machine's window chip). Those state it in the code.
-- **Edge scroll** — what a clamped arrow does instead. With the highlight on the first
-  selectable row, ↑ scrolls the page up a line, and on the last, ↓ scrolls it down, until
-  the page's real top or bottom is in view: whatever sits above the first row or below
-  the last (a node's vitals, a list's lead-in, a closing note) can always be reached.
-  Home and End go to the page's very top and bottom with the highlight. The frame stops
-  following the highlight while a page is edge-scrolled, so it may leave the screen —
-  deliberately. **The snap-back** brings it home: while it is out of view, a key that
-  would move it or act on it (the other arrow, Enter, Delete) only brings it back into
-  view, jumping if it must, and does nothing else — nothing runs that can't be seen. Any
-  other key ends the edge scroll. It lives in `Screen.edge_scroll`, which the session asks
-  before `handle`; a screen opts in by answering `cursor_at_edge` (`Screen.row_at_edge`
-  for an index over rows), and one whose ↑↓ move no highlight (a prompt's history
-  recall) leaves it `None`.
+- **Edge scroll** — what a clamped arrow does instead, on every page with a highlight,
+  screen or dialog. With the highlight on the first selectable row, ↑ scrolls the page up
+  a line, and on the last, ↓ scrolls it down, until the page's real top or bottom is in
+  view: whatever sits above the first row or below the last (a node's vitals, a list's
+  lead-in, a closing note) can always be reached. Home and End go to the page's very top
+  and bottom with the highlight. The frame stops following the highlight while a page is
+  edge-scrolled, so it may leave the screen — deliberately. **The snap-back** brings it
+  home: while it is out of view, a key that would move it toward the window or act on it
+  (the arrow pointing at it, Enter, Delete) only brings it back into view, jumping if it
+  must, and does nothing else — nothing runs that can't be seen. Any other key ends the
+  edge scroll. **No screen says where its edges are**: it lives in `Screen` and the frame,
+  and an arrow goes to `handle` like any key — the next paint reads the answer off the
+  page (`Screen.note_highlight`), where a highlight on the same line, drawn the same,
+  moved nothing, so the page takes the line instead. All a screen supplies is its
+  highlight's line in `cursor_line`, which keeping it in view asks of it anyway; with no
+  rows, a list's empty state stands in. A page with no highlight (the map, which pans; a
+  plain page, whose ↑↓ already scroll) has nothing to edge, and one whose kept line is
+  not a highlight the arrows walk — the remote CLI's prompt, ↑↓ recalling history — sets
+  `edge_scrolls = False`.
 - Grouped-list section headings use `section_heading("Label")` → `── Label ──` in the
   bold `heading` grey, never the frame's accent: a rule in the border's colour reads as
   part of the frame. A chat's day divider wears the same dress. That is also what makes a heading *sticky* (it pins to the top row while its section

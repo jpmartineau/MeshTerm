@@ -45,6 +45,9 @@ class RemoteCliScreen(Screen):
     """A shell-like screen onto one remote node's CLI. The owner does the radio work."""
 
     floating = False
+    #: The line kept in view is the prompt, not a highlight: ↑↓ recall history as a shell's
+    #: do, and the transcript scrolls by the page keys alone — so no edge scroll here.
+    edge_scrolls = False
 
     @property
     def picocalc_lyra_lane(self):

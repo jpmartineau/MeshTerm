@@ -678,10 +678,6 @@ class PathComposerScreen(Screen):
         """The body line of the highlighted row, so the session keeps it visible."""
         return getattr(self, "_cursor_row", None)
 
-    def cursor_at_edge(self, step: int) -> bool:
-        """Edge scroll's gate: the first suggestion going up, the last going down."""
-        return self.row_at_edge(self._index, len(self._rows()), step)
-
     # --- input ---------------------------------------------------------------------
 
     def _insert_hop(self, node: str) -> None:

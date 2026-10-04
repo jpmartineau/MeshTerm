@@ -386,10 +386,6 @@ class TxSweepScreen(Screen):
         """The highlighted action row while ↑/↓ are in use; free scrolling otherwise."""
         return getattr(self, "_cursor", None) if self._pin_cursor else None
 
-    def cursor_at_edge(self, step: int) -> bool:
-        """Edge scroll's gate: the first action going up, the last going down."""
-        return self.row_at_edge(self._index, len(self._actions), step)
-
     def _action_text(self, key: str, selected: bool) -> Text:
         """One action row: pointer, glyph, and label (current value inlined)."""
         text = Text("❯ " if selected else "  ", style="cursor" if selected else "")

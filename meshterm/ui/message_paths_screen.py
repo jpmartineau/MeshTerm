@@ -268,10 +268,6 @@ class MessagePathsScreen(Screen):
         """
         return self._cursor
 
-    def cursor_at_edge(self, step: int) -> bool:
-        """Edge scroll's gate: the first arrival going up, the last going down."""
-        return self.row_at_edge(self._index, len(self._arrivals), step)
-
     # --- rendering -------------------------------------------------------------
 
     def render_body(self, width: int) -> list[str]:

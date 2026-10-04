@@ -397,6 +397,159 @@ def test_a_screen_without_a_highlight_keeps_its_own_arrows() -> None:
         assert not screen.edge_scroll(action)
 
 
+class _Rows(Screen):
+    """A screen with no edge-scroll code at all: a lead-in, a highlight over rows, a note.
+
+    Its ↑↓ clamp as every cursor's do, its Home and End move nothing, and it names its
+    highlight's line in ``cursor_line`` — which is all a screen supplies. ``window`` draws
+    the rows that many at a time, scrolling with the highlight as a ListWindow does.
+    """
+
+    def __init__(self, count: int = 3, *, window: int | None = None) -> None:
+        super().__init__()
+        self._count = count
+        self._window = window or count
+        self._index = 0
+        self._top = 0
+        self._cursor: int | None = None
+
+    def render_body(self, width: int) -> list[str]:
+        self._top = max(min(self._top, self._index), self._index - self._window + 1)
+        lines = [f"lead {i}" for i in range(4)]
+        for i in range(self._top, self._top + self._window):
+            if i == self._index:
+                self._cursor = len(lines)
+            lines.append(("❯ " if i == self._index else "  ") + f"row {i}")
+        lines.append("note")
+        return lines
+
+    def cursor_line(self) -> int | None:
+        return self._cursor
+
+    def handle(self, action: str, data: str = "") -> None:
+        if action == "up":
+            self._index = max(0, self._index - 1)
+        elif action == "down":
+            self._index = min(self._count - 1, self._index + 1)
+
+
+def test_every_screen_with_a_highlight_edge_scrolls() -> None:
+    """Edge scroll is inherited: a screen that only names its highlight's line has it.
+
+    _Rows says nothing about where its edges are — the paint reads them off the page.
+    """
+    screen = _Rows()
+    assert _view(screen) == ["lead 1", "lead 2", "lead 3", "❯ row 0"]
+    _press(screen, "up")  # row 0 is the first row: the page takes the line
+    assert _view(screen) == ["lead 0", "lead 1", "lead 2", "lead 3"]
+    _press(screen, "down")  # the snap-back
+    assert "❯ row 0" in _view(screen)
+    for _ in range(2):
+        _press(screen, "down")
+        _view(screen)
+    _press(screen, "down")  # row 2 is the last: the note comes into view
+    assert _view(screen) == ["row 0", "row 1", "❯ row 2", "note"]
+
+
+def test_several_arrows_before_a_paint_scroll_as_many_lines() -> None:
+    """Arrows faster than the paint are judged together: three at the edge, three lines."""
+    screen = _Rows()
+    _press(screen, "up")  # before any paint: nothing on the page to judge yet
+    _view(screen)
+    for _ in range(2):
+        _press(screen, "down")
+        _view(screen)
+    for _ in range(3):
+        _press(screen, "down")
+    view = _view(screen)
+    assert view == ["row 0", "row 1", "❯ row 2", "note"]  # clamped at the page's end
+
+
+def test_a_list_scrolling_in_its_own_window_is_not_at_its_edge() -> None:
+    """A highlight holding its line while rows pass under it has moved: no edge scroll.
+
+    Walking ↓ down a windowed list keeps the highlight on the window's last line, so the
+    line's index alone can't tell it from one that stayed put; the line as drawn can.
+    """
+    screen = _Rows(6, window=2)
+    _view(screen)
+    _press(screen, "down")
+    _view(screen)
+    before = screen.scroll
+    _press(screen, "down")  # row 2: the same body line as row 1, drawn differently
+    assert "❯ row 2" in _view(screen)
+    assert not screen.edge_scrolled and screen.scroll == before
+    for _ in range(3):
+        _press(screen, "down")
+        _view(screen)
+    _press(screen, "down")  # row 5 is the last
+    assert _view(screen)[-1] == "note" and screen.edge_scrolled
+
+
+def test_a_screen_can_keep_its_arrows_from_edge_scroll() -> None:
+    """``edge_scrolls`` off — the remote CLI, whose ↑↓ recall history — never scrolls."""
+    screen = _Rows()
+    screen.edge_scrolls = False
+    view = _view(screen)
+    _press(screen, "up")
+    assert _view(screen) == view and not screen.edge_scrolled
+
+
+def test_home_that_moves_no_highlight_leaves_the_arrows_to_it() -> None:
+    """Home takes the page to its top; only the page says where the highlight went.
+
+    _Rows's Home moves nothing, so ↑ afterwards is still a step up the rows — the arrow
+    pointing away from an off-screen highlight goes to the screen, and the highlight
+    comes back into view with it.
+    """
+    screen = _Rows()
+    _view(screen)
+    for _ in range(2):
+        _press(screen, "down")
+        _view(screen)
+    _press(screen, "home")
+    assert _view(screen)[0] == "lead 0"
+    _press(screen, "up")
+    assert "❯ row 1" in _view(screen)
+
+
+def test_a_list_with_no_rows_still_edge_scrolls() -> None:
+    """With nothing to highlight, the empty state holds the highlight's place."""
+    screen = _edge_list()
+    _view(screen)
+    _press(screen, "text", "z")
+    _press(screen, "text", "z")
+    assert _view(screen)[-1] == "no matches"
+    _press(screen, "up")
+    view = _view(screen)
+    assert "no matches" not in view and view[-1] == "closing note"
+
+
+def test_reorder_home_and_end_reach_the_ends() -> None:
+    """Home and End jump the reorder list's highlight too, as on every list."""
+    screen = ReorderScreen("order", ["a", "b", "c"])
+    screen.handle("end")
+    assert any(line.startswith("❯ c") for line in _view(screen))
+    screen.handle("home")
+    assert any(line.startswith("❯ a") for line in _view(screen))
+
+
+def test_autocomplete_keeps_its_highlighted_suggestion_in_view() -> None:
+    """A box too short for every suggestion follows the highlight, and edge-scrolls."""
+    screen = AutocompleteScreen("t", [f"opt{i}" for i in range(8)], prompt="pick one")
+    _view(screen, 5)
+    for _ in range(7):
+        _press(screen, "down")
+        _view(screen, 5)
+    assert _view(screen, 5)[-1] == "❯ opt7"
+    for _ in range(7):
+        _press(screen, "up")
+        _view(screen, 5)
+    assert _view(screen, 5)[0] == "❯ opt0"
+    _press(screen, "up")  # the first suggestion: the field comes back above it
+    assert _view(screen, 5)[1] == "❯ opt0"
+
+
 def test_select_clamps_at_the_ends() -> None:
     """Up on the first row and Down on the last stay put — no cursor in the app rolls over."""
     items = [Choice("alpha", 1), Choice("beta", 2), Choice("gamma", 3)]

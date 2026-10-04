@@ -360,15 +360,6 @@ class ChatScreen(Screen):
         """Keep the picked reply target in view; otherwise free scroll (managed by stick)."""
         return self._selected_line
 
-    def cursor_at_edge(self, step: int) -> bool:
-        """Edge scroll's gate: the oldest message picked, going up; never going down.
-
-        Above the oldest message sit its sender's line and the day it was sent, which ↑ on
-        it scrolls into view. Below the newest there is only the compose line, always shown,
-        and ↓ past the newest already leaves the pick for it.
-        """
-        return step < 0 and (not self._messages or self._selected == 0)
-
     # --- outgoing byte budget ------------------------------------------------
 
     def _byte_limit(self) -> int:

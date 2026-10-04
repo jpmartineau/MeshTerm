@@ -2140,9 +2140,10 @@ class TuiSession:
                 self._dispatch("paste", text)
             return
         top = self.top
-        # Edge scroll and its snap-back get the key first (Screen.edge_scroll): an arrow
-        # past the last row a highlight can reach scrolls the page instead, and a key that
-        # would act on a highlight scrolled out of view brings it back before doing anything.
+        # Edge scroll and its snap-back get the key first (Screen.edge_scroll): a key that
+        # would act on a highlight scrolled out of view brings it back before doing anything,
+        # and Home/End take the page to its ends. An arrow goes on to the screen, and the
+        # next paint scrolls the page instead if it moved nothing (Screen.note_highlight).
         if top is not None and not top.edge_scroll(action):
             top.handle(action, data)
         self.invalidate()

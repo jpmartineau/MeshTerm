@@ -795,6 +795,9 @@ class SelectScreen(Screen):
             if detail is not None and _plain(detail):
                 lines.append(self._detail_drawer(detail, width))
         if not choices:
+            # With no row to highlight the empty state holds its place: kept in view, and
+            # the page still edge-scrolls past it to whatever sits above and below.
+            cursor_at = len(lines)
             lines.append(render_to_ansi(Text("no matches", style="muted"), width))
         # Remember where the highlighted row landed so the session can keep it in view.
         self._cursor = cursor_at
@@ -907,10 +910,6 @@ class SelectScreen(Screen):
     def cursor_line(self) -> int | None:
         """Return the body line index of the highlighted row."""
         return getattr(self, "_cursor", None)
-
-    def cursor_at_edge(self, step: int) -> bool:
-        """Edge scroll's gate: the first choice going up, the last going down."""
-        return self.row_at_edge(self._index, len(self._choices()), step)
 
     # --- input ---------------------------------------------------------------
 
@@ -1110,10 +1109,6 @@ class ReorderScreen(Screen):
         """Return the body line index of the cursor row, so the session keeps it in view."""
         return getattr(self, "_cursor", None)
 
-    def cursor_at_edge(self, step: int) -> bool:
-        """Edge scroll's gate: the first row going up, the last action going down."""
-        return self.row_at_edge(self._index, len(self._order) + len(self._actions()), step)
-
     def handle(self, action: str, data: str = "") -> None:
         """Move the cursor, carry a grabbed row, grab/drop, run an action, or cancel on Esc."""
         n = len(self._order)
@@ -1143,6 +1138,13 @@ class ReorderScreen(Screen):
                 self._index += 1
             elif not self._grabbed and total:
                 self._index = min(total - 1, self._index + 1)
+        elif action in ("home", "ctrl_home") and not self._grabbed and total:
+            # Home and End jump to the first row and the last, as on every list, and edge
+            # scroll takes the page to its ends with them. A grabbed row is carried a step
+            # at a time only, so they leave it where it is.
+            self._index = 0
+        elif action in ("end", "ctrl_end") and not self._grabbed and total:
+            self._index = total - 1
         elif action == "enter":
             if self._index < n:
                 self._grabbed = not self._grabbed  # Enter grabs a row, Enter again drops it

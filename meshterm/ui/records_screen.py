@@ -414,15 +414,6 @@ class RecordScreen(Screen):
         """Keep the selected action visible while arrowing; scroll free once paging."""
         return self._cursor if self._follow else None
 
-    def cursor_at_edge(self, step: int) -> bool | None:
-        """Edge scroll's gate: the first action going up, the last going down.
-
-        ``None`` on the Area tab, whose keys move nothing.
-        """
-        if self._tab == _TAB_AREA:
-            return None
-        return self.row_at_edge(self._index, len(self._actions), step)
-
     def _header(self) -> Text:
         """The one-line identity above the strip: the discipline, the standing, the metric.
 

@@ -62,6 +62,16 @@ def _window_start(
     return scroll
 
 
+def _cursor_side(cursor: int | None, start: int, rows: int) -> int:
+    """Where a window of ``rows`` lines from ``start`` leaves ``cursor``: 0 in it, -1 above, +1 below.
+
+    No highlight at all counts as in view — there is nothing to bring back.
+    """
+    if cursor is None or start <= cursor < start + rows:
+        return 0
+    return -1 if cursor < start else 1
+
+
 def _visible_slice(screen: Screen, lines: list[str], viewport: int) -> tuple[list[str], bool, bool]:
     """Clamp the screen's scroll and return the visible lines plus clip flags.
 
@@ -86,9 +96,12 @@ def _visible_slice(screen: Screen, lines: list[str], viewport: int) -> tuple[lis
     # screenful and clamp to the content (see :meth:`Screen.note_metrics`).
     screen.note_metrics(total, viewport)
     cursor = screen.cursor_line()
-    # Edge scroll: a page scrolled past its highlight leaves it where it is, off screen if
-    # need be, until a key brings it back (see Screen.edge_scroll) — so only a page that
-    # isn't edge-scrolled has its highlight followed.
+    # Edge scroll: the arrows pressed since the last paint get their verdict first — one
+    # that left the highlight where it was scrolls the page instead (Screen.note_highlight).
+    # A page scrolled past its highlight leaves it where it is, off screen if need be, until
+    # a key brings it back (see Screen.edge_scroll) — so only a page that isn't
+    # edge-scrolled has its highlight followed.
+    screen.note_highlight(cursor, lines)
     follow = None if screen.edge_scrolled else cursor
 
     scroll = screen.scroll
@@ -124,13 +137,13 @@ def _visible_slice(screen: Screen, lines: list[str], viewport: int) -> tuple[lis
             pinned = screen.sticky_rows(start) or pinned
             start = _window_start(scroll, total, viewport, len(pinned), follow)
         cap = max(1, viewport - len(pinned))
-        screen.note_cursor_shown(cursor is None or start <= cursor < start + cap)
+        screen.note_cursor_side(_cursor_side(cursor, start, cap))
         visible = pinned + lines[start : start + cap]
         more_below = start + cap < total
         visible = visible + [""] * (viewport - len(visible))
         return visible, True, more_below
 
-    screen.note_cursor_shown(cursor is None or scroll <= cursor < scroll + viewport)
+    screen.note_cursor_side(_cursor_side(cursor, scroll, viewport))
     visible = lines[scroll : scroll + viewport]
     more_above = scroll > 0
     more_below = scroll + viewport < total

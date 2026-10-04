@@ -897,6 +897,8 @@ class AutocompleteScreen(_KeylessDialog):
 
     #: Cap the suggestion list so it never dominates the dialog.
     MAX_SUGGESTIONS = 8
+    #: Home and End move the field's caret, so edge scroll leaves them alone.
+    home_end_jumps = False
 
     def __init__(
         self,
@@ -927,6 +929,7 @@ class AutocompleteScreen(_KeylessDialog):
         self._validate = validate
         self._error = ""
         self._sugg = 0
+        self._cursor: int | None = None
 
     @property
     def dialog_width(self) -> int:
@@ -951,22 +954,34 @@ class AutocompleteScreen(_KeylessDialog):
         return matches[: self.MAX_SUGGESTIONS]
 
     def render_body(self, width: int) -> list[str]:
-        """Render the optional prompt, the field, the matching suggestions, and any error."""
+        """Render the optional prompt, the field, the matching suggestions, and any error.
+
+        The suggestions are drawn a row at a time so the highlighted one's body line is
+        known (see :meth:`cursor_line`).
+        """
         parts: list[RenderableType] = []
         if self._prompt:
             parts.append(Text(self._prompt))
             parts.append(Text(""))
         parts.append(self._editor.render())
+        lines = render_lines(Group(*parts), width)
         suggestions = self._suggestions()
         self._sugg = max(0, min(self._sugg, len(suggestions) - 1)) if suggestions else 0
+        self._cursor = None
         for i, sug in enumerate(suggestions):
             is_sel = i == self._sugg
             row = Text(("❯ " if is_sel else "  ") + sug, style="cursor" if is_sel else "muted")
             row.truncate(width)
-            parts.append(row)
+            if is_sel:
+                self._cursor = len(lines)
+            lines.extend(render_lines(row, width))
         if self._error:
-            parts.append(Text(self._error, style="err"))
-        return render_lines(Group(*parts), width)
+            lines.extend(render_lines(Text(self._error, style="err"), width))
+        return lines
+
+    def cursor_line(self) -> int | None:
+        """The highlighted suggestion's body line, kept in view on a box too short for all."""
+        return self._cursor
 
     def handle(self, action: str, data: str = "") -> None:
         """Edit the field, move/accept suggestions, submit on Enter, or cancel on Esc."""
