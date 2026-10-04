@@ -181,9 +181,11 @@ def install():
         try:
             return orig_rg(vp, tiles, markers, *a, **k)
         finally:
+            # have < tiles is a frame drawn short of ground: black where a tile is missing.
+            have = sum(1 for layers in tiles.values() if layers)
             emit("raster", f"{(time.perf_counter() - t) * 1000:.0f}",
-                 f"coarse={k.get('coarse', False)}", f"z{vp.zoom}", f"tiles={len(tiles)}",
-                 threading.current_thread().name)
+                 f"coarse={k.get('coarse', False)}", f"z{vp.zoom}",
+                 f"tiles={len(tiles)} have={have}", threading.current_thread().name)
 
     map_screen.render_ground = render_ground
 
