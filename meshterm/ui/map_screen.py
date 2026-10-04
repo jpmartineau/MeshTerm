@@ -433,8 +433,16 @@ class MapScreen(Screen):
           keys exactly, and the streets slide with the view — dimmed, and short of the
           edge you are panning onto — instead of the map blanking to black between every
           keypress and flashing back when the frame lands (JP, 2026-08-09).
+        * **A tile this view shows is still on its way** — draw nothing yet. A raster now
+          would paint that tile's ground black, and being *this* view's frame it would
+          replace the ghost, so a zoom read as the ghost, then a black screen, then the map
+          drawn in (JP, 2026-10-04). It was also a raster thrown away: the tile's arrival
+          asks for another. So the screen keeps standing on what it has — the aligned frame,
+          or the ghost — until the tiles are in, and the next raster, which is the first, is
+          the real picture. A tile that comes back as silence is no longer on its way, so a
+          map with no network still draws what it can.
 
-        The last of those is where the map goes black *and stays black*: four coarse pan
+        The third of those is where the map goes black *and stays black*: four coarse pan
         steps are 120% of the screen, so nothing drawn is under the view any more and
         there is no ground to reproject. The answer to that is not this method but the one
         it schedules — :meth:`_draw_ground` can land a rough picture in a quarter of the
@@ -447,7 +455,11 @@ class MapScreen(Screen):
                 self._schedule_ground(key, vp)  # the first pass is on screen; finish it
             return list(self._frame)
 
-        self._schedule_ground(key, vp)
+        if any(t in self._pending for t in vp.tiles(self._max_tile_zoom)):
+            # Waiting on this view's tiles, so anything queued is for a view already left.
+            self._wanted = None
+        else:
+            self._schedule_ground(key, vp)
         if self._aligned(key) and self._frame is not None:
             return list(self._frame)  # same view, only tiles differ — still aligned
         # The view moved (or nothing has ever been drawn): markers over the last ground.

@@ -568,7 +568,11 @@ async def test_location_picker_keeps_the_crosshair_when_the_basemap_lands(
     monkeypatch.setattr(ms.asyncio, "ensure_future", coros.append)
 
     screen = _picker(initial=(45.5, -73.6))
-    screen.render_body(80)  # paints now, schedules the ground raster
+    screen.render_body(80)  # paints now, asks for the view's tiles
+    for load in coros:  # the (offline) source answers; no raster until it has
+        await load
+    coros.clear()
+    screen.render_body(80)  # paints again, and now schedules the ground raster
     assert coros, "no background raster was scheduled"
 
     await coros[-1]  # the raster finishes — long after the crosshair was taken back

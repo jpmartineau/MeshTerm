@@ -2155,6 +2155,25 @@ def _map_over(source) -> MapScreen:  # noqa: ANN001
     return MapScreen(_StubSession(80, 24), [MapMarker("A", 45.5, -73.6)], source, 14)
 
 
+async def _drawn(screen) -> None:  # noqa: ANN001
+    """Paint until the view's tiles have answered and its raster has landed.
+
+    Real sleeps, not ``sleep(0)``: a tile load goes through a thread. And no raster is
+    asked for while a tile of the view is on its way, so a test of the raster has to let
+    the loads finish first — the stub sources answer at once, with silence.
+    """
+    for _ in range(400):
+        screen.render_body(80)
+        if (
+            not screen._pending
+            and screen._drawing is None
+            and screen._frame_key == screen._ground_key(screen._viewport)
+        ):
+            return
+        await asyncio.sleep(0.005)
+    raise AssertionError("the view's ground never landed")
+
+
 class _SilentSource(_StubSource):
     """A source that never answers — the flaky Wi-Fi, not an empty planet."""
 
@@ -2595,9 +2614,7 @@ def test_map_skips_the_coarse_pass_over_a_picture_already_drawn(monkeypatch) -> 
     )
 
     async def drive() -> None:
-        screen.render_body(80)
-        while screen._drawing is not None:
-            await asyncio.sleep(0)
+        await _drawn(screen)
         coarse_asked.clear()
         # A tile lands: same view, more detail. The frame on screen is still aligned.
         screen._tiles[screen._viewport.tiles(14)[0]] = _loaded_tile()
@@ -2629,12 +2646,7 @@ def test_the_rough_pass_is_a_switch_the_map_reads(monkeypatch) -> None:  # noqa:
         )
         screen = _map_over(_StubSource())
 
-        async def drive() -> None:
-            screen.render_body(80)
-            while screen._drawing is not None:
-                await asyncio.sleep(0)
-
-        asyncio.run(drive())
+        asyncio.run(_drawn(screen))
         return asked
 
     monkeypatch.setattr(ms, "_COARSE_PREVIEW", True)
@@ -2663,9 +2675,7 @@ def test_map_keeps_its_detail_while_a_find_is_typed(monkeypatch) -> None:  # noq
     )
 
     async def drive() -> None:
-        screen.render_body(80)
-        while screen._drawing is not None:
-            await asyncio.sleep(0)
+        await _drawn(screen)
         coarse_asked.clear()
         screen.handle("text", "a")  # one letter of a find query; the view does not move
         screen.render_body(80)
@@ -2680,7 +2690,11 @@ def test_map_keeps_its_detail_while_a_find_is_typed(monkeypatch) -> None:  # noq
 
 
 def _async_map(monkeypatch, drawn: list):
-    """A map screen whose rasters are captured instead of run, with a live event loop."""
+    """A map screen whose rasters are captured instead of run, with a live event loop.
+
+    Its tile loads answer the moment they are asked, with silence: a captured load would
+    otherwise be on its way for ever, and no raster is asked for while one is.
+    """
     from meshterm.ui import map_screen as ms
     from meshterm.ui.map_render import MapMarker
 
@@ -2689,6 +2703,13 @@ def _async_map(monkeypatch, drawn: list):
     monkeypatch.setattr(
         ms.asyncio, "ensure_future", lambda coro: (coro.close(), started.append(coro))[0]
     )
+
+    def answered_at_once(self, t):  # noqa: ANN001 - MapScreen._load, minus the thread
+        self._pending.discard(t)
+        self._unanswered[t] = monotonic() + _TILE_RETRY
+        return asyncio.sleep(0)  # a coroutine for the captured ensure_future to close
+
+    monkeypatch.setattr(ms.MapScreen, "_load", answered_at_once)
     screen = ms.MapScreen(_StubSession(80, 24), [MapMarker("A", 45.5, -73.6)], _StubSource(), 14)
     drawn.append(started)
     return screen
@@ -2760,6 +2781,45 @@ def test_map_holds_an_aligned_frame_while_a_tile_lands(monkeypatch) -> None:  # 
     screen._tiles[in_view] = _loaded_tile()  # a tile lands, view unmoved
     assert screen.render_body(80)[:-1] == ["ground"] * 19, "dropped an aligned frame"
     assert screen._drawing is not None, "did not redraw for the new tile"
+
+
+def test_map_stands_on_its_ghost_until_the_view_tiles_are_in(monkeypatch) -> None:  # noqa: ANN001
+    """A zoom shows the ghost, then the map — never a black screen in between.
+
+    A raster drawn while the new zoom's tiles were still loading painted their ground
+    black, and being the view's own frame it replaced the ghost: ghost, black, then the
+    streets drawn in (JP, 2026-10-04). It was a raster thrown away besides, since the tiles
+    landing ask for another.
+    """
+    from meshterm.ui import map_screen as ms
+    from meshterm.ui.map_render import MapMarker
+
+    monkeypatch.setattr(ms, "_loop_running", lambda: True)
+    started: list = []
+    monkeypatch.setattr(
+        ms.asyncio, "ensure_future", lambda coro: (coro.close(), started.append(coro))[0]
+    )
+    stood_on: list = []
+    monkeypatch.setattr(
+        ms, "render_map", lambda vp, tiles, m, **k: stood_on.append(k.get("ghost")) or [""]
+    )
+    screen = ms.MapScreen(_StubSession(80, 24), [MapMarker("A", 45.5, -73.6)], _StubSource(), 14)
+    screen._ghost = ghost = object()  # the ground the last view left behind
+
+    def rasters() -> list:
+        return [c for c in started if "_draw_ground" in c.__qualname__]
+
+    screen.handle("pageup")  # zoom in: a tile zoom whose tiles are not in hand
+    screen.render_body(80)
+    assert screen._pending, "the fixture's view asked for no tiles"
+    assert not rasters(), "a raster was drawn before the view's tiles were in"
+    assert stood_on == [ghost], "the paint did not stand on the ghost"
+
+    for t in list(screen._pending):  # the tiles land
+        screen._pending.discard(t)
+        screen._tiles[t] = _loaded_tile()
+    screen.render_body(80)
+    assert len(rasters()) == 1, "the tiles landed and their raster was not drawn"
 
 
 def test_map_drops_a_stale_frame_once_the_view_moves(monkeypatch) -> None:  # noqa: ANN001
