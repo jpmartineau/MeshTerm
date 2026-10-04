@@ -86,13 +86,17 @@ def _visible_slice(screen: Screen, lines: list[str], viewport: int) -> tuple[lis
     # screenful and clamp to the content (see :meth:`Screen.note_metrics`).
     screen.note_metrics(total, viewport)
     cursor = screen.cursor_line()
+    # Edge scroll: a page scrolled past its highlight leaves it where it is, off screen if
+    # need be, until a key brings it back (see Screen.edge_scroll) — so only a page that
+    # isn't edge-scrolled has its highlight followed.
+    follow = None if screen.edge_scrolled else cursor
 
     scroll = screen.scroll
-    if cursor is not None:
-        if cursor < scroll:
-            scroll = cursor
-        elif cursor >= scroll + viewport:
-            scroll = cursor - viewport + 1
+    if follow is not None:
+        if follow < scroll:
+            scroll = follow
+        elif follow >= scroll + viewport:
+            scroll = follow - viewport + 1
     scroll = max(0, min(scroll, max(0, total - viewport)))
 
     # Each pinned row takes a top row, leaving that many fewer for content: nudge the scroll
@@ -103,28 +107,30 @@ def _visible_slice(screen: Screen, lines: list[str], viewport: int) -> tuple[lis
     pinned = screen.sticky_rows(scroll) if scroll > 0 else []
     for _ in range(_PIN_SETTLE_PASSES):
         cap = max(1, viewport - len(pinned))
-        if not pinned or cursor is None or cursor < scroll + cap:
+        if not pinned or follow is None or follow < scroll + cap:
             break
-        scroll = min(cursor - cap + 1, max(0, total - cap))
+        scroll = min(follow - cap + 1, max(0, total - cap))
         pinned = screen.sticky_rows(scroll) if scroll > 0 else []
 
     screen.scroll = scroll
 
     if pinned:
-        start = _window_start(scroll, total, viewport, len(pinned), cursor)
+        start = _window_start(scroll, total, viewport, len(pinned), follow)
         if start != scroll:
             # The window slid down off the scroll offset, so the pins must describe the row
             # it now *starts* at — otherwise a section heading among the dropped lines would
             # simply vanish instead of being pinned. Re-ask, then re-settle the start against
             # however many rows that reserves (never unpinning: the slide depends on it).
             pinned = screen.sticky_rows(start) or pinned
-            start = _window_start(scroll, total, viewport, len(pinned), cursor)
+            start = _window_start(scroll, total, viewport, len(pinned), follow)
         cap = max(1, viewport - len(pinned))
+        screen.note_cursor_shown(cursor is None or start <= cursor < start + cap)
         visible = pinned + lines[start : start + cap]
         more_below = start + cap < total
         visible = visible + [""] * (viewport - len(visible))
         return visible, True, more_below
 
+    screen.note_cursor_shown(cursor is None or scroll <= cursor < scroll + viewport)
     visible = lines[scroll : scroll + viewport]
     more_above = scroll > 0
     more_below = scroll + viewport < total

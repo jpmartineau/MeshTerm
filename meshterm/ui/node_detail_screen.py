@@ -694,6 +694,15 @@ class NodeDetailScreen(Screen):
         """
         return self._cursor
 
+    def cursor_at_edge(self, step: int) -> bool:
+        """Edge scroll's gate: the tab's first row going up, its last going down.
+
+        On a short frame the vitals above the first action and the rows under the last
+        are what edge scroll brings back into view.
+        """
+        focus = self._focusables()
+        return self.row_at_edge(self._row_index % len(focus) if focus else 0, len(focus), step)
+
     def _switch_tab(self, delta: int) -> None:
         """Move the active tab, resetting the cursor and list window to that tab's top."""
         if len(self._tabs) < 2:

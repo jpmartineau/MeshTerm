@@ -729,6 +729,45 @@ def test_node_detail_screen_cursor_and_commit() -> None:
     assert resolved == ["timemachine", CANCEL]
 
 
+def test_the_vitals_come_back_with_edge_scroll() -> None:
+    """On a frame too short for the Info tab, ↑ on the first action scrolls the vitals back.
+
+    Walking down the actions scrolls the identity and the vitals off the top, and none of
+    them can take the highlight — so before edge scroll there was no way back to them short
+    of Home. ↑ on the first action now scrolls the page a line at a time to its top.
+    """
+    from meshterm.ui.tui import frame
+
+    actions = [_Action(f"a{i}", "⏳", "", f"Action {i}") for i in range(4)]
+    screen = _screen(info_actions=actions)
+
+    def press(action: str) -> None:
+        if not screen.edge_scroll(action):
+            screen.handle(action)
+
+    def view() -> list[str]:
+        screen.note_viewport(5)
+        visible, _above, _below = frame._visible_slice(screen, screen.render_body(60), 5)
+        return [_plain([line]) for line in visible]
+
+    view()
+    for _ in range(3):
+        press("down")
+        view()
+    for _ in range(3):
+        press("up")
+        view()
+    assert "Action 0" in "\n".join(view())  # back on the first action…
+    assert not any("Hub" in line for line in view())  # …the identity still scrolled off
+    for _ in range(10):
+        press("up")  # edge scroll: the page, not the highlight
+        view()
+    page = view()
+    assert "Hub" in page[0]  # the identity line is the top of the view again
+    press("down")  # the snap-back brings the first action home before anything moves
+    assert any("❯" in line and "Action 0" in line for line in view())
+
+
 def test_node_detail_carries_no_exit_row() -> None:
     """The page offers no Back row: Esc leaves, and a row repeating it was retired.
 
