@@ -69,62 +69,83 @@ def _short_stack(frame, depth=7):
 
 
 def watchdog():
-    pending = None  # (sent_at) of the outstanding ping
-    last_stall_sample = 0.0
-    last_mem = 0.0
-    names = {}
+    """Ping the loop forever; sample stacks while it doesn't answer; log memory twice a second.
+
+    Never dies quietly: an error in a look is logged and the next look goes ahead, because a
+    meter that stops is indistinguishable, in the log, from an app that went silent.
+    """
     while True:
         time.sleep(0.05)
-        now = time.monotonic()
-        loop = _state["loop"]
-        if loop is None:
-            continue
-        if pending is None:
-            sent = now
+        try:
+            if not _look(time.monotonic()):
+                return  # the loop is closed: the app has exited
+        except Exception:  # noqa: BLE001 - see the docstring
+            emit("watchdog-error", traceback.format_exc().replace("\n", " | "))
 
-            def pong(sent=sent):
-                nonlocal pending
-                lag = (time.monotonic() - sent) * 1000
-                if lag > 60:
-                    emit("ping", f"{lag:.0f}")
-                pending = None
 
-            pending = sent
-            try:
-                loop.call_soon_threadsafe(pong)
-            except RuntimeError:
-                return
-        elif now - pending > 0.25 and now - last_stall_sample > 0.25:
-            last_stall_sample = now
-            for t in threading.enumerate():
-                names[t.ident] = t.name
-            frames = sys._current_frames()
-            for ident, fr in frames.items():
-                if ident == threading.get_ident():
-                    continue
-                emit("stall", f"{(now - pending) * 1000:.0f}",
+#: The send time of the ping the loop has not answered yet (``None`` while none is out),
+#: and when the last stall sample and memory line were taken. The pong clears ``ping`` from
+#: the loop's thread, so a look reads it exactly once: read twice, the pong can land in
+#: between, and ``now - None`` raised inside this thread and killed it mid-run once.
+_watch = {"ping": None, "stall": 0.0, "mem": 0.0, "names": {}}
+
+
+def _look(now):
+    """One look at the loop; ``False`` once there is no loop left to watch."""
+    loop = _state["loop"]
+    if loop is None:
+        return True
+    sent = _watch["ping"]
+    if sent is None:
+
+        def pong(sent=now):
+            lag = (time.monotonic() - sent) * 1000
+            if lag > 60:
+                emit("ping", f"{lag:.0f}")
+            _watch["ping"] = None
+
+        _watch["ping"] = now
+        try:
+            loop.call_soon_threadsafe(pong)
+        except RuntimeError:
+            return False
+    elif now - sent > 0.25 and now - _watch["stall"] > 0.25:
+        _watch["stall"] = now
+        names = _watch["names"]
+        for t in threading.enumerate():
+            names[t.ident] = t.name
+        for ident, fr in sys._current_frames().items():
+            if ident != threading.get_ident():
+                emit("stall", f"{(now - sent) * 1000:.0f}",
                      f"thread={names.get(ident, ident)}", _short_stack(fr))
-        if now - last_mem > 0.5:
-            last_mem = now
-            rss, swap, majflt, cpu, thr = _proc()
-            scr = _state["screen"]
-            src = _state["source"]
-            q = "-"
-            try:
-                ex = loop._default_executor
-                if ex is not None:
-                    q = f"{ex._work_queue.qsize()}/{len(ex._threads)}"
-            except Exception:  # noqa: BLE001
-                pass
-            if scr is not None:
-                info = (f"pending={len(scr._pending)} tiles={len(scr._tiles)} "
-                        f"drawing={'y' if scr._drawing else 'n'} "
-                        f"wanted={'y' if scr._wanted else 'n'} spec={'y' if scr._speculating else 'n'}")
-            else:
-                info = "-"
-            memo = (f"{len(src._memo)}/{getattr(src, '_memo_bytes', 0) / 1048576:.1f}MB" if src is not None else "-")
-            emit("mem", f"rss={rss:.1f} swap={swap:.1f} majflt={majflt} cpu={cpu:.0f}",
-                 f"thr={thr} q={q} {info} memo={memo}")
+    if now - _watch["mem"] > 0.5:
+        _watch["mem"] = now
+        _log_memory(loop)
+    return True
+
+
+def _log_memory(loop):
+    rss, swap, majflt, cpu, thr = _proc()
+    scr = _state["screen"]
+    src = _state["source"]
+    q = "-"
+    try:
+        ex = loop._default_executor
+        if ex is not None:
+            q = f"{ex._work_queue.qsize()}/{len(ex._threads)}"
+    except Exception:  # noqa: BLE001
+        pass
+    if scr is not None:
+        info = (f"pending={len(scr._pending)} tiles={len(scr._tiles)} "
+                f"drawing={'y' if scr._drawing else 'n'} "
+                f"wanted={'y' if scr._wanted else 'n'} spec={'y' if scr._speculating else 'n'}")
+    else:
+        info = "-"
+    memo = "-"
+    if src is not None:
+        memo = f"{len(src._memo)}/{getattr(src, '_memo_bytes', 0) / 1048576:.1f}MB"
+    emit("mem", f"rss={rss:.1f} swap={swap:.1f} majflt={majflt} cpu={cpu:.0f}",
+         f"thr={thr} q={q} {info} memo={memo}")
 
 
 def install():
