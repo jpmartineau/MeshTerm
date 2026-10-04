@@ -34,6 +34,13 @@ CANCEL = object()
 #: turns it straight into :class:`PopToMenu`, so no caller ever has to test for it.
 POP_ALL = object()
 
+#: Edge scroll's keys (see :meth:`Screen.edge_scroll`): the arrows and the way each steps,
+#: the jumps to either end, and the keys that bring an off-screen highlight back into view
+#: before doing anything — every key that would move it or act on it.
+_EDGE_STEPS = {"up": -1, "down": 1}
+_EDGE_ENDS = {"home": -1, "ctrl_home": -1, "end": 1, "ctrl_end": 1}
+_SNAP_BACK_ACTIONS = frozenset({"up", "down", "enter", "delete"})
+
 
 class PopToMenu(BaseException):
     """Raised through every awaiting navigation frame to unwind to the main menu.
@@ -126,6 +133,10 @@ class Screen:
     bare: bool = False
     banner: Sequence[str] | None = None
     footnote: str | None = None
+    #: Whether Home and End jump the highlight to the first and last row, so edge scroll
+    #: takes the page to its very top and bottom with it (see :meth:`edge_scroll`). Off where
+    #: they move a text caret instead — the chat's compose line.
+    home_end_jumps: bool = True
 
     @property
     def fkey_lane(self):
@@ -211,6 +222,11 @@ class Screen:
         # first paint; irrelevant while not :attr:`grow_only`.
         self._viewport_floor = 0
         self._width_floor = 0
+        # Edge scroll (see :meth:`edge_scroll`): whether ↑↓ have scrolled the window past the
+        # highlight, so the frame has stopped pulling it into view; and whether the last
+        # paint showed it, which decides the snap-back. Recorded by the frame.
+        self._edge_scrolled = False
+        self._cursor_shown = True
 
     # --- rendering -----------------------------------------------------------
 
@@ -343,6 +359,79 @@ class Screen:
         """
         if action == "escape":
             self.resolve(CANCEL)
+
+    # --- edge scroll ---------------------------------------------------------
+
+    def cursor_at_edge(self, step: int) -> bool | None:
+        """Whether the highlight can go no further ``step`` way (-1 up, +1 down).
+
+        The gate of :meth:`edge_scroll`. ``None`` (the default) where ↑↓ move no highlight —
+        a plain scroll screen, a prompt whose arrows recall history — and edge scroll stays
+        out of the way. A screen whose ↑↓ walk a highlight over rows answers for it: ``True``
+        on the first row going up and the last going down (and either way with no row to
+        highlight at all), ``False`` everywhere else — most simply through
+        :meth:`row_at_edge`.
+        """
+        return None
+
+    @staticmethod
+    def row_at_edge(index: int, count: int, step: int) -> bool:
+        """:meth:`cursor_at_edge`'s answer for a highlight at ``index`` of ``count`` rows."""
+        if count <= 0:
+            return True
+        return index <= 0 if step < 0 else index >= count - 1
+
+    def edge_scroll(self, action: str) -> bool:
+        """Edge scroll and the snap-back: take ``action`` here, before :meth:`handle` sees it.
+
+        **Edge scroll** (JP, 2026-10-04): where the highlight can go no further, an arrow
+        scrolls the page a line instead, so whatever sits above the first selectable row or
+        below the last — a node's vitals, a list's lead-in, a closing note — can always be
+        brought into view. The frame stops pulling the highlight into view while the page is
+        edge-scrolled, so it may scroll off screen; that is deliberate. **Home** and **End**
+        go the same way: the highlight jumps to the first or last row as ever, and the page
+        to its very top or bottom.
+
+        **The snap-back**: while the highlight is off screen, a key that would move it or act
+        on it — the opposite arrow, Enter, Delete — first brings it back into view,
+        jumping if it has to, and does nothing else. Nothing is run that cannot be seen.
+
+        Any other key ends the edge scroll before :meth:`handle` sees it (a typed filter, a
+        tab switch, a page key), so the frame follows the highlight again from there.
+
+        Returns:
+            Whether the key was taken here; the session passes it to :meth:`handle` only
+            when it wasn't.
+        """
+        if self.cursor_at_edge(-1) is None:
+            return False
+        step = _EDGE_STEPS.get(action)
+        if step is not None and self.cursor_at_edge(step):
+            self._edge_scrolled = True
+            self.scroll_lines(step)
+            return True
+        if self._edge_scrolled and not self._cursor_shown and action in _SNAP_BACK_ACTIONS:
+            self._edge_scrolled = False  # the snap-back: this press only brings it home
+            return True
+        if action in _EDGE_ENDS and self.home_end_jumps:
+            self.handle(action)
+            self._edge_scrolled = True
+            if _EDGE_ENDS[action] < 0:
+                self.scroll_to_top()
+            else:
+                self.scroll = self._scroll_total  # the frame clamps it to the last screenful
+            return True
+        self._edge_scrolled = False
+        return False
+
+    @property
+    def edge_scrolled(self) -> bool:
+        """Whether the page is edge-scrolled, so the frame leaves the highlight where it is."""
+        return self._edge_scrolled
+
+    def note_cursor_shown(self, shown: bool) -> None:
+        """Record whether the last paint showed the highlight (the frame calls this)."""
+        self._cursor_shown = shown
 
     def resolve(self, value: Any) -> None:
         """Resolve this screen's future, committing ``value`` (or :data:`CANCEL`).

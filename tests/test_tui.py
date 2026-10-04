@@ -290,6 +290,113 @@ def test_select_filter_matches_callable_title() -> None:
     assert _run(screen, "enter") == 1
 
 
+# --- edge scroll ---------------------------------------------------------------
+
+
+def _edge_list() -> SelectScreen:
+    """Six lines of lead-in over four choices and a closing note: taller than a 4-row view."""
+    items: list = [Separator(f"lead {i}") for i in range(6)]
+    items += [Choice(name, name) for name in ("alpha", "beta", "gamma", "delta")]
+    items.append(Separator("closing note"))
+    return SelectScreen("pick", items)
+
+
+def _press(screen, action: str, data: str = "") -> None:
+    """Dispatch one key as the session does: edge scroll first, then the screen itself."""
+    if not screen.edge_scroll(action):
+        screen.handle(action, data)
+
+
+def _view(screen, viewport: int = 4) -> list[str]:
+    """Paint once through the frame's own slicer and return the visible rows' text."""
+    visible, _above, _below = frame._visible_slice(screen, screen.render_body(40), viewport)
+    return [_plain([line]).strip() for line in visible]
+
+
+def test_edge_scroll_brings_back_what_sits_above_the_first_row() -> None:
+    """↑ on the first row scrolls the page a line instead, up to its very top.
+
+    Following the highlight down had scrolled the lead-in off, and nothing up there can
+    take the highlight, so before edge scroll there was no way back to it. The highlight
+    may scroll off screen meanwhile; the snap-back brings it home without moving it.
+    """
+    screen = _edge_list()
+    assert _view(screen) == ["lead 3", "lead 4", "lead 5", "❯ alpha"]
+    _press(screen, "up")  # alpha is the first row: the page scrolls a line instead
+    assert _view(screen)[0] == "lead 2"
+    for _ in range(5):
+        _press(screen, "up")
+    view = _view(screen)
+    assert view == ["lead 0", "lead 1", "lead 2", "lead 3"]  # the top; alpha is off screen
+    _press(screen, "up")
+    assert _view(screen) == view  # nothing further up: it stays
+    # The snap-back: ↓ only brings alpha back, still highlighted; the next ↓ moves.
+    _press(screen, "down")
+    assert "❯ alpha" in _view(screen)
+    _press(screen, "down")
+    assert "❯ beta" in _view(screen)
+
+
+def test_edge_scroll_brings_back_what_sits_below_the_last_row() -> None:
+    """↓ on the last row scrolls the closing note into view; ↑ moves on as ever."""
+    screen = _edge_list()
+    _view(screen)
+    for _ in range(3):
+        _press(screen, "down")
+    assert _view(screen) == ["alpha", "beta", "gamma", "❯ delta"]  # the note is below
+    _press(screen, "down")  # delta is the last row
+    assert _view(screen) == ["beta", "gamma", "❯ delta", "closing note"]
+    _press(screen, "up")  # the highlight is in view, so this simply moves it
+    assert "❯ gamma" in _view(screen)
+
+
+def test_enter_on_a_highlight_scrolled_off_brings_it_back_instead() -> None:
+    """Nothing runs that can't be seen: the first Enter only snaps the highlight back."""
+    screen = _edge_list()
+    screen.future = _Fut()
+    _view(screen)
+    for _ in range(3):
+        _press(screen, "up")
+    assert "❯ alpha" not in _view(screen)
+    _press(screen, "enter")
+    assert screen.future.result is _UNSET  # nothing was chosen…
+    assert "❯ alpha" in _view(screen)  # …the highlight came back
+    _press(screen, "enter")
+    assert screen.future.result == "alpha"
+
+
+def test_home_and_end_take_the_page_to_its_very_ends() -> None:
+    """End shows the closing note under the last row; Home the lead-in over the first."""
+    screen = _edge_list()
+    _view(screen)
+    _press(screen, "end")
+    assert _view(screen) == ["beta", "gamma", "❯ delta", "closing note"]
+    _press(screen, "home")
+    assert _view(screen) == ["lead 0", "lead 1", "lead 2", "lead 3"]
+    _press(screen, "down")  # the snap-back: alpha, the highlight Home left, comes into view
+    assert "❯ alpha" in _view(screen)
+
+
+def test_any_other_key_ends_the_edge_scroll() -> None:
+    """A typed filter moves the highlight, so the frame follows it again at once."""
+    screen = _edge_list()
+    _view(screen)
+    for _ in range(3):
+        _press(screen, "up")
+    _view(screen)
+    assert screen.edge_scrolled
+    _press(screen, "text", "g")
+    assert not screen.edge_scrolled
+    assert "❯ gamma" in _view(screen)
+
+
+def test_a_screen_without_a_highlight_keeps_its_own_arrows() -> None:
+    """Edge scroll stays out of a plain scroll screen: its ↑↓ are its own."""
+    screen = ScrollScreen(Text("\n".join(f"row {i}" for i in range(20))), title="t")
+    for action in ("up", "down", "home", "end", "enter"):
+        assert not screen.edge_scroll(action)
+
+
 def test_select_clamps_at_the_ends() -> None:
     """Up on the first row and Down on the last stay put — no cursor in the app rolls over."""
     items = [Choice("alpha", 1), Choice("beta", 2), Choice("gamma", 3)]

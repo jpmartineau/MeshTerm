@@ -908,6 +908,10 @@ class SelectScreen(Screen):
         """Return the body line index of the highlighted row."""
         return getattr(self, "_cursor", None)
 
+    def cursor_at_edge(self, step: int) -> bool:
+        """Edge scroll's gate: the first choice going up, the last going down."""
+        return self.row_at_edge(self._index, len(self._choices()), step)
+
     # --- input ---------------------------------------------------------------
 
     def handle(self, action: str, data: str = "") -> None:
@@ -1105,6 +1109,10 @@ class ReorderScreen(Screen):
     def cursor_line(self) -> int | None:
         """Return the body line index of the cursor row, so the session keeps it in view."""
         return getattr(self, "_cursor", None)
+
+    def cursor_at_edge(self, step: int) -> bool:
+        """Edge scroll's gate: the first row going up, the last action going down."""
+        return self.row_at_edge(self._index, len(self._order) + len(self._actions()), step)
 
     def handle(self, action: str, data: str = "") -> None:
         """Move the cursor, carry a grabbed row, grab/drop, run an action, or cancel on Esc."""
