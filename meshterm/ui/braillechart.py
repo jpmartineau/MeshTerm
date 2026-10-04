@@ -473,15 +473,24 @@ def compact_label(value: float) -> str:
     return f"{round(value / 1_000_000)}M"
 
 
+#: The fewest cells a chart's y-axis labels are given, however small its peak (JP,
+#: 2026-10-04). Sized to the widest mark alone, the gutter grew as a busy minute pushed the
+#: peak from ``9`` to ``10`` to ``100``, sliding the whole chart sideways under the reader;
+#: three cells hold every mark :func:`compact_label` prints below a thousand (``563``) and
+#: every compacted one (``1k``, ``-12``), so the gutter stays put.
+AXIS_LABEL_MIN = 3
+
+
 def axis_label_w(peak: float, rows: int, *, lo: float = 0.0) -> int:
-    """The gutter width a chart of this scale actually needs: its widest printed mark.
+    """The gutter width a chart of this scale needs: its widest printed mark, at least 3.
 
     Sizing from the compacted *peak* alone under-measures: a ``1.5k`` peak prints as the
     two-cell ``1k`` while a lower tick can still land at ``563`` — three cells. Callers
     sharing one gutter across stacked charts take the max of this over each chart's
-    scale (and the default :func:`axis_chart` gutter is computed the same way).
+    scale (and the default :func:`axis_chart` gutter is computed the same way). Never
+    narrower than :data:`AXIS_LABEL_MIN`.
     """
-    return max([1, *(len(mark) for mark in y_axis_labels(peak, rows, lo=lo))])
+    return max([AXIS_LABEL_MIN, *(len(mark) for mark in y_axis_labels(peak, rows, lo=lo))])
 
 
 def y_axis_labels(peak: float, rows: int, *, lo: float = 0.0) -> list[str]:
@@ -624,7 +633,7 @@ def axis_chart(
         bottom border, and the caption.
     """
     marks = y_axis_labels(peak, len(chart_rows), lo=floor)
-    label_w = label_w or max([1, *(len(mark) for mark in marks)])
+    label_w = label_w or max([AXIS_LABEL_MIN, *(len(mark) for mark in marks)])
     out: list[Text] = []
     for mark, row in zip(marks, chart_rows, strict=True):
         line = Text(f"{mark:>{label_w}} " + ("┤" if mark else "│"), style=style)

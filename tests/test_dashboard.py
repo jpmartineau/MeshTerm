@@ -124,14 +124,20 @@ def test_dashboard_activity_chart_reads_newest_right_with_mirrored_scale() -> No
     # left half of the chart is bare flatline.
     chart = [line for line in lines if "┤" in line or "│" in line]
     bottom = chart[-1]
-    left_half = bottom[3 : 3 + (len(bottom) - 6) // 2]
+    # The cells between the gutters' borders (a ticked row's are ┤ and ├).
+    inner = bottom[re.search("[┤│]", bottom).end() : max(map(bottom.rfind, "├│"))]
+    left_half = inner[: len(inner) // 2]
     assert all(ch in (chr(0x2800), chr(0x2800 | 0x40 | 0x80), " ") for ch in left_half)
     assert any(0x2800 <= ord(ch) <= 0x28FF and ord(ch) & 0x3F for ch in chart[0])
 
 
 def test_dashboard_activity_chart_fills_the_width() -> None:
-    """The chart stretches to the render width: wider terminal, more minutes shown."""
-    screen = _screen(histogram=[5] * ACTIVITY_BUCKETS)
+    """The chart stretches to the render width: wider terminal, more minutes shown.
+
+    Three-digit counts fill the gutters' three cells, so the top row's marks reach both
+    edges and its length is the whole width.
+    """
+    screen = _screen(histogram=[500] * ACTIVITY_BUCKETS)
     for width in (60, 110):
         lines = _stripped(screen.render_body(width))
         top = next(line for line in lines if "┤" in line)

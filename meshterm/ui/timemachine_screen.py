@@ -135,6 +135,17 @@ def _slice_note(minutes: int) -> str:
     return "1 h slices" if minutes >= 60 else f"{minutes}-min slices"
 
 
+def _rhythm_heading(what: str, minutes: int, width: int) -> Text:
+    """The Rhythm heading: what it counts, then its slice width where the line has room.
+
+    The slice width is the part the reader needs least — the axis under the chart marks the
+    day's hours — so where the whole heading would wrap onto a second line (the PicoCalc's
+    and the Cardputer's 53 columns, JP 2026-10-04) it goes, and the rest keeps one row.
+    """
+    heading = body_heading("Rhythm", f"{what} · {_slice_note(minutes)}")
+    return heading if heading.cell_len <= width else body_heading("Rhythm", what)
+
+
 def _rhythm_slots(stamps: list[datetime], minutes: int) -> list[int]:
     """Fold timestamps into their local time-of-day slice at ``minutes`` per slot."""
     slots = [0] * (24 * 60 // minutes)
@@ -434,9 +445,7 @@ def _node_sections(
         )
 
     out.append(Text())
-    out.append(
-        body_heading("Rhythm", f"receptions by local time of day · {_slice_note(slice_minutes)}")
-    )
+    out.append(_rhythm_heading("receptions by local time of day", slice_minutes, width))
     out.extend(
         axis_chart(
             timeline_rows(slots, rows=_CHART_ROWS),
@@ -557,9 +566,7 @@ def _self_sections(ctx: AppContext, window: timedelta | None, width: int) -> lis
         )
 
     out.append(Text())
-    out.append(
-        body_heading("Rhythm", f"transmissions by local time of day · {_slice_note(slice_minutes)}")
-    )
+    out.append(_rhythm_heading("transmissions by local time of day", slice_minutes, width))
     out.extend(
         axis_chart(
             timeline_rows(slots, rows=_CHART_ROWS),
