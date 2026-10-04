@@ -36,7 +36,9 @@ jobs:
   build:
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    # Windows gets an extra hour: a signed build waits for the maintainer to approve it on
+    # SignPath (see "Sign it" below), and that wait is spent inside this job.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 90 || 25 }}
     strategy:
       fail-fast: false
       matrix:
@@ -137,9 +139,17 @@ jobs:
       # Both legs are skipped wholesale until the account exists (the variable is unset
       # until then), so this file builds unsigned Windows binaries in the meantime rather
       # than failing, and a fork with no SignPath project of its own is unaffected.
+      #
+      # SignPath Foundation's terms make a person approve every signing request, so each
+      # one waits on the maintainer. Only a release (a tag, arriving through the release
+      # workflow's call) or a run started by hand asks; a push to `main` that touched the
+      # packaging builds unsigned, rather than sending an approval request nobody wanted
+      # and failing the run when it went unanswered.
       - name: Hand the Windows binary to SignPath
         id: unsigned
-        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
+        if: >-
+          runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != '' &&
+          (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch')
         uses: actions/upload-artifact@v4
         with:
           # Deliberately not `meshterm-*`: the release workflow attaches every artifact
@@ -149,7 +159,7 @@ jobs:
           if-no-files-found: error
 
       - name: Sign it
-        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
+        if: steps.unsigned.outcome == 'success'
         uses: signpath/github-action-submit-signing-request@v1
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -161,6 +171,11 @@ jobs:
           # The signed file comes back where the unsigned one was built, under the same
           # name, so every step after this one is untouched by any of it.
           wait-for-completion: true
+          # An hour to approve it, where the action's own default is ten minutes: long
+          # enough to see SignPath's email and answer it from a phone, so a release
+          # doesn't fail because the maintainer stepped away. The job's timeout above
+          # leaves room for it.
+          wait-for-completion-timeout-in-seconds: 3600
           output-artifact-directory: packaging/dist
 
       - name: Name it after the version and the platform

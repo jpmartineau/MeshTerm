@@ -122,8 +122,12 @@ Whichever you took, you now have a single file: `meshterm` on macOS and Linux,
 `meshterm-windows-x64.exe` on Windows. Put it somewhere on your `PATH` (renamed to
 `meshterm.exe` on Windows) and it's just `meshterm` from anywhere.
 
-> **These builds aren't code-signed**, which is why macOS and Windows both push back the
-> first time; signing costs real money on both platforms and this is a free side project.
+> **These builds aren't code-signed yet**, which is why macOS and Windows both push back
+> the first time. **Windows signing is on its way.** MeshTerm has applied to the
+> [SignPath Foundation](https://signpath.org), which signs open-source projects for free.
+> Once that's set up, every Windows download will be signed. The
+> [code signing policy](#code-signing-policy) below explains how. Mac builds will stay
+> unsigned, because Apple charges for signing and this is a free side project.
 > Every release ships a `SHA256SUMS` file if you'd rather check what you got, and
 > [installing with pip or pipx](#or-install-with-pip) sidesteps the whole business, since
 > nothing arrives as a downloaded binary.
@@ -323,6 +327,35 @@ Also here: [CONTRIBUTING.md](CONTRIBUTING.md) ·
 [SECURITY.md](SECURITY.md) ·
 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) ·
 [CHANGELOG.md](CHANGELOG.md)
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://signpath.io), certificate by
+[SignPath Foundation](https://signpath.org).
+
+This is for the Windows download. It's being set up now, so releases up to and including
+0.10.2 are still unsigned.
+
+**How a build gets signed.** Every Windows build is made by GitHub Actions, straight from
+the public source code in this repository. SignPath only signs a file it can trace back to
+one of those builds, and only after the maintainer approves that release. A file built on
+anyone's own computer can't be signed this way, not even the maintainer's.
+
+**Who does what.** MeshTerm has one maintainer,
+[Jean-Pierre Martineau](https://github.com/jpmartineau), who holds all three roles:
+
+- **Author:** writes the code and commits it.
+- **Reviewer:** reviews every change from anyone else before it goes in.
+- **Approver:** approves each release before it gets signed.
+
+**Privacy.** This program will not transfer any information to other networked systems
+unless specifically requested by the user or the person installing or operating it.
+
+In practice, MeshTerm goes online for one thing: map tiles. It downloads them from
+[OpenFreeMap](https://openfreemap.org/) when you open a screen that shows a map, and
+OpenFreeMap's [privacy policy](https://openfreemap.org/privacy) covers those downloads. It
+collects nothing about you and doesn't check for updates. Over the radio, it sends only
+what you ask it to send.
 
 ## Acknowledgements & attribution
 

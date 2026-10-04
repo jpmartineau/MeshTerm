@@ -9,6 +9,7 @@
 # Built on the machine it targets. There is no cross-compiling here — the Windows build
 # comes off a Windows runner, the macOS one off macOS. That is what the workflow is for.
 
+import re
 import sys
 
 from PyInstaller.utils.hooks import collect_submodules
@@ -33,6 +34,61 @@ import notices  # noqa: E402 (import must follow the sys.path edit above)
 third_party_notices = notices.write_third_party_notices(
     os.path.join(workpath, "THIRD-PARTY-NOTICES.txt")
 )
+
+# The Windows build's version resource: the Details tab of the file's Properties, and the
+# name and version Windows shows for it. Without one the .exe is just "meshterm.exe" with
+# no product behind it, and SignPath refuses to sign it — their signing configuration
+# checks the product name and version written here, so a file that doesn't carry them
+# can't be passed off as a MeshTerm release. Built from the package's own `__version__`
+# rather than kept as a second copy that would drift. The other platforms have no such
+# resource, and PyInstaller warns if handed one there.
+version_info = None
+if sys.platform == "win32":
+    from PyInstaller.utils.win32.versioninfo import (
+        FixedFileInfo,
+        StringFileInfo,
+        StringStruct,
+        StringTable,
+        VarFileInfo,
+        VarStruct,
+        VSVersionInfo,
+    )
+
+    # The checkout being frozen, not whichever MeshTerm the interpreter happens to have
+    # installed: `Analysis` below reads its sources from here too.
+    sys.path.insert(0, os.path.dirname(SPECPATH))
+    import meshterm  # noqa: E402 (import must follow the sys.path edit above)
+
+    # The resource's fixed half holds exactly four numbers: 0.10.2 → (0, 10, 2, 0). A
+    # suffix such as `rc1` has nowhere to go there and is dropped; the text fields below
+    # keep the version exactly as written.
+    numbers = [int(n) for n in re.match(r"\d+(?:\.\d+)*", meshterm.__version__)[0].split(".")]
+    numbers = tuple((numbers + [0, 0, 0, 0])[:4])
+    version_info = VSVersionInfo(
+        ffi=FixedFileInfo(filevers=numbers, prodvers=numbers),
+        kids=[
+            StringFileInfo(
+                [
+                    # 0409 is US English and 04B0 says the strings are Unicode — the
+                    # pairing nearly every Windows program declares.
+                    StringTable(
+                        "040904B0",
+                        [
+                            StringStruct("CompanyName", meshterm.__author__),
+                            StringStruct("FileDescription", "MeshTerm"),
+                            StringStruct("FileVersion", meshterm.__version__),
+                            StringStruct("InternalName", "meshterm"),
+                            StringStruct("LegalCopyright", meshterm.copyright_notice()),
+                            StringStruct("OriginalFilename", "meshterm.exe"),
+                            StringStruct("ProductName", "MeshTerm"),
+                            StringStruct("ProductVersion", meshterm.__version__),
+                        ],
+                    )
+                ]
+            ),
+            VarFileInfo([VarStruct("Translation", [0x0409, 1200])]),
+        ],
+    )
 
 # The assets have to land at `meshterm/assets`, because `ui/about.py` finds them with
 # `Path(__file__).parent.parent / "assets"` and that path has to keep resolving inside
@@ -105,4 +161,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    version=version_info,
 )
