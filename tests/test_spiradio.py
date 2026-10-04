@@ -309,6 +309,42 @@ def test_no_bridge_means_nothing_carried(tmp_path: Path, monkeypatch: pytest.Mon
 
 
 @pytest.mark.parametrize(
+    ("labels", "chip"),
+    [
+        ({0: "pinctrl-bcm2711", 1: "raspberrypi-exp-gpio"}, 0),  # a CM4
+        ({0: "gpio-brcmstb@107d508500", 4: "pinctrl-rp1"}, 4),  # a CM5 on its first kernels
+        ({0: "pinctrl-rp1", 10: "gpio-brcmstb@107d508500"}, 0),  # a CM5 after the alias
+        ({0: "gpio-brcmstb@107d508500", 15: "pinctrl-rp1"}, 15),  # a CM5 whose chip moved
+        ({0: "gpio-mockup-A"}, None),  # no Raspberry Pi header at all
+    ],
+)
+def test_the_header_s_gpio_chip_is_found_by_its_label(labels: dict, chip: int | None) -> None:
+    """The header's controller is known by its label, whatever number this kernel gave it.
+
+    A CM4 and a CM5 put their 40-pin header on chips numbered differently, and on the CM5
+    the number has moved between kernel releases, so the AIO's defaults find it by name.
+    """
+    assert spiradio.header_gpio_chip(labels) == chip
+
+
+def test_a_profile_s_gpio_chip_pins_it_and_the_default_looks(monkeypatch) -> None:
+    """A number in the profile wins; left out, the label decides, and chip 0 is the fallback."""
+    monkeypatch.setattr(spiradio, "gpio_chip_labels", lambda: {15: "pinctrl-rp1"})
+    assert SpiWiring().gpio_chip == -1
+    assert spiradio.gpio_chip(SpiWiring()) == 15
+    assert spiradio.gpio_chip(SpiWiring(gpio_chip=4)) == 4
+    assert "sudo lsof /dev/gpiochip15" in spiradio.explain("busy", "", SpiWiring())
+    monkeypatch.setattr(spiradio, "gpio_chip_labels", lambda: {})
+    assert spiradio.gpio_chip(SpiWiring()) == 0
+
+
+def test_reading_the_chips_labels_never_fails(tmp_path: Path) -> None:
+    """Off Linux, or where a chip can't be asked, there is simply nothing to report."""
+    (tmp_path / "gpiochip0").write_bytes(b"")  # a plain file: the ioctl can't answer it
+    assert spiradio.gpio_chip_labels(tmp_path) == {}
+
+
+@pytest.mark.parametrize(
     ("kind", "holder", "says"),
     [
         ("busy", "bridge", "systemctl --user stop meshterm-spi-bridge"),

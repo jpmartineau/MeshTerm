@@ -81,7 +81,11 @@ class SpiWiring:
         bus_id: SPI bus (``/dev/spidev<bus_id>.<cs_id>``).
         cs_id: SPI chip-select device on that bus.
         cs_pin: A GPIO driven as chip select by hand, or ``-1`` for the bus's own.
-        gpio_chip: Which ``/dev/gpiochip<n>`` the pins below are on.
+        gpio_chip: Which ``/dev/gpiochip<n>`` the pins below are on, or ``-1`` (the default)
+            to find the Raspberry Pi header's controller by its label — ``pinctrl-bcm2711``
+            on a CM4, ``pinctrl-rp1`` on a CM5 — rather than trust a number that differs
+            between the two and has moved between kernel releases on the CM5 (see
+            :func:`~meshterm.core.spiradio.gpio_chip`). A number pins it.
         use_gpiod_backend: Drive the pins through ``gpiod`` instead of ``python-periphery``.
         reset_pin: The chip's reset line.
         busy_pin: The chip's busy line.
@@ -100,7 +104,7 @@ class SpiWiring:
     bus_id: int = 1
     cs_id: int = 0
     cs_pin: int = -1
-    gpio_chip: int = 0
+    gpio_chip: int = -1
     use_gpiod_backend: bool = False
     reset_pin: int = 25
     busy_pin: int = 24

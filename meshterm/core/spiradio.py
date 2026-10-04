@@ -40,7 +40,7 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .config import DeviceProfile, SpiWiring
@@ -137,6 +137,71 @@ def _xdg_data_home() -> Path:
 def spi_present(wiring: SpiWiring) -> bool:
     """Whether ``wiring``'s SPI device node exists on this machine (Linux only)."""
     return _on_linux() and os.path.exists(wiring.spidev)
+
+
+#: The labels the kernel gives the GPIO controller behind a Raspberry Pi's 40-pin header, in
+#: the order they are looked for: the RP1 a Pi 5 or CM5 carries, then the BCM2711 of a Pi 4
+#: or CM4, then the BCM2835 family of the older boards. Its *number* is no fact about the
+#: board: chip 0 on a CM4, chip 4 on a CM5 under the kernels it shipped with, chip 0 again
+#: once Raspberry Pi aliased the RP1 there (raspberrypi/linux#6144), and on some later
+#: kernels another number still, as probe order moved it. The label is what stays put.
+HEADER_GPIO_LABELS = ("pinctrl-rp1", "pinctrl-bcm2711", "pinctrl-bcm2835")
+
+#: ``GPIO_GET_CHIPINFO_IOCTL``: ``_IOR(0xB4, 0x01, struct gpiochip_info)``, which fills a
+#: 68-byte ``{char name[32]; char label[32]; u32 lines}`` for the chip the fd is open on.
+_GPIO_GET_CHIPINFO_IOCTL = 0x8044B401
+
+
+def gpio_chip_labels(dev: Path = Path("/dev")) -> dict[int, str]:
+    """Each ``/dev/gpiochip<n>``'s label as the kernel reports it, by ``n``.
+
+    Asked of the GPIO character device itself, which needs nothing installed and only the
+    read access the radio's pins need anyway. Empty off Linux, and a chip that can't be
+    opened (no ``gpio`` group yet) is simply left out — the radio's own start reports that.
+    """
+    try:
+        import fcntl
+    except ImportError:  # not a POSIX system: no GPIO character devices to ask
+        return {}
+    labels: dict[int, str] = {}
+    for path in dev.glob("gpiochip[0-9]*"):
+        try:
+            number = int(path.name.removeprefix("gpiochip"))
+            fd = os.open(path, os.O_RDONLY)
+        except (ValueError, OSError):
+            continue
+        try:
+            info = bytearray(68)
+            fcntl.ioctl(fd, _GPIO_GET_CHIPINFO_IOCTL, info)
+        except OSError:
+            continue
+        finally:
+            os.close(fd)
+        labels[number] = bytes(info[32:64]).split(b"\0", 1)[0].decode("ascii", "replace")
+    return labels
+
+
+def header_gpio_chip(labels: Mapping[int, str]) -> int | None:
+    """The chip carrying a Pi's 40-pin header, by its label (:data:`HEADER_GPIO_LABELS`)."""
+    for wanted in HEADER_GPIO_LABELS:
+        for number in sorted(labels):
+            if labels[number] == wanted:
+                return number
+    return None
+
+
+def gpio_chip(wiring: SpiWiring) -> int:
+    """The ``/dev/gpiochip<n>`` the wiring's pins are on.
+
+    The profile's ``gpio_chip`` where it names one. Otherwise the Raspberry Pi header's
+    controller, found by its label — so a uConsole's CM4 and CM5 both work on the AIO's
+    defaults, whatever number the kernel gave the chip this boot — and chip 0 where no
+    controller carries a header label, which is what the default meant before it looked.
+    """
+    if wiring.gpio_chip >= 0:
+        return wiring.gpio_chip
+    found = header_gpio_chip(gpio_chip_labels())
+    return 0 if found is None else found
 
 
 def spi_radios(
@@ -308,7 +373,7 @@ def explain(kind: str, detail: str, wiring: SpiWiring, holder: str | None = None
             return "meshcore-console has the radio open — close it and connect again"
         return (
             "another program has the radio's pins "
-            f"(`sudo lsof /dev/gpiochip{wiring.gpio_chip}` shows which)"
+            f"(`sudo lsof /dev/gpiochip{gpio_chip(wiring)}` shows which)"
         )
     if kind == "runtime":
         return (
@@ -321,7 +386,7 @@ def explain(kind: str, detail: str, wiring: SpiWiring, holder: str | None = None
             "`dtoverlay=spi1-1cs` to /boot/firmware/config.txt) and reboot"
         )
     if kind == "no-gpio":
-        return f"/dev/gpiochip{wiring.gpio_chip} does not exist — check `gpio_chip` in the profile"
+        return f"/dev/gpiochip{gpio_chip(wiring)} does not exist — check `gpio_chip` in the profile"
     if kind == "permission":
         return (
             f"{detail} — add yourself to the spi and gpio groups "
@@ -482,6 +547,9 @@ async def start_node(wiring: SpiWiring, state: Path, *, node_name: str) -> NodeP
     """
     if not _on_linux():
         raise SpiRadioError("unsupported", "a radio on the SPI bus needs Linux")
+    # The chip the pins are on, found by label where the profile names none: settled once
+    # here, so the node, every error message and the `lsof` hint all name the same chip.
+    wiring = replace(wiring, gpio_chip=await asyncio.to_thread(gpio_chip, wiring))
     # Each of these runs a short subprocess or two; none of them belongs on the event loop
     # that is drawing the "connecting" card.
     holder = await asyncio.to_thread(radio_holder)

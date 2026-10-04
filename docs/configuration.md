@@ -106,11 +106,16 @@ map one to one:
 | `TXen`, `RXen` | `txen_pin`, `rxen_pin` |
 | `DIO2_AS_RF_SWITCH: true` | `use_dio2_rf = true` |
 | `DIO3_TCXO_VOLTAGE: true` | `use_dio3_tcxo = true` (1.8 V) |
-| `gpiochip: 4` | `gpio_chip = 4` |
+| `gpiochip: 4` | usually nothing — see below; `gpio_chip = 4` to pin it |
 
-`Module` must be `sx1262`; that is the chip MeshTerm's node drives. `gpio_chip` is `0` on
-a Compute Module 4 but differs on a Raspberry Pi 5 and a CM5 — `gpiodetect`, or
-`ls /dev/gpiochip*`, shows which chip carries the 40-pin header.
+`Module` must be `sx1262`; that is the chip MeshTerm's node drives. **Leave `gpio_chip` out**
+unless you need to override it: a `meshtasticd` file pins a number because Meshtastic can't
+look the chip up, but the number that carries a Raspberry Pi's 40-pin header differs
+between a Pi 4/CM4 and a Pi 5/CM5 and has moved between kernel releases on the latter.
+Left out, it defaults to `-1`, and MeshTerm finds the header's chip by its label
+(`pinctrl-rp1`, `pinctrl-bcm2711`, `pinctrl-bcm2835`) — falling back to chip `0` on a board
+whose chips carry none of them. `gpiodetect` lists every chip with its label. The
+[uConsole guide](uconsole.md#which-gpio-chip) has the whole story.
 
 **State every pin and both switches.** Where a `meshtasticd` file leaves a key out, it means
 "none" or "off". Where the `spi` table leaves a key out, it means *the AIO's value* — IRQ on

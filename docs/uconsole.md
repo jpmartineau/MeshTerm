@@ -35,6 +35,7 @@ That's [further down](#always-on-the-bridge) — most people want the section ab
 - [Step 4 — Connect](#step-4--connect)
 - [Moving over from the bridge (0.9.0 and earlier)](#moving-over-from-the-bridge-090-and-earlier)
 - [Board wiring](#board-wiring)
+  - [Which GPIO chip](#which-gpio-chip)
 - [Troubleshooting](#troubleshooting)
 - [Always on: the bridge](#always-on-the-bridge)
 - [What this has been tested on](#what-this-has-been-tested-on)
@@ -47,7 +48,7 @@ That's [further down](#always-on-the-bridge) — most people want the section ab
 
 | Part | Notes |
 | --- | --- |
-| ClockworkPi **uConsole** (CM4 module) | Any uConsole with a Compute Module 4. |
+| ClockworkPi **uConsole** with a Raspberry Pi **CM4 or CM5** | Both cores work the same way; MeshTerm finds the GPIO chip behind the header on either (see [Which GPIO chip](#which-gpio-chip)). ClockworkPi's own A-04, A-06 and R-01 cores are not supported. |
 | hackergadgets **AIO** expansion board | The board this guide is written for and the one we recommend: an SX1262 on SPI bus 1, plus GPS, an RTL-SDR and a USB hub you don't need here. MeshTerm's SPI defaults are its wiring (AIO v1; the v2 needs one extra setting — see [Board wiring](#board-wiring)). |
 | An antenna for your region's LoRa band | Required. |
 
@@ -61,8 +62,8 @@ for that part.
   Linux-only — driving a radio on the host's own SPI bus is not something Windows or macOS
   can do.
 - A `/dev/spidev*` node. This needs `dtoverlay=spi1-1cs` in `/boot/firmware/config.txt`.
-- `/dev/gpiochip0`, and membership of the `spi` and `gpio` groups so you can read and write
-  both without root.
+- The GPIO character devices (`/dev/gpiochip*`), and membership of the `spi` and `gpio`
+  groups so you can read and write both without root.
 - The radio library, **`openhop-core[hardware]` 1.1.3 or newer** — [Step
   2](#step-2--install-the-radio-library) gets you there. It doesn't have to be in
   MeshTerm's own Python; MeshTerm looks in several places for it.
@@ -99,12 +100,14 @@ sudo reboot
 After it comes back, check the device nodes exist and that you can use them:
 
 ```bash
-ls -l /dev/spidev* /dev/gpiochip0
+ls -l /dev/spidev* /dev/gpiochip*
 groups
 ```
 
-You should see `/dev/spidev1.0` (or another `spidev*` node) and `/dev/gpiochip0` listed,
-and `spi` and `gpio` in your `groups` output.
+You should see `/dev/spidev1.0` (or another `spidev*` node) and at least one `gpiochip`
+listed, and `spi` and `gpio` in your `groups` output. Which `gpiochip` carries the radio's
+pins depends on your core and your kernel; MeshTerm works that out itself (see [Which GPIO
+chip](#which-gpio-chip)).
 
 ---
 
@@ -275,7 +278,7 @@ en_pins = [27]   # the AIO v2 needs this
 | --- | --- | --- |
 | `bus_id`, `cs_id` | `1`, `0` | Which SPI bus and chip-select the radio is on (`/dev/spidev<bus_id>.<cs_id>`). |
 | `cs_pin` | `-1` | A GPIO driven as chip select by hand, instead of the bus's own. |
-| `gpio_chip` | `0` | Which `/dev/gpiochip<n>` the pins below are on. |
+| `gpio_chip` | `-1` | Which `/dev/gpiochip<n>` the pins below are on. `-1` finds the chip behind the 40-pin header by its label — see [Which GPIO chip](#which-gpio-chip). |
 | `use_gpiod_backend` | `false` | Drive the pins through `gpiod` instead of `python-periphery`. |
 | `reset_pin`, `busy_pin`, `irq_pin` | `25`, `24`, `26` | The chip's reset, busy and interrupt (DIO1) lines. |
 | `txen_pin`, `rxen_pin` | `-1`, `-1` | An external RF switch's transmit/receive-enable lines, if the board has one. |
@@ -291,6 +294,38 @@ Radio settings — frequency, bandwidth, spreading factor, coding rate, TX power
 **not** in this table. They're the node's own, on Device config, as noted in
 [What you need](#what-you-need).
 
+### Which GPIO chip
+
+The AIO's reset, busy and interrupt lines are GPIO 25, 24 and 26 on either core — the pin
+numbers don't change. What changes is *which* `/dev/gpiochip<n>` Linux puts them on:
+
+| Core | The header's GPIO controller | Its chip number |
+| --- | --- | --- |
+| CM4 | `pinctrl-bcm2711` | `0` |
+| CM5, early kernels | `pinctrl-rp1` | `4` |
+| CM5, kernels since Raspberry Pi aliased the RP1 to chip 0 ([raspberrypi/linux#6144](https://github.com/raspberrypi/linux/pull/6144)) | `pinctrl-rp1` | `0` |
+| CM5, some later kernels | `pinctrl-rp1` | another number again, as the order the drivers load in moved it |
+
+So a chip number is not a fact about the board. **MeshTerm looks the chip up by its label
+instead**: with `gpio_chip` left at its default of `-1`, it asks each `/dev/gpiochip<n>` for
+its label and uses the one called `pinctrl-rp1`, `pinctrl-bcm2711` or `pinctrl-bcm2835`, so
+the same profile works on a CM4, a CM5, and across kernel updates. Where no chip carries one
+of those labels, it falls back to chip `0`.
+
+To see what your system has, `gpiodetect` (from the `gpiod` package) lists every chip with
+its label:
+
+```
+gpiochip0 [pinctrl-rp1] (54 lines)
+gpiochip10 [gpio-brcmstb@107d508500] (32 lines)
+…
+```
+
+Set `gpio_chip` to a number only to override the lookup — on a board whose header
+controller has some other label, say. The [bridge](#always-on-the-bridge) does not look
+chips up by label: on a CM5 it needs `MESHCORE_GPIO_CHIP` set to whatever `gpiodetect` shows
+for `pinctrl-rp1`, if that isn't `0`.
+
 ---
 
 ## Troubleshooting
@@ -302,7 +337,7 @@ Radio settings — frequency, bandwidth, spreading factor, coding rate, TX power
 | Permission denied opening the SPI or GPIO device | `sudo usermod -aG spi,gpio $USER`, then log out and back in. |
 | "the meshterm-spi-bridge service has the radio" | Stop it: `systemctl --user stop meshterm-spi-bridge` (and `disable` it to keep it stopped). |
 | "meshcore-console has the radio open" | Close the GUI and connect again. |
-| Some other program has the radio | `sudo lsof /dev/gpiochip0` shows which; only one program may hold the radio at a time. |
+| Some other program has the radio | The message names the chip: `sudo lsof /dev/gpiochip<n>` on it shows which program; only one may hold the radio at a time. |
 | The node starts but never answers | Check its log: `~/.meshterm/radio/spidev1.0/node.log`. |
 | An AIO v2 radio never comes up | It needs `en_pins = [27]` in the profile's `spi` table — see [Board wiring](#board-wiring). |
 
@@ -400,7 +435,7 @@ what to do if it fails:
 | --- | --- | --- |
 | `node runtime` | Neither `openhop_core` nor `pymc_core` is importable by any interpreter the bridge tried. | Build the venv from [step 1](#bridge-step-1--install-the-radio-runtime), or set `MESHTERM_PYMC_PYTHON` to a python that has one. |
 | `SPI device` | No `/dev/spidev*` node exists, or it exists but you can't read/write it. | No node at all: add `dtoverlay=spi1-1cs` to `/boot/firmware/config.txt` and reboot. Node present but no permission: `sudo usermod -aG spi $USER`, then log out and back in. |
-| `GPIO chip` | `/dev/gpiochip0` is missing or not read/write for you. | `sudo usermod -aG gpio $USER`, then log out and back in. |
+| `GPIO chip` | `/dev/gpiochip0` (or the chip `MESHCORE_GPIO_CHIP` names) is missing or not read/write for you. | `sudo usermod -aG gpio $USER`, then log out and back in. On a CM5, check [which chip](#which-gpio-chip) the header is on. |
 | `bridge service` / `radio in use` / `port 5000 busy` / `radio is free` | Tells you whether something already holds the radio: the bridge's own boot service, a running `meshcore-console`, or something else already listening on the TCP port. | Only one program may use the radio at a time — see [step 6](#bridge-step-6--connect-meshterm-to-it). If `meshcore-console` is running, close it before running the bridge. |
 
 If the first three checks all pass, you're ready to run it.
@@ -568,7 +603,7 @@ Then `systemctl --user restart meshterm-spi-bridge.service`.
 | `MESHCORE_SPREADING_FACTOR`, `MESHCORE_BANDWIDTH`, `MESHCORE_CODING_RATE` | the modem preset — all three must match the mesh you are joining. Whole numbers only: bandwidth in Hz (`62500`), coding rate as the denominator (`5` for 4/5). A decimal or `4/5` stops the bridge at startup. |
 | `MESHCORE_TXEN_PIN`, `MESHCORE_RXEN_PIN`, `MESHCORE_EN_PINS` | the RF-switch and power-enable lines a board may need (`-1` for none; `EN_PINS` is a comma list — the AIO v2 wants `27`) |
 | `MESHCORE_USE_DIO2_RF`, `MESHCORE_USE_DIO3_TCXO`, `MESHCORE_IS_WAVESHARE` | whether DIO2 drives the RF switch and DIO3 the TCXO (both on for the AIO), and a flag for a different vendor's wiring the runtime knows about |
-| `MESHCORE_GPIO_CHIP`, `MESHCORE_USE_GPIOD_BACKEND`, `MESHCORE_PREAMBLE_LENGTH` | which gpiochip, whether to drive it through `gpiod`, and the LoRa preamble (leave it unset: the bridge follows MeshCore, 32 symbols up to SF8 and 16 above, and a shorter one leaves the radio deaf to most of the mesh) |
+| `MESHCORE_GPIO_CHIP`, `MESHCORE_USE_GPIOD_BACKEND`, `MESHCORE_PREAMBLE_LENGTH` | which gpiochip (`0` unless set — the bridge doesn't look it up by label, so on a CM5 see [Which GPIO chip](#which-gpio-chip)), whether to drive it through `gpiod`, and the LoRa preamble (leave it unset: the bridge follows MeshCore, 32 symbols up to SF8 and 16 above, and a shorter one leaves the radio deaf to most of the mesh) |
 | `MESHTERM_PYMC_PYTHON` | force a specific interpreter instead of letting the bridge discover one |
 
 The bridge passes a knob only when the runtime's radio constructor accepts it, so the same
@@ -597,9 +632,10 @@ install the table above is the whole of it. Either way, an AIO v2 without
 
 ## What this has been tested on
 
-**The direct connection** has been tested against the real radio library
-(`openhop-core`) with a simulated radio; it has **not yet been verified on uConsole
-hardware**.
+**The direct connection** has run on a bookworm uConsole with a **CM5** and an AIO v1
+since 2026-09-24, on MeshTerm's defaults. It has also been tested against the real radio
+library (`openhop-core`) with a simulated radio. A CM4 has not been tried with it; its
+header chip is found by the same label lookup (see [Which GPIO chip](#which-gpio-chip)).
 
 **The bridge** has been verified on a bookworm uConsole with `openhop-core` 1.1.3: the
 radio comes up, contacts are restored across a restart, and `info` and `contacts` answer
@@ -609,8 +645,7 @@ live feed. MeshTerm's test suite does not cover the bridge.
 
 What has not been confirmed:
 
-- **The direct connection on real hardware** — everything above has only run against a
-  simulated radio under the real library.
+- **The direct connection on a CM4** — only the CM5 has run it.
 - **The bridge under `openhop_core` beyond `info` and `contacts`.** Startup, identity,
   contact restore and those two reads were exercised; a trace, a message and the live feed
   under the new runtime were not, though the library's own trace push is what the bridge

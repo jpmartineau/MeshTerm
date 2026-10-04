@@ -66,6 +66,14 @@ description = "Basestation over WiFi"
 transport = "spi"
 # [profiles.aio.spi]
 # en_pins = [27]   # the AIO v2 powers its radio from pin 27
+#
+# Which /dev/gpiochip<n> carries the pins is not a fact about the board: a uConsole's CM4
+# has its 40-pin header on chip 0, a CM5 had it on chip 4 under its early kernels, chip 0
+# once Raspberry Pi aliased it there, and another number again on some later kernels. So
+# gpio_chip defaults to -1, which finds the chip by its label (pinctrl-rp1 on a CM5,
+# pinctrl-bcm2711 on a CM4; `gpiodetect` lists them) and falls back to chip 0 where none
+# carries either. Give it a number only to override that:
+# gpio_chip = 4
 
 # Any other board states its whole wiring — every pin and both switches, because a key
 # left out keeps the AIO's value. Read them off the board's meshtasticd config; the
