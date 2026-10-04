@@ -77,7 +77,7 @@ def _leaf_commands() -> list[tuple[str, ...]]:
 
 
 #: Commands that own the terminal or run until interrupted: they have no one-shot output.
-_NOT_ONE_SHOT = {("monitor",), ("chat", "listen"), ("tx-optimize",)}
+_NOT_ONE_SHOT = {("monitor",), ("chat", "listen"), ("tx-optimize",), ("emulate",)}
 
 #: The one command whose output *is* its colour, and says so (:mod:`meshterm.ui.specimen`).
 _KEEPS_ITS_COLOUR = {("specimen",)}
@@ -118,7 +118,7 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201 - a cl
 
 
 #: Commands that refuse a machine-readable face outright, and say so as a usage error.
-_REFUSES_JSON = {("specimen",)}
+_REFUSES_JSON = {("specimen",), ("emulate",)}
 
 
 # -- the four rules -------------------------------------------------------------------

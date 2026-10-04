@@ -694,6 +694,92 @@ def specimen_command() -> None:
         console.print(line)
 
 
+#: Globals the emulated MeshTerm must not inherit: the emulator names its platform itself,
+#: refuses a machine-readable face, and answers ``--version`` before anything runs.
+_NOT_FORWARDED = {"platform", "json_output", "version", "help"}
+
+
+def _forwarded_globals(ctx: typer.Context) -> list[str]:
+    """The global options this invocation set, spelled again for the emulated MeshTerm.
+
+    A global is lifted ahead of the subcommand wherever it was typed (see
+    :func:`_globals_first`), so ``meshterm emulate picocalc-lyra --mock`` parses ``--mock``
+    on the outer MeshTerm. The emulated one is a second invocation, and it needs the same
+    flags, so they are read back off the root's parsed values and written out again.
+    """
+    root = ctx.find_root()
+    out: list[str] = []
+    for param in root.command.params:
+        if param.name in _NOT_FORWARDED or not param.opts:
+            continue
+        value = root.params.get(param.name)
+        if value is None or value == param.default:
+            continue
+        option = max(param.opts, key=len)
+        if getattr(param, "is_flag", False):
+            out.extend([option] if value else list(param.secondary_opts[:1]))
+        else:
+            out.extend([option, str(value)])
+    return out
+
+
+@app.command(
+    name="emulate",
+    help="Show MeshTerm as it looks on a handheld, in a window",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def emulate_command(
+    ctx: typer.Context,
+    device: str | None = typer.Argument(
+        None, help="The handheld: cardputer-zero or picocalc-lyra", show_default=False
+    ),
+    scale: int = typer.Option(3, "--scale", min=1, help="Window zoom, in whole pixels"),
+    fetch_fonts: bool = typer.Option(
+        False, "--fetch-fonts", help="Download the Terminus font the emulator draws in, once"
+    ),
+    archive: Path | None = typer.Option(
+        None, "--archive", help="Install the font from this downloaded release archive"
+    ),
+) -> None:
+    """Run MeshTerm in a window that shows a handheld's display, pixel for pixel.
+
+    Not a strict emulator: MeshTerm runs as itself on this machine, and what the window
+    reproduces is the device's display and keyboard — its panel, its grid, its font, the
+    colours it can show, the keys that drive its F-key lane (see :mod:`meshterm.emulator`).
+    Every global option given (``--mock``, ``--port``, ``--ble``…) is passed on to the
+    MeshTerm the window runs.
+
+    Like ``specimen`` it has no machine-readable face — a window is no document — so it
+    refuses ``--json`` as a usage error.
+    """
+    from .emulator.__main__ import start
+
+    assert _state is not None  # set by the callback that always runs first
+    if _state.output is not OutputFormat.PLAIN:
+        raise typer.BadParameter("emulate has no machine-readable output — it opens a window")
+
+    def complain(problem: str) -> None:
+        script.stderr_console().print(f"meshterm: {problem}", style="err", highlight=False)
+
+    if fetch_fonts or archive is not None:
+        from .emulator.fetch import install_terminus
+
+        try:
+            install_terminus(archive, say=lambda line: print(line, file=sys.stderr))
+        except (OSError, ValueError) as why:
+            complain(f"couldn't install the font: {why}")
+            raise typer.Exit(exitcodes.FAILURE) from None
+        return
+    try:
+        status = start(
+            device, [*_forwarded_globals(ctx), *ctx.args], scale=scale, complain=complain
+        )
+    except ValueError as why:
+        raise typer.BadParameter(str(why), param_hint="DEVICE") from None
+    if status:
+        raise typer.Exit(status)
+
+
 def run_tool_command(tool: Tool, params: dict) -> None:
     """Execute a tool from a CLI subcommand and render its result.
 

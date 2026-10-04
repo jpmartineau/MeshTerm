@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Cells to pixels: the panel the emulator shows, drawn from a :class:`~.vt.Terminal`.
 
-The panel is 320×170; 53 columns of 6 pixels and 14 rows of 12 leave a two-pixel margin
-right and bottom, which this splits evenly so the grid sits centred. Pixels are packed
+The Cardputer Zero's panel is 320×170; 53 columns of 6 pixels and 14 rows of 12 leave a
+two-pixel margin right and bottom, which this splits evenly so the grid sits centred. A
+Linux console (the PicoCalc's) instead starts its grid at the panel's top-left corner, and
+draws bold as *bright* — a dim palette colour becomes its bright twin, in the same glyph —
+which ``top_left`` and ``bold_is_bright`` reproduce. Pixels are packed
 straight into the byte layout the destination wants — 16-bit RGB565 for the Cardputer's
 framebuffer, 24-bit RGB for a desktop window — so nothing converts a whole frame on its
 way out.
@@ -55,6 +58,11 @@ class Raster:
         default_bg: The paper of a cell whose style names none.
         width: Panel width in pixels.
         height: Panel height in pixels.
+        top_left: Start the grid at the panel's top-left corner, as a Linux console does,
+            rather than centring it.
+        bold_is_bright: Draw bold the Linux console's way: a foreground from the palette's
+            eight dim slots takes its bright twin (slot ``n + 8``) and the glyph stays
+            regular, since a console font has no bold face.
     """
 
     def __init__(
@@ -67,6 +75,8 @@ class Raster:
         default_bg: RGB = (0, 0, 0),
         width: int = PANEL_W,
         height: int = PANEL_H,
+        top_left: bool = False,
+        bold_is_bright: bool = False,
     ) -> None:
         """Lay the grid out on the panel and paint it blank."""
         self.terminal = terminal
@@ -78,8 +88,10 @@ class Raster:
         self.height = height
         self.bpp = len(pack((0, 0, 0)))
         self.stride = width * self.bpp
-        self.left = (width - terminal.cols * CELL_W) // 2
-        self.top = (height - terminal.rows * CELL_H) // 2
+        self.left = 0 if top_left else (width - terminal.cols * CELL_W) // 2
+        self.top = 0 if top_left else (height - terminal.rows * CELL_H) // 2
+        palette = terminal.palette
+        self._bright = {palette[n]: palette[n + 8] for n in range(8)} if bold_is_bright else None
         self.pixels = bytearray(pack(default_bg) * (width * height))
         self._spans: dict[tuple[int, RGB, RGB], bytes] = {}
 
@@ -129,6 +141,9 @@ class Raster:
             fg = style.fg or self.default_fg
             bg = style.bg or self.default_bg
             flags = style.flags
+            bold = bool(flags & BOLD)
+            if bold and self._bright is not None:
+                fg, bold = self._bright.get(fg, fg), False
             if flags & REVERSE:
                 fg, bg = bg, fg
             if flags & DIM:
@@ -136,7 +151,7 @@ class Raster:
             if flags & HIDDEN or char == "":
                 glyph = bytes(CELL_H)
             else:
-                glyph = self.font.glyph(char, bold=bool(flags & BOLD))
+                glyph = self.font.glyph(char, bold=bold)
             if flags & UNDERLINE:
                 glyph = glyph[: CELL_H - 2] + b"\xfc" + glyph[CELL_H - 1 :]
             if flags & STRIKE:

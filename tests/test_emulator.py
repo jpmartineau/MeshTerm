@@ -279,3 +279,136 @@ def test_the_cardputer_inventory_is_what_the_host_draws() -> None:
         return  # no Terminus on this machine (CI): the marks are the part that is ours
     drawn = {cp for cp in load_bdf(installed) if cp >= 0x20} | ours
     assert drawn == CARDPUTER_ZERO_CODEPOINTS
+
+
+# --- the devices the emulator stands in for ------------------------------------------------
+
+
+def test_every_device_is_named_for_its_platform() -> None:
+    """``meshterm emulate picocalc-lyra`` and ``--platform picocalc-lyra`` say one device."""
+    import pytest
+
+    from meshterm.emulator.devices import DEVICES, device
+    from meshterm.platforms import CARDPUTER_ZERO, PICOCALC_LYRA
+
+    assert DEVICES["cardputer-zero"].platform is CARDPUTER_ZERO
+    assert DEVICES["picocalc-lyra"].platform is PICOCALC_LYRA
+    assert device(" PicoCalc-Lyra ").id == "picocalc-lyra"
+    with pytest.raises(ValueError, match="cardputer-zero, picocalc-lyra"):
+        device("picocalc")
+
+
+def test_the_picocalc_s_shift_bank_arrives_as_f6_to_f10() -> None:
+    """Its keyboard sends F6–F10 for Shift+F1–F5; the Cardputer's sends a shifted F4–F8."""
+    from meshterm.emulator.devices import CARDPUTER_ZERO_DEVICE, PICOCALC_LYRA_DEVICE
+
+    picocalc = PICOCALC_LYRA_DEVICE.translate
+    assert encode(picocalc(Key(name="f1", shift=True))) == encode(Key(name="f6"))
+    assert encode(picocalc(Key(name="f5", shift=True))) == encode(Key(name="f10"))
+    assert picocalc(Key(name="f1")) == Key(name="f1")  # unshifted, untouched
+    shifted_f4 = Key(name="f4", shift=True)
+    assert CARDPUTER_ZERO_DEVICE.translate(shifted_f4) == shifted_f4
+
+
+def test_a_console_draws_bold_as_bright_from_the_top_left_corner() -> None:
+    """The PicoCalc's Linux console: grid at (0, 0), bold a dim colour's bright twin.
+
+    And never a heavier glyph — a console font has no bold face — where the Cardputer's
+    panel keeps its centred grid and bold weight.
+    """
+    from meshterm.emulator.run import _palette
+
+    palette = _palette()
+    font = build_font(
+        {0x41: bytes([0, 0, 0x70, 0x88, 0x88, 0x88, 0xF8, 0x88, 0x88, 0x88, 0, 0])},
+        {0x41: bytes([0, 0, 0xF8] * 4)},
+    )
+    term = Terminal(2, 1, palette=palette)
+    term.feed("\x1b[1;31mA")  # bold, dim red (slot 1)
+    console = Raster(term, font, width=12, height=12, top_left=True, bold_is_bright=True)
+    console.redraw()
+    assert (console.left, console.top) == (0, 0)
+    lit = {bytes(console.pixels[i : i + 3]) for i in range(0, len(console.pixels), 3)}
+    assert bytes(palette[9]) in lit  # the bright twin (slot 9) …
+    assert bytes(palette[1]) not in lit  # … never the dim red it was asked for
+    # The regular glyph's row 2 (0x70) is drawn, not the bold one's (0xF8).
+    row2 = console.pixels[2 * 12 * 3 : 2 * 12 * 3 + 6 * 3]
+    assert bytes(row2[:3]) != bytes(palette[9])  # the leftmost pixel of 0x70 is off
+
+    term.feed("\x1b[2J\x1b[H\x1b[1;31mA")
+    panel = Raster(term, font, width=16, height=14)
+    panel.redraw()
+    assert (panel.left, panel.top) == (2, 1)  # centred
+    assert bytes(palette[1]) in {
+        bytes(panel.pixels[i : i + 3]) for i in range(0, len(panel.pixels), 3)
+    }
+
+
+def test_meshterm_runs_as_a_picocalc_inside_the_emulator(monkeypatch) -> None:
+    """53x26 with the PicoCalc's header, its F1–F5 lane, drawn by MeshTerm itself.
+
+    The platform is the PicoCalc's in every respect but one: inside the emulator nothing but
+    MeshTerm draws it, so it resolves with ``own_display`` set and never offers to move to
+    another terminal.
+    """
+    from meshterm import __version__
+    from meshterm.emulator.devices import PICOCALC_LYRA_DEVICE
+    from meshterm.platforms import get_platform
+    from meshterm.ui import menu
+
+    monkeypatch.setattr(menu, "_arm_exit_watchdog", lambda *args, **kwargs: None)
+    seen: dict[str, str] = {}
+    wordmark = f"MeshTerm v{__version__}"
+
+    class Headless:
+        def __init__(self, terminal, lock, type_text):
+            def drive():
+                deadline = time.monotonic() + 30
+                while time.monotonic() < deadline:
+                    with lock:
+                        text = terminal.text()
+                    if text.startswith(wordmark) and "What would you like to do?" in text:
+                        seen["menu"] = text
+                        seen["platform"] = get_platform()
+                        break
+                    time.sleep(0.1)
+                type_text("\x11")
+                time.sleep(0.3)
+                type_text("\x11")
+
+            threading.Thread(target=drive, daemon=True).start()
+
+        def frame_ready(self):
+            pass
+
+        def close(self):
+            pass
+
+    assert run(["--mock"], Headless, PICOCALC_LYRA_DEVICE) == 0
+    screen = seen["menu"].splitlines()
+    assert len(screen) == 26 and all(len(line) == 53 for line in screen)
+    assert screen[-1].startswith("F1") and "F3 Quit?" in screen[-1]  # the PicoCalc's own lane
+    assert seen["platform"].name == "picocalc-lyra" and seen["platform"].own_display
+
+
+def test_emulate_hands_the_global_options_to_the_meshterm_it_runs(monkeypatch, tmp_path) -> None:
+    """``meshterm emulate picocalc-lyra --mock``: the window's MeshTerm gets ``--mock``.
+
+    A global is parsed by the outer invocation wherever it was typed, so the emulated one
+    would otherwise start without it — and go looking for real hardware.
+    """
+    from typer.testing import CliRunner
+
+    from meshterm.cli import app
+    from meshterm.emulator import __main__ as entry
+
+    calls: list = []
+    monkeypatch.setattr(
+        entry, "start", lambda name, argv, **kw: calls.append((name, argv, kw)) or 0
+    )
+    monkeypatch.setenv("MESHTERM_HOME", str(tmp_path))
+    result = CliRunner().invoke(app, ["emulate", "picocalc-lyra", "--mock", "--scale", "2"])
+    assert result.exit_code == 0, result.output
+    ((name, argv, kw),) = calls
+    assert name == "picocalc-lyra" and "--mock" in argv and kw["scale"] == 2
+    assert "--platform" not in argv  # the emulator names the platform itself

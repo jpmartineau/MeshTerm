@@ -256,8 +256,8 @@ def find_font() -> Font:
     regular_path = directory / REGULAR_BDF
     if not regular_path.is_file():
         raise FileNotFoundError(
-            f"no {REGULAR_BDF} in {directory} -- fetch Terminus with "
-            "`python scripts/cardputer-zero/fetch-terminus.py` (or set "
+            f"no {REGULAR_BDF} in {directory} - fetch the Terminus font once with "
+            "`meshterm emulate --fetch-fonts` (or set "
             f"{FONT_ENV} to a directory holding it)"
         )
     bold_path = directory / BOLD_BDF

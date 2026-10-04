@@ -1,16 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The emulator's desktop window: the device's panel in a window, keys from the desktop.
+"""The emulator's desktop window: a device's panel in a window, keys from the desktop.
 
-Everything between the two ends is the device's own code — the terminal, the font, the
-rasterizer, the key encoding — so what the window shows is the panel's pixels, scaled up
-without smoothing, and what the desktop keyboard types is what the device's keyboard will.
-Under the panel it draws the five keys the F-key lane sits over, 4 to 8, at the positions
-M5's drawing gives them, so a chip that drifts off its key is visible.
+Everything between the two ends is the device's own code path — the terminal, the font,
+the rasterizer, the key encoding — so what the window shows is the panel's pixels, scaled
+up without smoothing, and what the desktop keyboard types is what the device's keyboard
+will (:meth:`~.devices.EmulatedDevice.translate`). Where the device's lane keys sit right
+under its panel (the Cardputer Zero's 4 to 8), the window draws them there, at the positions
+the maker's drawing gives them, so a chip that drifts off its key is visible.
 
-The desktop's own F4–F8 stand in for Fn+4…8, and Shift with them is the second bank; the
+The desktop's own F-keys stand in for the device's lane keys — F4–F8 for the Cardputer
+Zero's Fn+4…8, F1–F5 for the PicoCalc's — and Shift with them is the second bank; the
 window also reports Shift to the lane as it goes down and up, so the bank flips on screen
 the way it will on the device. Closing the window leaves MeshTerm at once, as ^Q twice
-would. Ctrl+Shift+S saves the panel at its true 320×170 as a PNG in the working directory.
+would. Ctrl+Shift+S saves the panel at its true size as a PNG in the working directory.
 
 Tk runs on a thread of its own, the TUI on the main thread; the two meet only through the
 terminal's lock, a flag saying a frame is ready, and the function that types.
@@ -25,14 +27,12 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..services import modifier_watch
+from .devices import EmulatedDevice
 from .font import Font
 from .keys import Key, encode
-from .raster import PANEL_H, PANEL_W, Raster
-from .run import DEFAULT_BG, DEFAULT_FG
+from .raster import Raster
+from .run import default_colours
 from .vt import Terminal
-
-#: The lane keys' centres on the panel, in panel pixels (M5's screen-key drawing).
-_LANE_KEYS = ((4, 48), (5, 104), (6, 160), (7, 216), (8, 272))
 
 _NAMED = {
     "Up": "up",
@@ -80,7 +80,7 @@ def key_from_tk(keysym: str, char: str, state: int) -> Key | None:
 
 
 class EmulatorWindow:
-    """A window showing the panel, typing the desktop's keys into the TUI."""
+    """A window showing ``device``'s panel, typing the desktop's keys into the TUI."""
 
     def __init__(
         self,
@@ -88,6 +88,7 @@ class EmulatorWindow:
         lock: threading.Lock,
         type_text: Callable[[str], None],
         *,
+        device: EmulatedDevice,
         font: Font,
         scale: int = 3,
     ) -> None:
@@ -95,13 +96,25 @@ class EmulatorWindow:
         self._terminal = terminal
         self._lock = lock
         self._type = type_text
+        self._device = device
         self._scale = scale
-        self._raster = Raster(terminal, font, default_fg=DEFAULT_FG, default_bg=DEFAULT_BG)
+        ink, paper = default_colours(device)
+        width, height = device.panel
+        self._raster = Raster(
+            terminal,
+            font,
+            default_fg=ink,
+            default_bg=paper,
+            width=width,
+            height=height,
+            top_left=device.console,
+            bold_is_bright=device.console,
+        )
         self._ready = threading.Event()
         self._ready.set()
         self._closing = False
         self._started = threading.Event()
-        threading.Thread(target=self._main, name="cardputer-sim", daemon=True).start()
+        threading.Thread(target=self._main, name=f"{device.id}-window", daemon=True).start()
         self._started.wait(5)
 
     # --- the TUI's side ---------------------------------------------------------------
@@ -120,19 +133,20 @@ class EmulatorWindow:
         import tkinter as tk
 
         scale = self._scale
+        panel_w, panel_h = self._device.panel
         margin = 6 * scale
-        keys_h = 26 * scale
+        keys_h = 26 * scale if self._device.lane_keys else 0
         root = tk.Tk()
-        root.title("MeshTerm — Cardputer Zero simulator")
+        root.title(f"MeshTerm — {self._device.name} emulator")
         root.configure(background="#2b2f36")
         root.resizable(False, False)
-        width = PANEL_W * scale + 2 * margin
-        height = PANEL_H * scale + 2 * margin + keys_h
+        width = panel_w * scale + 2 * margin
+        height = panel_h * scale + 2 * margin + keys_h
         canvas = tk.Canvas(
             root, width=width, height=height, background="#2b2f36", highlightthickness=0
         )
         canvas.pack()
-        base = tk.PhotoImage(width=PANEL_W, height=PANEL_H)
+        base = tk.PhotoImage(width=panel_w, height=panel_h)
         shown = base.zoom(scale, scale)
         canvas.create_image(margin, margin, image=shown, anchor="nw", tags="panel")
         self._draw_keys(canvas, margin, scale)
@@ -146,9 +160,9 @@ class EmulatorWindow:
         root.mainloop()
 
     def _draw_keys(self, canvas, margin: int, scale: int) -> None:
-        top = margin + PANEL_H * scale + 4 * scale
+        top = margin + self._device.panel[1] * scale + 4 * scale
         size = 18 * scale
-        for number, centre in _LANE_KEYS:
+        for number, centre in self._device.lane_keys:
             x = margin + centre * scale
             canvas.create_line(x, top - 3 * scale, x, top, fill="#e34b0f", width=scale)
             canvas.create_rectangle(
@@ -175,7 +189,8 @@ class EmulatorWindow:
                 bands = self._raster.update()
                 pixels = bytes(self._raster.pixels)
             if bands:
-                header = f"P6 {PANEL_W} {PANEL_H} 255\n".encode()
+                panel_w, panel_h = self._device.panel
+                header = f"P6 {panel_w} {panel_h} 255\n".encode()
                 base.configure(data=header + pixels, format="PPM")
                 shown = base.zoom(self._scale, self._scale)
                 canvas.itemconfigure("panel", image=shown)
@@ -191,7 +206,7 @@ class EmulatorWindow:
             return
         key = key_from_tk(event.keysym, event.char, event.state)
         if key is not None:
-            data = encode(key)
+            data = encode(self._device.translate(key))
             if data:
                 self._type(data)
 
@@ -207,18 +222,31 @@ class EmulatorWindow:
 
     def _save(self) -> None:
         _, _, base, _ = self._tk
-        path = Path.cwd() / f"cardputer-{time.strftime('%Y%m%d-%H%M%S')}.png"
+        path = Path.cwd() / f"{self._device.id}-{time.strftime('%Y%m%d-%H%M%S')}.png"
         base.write(str(path), format="png")
 
 
-def front_end(scale: int = 3):
-    """The window as a :data:`~.run.FrontEndFactory`, loading the emulator's font first."""
+def front_end(device: EmulatedDevice, scale: int = 3):
+    """The window as a :data:`~.run.FrontEndFactory`, loading the emulator's font first.
+
+    Raises:
+        FileNotFoundError: The font isn't installed (see :func:`~.font.find_font`).
+        RuntimeError: This Python has no Tk to open a window with — the one-file builds
+            leave it out, so the emulator wants MeshTerm installed with pip or pipx.
+    """
     from .font import find_font
 
+    try:
+        import tkinter  # noqa: F401 - only asking whether it is there
+    except ImportError:
+        raise RuntimeError(
+            "the emulator's window needs Tk, which this copy of MeshTerm doesn't include "
+            "- install MeshTerm with pip or pipx to use it"
+        ) from None
     font = find_font()
 
     def build(terminal: Terminal, lock: threading.Lock, type_text: Callable[[str], None]):
-        return EmulatorWindow(terminal, lock, type_text, font=font, scale=scale)
+        return EmulatorWindow(terminal, lock, type_text, device=device, font=font, scale=scale)
 
     return build
 

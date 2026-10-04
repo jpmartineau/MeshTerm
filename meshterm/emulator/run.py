@@ -2,12 +2,12 @@
 """Run MeshTerm inside the emulator: the TUI unchanged, its terminal ours.
 
 :func:`run` builds the three pieces every front end shares — the :class:`~.vt.Terminal` the
-TUI's bytes land in, a :class:`HostOutput` prompt_toolkit writes to, and a pipe input the
-the keys go into — sets them as prompt_toolkit's app session, and calls the ordinary
-CLI with ``--platform cardputer-zero`` exactly as a shell would. A *front end* is the part that
-differs: where the pixels go and where the keys come from. It is handed the terminal, the
-lock that guards it and a way to type, starts whatever threads it needs, and is told each
-time a frame is complete.
+TUI's bytes land in, the prompt_toolkit output that writes to it (:func:`panel_output`), and
+a pipe input the keys go into — sets them as prompt_toolkit's app session, and calls the
+ordinary CLI with ``--platform`` set to the emulated device, exactly as a shell would. A
+*front end* is the part that differs: where the pixels go and where the keys come from. It
+is handed the terminal, the lock that guards it and a way to type, starts whatever threads
+it needs, and is told each time a frame is complete.
 """
 
 from __future__ import annotations
@@ -22,7 +22,8 @@ from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output.color_depth import ColorDepth
 from prompt_toolkit.output.vt100 import Vt100_Output
 
-from ..platforms import CARDPUTER_ZERO
+from .. import platforms
+from .devices import CARDPUTER_ZERO_DEVICE, EmulatedDevice
 from .vt import RGB, Terminal
 
 
@@ -43,6 +44,18 @@ def _palette() -> tuple[RGB, ...]:
 DEFAULT_FG: RGB = (204, 204, 204)
 #: The paper of a cell whose style names none.
 DEFAULT_BG: RGB = (0, 0, 0)
+
+
+def default_colours(device: EmulatedDevice) -> tuple[RGB, RGB]:
+    """The ink and paper of a cell whose style names none, on ``device``.
+
+    A Linux console's are its own palette's slot 7 on slot 0; MeshTerm drawing a panel
+    itself uses a desktop terminal's, which its truecolour theme was designed against.
+    """
+    if device.console:
+        palette = _palette()
+        return palette[7], palette[0]
+    return DEFAULT_FG, DEFAULT_BG
 
 
 class _Sink:
@@ -77,15 +90,18 @@ class _Sink:
 
 
 def panel_output(
-    terminal: Terminal, lock: threading.Lock, on_frame: Callable[[], None]
+    terminal: Terminal,
+    lock: threading.Lock,
+    on_frame: Callable[[], None],
+    depth: ColorDepth = ColorDepth.TRUE_COLOR,
 ) -> Vt100_Output:
-    """A prompt_toolkit output drawing into ``terminal``: fixed size, 24-bit colour."""
+    """A prompt_toolkit output drawing into ``terminal``: fixed size, ``depth`` colours."""
     size = Size(rows=terminal.rows, columns=terminal.cols)
     return Vt100_Output(
         _Sink(terminal, lock, on_frame),  # type: ignore[arg-type]
         lambda: size,
         term="xterm-256color",
-        default_color_depth=ColorDepth.TRUE_COLOR,
+        default_color_depth=depth,
         enable_cpr=False,
     )
 
@@ -104,8 +120,16 @@ class FrontEnd(Protocol):
 FrontEndFactory = Callable[[Terminal, threading.Lock, Callable[[str], None]], FrontEnd]
 
 
-def run(argv: Sequence[str], front_end: FrontEndFactory) -> int:
-    """Run the MeshTerm CLI with ``argv`` inside the emulator, drawn by ``front_end``.
+def run(
+    argv: Sequence[str],
+    front_end: FrontEndFactory,
+    device: EmulatedDevice = CARDPUTER_ZERO_DEVICE,
+) -> int:
+    """Run the MeshTerm CLI with ``argv`` as it runs on ``device``, drawn by ``front_end``.
+
+    The CLI resolves ``device``'s platform as one MeshTerm draws itself
+    (:func:`~meshterm.platforms.drawn_by_meshterm`): a PicoCalc's console is drawn by the
+    emulator here, not by the terminal the emulator was started from.
 
     Returns:
         The CLI's exit status.
@@ -115,18 +139,18 @@ def run(argv: Sequence[str], front_end: FrontEndFactory) -> int:
     lock = threading.Lock()
     with create_pipe_input() as pipe:
         terminal = Terminal(
-            CARDPUTER_ZERO.readable_cols,
-            CARDPUTER_ZERO.readable_rows,
+            device.platform.readable_cols,
+            device.platform.readable_rows,
             palette=_palette(),
             reply=pipe.send_text,
         )
         end = front_end(terminal, lock, pipe.send_text)
-        output = panel_output(terminal, lock, end.frame_ready)
+        output = panel_output(terminal, lock, end.frame_ready, device.color_depth)
         try:
-            with create_app_session(input=pipe, output=output):
+            with create_app_session(input=pipe, output=output), platforms.drawn_by_meshterm():
                 # Standalone, as a shell would run it: the CLI reports its own errors and
                 # ends by raising SystemExit with the status.
-                cli.app(args=["--platform", "cardputer-zero", *argv], windows_expand_args=False)
+                cli.app(args=["--platform", device.id, *argv], windows_expand_args=False)
             return 0
         except SystemExit as done:
             return done.code if isinstance(done.code, int) else (0 if done.code is None else 1)

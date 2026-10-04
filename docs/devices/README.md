@@ -15,7 +15,7 @@ its own step-by-step manual, and this page only tells you which one is yours.
 | a ClockworkPi **PicoCalc**, stock or already running Calculinux on a Luckfox Lyra, and I want MeshTerm on its own screen | **[MeshTerm on the PicoCalc](picocalc-lyra.md)** — from the shopping list to a working machine |
 | …and I want a **radio** inside it | the same manual, [Phase 3](picocalc-lyra.md#phase-3--add-the-radio) — a XIAO nRF52840 + Wio-SX1262 soldered to the Lyra's UART |
 | a ClockworkPi **uConsole** with the hackergadgets AIO board — an SX1262 on the host's own SPI bus | **[MeshTerm on the uConsole](uconsole.md)** — MeshTerm drives it directly with `--spi`, or a bridge service fronts it as a companion if you want it always on |
-| an M5Stack **Cardputer Zero** — the one with a Raspberry Pi inside, not the ESP32 Cardputer or Cardputer-Adv | **[MeshTerm on the Cardputer Zero](cardputer-zero.md)** — ⚠️ **not supported yet**: it has never run on the device; the page says what works in the simulator |
+| an M5Stack **Cardputer Zero** — the one with a Raspberry Pi inside, not the ESP32 Cardputer or Cardputer-Adv | **[MeshTerm on the Cardputer Zero](cardputer-zero.md)** — ⚠️ **not supported yet**: it has never run on the device; the page says what works in the emulator |
 | a MeshCore companion on USB, Bluetooth, or Wi-Fi | nothing here — the [README](../../README.md), and [When a companion won't connect](../guide/connecting.md) if it doesn't |
 
 The devices have nothing in common but MeshTerm itself. The device-side scripts each
@@ -60,7 +60,7 @@ emoji, an F-key lane instead of a hint line, and sixteen colour slots rather tha
 space. Nothing loses its colour there: the node hue and the recency heat gradient
 quantise to those slots instead. It is detected from the device tree on the Lyra, and
 `--platform picocalc-lyra` or `MESHTERM_PLATFORM=picocalc-lyra` forces it anywhere, which
-is how you preview the handheld layout on a desktop:
+is how you preview the handheld layout in your own terminal:
 
 ```bash
 meshterm --mock --platform picocalc-lyra   # the whole app, simulated radio, handheld layout
@@ -75,3 +75,36 @@ itself. It is [not supported yet](cardputer-zero.md), so it is never detected: o
 What that platform needs from the console — a font with the glyphs the interface draws,
 and the stock sixteen-slot palette — is installed by the PicoCalc manual's setup script;
 the details are in that manual and in the scripts' own headers.
+
+## The emulator
+
+`--platform` gives you a handheld's layout in your own terminal, drawn in your terminal's
+font and colours. For a closer look, `meshterm emulate` opens a window showing MeshTerm the
+way the handheld's own screen draws it:
+
+```bash
+meshterm emulate --fetch-fonts            # once: the font the handhelds draw in
+meshterm emulate picocalc-lyra --mock     # the PicoCalc's 320×320 screen
+meshterm emulate cardputer-zero --mock    # the Cardputer Zero's 320×170 screen
+```
+
+**It isn't a strict emulator.** It doesn't imitate the device's computer: MeshTerm runs on
+your own machine, at your machine's speed. What it copies is the display's constraints —
+the screen's size in pixels, the grid of letters on it, the font, the colours the device
+can show, and the keys that drive the F-key lane. On the PicoCalc that means sixteen
+colours, and bold drawn as a brighter colour rather than a heavier letter, the way its
+console does it. Those are what decide whether a screen fits and reads well, so those are
+what the window reproduces.
+
+Your keyboard's F-keys stand in for the lane's keys: **F1** to **F5** for the PicoCalc's,
+and **F4** to **F8** for the Cardputer Zero's **Fn+4** to **Fn+8**. Hold **Shift** for the
+second set. Everything you type after the device's name goes to the MeshTerm in the window:
+`--mock` for the simulated radio, or `--port`, `--ble` or `--tcp` for a real one. `--scale`
+sets the zoom, **Ctrl+Shift+S** saves a screenshot at the screen's real size, and closing
+the window quits MeshTerm.
+
+It needs MeshTerm installed with pip or pipx; the one-file downloads leave out the part of
+Python that opens windows. The font is Terminus, which has its own licence, so MeshTerm
+doesn't ship it: `--fetch-fonts` downloads the official release and checks it is the real
+one. On a machine that can't download it, fetch `terminus-font-4.49.1.tar.gz` some other
+way and install it with `meshterm emulate --archive terminus-font-4.49.1.tar.gz`.

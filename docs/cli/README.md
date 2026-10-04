@@ -358,7 +358,7 @@ classification stays in `$?`. There is no error document to tell apart from a re
 
 **A command with no data face refuses, loudly.** `meshterm specimen --json` is a usage
 error (exit 2): its output *is* the colour, and a document of it would be a lie or an
-empty gesture. So is `--json` with no subcommand — there is no document an interactive
+empty gesture. `meshterm emulate --json` is refused the same way, since it opens a window. So is `--json` with no subcommand — there is no document an interactive
 session can emit.
 
 ### The shapes that repeat
@@ -1733,8 +1733,35 @@ do it. That is deliberate: the colour *is* the output. It is the font-and-palett
 acceptance card on the PicoCalc console, and with `--platform picocalc-lyra` it previews that
 flavour from a desktop. A monochrome specimen would test nothing.
 
-It is also the one command that **refuses `--json`**, as a usage error (exit `2`). There is
-no data face behind a colour card, and a document of it would be a lie or an empty gesture.
+It also **refuses `--json`**, as a usage error (exit `2`). There is no data face behind a
+colour card, and a document of it would be a lie or an empty gesture.
+
+#### `meshterm emulate`
+
+Open a window showing MeshTerm as a handheld's screen draws it: `cardputer-zero` or
+`picocalc-lyra`.
+
+```console
+$ meshterm emulate --fetch-fonts
+$ meshterm emulate picocalc-lyra --mock --scale 2
+```
+
+It isn't a strict emulator. MeshTerm runs on this machine as itself; the window copies the
+device's display constraints — the panel's size in pixels, its grid, its font, the colours
+it can show — and the keys that drive its F-key lane. Every global option (`--mock`,
+`--port`, `--ble`, `--db`…) goes to the MeshTerm in the window. [The
+emulator](../devices/README.md#the-emulator) covers the keys and the font.
+
+| Option | |
+| --- | --- |
+| `DEVICE` | `cardputer-zero` or `picocalc-lyra` |
+| `--scale N` | the window's zoom, in whole pixels (default `3`) |
+| `--fetch-fonts` | download the Terminus font the screens are drawn in, then stop. Needed once |
+| `--archive FILE` | install the font from a release archive downloaded some other way |
+
+It needs a pip or pipx install, since the one-file downloads leave out Tk. Like
+`specimen`, it refuses `--json` (exit `2`): a window is no document. A window that can't
+open — no font yet, no Tk — exits `1` with the reason on stderr.
 
 ---
 

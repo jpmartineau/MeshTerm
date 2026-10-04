@@ -9,6 +9,12 @@ two phases, most of it spent waiting for a toolchain to download; the radio phas
 soldering iron and can be done later — MeshTerm's `--mock` mode runs perfectly well without
 a radio in the meantime.
 
+**Want to see it before you build it?** On any computer with MeshTerm installed,
+`meshterm emulate picocalc-lyra --mock` opens a window showing MeshTerm as the PicoCalc's
+screen draws it, with a simulated radio. It isn't a strict emulator — it copies the
+screen's size, font, and colours, not the machine — but it shows you what you're building
+toward. [The emulator](README.md#the-emulator) has the details.
+
 > ⚠ **Read this first.** This build takes the PicoCalc apart, swaps its core board, and
 > solders to it. It assumes you can already solder cleanly, use a multimeter, and work with
 > small electronics without forcing anything. There is a real risk of damaging the

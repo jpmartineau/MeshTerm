@@ -20,7 +20,8 @@ current value, so it has no such trap.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -439,6 +440,14 @@ def resolve(flag: str | None = None) -> Resolution:
     Raises:
         ValueError: The deciding input (flag or env var) named an unknown platform.
     """
+    found = _resolve(flag)
+    if _DRAWN_BY_MESHTERM and not found.platform.own_display:
+        return replace(found, platform=replace(found.platform, own_display=True))
+    return found
+
+
+def _resolve(flag: str | None) -> Resolution:
+    """:func:`resolve`'s decision, before :func:`drawn_by_meshterm` has its say."""
     env = os.environ.get("MESHTERM_PLATFORM") or None
     model = _read_device_tree_model()
     if flag:
@@ -454,6 +463,30 @@ def resolve(flag: str | None = None) -> Resolution:
     if model == _LYRA_MODEL:
         return Resolution(flag, env, model, "auto-detect", PICOCALC_LYRA)
     return Resolution(flag, env, model, "default", REGULAR)
+
+
+#: Set while :mod:`meshterm.emulator` runs MeshTerm in a display of its own drawing (see
+#: :func:`drawn_by_meshterm`).
+_DRAWN_BY_MESHTERM = False
+
+
+@contextmanager
+def drawn_by_meshterm() -> Iterator[None]:
+    """Resolve every platform as one MeshTerm draws itself, for as long as this lasts.
+
+    The emulator shows a PicoCalc (Lyra) in a window: the platform is that device's in every
+    respect but one — no console draws it, MeshTerm does — so it resolves with
+    :attr:`Platform.own_display` set, and nothing about the terminal the emulator was
+    started from (a classic Windows console to leave, a font to offer) is the emulated
+    session's business. In-process only: nothing leaks into a child process's environment.
+    """
+    global _DRAWN_BY_MESHTERM
+    previous = _DRAWN_BY_MESHTERM
+    _DRAWN_BY_MESHTERM = True
+    try:
+        yield
+    finally:
+        _DRAWN_BY_MESHTERM = previous
 
 
 def without_emoji(platform: Platform) -> Platform:

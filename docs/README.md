@@ -37,7 +37,7 @@ USB, Bluetooth, or Wi-Fi needs none of this.
 | **[MeshTerm on hardware](devices/README.md)** | Start here — which manual below is yours, and what the device-side scripts do. |
 | [MeshTerm on the PicoCalc](devices/picocalc-lyra.md) | A stock ClockworkPi PicoCalc to a Linux handheld with a LoRa radio soldered inside: the shopping list, the swap to a Luckfox Lyra core, Calculinux, and the radio. |
 | [MeshTerm on the uConsole](devices/uconsole.md) | A uConsole (CM4 or CM5) with the hackergadgets AIO LoRa board, whose SX1262 sits on the computer's own SPI bus — MeshTerm drives it directly with `--spi`, or a small bridge fronts it as a companion for an always-on node. |
-| [MeshTerm on the Cardputer Zero](devices/cardputer-zero.md) | ⚠️ **Not supported yet.** What exists for M5Stack's Linux Cardputer, and how to try it in the desktop simulator. |
+| [MeshTerm on the Cardputer Zero](devices/cardputer-zero.md) | ⚠️ **Not supported yet.** What exists for M5Stack's Linux Cardputer, and how to try it in the desktop emulator. |
 
 ## Reading the code
 

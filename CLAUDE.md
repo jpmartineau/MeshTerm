@@ -729,13 +729,21 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   draws the cells in Terminus 6×12 with MeshTerm's marks over it (`emulator/font.py`). The
   front end is the only part that differs: the framebuffer and evdev on the device
   (`emulator/framebuffer.py`, written ahead of the hardware), a Tk window on the desktop
-  (`emulator/window.py`): `python -m meshterm.emulator --mock`, after
-  `python scripts/cardputer-zero/fetch-terminus.py` once. Its glyph contract is
+  (`emulator/window.py`). The window is the **emulator** for both handhelds —
+  `meshterm emulate cardputer-zero|picocalc-lyra --mock`, after `meshterm emulate
+  --fetch-fonts` once (Terminus is OFL, so it is fetched and digest-checked, never
+  shipped). An `EmulatedDevice` (`emulator/devices.py`) is everything that differs per
+  handheld: the panel, a Linux console's top-left grid and bold-as-bright 4-bit palette
+  (the PicoCalc), the lane keys drawn under the panel (the Cardputer's 4–8), and how its
+  keyboard spells Shift+F-keys. It is **not a strict emulator** — it mimics the display's
+  and keyboard's constraints, never the CPU or the OS — and the docs say so wherever they
+  offer it. Inside it the resolved platform carries `own_display`
+  (`platforms.drawn_by_meshterm`), so nothing offers to move to another terminal. Its glyph contract is
   `fontset.CARDPUTER_ZERO_CODEPOINTS`, named by `Platform.font` as the PicoCalc's is; the fold
   derives everything from the platform's font (accents, emoji, the `?` net) and quantizes
   colour only where `truecolor` is off.
 - `meshterm specimen` prints the whole visual language through the real funnels — the
   acceptance card on-device, a preview under `--platform picocalc-lyra` on the desktop.
 - Dev loop: `meshterm --mock --platform picocalc-lyra` in a 53×40 window, or
-  `--platform cardputer-zero` in a 53×14 one; the gallery and `tests/test_theme16.py` carry the
-  contracts.
+  `--platform cardputer-zero` in a 53×14 one — or `meshterm emulate <device> --mock` for the
+  panel's own pixels; the gallery and `tests/test_theme16.py` carry the contracts.
