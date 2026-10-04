@@ -86,6 +86,10 @@ def scope_atom(key: ScopeKey, *, bare: bool = False) -> str:
 
 
 def scope_chip(key: ScopeKey | None) -> str:
-    """The F-lane chip naming the view a press goes *to*, within the lane's 6 cells."""
+    """The F-lane chip naming the view a press goes *to*: the word alone, in all 6 cells.
+
+    No ``▸`` lead-in (JP, 2026-10-04): it took two of the chip's six cells to say what the
+    chip's place on the lane already says, and cut a region's name to four.
+    """
     word = "all" if key is None else key[-1]
-    return "▸ " + fit_cells(word, 4).rstrip()
+    return fit_cells(word, 6).rstrip()

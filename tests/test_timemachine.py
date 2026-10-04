@@ -975,10 +975,10 @@ def test_screen_cycles_windows_and_caches(tmp_path: Path) -> None:
     # The F-key chip is the same behaviour under another name — the only way a platform
     # that draws no hint line can learn that `w` exists at all. It names the span it takes
     # you *to*, since the title already says where you are.
-    assert screen.picocalc_lane[2].label == "▸ all"
+    assert screen.picocalc_lane[2].label == "all"
     screen.handle("window")
     assert "all time" in screen.title
-    assert screen.picocalc_lane[2].label == "▸ 24 h"  # the ring wraps back around
+    assert screen.picocalc_lane[2].label == "24 h"  # the ring wraps back around
 
 
 def test_picocalc_window_ring_stops_at_30_days() -> None:
@@ -996,7 +996,7 @@ def test_picocalc_window_ring_stops_at_30_days() -> None:
     assert "7 d" in screen.title  # opens on 7 d, as everywhere
     screen.handle("text", "w")
     assert "30 d" in screen.title
-    assert screen.picocalc_lane[2].label == "▸ 24 h"  # never "▸ all" on this ring
+    assert screen.picocalc_lane[2].label == "24 h"  # never "all" on this ring
     screen.handle("window")
     assert "24 h" in screen.title  # wrapped straight past where all time would sit
 
@@ -1310,6 +1310,20 @@ def test_s_cycles_the_mesh_pages_scope_and_retitles_it(tmp_path: Path) -> None:
     assert built == [("unscoped",), ("region", "yul"), ("unknown",), None]
     screen.handle("scope")  # the F2 chip's action is the same cycle
     assert screen.short_title == "the whole mesh · 7 d · unscoped"
+
+
+def test_the_scope_chip_is_the_word_alone_in_all_six_cells() -> None:
+    """No ``▸`` lead-in: the view a press goes to gets the chip's whole six cells."""
+    from rich.cells import cell_len
+
+    from meshterm.ui.scopering import scope_chip
+
+    assert scope_chip(None) == "all"
+    assert scope_chip(("region", "yul")) == "yul"
+    assert scope_chip(("region", "harbor")) == "harbor"  # whole, where it read "▸ har…"
+    for key in (("unscoped",), ("unknown",), ("region", "lakeshore")):
+        chip = scope_chip(key)
+        assert cell_len(chip) == 6 and chip.endswith("…") and "▸" not in chip
 
 
 def test_a_page_with_no_scope_offers_no_cycle() -> None:
