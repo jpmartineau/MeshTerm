@@ -389,10 +389,10 @@ class NodeDetailScreen(Screen):
         to learn it. It names the tab it would take you *to*, never the one you are on —
         the strip already marks that, and a chip repeating it would say nothing about what
         pressing it does. (A per-tab chip on F1/F2 was tried and reverted — JP, 2026-08-09:
-        the toggle was better.) Unlike the Time Machine's window chip, this one carries no
-        ``▸`` lead-in: ``Routes`` is exactly six cells on its own, and the strip beside it
-        makes the direction plain anyway. A page with one tab has nothing to switch, so
-        the slot stays empty.
+        the toggle was better.) Like every cycling chip, it is the target's name alone,
+        with no lead-in: ``Routes`` is exactly six cells, and the strip beside it makes the
+        direction plain anyway. A page with one tab has nothing to switch, so the slot
+        stays empty.
 
         The pager gates on the route list actually being windowed: on the Info tab, and on
         a node whose routes all fit, the keys move nothing.

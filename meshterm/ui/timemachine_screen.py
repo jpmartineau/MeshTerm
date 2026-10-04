@@ -250,15 +250,16 @@ class TimeMachineScreen(Screen):
 
         The chip names the span it would *take you to*, not the one on screen: the title
         already says where you are, so a chip repeating it would be the same claim twice
-        and would never tell you what pressing it does. ``all time`` shortens to ``all``
-        to stay inside the 6-cell chip — the only span whose name doesn't already fit,
-        and one this platform's ring may not even offer (see :func:`_bind_windows`).
+        and would never tell you what pressing it does. It is the span alone, with no
+        ``▸`` lead-in (JP, 2026-10-04), so it has all six cells: ``all time`` still
+        shortens to ``all`` — the only span whose name doesn't fit, and one this platform's
+        ring may not even offer (see :func:`_bind_windows`).
         """
         from .tui.fkeys import FPair, default_lane
 
         lane = list(default_lane(nav=self.content_overflows))
         nxt, _delta = _WINDOWS[(self._window_index + 1) % len(_WINDOWS)]
-        lane[2] = FPair(f"▸ {'all' if nxt == 'all time' else nxt}", "window")
+        lane[2] = FPair("all" if nxt == "all time" else nxt, "window")
         # The scope cycle beside it, on the same terms: the chip names where a press goes.
         views = self._ring()
         if len(views) > 1:
