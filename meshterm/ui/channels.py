@@ -473,12 +473,13 @@ _NAME_WIDTH_MAX = 18
 #: as wide as the longest scope (never narrower than its ``SCOPE`` label), taking what the
 #: names leave of this budget: with a name at :data:`_NAME_WIDTH_MAX` it gets eight cells —
 #: what the 72-column row had spare before the lane existed, less the last cell an
-#: ellipsizing row keeps back — so the activity sparkline is never cut to make room; shorter
-#: names give a long region name more of its own. A 30-byte region name is ellipsized rather
-#: than let widen the row. On the PicoCalc's 53 the row was already cut inside the activity
-#: lane, so a scope lane there costs the MSGS count behind it; the detail page states it.
-#: The leading SLOT lane is paid for out of this budget too (see :func:`_menu_items`), for
-#: the same reason: the sparkline keeps its cells.
+#: ellipsizing row keeps back — so the activity sparkline keeps its full width on the
+#: desktop; shorter names give a long region name more of its own. A 30-byte region name is
+#: ellipsized rather than let widen the row. On the PicoCalc's 53 the sparkline is already
+#: drawn shorter to fit (see :func:`_slot_text`), so a scope lane there shortens it further,
+#: and costs the MSGS count behind it only once the chart has no cells left; the detail page
+#: states it. The leading SLOT lane is paid for out of this budget too (see
+#: :func:`_menu_items`), for the same reason: the sparkline keeps its cells.
 _NAME_SCOPE_BUDGET = _NAME_WIDTH_MAX + 8
 #: Narrowest the right-aligned slot-index lane is drawn (two digits: MeshCore's default
 #: table holds more than ten slots); a wider table widens it to its highest index.
@@ -491,22 +492,31 @@ _COUNT_WIDTH = 5
 _AGE_WIDTH = 5
 
 
-@lru_cache(maxsize=32)
-def _activity_sparkline(histogram: tuple[int, ...], peak: float) -> Text:
-    """The channel's braille activity sparkline over the trailing two hours, now at the right.
+#: Cells the activity sparkline takes when the row has room for all of it: two five-minute
+#: buckets a braille cell, so the trailing two hours.
+_ACTIVITY_CELLS = ACTIVITY_DRAWN_BUCKETS // 2
+
+
+@lru_cache(maxsize=64)
+def _activity_sparkline(
+    histogram: tuple[int, ...], peak: float, cells: int = _ACTIVITY_CELLS
+) -> Text:
+    """The channel's braille activity sparkline, ``cells`` wide, now at the right.
 
     The shared :func:`~meshterm.ui.braillechart.activity_sparkline` over the newest
-    :data:`ACTIVITY_DRAWN_BUCKETS` five-minute buckets of the repository histogram,
-    scaled to ``peak`` — the shared ceiling across every channel (see
-    :meth:`_LiveStats.peak`) — so the whole activity column shares one scale and the
-    rows' bars are comparable at a glance. The histogram runs deeper than is drawn; the
-    tail past the drawn buckets shapes ``peak`` but isn't charted.
+    ``2 × cells`` five-minute buckets of the repository histogram — the trailing two hours
+    at its full :data:`_ACTIVITY_CELLS`, less where the row has less room (see
+    :func:`_slot_text`), which drops the *oldest* buckets so now stays on the right edge.
+    Scaled to ``peak`` — the shared ceiling across every channel (see
+    :meth:`_LiveStats.peak`) — so the whole activity column shares one scale and the rows'
+    bars are comparable at a glance. The histogram runs deeper than is drawn; the tail
+    past the drawn buckets shapes ``peak`` but isn't charted.
 
     Memoized on its (hashable) inputs: the row callables rebuild every repaint, but the
     histogram snapshot only moves once per :class:`_LiveStats` TTL, so between refreshes
     every slot's sparkline is a cache hit. Callers treat the returned Text as read-only.
     """
-    return activity_sparkline(histogram, ACTIVITY_DRAWN_BUCKETS, peak=peak)
+    return activity_sparkline(histogram, 2 * cells, peak=peak)
 
 
 # --- menus -------------------------------------------------------------------
@@ -519,12 +529,10 @@ def _lanes_header(slot_w: int, name_w: int, scope_w: int, width: int) -> str:
     not separators). ``SLOT`` leads — the index every ``channels`` command and the chat's
     slot references take — and its lane also spans the unlabelled glyph lane after it,
     *measured* rather than assumed: a channel's glyph is two cells on the desktop and one on
-    the console, so a hard-coded width put every later label a column off there. ``UNREAD``
-    borrows its lane's trailing gap — the badge lane
-    itself is one cell too narrow for the word — which still leaves a space before the
-    message count. (No TYPE or HASH lane: the glyph already carries the openness and the
-    hash lives in Show key, which buys the activity sparkline its room on a 72-column
-    terminal.) ``SCOPE`` sits between the name and the badge: it says where the channel's
+    the console, so a hard-coded width put every later label a column off there. ``NEW``
+    sits over the unread badge's lane. (No TYPE or HASH lane: the glyph already carries the
+    openness and the hash lives in Show key, which buys the activity sparkline its room on a
+    72-column terminal.) ``SCOPE`` sits between the name and the badge: it says where the channel's
     messages go, which is the channel's own fact, before the lanes that count its traffic —
     and only while some channel has one (``scope_w`` is 0 otherwise). ``LAST`` comes before
     ``MSGS``: how recently a channel spoke is the question a glance down the list asks, and
@@ -533,7 +541,7 @@ def _lanes_header(slot_w: int, name_w: int, scope_w: int, width: int) -> str:
     Resolved against the render width, because the header row is pinned and must stay one
     row: at 53 columns the full line ran to 54 and wrapped, costing a content row out of
     twenty-six and leaving the landmark drawn twice over. ``ACTIVITY`` gives its cells back
-    first (see :func:`~meshterm.ui.menus.column_header`).
+    first (see :func:`~meshterm.ui.menus.column_header`), as the chart under it does.
     """
     return column_header(
         [
@@ -546,7 +554,7 @@ def _lanes_header(slot_w: int, name_w: int, scope_w: int, width: int) -> str:
             # off the digits it names.
             Lane(f"{'LAST':>{_AGE_WIDTH}}", _AGE_WIDTH + 2),
             Lane(f"{'MSGS':>{_COUNT_WIDTH}}", _COUNT_WIDTH + 2),
-            Lane(("ACTIVITY", "ACT")),
+            Lane(("ACTIVITY", "ACT", "")),  # gone with its chart (see _slot_text)
         ],
         width,
     )
@@ -554,20 +562,27 @@ def _lanes_header(slot_w: int, name_w: int, scope_w: int, width: int) -> str:
 
 def _slot_row(
     ctx: AppContext, slot: ChannelSlot, stats: _LiveStats, slot_w: int, name_w: int, scope_w: int
-) -> Callable[[], Text]:
+) -> Callable[[int], Text]:
     """Return a list-row title *callable* the select screen re-renders on each repaint.
 
     The unread badge, counts, age, and activity sparkline are all read live (see
     :class:`_LiveStats`), so a message arriving while the list sits open updates the row on
-    the next repaint — exactly the conversation picker's behavior.
+    the next repaint — exactly the conversation picker's behavior. It takes the render
+    width, so the sparkline can fit itself to the row (see :func:`_slot_text`).
     """
-    return lambda: _slot_text(ctx, slot, stats, slot_w, name_w, scope_w)
+    return lambda width: _slot_text(ctx, slot, stats, slot_w, name_w, scope_w, width)
 
 
 def _slot_text(
-    ctx: AppContext, slot: ChannelSlot, stats: _LiveStats, slot_w: int, name_w: int, scope_w: int
+    ctx: AppContext,
+    slot: ChannelSlot,
+    stats: _LiveStats,
+    slot_w: int,
+    name_w: int,
+    scope_w: int,
+    width: int,
 ) -> Text:
-    """Build one channel's list row as fixed-width, colour-coded lanes.
+    """Build one channel's list row as fixed-width, colour-coded lanes, ``width`` cells at most.
 
     Alignment carries the readability — slot index (right-aligned, muted), glyph, name,
     send scope, unread badge, last-message age, total messages, and the activity
@@ -583,6 +598,12 @@ def _slot_text(
     ``scope_w`` 0 (no channel has one) the lane is not drawn at all. The row is always a
     Rich :class:`~rich.text.Text` so those spans survive under the select screen's row
     highlight.
+
+    **The sparkline is the last lane, and it shortens to fit** (JP, 2026-10-03): where the
+    row is narrower than every lane at full width (the PicoCalc and Cardputer's 53 columns,
+    a long name, a scope lane), the chart is drawn in whatever cells the lanes before it
+    leave, dropping its oldest buckets so now stays on the right — rather than the row's
+    ellipsis cutting it off mid-chart. With no cell left for it, it is not drawn at all.
     """
     st = stats.get(slot.identity)
     muted = _is_muted(ctx, slot)
@@ -619,9 +640,13 @@ def _slot_text(
         # row — what the console folds ``🔕`` to, so a muted channel with no messages drew
         # the same glyph twice meaning different things.
         text.append(f"{'○':>{_COUNT_WIDTH}}", style="muted")
-    text.append("  ")
-    # The shared peak across all channels, so every row's sparkline uses one scale.
-    text.append_text(_activity_sparkline(st.histogram if st is not None else (), stats.peak()))
+    # Whatever the lanes leave after the gap, up to the chart's full width.
+    cells = min(_ACTIVITY_CELLS, width - text.cell_len - 2)
+    if cells > 0:
+        text.append("  ")
+        # The shared peak across all channels, so every row's sparkline uses one scale.
+        histogram = st.histogram if st is not None else ()
+        text.append_text(_activity_sparkline(histogram, stats.peak(), cells))
     return text
 
 
@@ -643,7 +668,7 @@ def _menu_items(
         # No lane at all while no channel has a scope (see :data:`_NAME_SCOPE_BUDGET`); the
         # slot lane and its gap come out of the same budget, so the sparkline keeps its room.
         # A drawn scope lane is never narrower than its label — a long name gives up cells
-        # before the lane would crowd ``SCOPE`` against ``UNREAD``.
+        # before the lane would crowd ``SCOPE`` against ``NEW``.
         budget = _NAME_SCOPE_BUDGET - (slot_w + 2)
         scope_w = max(len("SCOPE"), min(budget - name_w, max(*scopes))) if any(scopes) else 0
         name_w = min(name_w, budget - scope_w)
@@ -651,9 +676,10 @@ def _menu_items(
         # so they pin overhead while the slots scroll and give way to Organize/Add a channel.
         items.append(Separator(lambda w: _lanes_header(slot_w, name_w, scope_w, w), heading=True))
         for slot in slots:
-            items.append(
-                Choice(title=_slot_row(ctx, slot, stats, slot_w, name_w, scope_w), value=slot.idx)
-            )
+            # Fitted: the row is whole at any width (its chart shortens), so the highlight
+            # draws it fitted too rather than as a line for ←→ to slide (Choice.fitted).
+            row = _slot_row(ctx, slot, stats, slot_w, name_w, scope_w)
+            items.append(Choice(title=row, value=slot.idx, fitted=True))
     else:
         items.append(Separator("  no channels yet — add one below"))
 

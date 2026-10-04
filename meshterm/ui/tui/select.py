@@ -74,6 +74,13 @@ class Choice:
             list's scrolling on* (see :class:`SelectScreen`): a head block is only meaningful
             as the part that stays put, so a row that pins one is a row built to scroll,
             wherever the builder's list ends up being shown.
+        fitted: The width-aware title *is* the row at any width, not a cut of a longer one:
+            its lanes are fixed and only a trailing chart gives cells back (the Channels
+            list's activity sparkline, which drops its oldest buckets to fit). The
+            highlighted row of an ``hscroll`` list then draws that fitted form too, instead
+            of keeping its natural one for ←→ to slide over — nothing past the edge of such a
+            row is worth sliding to, and a highlight that flipped the row back to a cut-off
+            chart would undo the fit on exactly the row being read.
     """
 
     title: str | Text | Callable[[], str | Text] | Callable[[int], str | Text]
@@ -81,6 +88,7 @@ class Choice:
     deletable: bool = False
     detail: str | Text | Callable[[], str | Text] | None = None
     hscroll_from: int = 0
+    fitted: bool = False
 
     def __post_init__(self) -> None:
         """Read the title callable's arity once, so no paint has to ask again."""
@@ -97,6 +105,16 @@ class Choice:
     def label(self) -> str | Text:
         """The row's *natural* (unbounded) text — what filtering and measuring read."""
         return self.text(_UNBOUNDED)
+
+    def scroll_text(self, width: int) -> str | Text:
+        """What this row draws, and ←→ slide, as the highlighted row of an ``hscroll`` list.
+
+        Its natural form, so the whole line can be slid along — or, for a row whose fitted
+        form is complete (:attr:`fitted`), that form at ``width``, which by construction
+        leaves nothing to slide. The drawing, the slide's clamp, and the footer's ←→ atom
+        all read this one answer, so none of them can disagree about whether the row moves.
+        """
+        return self.text(width) if self.fitted else self.label
 
     @property
     def detail_label(self) -> str | Text | None:
@@ -628,11 +646,10 @@ class SelectScreen(Screen):
         current = self._current_choice()
         if current is None:
             return False
+        avail = max(1, self._last_width - 2)
         return (
             self._max_hshift(
-                cell_len(_plain(current.label)),
-                current.hscroll_from,
-                max(1, self._last_width - 2),
+                cell_len(_plain(current.scroll_text(avail))), current.hscroll_from, avail
             )
             > 0
         )
@@ -702,7 +719,8 @@ class SelectScreen(Screen):
         # width — against the row's content area (width less the 2-cell pointer).
         self._last_width = width
         if self._hscroll and self._hshift:
-            sel_len = cell_len(_plain(selected.label)) if selected is not None else 0
+            avail = max(1, width - 2)
+            sel_len = cell_len(_plain(selected.scroll_text(avail))) if selected is not None else 0
             anchor = selected.hscroll_from if selected is not None else 0
             self._hshift = max(
                 0, min(self._hshift, self._max_hshift(sel_len, anchor, max(1, width - 2)))
@@ -789,9 +807,10 @@ class SelectScreen(Screen):
             # A width-aware title fits itself to the row's content area (the width less
             # the 2-cell pointer). The exception is the highlighted row of an ``hscroll``
             # list, which keeps its natural form: ←→ slide the full line, and a row that
-            # pre-elided itself would have nothing left to slide over.
+            # pre-elided itself would have nothing left to slide over — unless the row
+            # declares its fitted form complete (``Choice.fitted``).
             if self._hscroll and is_sel:
-                label = item.label
+                label = item.scroll_text(max(1, width - 2))
             else:
                 label = item.text(max(1, width - 2))
             pointer = "❯ " if is_sel else "  "
@@ -830,6 +849,8 @@ class SelectScreen(Screen):
         """
         lane = max(1, avail - max(0, anchor))
         run = max(0, label_cells - max(0, anchor))
+        if run <= lane:
+            return 0  # the whole run is in view unscrolled: nothing to slide to
         steps = -(-max(0, run - (lane - 1)) // self._HSCROLL_STEP)
         return steps * self._HSCROLL_STEP
 

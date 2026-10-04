@@ -388,7 +388,10 @@ def column_header(lanes: Sequence[Lane], width: int, *, indent: int = 2) -> str:
     A header is one row and stays one row. Where the line overruns ``width`` the lanes fall
     back to their shorter labels — from the right, since the fixed lanes are padded to their
     rows' content and only a trailing lane can actually give a cell back — and a line that
-    still won't fit is ellipsized. It never wraps: a pinned header (see
+    still won't fit is ellipsized. A trailing lane whose rows can vanish (a chart that
+    shortens to fit, then goes) ends its forms on ``""``, so its label goes with it rather
+    than the line being cut inside the lane before it; the padding after the last label drawn
+    is air, so it never counts against ``width``. It never wraps: a pinned header (see
     :attr:`~meshterm.ui.tui.select.Separator.pinned`) is drawn outside the body slice, where
     a second row would cost the content one.
 
@@ -408,7 +411,7 @@ def column_header(lanes: Sequence[Lane], width: int, *, indent: int = 2) -> str:
         for lane, form in zip(lanes, picked, strict=True):
             label = lane.forms[form]
             out += label + " " * max(0, lane.width - cell_len(label))
-        return out
+        return out.rstrip()
 
     at = len(lanes) - 1
     while at >= 0 and cell_len(line()) > width:

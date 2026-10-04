@@ -691,6 +691,9 @@ def test_activity_sparkline_packs_24_buckets_into_braille() -> None:
     # (fullest here) pair in the rightmost cell.
     ramp = _activity_sparkline((16, 12, 8, 4) + (0,) * 20, 16).plain
     assert ramp[-2:] == chr(0x2800 | 0x40 | 0xA0) + chr(0x2800 | 0x46 | 0xB8)
+    # Drawn shorter, it keeps the newest buckets: the same ramp, only less history.
+    short = _activity_sparkline((16, 12, 8, 4) + (0,) * 20, 16, 3).plain
+    assert len(short) == 3 and short[-2:] == ramp[-2:]
 
 
 async def test_channel_rows_carry_stats_unread_and_lanes(ctx: AppContext) -> None:
@@ -725,6 +728,18 @@ async def test_channel_rows_carry_stats_unread_and_lanes(ctx: AppContext) -> Non
     assert plain.rstrip().endswith("⣀" * 11 + chr(0x2800 | 0x40 | 0xB8))
     label = row.label
     assert label.spans[-1].style == "ok"  # …and its newest cell reads as live traffic
+
+    # Narrower than the whole row, the chart shortens to fit instead of being cut: the row
+    # ends exactly at the edge, on the same newest cell, with less history behind it.
+    natural = cell_len(plain)
+    now_cell = chr(0x2800 | 0x40 | 0xB8)
+    for width in (natural - 1, natural - 5, natural - 11):
+        fitted = row.text(width).plain
+        assert cell_len(fitted) == width and "…" not in fitted
+        assert fitted.endswith(now_cell)
+    # With no cell left for it, the chart is left out rather than drawn as a stub of gap.
+    lanes_only = row.text(natural - 13).plain
+    assert now_cell not in lanes_only and "⣀" not in lanes_only
 
 
 async def test_standard_public_row_appears_only_while_it_is_absent(ctx: AppContext) -> None:

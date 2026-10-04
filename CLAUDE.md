@@ -464,6 +464,12 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   starting `www.`, or ending in a TLD IANA has delegated (`assets/tlds.txt`, the registry
   verbatim; refreshing it is downloading it again). So `meshterm.net` is a link and
   `file.txt` is not. A scheme-less link opens, and encodes, as `https://…`.
+- **A chart that is a row's last column shortens to fit**, on every platform: drawn in
+  whatever cells the lanes before it leave, its oldest buckets dropped so now stays on the
+  right, never cut by the row's ellipsis — and left out when no cell is left. The row
+  title takes the render width to know it (`Choice.title` as a one-argument callable;
+  `channels._slot_text` is the reference), and the header's label gives way the same way
+  (`("ACTIVITY", "ACT", "")`, gone with the chart).
 - Dialogs anchor slightly above true centre, sized for their populated state.
 - Radio traffic: single transmissions or a user-chosen sample count with cooldown pacing
   — never bursts.
