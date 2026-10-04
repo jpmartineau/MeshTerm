@@ -327,12 +327,17 @@ def _archived(cols: int, rows: int) -> Screen:
     )
 
 
-def _node_detail_header() -> Text:
+def _node_detail_mark() -> Text:
     # Through the app's own marker and name styles, not a hand-spelled hex: the gallery is
     # a specimen of what the platform draws, so a stub colour would hide a palette bug.
     glyph, glyph_style = NODE_GLYPHS[NODE_TYPE_REPEATER]
-    header = Text(f"{glyph} ", style=glyph_style)
-    header.append("Hilltop-Repeater", style=name_style("Hilltop-Repeater", _HUB_KEY))
+    mark = Text(f"{glyph} ", style=glyph_style)
+    mark.append("Hilltop-Repeater", style=name_style("Hilltop-Repeater", _HUB_KEY))
+    return mark
+
+
+def _node_detail_header() -> Text:
+    header = _node_detail_mark()
     header.append("   repeater", style="muted")
     return header
 
@@ -371,6 +376,7 @@ def _node_detail(cols: int, rows: int, *, with_minimap: bool = False) -> Screen:
             _Action("remove", "🗑", "err", "Remove contact…"),
         ],
         trace_action=_Action("trace", "\U0001f3af", "", "Trace — auto route …"),
+        mark=_node_detail_mark(),
     )
 
 
