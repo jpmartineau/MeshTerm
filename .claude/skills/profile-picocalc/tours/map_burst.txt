@@ -1,0 +1,32 @@
+# A thumb faster than the map: pans and zooms sent at a fixed rate, not waiting for the
+# app (`burst`), from a fixed view. Pin the view first (see SKILL.md) or runs differ.
+label: connect
+enter
+sleep 25
+shot menu
+text:m
+text:a
+text:p
+shot filtered
+label: open-map
+enter
+expect km across
+sleep 15
+shot map-open
+
+label: pan-burst
+burst right 12 100
+shot after-right
+burst down 12 100
+burst left 12 100
+burst up 12 100
+shot after-pans
+
+label: zoom-burst
+burst pgdn 3 150
+burst right 8 100
+burst pgup 4 150
+burst left 8 100
+sleep 5
+shot end
+esc

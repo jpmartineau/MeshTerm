@@ -15,6 +15,8 @@ Script lines:  KEY [repeat]      e.g.  "down 5", "enter", "esc", "text:c"
                sleep SECONDS     let the app settle (a screen opening, a radio connect)
                label: NAME       start a new measurement group
                shot NAME         dump the console text right now
+               burst KEY N MS    N presses MS apart without waiting for the app, then
+                                 time how long it takes to catch up
                #  comments and blank lines are ignored
 
 Keys: up down left right enter esc tab backspace pgup pgdn home end space f1..f10,
@@ -74,6 +76,11 @@ QUIET_S = 0.045
 
 #: Give up on a keystroke that never produces output (a key the screen ignores).
 TIMEOUT_S = 6.0
+
+#: After a ``burst``, the app has caught up once it has written nothing for this long.
+#: Longer than a repaint gap, because a burst's tail is background work landing (a tile, a
+#: raster) rather than one frame; shorter than the 2 s header tick, which would never end.
+BURST_QUIET_S = 1.5
 
 
 def set_winsize(fd, rows, cols):
@@ -242,6 +249,47 @@ def main():
                 print(f"{label:<20} {'appear':<10} {1:3d} "
                       f"{(found - base) * 1000:8.1f} {'':>8} {'':>8} {'':>7}"
                       f"  <- {needle}")
+            continue
+        if line.startswith("burst "):
+            # Keys at a fixed rate, *not* waiting for the app: a held key or a fast thumb.
+            # The per-key clock below answers "how long does one key cost"; this answers
+            # "how long until the app has caught up with everything it was sent", which is
+            # the freeze a reader actually feels. Reports the catch-up (last key sent to
+            # the app going quiet for `BURST_QUIET_S`) and the longest silence in between.
+            _, name, count, every_ms = line.split()
+            seq = KEYS.get(name) or (name.split(":", 1)[1] if name.startswith("text:") else None)
+            if seq is None:
+                print(f"  ?? unknown key {name!r}", file=sys.stderr)
+                continue
+            while drain(timeout=quiet_s)[0]:
+                pass
+            every = int(every_ms) / 1000.0
+            t_begin = time.perf_counter()
+            last_out = t_begin
+            longest = 0.0
+            for i in range(int(count)):
+                os.write(fd, seq.encode())
+                last_key[0] = time.perf_counter()
+                until = t_begin + (i + 1) * every
+                while (left := until - time.perf_counter()) > 0:
+                    n, first, last, _ = drain(quiet=left, timeout=left)
+                    if first is not None:
+                        longest = max(longest, first - last_out)
+                        last_out = last
+            t_sent = time.perf_counter()
+            while True:
+                n, first, last, _ = drain(quiet=BURST_QUIET_S, timeout=BURST_QUIET_S)
+                if first is None or time.perf_counter() - t_sent > 120:
+                    break
+                longest = max(longest, first - last_out)
+                last_out = last
+            catch_up = (last_out - t_sent) * 1000
+            rows_out.append({"label": label, "key": f"burst:{name}x{count}@{every_ms}",
+                             "n": int(count), "catch_up": catch_up,
+                             "longest_gap": longest * 1000})
+            print(f"{label:<20} {'burst':<10} {int(count):3d} "
+                  f"sent {(t_sent - t_begin) * 1000:7.0f}  catch-up {catch_up:8.0f}  "
+                  f"longest gap {longest * 1000:7.0f}  <- {name} every {every_ms} ms")
             continue
         m = re.match(r"^(\S+?)(?:\s+(\d+))?$", line)
         name, count = m.group(1), int(m.group(2) or 1)

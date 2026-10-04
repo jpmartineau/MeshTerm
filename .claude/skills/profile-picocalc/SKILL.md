@@ -49,9 +49,11 @@ byte to `/dev/tty1` so the screen shows exactly what a person would see (JP can 
 along live), injects the scripted keys, and prints p50/p90/max per key group.
 
 Tour scripts are one step per line: `down 8`, `enter`, `text:y`, `sleep 3`,
-`label: contacts` to start a new measurement group, `shot NAME` to grab the screen.
+`label: contacts` to start a new measurement group, `shot NAME` to grab the screen,
+`burst right 12 100` to send keys at a fixed rate without waiting (see below).
 `tours/` has `nav_all.txt` (every page), `nav_ab.txt` (short, for A/B runs),
-`nav_opens.txt` (screen opens, timed with `expect`), `nav_map.txt`, and
+`nav_opens.txt` (screen opens, timed with `expect`), `nav_map.txt`, `map_burst.txt`
+(the map driven faster than it can keep up), and
 `nav_changed.txt` (every optimised paint plus a real dialog — the A/B tour).
 
 ## A/B'ing a change: revert the device, don't rebuild it
@@ -130,6 +132,34 @@ good example: the `escape` row is ~10 ms, and the menu that replaces it repaints
 later as an untriggered `~tick` (the menu loop resumes asynchronously, so it is not
 attributed to the key). Judging Esc by its own row alone understates it; judging it by
 console quiescence overstates it — the truth was ~90 ms, from the sequence.
+
+## When the app falls behind, or freezes
+
+The per-key clock waits for each key to finish, so it can never see the failure a fast thumb
+causes: keys arriving faster than the app answers them. `burst KEY N MS` sends N presses MS
+apart regardless, then reports the **catch-up** (last key sent to the app quiet for 1.5 s)
+and the **longest gap** in its output. A long catch-up with short gaps is the app working
+through a backlog while staying live; a long gap is a freeze.
+
+To see *why*, run the app under `scripts/watchdog.py` (`--exe .../run_watchdog.sh`, with
+`watchdog.py` copied to the repo root like `instrument.py`). A thread outside the event loop
+pings it every 50 ms and, while a ping goes unanswered, samples every thread's stack; twice a
+second it logs RSS, swap and major page faults. Two signatures:
+
+- **The log itself goes silent** for seconds and `majflt` jumps by thousands: the whole
+  process was stopped while the kernel paged it back in from the SD-card swap. That is
+  memory, not CPU — find what grew (`rss`, `swap`, the map's `memo=` bytes).
+- **Pings of 0.3–1 s with the main thread somewhere cheap** — a `glob`, a `stat`, a small
+  read: the GIL convoy. Each syscall hands the GIL back and waits up to 5 ms to retake it
+  while a worker thread (a raster, a tile decode) holds it, so a loop doing hundreds of small
+  reads takes hundreds of times longer. Anything that walks the filesystem belongs in
+  `asyncio.to_thread`, however cheap it looks idle.
+
+The map persists its view, so pin it before every run or two runs start in different places:
+`INSERT OR REPLACE INTO app_state(key, value) VALUES ('map_view', '{"lat": 45.52, "lon":
+-73.62, "zoom": 10}')` into `~/.meshterm/meshterm.db`, with the venv's Python (the image's
+own has no `sqlite3`). And `expect` needles must be ASCII: `/dev/vcs1` holds font glyph
+indices, so `·` never matches — `km across` finds the map's title.
 
 ## Traps that cost real time
 
