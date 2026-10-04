@@ -4,10 +4,11 @@
 Shown once at the start of the interactive menu when no port was given explicitly. Unlike the
 in-menu prompts, it is drawn as a chromeless splash — the MeshTerm wordmark centered above a
 content-sized box, with no header/footer status bars. It lists the discovered devices in
-aligned columns — name, connection target, a TYPE glyph (wired serial vs Bluetooth), and a
-HARDWARE column (the confirmed device's firmware model, else the USB vendor) — tags the ones
-already confirmed as MeshCore companions, marks the remembered "last known good" one, and
-preselects it as the default.
+aligned columns — name, a TYPE glyph (wired serial vs Bluetooth), a HARDWARE column (the
+confirmed device's firmware model, else the USB vendor), and the connection target last —
+tags the ones already confirmed as MeshCore companions, marks the remembered "last known
+good" one, and preselects it as the default. No field is ever shortened to fit: a row wider
+than the box runs off its edge, and ←→ slide the highlighted row to read the rest.
 
 Confirmed companions are sorted to the top, most-recently-used first, and shown by the mesh
 node name we learned when we last talked to them (in white, so they stand out from ports we've
@@ -55,9 +56,8 @@ from ..core.discovery import (
 )
 from ..core.spiradio import spi_radios
 from ..persistence.logging import log_file_for
-from ..platforms import get_platform
 from .logo import load_logo
-from .menus import Lane, align_icons, column_header, fit_cells
+from .menus import Lane, align_icons, column_header
 from .tui import Choice, DeleteRequest, KeyRequest, Separator
 
 if TYPE_CHECKING:
@@ -168,38 +168,8 @@ def _display_name(device: DiscoveredDevice, registry: dict[str, RememberedDevice
 
 
 def _where(device: DiscoveredDevice) -> str:
-    """The connection target shown in the middle column: serial port or BLE address."""
+    """The connection target shown in the last column: serial port, BLE address, host:port."""
     return device.target
-
-
-def _fit_target(text: str, width: int) -> str:
-    """Fit a connection target into ``width`` cells, keeping its **end**.
-
-    Deliberately not :func:`~meshterm.ui.menus.fit_cells`, which keeps the head: what tells
-    two targets apart is their *tail* — ``usbmodem1101`` from ``usbmodem1102``,
-    ``ttyUSB0`` from ``ttyUSB1`` — while the head they share (``/dev/cu.``) is boilerplate.
-    Cutting the front is the cut that leaves the column able to do its one job in a picker,
-    and cutting the back would render two different ports identically. A CoreBluetooth UUID
-    is equally identifiable from either end, so the rule that is right for ports costs the
-    platform that needed the cap nothing.
-
-    Args:
-        text: The target to fit.
-        width: The cells available. Text already inside it is returned unchanged, so the
-            platforms whose targets already fit the lane are untouched.
-
-    Returns:
-        The target, or its tail behind a leading ``…``, measuring at most ``width`` cells.
-    """
-    if cell_len(text) <= width:
-        return text
-    keep = max(0, width - 1)  # the leading ellipsis costs a cell
-    tail = ""
-    for ch in reversed(text):
-        if cell_len(tail) + cell_len(ch) > keep:
-            break
-        tail = ch + tail
-    return "…" + tail
 
 
 def _hardware_label(device: DiscoveredDevice, registry: dict[str, RememberedDevice]) -> str:
@@ -836,70 +806,22 @@ async def _remove_network_device(
         store.forget(device.stable_id)
 
 
-#: The narrowest the HARDWARE column is worth keeping before the name lane has to give way.
-#: Below this a model string says nothing at all, and the lane is better spent on the name.
-_HARDWARE_MIN = 10
+def _tag(device: DiscoveredDevice, is_known: bool) -> tuple[str, str]:
+    """The muted qualifier after HARDWARE, and its style — ``("", "")`` for a row with none.
 
-#: The narrowest the PORT / ADDRESS lane is worth shrinking to before DEVICE has to give.
-#: This is the lane that adapts: a target is how you tell two similar rows apart, and ten
-#: cells still does that (the tail of a UUID, the end of a port path), while a *name* is
-#: what the reader actually came to read. macOS is why any of this is needed —
-#: CoreBluetooth reports no MAC at all but a per-machine 36-cell UUID, and even its ports
-#: run long (every Mac carries a 31-cell ``/dev/cu.Bluetooth-Incoming-Port``) — where a MAC
-#: is 17 and ``/dev/ttyUSB0`` is 12, so no other platform ever presses on the row at all.
-_ADDRESS_MIN = 10
-
-
-def _lane_widths(
-    devices: list[DiscoveredDevice], registry: dict[str, RememberedDevice]
-) -> tuple[int, int]:
-    """The DEVICE and PORT / ADDRESS widths: the name in full, the address taking the rest.
-
-    The row has a fixed budget, and something has to give when the two lanes together
-    outrun it. **The address gives first.** A name is what the reader came to read and what
-    they recognise their own radio by; an address is a disambiguator, and a disambiguator
-    does its whole job from its last ten cells (:func:`_fit_target` keeps the tail for
-    exactly this reason). So DEVICE is sized to the longest name it has, and ADDRESS takes
-    whatever is left over, down to :data:`_ADDRESS_MIN`.
-
-    Only once the address is down to that floor does the name start ellipsizing, and it
-    still must: a USB adapter's own product string runs to forty-odd characters ("CP2102
-    USB to UART Bridge Controller"), and a lane sized to *that* pushed everything after it
-    off the right-hand edge — the row ended mid-port and the HARDWARE column that says what
-    the thing actually *is* was not on screen, nor reachable by scrolling, because the
-    pinned head was already wider than the box. HARDWARE keeps :data:`_HARDWARE_MIN` out of
-    the budget so it always has a readable stub; it is the row's scrolling tail, so beyond
-    that stub it is free to run long.
-
-    Args:
-        devices: The devices being listed.
-        registry: Confirmed companions, for their remembered names.
-
-    Returns:
-        ``(name_w, port_w)`` in cells.
+    Only devices we've actually confirmed are billed as MeshCore companions; a USB vendor ID
+    (or a BLE advert) is a sort hint, not a claim. A bare serial bridge earns an honest
+    label; a MeshCore-named BLE advert is flagged as a likely companion.
     """
-    platform = get_platform()
-    # What the splash's box gives a row: the terminal, less the gutter it floats over, less
-    # its own border and padding, less the pointer and star columns the row leads with.
-    content = platform.readable_cols - platform.dialog_margin - 4 - 4
-    # ...less the three two-cell gaps, the TYPE badge, and HARDWARE's readable stub.
-    budget = content - 6 - len("TYPE") - _HARDWARE_MIN
-
-    name_natural = max(cell_len(_display_name(d, registry)) for d in devices)
-    port_natural = max(cell_len(_where(d)) for d in devices)
-    # Never reserve more room for the address than it actually wants: a lone "COM3" should
-    # hand its slack to the name rather than sit in a ten-cell lane holding four cells.
-    floor = min(port_natural, _ADDRESS_MIN)
-
-    name_w = max(len("DEVICE"), min(name_natural, budget - floor))
-    port_w = max(floor, min(port_natural, budget - name_w))
-
-    if name_w < name_natural and port_w < port_natural:
-        # The name is being ellipsized whatever happens, so spending two more of its cells
-        # to keep the address whole trades one cut for none rather than adding a second.
-        port_w = min(port_natural, budget - len("DEVICE"))
-        name_w = max(len("DEVICE"), budget - port_w)
-    return name_w, port_w
+    if is_known:
+        return "· MeshCore device", "ok"
+    if device.is_tcp:
+        return "· network companion", "muted"
+    if device.is_ble:
+        return "· Bluetooth companion", "muted"
+    if device.confidence == "bridge":
+        return "· serial adapter", "muted"
+    return "", ""
 
 
 def _order(
@@ -927,16 +849,20 @@ def _build_items(
     """Build the aligned splash rows (a muted header + one :class:`Choice` per device).
 
     The row for each device leads with its display name (the remembered node's name when
-    known, else the hardware name), followed by its connection target, a TYPE glyph marking
-    the transport, and the HARDWARE column (the remembered firmware model, else the USB
-    vendor); columns are padded to a shared width so they align. Confirmed companions sort to
-    the top (most-recent first), wear their name in white and a bright tag; the remembered
-    default is starred. Trailing rows let the user name a network device by hand and quit here.
+    known, else the hardware name), followed by a TYPE glyph marking the transport, the
+    HARDWARE column (the remembered firmware model, else the USB vendor) with its tag, and the
+    connection target last; columns are padded to a shared width so they align. Confirmed
+    companions sort to the top (most-recent first), wear their name in white and a bright tag;
+    the remembered default is starred. Trailing rows let the user name a network device by hand
+    and quit here.
 
-    A device row's fixed lanes are pinned and its HARDWARE tail scrolls: a firmware model
-    string is as long as its vendor felt like making it, and on a narrow terminal the column
-    that says *what the thing actually is* was the one being cut off. ←→ read it to its end,
-    on the highlighted row alone, and only while that row overflows.
+    Every lane is sized to its longest value and nothing is shortened to fit — not a name, not
+    a model string, not a heading. Each lane used to be squeezed against a budget so the row
+    fitted the box, and on a narrow terminal (or beside a 36-cell CoreBluetooth UUID) that cut
+    the name the reader came to read down to its first five letters. A row wider than the box
+    now runs off its edge instead, and ←→ slide the highlighted row to read it to its end. The
+    address goes last because it is the lane the reader needs least: it tells two similar
+    rows apart, which the name and the hardware usually already have.
 
     Args:
         devices: The devices to list — already less anything hidden.
@@ -959,7 +885,7 @@ def _build_items(
     devices = _order(devices, registry)
     known: set[str] = set(registry)
 
-    # The middle column holds a serial port, a BLE address, or a TCP host:port; label it for
+    # The last column holds a serial port, a BLE address, or a TCP host:port; label it for
     # whichever kinds are present so a non-serial endpoint never sits under a bare "PORT"
     # heading (a BLE address and a network host:port both read as an "address").
     has_serial = any(not d.is_ble and not d.is_tcp for d in devices)
@@ -970,31 +896,23 @@ def _build_items(
     # The TYPE column holds a small transport badge (at most 3 cells); its heading is wider,
     # so the four-cell "TYPE" label sets the column width and every badge pads out to it.
     type_w = len("TYPE")
-    # DEVICE in full, ADDRESS taking what is left (see _lane_widths). The heading does not
-    # set a floor here the way it used to: the lane may end up narrower than "PORT / ADDRESS"
-    # spells, and column_header already carries the short form to fall back on.
-    name_w, port_w = _lane_widths(devices, registry)
-    hardware_w = max(cell_len(_hardware_label(d, registry)) for d in devices)
-    hardware_w = max(hardware_w, len("HARDWARE"))
+    names = {d.stable_id: _display_name(d, registry) for d in devices}
+    name_w = max(len("DEVICE"), *(cell_len(name) for name in names.values()))
+    hardware_w = max(len("HARDWARE"), *(cell_len(_hardware_label(d, registry)) for d in devices))
+    tags = {d.stable_id: _tag(d, d.stable_id in known) for d in devices}
+    tag_w = max(cell_len(text) for text, _ in tags.values())
 
     # A muted, aligned header, resolved against the render width because it is *pinned*: it
     # leads the device rows as their landmark, so a long detection list keeps the lane names
     # overhead as it scrolls — and a pinned row that wraps is drawn outside the body slice,
-    # where the second line costs the list a device. The indent mirrors the row pointer (2)
-    # and the star column (2) so each label sits over its own lane.
-    header = Separator(
-        lambda width: column_header(
-            [
-                Lane("DEVICE", name_w + 2),
-                Lane((port_label, "PORT" if has_serial else "ADDRESS"), port_w + 2),
-                Lane("TYPE", type_w + 2),
-                Lane(("HARDWARE", "HW")),
-            ],
-            width,
-            indent=4,
-        ),
-        heading=True,
-    )
+    # where the second line costs the list a device. Every label is the one form, in full; a
+    # header wider than the box is cropped at its edge like the rows under it. The indent
+    # mirrors the row pointer (2) and the star column (2) so each label sits over its own lane.
+    lanes = [Lane("DEVICE", name_w + 2), Lane("TYPE", type_w + 2), Lane("HARDWARE", hardware_w + 2)]
+    if tag_w:
+        lanes.append(Lane("", tag_w + 2))  # the tag rides under HARDWARE's heading
+    lanes.append(Lane(port_label))
+    header = Separator(lambda width: column_header(lanes, width, indent=4), heading=True)
 
     items: list = [header]
     for device in devices:
@@ -1004,12 +922,7 @@ def _build_items(
         row.append("★" if is_remembered else " ", style="warn" if is_remembered else "")
         row.append(" ")
         # A confirmed companion wears its name in white so it stands out from mere detections.
-        row.append(
-            _pad(fit_cells(_display_name(device, registry), name_w), name_w),
-            style="device.known" if is_known else "",
-        )
-        row.append("  ")
-        row.append(_pad(_fit_target(_where(device), port_w), port_w), style="muted")
+        row.append(_pad(names[device.stable_id], name_w), style="device.known" if is_known else "")
         row.append("  ")
         # The TYPE badge marks the transport: a plug emoji for serial, or the Bluetooth rune
         # on its blue badge for BLE. It's built with its own colours, then the column is
@@ -1019,28 +932,18 @@ def _build_items(
         row.append_text(cell)
         row.append(" " * max(0, type_w - cell.cell_len))
         row.append("  ")
+        row.append(_pad(_hardware_label(device, registry), hardware_w), style="muted")
+        row.append("  ")
+        if tag_w:
+            tag, tag_style = tags[device.stable_id]
+            row.append(_pad(tag, tag_w), style=tag_style)
+            row.append("  ")
         # Nothing is pinned here, so ←→ slide the whole row. The Trophy case pins its
         # rank/date/score lanes because those always fit and only the walk overflows, which
-        # makes them the reader's place in a long list. This list inverts that: on a narrow
-        # terminal it is the device name and the address that get cut, so pinning them would
-        # pin the truncation in place and leave the one thing ←→ could not reach being the
-        # text somebody most wants to finish reading.
-        row.append(_pad(_hardware_label(device, registry), hardware_w), style="muted")
-        # Only devices we've actually confirmed are billed as MeshCore companions; a USB
-        # vendor ID (or a BLE advert) is a sort hint, not a claim. A bare serial bridge earns
-        # an honest label; a MeshCore-named BLE advert is flagged as a likely companion.
-        if is_known:
-            row.append("  ")
-            row.append("· MeshCore device", style="ok")
-        elif device.is_tcp:
-            row.append("  ")
-            row.append("· network companion", style="muted")
-        elif device.is_ble:
-            row.append("  ")
-            row.append("· Bluetooth companion", style="muted")
-        elif device.confidence == "bridge":
-            row.append("  ")
-            row.append("· serial adapter", style="muted")
+        # makes them the reader's place in a long list. This list inverts that: every lane is
+        # drawn whole, so on a narrow terminal any of them may run past the edge, and pinning
+        # the head would leave part of a long name the one thing ←→ could not reach.
+        row.append(_where(device), style="muted")
         # Only a network device opts into Delete-to-remove: it's listed solely from its
         # remembered endpoint, so forgetting it is the only way it leaves the picker. A scanned
         # serial/BLE device would just reappear, so Delete stays inert on those rows.

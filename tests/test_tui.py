@@ -1619,59 +1619,46 @@ def test_device_picker_builds_aligned_columns(tmp_path) -> None:
     assert device_rows[0].index("COM5") == device_rows[1].index("/dev/ttyUSB0")
 
 
-def test_device_picker_address_lane_is_the_one_that_adapts() -> None:
-    """DEVICE shows its name in full; PORT / ADDRESS takes whatever is left.
+def test_device_picker_shortens_nothing_and_puts_the_address_last() -> None:
+    """Every field is drawn whole, and the connection target is the row's last column.
 
-    A name is what the reader came to read and recognises their own radio by; an address
-    is a disambiguator, and does that job from its last ten cells. macOS is what forced
-    the question — CoreBluetooth reports no MAC but a per-machine 36-cell UUID, and even
-    its ports run long — which sized the lane to 36 and left DEVICE the width of its own
-    heading.
+    The lanes used to be squeezed against a budget so the row fitted the box, and beside a
+    36-cell CoreBluetooth UUID that cut a name down to ``Johnp…`` and the UUID to its tail.
+    Now a row wider than the box runs off its edge and ←→ read the rest, so the address,
+    the lane the reader needs least, goes last where running off the edge costs least.
     """
-    from rich.cells import cell_len
-
     from meshterm.core.discovery import DiscoveredDevice
-    from meshterm.ui.device_picker import _ADDRESS_MIN, _fit_target, _lane_widths
+    from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
+    from meshterm.ui.device_picker import _build_items
 
     name = "MeshCore-Johnputer Wardriver"
     uuid = "12345678-1234-1234-1234-123456789ABC"
-    mac_devices = [
-        DiscoveredDevice(transport="ble", address="C6:B6:26:BC:7F:09", name=name, product=name),
-        DiscoveredDevice("COM3", product="Some Adapter", vid=0x1234),
-    ]
-    uuid_devices = [
+    adapter = "CP2102 USB to UART Bridge Controller"
+    devices = [
         DiscoveredDevice(transport="ble", address=uuid, name=name, product=name),
         DiscoveredDevice("/dev/cu.Bluetooth-Incoming-Port"),
+        DiscoveredDevice("/dev/ttyUSB0", product=adapter, vid=0x10C4),
     ]
-
-    # The name is shown whole on both, and a 36-cell address does not shrink it: the lane
-    # that gives is the address, and it never drops below the floor that keeps it useful.
-    for devices in (mac_devices, uuid_devices):
-        name_w, port_w = _lane_widths(devices, {})
-        assert name_w == cell_len(name)
-        assert port_w >= _ADDRESS_MIN
-    assert _lane_widths(mac_devices, {})[0] == _lane_widths(uuid_devices, {})[0]
-
-    # A target that fits is untouched, and a long one keeps its tail -- which is what tells
-    # two of them apart, and the whole reason the cut takes the front.
-    _, port_w = _lane_widths(uuid_devices, {})
-    assert _fit_target("COM3", port_w) == "COM3"
-    assert _fit_target(uuid, port_w).endswith("9ABC")
-    assert cell_len(_fit_target(uuid, port_w)) <= port_w
-    assert _fit_target("/dev/cu.usbmodem1101", 14) != _fit_target("/dev/cu.usbmodem1102", 14)
-
-    # Nothing is hoarded: a lone short port hands its slack back to the name.
-    short = [DiscoveredDevice("COM5", product="Wio SX1262", vid=0x2886)]
-    assert _lane_widths(short, {})[1] == cell_len("COM5")
-
-    # And where the name cannot fit whatever happens, the address is left whole rather
-    # than ellipsized alongside it -- one cut in the row instead of two.
-    sprawling = [
-        DiscoveredDevice("/dev/ttyUSB0", product="CP2102 USB to UART Bridge Controller", vid=0x10C4)
-    ]
-    name_w, port_w = _lane_widths(sprawling, {})
-    assert port_w == cell_len("/dev/ttyUSB0")
-    assert name_w < cell_len("CP2102 USB to UART Bridge Controller")
+    try:
+        for platform in (REGULAR, PICOCALC_LYRA):
+            set_platform(platform)
+            items = _build_items(devices, None, {})
+            rows = {
+                it.value.stable_id: it.title.plain
+                for it in items
+                if isinstance(it, Choice) and it.value in devices
+            }
+            for device in devices:
+                row = rows[device.stable_id].rstrip()
+                assert "…" not in row, platform.name
+                # The target is whole, and nothing follows it.
+                assert row.endswith(device.target), platform.name
+            assert name in rows[devices[0].stable_id] and adapter in rows[devices[2].stable_id]
+            # The header is unabridged at any width the row needs, ADDRESS last.
+            header = items[0].text(1000)
+            assert header.split() == ["DEVICE", "TYPE", "HARDWARE", "PORT", "/", "ADDRESS"]
+    finally:
+        set_platform(REGULAR)
 
 
 def test_device_picker_names_and_sorts_known_devices(tmp_path) -> None:
@@ -3648,9 +3635,8 @@ def test_the_splash_scrolls_the_whole_row_it_is_on() -> None:
 
     The Trophy case pins its rank/date/score lanes because those always fit and only the
     walk overflows, so they are the reader's place in a long list. This list inverts that:
-    on a narrow terminal it is the device name and the address that get cut, so pinning
-    them would pin the truncation in place and the one thing ←→ could not reach would be
-    the text somebody most wants to finish reading.
+    every lane is drawn whole, so on a narrow terminal any of them may run past the edge,
+    and pinning the head would leave part of a long name the one thing ←→ could not reach.
 
     Scrolling has to be asked for outright here, because it is a row pinning a head block
     that normally turns it on and no row does now.
