@@ -88,6 +88,20 @@ scripts/cardputer-zero/launcher-entry.sh
 MeshTerm now has an icon in the launcher. `scripts/cardputer-zero/launcher-entry.sh remove`
 takes it out again.
 
+### Typing long text from your computer
+
+A long password or key is hard work on a keyboard this small. From another computer that
+can reach the Cardputer over SSH, `scripts/cardputer-zero/type-text.py` types it for you,
+into whatever app has the screen:
+
+```bash
+python scripts/cardputer-zero/type-text.py --host pi@cardputer.local
+```
+
+Paste the text when it asks, and press Enter. Your typing stays hidden, and the text goes
+to the Cardputer over SSH, so it never shows on either screen. Open the field you want it
+in on the Cardputer first, and leave its keyboard alone until the tool says it's done.
+
 ## Trying it in the emulator
 
 The emulator opens a window showing the Cardputer Zero's screen, scaled up so it's

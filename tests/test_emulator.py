@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import mmap
+import os
 import threading
 import time
 
@@ -11,7 +13,7 @@ from prompt_toolkit.input.vt100_parser import Vt100Parser
 from prompt_toolkit.keys import Keys
 
 from meshterm.emulator.font import CELL_H, MARKS, MISSING, build_font, load_bdf
-from meshterm.emulator.framebuffer import KeyState
+from meshterm.emulator.framebuffer import Framebuffer, KeyState
 from meshterm.emulator.keys import Key, encode
 from meshterm.emulator.raster import PANEL_H, PANEL_W, Raster, rgb565
 from meshterm.emulator.run import panel_output, run
@@ -218,6 +220,28 @@ def test_the_raster_draws_a_cell_in_its_colours() -> None:
     assert pixel(0, 2) == rgb565((0, 0, 255))  # paper beside it
     term.feed("\x1b[14;1Hz")
     assert raster.update() == [(raster.top + 13 * 12, raster.top + 14 * 12)]
+
+
+@pytest.mark.skipif(not hasattr(mmap, "MAP_SHARED"), reason="the panel is Linux's")
+def test_the_panel_is_written_through_its_mapping(tmp_path) -> None:
+    """Rows land at their stride through the map: the panel redraws only what the map dirties.
+
+    A ``pwrite`` to the Cardputer's ``/dev/fb0`` reaches the buffer and never the glass, so
+    MeshTerm ran behind the launcher's loading screen. A plain file stands in for the
+    device; what is pinned is that the bytes go through the mapping, in the right place.
+    """
+    path = tmp_path / "fb0"
+    path.write_bytes(bytes(8 * 4))
+    fb = Framebuffer(str(path), width=4, height=4)  # no sysfs here: stride is width * 2
+    write = os.pwrite
+    try:
+        os.pwrite = lambda *a: pytest.fail("the panel must not be written with pwrite")  # type: ignore[assignment]
+        image = bytes(range(32))
+        fb.write(image, 8, 1, 3)
+    finally:
+        os.pwrite = write  # type: ignore[assignment]
+        fb.close()
+    assert path.read_bytes() == bytes(8) + image[8:24] + bytes(8)
 
 
 # --- a whole run ----------------------------------------------------------------------

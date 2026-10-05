@@ -10,8 +10,10 @@ app reads key events itself, while the launcher watches the same stream for a he
 **Written ahead of the hardware** (2026-09-30), from M5's published sources: the
 framebuffer and keyboard paths and the Esc policy from the launcher, the key codes from the
 keyboard driver's keymaps, and the Sym layer's characters from M5's console keymap
-(``tca8418_keypad_m5stack_keymap.map``). The mapping is unit-tested; the I/O waits for a
-device to run on.
+(``tca8418_keypad_m5stack_keymap.map``). The mapping is unit-tested. **Run on the device
+since 2026-10-05**, where the key codes and the Sym layer checked out against the keyboard
+and M5's installed keymap, and the panel turned out to need its pixels written through a
+mapping (:class:`Framebuffer`).
 
 The keyboard driver does the Fn layer in the kernel, so Fn+4 arrives as a plain ``KEY_F4``
 and the arrows as real arrow keys; Shift is a real ``KEY_LEFTSHIFT`` held down for as long
@@ -22,6 +24,7 @@ gives them the same ones, and is the only place that knows.
 
 from __future__ import annotations
 
+import mmap
 import os
 import signal
 import struct
@@ -127,16 +130,33 @@ class KeyState:
 
 
 class Framebuffer:
-    """The panel's framebuffer, written a band of pixel rows at a time."""
+    """The panel's framebuffer, written a band of pixel rows at a time through a mapping.
+
+    **Through a mapping, never ``write()``.** The panel is a DRM driver (``panel-mipi-dbi``)
+    whose ``/dev/fb0`` is the kernel's fbdev emulation: a buffer the kernel copies to the
+    panel only where it knows something changed, and what it watches is the *mapping* —
+    a write through it faults the page, and the page goes on the next refresh. Bytes sent
+    with ``pwrite`` land in the same buffer, where reading ``/dev/fb0`` back shows them, and
+    never reach the glass: on the device MeshTerm ran with the launcher's loading screen
+    still showing over it, and the reader quit a splash they couldn't see. M5's own apps
+    draw through the mapping too (LVGL's ``lv_linux_fbdev``). Found on the hardware,
+    2026-10-05.
+    """
 
     def __init__(self, path: str, *, width: int, height: int) -> None:
-        """Open the framebuffer at ``path`` for a ``width`` × ``height`` panel."""
+        """Open and map the framebuffer at ``path`` for a ``width`` × ``height`` panel."""
         self.path = path
         self._fd = os.open(path, os.O_RDWR)
         stride = self._sysfs("stride")
         self.stride = int(stride) if stride else width * 2
         self.width = width
         self.height = height
+        self._map = mmap.mmap(
+            self._fd,
+            self.stride * height,
+            mmap.MAP_SHARED,  # type: ignore[attr-defined]  # Linux only, as the panel is
+            mmap.PROT_READ | mmap.PROT_WRITE,  # type: ignore[attr-defined]
+        )
 
     def _sysfs(self, name: str) -> str | None:
         node = Path("/sys/class/graphics") / Path(self.path).name / name
@@ -149,10 +169,12 @@ class Framebuffer:
         """Write pixel rows ``first`` to ``last`` (exclusive) of a ``row_bytes``-wide image."""
         view = memoryview(pixels)
         for y in range(first, min(last, self.height)):
-            os.pwrite(self._fd, view[y * row_bytes : (y + 1) * row_bytes], y * self.stride)
+            start = y * self.stride
+            self._map[start : start + row_bytes] = view[y * row_bytes : (y + 1) * row_bytes]
 
     def close(self) -> None:
-        """Close the framebuffer."""
+        """Unmap and close the framebuffer."""
+        self._map.close()
         os.close(self._fd)
 
 
