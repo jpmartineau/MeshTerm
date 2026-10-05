@@ -65,8 +65,8 @@ route or the stored history and labelled with that provenance — else the most 
 stored trace), the run's robust aggregates, the wire spec that route amounts to, the
 action list, then the results — per-hop median SNR with quality bars and the
 individual traces newest-first — on the same page: ↑/↓ belong to the action cursor and
-edge-scroll on into the results past the last action, and PgUp/PgDn/Home/End page the
-whole screen.
+edge-scroll on into the results past the last action, PgUp/PgDn/Home/End page the
+whole screen, and ←/→ slide a hop's path where it runs past the edge.
 
 Both path lanes draw through THE path widget (:mod:`~meshterm.ui.pathline`) and break
 at hop boundaries under their own value column: a route folds between nodes — never
@@ -90,18 +90,26 @@ from typing import TYPE_CHECKING, Any
 
 from rich.cells import cell_len
 from rich.console import Group, RenderableType
-from rich.table import Table
 from rich.text import Text
 
-from ..core.models import PATH_TRACE_TARGET, TraceResult, TraceStats
+from ..core.models import PATH_TRACE_TARGET, HopAggregate, TraceResult, TraceStats
 from ..services import trace_runner
 from ..services.records import first_repeated_edge
 from ..services.topology import render_forced_spec
 from .braillechart import meter
 from .menus import icon_lane, icon_mark, marked_label, section_heading
-from .pathline import PathHop, PathLine, cut_to, hops_atom, path_line
+from .pathline import (
+    ELIDE_HEAD,
+    ELIDE_TAIL,
+    PathHop,
+    PathLine,
+    cut_mark,
+    cut_to,
+    hops_atom,
+    path_line,
+)
 from .theme import snr_style
-from .tui.render import render_lines, render_to_ansi
+from .tui.render import crop_cells, render_lines, render_to_ansi
 from .tui.screen import Screen
 from .tui.spinner import Spinner, spinner_interval
 from .widgets import NodeResolver, highlighted_hash, link_text, route_path
@@ -118,6 +126,10 @@ _BAR_WIDTH = 8
 #: outside clamp to the ends, so the bar always shows *something* for a heard hop.
 _BAR_SNR_MIN = -15.0
 _BAR_SNR_MAX = 10.0
+
+#: Cells one ←/→ press slides the per-hop paths by — the step every other sliding path
+#: row in the app takes (the select list's ``hscroll``, the node page's routes).
+_HSCROLL_STEP = 8
 
 #: The sample counts the Sample count dialog offers: how many traces one Trace action
 #: runs, paced between transmissions.
@@ -204,6 +216,27 @@ def _lane_lines(label: str, value: list[Text], width: int) -> list[str]:
         row.append_text(line)
         lines.append(render_to_ansi(row, width, no_wrap=True))
     return lines
+
+
+def _slid(line: Text, shift: int, width: int) -> Text:
+    """``line`` seen through a ``width``-cell window slid ``shift`` cells in.
+
+    Each edge the line continues past wears :func:`~meshterm.ui.pathline.cut_mark` — a
+    chip broken off in its own fill, an arrow line's ``…`` — and the marks are chrome
+    inside the window, so each costs it a cell. The same window the select list's
+    ``hscroll`` rows and the node page's routes slide through.
+    """
+    left = 1 if shift else 0
+    inner = max(1, width - left)
+    right = 1 if shift + inner < line.cell_len else 0
+    window = max(1, inner - right)
+    out = Text(no_wrap=True)
+    if left:
+        out.append_text(cut_mark(line, shift, ELIDE_HEAD))
+    out.append_text(crop_cells(line, shift, window))
+    if right:
+        out.append_text(cut_mark(line, shift + window - 1, ELIDE_TAIL))
+    return out
 
 
 def _note(text: str, indent: int, *, style: str = "faint") -> Text:
@@ -499,6 +532,11 @@ class TraceScreen(Screen):
         self._actions: tuple[str, ...] = tuple(actions)
         self._index = self._actions.index("trace")
         self._pin_cursor = False  # only pin the view while ↑/↓ are actually in use
+        #: How far ←→ have slid the per-hop paths (cells), and how far they may: the
+        #: widest path's tail, as the last paint measured it — 0 while every row's whole
+        #: path is in view, which is also what keeps ``←→ scroll`` out of the footer.
+        self._hshift = 0
+        self._hop_pan = 0
 
     # --- state -----------------------------------------------------------------
 
@@ -510,7 +548,8 @@ class TraceScreen(Screen):
                 done, total = self._progress
                 return f"tracing {done}/{total}… · PgUp/PgDn scroll · Esc back"
             return "tracing… · PgUp/PgDn scroll · Esc back"
-        return "↑↓ actions · Enter run · PgUp/PgDn scroll · Esc back"
+        slide = " · ←→ scroll" if self._hop_pan else ""
+        return f"↑↓ actions{slide} · Enter run · PgUp/PgDn scroll · Esc back"
 
     def start_trace(self) -> None:
         """Kick off a trace run in the background (no-op while one is already flying)."""
@@ -670,9 +709,17 @@ class TraceScreen(Screen):
 
         ↑/↓ belong to the action cursor, and past the last action edge scroll carries
         them on down the results; PgUp/PgDn/Home/End page the whole screen, the
-        cursor left where it was until an arrow brings it back.
+        cursor left where it was until an arrow brings it back. ←→ slide the per-hop
+        paths that run past the edge (see :meth:`_hop_lines`).
         """
-        if action == "enter":
+        if action in ("left", "right"):
+            # The paths are not the highlight: sliding them must not hand the page back
+            # to the action cursor, or reading a hop edge-scrolled into view would yank
+            # the page up to the actions under it. Clamped to the paths' tail at render.
+            self._pin_cursor = False
+            step = _HSCROLL_STEP if action == "right" else -_HSCROLL_STEP
+            self._hshift = max(0, min(self._hop_pan, self._hshift + step))
+        elif action == "enter":
             self._commit_action()
         elif action == "up":
             # Both ends clamp rather than wrap — the app-wide rule for a row cursor:
@@ -854,20 +901,24 @@ class TraceScreen(Screen):
         trace, and between completions nothing in it moves. A *running* trace skips
         the memo outright: its log row carries the live spinner glyph.
         """
-        key = (self._traces_rev, self._status, width)
+        key = (self._traces_rev, self._status, width, self._hshift)
         if not self._running and self._tail_memo is not None and self._tail_memo[0] == key:
             return self._tail_memo[1]
-        tail: list[RenderableType] = []
+        lines: list[str] = []
         if stats.hop_snrs:
             hash_bytes = current.path_hash_bytes if current is not None else None
-            tail += [Text(), Text("Per-hop medians", style="accent")]
-            tail.append(self._hops_table(stats, hash_bytes))
+            lines += render_lines(Group(Text(), Text("Per-hop medians", style="accent")), width)
+            lines += self._hop_lines(stats, hash_bytes, width)
+        else:
+            self._hop_pan = self._hshift = 0
         if self._running or self._status or self._traces:
-            tail += [Text(), Text("Traces", style="accent")]
-            tail.append(self._trace_log())
-        lines = render_lines(Group(*tail), width) if tail else []
+            lines += render_lines(
+                Group(Text(), Text("Traces", style="accent"), self._trace_log()), width
+            )
         if not self._running:
-            self._tail_memo = (key, lines)
+            # Keyed on the shift the rows were actually drawn at, which _hop_lines may
+            # have clamped in — so the next paint finds it.
+            self._tail_memo = ((self._traces_rev, self._status, width, self._hshift), lines)
         return lines
 
     def cursor_line(self) -> int | None:
@@ -1146,28 +1197,82 @@ class TraceScreen(Screen):
                 lines.append(_note(count, indent, style="muted"))
         return lines
 
-    def _hops_table(self, stats: TraceStats, hash_bytes: int | None) -> Table:
-        """The per-hop median SNRs with quality bars, in path order."""
-        table = Table(box=None, padding=(0, 1, 0, 0), expand=False, show_header=False)
-        table.add_column(justify="right", style="muted")  # hop index
-        table.add_column()  # link
-        table.add_column(justify="right")  # median snr
-        table.add_column()  # bar
-        for agg in stats.hop_snrs:
-            table.add_row(
-                str(agg.index),
-                link_text(
-                    agg.origin,
-                    agg.destination,
-                    self._device_label,
-                    self._resolve,
-                    hash_bytes,
-                    self._device_hash,
-                ),
-                Text(f"{agg.median_snr:+.1f} dB", style=snr_style(agg.median_snr)),
-                snr_bar(agg.median_snr),
-            )
-        return table
+    def _hop_lines(self, stats: TraceStats, hash_bytes: int | None, width: int) -> list[str]:
+        """The per-hop median SNRs with quality bars, in path order.
+
+        Each hop reads ``n  origin → destination  +4.5 dB  meter``, the link drawn through
+        THE path widget as the route lane above draws it: names, no hash after them (an
+        unnamed node shows its hash, the only identity it has), our own end the bare
+        ``★``. Where every row fits whole the hops are a four-column table, one line each.
+        Where any doesn't, every row takes two — all alike, so the column of readings
+        never jumps between lines as the eye runs down it: the hop number and its path on
+        the first, the reading and its meter flush right on the second. A path still
+        wider than its lane is cut on its own crack and slides under ←→ (:attr:`_hshift`,
+        shared by every row, each stopping at its own tail), the hop number pinned.
+
+        Measures how far ←→ may slide (:attr:`_hop_pan`) and clamps the shift to it, so
+        the rows are drawn at the shift the footer and the next press agree on.
+        """
+        numbers = [Text(str(agg.index), style="muted") for agg in stats.hop_snrs]
+        paths = [self._hop_path(agg, hash_bytes) for agg in stats.hop_snrs]
+        readings = [
+            Text(f"{agg.median_snr:+.1f} dB", style=snr_style(agg.median_snr))
+            for agg in stats.hop_snrs
+        ]
+        number_w = max(n.cell_len for n in numbers)
+        path_w = max(p.cell_len for p in paths)
+        reading_w = max(r.cell_len for r in readings)
+        lines: list[str] = []
+        if number_w + 1 + path_w + 1 + reading_w + 1 + _BAR_WIDTH <= width:
+            self._hop_pan = self._hshift = 0
+            for number, path, reading, agg in zip(
+                numbers, paths, readings, stats.hop_snrs, strict=True
+            ):
+                row = Text(" " * (number_w - number.cell_len))
+                row.append_text(number)
+                row.append(" ")
+                row.append_text(path)
+                row.append(" " * (path_w - path.cell_len + 1 + reading_w - reading.cell_len))
+                row.append_text(reading)
+                row.append(" ")
+                row.append_text(snr_bar(agg.median_snr))
+                lines.append(render_to_ansi(row, width, no_wrap=True))
+            return lines
+        lane = max(1, width - number_w - 1)
+        # A slid line gives a cell up to its left mark, so a path's tail is in view at
+        # ``cells - (lane - 1)`` — the exact stop, as a panning table takes it.
+        tails = [p.cell_len - (lane - 1) if p.cell_len > lane else 0 for p in paths]
+        self._hop_pan = max(tails)
+        self._hshift = min(self._hshift, self._hop_pan)
+        for number, path, reading, tail, agg in zip(
+            numbers, paths, readings, tails, stats.hop_snrs, strict=True
+        ):
+            first = Text(" " * (number_w - number.cell_len))
+            first.append_text(number)
+            first.append(" ")
+            first.append_text(_slid(path, min(self._hshift, tail), lane))
+            lines.append(render_to_ansi(first, width, no_wrap=True))
+            second = Text(" " * max(0, width - reading.cell_len - 1 - _BAR_WIDTH))
+            second.append_text(reading)
+            second.append(" ")
+            second.append_text(snr_bar(agg.median_snr))
+            lines.append(render_to_ansi(second, width, no_wrap=True))
+        return lines
+
+    def _hop_path(self, agg: HopAggregate, hash_bytes: int | None) -> Text:
+        """One hop's link, ``origin → destination``, as the route lane draws its nodes."""
+        ends = [
+            None if not node or node == self._device_label else node
+            for node in (agg.origin, agg.destination)
+        ]
+        return path_line(
+            ends,
+            self._resolve,
+            prefix_bytes=hash_bytes or 8,
+            self_name=self._device_label,
+            hash_bytes=hash_bytes,
+            bare_self=True,
+        ).text()
 
     def _trace_log(self) -> RenderableType:
         """The individual traces, newest first, with the in-flight spinner on top."""

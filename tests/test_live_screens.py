@@ -360,6 +360,73 @@ async def test_trace_results_are_page_that_edge_scroll_reaches() -> None:
     assert any("❯" in line and "Trace" in line for line in view())
 
 
+def _hop_rows_screen() -> TraceScreen:
+    """A trace screen holding one walk out over two named relays and home."""
+    names = {"3d63": "Lakeside", "f2c2": "Mont-Royal Summit Relay"}
+    screen, _ = _trace_screen()
+    screen._resolve = lambda hop: names.get(hop, hop)
+    screen._on_trace(
+        TraceResult(
+            target="Alice",
+            success=True,
+            hops=[Hop(0, "3d63", 5.0), Hop(1, "f2c2", -3.5), Hop(2, None, 1.0)],
+            round_trip_ms=200.0,
+            path_hash_bytes=2,
+        )
+    )
+    return screen
+
+
+def _hop_rows(screen: TraceScreen, width: int) -> list[str]:
+    """The per-hop medians' rows as drawn, heading and the trace log left off."""
+    lines = [_plain([line]) for line in screen.render_body(width)]
+    start = next(i for i, line in enumerate(lines) if line.strip() == "Per-hop medians") + 1
+    end = next(i for i, line in enumerate(lines) if line.strip() == "Traces") - 1
+    return lines[start:end]
+
+
+def test_hop_rows_name_their_link_on_one_line_where_it_fits() -> None:
+    """Each hop is ``n  origin → destination  reading  meter`` — names, never a hash."""
+    rows = _hop_rows(_hop_rows_screen(), 100)
+    assert len(rows) == 3  # one line a hop
+    assert rows[1].startswith("1 Lakeside → Mont-Royal Summit Relay")
+    assert "-3.5 dB" in rows[1] and _BAR_FULL in rows[1]
+    assert rows[0].startswith("0 ★ → Lakeside")  # our end is the bare star
+    assert not any("(3d" in row or "(f2" in row for row in rows)
+    # A four-column table: every reading ends in the same column.
+    assert len({row.index(" dB") for row in rows}) == 1
+
+
+def test_hop_rows_fold_under_their_path_and_slide_where_it_does_not() -> None:
+    """Too narrow for a row, every hop takes two lines; ←→ slide the paths alone.
+
+    The reading and its meter sit flush right on the line under the path, and the path
+    that runs past the edge cracks there and slides — the hop number pinned, the path
+    that already fits staying put.
+    """
+    screen = _hop_rows_screen()
+    rows = _hop_rows(screen, 30)
+    assert len(rows) == 6  # two lines a hop, all alike
+    assert rows[2].startswith("1 Lakeside → Mont-Royal Su")
+    assert rows[2].rstrip().endswith("…")  # cut where it runs on
+    assert "-3.5 dB" in rows[3] and cell_len(rows[3].rstrip()) == 30  # flush right
+    assert "←→ scroll" in screen.footer_hint
+
+    screen.handle("down")  # the action cursor pins the page…
+    screen.handle("right")
+    assert screen.cursor_line() is None  # …and sliding the paths lets it go again
+    rows = _hop_rows(screen, 30)
+    assert rows[2].startswith("1 …") and rows[2].rstrip().endswith("Summit Relay")
+    assert rows[0].startswith("0 ★ → Lakeside")  # a path in view whole never moves
+    screen.handle("right")  # already at the tail: clamped
+    assert _hop_rows(screen, 30)[2] == rows[2]
+    screen.handle("left")
+    assert _hop_rows(screen, 30)[2].startswith("1 Lakeside")
+
+    _hop_rows(screen, 100)  # wide enough again: nothing to slide, nothing advertised
+    assert "←→ scroll" not in screen.footer_hint
+
+
 async def test_trace_screen_seeds_route_from_previous_trace() -> None:
     """Before any fresh reply, the stored route shows, marked as previous."""
     old = _trace(4.0)
