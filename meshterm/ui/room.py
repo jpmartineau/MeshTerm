@@ -15,12 +15,13 @@ Three things set it apart, each the room's own:
   key, and under the bare hash — in the unidentified-node grey — when nothing does. Either
   way its colour is the key's, never a guess from the name.
 * **Getting in is a login.** The title carries what the room let us do (``member``,
-  ``admin``, ``read-only``) or where the login stands. Opening a room logs in to it only
-  when it has been quiet (:meth:`~meshterm.services.rooms.RoomService.login_due`), asks for
-  the room's password the first time, and ^L logs in again on demand. The login runs while
-  the board stays open to read, since a room several hops out can take a while to answer.
-* **Read-only means silent.** A room drops a read-only member's posts without a word, so
-  the compose line says so instead of taking typing that would go nowhere.
+  ``admin``, ``read-only``) or where the login stands. Joining is the Rooms page's
+  (:mod:`meshterm.ui.rooms`); here, opening a joined room logs in to it again only when it
+  has been quiet (:meth:`~meshterm.services.rooms.RoomService.login_due`), quietly and with
+  the board open to read, and ^L runs the explained login on demand.
+* **Posting waits for the room.** A room drops a post from anyone it doesn't know — or
+  knows read-only — without a word, so the compose line opens only once we are in and may
+  post, and until then says why not and what to press.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ from rich.text import Text
 from ..core.events import EventKind, MeshEvent
 from ..core.models import (
     ChatMessage,
+    Contact,
     Conversation,
     LoginResult,
     NodeResolver,
@@ -51,8 +53,10 @@ LOGGING_IN = "logging in…"
 NO_REPLY = "no reply"
 #: The title's login atom after the companion refused the login outright.
 REFUSED = "refused"
-#: The title's atom for a room we hold no password for, the join prompt dismissed.
+#: The title's atom for a board opened on a room not joined.
 NOT_JOINED = "not joined"
+#: The title's login atom after a login failed outright (the link, the radio).
+FAILED = "login failed"
 
 
 def author_label(author: str, resolve: NodeResolver) -> tuple[str, str | None]:
@@ -119,9 +123,9 @@ class RoomScreen(ChatScreen):
         names: dict[str, str],
         session,  # noqa: ANN001 - TuiSession, imported lazily to avoid a cycle
         resolve: NodeResolver,
-        password: Callable[[], str | None],
-        ask: Callable[[], Awaitable[str | None]],
-        log_in: Callable[[str], Awaitable[RoomLogin]],
+        auto_login: Callable[[], Awaitable[RoomLogin | None]],
+        join: Callable[[bool], Awaitable[RoomLogin | None]],
+        joined: bool = True,
         access: RoomAccess | None = None,
         resend: Callable[[ChatMessage], Awaitable[ChatMessage]] | None = None,
         paths: Callable[[ChatMessage], Awaitable[None]] | None = None,
@@ -137,10 +141,13 @@ class RoomScreen(ChatScreen):
             names: Contact key prefix → name (what the chat screen labels a peer with).
             session: The running :class:`~meshterm.ui.tui.session.TuiSession`.
             resolve: Maps an author's key prefix to a name (see :func:`author_label`).
-            password: The password at hand for this room, or ``None`` when none is
-                remembered (``""`` is a password: an open room).
-            ask: Asks the reader for the room's password; ``None`` when they decline.
-            log_in: Logs in with a password — one exchange — and says how it ended.
+            auto_login: Logs in quietly with the remembered password — what opening a quiet
+                room does; ``None`` when there is none to log in with.
+            join: The explained login flow (:func:`~meshterm.ui.rooms.join_room`), its
+                dialogs floating over the board; called with whether to ask for the password
+                even when one is remembered. ``None`` when the reader backed out.
+            joined: Whether the room has been joined. A board opened on one that hasn't
+                (its stored posts, read from the Rooms page) takes no posts.
             access: What the room let us do when we last logged in, if we ever did.
             resend: Posts an unacknowledged post again (^R).
             paths: Presents the paths a picked post took (^P).
@@ -158,74 +165,82 @@ class RoomScreen(ChatScreen):
         )
         self._label = conversation.label
         self._resolve = resolve
-        self._password = password
-        self._ask = ask
-        self._log_in = log_in
+        self._auto_login = auto_login
+        self._join = join
         self._access = access
         #: Where the login stands, when that is what the title should say instead of the
         #: access (one of the module's atoms); ``None`` lets the access speak.
-        self._login_state: str | None = None
+        self._login_state: str | None = None if joined else NOT_JOINED
         self._login_open = False
         self._apply_access()
 
     # --- the login ----------------------------------------------------------------------
 
     def begin_login(self, *, ask: bool = False) -> None:
-        """Log in to the room, off the key handler; one login at a time.
+        """^L: the explained login flow, its prompt and its outcome floating over the board.
 
         Args:
-            ask: Ask for the password even when one is remembered — what ^L does after a
-                login met silence, since a room is just as silent for a wrong password.
+            ask: Ask for the password even when one is remembered — what a read-only member
+                needs, the remembered one having earned no more than that.
         """
         if self._login_open:
             return
         self._login_open = True
-        self._session.run_detached(self._run_login(ask))
+        self._session.run_detached(self._settle(self._join(ask)))
 
-    async def _run_login(self, ask: bool) -> None:
-        """Find a password (asking if need be), log in with it, and show how it went."""
+    def begin_auto_login(self) -> None:
+        """Opening a quiet room: log in with what is remembered, the board open meanwhile.
+
+        No dialogs — the reader asked for the board, not for a login — so the title says
+        ``logging in…`` while it runs, and the compose line waits for the answer: a room
+        that has forgotten us drops whatever we post, so posting opens only once it has let
+        us in. Silence shows in the same two places, and ^L is the explained retry.
+        """
+        if self._login_open:
+            return
+        self._login_open = True
+        self._login_state = LOGGING_IN
+        self._apply_access()
+        self._session.run_detached(self._settle(self._auto_login()))
+
+    async def _settle(self, attempt: Awaitable[RoomLogin | None]) -> None:
+        """Await one login attempt, and show how it ended."""
         try:
-            password = None if ask else self._password()
-            if password is None:
-                password = await self._ask()
-                if password is None:  # declined: the board stays open to read
-                    if self._access is None and self._password() is None:
-                        self._login_state = NOT_JOINED
-                    return
-            self._login_state = LOGGING_IN
-            self._status = ""
-            self._retitle()
-            try:
-                login = await self._log_in(password)
-            except Exception as exc:  # noqa: BLE001 - report inline, keep the board open
-                self._login_state = None
-                self._status = f"login failed: {exc}"
-                return
-            self._apply_login(login)
+            login = await attempt
+        except Exception as exc:  # noqa: BLE001 - shown on the board, which stays open
+            self._login_state = FAILED
+            self._status = f"login failed: {exc}"
+        else:
+            if login is not None:
+                self._apply_login(login)
+            elif self._login_state == LOGGING_IN:
+                self._login_state = None  # nothing to log in with after all
         finally:
             self._login_open = False
-            self._retitle()
+            self._apply_access()
             self._session.invalidate()
 
     def _apply_login(self, login: RoomLogin) -> None:
         """Take in a login's outcome: the access it won, or why there is none."""
+        self._status = ""
         if login.access is not None and login.result is LoginResult.ACCEPTED:
             self._access = login.access
             self._login_state = None
-            self._status = ""
         elif login.result is LoginResult.REFUSED:
             self._login_state = REFUSED
-            self._status = "The radio refused the login. ^L to enter the password again."
         else:
-            # The one failure a room has: silence. It is also how it answers a wrong
-            # password, so the line names both and ^L asks for the password next time.
             self._login_state = NO_REPLY
-            self._status = "No reply — out of reach, or a wrong password. ^L to try again."
-        self._apply_access()
 
     def _apply_access(self) -> None:
-        """Let the compose line take typing only where the room keeps what we post."""
-        self._composing = self._access is None or self._access.can_post
+        """Open the compose line only while we are in, and the room keeps what we post.
+
+        Not while a login is on its way or has met silence: a room that has forgotten us —
+        it restarted, or gave up on us — drops a post without a word, and a compose line
+        that took one anyway was the one thing the board said that wasn't so.
+        """
+        self._composing = (
+            self._login_state is None and self._access is not None and self._access.can_post
+        )
         self._retitle()
 
     def _retitle(self) -> None:
@@ -268,10 +283,24 @@ class RoomScreen(ChatScreen):
         return super()._header_key(sender, message)
 
     def _compose_line(self, width: int) -> RenderableType:
-        """The compose line — or, for a read-only member, why there is none."""
+        """The compose line — or, while there can be none, why not and what to press."""
         if self._composing:
             return super()._compose_line(width)
-        return Text("read-only — this room doesn't keep what you post", style="muted")
+        # Each inside the handhelds' 53 columns, so the reason is one line everywhere.
+        why = {
+            LOGGING_IN: "logging in… posting opens once the room lets you in",
+            NO_REPLY: "not logged in: no answer from the room · ^L to retry",
+            REFUSED: "not logged in: the login was refused · ^L to retry",
+            FAILED: "not logged in · ^L to try again",
+            NOT_JOINED: "not joined · ^L to join",
+        }.get(self._login_state or "")
+        if why is None:
+            why = (
+                "read-only — the room drops your posts · ^L to log in"
+                if self._access is RoomAccess.READ_ONLY
+                else "not logged in · ^L to log in"
+            )
+        return Text(why, style="muted")
 
     def _submit(self) -> None:
         """Post the compose line, unless the room is known to drop our posts."""
@@ -281,14 +310,9 @@ class RoomScreen(ChatScreen):
     def handle(self, action: str, data: str = "") -> None:
         """^L logs in; everything else is the chat's."""
         if action == "login":
-            # Asked for, rather than sent with what is remembered, wherever that would only
-            # repeat the outcome on screen: after silence (a room's answer to a wrong
-            # password too), and when all we are is read-only — the room password is what
-            # lets a reader post.
-            ask = self._login_state in (NO_REPLY, REFUSED, NOT_JOINED) or (
-                self._access is RoomAccess.READ_ONLY
-            )
-            self.begin_login(ask=ask)
+            # A read-only member's remembered password has earned all it can, so ^L asks
+            # for another; everyone else's is tried first, the flow asking only if it fails.
+            self.begin_login(ask=self._access is RoomAccess.READ_ONLY)
             self._session.invalidate()
             return
         super().handle(action, data)
@@ -318,11 +342,12 @@ class RoomScreen(ChatScreen):
 async def open_room(ctx: AppContext, conversation: Conversation) -> int:
     """Open the room view for ``conversation`` and run it until the reader leaves.
 
-    The board opens at once on what is stored. A room with no password remembered asks for
-    one over it (the first visit — joining); one that has been quiet logs in with the
-    password it has, which restarts the room's catch-up; one heard from lately sends
-    nothing at all. Posts that arrive while it is open append live, and the room's unread
-    count stays clear while the reader is on it.
+    The board opens at once on what is stored. A joined room that has been quiet logs in
+    with the password remembered for it — in the background, the board readable meanwhile —
+    which restarts the room's catch-up; one heard from lately sends nothing at all. Joining
+    is the Rooms page's (:mod:`meshterm.ui.rooms`), so a room not joined opens read-only on
+    its stored posts, and ^L joins it. Posts that arrive while the board is open append
+    live, and the room's unread count stays clear while the reader is on it.
 
     Args:
         ctx: The shared application context (running the interactive TUI surface).
@@ -332,6 +357,7 @@ async def open_room(ctx: AppContext, conversation: Conversation) -> int:
         The number of posts on the board when the view closed.
     """
     from ..services import trace_runner
+    from .rooms import join_room
 
     session = ctx.ui.session
     room = conversation.contact
@@ -357,15 +383,18 @@ async def open_room(ctx: AppContext, conversation: Conversation) -> int:
     async def resend(message: ChatMessage) -> ChatMessage:
         return await _with_restore(ctx, lambda: ctx.chat.resend_post(room, message))
 
-    async def ask() -> str | None:
-        joined = ctx.rooms.joined(room)
-        return await session.text(
-            f"Log in to {room.name}" if joined else f"Join {room.name}",
-            prompt="Room password (blank if the room already knows you):",
-            help_text="Ask whoever runs the room. One left on its stock settings uses hello.",
-            password=True,
-            floating=True,
-        )
+    async def fresh() -> Contact:
+        """The room as the contact cache holds it now: its route and heard time move."""
+        held = await ctx.devstate.contacts()
+        key = room.public_key or room.key_prefix
+        return next((c for c in held if (c.public_key or c.key_prefix) == key), room)
+
+    async def auto_login() -> RoomLogin | None:
+        password = ctx.rooms.password(room)
+        return None if password is None else await ctx.rooms.login(room, password)
+
+    async def join(ask: bool) -> RoomLogin | None:
+        return await join_room(ctx, await fresh(), ask=ask)
 
     screen = RoomScreen(
         conversation,
@@ -374,9 +403,9 @@ async def open_room(ctx: AppContext, conversation: Conversation) -> int:
         names=_contact_names(contacts),
         session=session,
         resolve=trace_runner.make_node_resolver(contacts, stored_names),
-        password=lambda: ctx.rooms.password(room),
-        ask=ask,
-        log_in=lambda password: ctx.rooms.login(room, password),
+        auto_login=auto_login,
+        join=join,
+        joined=ctx.rooms.joined(room),
         access=ctx.rooms.access(room),
         resend=resend,
         paths=await _make_paths_presenter(ctx, conversation, device),
@@ -391,13 +420,11 @@ async def open_room(ctx: AppContext, conversation: Conversation) -> int:
 
     unsubscribe = ctx.events.subscribe(on_event, EventKind.MESSAGE)
     try:
-        # Kept pushed for the visit (one round of it) so the join prompt can float over the
+        # Kept pushed for the visit (one round of it) so a login's dialogs float over the
         # board the moment it is up, rather than over whatever the room was opened from.
         async with session.stay(screen) as visit:
-            if not ctx.rooms.joined(room):
-                screen.begin_login(ask=True)
-            elif ctx.rooms.login_due(room):
-                screen.begin_login()
+            if ctx.rooms.login_due(room):
+                screen.begin_auto_login()
             await visit.result()  # the board resolves only when the reader leaves it
     finally:
         unsubscribe()

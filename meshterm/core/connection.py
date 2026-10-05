@@ -130,6 +130,26 @@ _MESSAGE_GET_TIMEOUT_S = 5.0
 #: a command-line exchange.)
 _TXT_TYPE_SIGNED_PLAIN = 2
 
+
+@dataclass(frozen=True, slots=True)
+class _LoginExchange:
+    """One login exchange as :meth:`MeshCoreDevice._login` saw it.
+
+    Attributes:
+        result: How it ended.
+        payload: The accepting ``LOGIN_SUCCESS`` frame's payload; ``None`` unless accepted.
+        flood: How the radio confirmed sending it — ``True`` by flood, ``False`` along its
+            learned route — or ``None`` when it never confirmed sending it.
+        radio_error: The companion's reason for not sending it, when it never did and said
+            why; ``None`` otherwise.
+    """
+
+    result: LoginResult
+    payload: dict | None
+    flood: bool | None
+    radio_error: str | None = None
+
+
 #: How many uncorrelated frames one :meth:`MeshCoreDevice.admin_login` may quote in its log
 #: line. They are evidence for reading a failure afterwards, not a record to keep, and a busy
 #: mesh can push a great many through the window — a handful names the fault, and the rest
@@ -1196,6 +1216,24 @@ class Device(ABC):
 
         Returns:
             How the login ended, and the access granted when it was accepted.
+        """
+
+    @abstractmethod
+    async def reset_route(self, node: Contact) -> None:
+        """Forget the route the radio learned to ``node``, so its next message floods.
+
+        A route is learned from the path a flood took to arrive, and it goes stale as the
+        mesh changes — a repeater moved, switched off, or out-heard — after which every
+        message sent along it vanishes without a word. Forgetting it is local (nothing is
+        transmitted); the next message to the node floods the whole mesh, and the radio
+        learns a fresh route from the answer. MeshCore's own apps call this *reset path*.
+
+        Args:
+            node: The contact whose route to forget.
+
+        Raises:
+            ContactNotOnDeviceError: If the radio holds no contact for the node.
+            DeviceCommandError: If the radio refused for any other reason.
         """
 
     @abstractmethod
@@ -3093,18 +3131,29 @@ class MeshCoreDevice(Device):
         return pub
 
     async def admin_login(self, node: Contact, password: str) -> LoginResult:  # noqa: D102
-        result, _payload = await self._login(node, password, what="admin login")
-        return result
+        return (await self._login(node, password, what="admin login")).result
 
     async def room_login(self, room: Contact, password: str) -> RoomLogin:  # noqa: D102
-        result, payload = await self._login(room, password, what="room login")
-        if result is not LoginResult.ACCEPTED:
-            return RoomLogin(result)
-        return RoomLogin(result, RoomAccess.from_login(payload or {}))
+        exchange = await self._login(room, password, what="room login")
+        access = None
+        if exchange.result is LoginResult.ACCEPTED:
+            access = RoomAccess.from_login(exchange.payload or {})
+        return RoomLogin(
+            exchange.result, access, flood=exchange.flood, radio_error=exchange.radio_error
+        )
 
-    async def _login(
-        self, node: Contact, password: str, *, what: str
-    ) -> tuple[LoginResult, dict | None]:
+    async def reset_route(self, node: Contact) -> None:  # noqa: D102 - inherited docstring
+        mc = self._require()
+        pub = self._node_pubkey(node)
+        result = await mc.commands.reset_path(pub)
+        if result is None or getattr(result, "is_error", lambda: False)():
+            if error_code(result) == _ERR_NOT_FOUND:
+                raise ContactNotOnDeviceError(node)
+            raise DeviceCommandError(
+                f"couldn't reset the route to {node.name}: {reject_reason(result)}"
+            )
+
+    async def _login(self, node: Contact, password: str, *, what: str) -> _LoginExchange:
         """Run one login exchange with a remote node and report how it ended.
 
         The one login a remote node has, whichever role the password earns:
@@ -3116,8 +3165,8 @@ class MeshCoreDevice(Device):
             what: How the debug log names the exchange.
 
         Returns:
-            The outcome, and the accepting ``LOGIN_SUCCESS`` frame's payload (``None``
-            unless the login was accepted).
+            The outcome, the accepting ``LOGIN_SUCCESS`` frame's payload, and how the radio
+            sent the request (see :class:`_LoginExchange`).
         """
         from meshcore import EventType
 
@@ -3151,7 +3200,22 @@ class MeshCoreDevice(Device):
         # when it gives up early, the node still gets a full budget of its own, sized to the
         # route the way a trace to the same node would be, and counted from the send rather
         # than from the queuing — see the wait below for why that distinction is the fix.
+        #
+        # What ``send_login_sync`` returns is the library's own wait for the *answer* (it
+        # gives the node ``suggested_timeout / 800`` seconds), never whether the request
+        # went out — so the radio's confirmation is heard here, on its own listener. On
+        # hardware it lands within a tenth of a second while the library's wait runs on for
+        # six; this log used to call every such login "unacknowledged" (verified against a
+        # room 2026-10-05, whose acceptance then arrived ten seconds after the send). The
+        # confirmation also says how the radio sent it, a flood or along the route it had
+        # learned — what tells a stale route from a silent node.
         answer: asyncio.Future = loop.create_future()
+        # The radio's confirmation of *this* request: a login's ``expected_ack`` is the first
+        # four bytes of the addressed key (MeshCore's ``pending_login``), which tells it from
+        # the MSG_SENT of any other command in flight.
+        confirm: asyncio.Future = loop.create_future()
+        ours = bytes.fromhex(pub[:8])
+        errors: list[object] = []
         # Frames that landed during the exchange but are not our verdict. Kept only to be
         # logged beside the outcome: a "no reply" with one of these next to it is a
         # different fault from a node that stayed silent, and nothing else would show it.
@@ -3177,14 +3241,21 @@ class MeshCoreDevice(Device):
             # ``send_login_sync`` erases it — it turns its own ERROR into a bare ``None``,
             # indistinguishable from an acknowledgement that was merely slow — so the reason
             # is only recoverable by listening for the frame. Uncorrelated (an ERROR carries
-            # no request id and may belong to another command in flight), so it is evidence
-            # for the log and never a verdict.
+            # no request id and may belong to another command in flight), so it becomes the
+            # reason only when this request was never confirmed sent at all.
             note("companion error:", event)
+            errors.append(event)
+
+        def on_sent(event) -> None:  # noqa: ANN001 - meshcore Event
+            payload = getattr(event, "payload", None) or {}
+            if not confirm.done() and payload.get("expected_ack") == ours:
+                confirm.set_result((loop.time(), payload))
 
         subscriptions = [
             mc.subscribe(EventType.LOGIN_SUCCESS, on_answer),
             mc.subscribe(EventType.LOGIN_FAILED, on_answer),
             mc.subscribe(EventType.ERROR, on_local_error),
+            mc.subscribe(EventType.MSG_SENT, on_sent),
         ]
         # A login is a round trip along the contact's route and back, which is the shape a
         # trace budget already describes; the stored route is one-way, so the wire carries
@@ -3197,17 +3268,18 @@ class MeshCoreDevice(Device):
         started = loop.time()
         try:
             async with self.transmitting():
-                sent = await mc.commands.send_login_sync(pub, password)
-            # The budget times the *node's* answer, so it is spent from the moment the
-            # request is on the air — not from the moment we began queuing it. Everything
-            # before that belongs to the companion, and it can be most of a minute:
-            # ``send_login_sync`` first waits its turn on the library's mesh-request lock,
-            # which every telemetry poll and courier retry holds for a whole round trip, and
-            # then blocks until a MSG_SENT it correlates by event type alone arrives. Timing
-            # the repeater from before all that is what made the last fix a longer way of
-            # failing at the same ten seconds: the wait was widened, then handed a window
-            # some other command had already spent.
-            sent_at = loop.time()
+                library = await mc.commands.send_login_sync(pub, password)
+            # The budget is spent *after* ``send_login_sync`` returns, never from the moment
+            # we began queuing. Everything before that belongs to the companion and the
+            # library, and it can be most of a minute: it waits its turn on the library's
+            # mesh-request lock, which every telemetry poll and courier retry holds for a
+            # whole round trip, then for the radio's confirmation, then — the part this log
+            # long mistook for the send — for the node's answer, ``suggested_timeout / 800``
+            # seconds. So a node gets that library wait *and* the budget: about six seconds
+            # and ten for a flood, which is what a room five hops out needed (its answers
+            # landed ten seconds after the confirmation, on hardware). Timing from the
+            # queuing is what made an earlier fix a longer way of failing at the same ten
+            # seconds: the wait was widened, then handed a window something else had spent.
             if not answer.done():
                 # Shielded: a timeout here must leave the future readable, not cancel it.
                 try:
@@ -3219,37 +3291,52 @@ class MeshCoreDevice(Device):
                 subscription.unsubscribe()
 
         event = answer.result() if answer.done() else None
-        if event is None and getattr(sent, "type", None) is EventType.LOGIN_SUCCESS:
+        if event is None and getattr(library, "type", None) is EventType.LOGIN_SUCCESS:
             # Cannot normally happen — our subscription was registered first, so anything the
             # library's own wait saw, ours saw too. Deferring to it anyway costs nothing and
             # can only ever turn a false no-reply into the acceptance it really was, which is
             # the direction this whole method is trying to fail in.
-            event = sent
+            event = library
         etype = getattr(event, "type", None)
-        # Three numbers, because a no-reply has three different causes and they are told
-        # apart only by where the time went: a send that took seconds means the request sat
-        # behind another command, a send that returned at once with no acknowledgement means
-        # the companion never put it on the air, and a full budget spent after a clean send
-        # means the node really did stay silent.
+        confirmed_at, confirmation = confirm.result() if confirm.done() else (None, {})
+        flood = None if confirmed_at is None else confirmation.get("type") == 1
+        # Where the time went, because a no-reply has three different causes and they are
+        # told apart by it: a confirmation that took seconds means the request sat behind
+        # another command, no confirmation at all means the companion never put it on the
+        # air (and the error it raised, if any, is logged beside it), and a full wait after
+        # a prompt confirmation means the node really did stay silent.
+        answered = loop.time()
         _log.debug(
-            "%s to %s: send %s in %.0fms, budget=%.1fs -> %s after %.0fms%s",
+            "%s to %s: %s, budget=%.1fs -> %s %.0fms after %s%s",
             what,
             node.name,
-            "acknowledged" if sent is not None else "unacknowledged",
-            (sent_at - started) * 1000.0,
+            "never confirmed sent"
+            if confirmed_at is None
+            else f"sent by {'flood' if flood else 'its route'}, confirmed in "
+            f"{(confirmed_at - started) * 1000.0:.0f}ms",
             budget,
             etype,
-            (loop.time() - sent_at) * 1000.0,
+            (answered - (confirmed_at or started)) * 1000.0,
+            "the send" if confirmed_at is not None else "queuing it",
             f" [also heard: {'; '.join(stray)}]" if stray else "",
         )
+        radio_error = None
+        if confirmed_at is None and errors:
+            radio_error = (
+                "this node isn't in the radio's contacts"
+                if error_code(errors[-1]) == _ERR_NOT_FOUND
+                else reject_reason(errors[-1])
+            )
         if etype is EventType.LOGIN_SUCCESS:
-            return LoginResult.ACCEPTED, dict(getattr(event, "payload", None) or {})
+            return _LoginExchange(
+                LoginResult.ACCEPTED, dict(getattr(event, "payload", None) or {}), flood
+            )
         if etype is EventType.LOGIN_FAILED:
-            return LoginResult.REFUSED, None
+            return _LoginExchange(LoginResult.REFUSED, None, flood)
         # Nothing came back — including the local-ERROR case, where the companion would not
         # even send the request. Either way we never heard the node, so the password stands
         # unproven rather than disproven and the caller must keep it.
-        return LoginResult.NO_REPLY, None
+        return _LoginExchange(LoginResult.NO_REPLY, None, flood, radio_error)
 
     @staticmethod
     def _refers_to(event: object, pubkey: str) -> bool:
@@ -4226,6 +4313,10 @@ class MockDevice(Device):
         #: Whoever is subscribed to the event stream right now, so a room can push its posts
         #: to them after a login the way a real room's catch-up arrives — unsolicited.
         self._listeners: list[EventCallback] = []
+        #: Nodes whose learned route has gone stale: a message sent along it meets silence,
+        #: and a flood gets through and learns a fresh one. Empty by default; name a contact
+        #: here to walk the "try by flood" path a stale route leaves a reader on.
+        self._stale_routes: set[str] = set()
         # Remote-admin simulation: which nodes we're "logged in" to, and each tuned
         # node's transmit power keyed by full public key. ``_default_remote_tx`` is the
         # assumed power before the optimizer first writes one.
@@ -4437,8 +4528,21 @@ class MockDevice(Device):
     async def room_login(self, room: Contact, password: str) -> RoomLogin:  # noqa: D102
         await asyncio.sleep(0)
         key = self._mock_key(room)
-        if room.name in self._unreachable:
-            return RoomLogin(LoginResult.NO_REPLY)
+        held = next((c for c in self._contacts if self._mock_key(c) == key), None)
+        if held is None:
+            return RoomLogin(
+                LoginResult.NO_REPLY,
+                flood=None,
+                radio_error="this node isn't in the radio's contacts",
+            )
+        # How the radio sends it: along the route it learned, or by flood once that is gone.
+        flood = held.route_hops is None
+        if room.name in self._unreachable or (room.name in self._stale_routes and not flood):
+            return RoomLogin(LoginResult.NO_REPLY, flood=flood)
+        if flood:
+            # The answer to a flood brings a fresh route back with it, as on hardware.
+            self._stale_routes.discard(room.name)
+            self._set_route(key, self._LEARNED_ROUTE)
         cfg = self._remote_config(room)
         if password == self._admin_password:
             access = RoomAccess.ADMIN
@@ -4450,12 +4554,28 @@ class MockDevice(Device):
             access = RoomAccess.READ_ONLY
         else:
             # A room never says no: a wrong password is met with silence.
-            return RoomLogin(LoginResult.NO_REPLY)
+            return RoomLogin(LoginResult.NO_REPLY, flood=flood)
         self._room_access[key] = access
         if access is RoomAccess.ADMIN:
             self._admin_sessions.add(key)
         self._push_room(room)
-        return RoomLogin(LoginResult.ACCEPTED, access)
+        return RoomLogin(LoginResult.ACCEPTED, access, flood=flood)
+
+    async def reset_route(self, node: Contact) -> None:  # noqa: D102 - inherited docstring
+        await asyncio.sleep(0)
+        key = self._mock_key(node)
+        if not any(self._mock_key(c) == key for c in self._contacts):
+            raise ContactNotOnDeviceError(node)
+        self._set_route(key, None)
+
+    #: The route the simulator "learns" back from a flood's answer: one hop, via Yagi.
+    _LEARNED_ROUTE = ("a1b2c3d4",)
+
+    def _set_route(self, key: str, hops: tuple[str, ...] | None) -> None:
+        """Give the contact under ``key`` a learned route, or forget it (``None``)."""
+        self._contacts = [
+            replace(c, route_hops=hops) if self._mock_key(c) == key else c for c in self._contacts
+        ]
 
     def _push_room(self, room: Contact) -> None:
         """Start a room's catch-up: each post newer than the last one we hold, oldest first.

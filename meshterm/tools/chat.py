@@ -4,9 +4,9 @@
 Interactively it opens a conversation picker and then a live, full-screen chat (see
 :mod:`meshterm.ui.chat`) where sent and received messages stream together — or, for a room
 server, its board (:mod:`meshterm.ui.room`). On the CLI it exposes ``send``, ``history``,
-``list``, ``listen`` and ``join`` subcommands for scripted use; a room is addressed by
-``--to`` like a contact, and ``join`` logs in to one. Channels are only *listed* here for
-picking; creating and editing channel slots lives in the ``channels`` tool.
+``list`` and ``listen`` subcommands for scripted use; a room is addressed by ``--to`` like a
+contact. Channels and rooms are only *listed* here for picking: configuring channel slots is
+the ``channels`` tool's, and joining a room is the ``rooms`` tool's.
 
 Every inbound message is recorded to history by the always-on
 :class:`~meshterm.services.chat_service.ChatService`, and outbound messages are recorded on
@@ -193,10 +193,12 @@ class ChatTool(Tool):
         # (the app-wide DM rule, see is_direct_messageable). Room servers have their own
         # section: somewhere you join and post, not someone you message.
         companions = [c for c in contacts if is_direct_messageable(c.node_type)]
+        # Only rooms we have joined — as only channels on a slot are listed. Joining is the
+        # Rooms page's (see meshterm.ui.rooms).
         rooms = [
             Conversation(label=c.name, is_channel=False, contact=c)
             for c in contacts
-            if is_room(c.node_type)
+            if is_room(c.node_type) and ctx.rooms.joined(c)
         ]
         room_peers = [conv.peer for conv in rooms if conv.peer]
         # A stable snapshot orders the rows (so the list doesn't reshuffle under the
@@ -216,9 +218,6 @@ class ChatTool(Tool):
         direct = [Conversation(label=c.name, is_channel=False, contact=c) for c in companions]
         direct.sort(key=lambda conv: _recency_key(conv, lasts))
         rooms.sort(key=lambda conv: _recency_key(conv, lasts))
-        # Read once per build rather than per repaint: a room is joined from inside it, and
-        # the list is rebuilt when the reader comes back.
-        joined = {conv.key for conv in rooms if ctx.rooms.joined(conv.contact)}
         # One measurement for the whole list, headings and rows alike, taken before either is
         # built: the name lane is only as wide as the names actually in it, and every cell it
         # gives back goes to the message preview (see _lanes).
@@ -245,15 +244,7 @@ class ChatTool(Tool):
         for conversation in rooms:
             items.append(
                 Choice(
-                    title=_row_title(
-                        ctx,
-                        conversation,
-                        live,
-                        key_of,
-                        lanes,
-                        name_of=name_of,
-                        joined=conversation.key in joined,
-                    ),
+                    title=_row_title(ctx, conversation, live, key_of, lanes, name_of=name_of),
                     value=conversation,
                     deletable=lasts.get(conversation.key) is not None,
                     hscroll_from=lanes.head,
@@ -261,8 +252,8 @@ class ChatTool(Tool):
             )
         if not rooms:
             # Said, not left out: "how do I get on a room?" is a question people bring here,
-            # and an empty section answers where one will be.
-            items.append(Separator("  no rooms yet — a room server is listed once it's heard"))
+            # and an empty section answers where to go.
+            items.append(Separator("  no rooms joined — join one on the Rooms page"))
 
         items.append(section_heading("👤 Direct"))
         if companions:
@@ -318,7 +309,7 @@ class ChatTool(Tool):
 
         Args:
             ctx: Shared application context.
-            action: One of ``send``, ``history``, ``listen``, ``join``, ``list``.
+            action: One of ``send``, ``history``, ``listen``, ``list``.
             params: The action's arguments.
 
         Returns:
@@ -326,8 +317,6 @@ class ChatTool(Tool):
         """
         if action == "send":
             return await self._cli_send(ctx, params)
-        if action == "join":
-            return await self._cli_join(ctx, params)
         if action == "history":
             return await self._cli_history(ctx, params)
         if action == "listen":
@@ -350,7 +339,7 @@ class ChatTool(Tool):
 
         ``--to`` a room server posts to it. The room acknowledges a post once it has stored
         it, so ``acked`` reads the same way; a room that no longer knows us (it restarted,
-        or we never joined) drops the post unacknowledged — ``chat join`` first.
+        or we never joined) drops the post unacknowledged — ``rooms join`` first.
         """
         device = await ctx.device()
         text = str(params["text"])
@@ -415,50 +404,6 @@ class ChatTool(Tool):
             summary={"conversation": label, "messages": len(messages)},
             report=(_transcript(messages, room=room, name_of=name_of, me=me),),
             exit_code=exitcodes.OK if messages else exitcodes.NO_RESULT,
-        )
-
-    async def _cli_join(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Log in to a room server — one exchange — and print the access it granted.
-
-        The password is ``--password``, else the one MeshTerm remembers for the room (its
-        room password, then its admin password); one that works is remembered, exactly as
-        the menu's join prompt remembers it. The room then sends every post the companion
-        hasn't seen, one at a time — they wait on the radio for whatever reads it next
-        (``chat listen``, the menu), and ``chat history`` has them from then on.
-
-        A room never says no: a wrong password gets no reply at all, so silence is a
-        failure here (exit 4) that names both of its causes, and keeps whatever password
-        was remembered.
-        """
-        from ..core.connection import DeviceCommandError
-        from ..core.models import LoginResult
-
-        device = await ctx.device()
-        name = str(params["room"])
-        room = _resolve_contact(await device.get_contacts(), name)
-        # Both are the argument being wrong, with nothing yet on the air: usage errors.
-        if not room.is_room:
-            raise typer.BadParameter(f"{room.name!r} is not a room server")
-        password = params.get("password")
-        if password is None:
-            password = ctx.rooms.password(room)
-        if password is None:
-            raise typer.BadParameter(
-                f"no password remembered for {room.name!r}; pass --password "
-                "(an empty one asks the room whether it already knows you)"
-            )
-        login = await ctx.rooms.login(room, str(password))
-        if login.result is LoginResult.REFUSED:
-            raise DeviceCommandError(f"the radio refused the login to {room.name!r}")
-        if login.access is None:
-            raise DeviceCommandError(
-                f"{room.name!r} did not answer the login — it is out of reach, or the "
-                "password is wrong (a room says nothing to a wrong one). Any remembered "
-                "password was kept."
-            )
-        return ToolResult(
-            summary={"room": room.name, "access": login.access.value},
-            report=(_joined(room, login.access.value),),
         )
 
     async def _cli_listen(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
@@ -596,28 +541,6 @@ class ChatTool(Tool):
         @chat_app.command("list", help="List channels, rooms, contacts, and recent messages")
         def _list_cmd() -> None:
             run_tool_command(self, {"cli_action": "list"})
-
-        @chat_app.command("join", help="Log in to a room server, so it sends you its posts")
-        def _join_cmd(
-            room: str = typer.Argument(..., help="The room server's name or key prefix"),
-            password: str | None = typer.Option(
-                None, "--password", help="Room or admin password (else remembered)"
-            ),
-        ) -> None:
-            run_tool_command(self, {"cli_action": "join", "room": room, "password": password})
-
-        @chat_app.command("listen", help="Tail inbound messages live in the console")
-        def _listen_cmd(
-            seconds: int = typer.Option(
-                0, "--seconds", "-s", help="How long to listen (0 = until Ctrl-C)"
-            ),
-            debug: bool = typer.Option(
-                False, "--debug", help="Log the message-pull activity (diagnostic)"
-            ),
-        ) -> None:
-            if debug:
-                _enable_receive_debug()
-            run_tool_command(self, {"cli_action": "listen", "seconds": seconds})
 
         app.add_typer(chat_app, name=self.name)
 
@@ -939,7 +862,6 @@ def _row_title(
     lanes: _Lanes,
     *,
     name_of: NodeResolver | None = None,
-    joined: bool = True,
 ) -> Callable[[], str | Text]:
     """Return a picker-row title *callable* the select screen re-renders on each repaint.
 
@@ -954,12 +876,11 @@ def _row_title(
         key_of: Maps a sender name back to its node's key, for the preview hues.
         lanes: The list's measured lane widths.
         name_of: Maps a room post's author key to a name (rooms only).
-        joined: Whether MeshTerm can log in to the room unasked (rooms only).
 
     Returns:
         A zero-argument callable producing the current row title.
     """
-    return lambda: _title(ctx, conversation, lasts, key_of, lanes, name_of=name_of, joined=joined)
+    return lambda: _title(ctx, conversation, lasts, key_of, lanes, name_of=name_of)
 
 
 def _title(
@@ -970,7 +891,6 @@ def _title(
     lanes: _Lanes,
     *,
     name_of: NodeResolver | None = None,
-    joined: bool = True,
 ) -> str | Text:
     """Build a picker row as fixed-width, colour-coded lanes.
 
@@ -990,10 +910,6 @@ def _title(
         key_of: Maps a preview sender/mention name back to its node's key.
         lanes: The list's measured lane widths.
         name_of: Maps a room post's author key to a name (rooms only).
-        joined: For a room, whether MeshTerm holds a password for it. A room with nothing
-            to preview and no password says ``not joined…`` in the preview lane — opening
-            it asks for the password, so the row ends on the ellipsis a row that opens a
-            prompt carries.
 
     Returns:
         The row title as a styled :class:`~rich.text.Text`.
@@ -1023,8 +939,6 @@ def _title(
     text.append("  ")
     if last is not None:
         text.append_text(_preview_text(last, key_of, name_of))
-    elif conversation.is_room and not joined:
-        text.append("not joined…", style="muted")
     return text
 
 
@@ -1380,33 +1294,6 @@ def _conversations(ctx: AppContext, rows: list, lasts: dict) -> Listing:
         ),
         rows=records,
         order=("CONVERSATION", "KIND", "UNREAD", "LAST", "LAST_TEXT"),
-    )
-
-
-def _joined(room: Contact, access: str) -> Facts:
-    """What ``chat join`` won: the access a room granted, bare — the one fact asked for.
-
-    The room rides in the document, the caller having named it; the plain face prints the
-    access word alone (``member``, ``admin`` or ``read-only``), which is what a script
-    deciding whether it may post branches on.
-    """
-    from ..ui import fields
-    from ..ui.report import BARE, Facts
-
-    return Facts(
-        key="joined",
-        fields=(fields.node("room", lanes=()), fields.word("access", "access")),
-        values={
-            "room": NodeRef(
-                name=room.name,
-                key=(room.public_key or "").lower() or None,
-                hash=(room.key_prefix or "").lower() or None,
-                type=NODE_TYPE_LABELS.get(room.node_type),
-            ),
-            "access": access,
-        },
-        shape=BARE,
-        bare="access",
     )
 
 

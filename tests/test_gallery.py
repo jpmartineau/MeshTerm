@@ -562,11 +562,83 @@ def _room(cols: int, rows: int, *, access=None, retry: bool = False) -> Screen: 
         names={},
         session=_GallerySession(cols, rows),
         resolve=lambda h: names.get(h or "", h),
-        password=lambda: "hello",
-        ask=never,
-        log_in=never,
+        auto_login=never,
+        join=never,
         access=access or RoomAccess.MEMBER,
         resend=never,
+    )
+
+
+class _RoomsCtx:
+    """The minimal AppContext surface the Rooms page and a room's page read."""
+
+    def __init__(self) -> None:
+        from meshterm.core.models import RoomAccess
+
+        self._access = {"Lakeside BBS": RoomAccess.MEMBER}
+        self.rooms = SimpleNamespace(
+            joined=lambda room: room.name in self._access,
+            access=lambda room: self._access.get(room.name),
+        )
+        self.chat = SimpleNamespace(unread=lambda key: 128 if key.endswith("f6" * 6) else 0)
+        lasts = {
+            f"dm:{'f6' * 6}": ChatMessage(
+                text="x", peer="f6" * 6, author="d4e5f6a7", created_at=utcnow()
+            )
+        }
+        self.repo = SimpleNamespace(
+            last_chat_messages=lambda rooms=(): lasts,
+            recent_chat_messages=lambda **kw: [lasts[f"dm:{'f6' * 6}"]],
+        )
+
+
+def _gallery_rooms() -> list[Contact]:
+    """A joined room with a long name and a busy board, and two heard but not joined."""
+    from datetime import timedelta
+
+    now = utcnow()
+    return [
+        Contact(
+            name="Lakeside BBS and Swap Meet",
+            public_key="f6" * 32,
+            key_prefix="f6" * 6,
+            node_type=3,
+            last_seen=now,
+            route_hops=("a1", "b2", "c3", "d4", "e5"),
+        ),
+        Contact(
+            name="Hilltop Swap",
+            public_key="b7" * 32,
+            key_prefix="b7" * 6,
+            node_type=3,
+            last_seen=now - timedelta(days=6),
+        ),
+        Contact(name="Old Room", public_key="c8" * 32, key_prefix="c8" * 6, node_type=3),
+    ]
+
+
+def _rooms_page(cols: int, rows: int) -> Screen:
+    """The Rooms page at its widest: a long name, a three-digit badge, and a room never heard."""
+    from meshterm.ui.rooms import _PAGE_HINT, _page_items
+
+    ctx = _RoomsCtx()
+    ctx._access = {"Lakeside BBS and Swap Meet": ctx._access["Lakeside BBS"]}
+    title, items = _page_items(ctx, _gallery_rooms())
+    return SelectScreen(title, items, footer_hint=_PAGE_HINT)
+
+
+def _room_page(cols: int, rows: int) -> Screen:
+    """A joined room's page: its vital signs over its actions, the badge on Open the board."""
+    from meshterm.ui.rooms import _detail_items, _summary
+
+    ctx = _RoomsCtx()
+    room = _gallery_rooms()[0]
+    ctx._access = {room.name: ctx._access["Lakeside BBS"]}
+    return SelectScreen(
+        f"Room — {room.name}",
+        _detail_items(ctx, room),
+        prompt=_summary(ctx, room),
+        footer_hint="↑↓ move · Enter select · Esc back",
     )
 
 
@@ -1571,6 +1643,8 @@ _ENTRIES: list[_Entry] = [
     _Entry("room", _room),
     _Entry("room_read_only", _room_read_only),
     _Entry("room_retry", _room_retry),
+    _Entry("rooms_page", _rooms_page),
+    _Entry("room_page", _room_page),
     _Entry("channels_manager", _channels_manager),
     _Entry("channel_detail", _channel_detail),
     _Entry("channel_detail_scoped", _channel_detail_scoped),

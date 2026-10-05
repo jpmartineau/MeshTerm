@@ -70,8 +70,39 @@ class RoomService:
         return self._ctx.room_store.password(room) if self._ctx.room_store else None
 
     def joined(self, room: Contact) -> bool:
-        """Whether MeshTerm can log in to ``room`` without asking for a password."""
-        return self.password(room) is not None
+        """Whether we have joined ``room``: a login to it was accepted, and not forgotten since.
+
+        Joining is what the Rooms page does, and what puts a room in Chat — the way a
+        channel is in Chat once it is on a slot. An admin password Repeater admin happens to
+        remember is not a join: it lets a join go through without asking, nothing more.
+        """
+        store = self._ctx.room_store
+        return store is not None and store.membership(room) is not None
+
+    def worked_before(self, room: Contact, password: str) -> bool:
+        """Whether ``password`` is one that has got us into ``room`` before.
+
+        The one piece of evidence a silent room leaves about the password: a password that
+        worked last time is still right unless the owner changed it, so silence then points
+        at the room not hearing us rather than at the password.
+        """
+        if self._ctx.admin_store.get(room) == password and password:
+            return True
+        store = self._ctx.room_store
+        return store is not None and self.joined(room) and store.password(room) == password
+
+    def forget(self, room: Contact) -> None:
+        """Leave ``room``, as far as MeshTerm can: stop logging in, and forget its password.
+
+        The room keeps sending to the radio until it restarts or gives up on us — a member
+        cannot resign — and its posts already stored here are kept. An admin password
+        Repeater admin remembers for it is Repeater admin's, and stays.
+        """
+        if self._ctx.room_store is not None:
+            self._ctx.room_store.forget(room)
+        peer = self._peer(room)
+        self._access.pop(peer, None)
+        self._heard.pop(peer, None)
 
     def access(self, room: Contact) -> RoomAccess | None:
         """What ``room`` lets us do: as granted this session, else at our last login, if any."""
@@ -106,17 +137,18 @@ class RoomService:
         )
 
     def login_due(self, room: Contact) -> bool:
-        """Whether opening ``room`` should log in: a password at hand, and a quiet room.
+        """Whether opening ``room`` should log in: joined, a password at hand, and quiet.
 
         Never while a login to it is already on its way — that one's answer is this one's.
         """
         return (
             self.joined(room)
+            and self.password(room) is not None
             and not self.heard_recently(room)
             and self._peer(room) not in self._inflight
         )
 
-    async def login(self, room: Contact, password: str) -> RoomLogin:
+    async def login(self, room: Contact, password: str, *, flood: bool = False) -> RoomLogin:
         """Log in to ``room`` with ``password`` — one exchange — and remember the outcome.
 
         An accepted login is remembered the way each password is kept: the access and the
@@ -136,9 +168,13 @@ class RoomService:
         Args:
             room: The room server to log in to.
             password: The password to offer (``""`` asks the room whether it knows us).
+            flood: Forget the route the radio learned to the room first, so the login
+                floods the whole mesh — the way round a route that has gone stale, which is
+                silent exactly as a wrong password is. Forgetting it is local; the login is
+                still the one transmission.
 
         Returns:
-            How the login ended, and the access granted.
+            How the login ended, the access granted, and how the radio sent it.
 
         Raises:
             Exception: Propagates a device error (no connection, a contact the companion
@@ -148,13 +184,13 @@ class RoomService:
         running = self._inflight.get(peer)
         if running is not None:
             task, sent = running
-            if sent == password:
+            if sent == password and not flood:
                 return await asyncio.shield(task)
             try:
                 await asyncio.shield(task)
             except Exception:  # noqa: BLE001 - its own caller hears about its failure
                 pass
-        task = asyncio.ensure_future(self._login_once(room, password))
+        task = asyncio.ensure_future(self._login_once(room, password, flood=flood))
         self._inflight[peer] = (task, password)
         # Cleared when the exchange ends, not when this caller stops waiting: a room view
         # closed mid-login leaves the login running, and it is still the one in flight.
@@ -168,9 +204,16 @@ class RoomService:
         if not task.cancelled():
             task.exception()
 
-    async def _login_once(self, room: Contact, password: str) -> RoomLogin:
+    async def _login_once(self, room: Contact, password: str, *, flood: bool) -> RoomLogin:
         """One login exchange, and what its outcome means for the stores and the session."""
         device = await self._ctx.device()
+        if flood:
+            await device.reset_route(room)
+            # The route the contact cache holds is gone; the next read re-fetches it (with
+            # the one the radio learns from this login's answer).
+            devstate = getattr(self._ctx, "devstate", None)
+            if devstate is not None:
+                devstate.invalidate_contacts()
         login = await device.room_login(room, password)
         if self._ctx.room_store is not None:
             self._ctx.room_store.record(room, password, login)

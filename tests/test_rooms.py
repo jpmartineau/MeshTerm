@@ -326,6 +326,23 @@ def test_the_admin_password_is_tried_before_the_room_password(tmp_path: Path) ->
     assert ctx.rooms.password(ROOM) == "admin"
 
 
+def test_an_admin_password_alone_is_not_a_join(tmp_path: Path) -> None:
+    """Repeater admin's password lets a join go through unasked; joining is still a login."""
+    ctx = _Ctx(tmp_path, MockDevice())
+    ctx.admin_store.remember(ROOM, "admin")
+    assert ctx.rooms.password(ROOM) == "admin"
+    assert not ctx.rooms.joined(ROOM) and not ctx.rooms.login_due(ROOM)
+
+
+async def test_forgetting_a_room_leaves_it(tmp_path: Path) -> None:
+    """The membership and its password go; nothing is transmitted."""
+    ctx = _Ctx(tmp_path, MockDevice())
+    await ctx.rooms.login(ROOM, "hello")
+    ctx.rooms.forget(ROOM)
+    assert not ctx.rooms.joined(ROOM) and ctx.rooms.password(ROOM) is None
+    assert not ctx.rooms.heard_recently(ROOM)
+
+
 def test_read_only_never_replaces_the_room_password(rooms: RoomStore) -> None:
     """A room that lets readers in lets any password in: that proves nothing about one."""
     rooms.record(ROOM, "hello", RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER))
@@ -537,11 +554,33 @@ async def _record(chat: ChatService, ctx, message: Message) -> None:  # noqa: AN
     await chat._queue.join()
 
 
+def _join(ctx) -> None:  # noqa: ANN001
+    """Record a membership, as an accepted login does."""
+    ctx.room_store.record(ROOM, "hello", RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER))
+
+
+async def test_a_room_not_joined_records_its_posts_but_raises_no_badge(
+    tmp_path: Path, repo: Repository
+) -> None:
+    """Chat has no row for a room not joined, so the badge would point at nothing."""
+    ctx = _GatedCtx(tmp_path, MockDevice(), repo)
+    chat = ChatService(ctx)
+    await chat.start()
+    try:
+        await _record(chat, ctx, _post("still sending after we forgot it"))
+        assert chat.unread(f"dm:{ROOM.key_prefix}") == 0
+        board = repo.recent_chat_messages(is_channel=False, peer=ROOM.key_prefix, posts_only=True)
+        assert [m.text for m in board] == ["still sending after we forgot it"]
+    finally:
+        await chat.stop()
+
+
 async def test_a_post_is_recorded_once_and_raises_the_badge_once(
     tmp_path: Path, repo: Repository
 ) -> None:
     """A re-sent post lands twice on the wire and once in history."""
     ctx = _GatedCtx(tmp_path, MockDevice(), repo)
+    _join(ctx)
     chat = ChatService(ctx)
     await chat.start()
     try:
@@ -640,22 +679,22 @@ def _view(
     messages: list[ChatMessage] | None = None,
     *,
     access: RoomAccess | None = RoomAccess.MEMBER,
-    password: str | None = "hello",
-    ask_answer: str | None = "hello",
+    joined: bool = True,
     login: RoomLogin | None = None,
 ) -> tuple[RoomScreen, dict]:
-    """A room view over stubbed send/login hooks; ``calls`` records what they were asked."""
-    calls: dict = {"asked": 0, "logins": [], "sent": []}
+    """A board over stubbed hooks; ``calls`` records what they were asked."""
+    calls: dict = {"auto": 0, "joins": [], "sent": []}
+    outcome = login if login is not None else RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER)
 
-    async def ask() -> str | None:
-        calls["asked"] += 1
-        return ask_answer
-
-    async def log_in(pw: str) -> RoomLogin:
-        calls["logins"].append(pw)
+    async def auto_login() -> RoomLogin | None:
+        calls["auto"] += 1
         await asyncio.sleep(0)  # an exchange on the air: the board goes on drawing meanwhile
-        # Not ``login or …``: a login that failed is falsy, which is the point of it.
-        return login if login is not None else RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER)
+        return outcome
+
+    async def join(ask: bool) -> RoomLogin | None:
+        calls["joins"].append(ask)
+        await asyncio.sleep(0)
+        return outcome
 
     async def send(text: str) -> ChatMessage:
         calls["sent"].append(text)
@@ -668,12 +707,17 @@ def _view(
         names={},
         session=_Session(),
         resolve=_resolve,
-        password=lambda: password,
-        ask=ask,
-        log_in=log_in,
+        auto_login=auto_login,
+        join=join,
+        joined=joined,
         access=access,
     )
     return screen, calls
+
+
+async def _settled(screen: RoomScreen) -> None:
+    while screen._login_open:
+        await asyncio.sleep(0)
 
 
 def _board() -> list[ChatMessage]:
@@ -683,6 +727,10 @@ def _board() -> list[ChatMessage]:
         ChatMessage.from_message(_post("Board keeps 32 posts.", "f6a7b8c9", minutes=-10)),
         ChatMessage(text="I'll check it", outbound=True, peer=ROOM.key_prefix, acked=True),
     ]
+
+
+def _compose(screen: RoomScreen) -> str:
+    return plain("\n".join(screen.render_body(72))).splitlines()[-1]
 
 
 def test_an_author_is_named_by_key_or_stands_as_a_grey_hash() -> None:
@@ -710,20 +758,6 @@ def test_a_post_that_arrives_twice_is_shown_once_and_a_reply_not_at_all() -> Non
     assert screen._messages[-1].text == "New one"
 
 
-async def test_a_read_only_member_gets_a_line_instead_of_a_compose_box() -> None:
-    """Typing that could go nowhere is not taken, and the line says why."""
-    screen, calls = _view(access=RoomAccess.READ_ONLY)
-    for ch in "hi":
-        screen.handle("text", ch)
-    screen.handle("enter")
-    await asyncio.sleep(0)
-    assert calls["sent"] == []
-    body = plain("\n".join(screen.render_body(72)))
-    assert "read-only" in body
-    assert "Enter send" not in screen.footer_hint
-    assert screen.title.endswith("· read-only")
-
-
 async def test_a_member_posts_from_the_compose_line() -> None:
     """Enter posts, through the same path a direct message takes."""
     screen, calls = _view()
@@ -735,6 +769,63 @@ async def test_a_member_posts_from_the_compose_line() -> None:
     assert calls["sent"] == ["hi"]
 
 
+async def test_the_compose_line_waits_for_the_quiet_login() -> None:
+    """Opening a quiet room logs in in the background; posting opens once it lets us in."""
+    screen, calls = _view(access=RoomAccess.MEMBER)
+    screen.begin_auto_login()
+    assert screen.title == f"{ROOM.name} · {LOGGING_IN}"
+    assert "posting opens once" in _compose(screen)
+    screen.handle("text", "x")
+    assert screen._editor.text == "", "nothing typed while the room may not know us"
+    await _settled(screen)
+    assert calls["auto"] == 1 and screen.title == f"{ROOM.name} · member"
+    assert screen._composing
+
+
+async def test_after_silence_nothing_can_be_posted_and_the_line_says_why() -> None:
+    """THE reported bug: a login met silence, and the compose line went on taking posts."""
+    screen, calls = _view(login=RoomLogin(LoginResult.NO_REPLY, flood=True))
+    screen.begin_auto_login()
+    await _settled(screen)
+    assert screen.title.endswith(NO_REPLY)
+    assert "no answer" in _compose(screen) and "^L" in _compose(screen)
+    for ch in "hi":
+        screen.handle("text", ch)
+    screen.handle("enter")
+    await asyncio.sleep(0)
+    assert calls["sent"] == []
+    assert "Enter send" not in screen.footer_hint
+
+
+async def test_control_l_runs_the_explained_login() -> None:
+    """^L hands the login to the Rooms flow, its dialogs over the board, and shows the end."""
+    screen, calls = _view(access=None, login=RoomLogin(LoginResult.ACCEPTED, RoomAccess.ADMIN))
+    screen.handle("login")
+    assert screen._login_open
+    assert "^L log in" not in screen.footer_hint  # a second press would do nothing
+    await _settled(screen)
+    assert calls["joins"] == [False]
+    assert screen.title == f"{ROOM.name} · admin" and screen._composing
+
+
+async def test_a_read_only_member_is_asked_for_another_password_and_offered_no_retry() -> None:
+    """^L asks (the room password is what lets a reader post); ^R would only be dropped."""
+    unacked = ChatMessage(text="lost", outbound=True, peer=ROOM.key_prefix, acked=False)
+    screen, calls = _view([unacked], access=RoomAccess.READ_ONLY)
+    assert "read-only" in _compose(screen)
+    assert screen._retry_target() is None and "^R" not in screen.footer_hint
+    screen.handle("login")
+    await _settled(screen)
+    assert calls["joins"] == [True]
+
+
+def test_a_board_not_joined_takes_no_posts() -> None:
+    """Its stored posts read from the Rooms page; posting starts with joining."""
+    screen, _ = _view(_board(), access=None, joined=False)
+    assert screen.title.endswith(NOT_JOINED)
+    assert "not joined" in _compose(screen) and not screen._composing
+
+
 async def test_enter_on_a_picked_post_replies_to_its_author() -> None:
     """A board has many voices, so Enter on a post primes an @mention, as a channel does."""
     screen, _ = _view(_board())
@@ -744,43 +835,23 @@ async def test_enter_on_a_picked_post_replies_to_its_author() -> None:
     assert screen._editor.text == f"@[{STRANGER_KEY}] "
 
 
-async def test_control_l_logs_in_with_the_remembered_password() -> None:
-    """^L logs in without asking, and the title says so while it does."""
-    screen, calls = _view(access=None)
-    screen.handle("login")
-    assert screen._login_open
-    assert "^L log in" not in screen.footer_hint  # a second press would do nothing
-    titles = []
-    while screen._login_open:
-        titles.append(screen.title)
-        await asyncio.sleep(0)
-    assert f"{ROOM.name} · {LOGGING_IN}" in titles
-    assert calls == {"asked": 0, "logins": ["hello"], "sent": []}
-    assert screen.title == f"{ROOM.name} · member"
+async def test_a_read_only_member_picks_a_post_to_see_its_paths_not_to_reply() -> None:
+    """With no compose line, Enter on a post has nothing to prime, and a paste nowhere to go."""
+    screen, _ = _view(_board(), access=RoomAccess.READ_ONLY)
+    opened: list[ChatMessage] = []
 
+    async def paths(message: ChatMessage) -> None:
+        opened.append(message)
 
-async def test_after_silence_control_l_asks_for_the_password() -> None:
-    """A room is as silent for a wrong password as for a missing room — so ask next time."""
-    screen, calls = _view(login=RoomLogin(LoginResult.NO_REPLY))
-    screen.begin_login()
-    while screen._login_open:
-        await asyncio.sleep(0)
-    assert screen.title.endswith(NO_REPLY)
-    assert "^L" in screen._status
-    screen.handle("login")
-    while screen._login_open:
-        await asyncio.sleep(0)
-    assert calls["asked"] == 1
-
-
-async def test_declining_to_join_leaves_the_board_open_and_says_so() -> None:
-    """Esc on the join prompt keeps the board to read, titled for what it is."""
-    screen, calls = _view(access=None, password=None, ask_answer=None)
-    screen.begin_login(ask=True)
-    while screen._login_open:
-        await asyncio.sleep(0)
-    assert calls["logins"] == []
-    assert screen.title.endswith(NOT_JOINED)
+    screen._paths = paths
+    screen.handle("paste", "pasted text")
+    assert not screen._paste_open and screen._editor.text == ""
+    screen.handle("up")
+    assert screen.footer_hint.startswith("Enter paths")
+    screen.handle("enter")
+    await asyncio.sleep(0)
+    assert screen._editor.text == ""
+    assert [m.text for m in opened] == ["I'll check it"]
 
 
 def test_the_hint_names_log_in_and_fits() -> None:
@@ -795,24 +866,295 @@ def test_the_hint_names_log_in_and_fits() -> None:
 def test_the_handheld_lane_puts_log_in_behind_f1() -> None:
     """Every chord earns a chip where the keyboard has no Ctrl to reach it by."""
     screen, _ = _view(_board())
-    deck = fkeys.PICOCALC_LYRA_DECK
     lane = screen.picocalc_lyra_lane
     assert lane[0].opp_label == "Log in"
-    assert deck.action_for(lane, 6) == "login"
+    assert fkeys.PICOCALC_LYRA_DECK.action_for(lane, 6) == "login"
+
+
+# --- joining: the explained flow ------------------------------------------------------
+
+
+class _ScriptedUi:
+    """A UI surface answering the join flow's prompt and dialogs from a script.
+
+    ``choices`` are button *labels*, pressed in order; every dialog shown is kept as
+    ``(text, labels, default label)`` for the test to read.
+    """
+
+    def __init__(self, *, passwords=(), choices=()) -> None:  # noqa: ANN001
+        self.passwords = list(passwords)
+        self.choices = list(choices)
+        self.asked: list[str] = []
+        self.defaults: list[str] = []
+        self.dialogs: list[tuple[str, list[str], str]] = []
+
+    async def text(self, title: str, **kwargs):  # noqa: ANN003, ANN201
+        self.asked.append(title)
+        self.defaults.append(kwargs.get("default", ""))
+        assert kwargs["validate"]("x" * 16) is not True, "a password the radio would cut"
+        return self.passwords.pop(0) if self.passwords else None
+
+    async def dialog(self, prompt, buttons, **kwargs):  # noqa: ANN001, ANN003, ANN201
+        labels = [label for label, _ in buttons]
+        default = labels[kwargs.get("default", 0)]
+        self.dialogs.append((getattr(prompt, "plain", prompt), labels, default))
+        pressed = self.choices.pop(0) if self.choices else labels[0]
+        return dict(buttons)[pressed]
+
+    def busy_dialog(self, message: str = "", *, title: str = ""):  # noqa: ANN201
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def card():  # noqa: ANN202
+            yield SimpleNamespace(message=message)
+
+        return card()
+
+
+class _JoinCtx(_Ctx):
+    """A context with a scripted UI and a device-state stub the flow invalidates."""
+
+    def __init__(self, tmp_path: Path, device: MockDevice, ui: _ScriptedUi) -> None:
+        super().__init__(tmp_path, device)
+        self.ui = ui
+        self.devstate = SimpleNamespace(invalidate_contacts=lambda: None)
+
+
+async def test_joining_with_the_right_password_says_nothing_more(tmp_path: Path) -> None:
+    """A login that lets us post ends the flow quietly; the page shows the access."""
+    from meshterm.ui.rooms import join_room
+
+    ui = _ScriptedUi(passwords=["hello"])
+    ctx = _JoinCtx(tmp_path, MockDevice(), ui)
+    login = await join_room(ctx, ROOM)
+    assert login.access is RoomAccess.MEMBER and ctx.rooms.joined(ROOM)
+    assert ui.asked == [f"Join — {ROOM.name}"] and ui.dialogs == []
+
+
+async def test_a_stale_route_is_explained_and_a_flood_gets_through(tmp_path: Path) -> None:
+    """THE case on hardware: a learned route silently dead, the same login by flood fine."""
+    from meshterm.ui.rooms import join_room
+
+    device = MockDevice()
+    device._stale_routes.add(ROOM.name)
+    ui = _ScriptedUi(passwords=["hello"], choices=["Try by flood"])
+    ctx = _JoinCtx(tmp_path, device, ui)
+    login = await join_room(ctx, ROOM)
+    assert login.access is RoomAccess.MEMBER and login.flood is True
+    text, labels, default = ui.dialogs[0]
+    assert text.startswith(f"{ROOM.name} didn't answer.")
+    assert "route your radio learned to the room (1 hop)" in text
+    assert labels == ["Cancel", "Try by flood"] and default == "Try by flood"
+    assert len(ui.asked) == 1, "the flood carries the same password"
+
+
+async def test_silence_by_flood_names_both_causes_and_offers_another_password(
+    tmp_path: Path,
+) -> None:
+    """A password that never worked here could be the problem; the dialog says so."""
+    from meshterm.ui.rooms import join_room
+
+    device = MockDevice()
+    await device.reset_route(ROOM)  # no route: every login floods
+    ui = _ScriptedUi(passwords=["nope", "hello"], choices=["Try again…"])
+    ctx = _JoinCtx(tmp_path, device, ui)
+    login = await join_room(ctx, ROOM)
+    assert login.access is RoomAccess.MEMBER and len(ui.asked) == 2
+    text, labels, default = ui.dialogs[0]
+    assert "went out to the whole mesh" in text and "the password is wrong" in text
+    assert labels == ["Cancel", "Try again…"] and default == "Try again…"
+    assert ui.defaults == ["", "nope"], "the second prompt holds the password just tried"
+
+
+async def test_silence_with_a_password_that_worked_points_at_reach(tmp_path: Path) -> None:
+    """A remembered password is still right; the room most likely didn't hear us."""
+    from meshterm.ui.rooms import join_room
+
+    device = MockDevice()
+    await device.reset_route(ROOM)
+    ui = _ScriptedUi(choices=["Cancel"])
+    ctx = _JoinCtx(tmp_path, device, ui)
+    await ctx.rooms.login(ROOM, "hello")
+    await device.reset_route(ROOM)  # the answer taught it a route; flood the next one too
+    device._unreachable.add(ROOM.name)
+    login = await join_room(ctx, ROOM)
+    assert login.result is LoginResult.NO_REPLY and ui.asked == []
+    text, labels, _ = ui.dialogs[0]
+    assert "got you in before" in text and labels == ["Cancel", "Try again"]
+    assert ctx.rooms.password(ROOM) == "hello", "silence keeps the password"
+
+
+async def test_read_only_is_explained_and_another_password_offered(tmp_path: Path) -> None:
+    """In, but not as a member: the dialog says what that means and why it may be."""
+    from meshterm.ui.rooms import join_room
+
+    device = MockDevice()
+    device._remote_config(ROOM)["allow.read.only"] = "on"
+    ui = _ScriptedUi(passwords=["guess"], choices=["Keep read-only"])
+    ctx = _JoinCtx(tmp_path, device, ui)
+    login = await join_room(ctx, ROOM)
+    assert login.access is RoomAccess.READ_ONLY
+    text, labels, default = ui.dialogs[0]
+    assert "read-only" in text and labels == ["Keep read-only", "Try again…"]
+
+
+async def test_a_room_the_radio_forgot_is_put_back_and_tried_again(tmp_path: Path) -> None:
+    """Not sent at all is its own case: the radio said why, and the fix is one write."""
+    from meshterm.ui.rooms import join_room
+
+    device = MockDevice()
+    device._contacts = [c for c in device._contacts if not c.is_room]
+    ui = _ScriptedUi(passwords=["hello"], choices=["Add it & try again"])
+    ctx = _JoinCtx(tmp_path, device, ui)
+    login = await join_room(ctx, ROOM)
+    assert login.access is RoomAccess.MEMBER
+    text, labels, _ = ui.dialogs[0]
+    assert text == "Your radio didn't send the login: this node isn't in the radio's contacts."
+    assert labels == ["Cancel", "Add it & try again"]
+
+
+async def test_backing_out_of_the_prompt_sends_nothing(tmp_path: Path) -> None:
+    """Esc on the password prompt is the end of it; no login goes out."""
+    from meshterm.ui.rooms import join_room
+
+    device = MockDevice()
+    ui = _ScriptedUi()
+    ctx = _JoinCtx(tmp_path, device, ui)
+    assert await join_room(ctx, ROOM) is None
+    assert not device._room_access
+
+
+def test_a_password_the_radio_would_cut_is_refused() -> None:
+    """MeshCore sends 15 bytes of a password; a longer one could never work."""
+    from meshterm.ui.rooms import valid_password
+
+    assert valid_password("x" * 15) is True
+    assert valid_password("x" * 16) is not True
+    assert valid_password("é" * 8) is not True, "bytes, not characters"
+
+
+def test_how_long_since_the_room_was_heard_is_part_of_the_explanation(tmp_path: Path) -> None:
+    """Never heard, heard just now: the evidence a reader judges reach by."""
+    from dataclasses import replace
+
+    from meshterm.ui.rooms import silence_explanation
+
+    ctx = _Ctx(tmp_path, MockDevice())
+    silent = RoomLogin(LoginResult.NO_REPLY, flood=True)
+    never = silence_explanation(ctx, replace(ROOM, last_seen=None), silent, "x")
+    assert "The room has never been heard here." in never
+    now = datetime.now(timezone.utc)
+    fresh = silence_explanation(ctx, replace(ROOM, last_seen=now), silent, "x")
+    assert "The room was heard just now." in fresh
+
+
+# --- the radio's confirmation ---------------------------------------------------------
+
+
+class _ConfirmingMeshCore:
+    """A meshcore stand-in whose login sends confirmations and answers as scripted."""
+
+    def __init__(self, frames: list[tuple[str, dict]]) -> None:
+        self.frames = frames
+        self.subs: list = []
+        self.commands = self
+
+    def subscribe(self, event_type, callback, attribute_filters=None):  # noqa: ANN001, ANN201
+        sub = SimpleNamespace(event_type=event_type, callback=callback)
+        sub.unsubscribe = lambda: self.subs.remove(sub) if sub in self.subs else None
+        self.subs.append(sub)
+        return sub
+
+    async def send_login_sync(self, pub, password):  # noqa: ANN001, ANN201
+        from meshcore import EventType
+
+        for name, payload in self.frames:
+            event = SimpleNamespace(type=getattr(EventType, name), payload=payload)
+            for sub in list(self.subs):
+                if sub.event_type is event.type:
+                    sub.callback(event)
+        return None
+
+
+def _confirmed_login(frames: list[tuple[str, dict]]) -> RoomLogin:
+    device = MeshCoreDevice(port="mock")
+    device._mc = _ConfirmingMeshCore(frames)
+    return asyncio.run(device.room_login(ROOM, "hello"))
+
+
+def test_the_radios_confirmation_says_how_the_login_went_out(quick_budget) -> None:  # noqa: ANN001, F811
+    """Matched by the login's expected ack — the room's first four key bytes."""
+    ours = bytes.fromhex(ROOM.public_key[:8])
+    flood = _confirmed_login(
+        [("MSG_SENT", {"type": 1, "expected_ack": ours}), ("LOGIN_SUCCESS", {"acl_permissions": 2})]
+    )
+    assert flood.access is RoomAccess.MEMBER and flood.flood is True
+    direct = _confirmed_login([("MSG_SENT", {"type": 0, "expected_ack": ours})])
+    assert direct.result is LoginResult.NO_REPLY and direct.flood is False
+
+
+def test_another_commands_confirmation_is_not_ours(quick_budget) -> None:  # noqa: ANN001, F811
+    """A MSG_SENT for anything else in flight says nothing about this login."""
+    other = _confirmed_login([("MSG_SENT", {"type": 1, "expected_ack": b"\x00\x01\x02\x03"})])
+    assert other.flood is None and other.radio_error is None
+
+
+def test_a_login_the_radio_would_not_send_carries_its_reason(quick_budget) -> None:  # noqa: ANN001, F811
+    """No confirmation, and the radio's own error: the room isn't in its contacts."""
+    refused = _confirmed_login([("ERROR", {"error_code": 2})])
+    assert refused.flood is None
+    assert refused.radio_error == "this node isn't in the radio's contacts"
+
+
+async def test_the_simulator_floods_once_its_route_is_forgotten(tmp_path: Path) -> None:
+    """A stale route meets silence; forgetting it floods, and the answer brings a new one."""
+    device = MockDevice()
+    device._stale_routes.add(ROOM.name)
+    stale = await device.room_login(ROOM, "hello")
+    assert stale.result is LoginResult.NO_REPLY and stale.flood is False
+    await device.reset_route(ROOM)
+    flooded = await device.room_login(ROOM, "hello")
+    assert flooded.access is RoomAccess.MEMBER and flooded.flood is True
+    again = await device.room_login(ROOM, "")
+    assert again.flood is False and again.access is RoomAccess.MEMBER
+
+
+# --- the Rooms page -------------------------------------------------------------------
+
+
+def test_the_page_lists_joined_rooms_first(tmp_path: Path, repo: Repository) -> None:
+    """Joined, then the rest heard most recently first, each with its lanes."""
+    from dataclasses import replace
+
+    from meshterm.ui.rooms import _page_items
+
+    ctx = _Ctx(tmp_path, MockDevice(), repo)
+    ctx.chat = SimpleNamespace(unread=lambda key: 0)
+    now = datetime.now(timezone.utc)
+    joined = replace(ROOM, last_seen=now)
+    hilltop = Contact(
+        name="Hilltop Swap", public_key="b7" * 32, key_prefix="b7" * 6, node_type=NODE_TYPE_ROOM
+    )
+    _join(ctx)
+    title, items = _page_items(ctx, [hilltop, joined])
+    assert title == "Rooms · 1 joined"
+    rows = [i.title().plain for i in items if hasattr(i, "value")]
+    assert rows[0].startswith("■ Lakeside BBS") and "member" in rows[0] and "now" in rows[0]
+    assert rows[1].startswith("■ Hilltop Swap") and "never" in rows[1]
 
 
 # --- end to end, through the real session ---------------------------------------------
 
 
-async def test_joining_a_room_end_to_end(tmp_path: Path) -> None:
-    """Open an unjoined room, answer the join prompt, read the catch-up, post, leave."""
+async def test_joining_from_the_rooms_page_end_to_end(tmp_path: Path) -> None:
+    """Rooms, the room's page, Join…, the password, Open the board: read, post, leave."""
     from prompt_toolkit.input.defaults import create_pipe_input
     from prompt_toolkit.output import DummyOutput
     from rich.console import Console
 
     from meshterm.context import AppContext
     from meshterm.core.device_store import DeviceStore
-    from meshterm.ui.chat import open_chat
+    from meshterm.ui.rooms import manage_rooms
     from meshterm.ui.surface import TuiUi
     from meshterm.ui.tui.session import TuiSession
 
@@ -825,12 +1167,21 @@ async def test_joining_a_room_end_to_end(tmp_path: Path) -> None:
         admin_store=AdminStore(tmp_path / "admin.json"),
         mock=True,
     )
-    conv = Conversation(label=ROOM.name, is_channel=False, contact=ROOM)
 
     def board() -> list[ChatMessage]:
         return ctx.repo.recent_chat_messages(
             is_channel=False, peer=ROOM.key_prefix, posts_only=True
         )
+
+    def top() -> str:
+        return getattr(session._stack[-1], "title", "") if session._stack else ""
+
+    async def until(check, what: str) -> None:  # noqa: ANN001
+        for _ in range(500):
+            if check():
+                return
+            await asyncio.sleep(0.01)
+        raise AssertionError(f"never reached: {what} (top is {top()!r})")
 
     try:
         with create_pipe_input() as inp:
@@ -838,31 +1189,37 @@ async def test_joining_a_room_end_to_end(tmp_path: Path) -> None:
             ctx.ui = TuiUi(session)
 
             async def drive() -> None:
-                while not session._stack or len(session._stack) < 2:
-                    await asyncio.sleep(0.01)  # the board, and the join prompt over it
+                await until(lambda: top().startswith("Rooms"), "the Rooms page")
+                inp.send_text("\r")  # the one room, under Not joined
+                await until(lambda: top() == f"Room — {ROOM.name}", "the room's page")
+                inp.send_text("\r")  # Join…
+                await until(lambda: top() == f"Join — {ROOM.name}", "the password prompt")
                 inp.send_text("hello\r")
-                while len([m for m in board() if m.is_post]) < 5:
-                    await asyncio.sleep(0.01)
+                await until(lambda: ctx.rooms.joined(ROOM), "the join")
+                await until(lambda: top() == f"Room — {ROOM.name}", "back on the room's page")
+                inp.send_text("\r")  # Open the board
+                await until(lambda: top().startswith(f"{ROOM.name} ·"), "the board")
+                await until(lambda: len([m for m in board() if m.is_post]) >= 5, "the catch-up")
                 inp.send_text("count me in\r")
-                while not [m for m in board() if m.outbound]:
-                    await asyncio.sleep(0.01)
+                await until(lambda: [m for m in board() if m.outbound], "the post")
+                inp.send_text("\x1b")  # board, back to the room's page
+                await until(lambda: top() == f"Room — {ROOM.name}", "the room's page again")
+                inp.send_text("\x1b")  # the room's page, back to Rooms
+                await until(lambda: top().startswith("Rooms"), "the Rooms page again")
                 inp.send_text("\x1b")
 
             async def main() -> None:
                 driver = asyncio.ensure_future(drive())
                 try:
-                    await open_chat(ctx, conv)
+                    await manage_rooms(ctx)
                 finally:
                     driver.cancel()
 
-            await asyncio.wait_for(session.run(main()), timeout=10)
+            await asyncio.wait_for(session.run(main()), timeout=20)
 
-        posts = board()
-        assert len([m for m in posts if m.is_post]) == 5
-        mine = [m for m in posts if m.outbound]
+        mine = [m for m in board() if m.outbound]
         assert [(m.text, m.acked) for m in mine] == [("count me in", True)]
         assert ctx.room_store.password(ROOM) == "hello"
-        assert ctx.rooms.access(ROOM) is RoomAccess.MEMBER
     finally:
         await ctx.aclose()
 
@@ -898,25 +1255,47 @@ def test_chat_list_names_a_room_as_one(cli) -> None:  # noqa: ANN001
     assert kinds["Lakeside BBS"] == "room" and kinds["Alice"] == "direct"
 
 
-def test_chat_join_answers_with_the_access_won(cli) -> None:  # noqa: ANN001
-    """The access word alone on the plain face; the room and the access in the document."""
+def test_rooms_join_answers_with_the_access_won(cli) -> None:  # noqa: ANN001
+    """The access word alone on the plain face; the room, the access and the route in JSON."""
     import json
 
     from meshterm.core import exitcodes
 
-    unknown = cli("chat", "join", "Lakeside BBS")
+    unknown = cli("rooms", "join", "Lakeside BBS")
     assert unknown.exit_code == exitcodes.USAGE, "nothing remembered, nothing sent"
-    assert cli("chat", "join", "Alice", "--password", "x").exit_code == exitcodes.USAGE
+    assert cli("rooms", "join", "Alice", "--password", "x").exit_code == exitcodes.USAGE
+    long = cli("rooms", "join", "Lakeside BBS", "--password", "x" * 16)
+    assert long.exit_code == exitcodes.USAGE, "a password the radio would cut"
 
-    silent = cli("chat", "join", "Lakeside BBS", "--password", "nope")
+    silent = cli("rooms", "join", "Lakeside BBS", "--password", "nope")
     assert silent.exit_code == exitcodes.DEVICE
-    assert silent.stdout == "" and "wrong" in silent.stderr
+    assert silent.stdout == "" and "didn't answer" in silent.stderr
 
-    joined = cli("chat", "join", "Lakeside BBS", "--password", "hello")
+    joined = cli("rooms", "join", "Lakeside BBS", "--password", "hello")
     assert joined.exit_code == exitcodes.OK and joined.stdout == "member\n"
-    again = json.loads(cli("--json", "chat", "join", "Lakeside BBS").stdout)  # remembered
-    assert again["access"] == "member"
+    again = json.loads(cli("--json", "rooms", "join", "Lakeside BBS").stdout)  # remembered
+    assert again["access"] == "member" and again["route"] == "direct"
     assert again["room"]["name"] == "Lakeside BBS" and again["room"]["type"] == "room server"
+    flooded = json.loads(cli("--json", "rooms", "join", "Lakeside BBS", "--flood").stdout)
+    assert flooded["route"] == "flood"
+
+
+def test_rooms_list_and_forget(cli) -> None:  # noqa: ANN001
+    """Every room the radio knows, joined or not; forgetting one is local and silent."""
+    import json
+
+    from meshterm.core import exitcodes
+
+    header, *rows = cli("rooms", "list").stdout.splitlines()
+    assert header.split() == ["ROOM", "ACCESS", "HEARD", "LAST_POST", "UNREAD"]
+    assert rows[0].startswith("Lakeside BBS")
+    cli("rooms", "join", "Lakeside BBS", "--password", "hello")
+    docs = json.loads(cli("--json", "rooms", "list").stdout)
+    assert docs[0]["joined"] is True and docs[0]["access"] == "member"
+    forgot = cli("rooms", "forget", "Lakeside BBS")
+    assert forgot.exit_code == exitcodes.OK and forgot.stdout == ""
+    assert cli("rooms", "forget", "Lakeside BBS").exit_code == exitcodes.NO_RESULT
+    assert json.loads(cli("--json", "rooms", "list").stdout)[0]["joined"] is False
 
 
 def test_chat_history_reads_a_room_by_author(cli) -> None:  # noqa: ANN001
@@ -946,8 +1325,6 @@ def test_chat_history_reads_a_room_by_author(cli) -> None:  # noqa: ANN001
         "type": None,
         "self": False,
     }
-    direct = json.loads(cli("--json", "chat", "list").stdout)
-    assert direct, "the list still answers"
 
 
 def test_chat_send_to_a_room_is_a_post(cli) -> None:  # noqa: ANN001
@@ -957,34 +1334,3 @@ def test_chat_send_to_a_room_is_a_post(cli) -> None:  # noqa: ANN001
     receipt = json.loads(cli("--json", "chat", "send", "--to", "Lakeside BBS", "hi").stdout)
     assert receipt["kind"] == "room"
     assert receipt["acked"] is False, "this simulator never joined, so the room drops it"
-
-
-async def test_a_read_only_member_is_asked_for_a_password_and_offered_no_retry() -> None:
-    """^L asks (the room password is what lets a reader post); ^R would only be dropped."""
-    unacked = ChatMessage(text="lost", outbound=True, peer=ROOM.key_prefix, acked=False)
-    screen, calls = _view([unacked], access=RoomAccess.READ_ONLY)
-    assert screen._retry_target() is None
-    assert "^R" not in screen.footer_hint
-    screen.handle("login")
-    while screen._login_open:
-        await asyncio.sleep(0)
-    assert calls["asked"] == 1
-
-
-async def test_a_read_only_member_picks_a_post_to_see_its_paths_not_to_reply() -> None:
-    """With no compose line, Enter on a post has nothing to prime, and a paste nowhere to go."""
-    screen, _ = _view(_board(), access=RoomAccess.READ_ONLY)
-    opened: list[ChatMessage] = []
-
-    async def paths(message: ChatMessage) -> None:
-        opened.append(message)
-
-    screen._paths = paths
-    screen.handle("paste", "pasted text")
-    assert not screen._paste_open and screen._editor.text == ""
-    screen.handle("up")
-    assert screen.footer_hint.startswith("Enter paths")
-    screen.handle("enter")
-    await asyncio.sleep(0)
-    assert screen._editor.text == ""
-    assert [m.text for m in opened] == ["I'll check it"]

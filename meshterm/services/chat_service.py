@@ -426,7 +426,11 @@ class ChatService:
                 ident = (ident or "").lower()
                 if ident and (ident.startswith(peer) or peer.startswith(ident)):
                     if contact.is_room:
-                        return post
+                        # Chat lists a room once it is joined, as it lists a channel once it
+                        # is on a slot; a room still sending to us after we forgot it has
+                        # no row for the badge to point at.
+                        rooms = getattr(self._ctx, "rooms", None)
+                        return post and (rooms is None or rooms.joined(contact))
                     return is_direct_messageable(contact.node_type)
         return False
 

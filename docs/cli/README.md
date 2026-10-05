@@ -1005,7 +1005,6 @@ The live transcript is a menu screen; from the command line, pick a subcommand.
 | `history [--to NAME \| --channel N] [--limit N]` | Print a conversation's stored transcript. Default limit 50. |
 | `list` | Every channel, room and contact with its unread count and last message. |
 | `listen [-s SECONDS] [--debug]` | Tail inbound messages live. `-s 0` (the default) runs until Ctrl-C. |
-| `join ROOM [--password PASSWORD]` | Log in to a room server, and print what it lets you do. |
 
 Exactly one of `--to` and `--channel` is required on `send` and `history`.
 
@@ -1035,25 +1034,9 @@ $ meshterm --absolute chat history --to Alice
 of the line — a message body is the one field that can hold absolutely anything, so
 nothing may follow it.
 
-**Rooms.** A room server is a message board that lives on a radio. It keeps the latest
-posts, and once you have logged in it sends you every post you missed, then each new one as
-people write it. You join a room by logging in with its password, which you get from
-whoever runs it:
-
-```console
-$ meshterm chat join "Lakeside BBS" --password hello
-member
-```
-
-`join` prints what the room let you do: `member` (read and post), `admin` (the room's
-owner), or `read-only` (the room drops anything you post). A password that works is
-remembered, so the next `join` needs no `--password`; an empty one (`--password ""`) asks
-the room whether it already knows you. A room never says a password is wrong. It just
-doesn't answer, so a `join` that hears nothing fails with exit `4`, and the message names
-both possible reasons. The posts the room sends after a login wait on your radio until
-something collects them: `chat listen`, or Chat in the menu.
-
-Post with `send --to`, exactly like a direct message. `acked yes` means the room stored the
+**Rooms.** A room server is a message board that lives on a radio. Join one first with
+[`meshterm rooms join`](#meshterm-rooms); after that, post with `send --to`, exactly like a
+direct message. `acked yes` means the room stored the
 post, not that anyone has read it. A room's `history` names who wrote each post, where a
 direct conversation names the peer:
 
@@ -1156,13 +1139,76 @@ An inbound message carries only the sender's key prefix, so its `node` is thinne
 same node in `contacts` — `name` is whatever the resolver could find and `key` is `null`.
 Join on `hash`.
 
-`join` is the room and the access it granted:
+`history`, `list` and `listen` return `5` when there is nothing to report.
 
-```json
-{"room":{"name":"Lakeside BBS","key":"f6a7b8c900000000000000000000000000000000000000000000000000000000","hash":"f6a7b8c9","type":"room server","self":false},"access":"member"}
+#### `meshterm rooms`
+
+A room server is a message board that lives on a radio. It keeps the latest posts, and once
+you have logged in it sends you every post you missed, then each new one as people write it.
+Joining a room is logging in with its password, which you get from whoever runs it. On its
+own, `meshterm rooms` prints this group's help; the Rooms page in the menu does the same
+jobs with dialogs.
+
+| Subcommand | What it does |
+| --- | --- |
+| `list` | Every room server your radio knows, joined or not. |
+| `join ROOM [--password PASSWORD] [--flood]` | Log in, and print what the room lets you do. |
+| `forget ROOM` | Stop logging in to a room, and forget its password. |
+
+```console
+$ meshterm rooms list
+ROOM          ACCESS  HEARD  LAST_POST  UNREAD
+Lakeside BBS  member    12m         3m       0
+
+$ meshterm rooms join "Lakeside BBS" --password hello
+member
 ```
 
-`history`, `list` and `listen` return `5` when there is nothing to report.
+`join` prints what the room let you do: `member` (read and post), `admin` (the room's
+owner), or `read-only` (the room won't keep anything you post). A password that works is
+remembered, so the next `join` needs no `--password`. An empty one (`--password ""`) asks
+the room whether it already knows you. MeshCore sends at most 15 characters of a password,
+so a longer one is refused before anything goes out (exit `2`).
+
+A room never says a password is wrong. It just doesn't answer. So a `join` that hears
+nothing fails with exit `4`, and the message says what is known: how the login went out,
+when the room was last heard, and whether this password has worked before:
+
+```console
+$ meshterm rooms join "Lakeside BBS" --password nope
+meshterm: Lakeside BBS didn't answer. It went along the route your radio learned to the
+room (1 hop), and a route goes stale when the mesh changes. The room was heard 12m ago. A
+room doesn't answer a wrong password — it stays silent — so either it didn't hear you, or
+the password is wrong. Try --flood.
+```
+
+Your radio sends a login along the route it learned the last time the room answered. When
+that route has gone stale, the login vanishes on the way. `--flood` makes the radio forget
+the route first, so the login goes to the whole mesh instead, and the room's answer teaches
+it a fresh route. Forgetting the route sends nothing; the login is still one transmission.
+
+The posts a room sends after a login wait on your radio until something collects them:
+`chat listen`, or Chat in the menu. `chat history --to ROOM` reads them by author.
+
+`forget` is local and prints nothing. MeshCore has no way to leave a room, so the room may
+keep sending your radio new posts until it restarts, or until it needs your seat for a new
+member (it holds 20, and drops the least active). `forget` exits `5` if you hadn't joined.
+
+**`--json`.** `list` is an array, one object per room:
+
+```json
+{"node":{"name":"Lakeside BBS","key":"f6a7b8c900000000000000000000000000000000000000000000000000000000","hash":"f6a7b8c9","type":"room server","self":false},"joined":true,"access":"member","heard_at":null,"last_post_at":null,"unread":0}
+```
+
+`access` is `null` for a room you haven't joined, and `heard_at` is `null` for one never
+heard. `join` answers with the room, the access, and how the login went out (`route` is
+`"flood"`, `"direct"`, or `null` if the radio never confirmed sending it):
+
+```json
+{"room":{"name":"Lakeside BBS","key":"f6a7b8c900000000000000000000000000000000000000000000000000000000","hash":"f6a7b8c9","type":"room server","self":false},"access":"member","route":"flood"}
+```
+
+`forget` answers with the room and `forgotten` (`true`, or `false` when you hadn't joined).
 
 #### `meshterm channels`
 

@@ -159,10 +159,18 @@ class RoomLogin:
             password gets no reply at all, so :attr:`~LoginResult.NO_REPLY` is also what a
             mistyped password looks like.
         access: The access granted, when the login was accepted.
+        flood: How the radio sent the request, as it confirmed sending it: ``True`` to the
+            whole mesh, ``False`` along the route it had learned for the room. ``None`` when
+            it never confirmed sending it at all. Half of why a login meets silence: a
+            learned route goes stale as the mesh changes, and a flood is the way round it.
+        radio_error: The companion's own reason for not sending the request, when it
+            refused to (a room missing from its contacts, most often); ``None`` otherwise.
     """
 
     result: LoginResult
     access: RoomAccess | None = None
+    flood: bool | None = None
+    radio_error: str | None = None
 
     def __bool__(self) -> bool:
         """Truthy only when logged in, like the :class:`LoginResult` it carries."""
