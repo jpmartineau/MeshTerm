@@ -12,6 +12,8 @@ import asyncio
 import time
 from types import SimpleNamespace
 
+import pytest
+
 from meshterm.core.connection import charging_from_battery_level_status
 from meshterm.services import battery_service
 from meshterm.services.battery_service import (
@@ -276,6 +278,12 @@ def test_battery_poller_charging_ignores_load_sag_and_flat_or_falling_packs() ->
 # --- the host pack (the PicoCalc's own power_supply) ---------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _no_retry_pause(monkeypatch) -> None:
+    """The host pack's retries wait out a kernel cache on the device; here, nothing to wait."""
+    monkeypatch.setattr(battery_service, "_HOST_RETRY_S", 0)
+
+
 def _host_supply(tmp_path, monkeypatch, name: str = "picocalc", **files: str):
     """Stand a fake ``power_supply`` class up, holding one battery, and point the poller at it."""
     supply = tmp_path / name
@@ -296,11 +304,12 @@ def test_host_pack_reads_the_drivers_own_percent_and_charging_flag(tmp_path, mon
     asyncio.run(svc._poll())
     assert svc.reading().percent == 76 and svc.reading().charging is False
     # Plugged in: the flag flips on the driver's word alone, with no history to trend over.
-    _host_supply(tmp_path, monkeypatch, capacity="22", status="Charging")
+    _host_supply(tmp_path, monkeypatch, capacity="77", status="Charging")
     asyncio.run(svc._poll())
     assert svc.reading().charging is True
     assert not svc._history  # the trend machinery never runs on this path
     # A topped-off pack is *not* taking charge, whatever is plugged into it.
+    svc = _service([])
     _host_supply(tmp_path, monkeypatch, capacity="100", status="Full")
     asyncio.run(svc._poll())
     assert svc.reading().percent == 100 and svc.reading().charging is False
@@ -366,13 +375,49 @@ def _flaky_reads(monkeypatch, failures: dict[str, int]) -> None:
 
 
 def test_an_io_error_is_asked_again_not_believed(tmp_path, monkeypatch) -> None:
-    """With the Cap powered, a gauge read fails often and the next one answers."""
+    """With the Cap powered, a gauge read fails often and a later one answers."""
     monkeypatch.setattr(battery_service, "get_platform", lambda: SimpleNamespace(battery="host"))
     _host_supply(tmp_path, monkeypatch, capacity="84", status="Charging")
     _flaky_reads(monkeypatch, {"capacity": battery_service._HOST_READ_ATTEMPTS - 1})
     svc = _service([])
     asyncio.run(svc._poll())
     assert svc.reading().percent == 84 and svc.reading().charging is True
+
+
+def _scripted_capacity(monkeypatch, answers: list[str]) -> None:
+    """Make ``capacity`` answer each of ``answers`` in turn, as a garbling bus would."""
+    script = iter(answers)
+    real = battery_service.Path.read_text
+
+    def read_text(self, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003, ANN202
+        return f"{next(script)}\n" if self.name == "capacity" else real(self, *args, **kwargs)
+
+    monkeypatch.setattr(battery_service.Path, "read_text", read_text)
+    monkeypatch.setattr(battery_service, "_HOST_RETRY_S", 0)
+
+
+def test_a_garbled_percent_is_never_shown(tmp_path, monkeypatch) -> None:
+    """56414 is no percent; it is asked again, after the driver's cache has let it go."""
+    monkeypatch.setattr(battery_service, "get_platform", lambda: SimpleNamespace(battery="host"))
+    _host_supply(tmp_path, monkeypatch, capacity="94", status="Discharging")
+    _scripted_capacity(monkeypatch, ["56414", "94"])
+    svc = _service([])
+    asyncio.run(svc._poll())
+    assert svc.reading().percent == 94
+
+
+def test_a_big_step_waits_for_the_next_poll(tmp_path, monkeypatch) -> None:
+    """A garbled read can land in 0-100; a pack can't fall 57 points between two polls."""
+    monkeypatch.setattr(battery_service, "get_platform", lambda: SimpleNamespace(battery="host"))
+    _host_supply(tmp_path, monkeypatch, capacity="94", status="Discharging")
+    _scripted_capacity(monkeypatch, ["94", "37", "93", "60", "60"])
+    svc = _service([])
+    shown = []
+    for _ in range(5):
+        asyncio.run(svc._poll())
+        shown.append(svc.reading().percent)
+    # 37 is held and never confirmed; a small step is believed at once; 60 twice is real.
+    assert shown == [94, 94, 93, 93, 60]
 
 
 def test_a_status_that_will_not_read_keeps_the_last_verdict(tmp_path, monkeypatch) -> None:
@@ -382,7 +427,7 @@ def test_a_status_that_will_not_read_keeps_the_last_verdict(tmp_path, monkeypatc
     svc = _service([])
     asyncio.run(svc._poll())
     (supply / "capacity").write_text("85\n")
-    _flaky_reads(monkeypatch, {"status": battery_service._HOST_READ_ATTEMPTS})
+    _flaky_reads(monkeypatch, {"status": 1})
     asyncio.run(svc._poll())
     assert svc.reading().percent == 85 and svc.reading().charging is True
 

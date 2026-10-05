@@ -86,36 +86,57 @@ _TREND_SAMPLES = int(_TREND_WINDOW_S / POLL_S) + 2
 #: what they are rather than by a name kept on a list.
 _POWER_SUPPLIES = Path("/sys/class/power_supply")
 
-#: How often one sysfs value is tried before a poll gives up on it, and the pause between
-#: tries. The Cardputer Zero's BQ27220 shares I2C bus 1 with the keyboard and the clock,
+#: How often the pack's percent is asked for before a poll gives up, and the pause between
+#: asks. The Cardputer Zero's BQ27220 shares I2C bus 1 with the keyboard and the clock,
 #: and while the Cap on its header is powered that bus turns noisy: measured on the device,
-#: a quarter to three quarters of the gauge's reads fail with an I/O error, and one in ten
-#: of the clock's, against none with the header off. A failed read says nothing about the
-#: pack, so it is simply asked again.
-_HOST_READ_ATTEMPTS = 6
-_HOST_RETRY_S = 0.1
+#: a quarter to three quarters of the gauge's reads fail with an I/O error (one in ten of
+#: the clock's), against none with the header off, and some that "succeed" are garbled —
+#: a ``capacity`` of 56414. The kernel's ``bq27xxx`` driver caches what it read, failure or
+#: garbage alike, for five seconds, so asking again sooner only gets the same answer back:
+#: the pause is just past that.
+_HOST_READ_ATTEMPTS = 3
+_HOST_RETRY_S = 5.5
 
 #: How many polls in a row a host pack may fail to read before its gauge is taken down — a
 #: pack doesn't change in two minutes, so the last reading stands rather than blinking out.
 _HOST_MISSES_KEPT = 6
 
+#: The most a percent may move between two polls and be believed at once. A pack doesn't
+#: gain or lose this much in :data:`POLL_S`; a bigger step is held until the next poll says
+#: the same, which catches a garbled read that happens to land inside 0–100.
+_HOST_STEP_PCT = 5
 
-async def _read_value(path: Path) -> str:
-    """One sysfs value, asked again on an I/O error (see :data:`_HOST_READ_ATTEMPTS`).
+
+async def _sysfs(path: Path) -> str:
+    """One sysfs value, read off the event loop.
+
+    Reading a gauge's value can make the kernel talk to it over I2C, and on a noisy bus a
+    failing transfer takes its time; the loop drawing the screen shouldn't wait on it.
+    """
+    return (await asyncio.to_thread(path.read_text)).strip()
+
+
+async def _read_percent(path: Path) -> int:
+    """The pack's percent from ``capacity``, asked again while it is unreadable or garbled.
+
+    An I/O error and a percent outside 0–100 are the same thing here — no reading — and are
+    asked again after :data:`_HOST_RETRY_S`, by which time the driver reads the gauge anew.
 
     Raises:
-        OSError: When every try failed.
+        OSError: When :data:`_HOST_READ_ATTEMPTS` tries gave no percent.
     """
     for attempt in range(_HOST_READ_ATTEMPTS):
+        if attempt:
+            await asyncio.sleep(_HOST_RETRY_S)
         try:
-            return path.read_text().strip()
+            value = int(await _sysfs(path))
         except FileNotFoundError:
             raise  # no such value: asking again won't make one
-        except OSError:
-            if attempt == _HOST_READ_ATTEMPTS - 1:
-                raise
-            await asyncio.sleep(_HOST_RETRY_S)
-    raise OSError(f"{path} could not be read")  # pragma: no cover - the loop always returns
+        except (OSError, ValueError):
+            continue
+        if 0 <= value <= 100:
+            return value
+    raise OSError(f"{path} gave no percent")
 
 
 def host_supply(root: Path = _POWER_SUPPLIES) -> Path | None:
@@ -235,6 +256,8 @@ class BatteryService:
         self._history: deque[tuple[float, int]] = deque(maxlen=_TREND_SAMPLES)
         #: Host-pack reads failed in a row (see :data:`_HOST_MISSES_KEPT`).
         self._host_misses = 0
+        #: A host percent too far from the shown one to believe yet (:data:`_HOST_STEP_PCT`).
+        self._host_unconfirmed: int | None = None
 
     @property
     def active(self) -> bool:
@@ -322,32 +345,41 @@ class BatteryService:
         path's voltage-curve or trend estimation applies. An unreadable supply (driver
         missing, permissions) reports *absent* and the header simply draws no gauge —
         once it has failed :data:`_HOST_MISSES_KEPT` polls running; a failed poll after a
-        good one keeps the good one. Each value is asked again on an I/O error first
-        (:func:`_read_value`), and a ``status`` that still won't read keeps the charging
-        verdict the last good one gave: the percent is the reading, the flag its garnish.
+        good one keeps the good one. The percent is asked again while it is unreadable or
+        out of range (:func:`_read_percent`), and a step bigger than
+        :data:`_HOST_STEP_PCT` waits for the next poll to confirm it. ``status`` is read
+        from the same driver snapshot as the percent; when it won't read, the charging
+        verdict the last good one gave stands: the percent is the reading, the flag its
+        garnish.
         """
         supply = host_supply(_POWER_SUPPLIES)
         try:
             if supply is None:
                 raise OSError("no battery power_supply")
-            percent = int(await _read_value(supply / "capacity"))
-        except (OSError, ValueError):
+            percent = await _read_percent(supply / "capacity")
+        except OSError:
             self._host_misses += 1
             if self._host_misses > _HOST_MISSES_KEPT:
                 self._reading = None
             return
         self._host_misses = 0
+        shown = self._reading
+        if shown is not None and abs(percent - shown.percent) > _HOST_STEP_PCT:
+            if percent != self._host_unconfirmed:
+                self._host_unconfirmed = percent  # believed when the next poll says it too
+                return
+        self._host_unconfirmed = None
         try:
-            charging = await _read_value(supply / "status") == "Charging"
+            charging = await _sysfs(supply / "status") == "Charging"
         except OSError:
-            charging = self._reading.charging if self._reading is not None else False
+            charging = shown.charging if shown is not None else False
         try:  # informational only; the header draws percent + charging
-            mv = int((supply / "voltage_now").read_text().strip()) // 1000
+            mv = int(await _sysfs(supply / "voltage_now")) // 1000
         except (OSError, ValueError):
             mv = 0
         self._reading = BatteryReading(
             millivolts=mv,
-            percent=max(0, min(100, percent)),
+            percent=percent,
             charging=charging,
         )
 
