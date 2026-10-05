@@ -5,6 +5,7 @@ Repo-side tools. None of these ship in the wheel.
 | Script | What it is for |
 |---|---|
 | `basemap-doctor.py` | Why a user's map has no basemap — certificates, DNS, proxy, or colour depth |
+| `cardputer-zero/` | `launcher-entry.sh` puts a source checkout on the Cardputer Zero's app launcher (and `remove` takes it off), until there is a store package; `meshterm.png` is its placeholder icon |
 | `picocalc-lyra/` | Calculinux device setup: console font, palette, Wi-Fi; `xiao-radio/` is the XIAO radio kit (firmware build, flashing, UART setup) |
 | `uconsole/` | The uConsole's always-on SPI bridge service (MeshTerm can also drive that radio directly, with no script at all — see `docs/devices/uconsole.md`) |
 

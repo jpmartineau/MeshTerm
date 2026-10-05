@@ -276,13 +276,14 @@ def test_battery_poller_charging_ignores_load_sag_and_flat_or_falling_packs() ->
 # --- the host pack (the PicoCalc's own power_supply) ---------------------------------------
 
 
-def _host_supply(tmp_path, monkeypatch, **files: str):
-    """Stand a fake ``power_supply`` directory up and point the poller at it."""
-    supply = tmp_path / "picocalc"
+def _host_supply(tmp_path, monkeypatch, name: str = "picocalc", **files: str):
+    """Stand a fake ``power_supply`` class up, holding one battery, and point the poller at it."""
+    supply = tmp_path / name
     supply.mkdir(exist_ok=True)
-    for name, value in files.items():
-        (supply / name).write_text(f"{value}\n")
-    monkeypatch.setattr(battery_service, "_HOST_SUPPLY", supply)
+    (supply / "type").write_text("Battery\n")
+    for key, value in files.items():
+        (supply / key).write_text(f"{value}\n")
+    monkeypatch.setattr(battery_service, "_POWER_SUPPLIES", tmp_path)
     return supply
 
 
@@ -309,13 +310,81 @@ def test_host_pack_absent_when_the_supply_cant_be_read(tmp_path, monkeypatch) ->
     """No driver (or an unreadable one) reports *no battery*, so the header draws no gauge."""
     monkeypatch.setattr(battery_service, "get_platform", lambda: SimpleNamespace(battery="host"))
     svc = _service([])
-    monkeypatch.setattr(battery_service, "_HOST_SUPPLY", tmp_path / "nothing-here")
+    monkeypatch.setattr(battery_service, "_POWER_SUPPLIES", tmp_path / "nothing-here")
     asyncio.run(svc._poll())
     assert svc.reading() is None
     # A supply that answers with junk is just as absent — never a bogus gauge.
     _host_supply(tmp_path, monkeypatch, capacity="", status="Charging")
     asyncio.run(svc._poll())
     assert svc.reading() is None
+
+
+def test_the_host_pack_is_found_by_what_it_is(tmp_path, monkeypatch) -> None:
+    """The Cardputer Zero's gauge has another name; a peripheral's battery is not the host's."""
+    monkeypatch.setattr(battery_service, "get_platform", lambda: SimpleNamespace(battery="host"))
+    mouse = _host_supply(tmp_path, monkeypatch, name="hid-mouse-battery", capacity="5")
+    (mouse / "scope").write_text("Device\n")
+    charger = tmp_path / "AC"
+    charger.mkdir()
+    (charger / "type").write_text("Mains\n")
+    _host_supply(tmp_path, monkeypatch, name="bq27220-0", capacity="84", status="Charging")
+    svc = _service([])
+    asyncio.run(svc._poll())
+    assert svc.reading().percent == 84 and svc.reading().charging is True
+
+
+def test_a_failed_read_keeps_the_last_reading_for_a_while(tmp_path, monkeypatch) -> None:
+    """A BQ27220 read fails now and then on the CM0's I2C; the gauge must not blink out."""
+    monkeypatch.setattr(battery_service, "get_platform", lambda: SimpleNamespace(battery="host"))
+    supply = _host_supply(tmp_path, monkeypatch, capacity="84", status="Discharging")
+    svc = _service([])
+    asyncio.run(svc._poll())
+    (supply / "capacity").unlink()  # the driver's read now fails
+    for _ in range(battery_service._HOST_MISSES_KEPT):
+        asyncio.run(svc._poll())
+        assert svc.reading().percent == 84
+    asyncio.run(svc._poll())  # one miss too many: the pack is gone, not just slow
+    assert svc.reading() is None
+    (supply / "capacity").write_text("83\n")
+    asyncio.run(svc._poll())
+    assert svc.reading().percent == 83
+
+
+def _flaky_reads(monkeypatch, failures: dict[str, int]) -> None:
+    """Make each named sysfs file fail its next N reads with an I/O error, as on a noisy bus."""
+    real = battery_service.Path.read_text
+    left = dict(failures)
+
+    def read_text(self, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003, ANN202
+        if left.get(self.name, 0) > 0:
+            left[self.name] -= 1
+            raise OSError(121, "Remote I/O error")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(battery_service.Path, "read_text", read_text)
+    monkeypatch.setattr(battery_service, "_HOST_RETRY_S", 0)
+
+
+def test_an_io_error_is_asked_again_not_believed(tmp_path, monkeypatch) -> None:
+    """With the Cap powered, a gauge read fails often and the next one answers."""
+    monkeypatch.setattr(battery_service, "get_platform", lambda: SimpleNamespace(battery="host"))
+    _host_supply(tmp_path, monkeypatch, capacity="84", status="Charging")
+    _flaky_reads(monkeypatch, {"capacity": battery_service._HOST_READ_ATTEMPTS - 1})
+    svc = _service([])
+    asyncio.run(svc._poll())
+    assert svc.reading().percent == 84 and svc.reading().charging is True
+
+
+def test_a_status_that_will_not_read_keeps_the_last_verdict(tmp_path, monkeypatch) -> None:
+    """The percent is the reading; a flag lost to the bus keeps the one it had."""
+    monkeypatch.setattr(battery_service, "get_platform", lambda: SimpleNamespace(battery="host"))
+    supply = _host_supply(tmp_path, monkeypatch, capacity="84", status="Charging")
+    svc = _service([])
+    asyncio.run(svc._poll())
+    (supply / "capacity").write_text("85\n")
+    _flaky_reads(monkeypatch, {"status": battery_service._HOST_READ_ATTEMPTS})
+    asyncio.run(svc._poll())
+    assert svc.reading().percent == 85 and svc.reading().charging is True
 
 
 # --- the standard BLE charging flag (GATT Battery Level Status, 0x2BED) --------------------

@@ -3,12 +3,12 @@
 > [!CAUTION]
 > **The Cardputer Zero is not supported yet.**
 >
-> MeshTerm has never run on a real Cardputer Zero. Everything on this page was built from
-> M5Stack's published source code and documentation, and tested only in an emulator on a
-> desktop computer. There is no package to install on the device, the screen and keyboard
-> code has never touched the hardware, and the LoRa add-on board is not wired up at all.
+> MeshTerm now runs on a real Cardputer Zero, with M5Stack's Cap LoRa-1262 as its radio,
+> but only from a copy of the source code you set up yourself. There is no package in
+> M5Stack's app store, and the keyboard has only been checked by sending key events to it
+> from another computer, not by someone typing on it.
 >
-> Don't buy a Cardputer Zero to run MeshTerm on it. This page will say so when that
+> Don't buy a Cardputer Zero to run MeshTerm on it yet. This page will say so when that
 > changes.
 
 M5Stack makes three Cardputers. This page is about the **Cardputer Zero**: the one with a
@@ -18,6 +18,7 @@ applies to them.
 
 - [The device](#the-device)
 - [Where the work stands](#where-the-work-stands)
+- [Installing it on the device](#installing-it-on-the-device)
 - [Trying it in the emulator](#trying-it-in-the-emulator)
 - [Radios](#radios)
 
@@ -41,21 +42,51 @@ character on the screen itself and reads the keys directly.
 
 ## Where the work stands
 
-**Done, and tested only in the emulator:**
+**Done, and tried on a real Cardputer Zero:**
 
+- MeshTerm starts from M5Stack's app launcher and draws on the screen itself.
 - MeshTerm's layout for the 14-row screen: a title bar that also carries the unread count
   and the battery, one-row tab strips, and dialogs sized for the short screen.
+- The battery in the title bar is the Cardputer Zero's own.
 - The row of function-key labels along the bottom of the screen, driven by **Fn+4** to
   **Fn+8**, the keys that sit right under the display. **Shift** with them is a second set.
-- The program that draws MeshTerm on the screen, and a desktop emulator built on it.
+- M5Stack's Cap LoRa-1262 radio add-on (see [Radios](#radios)).
+- Holding **Esc** for three seconds, which is how the launcher closes any app, closes
+  MeshTerm properly.
 
 **Not done:**
 
-- Running on the real device at all.
-- A package for M5Stack's app store, so the launcher can start MeshTerm.
-- The LoRa radio add-on (see [Radios](#radios)).
-- Checking the keyboard on the device. Its layout was read from M5Stack's driver code,
-  and two printings of the keyboard exist.
+- A package for M5Stack's app store. Until there is one, you install MeshTerm yourself
+  (see below).
+- Typing on the real keyboard. The arrows, Enter, Esc, Fn+4 to Fn+8, and Shift have been
+  checked by sending their key events to the keyboard from another computer, and the
+  symbols on the Sym layer match M5Stack's own keymap on the device. Nobody has typed a
+  message on it yet.
+
+## Installing it on the device
+
+This is for people comfortable with a Linux command line. You need the Cardputer Zero on
+Wi-Fi, and a way to type commands on it: SSH from another computer is easiest.
+
+Get MeshTerm and the radio library, and fetch the font the screen is drawn in:
+
+```bash
+git clone https://github.com/jpmartineau/MeshTerm.git
+cd MeshTerm
+python3 -m venv .venv
+.venv/bin/pip install -e '.[spi]'
+.venv/bin/meshterm emulate --fetch-fonts
+```
+
+Then put MeshTerm in the launcher. This asks for your password once, because the launcher's
+list of apps belongs to the system:
+
+```bash
+scripts/cardputer-zero/launcher-entry.sh
+```
+
+MeshTerm now has an icon in the launcher. `scripts/cardputer-zero/launcher-entry.sh remove`
+takes it out again.
 
 ## Trying it in the emulator
 

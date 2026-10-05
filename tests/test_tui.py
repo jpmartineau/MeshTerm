@@ -1717,6 +1717,22 @@ def test_device_picker_names_and_sorts_known_devices(tmp_path) -> None:
     assert any(_BLE_ICON in row.plain for row in device_rows)
 
 
+def test_device_picker_ranks_likely_companions_above_a_bare_port() -> None:
+    """A board's own UART (no USB identity) sinks below companions on any transport.
+
+    On a Cardputer Zero, ``/dev/ttyS0`` is the Cap's GPS: listed first because serial is
+    scanned first, it opened the splash with the highlight on a port that can't be a node.
+    """
+    from meshterm.core.config import SpiWiring
+    from meshterm.core.discovery import DiscoveredDevice, spi_device
+    from meshterm.ui.device_picker import _order
+
+    uart = DiscoveredDevice(port="/dev/ttyS0", description="n/a")
+    ble = DiscoveredDevice(transport="ble", address="AA:BB", name="MeshCore-Roam")
+    cap = spi_device(SpiWiring(bus_id=0, cs_id=1), name="Cap LoRa-1262")
+    assert _order([uart, ble, cap], {}) == [ble, cap, uart]
+
+
 def test_device_picker_reinjects_remembered_tcp_device(tmp_path) -> None:
     """A remembered TCP companion reappears in the picker even though it can't be scanned for."""
     from meshterm.core.device_store import DeviceStore

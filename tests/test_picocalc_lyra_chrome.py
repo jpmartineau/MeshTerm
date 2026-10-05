@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from rich.cells import cell_len
 from rich.text import Text
 
@@ -384,22 +386,26 @@ def test_host_battery_reads_the_sysfs_supply(tmp_path, monkeypatch) -> None:
     """The PicoCalc battery path: a true percent and charging flag straight from sysfs."""
     from meshterm.services import battery_service
 
-    (tmp_path / "capacity").write_text("53\n")
-    (tmp_path / "status").write_text("Discharging\n")
-    (tmp_path / "voltage_now").write_text("4012000\n")
-    monkeypatch.setattr(battery_service, "_HOST_SUPPLY", tmp_path)
+    supply = tmp_path / "picocalc"
+    supply.mkdir()
+    (supply / "type").write_text("Battery\n")
+    (supply / "capacity").write_text("53\n")
+    (supply / "status").write_text("Discharging\n")
+    (supply / "voltage_now").write_text("4012000\n")
+    monkeypatch.setattr(battery_service, "_POWER_SUPPLIES", tmp_path)
     service = battery_service.BatteryService(ctx=None)
-    service._poll_host()
+    asyncio.run(service._poll_host())
     reading = service.reading()
     assert reading is not None
     assert (reading.percent, reading.charging, reading.millivolts) == (53, False, 4012)
 
-    (tmp_path / "status").write_text("Charging\n")
-    service._poll_host()
+    (supply / "status").write_text("Charging\n")
+    asyncio.run(service._poll_host())
     assert service.reading().charging is True
 
-    monkeypatch.setattr(battery_service, "_HOST_SUPPLY", tmp_path / "gone")
-    service._poll_host()
+    monkeypatch.setattr(battery_service, "_POWER_SUPPLIES", tmp_path / "gone")
+    for _ in range(battery_service._HOST_MISSES_KEPT + 1):
+        asyncio.run(service._poll_host())
     assert service.reading() is None  # unreadable supply = absent, header draws nothing
 
 

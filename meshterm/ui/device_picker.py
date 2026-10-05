@@ -824,15 +824,20 @@ def _tag(device: DiscoveredDevice, is_known: bool) -> tuple[str, str]:
 def _order(
     devices: list[DiscoveredDevice], registry: dict[str, RememberedDevice]
 ) -> list[DiscoveredDevice]:
-    """Confirmed companions first (most-recently-used first), then everything else as found.
+    """Confirmed companions first (most-recently-used first), then likely ones, then the rest.
 
     The devices we've actually spoken to are the ones the user almost always wants, so they
-    rise to the top ordered by their last-connected timestamp (newest first). Unknown ports
-    keep their incoming discovery order — a stable sort preserves it since they all tie.
+    rise to the top ordered by their last-connected timestamp (newest first). Below them,
+    anything that looks like a companion — a MeshCore advert, a known board, a radio on the
+    SPI bus — comes before a port nothing vouches for, *across* transports: serial is listed
+    first as found, so a board's bare UART (a Cardputer Zero's ``/dev/ttyS0``, wired to its
+    Cap's GPS) used to open the splash with the highlight on it, above the Cap itself. Ties
+    keep their discovery order — the sort is stable.
     """
     known = [d for d in devices if d.stable_id in registry]
     others = [d for d in devices if d.stable_id not in registry]
     known.sort(key=lambda d: registry[d.stable_id].last_connected, reverse=True)
+    others.sort(key=lambda d: not d.is_likely_lora)
     return known + others
 
 

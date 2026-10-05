@@ -266,8 +266,9 @@ PICOCALC_LYRA = Platform(
 #: keys), dealing the PicoCalc's lanes for now (JP, 2026-09-30). MeshTerm draws the panel
 #: itself in RGB565 (:mod:`meshterm.emulator`), so it is not held to a 16-slot palette
 #: (``truecolor``). Provisional until measured on the device: the cadences, taken from the
-#: PicoCalc; ``effects`` off; and the battery, read from the companion until the device's
-#: own gauge (a BQ27220) has a known ``power_supply`` name.
+#: PicoCalc; and ``effects`` off. The battery is the handheld's own BQ27220 gauge, which the
+#: kernel publishes as the ``power_supply`` ``bq27220-0`` (seen on the device, 2026-10-05) —
+#: the pack the reader is holding, whichever radio is connected, as on the PicoCalc.
 CARDPUTER_ZERO = Platform(
     name="cardputer-zero",
     readable_cols=53,
@@ -293,7 +294,7 @@ CARDPUTER_ZERO = Platform(
     effects=False,
     tick_s=2.0,
     spinner_tick_s=0.5,
-    battery="companion",
+    battery="host",
     own_display=True,
     modifier_watch="tca8418c",
 )

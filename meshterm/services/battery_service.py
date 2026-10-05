@@ -8,11 +8,11 @@ it holds no device subscription — each pass just checks whether a device is co
 skips quietly otherwise — so it is indifferent to reconnects, ticking across a link drop
 and resuming once the radio is back.
 
-Which pack it reads is platform data (``Platform.battery``). On the **PicoCalc** the gauge is
-the handheld's own — its BMS hangs off the keyboard MCU's I2C register block and the kernel
-publishes it as a standard ``power_supply`` (:data:`_HOST_SUPPLY`), so both numbers are the
-device's own ground truth: ``capacity`` is a real percent and ``status`` a real charging flag
-(the MCU's battery register carries charge in its low bits and *charging* in its top one).
+Which pack it reads is platform data (``Platform.battery``). On the **PicoCalc** and the
+**Cardputer Zero** the gauge is the handheld's own, published by the kernel as a standard
+``power_supply`` (:func:`host_supply`) — the PicoCalc's BMS through its keyboard MCU's I2C
+register block, the Cardputer's through a BQ27220 fuel gauge — so both numbers are the
+device's own ground truth: ``capacity`` is a real percent and ``status`` a real charging flag.
 Nothing below is estimated there — no voltage curve, no trend.
 
 The rest of this module is the **companion** path, where the radio gives far less. Two device
@@ -80,9 +80,68 @@ _CHARGING_RISE_HOLD_MV = 8
 #: How many samples to retain — the trend window plus a little slack at the poll cadence.
 _TREND_SAMPLES = int(_TREND_WINDOW_S / POLL_S) + 2
 
-#: The PicoCalc's own battery gauge, a standard kernel ``power_supply`` driver
-#: (confirmed present in P0: ``capacity``, ``status``, Li-ion, uevent format).
-_HOST_SUPPLY = Path("/sys/class/power_supply/picocalc")
+#: Where the kernel lists every ``power_supply``. The host's own pack is the one of type
+#: ``Battery`` that isn't a peripheral's (:func:`host_supply`): the PicoCalc's ``picocalc``
+#: (confirmed in P0) and the Cardputer Zero's BQ27220 gauge, ``bq27220-0``, both qualify by
+#: what they are rather than by a name kept on a list.
+_POWER_SUPPLIES = Path("/sys/class/power_supply")
+
+#: How often one sysfs value is tried before a poll gives up on it, and the pause between
+#: tries. The Cardputer Zero's BQ27220 shares I2C bus 1 with the keyboard and the clock,
+#: and while the Cap on its header is powered that bus turns noisy: measured on the device,
+#: a quarter to three quarters of the gauge's reads fail with an I/O error, and one in ten
+#: of the clock's, against none with the header off. A failed read says nothing about the
+#: pack, so it is simply asked again.
+_HOST_READ_ATTEMPTS = 6
+_HOST_RETRY_S = 0.1
+
+#: How many polls in a row a host pack may fail to read before its gauge is taken down — a
+#: pack doesn't change in two minutes, so the last reading stands rather than blinking out.
+_HOST_MISSES_KEPT = 6
+
+
+async def _read_value(path: Path) -> str:
+    """One sysfs value, asked again on an I/O error (see :data:`_HOST_READ_ATTEMPTS`).
+
+    Raises:
+        OSError: When every try failed.
+    """
+    for attempt in range(_HOST_READ_ATTEMPTS):
+        try:
+            return path.read_text().strip()
+        except FileNotFoundError:
+            raise  # no such value: asking again won't make one
+        except OSError:
+            if attempt == _HOST_READ_ATTEMPTS - 1:
+                raise
+            await asyncio.sleep(_HOST_RETRY_S)
+    raise OSError(f"{path} could not be read")  # pragma: no cover - the loop always returns
+
+
+def host_supply(root: Path = _POWER_SUPPLIES) -> Path | None:
+    """The host's own battery: the first ``Battery`` supply that isn't a peripheral's.
+
+    A wireless mouse's or a game pad's battery is a ``power_supply`` too, and carries
+    ``scope = Device``; the host's carries no scope, or ``System``. ``None`` when there is
+    none, or the directory can't be read.
+    """
+    try:
+        supplies = sorted(root.iterdir())
+    except OSError:
+        return None
+    for supply in supplies:
+        try:
+            kind = (supply / "type").read_text().strip()
+        except OSError:
+            continue
+        try:
+            scope = (supply / "scope").read_text().strip()
+        except OSError:
+            scope = ""
+        if kind == "Battery" and scope != "Device":
+            return supply
+    return None
+
 
 #: Single-cell LiPo terminal-voltage → state-of-charge lookup ``(millivolts, percent)``,
 #: high to low. The discharge curve is far from a straight line — most of the usable charge
@@ -174,6 +233,8 @@ class BatteryService:
         self._reading: BatteryReading | None = None
         #: Recent ``(monotonic_time, millivolts)`` samples, for the charging trend.
         self._history: deque[tuple[float, int]] = deque(maxlen=_TREND_SAMPLES)
+        #: Host-pack reads failed in a row (see :data:`_HOST_MISSES_KEPT`).
+        self._host_misses = 0
 
     @property
     def active(self) -> bool:
@@ -226,7 +287,7 @@ class BatteryService:
         regular platform polls the connected companion radio over the mesh link.
         """
         if get_platform().battery == "host":
-            self._poll_host()
+            await self._poll_host()
             return
         ctx = self._ctx
         if not ctx.is_connected:
@@ -253,21 +314,33 @@ class BatteryService:
             charging=charging,
         )
 
-    def _poll_host(self) -> None:
-        """Read the host's own pack from sysfs (the PicoCalc's ``picocalc`` supply).
+    async def _poll_host(self) -> None:
+        """Read the host's own pack from sysfs (:func:`host_supply`).
 
         The driver is a standard ``power_supply``: ``capacity`` is a true percent and
         ``status`` a real charging flag (verified in P0), so none of the companion
         path's voltage-curve or trend estimation applies. An unreadable supply (driver
-        missing, permissions) reports *absent* and the header simply draws no gauge.
+        missing, permissions) reports *absent* and the header simply draws no gauge —
+        once it has failed :data:`_HOST_MISSES_KEPT` polls running; a failed poll after a
+        good one keeps the good one. Each value is asked again on an I/O error first
+        (:func:`_read_value`), and a ``status`` that still won't read keeps the charging
+        verdict the last good one gave: the percent is the reading, the flag its garnish.
         """
-        supply = _HOST_SUPPLY
+        supply = host_supply(_POWER_SUPPLIES)
         try:
-            percent = int((supply / "capacity").read_text().strip())
-            status = (supply / "status").read_text().strip()
+            if supply is None:
+                raise OSError("no battery power_supply")
+            percent = int(await _read_value(supply / "capacity"))
         except (OSError, ValueError):
-            self._reading = None
+            self._host_misses += 1
+            if self._host_misses > _HOST_MISSES_KEPT:
+                self._reading = None
             return
+        self._host_misses = 0
+        try:
+            charging = await _read_value(supply / "status") == "Charging"
+        except OSError:
+            charging = self._reading.charging if self._reading is not None else False
         try:  # informational only; the header draws percent + charging
             mv = int((supply / "voltage_now").read_text().strip()) // 1000
         except (OSError, ValueError):
@@ -275,7 +348,7 @@ class BatteryService:
         self._reading = BatteryReading(
             millivolts=mv,
             percent=max(0, min(100, percent)),
-            charging=status == "Charging",
+            charging=charging,
         )
 
     def _charging(self, now: float) -> bool:
