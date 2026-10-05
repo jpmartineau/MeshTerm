@@ -1203,7 +1203,8 @@ class TraceScreen(Screen):
         Each hop reads ``n  origin → destination  +4.5 dB  meter``, the link drawn through
         THE path widget as the route lane above draws it: names, no hash after them (an
         unnamed node shows its hash, the only identity it has), our own end the bare
-        ``★``. Where every row fits whole the hops are a four-column table, one line each.
+        ``★``, and only the route's own two ends square (see :meth:`_hop_path`). Where
+        every row fits whole the hops are a four-column table, one line each.
         Where any doesn't, every row takes two — all alike, so the column of readings
         never jumps between lines as the eye runs down it: the hop number and its path on
         the first, the reading and its meter flush right on the second. A path still
@@ -1214,7 +1215,11 @@ class TraceScreen(Screen):
         the rows are drawn at the shift the footer and the next press agree on.
         """
         numbers = [Text(str(agg.index), style="muted") for agg in stats.hop_snrs]
-        paths = [self._hop_path(agg, hash_bytes) for agg in stats.hop_snrs]
+        last = len(stats.hop_snrs) - 1
+        paths = [
+            self._hop_path(agg, hash_bytes, from_origin=i == 0, to_destination=i == last)
+            for i, agg in enumerate(stats.hop_snrs)
+        ]
         readings = [
             Text(f"{agg.median_snr:+.1f} dB", style=snr_style(agg.median_snr))
             for agg in stats.hop_snrs
@@ -1259,8 +1264,20 @@ class TraceScreen(Screen):
             lines.append(render_to_ansi(second, width, no_wrap=True))
         return lines
 
-    def _hop_path(self, agg: HopAggregate, hash_bytes: int | None) -> Text:
-        """One hop's link, ``origin → destination``, as the route lane draws its nodes."""
+    def _hop_path(
+        self,
+        agg: HopAggregate,
+        hash_bytes: int | None,
+        *,
+        from_origin: bool,
+        to_destination: bool,
+    ) -> Text:
+        """One hop's link, ``origin → destination``, as the route lane draws its nodes.
+
+        A hop is one link of the walk, so only the route's own two ends are drawn square —
+        the first hop's start, the last hop's finish. Every other end is a node the route
+        runs on through, and wears the chevron (the arrow form, a bare ``→``) that says so.
+        """
         ends = [
             None if not node or node == self._device_label else node
             for node in (agg.origin, agg.destination)
@@ -1272,6 +1289,8 @@ class TraceScreen(Screen):
             self_name=self._device_label,
             hash_bytes=hash_bytes,
             bare_self=True,
+            from_origin=from_origin,
+            to_destination=to_destination,
         ).text()
 
     def _trace_log(self) -> RenderableType:

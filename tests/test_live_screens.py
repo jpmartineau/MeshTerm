@@ -389,12 +389,29 @@ def test_hop_rows_name_their_link_on_one_line_where_it_fits() -> None:
     """Each hop is ``n  origin → destination  reading  meter`` — names, never a hash."""
     rows = _hop_rows(_hop_rows_screen(), 100)
     assert len(rows) == 3  # one line a hop
-    assert rows[1].startswith("1 Lakeside → Mont-Royal Summit Relay")
     assert "-3.5 dB" in rows[1] and _BAR_FULL in rows[1]
-    assert rows[0].startswith("0 ★ → Lakeside")  # our end is the bare star
     assert not any("(3d" in row or "(f2" in row for row in rows)
+    # Only the route's own ends are bare; every end it runs on through keeps its arrow.
+    assert rows[0].startswith("0 ★ → Lakeside → ")  # our end is the bare star
+    assert rows[1].startswith("1 → Lakeside → Mont-Royal Summit Relay → ")
+    assert rows[2].startswith("2 → Mont-Royal Summit Relay → ★ ")
     # A four-column table: every reading ends in the same column.
     assert len({row.index(" dB") for row in rows}) == 1
+
+
+def test_hop_rows_square_only_the_routes_own_ends(powerline) -> None:  # noqa: ANN001
+    """As chips, the first hop opens square and the last closes square — nothing else.
+
+    A hop is one link of the walk, so its far ends are nodes the route runs on through:
+    those wear the notch and the point, the marks a path line uses for "this goes on".
+    """
+    from meshterm.ui.pathline import POWERLINE_SEP
+
+    powerline(True)
+    rows = _hop_rows(_hop_rows_screen(), 50)  # chips are wider: every hop folds
+    paths = [row[2:].rstrip() for row in rows[::2]]
+    assert [p.startswith(POWERLINE_SEP) for p in paths] == [False, True, True]
+    assert [p.endswith(POWERLINE_SEP) for p in paths] == [True, True, False]
 
 
 def test_hop_rows_fold_under_their_path_and_slide_where_it_does_not() -> None:
@@ -407,7 +424,7 @@ def test_hop_rows_fold_under_their_path_and_slide_where_it_does_not() -> None:
     screen = _hop_rows_screen()
     rows = _hop_rows(screen, 30)
     assert len(rows) == 6  # two lines a hop, all alike
-    assert rows[2].startswith("1 Lakeside → Mont-Royal Su")
+    assert rows[2].startswith("1 → Lakeside → Mont-Royal")
     assert rows[2].rstrip().endswith("…")  # cut where it runs on
     assert "-3.5 dB" in rows[3] and cell_len(rows[3].rstrip()) == 30  # flush right
     assert "←→ scroll" in screen.footer_hint
@@ -415,13 +432,15 @@ def test_hop_rows_fold_under_their_path_and_slide_where_it_does_not() -> None:
     screen.handle("down")  # the action cursor pins the page…
     screen.handle("right")
     assert screen.cursor_line() is None  # …and sliding the paths lets it go again
+    screen.handle("right")
     rows = _hop_rows(screen, 30)
-    assert rows[2].startswith("1 …") and rows[2].rstrip().endswith("Summit Relay")
-    assert rows[0].startswith("0 ★ → Lakeside")  # a path in view whole never moves
+    assert rows[2].startswith("1 …") and rows[2].rstrip().endswith("Summit Relay →")
+    assert rows[0].startswith("0 ★ → Lakeside →")  # a path in view whole never moves
     screen.handle("right")  # already at the tail: clamped
     assert _hop_rows(screen, 30)[2] == rows[2]
     screen.handle("left")
-    assert _hop_rows(screen, 30)[2].startswith("1 Lakeside")
+    screen.handle("left")
+    assert _hop_rows(screen, 30)[2].startswith("1 → Lakeside")
 
     _hop_rows(screen, 100)  # wide enough again: nothing to slide, nothing advertised
     assert "←→ scroll" not in screen.footer_hint
