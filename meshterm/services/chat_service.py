@@ -18,6 +18,8 @@ communications, not overheard noise, so they are always recorded while a device 
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from ..core.channels import channel_identity
@@ -26,6 +28,7 @@ from ..core.events import EventKind, MeshEvent
 from ..core.models import (
     ChatMessage,
     Contact,
+    Delivery,
     Message,
     is_direct_messageable,
     utcnow,
@@ -34,6 +37,15 @@ from ..core.regions import WILDCARD, normalize
 
 if TYPE_CHECKING:
     from ..context import AppContext
+
+
+#: How many unacknowledged messages keep waiting for a late ack. The radio itself remembers
+#: the codes of only its last eight sends (MeshCore's ``EXPECTED_ACK_TABLE_SIZE``) and
+#: pushes an ack for none older, so a few more than that covers every ack still possible.
+_AWAITING_CAP = 16
+
+#: Called with a message once its ack arrives after the send stopped waiting for it.
+LateAck = Callable[[ChatMessage], None]
 
 
 def _fallback_channel_id(idx: int | None) -> str:
@@ -80,6 +92,11 @@ class ChatService:
         # slot fresh every time (see :meth:`channel_id_for`), so this is not the source of
         # truth — only a warm map for priming/backfill and a fallback when a read fails.
         self._channel_ids: dict[int, str] = {}
+        # Messages sent whose ack had not arrived when the send stopped waiting, by the ack
+        # code a late one would carry (every attempt's, for a retried message), oldest
+        # first, each with whoever wants to hear when it lands (see :meth:`_settle_ack`).
+        self._awaiting: OrderedDict[str, tuple[ChatMessage, LateAck | None]] = OrderedDict()
+        self._ack_unsubscribe: Unsubscribe | None = None
 
     @property
     def active(self) -> bool:
@@ -234,6 +251,7 @@ class ChatService:
                 queue.put_nowait(message)
 
         self._unsubscribe = self._ctx.events.subscribe(on_event, EventKind.MESSAGE)
+        self._ack_unsubscribe = self._ctx.events.subscribe(self._on_ack, EventKind.ACK)
         self._run_id = run_id
         self._ctx.log.info("chat recording (run %s)", run_id)
         await self._prime_channels()
@@ -264,8 +282,11 @@ class ChatService:
         try:
             assert self._unsubscribe is not None
             self._unsubscribe()
+            if self._ack_unsubscribe is not None:
+                self._ack_unsubscribe()
         finally:
             self._unsubscribe = None
+            self._ack_unsubscribe = None
         if self._worker is not None:
             self._worker.cancel()
             try:
@@ -434,7 +455,7 @@ class ChatService:
                     return is_direct_messageable(contact.node_type)
         return False
 
-    async def _deliver_direct(self, contact: Contact, text: str):
+    async def _deliver_direct(self, contact: Contact, text: str) -> tuple[bool, list[str]]:
         """Transmit a direct message, softly retrying until it is acknowledged.
 
         A single logical send makes one initial transmission plus up to
@@ -454,8 +475,8 @@ class ChatService:
             text: The message body.
 
         Returns:
-            The delivery :class:`~meshterm.core.models.Ack` from the first attempt that landed,
-            or ``None`` if every attempt went unacknowledged.
+            Whether an attempt was acknowledged within its wait, and the ack code of every
+            attempt made — any of which a late ack may still carry (the radio keeps them).
 
         Raises:
             Exception: Propagates a hard send failure (the companion rejecting the send); such
@@ -463,11 +484,13 @@ class ChatService:
         """
         device = await self._ctx.device()
         attempts = max(0, self._ctx.preferences.direct_message_soft_retries) + 1
-        ack = None
+        codes: list[str] = []
         for attempt in range(1, attempts + 1):
-            ack = await device.send_direct_message(contact, text)
-            if ack is not None:
-                return ack
+            delivery: Delivery = await device.send_direct_message(contact, text)
+            if delivery.code:
+                codes.append(delivery.code)
+            if delivery.acked:
+                return True, codes
             if attempt < attempts:
                 self._ctx.log.debug(
                     "chat: DM to %s unacked on try %d/%d; soft-retrying",
@@ -475,34 +498,41 @@ class ChatService:
                     attempt,
                     attempts,
                 )
-        return ack
+        return False, codes
 
-    async def send_direct(self, contact: Contact, text: str) -> ChatMessage:
+    async def send_direct(
+        self, contact: Contact, text: str, *, on_late_ack: LateAck | None = None
+    ) -> ChatMessage:
         """Send a direct message to a contact and record it in history.
 
         Delivery is attempted with up to ``preferences.direct_message_soft_retries`` automatic
         soft retries (see :meth:`_deliver_direct`) before the message is recorded as
-        unacknowledged.
+        unacknowledged — which means *not confirmed yet*: an ack that lands later still
+        settles it (see :meth:`_settle_ack`), in history and on the screen showing it.
 
         Args:
             contact: The recipient.
             text: The message body.
+            on_late_ack: Called with the recorded message if its ack arrives after the
+                send stopped waiting (the Courier, which would otherwise send it again).
 
         Returns:
             The recorded outbound :class:`ChatMessage` (its ``acked`` reflects whether a
-            delivery acknowledgement arrived within the soft-retry budget).
+            delivery acknowledgement arrived within the wait, so far).
         """
-        ack = await self._deliver_direct(contact, text)
+        acked, codes = await self._deliver_direct(contact, text)
         chat = ChatMessage(
             text=text,
             outbound=True,
             is_channel=False,
             peer=contact.key_prefix or contact.public_key[:12] or None,
             peer_name=contact.name,
-            acked=ack is not None,
+            acked=acked,
             created_at=utcnow(),
         )
         chat.row_id = self._ctx.repo.record_chat_message(chat, run_id=self._run_id)
+        if not acked:
+            self._await_ack(chat, codes, on_late_ack)
         return chat
 
     async def resend_direct(self, contact: Contact, message: ChatMessage) -> ChatMessage:
@@ -523,10 +553,14 @@ class ChatService:
         Returns:
             The same ``message``, with :attr:`~ChatMessage.acked` refreshed.
         """
-        ack = await self._deliver_direct(contact, message.text)
-        message.acked = ack is not None
+        acked, codes = await self._deliver_direct(contact, message.text)
+        if message.acked:
+            return message  # a late ack for an earlier attempt settled it meanwhile
+        message.acked = acked
         if message.row_id is not None:
             self._ctx.repo.update_chat_ack(message.row_id, message.acked)
+        if not acked:
+            self._await_ack(message, codes, None)
         return message
 
     async def send_post(self, room: Contact, text: str) -> ChatMessage:
@@ -553,17 +587,19 @@ class ChatService:
             stored it.
         """
         device = await self._ctx.device()
-        ack = await device.send_direct_message(room, text)
+        delivery = await device.send_direct_message(room, text)
         chat = ChatMessage(
             text=text,
             outbound=True,
             is_channel=False,
             peer=room.key_prefix or room.public_key[:12] or None,
             peer_name=room.name,
-            acked=ack is not None,
+            acked=delivery.acked,
             created_at=utcnow(),
         )
         chat.row_id = self._ctx.repo.record_chat_message(chat, run_id=self._run_id)
+        if not delivery.acked:
+            self._await_ack(chat, [delivery.code] if delivery.code else [], None)
         return chat
 
     async def resend_post(self, room: Contact, message: ChatMessage) -> ChatMessage:
@@ -577,11 +613,67 @@ class ChatService:
             The same ``message``, with :attr:`~ChatMessage.acked` refreshed.
         """
         device = await self._ctx.device()
-        ack = await device.send_direct_message(room, message.text)
-        message.acked = ack is not None
+        delivery = await device.send_direct_message(room, message.text)
+        if message.acked:
+            return message  # a late ack for the first post settled it meanwhile
+        message.acked = delivery.acked
         if message.row_id is not None:
             self._ctx.repo.update_chat_ack(message.row_id, message.acked)
+        if not delivery.acked:
+            self._await_ack(message, [delivery.code] if delivery.code else [], None)
         return message
+
+    # --- late acks ------------------------------------------------------------------------
+
+    def _await_ack(self, chat: ChatMessage, codes: list[str], on_late_ack: LateAck | None) -> None:
+        """Keep listening for a sent message's ack after the send has stopped waiting.
+
+        The radio pushes an ack whenever it lands, however late, for any of its last eight
+        sends; a flood's ack, riding home on the path the message found, routinely lands
+        after the wait. So the message is filed under every code it was sent with, the
+        oldest entries giving way past :data:`_AWAITING_CAP`.
+        """
+        for code in codes:
+            self._awaiting[code.lower()] = (chat, on_late_ack)
+            self._awaiting.move_to_end(code.lower())
+        while len(self._awaiting) > _AWAITING_CAP:
+            self._awaiting.popitem(last=False)
+
+    def _on_ack(self, event: MeshEvent) -> None:
+        """Hub callback: an ack arrived; settle the message it belongs to, if one waits."""
+        ack = event.ack
+        if ack is None or not ack.code:
+            return
+        self._settle_ack(str(ack.code).lower())
+
+    def _settle_ack(self, code: str) -> None:
+        """Mark the message waiting on ``code`` delivered, everywhere it is shown or kept.
+
+        The history row is updated, and the very :class:`ChatMessage` the chat screen
+        holds flips to acknowledged, so its ✗ turns to ✓ on the next paint. Whoever asked
+        to hear of it (the Courier) is told. Every other code the message was sent under
+        (an earlier attempt's) is let go: it was delivered once, and that is the news.
+        """
+        entry = self._awaiting.pop(code, None)
+        if entry is None:
+            return
+        chat, on_late_ack = entry
+        for other in [c for c, (held, _) in self._awaiting.items() if held is chat]:
+            del self._awaiting[other]
+        if chat.acked:
+            return
+        chat.acked = True
+        if chat.row_id is not None:
+            try:
+                self._ctx.repo.update_chat_ack(chat.row_id, True)
+            except Exception as exc:  # noqa: BLE001 - the screen still shows it delivered
+                self._ctx.log.debug("chat: failed to record a late ack: %s", exc)
+        self._ctx.log.info("chat: late ack from %s", chat.peer_name or chat.peer)
+        if on_late_ack is not None:
+            try:
+                on_late_ack(chat)
+            except Exception as exc:  # noqa: BLE001 - one listener must not break the hub
+                self._ctx.log.debug("chat: late-ack listener failed: %s", exc)
 
     def channel_scope(self, channel_id: str | None) -> str | None:
         """The region a channel's messages are sent under, or ``None`` for the device default.

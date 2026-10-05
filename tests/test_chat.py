@@ -113,8 +113,8 @@ async def test_mock_send_direct_returns_ack() -> None:
     device = MockDevice()
     await device.connect()
     contact = (await device.get_contacts())[0]
-    ack = await device.send_direct_message(contact, "hello")
-    assert ack is not None
+    delivery = await device.send_direct_message(contact, "hello")
+    assert delivery.acked and delivery.code
     await device.send_channel_message(0, "hi channel")  # no return, must not raise
     await device.disconnect()
 
@@ -146,7 +146,7 @@ async def test_adding_a_forgotten_contact_back_makes_it_messageable() -> None:
     stranger = Contact(name="bob_caribou", public_key="a3" * 32, key_prefix="a3a3a3a3")
     await device.add_contact(stranger)
     assert "bob_caribou" in {c.name for c in await device.get_contacts()}
-    assert await device.send_direct_message(stranger, "hello") is not None
+    assert (await device.send_direct_message(stranger, "hello")).acked
     await device.disconnect()
 
 
@@ -1603,6 +1603,7 @@ class _ScriptedDevice:
     stand-in (any non-``None`` object counts as delivered) or ``None`` for an unacknowledged
     transmission — and appends the sent text to :attr:`sent`, so a test can assert exactly how
     many soft retries fired. Once the script is exhausted every further send goes unacked.
+    Each send gets its own ack code, as the radio's do.
     """
 
     def __init__(self, acks: list) -> None:
@@ -1613,8 +1614,11 @@ class _ScriptedDevice:
         return None
 
     async def send_direct_message(self, contact: Contact, text: str):
+        from meshterm.core.models import Delivery
+
         self.sent.append(text)
-        return self._acks.pop(0) if self._acks else None
+        ack = self._acks.pop(0) if self._acks else None
+        return Delivery(f"{len(self.sent):08x}", ack)
 
 
 def _contact() -> Contact:
@@ -2568,3 +2572,160 @@ def test_a_link_written_without_a_scheme_gets_its_code_too() -> None:
         assert isinstance(opened[0], QrScreen) and opened[0].urls == ("https://meshterm.net/map",)
 
     asyncio.run(scenario())
+
+
+# -- acks: listening early, waiting long enough, and catching the late ones ----
+
+
+class _AckingMeshCore:
+    """A meshcore stand-in whose send accepts the message, then acks it when scripted.
+
+    ``ack_at`` is seconds after the send returns (``None``: never); ``during_send`` pushes
+    the ack before the send has even returned, as a neighbour's can.
+    """
+
+    def __init__(self, *, ack_at: float | None, during_send: bool = False, flood: bool = True):
+        self.subs: list = []
+        self.commands = self
+        self._ack_at = ack_at
+        self._during = during_send
+        self._flood = flood
+
+    def subscribe(self, event_type, callback, attribute_filters=None):  # noqa: ANN001, ANN201
+        from types import SimpleNamespace
+
+        sub = SimpleNamespace(event_type=event_type, callback=callback)
+        sub.unsubscribe = lambda: self.subs.remove(sub) if sub in self.subs else None
+        self.subs.append(sub)
+        return sub
+
+    def _push_ack(self) -> None:
+        from types import SimpleNamespace
+
+        from meshcore import EventType
+
+        event = SimpleNamespace(type=EventType.ACK, payload={"code": "c0ffee01", "trip_time": 900})
+        for sub in list(self.subs):
+            if sub.event_type is EventType.ACK:
+                sub.callback(event)
+
+    async def send_msg(self, pub, text):  # noqa: ANN001, ANN201
+        from types import SimpleNamespace
+
+        if self._during:
+            self._push_ack()
+        elif self._ack_at is not None:
+            asyncio.get_running_loop().call_later(self._ack_at, self._push_ack)
+        return SimpleNamespace(
+            type="MSG_SENT",
+            is_error=lambda: False,
+            payload={
+                "type": 1 if self._flood else 0,
+                "expected_ack": bytes.fromhex("c0ffee01"),
+                "suggested_timeout": 100,  # 0.1 s: the radio's (too hopeful) estimate
+            },
+        )
+
+
+def _acking_device(mc) -> object:  # noqa: ANN001
+    from meshterm.core.connection import MeshCoreDevice
+
+    device = MeshCoreDevice(port="mock")
+    device._mc = mc
+    return device
+
+
+async def test_an_ack_quicker_than_the_send_is_still_caught() -> None:
+    """The listener is armed before the send, so a neighbour's instant ack isn't missed."""
+    device = _acking_device(_AckingMeshCore(ack_at=None, during_send=True))
+    delivery = await device.send_direct_message(_contact(), "hi")
+    assert delivery.acked and delivery.code == "c0ffee01" and delivery.flood is True
+
+
+async def test_an_ack_after_the_radios_estimate_is_still_waited_for(monkeypatch) -> None:  # noqa: ANN001
+    """THE bug: the wait was the radio's estimate × 1.2 — 0.12 s here, five on hardware.
+
+    A flood's ack rides home on the path the message found, and on hardware took twice the
+    estimate. The wait is now the estimate plus a round trip sized like a login's.
+    """
+    import meshterm.core.connection as connection
+
+    monkeypatch.setattr(connection, "trace_timeout", lambda hops: 0.5)
+    device = _acking_device(_AckingMeshCore(ack_at=0.3))
+    delivery = await device.send_direct_message(_contact(), "hi")
+    assert delivery.acked, "an ack at 0.3 s, after the old 0.12 s wait, counts"
+
+
+async def test_no_ack_in_the_wait_still_says_which_code_to_listen_for(monkeypatch) -> None:  # noqa: ANN001
+    """Not confirmed yet is not failed: the code goes back, for a late ack to settle."""
+    import meshterm.core.connection as connection
+
+    monkeypatch.setattr(connection, "trace_timeout", lambda hops: 0.05)
+    device = _acking_device(_AckingMeshCore(ack_at=None, flood=False))
+    delivery = await device.send_direct_message(_contact(), "hi")
+    assert not delivery.acked and delivery.code == "c0ffee01" and delivery.flood is False
+
+
+async def _late_ack_chat(tmp_path: Path, repo: Repository):  # noqa: ANN202
+    """A started chat service over a simulator whose acks for Alice arrive late."""
+    device = MockDevice()
+    device._late_acks.add("Alice")
+    ctx = _StubContext(device, repo)
+    chat = ChatService(ctx)
+    await chat.start()
+    alice = next(c for c in await device.get_contacts() if c.name == "Alice")
+    return device, chat, alice
+
+
+async def test_a_late_ack_turns_the_message_delivered(tmp_path: Path, repo: Repository) -> None:
+    """In history and in the very message the chat screen holds — its ✗ becomes ✓."""
+    device, chat, alice = await _late_ack_chat(tmp_path, repo)
+    heard: list[ChatMessage] = []
+    try:
+        sent = await chat.send_direct(alice, "you there?", on_late_ack=heard.append)
+        assert sent.acked is False
+        for _ in range(100):
+            if sent.acked:
+                break
+            await asyncio.sleep(0.01)
+        assert sent.acked is True
+        stored = repo.recent_chat_messages(is_channel=False, peer=alice.key_prefix)
+        assert stored[-1].acked is True
+        assert heard == [sent]
+    finally:
+        await chat.stop()
+        await device.disconnect()
+
+
+async def test_a_late_ack_for_an_earlier_attempt_settles_a_retried_message(
+    tmp_path: Path, repo: Repository
+) -> None:
+    """^R sends it again under a new code; the first attempt's ack still counts."""
+    device, chat, alice = await _late_ack_chat(tmp_path, repo)
+    try:
+        await chat.stop()  # hold the late acks back until both attempts are out
+        sent = await chat.send_direct(alice, "anyone?")
+        first = next(iter(chat._awaiting))
+        await chat.resend_direct(alice, sent)
+        assert len(chat._awaiting) == 2 and sent.acked is False
+        chat._settle_ack(first)
+        assert sent.acked is True and not chat._awaiting
+        stored = repo.recent_chat_messages(is_channel=False, peer=alice.key_prefix)
+        assert len(stored) == 1 and stored[0].acked is True
+    finally:
+        await device.disconnect()
+
+
+def test_only_the_acks_the_radio_could_still_push_are_awaited(repo: Repository) -> None:
+    """The radio keeps its last eight codes; a few more than that are kept here, no more."""
+    from meshterm.services.chat_service import _AWAITING_CAP
+
+    chat = ChatService(_StubContext(MockDevice(), repo))
+    messages = [ChatMessage(text=str(n), outbound=True, acked=False) for n in range(40)]
+    for n, message in enumerate(messages):
+        chat._await_ack(message, [f"{n:08x}"], None)
+    assert len(chat._awaiting) == _AWAITING_CAP
+    chat._settle_ack("00000000")  # long gone: nothing to settle
+    assert messages[0].acked is False
+    chat._settle_ack(f"{39:08x}")
+    assert messages[39].acked is True

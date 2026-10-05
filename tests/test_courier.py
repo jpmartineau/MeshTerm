@@ -40,11 +40,15 @@ class _StubChat:
     def __init__(self, outcomes: list[bool]) -> None:
         self.outcomes = list(outcomes)
         self.sent: list[tuple[str, str]] = []
+        self.late: list = []  # the late-ack listener each unacked send handed over
 
-    async def send_direct(self, contact: Contact, text: str) -> ChatMessage:
+    async def send_direct(self, contact: Contact, text: str, *, on_late_ack=None) -> ChatMessage:  # noqa: ANN001
         self.sent.append((contact.name, text))
         acked = self.outcomes.pop(0) if self.outcomes else False
-        return ChatMessage(text=text, outbound=True, acked=acked)
+        chat = ChatMessage(text=text, outbound=True, acked=acked)
+        if not acked:
+            self.late.append((chat, on_late_ack))
+        return chat
 
 
 class _StubDevice:
@@ -185,6 +189,26 @@ async def test_attempt_gives_up_after_the_budget(tmp_path: Path) -> None:
     assert settled.status == "gave-up" and settled.attempts == MAX_ATTEMPTS
     gave = [a for a in ctx.watch_store.alerts() if "gave up" in a.message]
     assert len(gave) == 1
+
+
+async def test_a_late_ack_is_a_delivery_not_a_reason_to_send_again(tmp_path: Path) -> None:
+    """The ack outran the attempt's wait; when it lands, the entry is delivered.
+
+    It used to stay queued, and the next attempt sent the recipient the same message again —
+    on a mesh where most acks from beyond a neighbour arrive late, a duplicate per message.
+    """
+    service = _service(tmp_path, [False])
+    ctx = service._ctx
+    entry = ctx.courier_store.queue(NODE, "Hub", "hello")
+    await service._attempt(ctx.courier_store.get(entry.ident))
+    assert ctx.courier_store.get(entry.ident).status == QUEUED
+    chat, on_late_ack = ctx.chat.late[0]
+    on_late_ack(chat)
+    settled = ctx.courier_store.get(entry.ident)
+    assert settled.status == "delivered" and settled.attempts == 1
+    assert any("ack came late" in a.message for a in ctx.watch_store.alerts())
+    on_late_ack(chat)  # the radio can push the same ack twice
+    assert len([a for a in ctx.watch_store.alerts() if "delivered" in a.message]) == 1
 
 
 async def test_pass_attempts_at_most_one_entry(tmp_path: Path) -> None:

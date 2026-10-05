@@ -468,7 +468,7 @@ async def test_the_simulators_room_sends_its_board_after_a_login(tmp_path: Path)
     )
     try:
         heard.clear()  # the stream's opening burst carries a synthetic DM of its own
-        assert await device.send_direct_message(ROOM, "before joining") is None
+        assert not (await device.send_direct_message(ROOM, "before joining")).acked
         login = await device.room_login(ROOM, "hello")
         assert login.access is RoomAccess.MEMBER
         while len([m for m in heard if m.is_post]) < 5:
@@ -478,7 +478,7 @@ async def test_the_simulators_room_sends_its_board_after_a_login(tmp_path: Path)
         assert [m.sender_timestamp for m in posts] == sorted(m.sender_timestamp for m in posts)
         assert {m.author for m in posts} == {ALICE_KEY, "c3d4e5f6", STRANGER_KEY, "f6a7b8c9"}
 
-        assert await device.send_direct_message(ROOM, "mine") is not None  # kept, acked
+        assert (await device.send_direct_message(ROOM, "mine")).acked  # kept, acked
         heard.clear()
         await device.room_login(ROOM, "")  # the room knows us; nothing new but our own
         await asyncio.sleep(0.2)
@@ -494,7 +494,7 @@ async def test_a_read_only_member_is_heard_but_not_kept(tmp_path: Path) -> None:
     device._remote_config(ROOM)["allow.read.only"] = "on"
     login = await device.room_login(ROOM, "anything")
     assert login.access is RoomAccess.READ_ONLY
-    assert await device.send_direct_message(ROOM, "lost") is None
+    assert not (await device.send_direct_message(ROOM, "lost")).acked
     await device.disconnect()
 
 

@@ -472,6 +472,36 @@ class Ack:
     raw: dict | None = None
 
 
+@dataclass(slots=True)
+class Delivery:
+    """A direct message the radio took: the ack it is waiting for, and whether it came in time.
+
+    The ack is the recipient's proof of receipt (for a room, of *storing* the post). It is
+    keyed by a four-byte code the radio derives from the message and hands back the moment
+    it accepts the send; the ack, whenever it arrives, carries the same code. Keeping the
+    code is what lets an ack that lands after the wait still count — the radio pushes it
+    regardless, and a flood's ack, riding back on the path the message found, often takes
+    longer than any wait a person would sit through.
+
+    Attributes:
+        code: The ack code the radio expects back, lowercase hex; ``None`` when the radio
+            gave none (nothing to wait for, and nothing a late ack could match).
+        ack: The acknowledgement, when it arrived within the wait; ``None`` otherwise —
+            which is *not* "not delivered", only "not confirmed yet".
+        flood: How the radio sent it: ``True`` to the whole mesh, ``False`` along the route
+            it learned; ``None`` when it didn't say.
+    """
+
+    code: str | None
+    ack: Ack | None = None
+    flood: bool | None = None
+
+    @property
+    def acked(self) -> bool:
+        """Whether the recipient's acknowledgement arrived within the wait."""
+        return self.ack is not None
+
+
 def conversation_key(is_channel: bool, channel_id: str | None, peer: str | None) -> str:
     """Return a stable key identifying a chat conversation.
 

@@ -30,7 +30,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from ..core.connection import Unsubscribe
-from ..core.courier_store import QUEUED, QueuedMessage
+from ..core.courier_store import DELIVERED, QUEUED, QueuedMessage
 from ..core.events import EventKind, MeshEvent
 from ..core.models import Contact, utcnow
 
@@ -218,7 +218,11 @@ class CourierService:
                 self._ctx.log.debug("courier: no contact for %r; leaving queued", message.node_name)
                 return "unknown contact"
             store.note_attempt(message.ident)
-            chat = await self._ctx.chat.send_direct(contact, message.text)
+            chat = await self._ctx.chat.send_direct(
+                contact,
+                message.text,
+                on_late_ack=lambda _chat, ident=message.ident: self._delivered_late(ident),
+            )
             if chat.acked:
                 store.mark_delivered(message.ident)
                 self._ctx.watch_store.add_alert(
@@ -245,6 +249,24 @@ class CourierService:
             return "no ack"
         finally:
             self._sending = False
+
+    def _delivered_late(self, ident: int) -> None:
+        """An attempt's ack arrived after the attempt stopped waiting: it was delivered.
+
+        Without this the entry stayed queued (or gave up) and the next attempt sent the
+        recipient the same message again — every late ack a duplicate on their screen.
+        """
+        store = self._ctx.courier_store
+        message = store.get(ident)
+        if message is None or message.status == DELIVERED:
+            return
+        store.mark_delivered(ident)
+        self._ctx.watch_store.add_alert(
+            "courier",
+            message.node_name,
+            f"delivered “{_preview(message.text)}” (attempt {message.attempts}, ack came late)",
+        )
+        self._ctx.log.info("courier: delivered to %s (late ack)", message.node_name)
 
     async def _resolve(self, message: QueuedMessage) -> Contact | None:
         """Find the recipient in the device's contact list, by key then by name."""

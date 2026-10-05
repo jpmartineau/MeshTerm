@@ -39,6 +39,7 @@ from .models import (
     NODE_TYPE_ROOM,
     Ack,
     Contact,
+    Delivery,
     Hop,
     LoginResult,
     Message,
@@ -1386,16 +1387,17 @@ class Device(ABC):
     # -- messaging ---------------------------------------------------------------
 
     @abstractmethod
-    async def send_direct_message(self, contact: Contact, text: str) -> Ack | None:
-        """Send a direct text message to a contact.
+    async def send_direct_message(self, contact: Contact, text: str) -> Delivery:
+        """Send a direct text message to a contact, and wait a while for its ack.
 
         Args:
             contact: The recipient; its ``public_key`` addresses the message.
             text: The message body.
 
         Returns:
-            The delivery :class:`Ack` if one arrived before the send timed out, else
-            ``None`` (the message was handed to the radio but not yet acknowledged).
+            The :class:`~meshterm.core.models.Delivery`: the ack code the radio expects
+            back, and the ack itself if it arrived within the wait. One that comes later is
+            still pushed by the radio, as an ``ACK`` event carrying the same code.
 
         Raises:
             DeviceCommandError: If the companion rejected the send outright.
@@ -3807,35 +3809,86 @@ class MeshCoreDevice(Device):
 
     async def send_direct_message(  # noqa: D102 - inherited docstring
         self, contact: Contact, text: str
-    ) -> Ack | None:
+    ) -> Delivery:
         transmit_gate.mark()
         from meshcore import EventType
 
         mc = self._require()
         pub = self._node_pubkey(contact)
-        # Only the hand-over holds the transmit lock; the ack wait below is not a send.
-        async with self.transmitting():
-            result = await mc.commands.send_msg(pub, text)
-        if result is None or getattr(result, "is_error", lambda: False)():
-            # A recipient the firmware has no entry for is the one rejection with an obvious
-            # fix, so it gets its own class for the chat screen to offer that fix on; see
-            # :class:`ContactNotOnDeviceError` for how a listed contact can be missing here.
-            if error_code(result) == _ERR_NOT_FOUND:
-                raise ContactNotOnDeviceError(contact)
-            raise DeviceCommandError(f"couldn't send to {contact.name}: {reject_reason(result)}")
-        # The companion acknowledges the send immediately with an ``expected_ack`` code and
-        # a suggested wait; the recipient's delivery ACK arrives later carrying that code.
-        payload = getattr(result, "payload", {}) or {}
-        expected = payload.get("expected_ack")
-        expected_hex = expected.hex() if isinstance(expected, (bytes, bytearray)) else expected
-        if not expected_hex:
-            return None
-        suggested = payload.get("suggested_timeout")
-        timeout = suggested / 1000 * 1.2 if suggested else 8.0
-        ack = await mc.wait_for_event(
-            EventType.ACK, attribute_filters={"code": expected_hex}, timeout=timeout
+        loop = asyncio.get_running_loop()
+        # Listen before sending, and to every ack: the code to match is only known once the
+        # send returns, and an ack quicker than that return (a neighbour's) used to land
+        # before anything was listening for it. Kept by code until the code is known.
+        heard: dict[str, object] = {}
+        wanted: asyncio.Future = loop.create_future()
+        code: list[str] = []
+        flood = False
+        budget = 0.0
+
+        def on_ack(event) -> None:  # noqa: ANN001 - meshcore Event
+            got = str((getattr(event, "payload", None) or {}).get("code") or "").lower()
+            heard[got] = event
+            if code and got == code[0] and not wanted.done():
+                wanted.set_result(event)
+
+        subscription = mc.subscribe(EventType.ACK, on_ack)
+        started = loop.time()
+        try:
+            # Only the hand-over holds the transmit lock; the ack wait below is not a send.
+            async with self.transmitting():
+                result = await mc.commands.send_msg(pub, text)
+            if result is None or getattr(result, "is_error", lambda: False)():
+                # A recipient the firmware has no entry for is the one rejection with an
+                # obvious fix, so it gets its own class for the chat screen to offer that
+                # fix on; see :class:`ContactNotOnDeviceError` for how a listed contact can
+                # be missing here.
+                if error_code(result) == _ERR_NOT_FOUND:
+                    raise ContactNotOnDeviceError(contact)
+                raise DeviceCommandError(
+                    f"couldn't send to {contact.name}: {reject_reason(result)}"
+                )
+            # The companion accepts the send at once with the ``expected_ack`` code and how
+            # it sent it; the recipient's ack arrives later, carrying the code.
+            payload = getattr(result, "payload", {}) or {}
+            expected = payload.get("expected_ack")
+            expected_hex = expected.hex() if isinstance(expected, (bytes, bytearray)) else expected
+            if not expected_hex:
+                return Delivery(None)
+            code.append(str(expected_hex).lower())
+            if code[0] in heard:
+                wanted.set_result(heard[code[0]])
+            flood = payload.get("type") == 1
+            # As patient as a login, whose answer travels exactly as an ack does: the
+            # radio's own estimate (``suggested_timeout``, which the library stretches by a
+            # quarter), then a round trip sized to the route. The estimate alone (what this
+            # waited until 2026-10-05) is ``500 ms + 16 x airtime`` for a flood, about five
+            # seconds, where a flood's answer from five hops out took ten on hardware. So
+            # most acks from beyond a neighbour landed after the wait had given up, and four
+            # messages in five read as failed that had been delivered.
+            hops = 0 if flood else 2 * len(contact.route_hops or ())
+            suggested = float(payload.get("suggested_timeout") or 0) / 1000.0
+            budget = suggested * 1.25 + max(trace_timeout(hops), trace_timeout(0))
+            if not wanted.done():
+                try:
+                    await asyncio.wait_for(asyncio.shield(wanted), budget)
+                except asyncio.TimeoutError:
+                    pass
+        finally:
+            subscription.unsubscribe()
+        event = wanted.result() if wanted.done() else None
+        ack = ack_from_event(event) if event is not None else None
+        _log.debug(
+            "direct message to %s: sent by %s, code %s, budget=%.1fs -> %s",
+            contact.name,
+            "flood" if flood else "its route",
+            code[0],
+            budget,
+            f"acked in {(loop.time() - started) * 1000.0:.0f}ms "
+            f"(the radio's round trip: {(ack.raw or {}).get('trip_time')}ms)"
+            if ack is not None
+            else "no ack yet",
         )
-        return ack_from_event(ack) if ack is not None else None
+        return Delivery(code[0], ack, flood)
 
     async def send_channel_message(  # noqa: D102 - inherited docstring
         self, index: int, text: str
@@ -4313,6 +4366,12 @@ class MockDevice(Device):
         #: Whoever is subscribed to the event stream right now, so a room can push its posts
         #: to them after a login the way a real room's catch-up arrives — unsolicited.
         self._listeners: list[EventCallback] = []
+        #: Contacts whose acks arrive only after the send has stopped waiting, the common
+        #: case beyond a neighbour on a real mesh. Empty by default; name one to walk the
+        #: late-ack path.
+        self._late_acks: set[str] = set()
+        #: Direct messages handed over so far, which numbers each one's ack code.
+        self._sent_codes = 0
         #: Nodes whose learned route has gone stale: a message sent along it meets silence,
         #: and a flood gets through and learns a fresh one. Empty by default; name a contact
         #: here to walk the "try by flood" path a stale route leaves a reader on.
@@ -4489,17 +4548,38 @@ class MockDevice(Device):
         # chat screen's "add it back and send" offer walkable on the simulator.
         if self._mock_key(contact) not in {self._mock_key(c) for c in self._contacts}:
             raise ContactNotOnDeviceError(contact)
+        self._sent_codes += 1
+        code = f"{self._sent_codes:08x}"
+        held = next(c for c in self._contacts if self._mock_key(c) == self._mock_key(contact))
+        flood = held.route_hops is None
         if contact.is_room:
             # A post. The room keeps it — and acknowledges — only from a member it knows
             # who may post; anyone else's is dropped with no reply, which is all a read-only
             # member ever learns about why a post went nowhere.
             access = self._room_access.get(self._mock_key(contact))
             if access is None or not access.can_post:
-                return None
+                return Delivery(code, None, flood)
             self._room_board.append((self._self_prefix(), utcnow(), text))
+        if contact.name in self._late_acks:
+            # Delivered, but the ack takes the long way home: it arrives after the wait,
+            # pushed the way the radio pushes one whenever it lands.
+            self._push_ack_later(code)
+            return Delivery(code, None, flood)
         # Otherwise the simulator "delivers" instantly and always acknowledges, so outbound
         # direct messages show as acked without a radio.
-        return Ack(code="mock")
+        return Delivery(code, Ack(code=code), flood)
+
+    def _push_ack_later(self, code: str) -> None:
+        """Push an ack to whoever listens, a beat after the send returned without one."""
+
+        async def push() -> None:
+            await asyncio.sleep(_MOCK_MONITOR_INTERVAL_S)
+            for listener in list(self._listeners):
+                listener(MeshEvent.ack_event(Ack(code=code)))
+
+        task = asyncio.create_task(push())
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
 
     async def send_channel_message(  # noqa: D102 - inherited docstring
         self, index: int, text: str
