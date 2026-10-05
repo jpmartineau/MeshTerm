@@ -1000,11 +1000,12 @@ The live transcript is a menu screen; from the command line, pick a subcommand.
 
 | Subcommand | What it does |
 | --- | --- |
-| `send TEXT --to NAME` | Send a direct message. |
+| `send TEXT --to NAME` | Send a direct message, or post to a room. |
 | `send TEXT --channel N [--scope REGION]` | Broadcast on a channel slot, under the channel's scope — or under `REGION` for this one message, `*` for unscoped. |
 | `history [--to NAME \| --channel N] [--limit N]` | Print a conversation's stored transcript. Default limit 50. |
-| `list` | Every channel and contact with its unread count and last message. |
+| `list` | Every channel, room and contact with its unread count and last message. |
 | `listen [-s SECONDS] [--debug]` | Tail inbound messages live. `-s 0` (the default) runs until Ctrl-C. |
+| `join ROOM [--password PASSWORD]` | Log in to a room server, and print what it lets you do. |
 
 Exactly one of `--to` and `--channel` is required on `send` and `history`.
 
@@ -1034,6 +1035,39 @@ $ meshterm --absolute chat history --to Alice
 of the line — a message body is the one field that can hold absolutely anything, so
 nothing may follow it.
 
+**Rooms.** A room server is a message board that lives on a radio. It keeps the latest
+posts, and once you have logged in it sends you every post you missed, then each new one as
+people write it. You join a room by logging in with its password, which you get from
+whoever runs it:
+
+```console
+$ meshterm chat join "Lakeside BBS" --password hello
+member
+```
+
+`join` prints what the room let you do: `member` (read and post), `admin` (the room's
+owner), or `read-only` (the room drops anything you post). A password that works is
+remembered, so the next `join` needs no `--password`; an empty one (`--password ""`) asks
+the room whether it already knows you. A room never says a password is wrong. It just
+doesn't answer, so a `join` that hears nothing fails with exit `4`, and the message names
+both possible reasons. The posts the room sends after a login wait on your radio until
+something collects them: `chat listen`, or Chat in the menu.
+
+Post with `send --to`, exactly like a direct message. `acked yes` means the room stored the
+post, not that anyone has read it. A room's `history` names who wrote each post, where a
+direct conversation names the peer:
+
+```console
+$ meshterm chat history --to "Lakeside BBS"
+TIME  DIR  AUTHOR                    SNR_DB  TEXT
+ 12m  in   Alice (d4e5f6a7)            +6.5  Anyone driving to the swap meet Saturday?
+  5m  in   e5f6a7b8                    +2.0  Is the north repeater down?
+ now  out  MockCompanion (00000000)       -  I'll check it tonight
+```
+
+An author is a name with its key's hash, or just the hash when nothing you've heard names
+that key. Your own posts name your own node.
+
 ```console
 $ meshterm chat list
 CONVERSATION    KIND     UNREAD   LAST  LAST_TEXT
@@ -1042,6 +1076,7 @@ Yagi-Repeater   direct        0  never  -
 Local-Repeater  direct        0  never  -
 Observer-Bot    direct        0  never  -
 Alice           direct        0  never  -
+Lakeside BBS    room          0  never  -
 ```
 
 ```console
@@ -1066,7 +1101,8 @@ $ meshterm chat send "net in 5" --channel 0 --json
 {"kind":"channel","node":null,"channel":{"slot":0,"name":"#0","public":true,"hash":null},"sent":true,"acked":null}
 ```
 
-`kind` is `"direct"` \| `"channel"` and says which of `node` / `channel` is populated.
+`kind` is `"direct"` \| `"room"` \| `"channel"` and says which of `node` / `channel` is
+populated (a room is a `node`).
 A channel send also carries `scope`, in the same shape `monitor` gives a received packet's:
 `{"state":"scoped","region":"harbour","code":null}` for a region, `"unscoped"` for a plain
 flood, and `null` where it isn't known (a direct message, or a channel with no scope of its
@@ -1091,7 +1127,7 @@ there, having no way to say it.
 `history` is an array, oldest first:
 
 ```json
-{"created_at":"2026-09-08T08:27:37Z","direction":"out","node":{"name":"Alice","key":null,"hash":"d4e5f6a7","type":null,"self":false},"channel":null,"snr_db":null,"text":"on my way","acked":true}
+{"created_at":"2026-09-08T08:27:37Z","direction":"out","node":{"name":"Alice","key":null,"hash":"d4e5f6a7","type":null,"self":false},"channel":null,"author":null,"snr_db":null,"text":"on my way","acked":true}
 ```
 
 | Field | Type | Meaning |
@@ -1100,6 +1136,7 @@ there, having no way to say it.
 | `direction` | string | `"in"` \| `"out"`. |
 | `node` | object \| null | The *other* party, for a direct conversation. |
 | `channel` | object \| null | The `channel` shape, for a channel conversation. |
+| `author` | object \| null | Who wrote a room post, as a `node`; on your own posts, your node. `null` outside a room. |
 | `snr_db` | number \| null | Reception SNR; `null` on an outbound message. |
 | `text` | string | The body, raw and unescaped. |
 | `acked` | boolean \| null | Delivery state of an outbound direct message; `null` inbound and on a channel. |
@@ -1109,12 +1146,21 @@ there, having no way to say it.
 shape as `history`, with **`received_at`** in place of `created_at`:
 
 ```json
-{"received_at":"2026-09-08T08:30:47Z","node":{"name":null,"key":null,"hash":"b2c3d4e5","type":null,"self":false},"channel":null,"snr_db":4.9,"text":"hello from Local-Repeater #1","direction":"in","acked":null}
+{"received_at":"2026-09-08T08:30:47Z","node":{"name":null,"key":null,"hash":"b2c3d4e5","type":null,"self":false},"channel":null,"author":null,"snr_db":4.9,"text":"hello from Local-Repeater #1","direction":"in","acked":null}
 ```
+
+A room post arrives from the room, so its `node` is the room and its `author` carries the
+writer's hash.
 
 An inbound message carries only the sender's key prefix, so its `node` is thinner than the
 same node in `contacts` — `name` is whatever the resolver could find and `key` is `null`.
 Join on `hash`.
+
+`join` is the room and the access it granted:
+
+```json
+{"room":{"name":"Lakeside BBS","key":"f6a7b8c900000000000000000000000000000000000000000000000000000000","hash":"f6a7b8c9","type":"room server","self":false},"access":"member"}
+```
 
 `history`, `list` and `listen` return `5` when there is nothing to report.
 

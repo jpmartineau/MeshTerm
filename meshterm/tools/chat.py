@@ -2,9 +2,11 @@
 """The ``chat`` tool: channel and direct messaging over the mesh.
 
 Interactively it opens a conversation picker and then a live, full-screen chat (see
-:mod:`meshterm.ui.chat`) where sent and received messages stream together. On the CLI it
-exposes ``send``, ``history``, and ``list`` subcommands for scripted use. Channels are only
-*listed* here for picking; creating and editing channel slots lives in the ``channels`` tool.
+:mod:`meshterm.ui.chat`) where sent and received messages stream together — or, for a room
+server, its board (:mod:`meshterm.ui.room`). On the CLI it exposes ``send``, ``history``,
+``list``, ``listen`` and ``join`` subcommands for scripted use; a room is addressed by
+``--to`` like a contact, and ``join`` logs in to one. Channels are only *listed* here for
+picking; creating and editing channel slots lives in the ``channels`` tool.
 
 Every inbound message is recorded to history by the always-on
 :class:`~meshterm.services.chat_service.ChatService`, and outbound messages are recorded on
@@ -316,7 +318,7 @@ class ChatTool(Tool):
 
         Args:
             ctx: Shared application context.
-            action: One of ``send``, ``history``, ``list``.
+            action: One of ``send``, ``history``, ``listen``, ``join``, ``list``.
             params: The action's arguments.
 
         Returns:
@@ -324,6 +326,8 @@ class ChatTool(Tool):
         """
         if action == "send":
             return await self._cli_send(ctx, params)
+        if action == "join":
+            return await self._cli_join(ctx, params)
         if action == "history":
             return await self._cli_history(ctx, params)
         if action == "listen":
@@ -343,6 +347,10 @@ class ChatTool(Tool):
         this one message (a region name, or ``*`` for unscoped); the document says which it
         went under. A radio that can't send under the scope refuses before anything is
         transmitted, and that is a failure (exit 1), never a quiet unscoped send.
+
+        ``--to`` a room server posts to it. The room acknowledges a post once it has stored
+        it, so ``acked`` reads the same way; a room that no longer knows us (it restarted,
+        or we never joined) drops the post unacknowledged — ``chat join`` first.
         """
         device = await ctx.device()
         text = str(params["text"])
@@ -357,17 +365,30 @@ class ChatTool(Tool):
             )
 
         contact = _resolve_contact(await device.get_contacts(), str(params["to"]))
-        message = await ctx.chat.send_direct(contact, text)
+        if contact.is_room:
+            message = await ctx.chat.send_post(contact, text)
+        else:
+            message = await ctx.chat.send_direct(contact, text)
         return ToolResult(
             summary={"to": contact.name, "acked": bool(message.acked)},
             report=(_sent(contact=contact, acked=bool(message.acked)),),
         )
 
     async def _cli_history(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Print a conversation's stored transcript."""
+        """Print a conversation's stored transcript — for a room, its board by author.
+
+        A room's transcript is its posts (its command replies are left out, as on its
+        board in the menu), and it names each post's author where a direct transcript
+        names the peer: the room is the conversation the caller already named, and every
+        post in it has a different writer. Our own posts name our node, as every hop of
+        ours does on this face.
+        """
         limit = int(params.get("limit") or _HISTORY_LIMIT)
         channel = params.get("channel")
         to = params.get("to")
+        room = False
+        name_of: NodeResolver | None = None
+        me: NodeRef | None = None
         if channel is not None:
             channel_id = await ctx.chat.channel_id_for(int(channel))
             messages = ctx.repo.recent_chat_messages(
@@ -376,18 +397,68 @@ class ChatTool(Tool):
             label = f"#{channel}"
         else:
             device = await ctx.device()
-            contact = _resolve_contact(await device.get_contacts(), str(to))
+            contacts = await device.get_contacts()
+            contact = _resolve_contact(contacts, str(to))
+            room = contact.is_room
             messages = ctx.repo.recent_chat_messages(
                 is_channel=False,
                 peer=contact.key_prefix or contact.public_key[:12],
                 limit=limit,
+                posts_only=room,
             )
             label = contact.name
+            if room:
+                name_of = make_node_resolver(contacts, ctx.repo.node_names())
+                me = _self_ref(await device.get_self_info())
 
         return ToolResult(
             summary={"conversation": label, "messages": len(messages)},
-            report=(_transcript(messages),),
+            report=(_transcript(messages, room=room, name_of=name_of, me=me),),
             exit_code=exitcodes.OK if messages else exitcodes.NO_RESULT,
+        )
+
+    async def _cli_join(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
+        """Log in to a room server — one exchange — and print the access it granted.
+
+        The password is ``--password``, else the one MeshTerm remembers for the room (its
+        room password, then its admin password); one that works is remembered, exactly as
+        the menu's join prompt remembers it. The room then sends every post the companion
+        hasn't seen, one at a time — they wait on the radio for whatever reads it next
+        (``chat listen``, the menu), and ``chat history`` has them from then on.
+
+        A room never says no: a wrong password gets no reply at all, so silence is a
+        failure here (exit 4) that names both of its causes, and keeps whatever password
+        was remembered.
+        """
+        from ..core.connection import DeviceCommandError
+        from ..core.models import LoginResult
+
+        device = await ctx.device()
+        name = str(params["room"])
+        room = _resolve_contact(await device.get_contacts(), name)
+        # Both are the argument being wrong, with nothing yet on the air: usage errors.
+        if not room.is_room:
+            raise typer.BadParameter(f"{room.name!r} is not a room server")
+        password = params.get("password")
+        if password is None:
+            password = ctx.rooms.password(room)
+        if password is None:
+            raise typer.BadParameter(
+                f"no password remembered for {room.name!r}; pass --password "
+                "(an empty one asks the room whether it already knows you)"
+            )
+        login = await ctx.rooms.login(room, str(password))
+        if login.result is LoginResult.REFUSED:
+            raise DeviceCommandError(f"the radio refused the login to {room.name!r}")
+        if login.access is None:
+            raise DeviceCommandError(
+                f"{room.name!r} did not answer the login — it is out of reach, or the "
+                "password is wrong (a room says nothing to a wrong one). Any remembered "
+                "password was kept."
+            )
+        return ToolResult(
+            summary={"room": room.name, "access": login.access.value},
+            report=(_joined(room, login.access.value),),
         )
 
     async def _cli_listen(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
@@ -438,6 +509,7 @@ class ChatTool(Tool):
                     "direction": "in",
                     "node": None if message.is_channel else NodeRef(hash=message.sender),
                     "channel": channel,
+                    "author": NodeRef(hash=message.author) if message.author else None,
                     "snr_db": message.snr,
                     "text": message.text,
                     "acked": None,
@@ -466,7 +538,8 @@ class ChatTool(Tool):
         device = await ctx.device()
         channels = await _read_channels(device)
         contacts = await device.get_contacts()
-        lasts = ctx.repo.last_chat_messages()
+        rooms = [(c.key_prefix or c.public_key[:12]).lower() for c in contacts if c.is_room]
+        lasts = ctx.repo.last_chat_messages(rooms=rooms)
 
         rows = [*channels] + [
             Conversation(label=c.name, is_channel=False, contact=c) for c in contacts
@@ -487,10 +560,10 @@ class ChatTool(Tool):
 
         chat_app = typer.Typer(help=self.help, no_args_is_help=True, rich_markup_mode=None)
 
-        @chat_app.command("send", help="Send a message to a contact or channel")
+        @chat_app.command("send", help="Send a message to a contact or channel, or post to a room")
         def _send_cmd(
             text: str = typer.Argument(..., help="The message body"),
-            to: str | None = typer.Option(None, "--to", help="Contact name or key prefix"),
+            to: str | None = typer.Option(None, "--to", help="Contact or room name, or key prefix"),
             channel: int | None = typer.Option(None, "--channel", help="Channel slot index"),
             scope: str | None = typer.Option(
                 None,
@@ -509,7 +582,7 @@ class ChatTool(Tool):
 
         @chat_app.command("history", help="Show a conversation's stored history")
         def _history_cmd(
-            to: str | None = typer.Option(None, "--to", help="Contact name or key prefix"),
+            to: str | None = typer.Option(None, "--to", help="Contact or room name, or key prefix"),
             channel: int | None = typer.Option(None, "--channel", help="Channel slot index"),
             limit: int = typer.Option(_HISTORY_LIMIT, "--limit", help="Max messages to show"),
         ) -> None:
@@ -520,9 +593,18 @@ class ChatTool(Tool):
                 {"cli_action": "history", "to": to, "channel": channel, "limit": limit},
             )
 
-        @chat_app.command("list", help="List channels, contacts, and recent messages")
+        @chat_app.command("list", help="List channels, rooms, contacts, and recent messages")
         def _list_cmd() -> None:
             run_tool_command(self, {"cli_action": "list"})
+
+        @chat_app.command("join", help="Log in to a room server, so it sends you its posts")
+        def _join_cmd(
+            room: str = typer.Argument(..., help="The room server's name or key prefix"),
+            password: str | None = typer.Option(
+                None, "--password", help="Room or admin password (else remembered)"
+            ),
+        ) -> None:
+            run_tool_command(self, {"cli_action": "join", "room": room, "password": password})
 
         @chat_app.command("listen", help="Tail inbound messages live in the console")
         def _listen_cmd(
@@ -1071,7 +1153,7 @@ def _channel_ref(idx: int | None, label: str, secret: bytes | None) -> ChannelRe
     )
 
 
-def _message_columns() -> tuple:
+def _message_columns(*, author_lane: bool = False) -> tuple:
     """One transcript row's columns, shared by ``history`` and the ``listen`` stream.
 
     ``DIR`` carries what the menu's transcript writes into its sender lane as the word
@@ -1083,25 +1165,91 @@ def _message_columns() -> tuple:
     stops being true the moment a body holds a newline — after which the remainder reads
     as a second record with an empty time. The document carries the body raw, a JSON string
     holding a newline natively.
+
+    ``author`` is a room post's writer, in every document (``null`` off a room) so one
+    command answers in one shape; ``author_lane`` draws it as ``AUTHOR`` too, for a room's
+    transcript, where it is the column a reader is there for.
     """
+    from dataclasses import replace
+
     from ..ui import fields
 
+    peer = fields.plain_only(fields.name("conversation", "PEER"))
     return (
         fields.when("created_at", "TIME"),
         fields.word("direction", "DIR"),
         # One column for whichever end the conversation had; the document keeps the two
-        # apart, because a parser cannot tell a channel from a contact by its label.
-        fields.plain_only(fields.name("conversation", "PEER")),
+        # apart, because a parser cannot tell a channel from a contact by its label. A
+        # room's transcript names the room on every row, so there AUTHOR stands instead.
+        replace(peer, lanes=()) if author_lane else peer,
         fields.node("node", lanes=()),
         fields.channel("channel", lanes=()),
+        _author_column(lane=author_lane),
         fields.snr("snr_db", "SNR_DB"),
         fields.free("text", "TEXT"),
         fields.hidden("acked"),
     )
 
 
-def _transcript(messages: list[ChatMessage]) -> Listing:
-    """A conversation's stored messages, oldest first, one record each."""
+def _author_column(*, lane: bool) -> Any:
+    """A room post's author: the shared node object, drawn as one hop — ``Name (hash)``.
+
+    The hop's grammar (:func:`~meshterm.ui.script.route`), because that is the plain
+    face's one way of naming a node by name *and* key: an author nothing names is its hash
+    alone, never an empty ``()``.
+    """
+    from dataclasses import replace
+
+    from ..ui import fields, script
+    from ..ui.report import Lane
+
+    column = fields.node("author", lanes=())
+    if not lane:
+        return column
+
+    def hop(ref: NodeRef | None) -> str:
+        return script.route([(ref.name, ref.hash)]) if ref is not None else script.NONE
+
+    return replace(column, lanes=(Lane(header="AUTHOR", render=hop),))
+
+
+def _self_ref(info: dict) -> NodeRef:
+    """Our own node, from the companion's self info — how a post of ours names its author."""
+    key = str(info.get("public_key") or "").lower()
+    return NodeRef(
+        name=str(info.get("name") or "") or None,
+        key=key or None,
+        hash=key[:8] or None,
+        type=NODE_TYPE_LABELS.get(info.get("adv_type")),
+        is_self=True,
+    )
+
+
+def _author_ref(author: str, name_of: NodeResolver | None) -> NodeRef:
+    """A post's author as a node: its hash always, its name where something names it."""
+    from ..ui.room import author_label
+
+    label, key = author_label(author, name_of) if name_of is not None else (author, None)
+    return NodeRef(name=label if key else None, hash=author)
+
+
+def _transcript(
+    messages: list[ChatMessage],
+    *,
+    room: bool = False,
+    name_of: NodeResolver | None = None,
+    me: NodeRef | None = None,
+) -> Listing:
+    """A conversation's stored messages, oldest first, one record each.
+
+    Args:
+        messages: The transcript.
+        room: Whether it is a room's board: each row then names its author, in an
+            ``AUTHOR`` lane standing where ``PEER`` would (the peer being the room on
+            every row).
+        name_of: Names an author's key, for a room.
+        me: Our own node, the author of our own posts in a room.
+    """
     from ..ui.report import Listing
 
     rows = []
@@ -1120,6 +1268,11 @@ def _transcript(messages: list[ChatMessage]) -> Listing:
                 if message.is_channel
                 else NodeRef(name=message.peer_name, hash=message.peer),
                 "channel": channel,
+                "author": (
+                    _author_ref(message.author, name_of)
+                    if message.author
+                    else (me if room and message.outbound else None)
+                ),
                 "snr_db": message.snr,
                 "text": message.text,
                 "acked": message.acked,
@@ -1127,9 +1280,9 @@ def _transcript(messages: list[ChatMessage]) -> Listing:
         )
     return Listing(
         key="messages",
-        columns=_message_columns(),
+        columns=_message_columns(author_lane=room),
         rows=rows,
-        order=("TIME", "DIR", "PEER", "SNR_DB", "TEXT"),
+        order=("TIME", "DIR", "AUTHOR" if room else "PEER", "SNR_DB", "TEXT"),
     )
 
 
@@ -1156,6 +1309,9 @@ def _live_messages() -> Listing:
             pin(fields.plain_only(fields.name("conversation", "PEER")), 16),
             fields.node("node", lanes=()),
             fields.channel("channel", lanes=()),
+            # A room post's writer rides in the document; the tail itself names the room,
+            # which is the node that sent it.
+            _author_column(lane=False),
             pin(fields.snr("snr_db", "SNR_DB"), 6),
             fields.free("text", "TEXT"),
             fields.hidden("direction"),
@@ -1184,9 +1340,15 @@ def _conversations(ctx: AppContext, rows: list, lasts: dict) -> Listing:
             else None
         )
         contact = getattr(conversation, "contact", None)
+        if conversation.is_channel:
+            kind = "channel"
+        elif conversation.is_room:
+            kind = "room"
+        else:
+            kind = "direct"
         records.append(
             {
-                "kind": "channel" if conversation.is_channel else "direct",
+                "kind": kind,
                 "conversation": conversation.label,
                 "channel": channel,
                 "node": None
@@ -1218,6 +1380,33 @@ def _conversations(ctx: AppContext, rows: list, lasts: dict) -> Listing:
         ),
         rows=records,
         order=("CONVERSATION", "KIND", "UNREAD", "LAST", "LAST_TEXT"),
+    )
+
+
+def _joined(room: Contact, access: str) -> Facts:
+    """What ``chat join`` won: the access a room granted, bare — the one fact asked for.
+
+    The room rides in the document, the caller having named it; the plain face prints the
+    access word alone (``member``, ``admin`` or ``read-only``), which is what a script
+    deciding whether it may post branches on.
+    """
+    from ..ui import fields
+    from ..ui.report import BARE, Facts
+
+    return Facts(
+        key="joined",
+        fields=(fields.node("room", lanes=()), fields.word("access", "access")),
+        values={
+            "room": NodeRef(
+                name=room.name,
+                key=(room.public_key or "").lower() or None,
+                hash=(room.key_prefix or "").lower() or None,
+                type=NODE_TYPE_LABELS.get(room.node_type),
+            ),
+            "access": access,
+        },
+        shape=BARE,
+        bare="access",
     )
 
 
@@ -1279,7 +1468,11 @@ def _sent(
             replace(fields.scope("scope", "scope"), lanes=()),
         ),
         values={
-            "kind": "channel" if channel is not None else "direct",
+            "kind": (
+                "channel"
+                if channel is not None
+                else ("room" if getattr(contact, "is_room", False) else "direct")
+            ),
             "node": node,
             "channel": (
                 _channel_ref(channel, f"#{channel}", None) if channel is not None else None

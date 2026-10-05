@@ -56,8 +56,9 @@ https://github.com/user-attachments/assets/f91a6695-14d5-4ae0-8fdc-e65492d0955d
   charts, and the Time Machine all read back that history.
 - **It measures.** Live trace with per-hop reliability, a coarse→refine→verify TX-power
   sweep, and a walkable graph of how the mesh actually hangs together.
-- **It talks.** Live channel and direct messaging, store-and-forward courier delivery for
-  contacts that aren't there yet, and shareable channels as QR codes and `meshcore://` links.
+- **It talks.** Live channel and direct messaging, room servers' message boards,
+  store-and-forward courier delivery for contacts that aren't there yet, and shareable
+  channels as QR codes and `meshcore://` links.
 - **It connects however your companion does.** Serial (USB), Bluetooth LE, or TCP (a Wi-Fi
   board or a network proxy) — the discoverable transports are auto-found and picked
   interactively, a network device is named by hand, and every kind reconnects live when a link

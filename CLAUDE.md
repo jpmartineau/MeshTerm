@@ -67,6 +67,8 @@ them instead of hand-rolling:
 | region | a named area a repeater relays floods for (`region put yul`); shown bare, never `#yul` — the `#` belongs to key derivation only |
 | scope | the region a flood is limited to — a packet's, a channel's send scope, the device's default scope. A direct packet has none. MeshCore's sense and the only one: the menu's This node / Other nodes / This app sections name *whose* a setting is, never a "scope" |
 | unscoped | a plain flood, relayed by any repeater that allows the wildcard `*` |
+| room | a room server's message board — what you *join*, read, and *post* to. The node is the *room server*; the people let in are its *members*, at an *access* of member, admin, or read-only. Its two passwords are the *room password* and the *admin password* |
+| post | a message on a room's board, filed under its *author*: the key prefix the room signs it with, named by whatever names that key. A room's other traffic (its command replies) shares its key and is never a post |
 | Back | leave the current screen/list — Esc's word, and a row's only where leaving is a *choice* (see below) |
 | Quit | leave the app (main menu, device splash) — nowhere else |
 
@@ -252,7 +254,7 @@ deliberately, one at a time, and say why in the code.
 - **A bare-letter shortcut only where nothing is typed.** A screen that filters, finds or
   composes as you type has no free letters, so its verbs are Ctrl chords — one table,
   `session._CTRL_LETTER_CHORDS`, each letter the mnemonic of its action (`^P` paths,
-  `^U` URL, `^Y` you). A screen that takes no typing may spend a bare letter instead (the
+  `^U` URL, `^Y` you, `^L` log in). A screen that takes no typing may spend a bare letter instead (the
   Time Machine's `w`, the dashboard's `s`, the device splash's `h`). Either way the key
   is named where it acts: in the hint, and on the PicoCalc's lane.
 - Empty states are lowercase muted, optionally `— explanation`, never parenthesized.
@@ -425,7 +427,7 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   ⚙ parameter · `#` count · ▶ run · ⚡ explore/probe · ★ best/winner · ⭐ watch ·
   📤 send now · 📨 courier/queue · 💬 chat · 🔔 notify · 🔕 mute (notifications off) ·
   📱 QR · 🔗 link · ↻ re-read · ↕ reorder · ⇄ reverse (flip a path's direction) ·
-  🔖 region/scope · 🏆 trophy case/record · ⌨ command line · 📖 read/about · 💰 support/donate ·
+  🔖 region/scope · 📌 rooms · 🏆 trophy case/record · ⌨ command line · 📖 read/about · 💰 support/donate ·
   🚪 quit. Packet-class icons (feed/viewer
   lane): 📢 advert · 📊 telemetry · 📦 packet · 💬 message · ✅ ack. Raw payload
   classes (`PAYLOAD_ICONS`): 📻 channel text · 💽 channel data · 📩 direct message

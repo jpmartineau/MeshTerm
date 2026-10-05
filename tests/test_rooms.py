@@ -798,3 +798,95 @@ async def test_joining_a_room_end_to_end(tmp_path: Path) -> None:
         assert ctx.rooms.access(ROOM) is RoomAccess.MEMBER
     finally:
         await ctx.aclose()
+
+
+# --- the command line -----------------------------------------------------------------
+
+
+@pytest.fixture()
+def cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201 - a closure
+    """The real CLI against the simulator, in a home of its own (see test_cli_contract)."""
+    from typer.testing import CliRunner
+
+    from meshterm.cli import app
+
+    monkeypatch.setenv("MESHTERM_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    db = tmp_path / "cli.db"
+
+    def invoke(*args: str):  # noqa: ANN202
+        return runner.invoke(app, ["--mock", "--db", str(db), *args])
+
+    invoke.db = db
+    return invoke
+
+
+def test_chat_list_names_a_room_as_one(cli) -> None:  # noqa: ANN001
+    """A room is its own kind of conversation, on both faces."""
+    import json
+
+    assert "Lakeside BBS    room" in cli("chat", "list").stdout
+    rows = json.loads(cli("--json", "chat", "list").stdout)
+    kinds = {r["node"]["name"]: r["kind"] for r in rows if r["node"]}
+    assert kinds["Lakeside BBS"] == "room" and kinds["Alice"] == "direct"
+
+
+def test_chat_join_answers_with_the_access_won(cli) -> None:  # noqa: ANN001
+    """The access word alone on the plain face; the room and the access in the document."""
+    import json
+
+    from meshterm.core import exitcodes
+
+    unknown = cli("chat", "join", "Lakeside BBS")
+    assert unknown.exit_code == exitcodes.USAGE, "nothing remembered, nothing sent"
+    assert cli("chat", "join", "Alice", "--password", "x").exit_code == exitcodes.USAGE
+
+    silent = cli("chat", "join", "Lakeside BBS", "--password", "nope")
+    assert silent.exit_code == exitcodes.DEVICE
+    assert silent.stdout == "" and "wrong" in silent.stderr
+
+    joined = cli("chat", "join", "Lakeside BBS", "--password", "hello")
+    assert joined.exit_code == exitcodes.OK and joined.stdout == "member\n"
+    again = json.loads(cli("--json", "chat", "join", "Lakeside BBS").stdout)  # remembered
+    assert again["access"] == "member"
+    assert again["room"]["name"] == "Lakeside BBS" and again["room"]["type"] == "room server"
+
+
+def test_chat_history_reads_a_room_by_author(cli) -> None:  # noqa: ANN001
+    """AUTHOR stands where PEER would; a command reply is not on the board; one shape."""
+    import json
+
+    repo = Repository(cli.db)
+    try:
+        repo.record_chat_message(ChatMessage.from_message(_post("swap meet?")))
+        repo.record_chat_message(ChatMessage.from_message(_post("north down?", STRANGER_KEY)))
+        repo.record_chat_message(ChatMessage(text="> hello", peer=ROOM.key_prefix))
+    finally:
+        repo.close()
+
+    header, *rows = cli("chat", "history", "--to", "Lakeside BBS").stdout.splitlines()
+    assert header.split() == ["TIME", "DIR", "AUTHOR", "SNR_DB", "TEXT"]
+    assert "Alice (d4e5f6a7)" in rows[0] and rows[0].endswith("swap meet?")
+    assert STRANGER_KEY in rows[1] and "(" not in rows[1].split("north")[0]
+    assert len(rows) == 2
+
+    docs = json.loads(cli("--json", "chat", "history", "--to", "Lakeside BBS").stdout)
+    assert docs[0]["author"]["name"] == "Alice" and docs[0]["author"]["hash"] == ALICE_KEY
+    assert docs[1]["author"] == {
+        "name": None,
+        "key": None,
+        "hash": STRANGER_KEY,
+        "type": None,
+        "self": False,
+    }
+    direct = json.loads(cli("--json", "chat", "list").stdout)
+    assert direct, "the list still answers"
+
+
+def test_chat_send_to_a_room_is_a_post(cli) -> None:  # noqa: ANN001
+    """The receipt says it was a room it went to."""
+    import json
+
+    receipt = json.loads(cli("--json", "chat", "send", "--to", "Lakeside BBS", "hi").stdout)
+    assert receipt["kind"] == "room"
+    assert receipt["acked"] is False, "this simulator never joined, so the room drops it"
