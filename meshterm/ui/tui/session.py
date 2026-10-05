@@ -80,6 +80,8 @@ from .spinner import spinner_interval
 #: terminal — prompt_toolkit's raw mode clears ``IXON``/``IXOFF``, so ^Q is not XON here.
 _CTRL_LETTER_CHORDS: dict[str, str] = {
     "c": "quit",
+    # ^L logs in to the room a room view is open on.
+    "l": "login",
     "p": "paths",
     "q": "quit",
     "r": "retry",

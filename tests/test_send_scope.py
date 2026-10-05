@@ -337,7 +337,7 @@ def test_a_v16_database_gains_the_scope_column(tmp_path: Path) -> None:
     assert "scope" in cols
     assert conn.execute("SELECT scope FROM messages").fetchone()["scope"] is None
     version = conn.execute("SELECT value FROM schema_meta WHERE key = 'version'").fetchone()
-    assert version["value"] == "17"
+    assert int(version["value"]) >= 17
     conn.close()
 
 

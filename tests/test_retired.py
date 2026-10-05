@@ -37,6 +37,7 @@ from meshterm.core.preferences import (
     report_dropped,
 )
 from meshterm.core.remote_store import RemoteStore
+from meshterm.core.room_store import RoomStore
 from meshterm.core.settings_store import SettingsStore
 
 
@@ -76,6 +77,7 @@ _EXPECTED_RECORDS = {
     "courier_store": {"QueuedMessage"},
     "device_store": {"RememberedDevice"},
     "remote_store": {"CachedValue", "_RemoteNode"},
+    "room_store": {"RoomMembership"},
     "watch_store": {"WatchedNode", "Alert", "_State"},
 }
 
@@ -163,6 +165,34 @@ def test_the_admin_store_writes_only_known_fields(tmp_path: Path) -> None:
     written = json.loads(path.read_text())
     assert set(written) == {"cd" * 32, "ef" * 32}
     assert written["cd" * 32].keys() == {"password", "label", "last_used"}
+
+
+def test_the_room_store_writes_only_known_fields(tmp_path: Path) -> None:
+    """A stray field on a membership, or a record with no access, is gone after a write."""
+    from meshterm.core.models import LoginResult, RoomAccess, RoomLogin
+
+    path = tmp_path / "rooms.json"
+    path.write_text(
+        json.dumps(
+            {
+                "cd" * 32: {
+                    "password": "hello",
+                    "access": "member",
+                    "label": "H",
+                    "last_login": "",
+                    "role": "x",
+                },
+                "junk": {"password": "no access"},
+            }
+        )
+    )
+    store = RoomStore(path)
+    assert store.password(_NODE) == "hello"
+    other = Contact(name="Other", public_key="ef" * 32, key_prefix="ef" * 6, node_type=3)
+    store.record(other, "pw", RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER))
+    written = json.loads(path.read_text())
+    assert set(written) == {"cd" * 32, "ef" * 32}
+    assert written["cd" * 32].keys() == {"password", "access", "label", "last_login"}
 
 
 def test_the_remote_store_writes_only_known_fields(tmp_path: Path) -> None:

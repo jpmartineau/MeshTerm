@@ -298,6 +298,15 @@ class ChatService:
         while True:
             message = await self._queue.get()
             try:
+                if message.is_post:
+                    # A room is still sending to us — the fact that decides whether opening
+                    # it needs a login (see RoomService.login_due) — whether or not this
+                    # post is one we already hold.
+                    rooms = getattr(self._ctx, "rooms", None)
+                    if rooms is not None:
+                        rooms.heard(message.sender)
+                    if self._ctx.repo.has_room_post(ChatMessage.from_message(message)):
+                        continue  # a re-sent post: recorded once, counted once
                 channel_id = (
                     await self.channel_id_for(message.channel) if message.is_channel else None
                 )
@@ -344,9 +353,12 @@ class ChatService:
 
         What that excludes is, in practice, machine traffic rather than correspondence:
 
-        * A direct message from a node that isn't a DM *recipient* — a repeater, room server,
-          or sensor (see :func:`~meshterm.core.models.is_direct_messageable`), which the picker
+        * A direct message from a node that isn't a DM *recipient* — a repeater or sensor
+          (see :func:`~meshterm.core.models.is_direct_messageable`), which the picker
           doesn't list. Every remote-CLI reply from a repeater you administer arrives this way.
+        * Anything from a room server but its *posts*. A room is listed — its board is a
+          conversation — but what else it sends, its replies to an admin's commands, is not
+          on the board, so it has no row to point at.
         * A direct message from a sender the contact table doesn't hold at all.
         * A channel message the device has no configured slot for — including one whose slot
           couldn't be identified, which carries the slot-derived fallback identity.
@@ -370,7 +382,7 @@ class ChatService:
             if store is not None and store.is_muted(channel_id):
                 return False
             return await self._is_listed_channel(channel_id)
-        return await self._is_listed_contact(message.sender)
+        return await self._is_listed_contact(message.sender, post=message.is_post)
 
     async def _is_listed_channel(self, channel_id: str | None) -> bool:
         """Whether a channel identity is one of the device's configured channel slots.
@@ -390,12 +402,13 @@ class ChatService:
             return True
         return any(channel_identity(slot.name, slot.secret) == channel_id for slot in slots)
 
-    async def _is_listed_contact(self, sender: str | None) -> bool:
-        """Whether a direct message's sender is a contact the Chat picker lists.
+    async def _is_listed_contact(self, sender: str | None, *, post: bool = False) -> bool:
+        """Whether a direct message's sender is a contact the Chat picker lists, for it.
 
         Matched the way the live chat matches an inbound sender to its thread: either prefix
         may be the shorter one, since what the wire addresses and what the contact table stores
-        need not be the same width.
+        need not be the same width. A companion is listed for its messages, a room server
+        for its posts (``post``) and nothing else.
         """
         if not sender:
             return False
@@ -412,6 +425,8 @@ class ChatService:
             for ident in (contact.key_prefix, contact.public_key[:12]):
                 ident = (ident or "").lower()
                 if ident and (ident.startswith(peer) or peer.startswith(ident)):
+                    if contact.is_room:
+                        return post
                     return is_direct_messageable(contact.node_type)
         return False
 
@@ -505,6 +520,60 @@ class ChatService:
             The same ``message``, with :attr:`~ChatMessage.acked` refreshed.
         """
         ack = await self._deliver_direct(contact, message.text)
+        message.acked = ack is not None
+        if message.row_id is not None:
+            self._ctx.repo.update_chat_ack(message.row_id, message.acked)
+        return message
+
+    async def send_post(self, room: Contact, text: str) -> ChatMessage:
+        """Post to a room and record the post in the room's history.
+
+        A post travels exactly as a direct message does — addressed to the room server,
+        which acknowledges it once it has *stored* it — and it is recorded under the room's
+        key the same way, so the board's history is one conversation. The acknowledgement
+        means the room kept it, never that anyone has read it; a read-only member's post is
+        dropped with no acknowledgement at all.
+
+        Unlike a direct message, a post is never soft-retried. A retry is a new message to
+        the room (it carries a new timestamp), so a post the room stored whose
+        acknowledgement was lost on the way home would be stored *again* and sent to every
+        member twice — a duplicate the whole room sees, where a direct message's is seen by
+        one. ^R remains the reader's own retry.
+
+        Args:
+            room: The room server.
+            text: The post.
+
+        Returns:
+            The recorded outbound :class:`ChatMessage`; its ``acked`` says whether the room
+            stored it.
+        """
+        device = await self._ctx.device()
+        ack = await device.send_direct_message(room, text)
+        chat = ChatMessage(
+            text=text,
+            outbound=True,
+            is_channel=False,
+            peer=room.key_prefix or room.public_key[:12] or None,
+            peer_name=room.name,
+            acked=ack is not None,
+            created_at=utcnow(),
+        )
+        chat.row_id = self._ctx.repo.record_chat_message(chat, run_id=self._run_id)
+        return chat
+
+    async def resend_post(self, room: Contact, message: ChatMessage) -> ChatMessage:
+        """Post an unacknowledged post again, once, updating its row in place (^R).
+
+        Args:
+            room: The room server.
+            message: The post that went unacknowledged; mutated with the new outcome.
+
+        Returns:
+            The same ``message``, with :attr:`~ChatMessage.acked` refreshed.
+        """
+        device = await self._ctx.device()
+        ack = await device.send_direct_message(room, message.text)
         message.acked = ack is not None
         if message.row_id is not None:
             self._ctx.repo.update_chat_ack(message.row_id, message.acked)

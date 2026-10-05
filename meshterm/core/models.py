@@ -95,11 +95,104 @@ class LoginResult(Enum):
         return self is LoginResult.ACCEPTED
 
 
+class RoomAccess(Enum):
+    """What a room server let us do when we logged in to it — the words a room view says.
+
+    A room answers a login with the *role* it filed us under, the low two bits of the
+    permissions byte its access list keeps per client (MeshCore's ``PERM_ACL_*``). The three
+    members here are what those roles *do* in a room, which is what the reader needs to
+    know, and the firmware's names for them are not quite that: a room drops posts only
+    from role 0, its "guest" — the one a wrong password lands on when the owner has turned
+    ``allow.read.only`` on. Role 1, which the firmware calls read-only, is assigned by hand
+    (``setperm``) and never by a login, and the room still takes its posts; so it reads as
+    a member here, because that is what it is.
+    """
+
+    #: Read, post, and run the room's command line. The room keeps admins across restarts.
+    ADMIN = "admin"
+    #: Read and post — the room password's level.
+    MEMBER = "member"
+    #: Read only. The room drops this member's posts without an acknowledgement.
+    READ_ONLY = "read-only"
+
+    @property
+    def can_post(self) -> bool:
+        """Whether the room keeps what this member posts."""
+        return self is not RoomAccess.READ_ONLY
+
+    @classmethod
+    def from_login(cls, payload: dict) -> RoomAccess:
+        """Read the access a room granted from its login reply.
+
+        Firmware that sends the access-list permissions byte (companion 1.10 and later)
+        is read from that; an older reply carries only the legacy flag in its first byte,
+        which a room sets to ``1`` for an admin and ``2`` for a guest.
+
+        Args:
+            payload: The ``LOGIN_SUCCESS`` event's payload, as the meshcore library
+                parses it (``acl_permissions`` and ``permissions``).
+
+        Returns:
+            The access the room granted.
+        """
+        acl = payload.get("acl_permissions")
+        if isinstance(acl, int):
+            role = acl & 0x03
+            if role == 0x03:
+                return cls.ADMIN
+            return cls.READ_ONLY if role == 0 else cls.MEMBER
+        legacy = payload.get("permissions")
+        if legacy == 1:
+            return cls.ADMIN
+        return cls.READ_ONLY if legacy == 2 else cls.MEMBER
+
+
+@dataclass(frozen=True, slots=True)
+class RoomLogin:
+    """How a login to a room server ended, and what it let us do.
+
+    The :class:`LoginResult` keeps its meaning — and its policy on what to remember — and a
+    room adds the one fact a repeater's login never needed: which of its roles it gave us.
+
+    Attributes:
+        result: Accepted, refused, or never answered. A room never refuses: a wrong
+            password gets no reply at all, so :attr:`~LoginResult.NO_REPLY` is also what a
+            mistyped password looks like.
+        access: The access granted, when the login was accepted.
+    """
+
+    result: LoginResult
+    access: RoomAccess | None = None
+
+    def __bool__(self) -> bool:
+        """Truthy only when logged in, like the :class:`LoginResult` it carries."""
+        return bool(self.result)
+
+
+def is_room(node_type: int | None) -> bool:
+    """Whether a node of this advert type is a room server — something you join, not DM.
+
+    The room counterpart of :func:`is_direct_messageable`: the two together sort every
+    contact the Chat picker lists into the section it belongs in. A contact whose type was
+    never advertised is not a room, because joining one starts with a password prompt, and
+    a companion should not be asked for one.
+
+    Args:
+        node_type: The node's advert type, or ``None`` when it was never advertised.
+
+    Returns:
+        ``True`` only for :data:`NODE_TYPE_ROOM`.
+    """
+    return node_type == NODE_TYPE_ROOM
+
+
 def is_direct_messageable(node_type: int | None) -> bool:
     """Whether a node of this advert type is a direct-message recipient — THE DM rule.
 
-    We only send direct messages to *companion* (chat) nodes: a repeater, room server, or
-    sensor is infrastructure, not someone to message. A contact whose type was never
+    We only send direct messages to *companion* (chat) nodes: a repeater or sensor is
+    infrastructure, not someone to message, and a room server is somewhere you *post*
+    (see :func:`is_room`) — the transmission is the same, but what the reader is doing,
+    and what the room view draws, is not. A contact whose type was never
     advertised (``None``) gets the benefit of the doubt, so a real companion is never
     hidden by a missing type. Every DM recipient picker (the chat conversation list, the
     courier outbox) filters through this one predicate, so "DMs go to companions only" is
@@ -201,6 +294,11 @@ class Contact:
     def is_repeater(self) -> bool:
         """Whether this contact advertises as a repeater (fixed infrastructure)."""
         return self.node_type == NODE_TYPE_REPEATER
+
+    @property
+    def is_room(self) -> bool:
+        """Whether this contact advertises as a room server (see :func:`is_room`)."""
+        return is_room(self.node_type)
 
 
 @dataclass(slots=True)
@@ -322,9 +420,16 @@ class Message:
         sender: Key prefix of the sending contact (direct messages), if known.
         channel: Channel index the message arrived on (channel messages), if applicable.
         is_channel: Whether this is a channel message rather than a direct one.
-        sender_timestamp: The sender's own timestamp for the message, if carried.
+        sender_timestamp: The sender's own timestamp for the message, if carried. A room
+            post carries the time it was *posted*, by the room's clock — a backlog post
+            arrives long after it.
         snr: Signal-to-noise ratio (dB) of the reception, if reported.
         received_at: When the companion delivered the message to us.
+        author: For a room post — a direct message from a room server, *signed* with the
+            first four bytes of whoever wrote it — that author's key prefix, as lowercase
+            hex. The room is the :attr:`sender` (it is the node that transmitted), and the
+            author is the member it vouches for. ``None`` for anything else, a room's own
+            command-line replies included.
         raw: Optional raw event payload for debugging/replay.
     """
 
@@ -335,7 +440,13 @@ class Message:
     sender_timestamp: datetime | None = None
     snr: float | None = None
     received_at: datetime = field(default_factory=utcnow)
+    author: str | None = None
     raw: dict | None = None
+
+    @property
+    def is_post(self) -> bool:
+        """Whether this is a room post (a message a room relayed on a member's behalf)."""
+        return self.author is not None
 
 
 @dataclass(slots=True)
@@ -409,6 +520,11 @@ class ChatMessage:
             :data:`~meshterm.core.regions.WILDCARD` (``*``) for unscoped, or ``None`` where
             it isn't known — every inbound or direct message, and anything sent before the
             scope was recorded.
+        author: For an inbound room post, the key prefix of the member who wrote it (see
+            :attr:`Message.author`); :attr:`peer` is then the room. ``None`` for every
+            other message — including our own posts, which a room never sends back, and a
+            room's command-line replies, which share its conversation key but are not
+            posts (see :attr:`is_post`).
     """
 
     text: str
@@ -423,6 +539,12 @@ class ChatMessage:
     created_at: datetime = field(default_factory=utcnow)
     row_id: int | None = None
     scope: str | None = None
+    author: str | None = None
+
+    @property
+    def is_post(self) -> bool:
+        """Whether this is an inbound room post, written by the member :attr:`author` names."""
+        return self.author is not None
 
     @property
     def key(self) -> str:
@@ -463,12 +585,18 @@ class ChatMessage:
             # so the transcript reflects message time rather than retrieval time. Falls
             # back to the receive time when the sender carried no timestamp.
             created_at=message.sender_timestamp or message.received_at,
+            author=None if message.is_channel else message.author,
         )
 
 
 @dataclass(slots=True)
 class Conversation:
-    """A selectable chat thread: a channel or a direct exchange with a contact.
+    """A selectable chat thread: a channel, a room, or a direct exchange with a contact.
+
+    A room is addressed like a direct exchange — one node, its key prefix keying the
+    history — so it is a conversation with a :attr:`contact` whose type is a room server
+    (:attr:`is_room`). What differs is what the transcript holds: posts by many members,
+    each under its :attr:`ChatMessage.author`, rather than one peer's messages.
 
     Attributes:
         label: Display name (e.g. ``#general`` or ``Alice``).
@@ -478,7 +606,7 @@ class Conversation:
             :func:`~meshterm.core.channels.channel_identity`).
         secret: The channel's 16-byte secret, for channels — used only to show its
             public/private openness marker; ``None`` when unknown.
-        contact: The contact, for direct conversations.
+        contact: The contact, for direct conversations and rooms.
     """
 
     label: str
@@ -490,10 +618,15 @@ class Conversation:
 
     @property
     def peer(self) -> str | None:
-        """The peer key prefix for a direct conversation, else ``None``."""
+        """The peer key prefix for a direct conversation or a room, else ``None``."""
         if self.is_channel or self.contact is None:
             return None
         return self.contact.key_prefix or self.contact.public_key[:12] or None
+
+    @property
+    def is_room(self) -> bool:
+        """Whether this conversation is a room server's board."""
+        return not self.is_channel and self.contact is not None and self.contact.is_room
 
     @property
     def key(self) -> str:

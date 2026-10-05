@@ -36,6 +36,7 @@ from .frames import frame_addressing, trace_link_snrs
 from .models import (
     NODE_TYPE_CHAT,
     NODE_TYPE_REPEATER,
+    NODE_TYPE_ROOM,
     Ack,
     Contact,
     Hop,
@@ -43,6 +44,8 @@ from .models import (
     Message,
     NeighbourInfo,
     Observation,
+    RoomAccess,
+    RoomLogin,
     TraceResult,
     advert_time,
     utcnow,
@@ -121,6 +124,11 @@ def charging_from_battery_level_status(data: bytes) -> bool | None:
 #: Per-``get_msg`` timeout in the message pump, so a missing device reply can't wedge the
 #: drain loop (seconds).
 _MESSAGE_GET_TIMEOUT_S = 5.0
+
+#: MeshCore's ``TXT_TYPE_SIGNED_PLAIN``: the text type a room server pushes its posts in,
+#: the body led by the first four bytes of the author's key. (``0`` is plain text and ``1``
+#: a command-line exchange.)
+_TXT_TYPE_SIGNED_PLAIN = 2
 
 #: How many uncorrelated frames one :meth:`MeshCoreDevice.admin_login` may quote in its log
 #: line. They are evidence for reading a failure afterwards, not a record to keep, and a busy
@@ -1164,6 +1172,30 @@ class Device(ABC):
             failure must tell :attr:`~LoginResult.REFUSED` (the node said no — the
             password is wrong) from :attr:`~LoginResult.NO_REPLY` (nothing came back —
             the password is unproven, not disproven).
+        """
+
+    @abstractmethod
+    async def room_login(self, room: Contact, password: str) -> RoomLogin:
+        """Log in to a room server, as a member or as its admin, and say what it allowed.
+
+        The same exchange as :meth:`admin_login` — a room server has one login, and the
+        password picks the role — with the one more thing a room's answer carries: the
+        access it granted (:class:`~meshterm.core.models.RoomAccess`). The companion adds
+        the time of the last post it already holds from this room, so the room answers by
+        sending each post since, one at a time, as ordinary inbound messages.
+
+        A room never says *no*: a wrong password gets no reply at all (unless its owner
+        lets anyone in read-only), so a refusal is :attr:`~LoginResult.NO_REPLY` here and
+        a caller must not read that as "unreachable" alone. A blank password asks the room
+        whether it already knows us — it does for its admins, and for anyone who has
+        logged in since it last restarted.
+
+        Args:
+            room: The room server to log in to. Its ``public_key`` addresses it.
+            password: The room password, the admin password, or ``""``.
+
+        Returns:
+            How the login ended, and the access granted when it was accepted.
         """
 
     @abstractmethod
@@ -3061,6 +3093,32 @@ class MeshCoreDevice(Device):
         return pub
 
     async def admin_login(self, node: Contact, password: str) -> LoginResult:  # noqa: D102
+        result, _payload = await self._login(node, password, what="admin login")
+        return result
+
+    async def room_login(self, room: Contact, password: str) -> RoomLogin:  # noqa: D102
+        result, payload = await self._login(room, password, what="room login")
+        if result is not LoginResult.ACCEPTED:
+            return RoomLogin(result)
+        return RoomLogin(result, RoomAccess.from_login(payload or {}))
+
+    async def _login(
+        self, node: Contact, password: str, *, what: str
+    ) -> tuple[LoginResult, dict | None]:
+        """Run one login exchange with a remote node and report how it ended.
+
+        The one login a remote node has, whichever role the password earns:
+        :meth:`admin_login` and :meth:`room_login` are each a reading of its answer.
+
+        Args:
+            node: The node to log in to.
+            password: The password to offer.
+            what: How the debug log names the exchange.
+
+        Returns:
+            The outcome, and the accepting ``LOGIN_SUCCESS`` frame's payload (``None``
+            unless the login was accepted).
+        """
         from meshcore import EventType
 
         mc = self._require()
@@ -3174,7 +3232,8 @@ class MeshCoreDevice(Device):
         # the companion never put it on the air, and a full budget spent after a clean send
         # means the node really did stay silent.
         _log.debug(
-            "admin login to %s: send %s in %.0fms, budget=%.1fs -> %s after %.0fms%s",
+            "%s to %s: send %s in %.0fms, budget=%.1fs -> %s after %.0fms%s",
+            what,
             node.name,
             "acknowledged" if sent is not None else "unacknowledged",
             (sent_at - started) * 1000.0,
@@ -3184,13 +3243,13 @@ class MeshCoreDevice(Device):
             f" [also heard: {'; '.join(stray)}]" if stray else "",
         )
         if etype is EventType.LOGIN_SUCCESS:
-            return LoginResult.ACCEPTED
+            return LoginResult.ACCEPTED, dict(getattr(event, "payload", None) or {})
         if etype is EventType.LOGIN_FAILED:
-            return LoginResult.REFUSED
+            return LoginResult.REFUSED, None
         # Nothing came back — including the local-ERROR case, where the companion would not
         # even send the request. Either way we never heard the node, so the password stands
         # unproven rather than disproven and the caller must keep it.
-        return LoginResult.NO_REPLY
+        return LoginResult.NO_REPLY, None
 
     @staticmethod
     def _refers_to(event: object, pubkey: str) -> bool:
@@ -3213,6 +3272,14 @@ class MeshCoreDevice(Device):
         textual reply arrives later as a ``CONTACT_MSG_RECV`` event. We return that
         reply text (or ``None`` if none arrived before ``timeout``).
 
+        The reply is the first message *from this node* that is not a room post. Any
+        direct message used to count, so a companion's message landing during the wait
+        was taken for the repeater's answer — and a room server pushes its members'
+        posts down the very same channel, one after another as each is acknowledged, so
+        administering a room you are a member of would read a stranger's post as the
+        result of ``get``. The listener is armed before the command goes out, like the
+        login's, so a reply quicker than the send's own return is not missed either.
+
         Args:
             node: The remote contact (must already be logged in).
             cmd: The repeater CLI command, e.g. ``"set tx 20"``.
@@ -3228,16 +3295,32 @@ class MeshCoreDevice(Device):
 
         mc = self._require()
         pub = self._node_pubkey(node)
-        async with self.transmitting():
-            sent = await mc.commands.send_cmd(pub, cmd)
-        if sent is not None and getattr(sent, "is_error", lambda: False)():
-            raise DeviceCommandError(
-                f"couldn't send admin command {cmd!r} to {node.name}: {reject_reason(sent)}"
-            )
-        reply = await mc.wait_for_event(EventType.CONTACT_MSG_RECV, timeout=timeout)
-        if reply is None:
-            return None
-        payload = getattr(reply, "payload", {}) or {}
+        answer: asyncio.Future = asyncio.get_running_loop().create_future()
+
+        def on_message(event) -> None:  # noqa: ANN001 - meshcore Event
+            payload = getattr(event, "payload", None) or {}
+            if answer.done() or payload.get("txt_type") == _TXT_TYPE_SIGNED_PLAIN:
+                return
+            answer.set_result(payload)
+
+        # The firmware stamps a received direct message with its sender's six-byte prefix,
+        # which the library files as the event's ``pubkey_prefix`` attribute.
+        subscription = mc.subscribe(
+            EventType.CONTACT_MSG_RECV, on_message, {"pubkey_prefix": pub[:12]}
+        )
+        try:
+            async with self.transmitting():
+                sent = await mc.commands.send_cmd(pub, cmd)
+            if sent is not None and getattr(sent, "is_error", lambda: False)():
+                raise DeviceCommandError(
+                    f"couldn't send admin command {cmd!r} to {node.name}: {reject_reason(sent)}"
+                )
+            try:
+                payload = await asyncio.wait_for(asyncio.shield(answer), timeout)
+            except asyncio.TimeoutError:
+                return None
+        finally:
+            subscription.unsubscribe()
         return str(payload.get("text", payload.get("msg", "")))
 
     async def send_remote_command(  # noqa: D102 - inherited docstring
@@ -4101,7 +4184,48 @@ class MockDevice(Device):
                 node_type=NODE_TYPE_CHAT,
                 route_hops=("a1b2c3d4",),
             ),
+            # Last, so every rotation over the first four (the synthetic traffic, the
+            # tests that count on it) is the one it always was.
+            Contact(
+                name="Lakeside BBS",
+                public_key=_mock_pub("f6a7b8c9"),
+                key_prefix="f6a7b8c9",
+                node_type=NODE_TYPE_ROOM,
+                route_hops=("a1b2c3d4",),
+            ),
         ]
+        # The simulated room server's board, oldest first, as (author key prefix, posted at,
+        # text): what Lakeside BBS holds when the simulator starts. Its authors are the three
+        # a room view has to draw — a contact (Alice, Observer-Bot), a node never befriended
+        # (``e5f6a7b8``, a neighbour no contact names, so no name places it), and the room
+        # itself, which is how a notice its admin posts with ``room.post`` arrives — and it
+        # spans two days, so the transcript has a day to divide.
+        now = utcnow()
+        self._room_board: list[tuple[str, datetime, str]] = [
+            ("d4e5f6a7", now - timedelta(hours=26), "Anyone driving to the swap meet Saturday?"),
+            (
+                "c3d4e5f6",
+                now - timedelta(hours=25),
+                "I can take two. Leaving 8am from the IGA lot.",
+            ),
+            ("f6a7b8c9", now - timedelta(hours=3), "Reminder: this board keeps the last 32 posts."),
+            (
+                "e5f6a7b8",
+                now - timedelta(minutes=50),
+                "Is the north repeater down? Nothing since 6.",
+            ),
+            ("d4e5f6a7", now - timedelta(minutes=12), "Heard it an hour ago. Probably the solar."),
+        ]
+        #: Our access in each room we have logged in to, keyed by the room's mock key — the
+        #: room's own access list, as far as it concerns us. A room forgets its members when
+        #: it restarts; the simulator never restarts one.
+        self._room_access: dict[str, RoomAccess] = {}
+        #: The time of the newest post we hold from each room: the companion's "sync since",
+        #: which a login carries so the room sends only what is newer.
+        self._room_synced: dict[str, datetime] = {}
+        #: Whoever is subscribed to the event stream right now, so a room can push its posts
+        #: to them after a login the way a real room's catch-up arrives — unsolicited.
+        self._listeners: list[EventCallback] = []
         # Remote-admin simulation: which nodes we're "logged in" to, and each tuned
         # node's transmit power keyed by full public key. ``_default_remote_tx`` is the
         # assumed power before the optimizer first writes one.
@@ -4274,6 +4398,14 @@ class MockDevice(Device):
         # chat screen's "add it back and send" offer walkable on the simulator.
         if self._mock_key(contact) not in {self._mock_key(c) for c in self._contacts}:
             raise ContactNotOnDeviceError(contact)
+        if contact.is_room:
+            # A post. The room keeps it — and acknowledges — only from a member it knows
+            # who may post; anyone else's is dropped with no reply, which is all a read-only
+            # member ever learns about why a post went nowhere.
+            access = self._room_access.get(self._mock_key(contact))
+            if access is None or not access.can_post:
+                return None
+            self._room_board.append((self._self_prefix(), utcnow(), text))
         # Otherwise the simulator "delivers" instantly and always acknowledges, so outbound
         # direct messages show as acked without a radio.
         return Ack(code="mock")
@@ -4290,12 +4422,99 @@ class MockDevice(Device):
 
     async def admin_login(self, node: Contact, password: str) -> LoginResult:  # noqa: D102
         await asyncio.sleep(0)
+        if node.is_room:
+            # One login, whichever screen sends it: an admin login to a room makes us a
+            # member it pushes posts to, and the room's rules decide the answer — including
+            # its silence for a wrong password — exactly as the firmware's do.
+            return (await self.room_login(node, password)).result
         if node.name in self._unreachable:
             return LoginResult.NO_REPLY  # simulates a node that is down or out of range
         if password != self._admin_password:
             return LoginResult.REFUSED
         self._admin_sessions.add(self._mock_key(node))
         return LoginResult.ACCEPTED
+
+    async def room_login(self, room: Contact, password: str) -> RoomLogin:  # noqa: D102
+        await asyncio.sleep(0)
+        key = self._mock_key(room)
+        if room.name in self._unreachable:
+            return RoomLogin(LoginResult.NO_REPLY)
+        cfg = self._remote_config(room)
+        if password == self._admin_password:
+            access = RoomAccess.ADMIN
+        elif not password and key in self._room_access:
+            access = self._room_access[key]  # "do you know me?" — it does
+        elif password == cfg["guest.password"]:
+            access = RoomAccess.MEMBER
+        elif cfg["allow.read.only"] == "on":
+            access = RoomAccess.READ_ONLY
+        else:
+            # A room never says no: a wrong password is met with silence.
+            return RoomLogin(LoginResult.NO_REPLY)
+        self._room_access[key] = access
+        if access is RoomAccess.ADMIN:
+            self._admin_sessions.add(key)
+        self._push_room(room)
+        return RoomLogin(LoginResult.ACCEPTED, access)
+
+    def _push_room(self, room: Contact) -> None:
+        """Start a room's catch-up: each post newer than the last one we hold, oldest first.
+
+        A real room sends one post, waits for the companion's acknowledgement, then sends
+        the next; the simulator spaces them by its event cadence so a room view fills
+        visibly rather than all at once. Our own posts are never sent back to us.
+        """
+        key = self._mock_key(room)
+        since = self._room_synced.get(key)
+        own = self._self_prefix()
+        pending = [
+            post
+            for post in self._room_board
+            if post[0] != own and (since is None or post[1] > since)
+        ]
+        if not pending:
+            return
+
+        async def push() -> None:
+            for author, posted_at, text in pending:
+                await asyncio.sleep(_MOCK_MONITOR_INTERVAL_S)
+                self._room_synced[key] = posted_at
+                message = Message(
+                    text=text,
+                    sender=room.key_prefix,
+                    sender_timestamp=posted_at,
+                    snr=round(self._rng.gauss(6.0, 3.0), 1),
+                    author=author,
+                )
+                for listener in list(self._listeners):
+                    listener(MeshEvent.message_event(message))
+
+        task = asyncio.create_task(push())
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
+    def _self_prefix(self) -> str:
+        """Our own node's four-byte key prefix — how a room signs a post we wrote."""
+        return str(self._info.get("public_key") or "")[:8].lower()
+
+    def _remote_config(self, node: Contact) -> dict[str, str]:
+        """A simulated node's CLI-visible configuration, seeded with the defaults on first touch.
+
+        A room server starts with the stock room password its build sets (MeshCore's
+        ``ROOM_PASSWORD``, ``hello``) and with forwarding off, as a room ships; the rest is
+        the repeater defaults, which the two firmwares share.
+        """
+        key = self._mock_key(node)
+        cfg = self._remote_cfg.get(key)
+        if cfg is None:
+            cfg = {"name": node.name, **self._REMOTE_CFG_DEFAULTS}
+            if node.is_room:
+                cfg.update({"guest.password": self._ROOM_PASSWORD, "repeat": "off"})
+            self._remote_cfg[key] = cfg
+        return cfg
+
+    #: The stock room password a MeshCore room server is built with.
+    _ROOM_PASSWORD = "hello"
 
     #: The simulated repeater CLI's configuration, keyed and answered the way MeshCore's
     #: ``CommonCLI.cpp`` does (see send_remote_command). What is absent is absent on purpose:
@@ -4345,11 +4564,18 @@ class MockDevice(Device):
         key = self._mock_key(node)
         if key not in self._admin_sessions:
             return None  # firmware ignores strangers — reads as a timeout, like hardware
-        cfg = self._remote_cfg.setdefault(key, {"name": node.name, **self._REMOTE_CFG_DEFAULTS})
+        cfg = self._remote_config(node)
         parts = command.strip().split()
         verb = parts[0].lower() if parts else ""
         if verb == "ver":
             return "MeshCore v1.15.0 (simulator)"
+        if verb == "room.post" and node.is_room:
+            # A notice the admin posts in the room's own name (MeshCore's ``addSystemPost``).
+            text = command.strip()[len("room.post") :].strip()
+            if not text:
+                return "ERR empty message"
+            self._room_board.append((key[:8], utcnow(), text))
+            return "OK"
         if verb == "clock":
             return "OK - clock synced" if parts[1:] == ["sync"] else "12:00 - 1/1/2026 UTC"
         if verb == "advert":
@@ -4688,9 +4914,12 @@ class MockDevice(Device):
         task = asyncio.create_task(emit_loop())
         self._bg_tasks.add(task)
         task.add_done_callback(self._bg_tasks.discard)
+        self._listeners.append(on_event)
 
         def unsubscribe() -> None:
             stop.set()  # wakes the loop's wait immediately; it exits on the next check
+            if on_event in self._listeners:
+                self._listeners.remove(on_event)
 
         return unsubscribe
 
@@ -4713,9 +4942,9 @@ class MockDevice(Device):
             ``advert`` otherwise, carrying a location for the simulated repeaters.
         """
         lat_lon = self._MOCK_LOCATIONS.get(contact.name)
-        # The two located nodes are the simulated repeaters (fixed infrastructure); the rest
-        # advertise as ordinary chat nodes, so the map has both classes to prioritise.
-        node_type = NODE_TYPE_REPEATER if contact.name in self._MOCK_LOCATIONS else NODE_TYPE_CHAT
+        # Each node advertises the type its contact holds — the two located repeaters, the
+        # companions, the room server — so the map and the lists have every class to draw.
+        node_type = contact.node_type or NODE_TYPE_CHAT
         return Observation(
             node=contact.key_prefix or contact.public_key[:12],
             public_key=contact.public_key or None,
@@ -4761,7 +4990,9 @@ class MockDevice(Device):
         Returns:
             A :class:`Message` from one of the known contacts.
         """
-        contact = self._contacts[seq % len(self._contacts)]
+        # A room server sends posts, never a message of its own (see _push_room).
+        senders = [c for c in self._contacts if not c.is_room]
+        contact = senders[seq % len(senders)]
         return Message(
             text=f"hello from {contact.name} #{seq}",
             sender=contact.key_prefix or contact.public_key[:12],
@@ -5020,6 +5251,12 @@ def message_from_event(event) -> Message | None:  # noqa: ANN001
     ``channel_idx`` instead (``type`` is ``"PRIV"`` or ``"CHAN"``). Field names are
     best-effort and should be validated against your firmware's event schema.
 
+    A room post is a direct message from the room server of the *signed* text type
+    (:data:`_TXT_TYPE_SIGNED_PLAIN`), and the library hands the four bytes the room signs it
+    with over as ``signature``: not a cryptographic signature but the first four bytes of
+    the author's public key (MeshCore's ``pushPostToClient``), which become
+    :attr:`~meshterm.core.models.Message.author`.
+
     Args:
         event: A meshcore message event (anything exposing a ``payload`` mapping).
 
@@ -5035,6 +5272,9 @@ def message_from_event(event) -> Message | None:  # noqa: ANN001
     sender_ts = (
         datetime.fromtimestamp(ts, tz=timezone.utc) if isinstance(ts, (int, float)) and ts else None
     )
+    author = None
+    if not is_channel and payload.get("txt_type") == _TXT_TYPE_SIGNED_PLAIN:
+        author = str(payload.get("signature") or "").lower() or None
     return Message(
         text=str(text),
         sender=None if is_channel else payload.get("pubkey_prefix"),
@@ -5042,6 +5282,7 @@ def message_from_event(event) -> Message | None:  # noqa: ANN001
         is_channel=is_channel,
         sender_timestamp=sender_ts,
         snr=_as_float(payload.get("SNR", payload.get("snr"))),
+        author=author,
         raw=payload,
     )
 

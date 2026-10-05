@@ -216,6 +216,13 @@ class ChatScreen(Screen):
         self._scope = scope if conversation.is_channel else None
         self.title = f"{conversation.label} · {self._scope}" if self._scope else conversation.label
         self._is_channel = conversation.is_channel
+        # Many voices or one: a channel and a room are read the same way — each message under
+        # whoever wrote it, Enter on one replying with an @mention — where a direct chat has
+        # two people and Enter on a message opens its paths.
+        self._multiparty = conversation.is_channel or conversation.is_room
+        # Whether typing reaches the compose line. Off where nothing typed could be sent (a
+        # room that keeps nothing from us), so keys never fill a line the reader cannot see.
+        self._composing = True
         self._key_of: Callable[[str], str | None] = key_of or (lambda name: None)
         # A direct thread's one remote sender is the peer; its key colours the header
         # even when the resolver can't place the display name.
@@ -312,7 +319,7 @@ class ChatScreen(Screen):
         self._selected_line = None
         self._selected_end = None
         if not self._messages:
-            lines = render_lines(Text("No messages yet — say hello!", style="muted"), width)
+            lines = render_lines(Text(self._empty_text, style="muted"), width)
         else:
             # Both direct and channel threads use the same grouped, Discord/Slack-style
             # transcript: consecutive messages from one sender share a colored header, with
@@ -324,14 +331,7 @@ class ChatScreen(Screen):
                 self._selected = max(0, min(self._selected, len(self._messages) - 1))
             lines = self._render_grouped(width)
 
-        limit = self._byte_limit()
-        # The byte budget is pinned to the right edge of the input's *last* line — so a
-        # compose that wraps onto a second line keeps the counter in the bottom-right
-        # corner rather than letting it trail the cursor down the wrap. Only a last line
-        # already full to the edge pushes it onto a right-aligned line of its own.
-        input_line = self._editor.render(overflow_at=self._overflow_at(limit))
-        counter = self._byte_counter(limit)
-        compose = right_aligned_tail(input_line, counter, width)
+        compose = self._compose_line(width)
         footer_parts: list[RenderableType] = [
             Text("─" * width, style="muted"),
             compose,
@@ -359,6 +359,21 @@ class ChatScreen(Screen):
     def cursor_line(self) -> int | None:
         """Keep the picked reply target in view; otherwise free scroll (managed by stick)."""
         return self._selected_line
+
+    #: What an empty transcript says.
+    _empty_text = "No messages yet — say hello!"
+
+    def _compose_line(self, width: int) -> RenderableType:
+        """The compose line under the transcript: the input, with its byte budget.
+
+        The byte budget is pinned to the right edge of the input's *last* line — so a
+        compose that wraps onto a second line keeps the counter in the bottom-right
+        corner rather than letting it trail the cursor down the wrap. Only a last line
+        already full to the edge pushes it onto a right-aligned line of its own.
+        """
+        limit = self._byte_limit()
+        input_line = self._editor.render(overflow_at=self._overflow_at(limit))
+        return right_aligned_tail(input_line, self._byte_counter(limit), width)
 
     # --- outgoing byte budget ------------------------------------------------
 
@@ -496,7 +511,7 @@ class ChatScreen(Screen):
                 if new_day or group != prev_group:
                     if not new_day and lines:
                         lines += render_lines(Text(""), width)  # gap between sender groups
-                    header = self._group_header(sender, is_self=message.outbound)
+                    header = self._group_header(sender, message)
                     lines += render_lines(header, width)
                 if selected:
                     # The first message owns the head of the transcript: nothing precedes
@@ -538,7 +553,7 @@ class ChatScreen(Screen):
             return (name or "·"), body
         return (self._name(message.peer) or message.peer or "?"), message.text
 
-    def _group_header(self, sender: str, *, is_self: bool = False) -> Text:
+    def _group_header(self, sender: str, message: ChatMessage) -> Text:
         """Build the sender header that starts a group: the name, drawn as a chip.
 
         The chip is what separates a *label* from the prose under it — a name standing
@@ -551,10 +566,19 @@ class ChatScreen(Screen):
         :meth:`_render_mentions`) is part of what was said, and inscribing it would put a
         chip in the middle of a sentence.
         """
-        if is_self:
+        if message.outbound:
             return name_chip("", you=True)
         # ``·`` is a channel line that arrived with no sender prefix — nobody to key on.
-        return name_chip(sender, None if sender == "·" else self._sender_key(sender))
+        return name_chip(sender, None if sender == "·" else self._header_key(sender, message))
+
+    def _header_key(self, sender: str, message: ChatMessage) -> str | None:
+        """The key that colours a group's sender chip: the one the sender's name resolves to.
+
+        A hook rather than a call, because a room knows more than a name: each post carries
+        its author's key prefix, which colours the chip with no name lookup at all (see
+        :class:`~meshterm.ui.room.RoomScreen`).
+        """
+        return self._sender_key(sender)
 
     def _body_lines(
         self, body: str, message: ChatMessage, width: int, *, selected: bool = False
@@ -666,7 +690,7 @@ class ChatScreen(Screen):
         message = self._messages[self._selected]
         sender, _ = self._sender_and_body(message)
         who = "this message" if message.outbound or sender == "·" else sender
-        if self._is_channel:
+        if self._multiparty:
             return Text(
                 f"↩ Enter to reply to {who} with an @mention · End to cancel",
                 style="accent",
@@ -711,7 +735,7 @@ class ChatScreen(Screen):
         (:meth:`_group_header`) so the two can't disagree about who a name is.
         """
         key = self._key_of(sender)
-        if not key and not self._is_channel and not mention:
+        if not key and not self._multiparty and not mention:
             key = self._peer_key or None
         return key
 
@@ -734,7 +758,7 @@ class ChatScreen(Screen):
         """
         if action == "enter":
             if self._selected is not None:
-                if self._is_channel:
+                if self._multiparty:
                     self._begin_reply()
                 else:
                     self._open_paths(self._selected)
@@ -777,7 +801,7 @@ class ChatScreen(Screen):
             self._clear_selection()
             self._stick = True  # jump back to the live tail / compose line
         else:
-            if self._editor.edit(action, data):
+            if self._composing and self._editor.edit(action, data):
                 # Touching the compose line returns focus there — nothing stays picked.
                 self._status = ""  # trimming clears the "too long" notice
                 self._clear_selection()
@@ -1210,6 +1234,10 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
 
     if not isinstance(ctx.ui, TuiUi):  # pragma: no cover - guarded by the menu-only caller
         raise RuntimeError("live chat is only available in the interactive menu")
+    if conversation.is_room:
+        from .room import open_room
+
+        return await open_room(ctx, conversation)
     session = ctx.ui.session
 
     device = await ctx.device()

@@ -28,6 +28,7 @@ from .core.preferences import PREFERENCES_FILENAME, Preferences, report_dropped
 from .core.preferences import install as install_preferences
 from .core.region_store import RegionStore
 from .core.remote_store import RemoteStore
+from .core.room_store import RoomStore
 from .core.selection import resolve_device
 from .core.settings_store import SettingsStore
 from .core.watch_store import WatchStore
@@ -45,6 +46,7 @@ if TYPE_CHECKING:
     from .services.device_state import DeviceState
     from .services.event_hub import EventHub
     from .services.monitor_service import MonitorService
+    from .services.rooms import RoomService
     from .services.watchtower import WatchtowerService
     from .ui.surface import Ui
 
@@ -90,6 +92,9 @@ class AppContext:
         contact_store: Store for contacts read through MeshTerm, merged back into the contact
             lists for a device that forgot them (a firmware-less radio bridge). Keyed by device
             public key; defaults to ``<config_dir>/contacts.json`` when not injected.
+        room_store: Store for the rooms this machine has joined — each room's password and
+            the access it granted (defaults to ``<config_dir>/rooms.json`` when not
+            injected).
         mock: Whether the simulator device is in use.
         port_override: Explicit serial port (from ``--port`` or the interactive picker),
             overriding the profile.
@@ -130,6 +135,7 @@ class AppContext:
     channel_store: ChannelStore | None = None
     settings_store: SettingsStore | None = None
     contact_store: ContactStore | None = None
+    room_store: RoomStore | None = None
     profile: DeviceProfile | None = None
     mock: bool = False
     port_override: str | None = None
@@ -165,6 +171,7 @@ class AppContext:
     _events: EventHub | None = field(default=None, init=False, repr=False)
     _monitor: MonitorService | None = field(default=None, init=False, repr=False)
     _chat: ChatService | None = field(default=None, init=False, repr=False)
+    _rooms: RoomService | None = field(default=None, init=False, repr=False)
     _adverts: AdvertScheduler | None = field(default=None, init=False, repr=False)
     _watchtower: WatchtowerService | None = field(default=None, init=False, repr=False)
     _clock_sync: ClockSync | None = field(default=None, init=False, repr=False)
@@ -203,6 +210,8 @@ class AppContext:
             self.settings_store = SettingsStore(self.settings.config_dir / "settings.json")
         if self.contact_store is None:
             self.contact_store = ContactStore(self.settings.config_dir / "contacts.json")
+        if self.room_store is None:
+            self.room_store = RoomStore(self.settings.config_dir / "rooms.json")
 
     @property
     def profile_name(self) -> str | None:
@@ -375,6 +384,20 @@ class AppContext:
 
             self._chat = ChatService(self)
         return self._chat
+
+    @property
+    def rooms(self) -> RoomService:
+        """Return the session's room service, creating it on first use.
+
+        The service joins room servers and remembers, for the session, what each one let us
+        do and when it was last heard — which is what decides whether opening a room logs
+        in to it again. It never transmits on its own.
+        """
+        if self._rooms is None:
+            from .services.rooms import RoomService
+
+            self._rooms = RoomService(self)
+        return self._rooms
 
     @property
     def adverts(self) -> AdvertScheduler:

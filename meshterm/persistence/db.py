@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -162,8 +162,9 @@ CREATE TABLE IF NOT EXISTS messages (
     snr         REAL,
     acked       INTEGER,
     created_at  TEXT    NOT NULL,
-    scope       TEXT              -- outbound floods: the region it was sent under, '*' for
+    scope       TEXT,             -- outbound floods: the region it was sent under, '*' for
                                   --   unscoped, NULL where it was never known
+    author      TEXT              -- a room post: its author's key prefix (peer is the room)
 );
 
 CREATE INDEX IF NOT EXISTS idx_traces_run ON traces(run_id);
@@ -363,3 +364,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # anything else — inbound messages, direct messages, and every row sent before this
         # column existed, whose scope was never known and cannot be recovered.
         conn.execute("ALTER TABLE messages ADD COLUMN scope TEXT")
+    if "author" not in message_cols:
+        # v17 -> v18: who wrote a room post. A room server relays its members' posts as
+        # direct messages from *itself*, so the row's peer is the room and the member who
+        # wrote the post is a second fact the wire carries beside it — the first four bytes
+        # of their key, which the room signs the post with. Stored as that lowercase hex;
+        # NULL for every other message, a room's own command-line replies included, which
+        # is what tells a post from a reply in the one conversation the two share. Rows
+        # from before this column are NULL too: a post recorded then lost its author on
+        # the way in, and nothing on disk can bring it back.
+        conn.execute("ALTER TABLE messages ADD COLUMN author TEXT")

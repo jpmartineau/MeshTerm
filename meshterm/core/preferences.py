@@ -277,6 +277,21 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         minimum=0,
         maximum=2,
     ),
+    PrefSpec(
+        key="room_relogin_minutes",
+        label="Room re-login",
+        help="Opening a room this quiet logs in again",
+        group="Sending",
+        value_type="int",
+        # A login is one exchange, and it is what restarts a room's catch-up: a room stops
+        # sending to a member after three posts go unacknowledged, and forgets every
+        # non-admin member when it restarts. A room heard from within this long is still
+        # sending, so opening it again sends nothing.
+        default=30,
+        minimum=1,
+        maximum=1440,
+        unit="min",
+    ),
     # --- TX optimize -------------------------------------------------------------
     PrefSpec(
         key="tx_opt_min",

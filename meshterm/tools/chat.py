@@ -39,12 +39,19 @@ from ..core.events import EventKind, MeshEvent
 from ..core.models import (
     NODE_TYPE_CHAT,
     NODE_TYPE_LABELS,
+    NODE_TYPE_ROOM,
     ChatMessage,
     Contact,
     Conversation,
+    NodeResolver,
     is_direct_messageable,
+    is_room,
 )
-from ..services.trace_runner import NameKeyResolver, make_name_key_resolver
+from ..services.trace_runner import (
+    NameKeyResolver,
+    make_name_key_resolver,
+    make_node_resolver,
+)
 from ..ui import renderers
 from ..ui.fields import ChannelRef, NodeRef
 from ..ui.menus import Lane, column_header, fit_cells, section_heading
@@ -157,7 +164,7 @@ class ChatTool(Tool):
                 picker.replace_items(await self._picker_items(ctx))
 
     async def _picker_items(self, ctx: AppContext) -> list:
-        """Build the picker's rows: the pinned lane names, the Channels group, then Direct.
+        """Build the picker's rows: the pinned lane names, then Channels, Rooms and Direct.
 
         Read fresh every time the list is built or swapped, so a thread that just gained
         messages sits where its recency puts it. Cheap enough to redo after each chat: the
@@ -179,27 +186,41 @@ class ChatTool(Tool):
         # :class:`~meshterm.services.device_state.DeviceState`).
         channels = _channels_from_slots(await ctx.devstate.channel_slots())
         contacts = await ctx.devstate.contacts()
-        # Only companion nodes are listed — we don't DM repeaters, rooms, or sensors;
-        # a contact whose type was never advertised gets the benefit of the doubt (the
-        # app-wide DM rule, see is_direct_messageable).
+        # Only companion nodes are listed under Direct — we don't DM repeaters, rooms, or
+        # sensors; a contact whose type was never advertised gets the benefit of the doubt
+        # (the app-wide DM rule, see is_direct_messageable). Room servers have their own
+        # section: somewhere you join and post, not someone you message.
         companions = [c for c in contacts if is_direct_messageable(c.node_type)]
+        rooms = [
+            Conversation(label=c.name, is_channel=False, contact=c)
+            for c in contacts
+            if is_room(c.node_type)
+        ]
+        room_peers = [conv.peer for conv in rooms if conv.peer]
         # A stable snapshot orders the rows (so the list doesn't reshuffle under the
         # cursor), while a self-refreshing view feeds each row's live preview
-        # (see _LiveLasts).
-        lasts = ctx.repo.last_chat_messages()
-        live = _LiveLasts(ctx, seed=lasts)
+        # (see _LiveLasts). A room's latest is its latest *post*.
+        lasts = ctx.repo.last_chat_messages(rooms=room_peers)
+        live = _LiveLasts(ctx, seed=lasts, rooms=room_peers)
         # Names in previews/mentions resolve back to keys for their hue (the app-wide
-        # colour rule); a name no contact or stored advert carries stays muted.
-        key_of = make_name_key_resolver(contacts, ctx.repo.node_names())
+        # colour rule); a name no contact or stored advert carries stays muted. A room
+        # post names its author by key, which resolves the other way.
+        stored_names = ctx.repo.node_names()
+        key_of = make_name_key_resolver(contacts, stored_names)
+        name_of = make_node_resolver(contacts, stored_names)
 
         # List contacts by recency — those with messages first, newest exchange at the top —
-        # then the never-contacted ones alphabetically (see _recency_key).
+        # then the never-contacted ones alphabetically (see _recency_key). Rooms the same.
         direct = [Conversation(label=c.name, is_channel=False, contact=c) for c in companions]
         direct.sort(key=lambda conv: _recency_key(conv, lasts))
+        rooms.sort(key=lambda conv: _recency_key(conv, lasts))
+        # Read once per build rather than per repaint: a room is joined from inside it, and
+        # the list is rebuilt when the reader comes back.
+        joined = {conv.key for conv in rooms if ctx.rooms.joined(conv.contact)}
         # One measurement for the whole list, headings and rows alike, taken before either is
         # built: the name lane is only as wide as the names actually in it, and every cell it
         # gives back goes to the message preview (see _lanes).
-        lanes = _lanes(channels + direct)
+        lanes = _lanes(channels + rooms + direct)
 
         # The lane names pin for the whole picker (they mean the same in both groups),
         # so scrolling into Direct keeps them overhead with that group's heading under
@@ -217,6 +238,29 @@ class ChatTool(Tool):
                     hscroll_from=lanes.head,
                 )
             )
+
+        items.append(section_heading("📌 Rooms"))
+        for conversation in rooms:
+            items.append(
+                Choice(
+                    title=_row_title(
+                        ctx,
+                        conversation,
+                        live,
+                        key_of,
+                        lanes,
+                        name_of=name_of,
+                        joined=conversation.key in joined,
+                    ),
+                    value=conversation,
+                    deletable=lasts.get(conversation.key) is not None,
+                    hscroll_from=lanes.head,
+                )
+            )
+        if not rooms:
+            # Said, not left out: "how do I get on a room?" is a question people bring here,
+            # and an empty section answers where one will be.
+            items.append(Separator("  no rooms yet — a room server is listed once it's heard"))
 
         items.append(section_heading("👤 Direct"))
         if companions:
@@ -238,16 +282,24 @@ class ChatTool(Tool):
 
     @staticmethod
     async def _delete_history(ctx: AppContext, conversation: Conversation) -> None:
-        """Confirm and delete one direct conversation's stored history.
+        """Confirm and delete one direct conversation's — or room's — stored history.
 
         Deleting history is irreversible data loss, so the confirm wears the reserved
         red (``destructive``): Cancel on the left, the committing Delete on the right.
         On confirm the peer's messages are removed from the database and the thread's
         unread count is cleared; the contact itself (a device-side record) is untouched.
+        A room's posts go from this machine only. The room keeps its own, and won't send
+        them again: it has seen them acknowledged.
         """
+        prompt = (
+            f"Delete the posts stored from {conversation.label}? They are removed from "
+            "this machine, and the room won't send them again."
+            if conversation.is_room
+            else f"Delete the chat history with {conversation.label}? Every stored "
+            "message in this conversation is removed."
+        )
         if not await ctx.ui.dialog(
-            f"Delete the chat history with {conversation.label}? Every stored "
-            "message in this conversation is removed.",
+            prompt,
             [("Cancel", False), ("Delete", True)],
             title="Delete history",
             default=1,
@@ -669,11 +721,18 @@ class _LiveLasts:
     second (bounded by ``ttl``) rather than once per row per repaint, so a wide list stays cheap.
     """
 
-    def __init__(self, ctx: AppContext, *, seed: dict, ttl: float = 0.5) -> None:
-        """Bind to a context, seeding the cache with the snapshot already loaded at open."""
+    def __init__(
+        self, ctx: AppContext, *, seed: dict, ttl: float = 0.5, rooms: list[str] | None = None
+    ) -> None:
+        """Bind to a context, seeding the cache with the snapshot already loaded at open.
+
+        ``rooms`` are the room servers' peers among the conversations, so a refresh reads
+        a room's latest *post* just as the seed did (see ``Repository.last_chat_messages``).
+        """
         self._ctx = ctx
         self._ttl = ttl
         self._cache = seed
+        self._rooms = list(rooms or ())
         self._at = time.monotonic()
 
     def get(self, key: str) -> ChatMessage | None:
@@ -681,7 +740,7 @@ class _LiveLasts:
         now = time.monotonic()
         if now - self._at >= self._ttl:
             try:
-                self._cache = self._ctx.repo.last_chat_messages()
+                self._cache = self._ctx.repo.last_chat_messages(rooms=self._rooms)
             except Exception:  # noqa: BLE001 - keep the last good snapshot on a read error
                 pass
             self._at = now
@@ -796,6 +855,9 @@ def _row_title(
     lasts: _LiveLasts,
     key_of: NameKeyResolver,
     lanes: _Lanes,
+    *,
+    name_of: NodeResolver | None = None,
+    joined: bool = True,
 ) -> Callable[[], str | Text]:
     """Return a picker-row title *callable* the select screen re-renders on each repaint.
 
@@ -809,11 +871,13 @@ def _row_title(
         lasts: The self-refreshing latest-message view feeding the preview.
         key_of: Maps a sender name back to its node's key, for the preview hues.
         lanes: The list's measured lane widths.
+        name_of: Maps a room post's author key to a name (rooms only).
+        joined: Whether MeshTerm can log in to the room unasked (rooms only).
 
     Returns:
         A zero-argument callable producing the current row title.
     """
-    return lambda: _title(ctx, conversation, lasts, key_of, lanes)
+    return lambda: _title(ctx, conversation, lasts, key_of, lanes, name_of=name_of, joined=joined)
 
 
 def _title(
@@ -822,6 +886,9 @@ def _title(
     lasts: _LiveLasts,
     key_of: NameKeyResolver,
     lanes: _Lanes,
+    *,
+    name_of: NodeResolver | None = None,
+    joined: bool = True,
 ) -> str | Text:
     """Build a picker row as fixed-width, colour-coded lanes.
 
@@ -840,6 +907,11 @@ def _title(
         lasts: The self-refreshing latest-message view.
         key_of: Maps a preview sender/mention name back to its node's key.
         lanes: The list's measured lane widths.
+        name_of: Maps a room post's author key to a name (rooms only).
+        joined: For a room, whether MeshTerm holds a password for it. A room with nothing
+            to preview and no password says ``not joined…`` in the preview lane — opening
+            it asks for the password, so the row ends on the ellipsis a row that opens a
+            prompt carries.
 
     Returns:
         The row title as a styled :class:`~rich.text.Text`.
@@ -868,7 +940,9 @@ def _title(
     text.append(f"{age:>{_AGE_WIDTH}}", style="muted")
     text.append("  ")
     if last is not None:
-        text.append_text(_preview_text(last, key_of))
+        text.append_text(_preview_text(last, key_of, name_of))
+    elif conversation.is_room and not joined:
+        text.append("not joined…", style="muted")
     return text
 
 
@@ -876,6 +950,11 @@ def _title(
 #: hue: the shape (filled/hollow) marks history, the colour marks "a companion", and the
 #: name beside it carries the person's own key-derived hue.
 _COMPANION_DOT_STYLE = NODE_GLYPHS[NODE_TYPE_CHAT][1]
+
+#: A room's marker: the room server's own ``■``, in its type colour — the mark the map and
+#: the contact list give a room. The console font has no hollow square, so it carries no
+#: history state; the preview lane says whether there is anything to read, or to join.
+_ROOM_MARK = NODE_GLYPHS[NODE_TYPE_ROOM]
 
 
 def _append_marker(
@@ -896,19 +975,27 @@ def _append_marker(
     if conversation.is_channel:
         glyph = channel_glyph(conversation.label, conversation.secret)
         text.append(glyph + " " * max(1, lanes.marker - cell_len(glyph)))
+    elif conversation.is_room:
+        mark, style = _ROOM_MARK
+        text.append(mark, style=style)
+        text.append(" " * max(1, lanes.marker - cell_len(mark)))
     else:
         dot = "●" if last is not None else "○"
         text.append(dot, style=_COMPANION_DOT_STYLE)
         text.append(" " * max(1, lanes.marker - cell_len(dot)))
 
 
-def _preview_text(last: ChatMessage, key_of: NameKeyResolver) -> Text:
+def _preview_text(
+    last: ChatMessage, key_of: NameKeyResolver, name_of: NodeResolver | None = None
+) -> Text:
     """A muted last-message preview with sender names and ``@mentions`` lit in their hue.
 
     Mirrors the live transcript: our own messages get a ``you:`` prefix, an inbound channel
     message's inline ``Name:`` sender is coloured in its key-derived hue (muted when no known
-    node carries the name), and every ``@[Name]`` mention reads as a bare ``@Name`` the same
-    way — so the list and the chat speak the same colour language.
+    node carries the name), a room post leads with its author — named by key the way the room
+    view names them (:func:`~meshterm.ui.room.author_label`) — and every ``@[Name]`` mention
+    reads as a bare ``@Name`` the same way, so the list and the chat speak the same colour
+    language.
 
     The preview is built *whole*, however long the message ran. It used to be clipped to a
     fixed 40 cells, which is a cut nothing could undo: the row is what ←→ scroll now, and a
@@ -928,6 +1015,13 @@ def _preview_text(last: ChatMessage, key_of: NameKeyResolver) -> Text:
             _append_body(text, body, key_of)
         else:
             _append_body(text, body_raw, key_of)
+    elif last.author and name_of is not None:
+        from ..ui.room import author_label
+
+        name, key = author_label(last.author, name_of)
+        text.append(name, style=name_style(name, key))
+        text.append(": ", style="muted")
+        _append_body(text, body_raw, key_of)
     else:
         _append_body(text, body_raw, key_of)
     return text

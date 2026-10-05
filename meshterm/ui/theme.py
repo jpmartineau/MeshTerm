@@ -725,6 +725,7 @@ _GLYPH_MAP: dict[str, str] = {
     "📰": "…",   # live feed — a stream of items
     "🎧": "≈",   # monitor — listening to the waveform
     "🗼": "▲",   # repeater admin — the repeater mark itself
+    "📌": "■",   # rooms — the room server mark itself
     "🔌": "~",   # serial port — the cable
     "📍": "╨",   # a radio on the host's SPI bus — the antenna on its board
     "🔖": "╬",   # region/scope — a flood's label; the grid square of an area

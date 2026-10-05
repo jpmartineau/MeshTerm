@@ -371,16 +371,21 @@ def test_contacts_names_every_node_bare_and_ages_every_time(run) -> None:  # noq
     header, *records = result_lines(run("contacts"))
     assert header.split() == ["NAME", "TYPE", "HEARD", "PKTS", "HASH", "LOCATION", "KEY"]
     assert records, "the simulator always has contacts"
+    # Read the lane where its heading stands rather than by counting words: a value may
+    # hold a space (the simulator's `Lakeside BBS` is a `room server`), and alignment, not
+    # whitespace, is what delimits the fields.
+    heard = header.index("HEARD")
     for line in records:
         assert not line.startswith('"')
-        age = line.split()[2]
+        age = line[heard:].split()[0]
         assert age in ("now", "never") or age[-1] in "mhdw"
 
     # `--absolute` asks for a different *form* of time, not for one fewer fact, so
     # `never` survives it: a node that has never been heard has no instant to print.
-    absolute = result_lines(run("--absolute", "contacts"))[1:]
+    header, *absolute = result_lines(run("--absolute", "contacts"))
+    heard = header.index("HEARD")
     for line in absolute:
-        stamp = line.split()[2]
+        stamp = line[heard:].split()[0]
         assert stamp in ("-", "never") or stamp[:4].isdigit()
 
 

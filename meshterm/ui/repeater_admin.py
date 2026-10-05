@@ -454,7 +454,7 @@ async def _admin_session(ctx: AppContext, device: Device, node: Contact) -> dict
                     # A read-only fact has nothing to stage; asking again is all Enter can do.
                     await read_settings(ctx, device, node, [spec])
                 else:
-                    await _stage_setting(ctx, str(choice), cache, pending)
+                    await _stage_setting(ctx, node, str(choice), cache, pending)
             # A read or an apply rewrites the cache the rows are drawn from; re-read it so
             # the values are the ones the action just produced.
             cache = ctx.remote_store.settings(node)
@@ -477,6 +477,9 @@ def _menu_items(node: Contact, cache: dict, pending: dict[str, str]) -> tuple[st
     for category, specs in settings_by_category():
         rows: list[tuple[str, Text, str, Any]] = []
         for spec in specs:
+            # In the words of the node it is open on — a room server's guest password is
+            # the room's own (RemoteSetting.for_node).
+            spec = spec.for_node(node.node_type)
             if spec.key == "lat":
                 # The map pick sets both coordinates at once, so it heads the pair it fills —
                 # the same row, in the same place, as on the Device config page.
@@ -584,11 +587,17 @@ def _value_text(
 # --- staging and applying ---------------------------------------------------------
 
 
-async def _stage_setting(ctx: AppContext, key: str, cache: dict, pending: dict[str, str]) -> None:
-    """Prompt for one setting's new value and stage it (nothing is sent yet)."""
+async def _stage_setting(
+    ctx: AppContext, node: Contact, key: str, cache: dict, pending: dict[str, str]
+) -> None:
+    """Prompt for one setting's new value and stage it (nothing is sent yet).
+
+    The prompt names the setting as its row does, in the words of the node it is for.
+    """
     spec = _spec_for(key, cache)
     if spec is None or not spec.writable:  # pragma: no cover - menu offers only real keys
         return
+    spec = spec.for_node(node.node_type)
     cached = cache.get(key)
     known = cached.value if cached is not None and cached.supported else None
     current = pending.get(key, known or "")

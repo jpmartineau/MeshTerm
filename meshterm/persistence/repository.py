@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import statistics
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -1959,7 +1959,8 @@ class Repository:
         cur = self._conn.execute(
             "INSERT INTO messages "
             "(run_id, outbound, is_channel, channel_id, channel_idx, peer, peer_name, text, "
-            "snr, acked, created_at, scope) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "snr, acked, created_at, scope, author) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run_id,
                 int(msg.outbound),
@@ -1973,10 +1974,39 @@ class Repository:
                 None if msg.acked is None else int(msg.acked),
                 msg.created_at.isoformat(),
                 msg.scope,
+                msg.author.lower() if msg.author else None,
             ),
         )
         self._conn.commit()
         return int(cur.lastrowid)
+
+    def has_room_post(self, msg: ChatMessage) -> bool:
+        """Whether this room post is already in the room's history.
+
+        A room re-sends a post it never heard us acknowledge — the acknowledgement lost
+        on the way back looks, from the room's side, exactly like the post being lost —
+        and a login asks for every post newer than the last one the *companion* recorded,
+        which can lag the last one *we* stored. Either way the same post arrives twice,
+        and history should hold it once. A room stamps each post with a unique time by
+        its own clock, so the room, the author, the time and the text together name it.
+
+        Args:
+            msg: An inbound room post (:attr:`~ChatMessage.is_post`).
+
+        Returns:
+            ``True`` when a row with the same room, author, time and text exists.
+        """
+        row = self._conn.execute(
+            "SELECT 1 FROM messages WHERE is_channel = 0 AND peer = ? AND author = ? "
+            "AND created_at = ? AND text = ? LIMIT 1",
+            (
+                (msg.peer or "").lower(),
+                (msg.author or "").lower(),
+                msg.created_at.isoformat(),
+                msg.text,
+            ),
+        ).fetchone()
+        return row is not None
 
     def update_chat_ack(self, message_id: int, acked: bool) -> None:
         """Update one outbound message's delivery acknowledgement (used on retry).
@@ -2015,14 +2045,19 @@ class Repository:
         channel_id: str | None = None,
         peer: str | None = None,
         limit: int = 200,
+        posts_only: bool = False,
     ) -> list[ChatMessage]:
         """Return a conversation's most recent messages, oldest-first.
 
         Args:
             is_channel: Whether to load a channel conversation.
             channel_id: The channel's slot-independent identity (channel conversations).
-            peer: The contact key prefix (direct conversations).
+            peer: The contact key prefix (direct conversations), or a room's.
             limit: Maximum number of messages to return.
+            posts_only: Load a room's *board*: the posts it relayed to us and the ones we
+                posted to it, leaving out what else arrives from a room under the same key
+                — its replies to an admin's commands, and any post stored before posts
+                carried their author (see :attr:`ChatMessage.is_post`).
 
         Returns:
             The messages in chronological order (ready to render as a transcript).
@@ -2031,27 +2066,46 @@ class Repository:
             where, params = "is_channel = 1 AND channel_id = ?", [channel_id]
         else:
             where, params = "is_channel = 0 AND peer = ?", [(peer or "").lower()]
+            if posts_only:
+                where += " AND (outbound = 1 OR author IS NOT NULL)"
         rows = self._conn.execute(
             f"SELECT * FROM messages WHERE {where} ORDER BY id DESC LIMIT ?",
             [*params, limit],
         ).fetchall()
         return [self._row_to_chat(row) for row in reversed(rows)]
 
-    def last_chat_messages(self) -> dict[str, ChatMessage]:
+    def last_chat_messages(self, rooms: Iterable[str] = ()) -> dict[str, ChatMessage]:
         """Return the latest message per conversation, keyed by conversation key.
 
         Backs the conversation picker's preview snippets. One row per distinct
         conversation, taken as the highest-id (most recent) message in each.
 
+        Args:
+            rooms: The key prefixes of the room servers among the conversations, lowercase
+                as stored. A room's latest message is its latest *post* — what
+                :meth:`recent_chat_messages` loads with ``posts_only`` — so an admin's
+                command reply never stands in as the last thing said on the board.
+
         Returns:
             A mapping of :func:`~meshterm.core.models.conversation_key` to its latest
             :class:`ChatMessage`.
         """
+        peers = sorted({room.lower() for room in rooms if room})
+        replies = ""
+        if peers:
+            # Leave out a room's inbound rows that are not posts. A peer is matched exactly:
+            # a room's rows are stored under the prefix its own contact entry carries.
+            marks = ", ".join("?" * len(peers))
+            replies = (
+                f" WHERE NOT (is_channel = 0 AND outbound = 0 AND author IS NULL "
+                f"AND peer IN ({marks}))"
+            )
         rows = self._conn.execute(
             "SELECT * FROM messages WHERE id IN ("
-            "  SELECT MAX(id) FROM messages GROUP BY "
+            f"  SELECT MAX(id) FROM messages{replies} GROUP BY "
             "  CASE WHEN is_channel = 1 THEN 'chan:' || channel_id "
-            "       ELSE 'dm:' || peer END)"
+            "       ELSE 'dm:' || peer END)",
+            peers,
         ).fetchall()
         return {msg.key: msg for msg in (self._row_to_chat(r) for r in rows)}
 
@@ -2267,4 +2321,5 @@ class Repository:
             created_at=datetime.fromisoformat(row["created_at"]),
             row_id=row["id"],
             scope=row["scope"] if "scope" in row.keys() else None,
+            author=row["author"] if "author" in row.keys() else None,
         )

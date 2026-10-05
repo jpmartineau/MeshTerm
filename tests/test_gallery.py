@@ -528,6 +528,60 @@ def _chat(cols: int, rows: int) -> Screen:
     )
 
 
+def _room(cols: int, rows: int, *, access=None, retry: bool = False) -> Screen:  # noqa: ANN001
+    """A room's board at its widest: every kind of author, and the title's access atom.
+
+    A post by a contact (named, in its hue), one by an author nothing names (the grey hash),
+    a notice the room posted itself, and our own — the last unacknowledged when ``retry``,
+    so ^R joins ^L on the hint, the longest the hint gets.
+    """
+    from meshterm.core.models import LoginResult, RoomAccess, RoomLogin
+    from meshterm.ui.room import RoomScreen
+
+    room = Contact(name="Lakeside BBS", public_key="f6" * 32, key_prefix="f6" * 6, node_type=3)
+    peer = room.key_prefix
+    messages = [
+        ChatMessage(text="Anyone driving to the swap meet Saturday?", peer=peer, author="d4e5f6a7"),
+        ChatMessage(
+            text="Is the north repeater down? Nothing since 6.", peer=peer, author="e5f6a7b8"
+        ),
+        ChatMessage(
+            text="Reminder: this board keeps the last 32 posts.", peer=peer, author="f6f6f6f6"
+        ),
+        ChatMessage(text="I'll check it tonight", outbound=True, peer=peer, acked=not retry),
+    ]
+    names = {"d4e5f6a7": "Alice", "f6f6f6f6": room.name}
+
+    async def never(*_):  # noqa: ANN002, ANN202 - nothing is pressed in the gallery
+        return RoomLogin(LoginResult.NO_REPLY)
+
+    return RoomScreen(
+        Conversation(label=room.name, is_channel=False, contact=room),
+        messages,
+        send=never,
+        names={},
+        session=_GallerySession(cols, rows),
+        resolve=lambda h: names.get(h or "", h),
+        password=lambda: "hello",
+        ask=never,
+        log_in=never,
+        access=access or RoomAccess.MEMBER,
+        resend=never,
+    )
+
+
+def _room_read_only(cols: int, rows: int) -> Screen:
+    """A read-only member: the compose line gives way to the line saying why."""
+    from meshterm.core.models import RoomAccess
+
+    return _room(cols, rows, access=RoomAccess.READ_ONLY)
+
+
+def _room_retry(cols: int, rows: int) -> Screen:
+    """An unacknowledged post of ours: ^R retry joins ^L on the hint."""
+    return _room(cols, rows, retry=True)
+
+
 def _chat_channel_scoped(cols: int, rows: int) -> Screen:
     """A channel with a send scope: the title's ``· scope`` atom, and a resend under it.
 
@@ -634,7 +688,7 @@ class _PickerRepo:
     def __init__(self, lasts: dict) -> None:
         self._lasts = lasts
 
-    def last_chat_messages(self) -> dict:
+    def last_chat_messages(self, rooms=()) -> dict:  # noqa: ANN001 - the repository's shape
         return dict(self._lasts)
 
     def node_names(self) -> dict:
@@ -654,6 +708,10 @@ def _chat_picker(cols: int, rows: int) -> Screen:
         Contact(name="Alice", public_key="aa" * 32, key_prefix="aa" * 6, node_type=1),
         Contact(name="A Rather Long Contact Name", public_key="d4" * 32, key_prefix="d4" * 6),
         Contact(name="Homestead", public_key="60" * 32, key_prefix="60" * 6, node_type=1),
+        # A room whose latest post is by an author nothing names (the hash stands in), and
+        # one never joined, whose preview lane says so.
+        Contact(name="Lakeside BBS", public_key="f6" * 32, key_prefix="f6" * 6, node_type=3),
+        Contact(name="Hilltop Swap", public_key="b7" * 32, key_prefix="b7" * 6, node_type=3),
     ]
     now = datetime(2026, 7, 12, 14, 30, tzinfo=timezone.utc)
     lasts = {
@@ -668,6 +726,12 @@ def _chat_picker(cols: int, rows: int) -> Screen:
         f"dm:{'aa' * 6}": ChatMessage(
             text="on my way, should be there soon - the bridge is backed up again",
             peer="aa" * 6,
+            created_at=now,
+        ),
+        f"dm:{'f6' * 6}": ChatMessage(
+            text="Is the north repeater down? Nothing since 6, and the solar was fine",
+            peer="f6" * 6,
+            author="e5f6a7b8",
             created_at=now,
         ),
     }
@@ -802,7 +866,8 @@ class _PickerCtx:
     def __init__(self, contacts: list[Contact], lasts: dict) -> None:
         self.devstate = _PickerDevstate(contacts, [])
         self.repo = _PickerRepo(lasts)
-        self.chat = _PickerChat({"chan:slot:0": 3, f"dm:{'aa' * 6}": 12})
+        self.chat = _PickerChat({"chan:slot:0": 3, f"dm:{'aa' * 6}": 12, f"dm:{'f6' * 6}": 4})
+        self.rooms = SimpleNamespace(joined=lambda room: room.name == "Lakeside BBS")
 
 
 def _livefeed(cols: int, rows: int) -> Screen:
@@ -1503,6 +1568,9 @@ _ENTRIES: list[_Entry] = [
     _Entry("chat_urls", _chat_urls),
     _Entry("chat_long_url", _chat_long_url),
     _Entry("chat_picker", _chat_picker),
+    _Entry("room", _room),
+    _Entry("room_read_only", _room_read_only),
+    _Entry("room_retry", _room_retry),
     _Entry("channels_manager", _channels_manager),
     _Entry("channel_detail", _channel_detail),
     _Entry("channel_detail_scoped", _channel_detail_scoped),

@@ -48,7 +48,9 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+
+from .models import is_room
 
 #: Reply text (lowercased) that reads as the firmware refusing/unknowing a command. ``??:``
 #: is how ``handleGetCmd`` answers a key it doesn't know; ``unknown config:`` is its ``set``
@@ -129,6 +131,9 @@ class RemoteSetting:
         discovered: Whether this setting is not in the catalog at all, but was learned from
             a command the reader ran on *one node's* command line (see
             :func:`discovered_setting`). Never true of a catalog entry.
+        as_room: ``(label, help)`` for a setting a room server means something else by —
+            the firmwares share their command line, not every word's purpose. Empty for a
+            setting that reads the same on both; see :meth:`for_node`.
     """
 
     key: str
@@ -151,6 +156,27 @@ class RemoteSetting:
     part: int = 0
     overlaps: tuple[str, ...] = ()
     discovered: bool = False
+    as_room: tuple[str, str] = ()
+
+    def for_node(self, node_type: int | None) -> RemoteSetting:
+        """This setting as a node of ``node_type`` presents it: a room server's own words.
+
+        A repeater's ``guest.password`` admits read-only guests; a room server's is the
+        password its members join with and post under. Same key, same value, a different
+        thing to the reader — so the page names it for the node it is open on, and the
+        catalog stays one list.
+
+        Args:
+            node_type: The administered node's advert type.
+
+        Returns:
+            The setting with its room label and help where it has them and the node is a
+            room server; otherwise this very setting.
+        """
+        if self.as_room and is_room(node_type):
+            label, help_text = self.as_room
+            return replace(self, label=label, help=help_text)
+        return self
 
     @property
     def get_command(self) -> str:
@@ -485,6 +511,7 @@ REPEATER_SETTINGS: tuple[RemoteSetting, ...] = (
         label="Guest password",
         category="Access",
         help="Password for read-only (guest) logins",
+        as_room=("Room password", "The password members join and post with"),
     ),
     RemoteSetting(
         key="allow.read.only",
@@ -492,6 +519,7 @@ REPEATER_SETTINGS: tuple[RemoteSetting, ...] = (
         category="Access",
         kind="bool",
         help="Allow read-only access (room servers)",
+        as_room=("Allow read-only", "Let any password in to read, but not to post"),
     ),
     # -- Power -------------------------------------------------------------------
     RemoteSetting(
