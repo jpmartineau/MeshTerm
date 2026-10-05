@@ -230,14 +230,19 @@ def _title(ctx: AppContext, room: Contact) -> str:
 
 
 async def _log_in(ctx: AppContext, room: Contact, password: str, *, flood: bool) -> RoomLogin:
-    """Send one login under a modal card that says how it went out and counts the wait."""
+    """Send one login under a modal card that says how it went out and counts the wait.
+
+    Two lines, by design: which room on the first, and how the login went out with the
+    seconds it has been waiting on the second — so a long name never pushes the count off
+    the end of the box, and the count ticks in the same place every second.
+    """
     if flood or room.route_hops is None:
         how = "by flood"
     elif room.route_hops:
         how = f"along its {len(room.route_hops)}-hop route"
     else:
         how = "directly"
-    caption = f"logging in to {room.name} {how}…"
+    caption = f"logging in to {room.name}\n{how}…"
     started = time.monotonic()
     async with ctx.ui.busy_dialog(caption, title="Rooms") as busy:
 

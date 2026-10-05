@@ -22,7 +22,7 @@ from rich.cells import cell_len
 from rich.console import RenderableType
 from rich.text import Text
 
-from .render import render_lines
+from .render import render_hanging, render_lines
 from .spinner import Spinner
 
 #: Sentinel a screen resolves with when the user presses Esc to cancel, distinct from a
@@ -920,11 +920,22 @@ class BusyScreen(Screen):
         self._spinner.tick()
 
     def render_body(self, width: int) -> list[str]:
-        """Render the current spinner frame followed by the message."""
-        line = self._spinner.text()
-        line.append("  ")
-        line.append(self._message)
-        return render_lines(line, width)
+        """Render the current spinner frame followed by the message, its lines hanging.
+
+        A caption may carry line feeds — what it is doing on one line, how far along on the
+        next — and every line after the first, like any line too long for the box, hangs
+        under the caption's text rather than under the spinner: the wrapped-row rule every
+        labelled block follows. Left to wrap on its own, a caption that ends in a running
+        count dropped the count's last letter alone onto a line at column zero.
+        """
+        first, *more = self._message.split("\n")
+        prefix = self._spinner.text()
+        prefix.append("  ")
+        indent = prefix.cell_len
+        lines = render_hanging(prefix, Text(first), width, indent=indent)
+        for line in more:
+            lines += render_hanging(Text(" " * indent), Text(line), width, indent=indent)
+        return lines
 
     def handle(self, action: str, data: str = "") -> None:
         """Swallow all keys: the splash dismisses itself when the task finishes."""
@@ -962,11 +973,12 @@ class BusyDialog(BusyScreen):
         the width ratchets, so a caption that grows mid-batch never makes the box shrink
         back and jitter.
         """
-        return cell_len(self._message) + 8  # spinner, its two spaces, and the padded border
+        widest = max(cell_len(line) for line in self._message.split("\n"))
+        return widest + 8  # spinner, its two spaces, and the padded border
 
     @property
     def message(self) -> str:
-        """The caption beside the spinner."""
+        """The caption beside the spinner; a line feed starts a line hung under its text."""
         return self._message
 
     @message.setter

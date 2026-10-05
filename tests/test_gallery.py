@@ -627,6 +627,15 @@ def _rooms_page(cols: int, rows: int) -> Screen:
     return SelectScreen(title, items, footer_hint=_PAGE_HINT)
 
 
+def _room_login_card(cols: int, rows: int) -> Screen:
+    """The join's busy card at its widest: a long room name, a long route, a long wait."""
+    from meshterm.ui.tui.screen import BusyDialog
+
+    return BusyDialog(
+        "logging in to YJN-ROOM-OBS St-Jean\nalong its 6-hop route… 137 s", title="Rooms"
+    )
+
+
 def _room_page(cols: int, rows: int) -> Screen:
     """A joined room's page: its vital signs over its actions, the badge on Open the board."""
     from meshterm.ui.rooms import _detail_items, _summary
@@ -1645,6 +1654,7 @@ _ENTRIES: list[_Entry] = [
     _Entry("room_retry", _room_retry),
     _Entry("rooms_page", _rooms_page),
     _Entry("room_page", _room_page),
+    _Entry("room_login_card", _room_login_card),
     _Entry("channels_manager", _channels_manager),
     _Entry("channel_detail", _channel_detail),
     _Entry("channel_detail_scoped", _channel_detail_scoped),

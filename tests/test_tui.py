@@ -2283,6 +2283,26 @@ def test_device_picker_quit_row_returns_none(tmp_path) -> None:
 # --- busy splash --------------------------------------------------------------
 
 
+def test_a_busy_caption_hangs_its_lines_under_its_text() -> None:
+    """A line feed starts a line under the caption; so does a line too long for the box.
+
+    The reported card: a long room name pushed the count's last letter alone onto a line at
+    column zero. Broken on purpose instead, the second line starts under the first one's
+    text, and the card is only as wide as its widest line.
+    """
+    from rich.text import Text as RichText
+
+    from meshterm.ui.tui.screen import BusyDialog
+
+    card = BusyDialog("logging in to YJN-ROOM-OBS St-Jean\nalong its 6-hop route… 37 s")
+    lines = RichText.from_ansi("\n".join(card.render_body(60))).plain.splitlines()
+    assert lines[0][3:] == "logging in to YJN-ROOM-OBS St-Jean"
+    assert lines[1] == "   along its 6-hop route… 37 s"
+    assert card.dialog_width == len("logging in to YJN-ROOM-OBS St-Jean") + 8
+    narrow = RichText.from_ansi("\n".join(card.render_body(24))).plain.splitlines()
+    assert all(line.startswith("   ") for line in narrow[1:]), narrow
+
+
 def test_busy_screen_spins_over_its_message() -> None:
     """The busy splash shows an ASCII spinner beside its message and advances on tick."""
     from rich.text import Text as RichText
