@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import sys
+import typing
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
@@ -94,6 +95,20 @@ class SpiWiring:
         rxen_pin: A receive-enable line for an external RF switch, or ``-1``.
         en_pins: Power-enable lines raised before the chip is touched (the AIO v2 wants
             ``[27]``); empty for none.
+        leds: Switches the kernel exposes as LEDs (``/sys/class/leds/<name>``), each
+            ``"name=brightness"``, set before the chip is touched and put back as they were
+            when the node ends. A board whose device tree hands its power and pin-routing
+            switches to ``gpio-leds`` is driven through them, because that driver holds the
+            lines and a GPIO request for them would be refused. The Cardputer Zero's Cap
+            LoRa-1262 needs two: ``ext_5v_out=1`` powers the header the Cap sits on, and
+            ``ext_usb_gpio_fun=0`` keeps two of that header's pins on GPIO rather than USB —
+            at ``1`` the Cap's reset line is cut and the chip sits in reset. Empty for none.
+        pi4io_bus: The I2C bus of a PI4IOE5V6408 expander the board switches its radio's
+            RF path with, or ``-1`` (the default) for none.
+        pi4io_address: That expander's address: ``0x43`` with its ADDR pin low, ``0x44``
+            with it high.
+        pi4io_high: The expander's pins (0–7) driven high before the chip is touched; every
+            other pin is left an input.
         use_dio2_rf: Whether DIO2 drives the RF switch.
         use_dio3_tcxo: Whether DIO3 powers a TCXO.
         is_waveshare: The Waveshare HAT's wiring quirks, which the radio library knows.
@@ -112,6 +127,10 @@ class SpiWiring:
     txen_pin: int = -1
     rxen_pin: int = -1
     en_pins: tuple[int, ...] = ()
+    leds: tuple[str, ...] = ()
+    pi4io_bus: int = -1
+    pi4io_address: int = 0x43
+    pi4io_high: tuple[int, ...] = ()
     use_dio2_rf: bool = True
     use_dio3_tcxo: bool = True
     is_waveshare: bool = False
@@ -144,6 +163,7 @@ class SpiWiring:
         unknown = sorted(set(table) - set(known))
         if unknown:
             raise ValueError(f"unknown SPI wiring key(s): {', '.join(unknown)}")
+        hints = typing.get_type_hints(cls)
         values: dict[str, Any] = {}
         for key, raw in table.items():
             default = getattr(cls(), key)
@@ -152,8 +172,9 @@ class SpiWiring:
             elif isinstance(default, int):
                 ok = isinstance(raw, int) and not isinstance(raw, bool)
             elif isinstance(default, tuple):
+                item = typing.get_args(hints[key])[0]  # what the list holds: pins or switches
                 ok = isinstance(raw, list) and all(
-                    isinstance(p, int) and not isinstance(p, bool) for p in raw
+                    isinstance(p, item) and not isinstance(p, bool) for p in raw
                 )
                 raw = tuple(raw) if ok else raw
             else:
@@ -161,6 +182,10 @@ class SpiWiring:
             if not ok:
                 raise ValueError(f"SPI wiring {key} = {raw!r} is not a {type(default).__name__}")
             values[key] = raw
+        for entry in values.get("leds", ()):
+            name, sep, brightness = entry.partition("=")
+            if not (name and sep and brightness.isdigit()):
+                raise ValueError(f"SPI wiring leds entry {entry!r} is not name=brightness")
         return cls(**values)
 
     @property

@@ -889,7 +889,8 @@ async def _startup(ctx: AppContext) -> bool:
         ctx.selected_device = chosen
         if chosen.is_spi:
             # A reconnect rebuilds the device from the context, so it has to know which radio.
-            # An SPI profile names its own; a bare row is the AIO's, which ``--spi`` resolves.
+            # An SPI profile names its own; a bare row is a shipped board's (the AIO's, the
+            # Cardputer Zero's Cap), which ``--spi`` resolves as the one radio attached.
             ctx.spi_override = True
             ctx.tcp_override = None
             ctx.ble_override = None

@@ -78,9 +78,10 @@ log = logging.getLogger("radionode")
 class NodeError(Exception):
     """A failure to bring the node up, with the ``kind`` the parent words its message by.
 
-    Kinds: ``runtime`` (the radio library is missing or too old), ``no-spi`` / ``no-gpio``
-    (the device node doesn't exist), ``permission`` (it exists but this user can't open it),
-    ``busy`` (another program holds the radio's pins), and ``failed`` (anything else).
+    Kinds: ``runtime`` (the radio library is missing or too old), ``no-spi`` / ``no-gpio`` /
+    ``no-i2c`` (the device node doesn't exist), ``permission`` (it exists but this user
+    can't open it), ``busy`` (another program holds the radio's pins), ``absent`` (the board
+    is there but the radio on it doesn't answer), and ``failed`` (anything else).
     """
 
     def __init__(self, kind: str, message: str) -> None:
@@ -263,6 +264,120 @@ def _check_device(path: str, missing_kind: str, what: str) -> None:
         raise NodeError("permission", f"no read/write permission on {path}")
 
 
+# --- the board around the chip -------------------------------------------------------------
+
+#: Where the kernel puts the switches a device tree hands to ``gpio-leds``.
+LEDS = Path("/sys/class/leds")
+
+#: How long a header that was just powered gets before anything on it is spoken to. The
+#: Cap's regulator and expander are up well inside this; the chip's own reset follows anyway.
+POWER_SETTLE_S = 0.1
+
+#: ``I2C_SLAVE``: address the open ``/dev/i2c-*`` at one device. Refused (``EBUSY``) while a
+#: kernel driver is bound to that address, which is the right answer — it is then not ours.
+_I2C_SLAVE = 0x0703
+
+#: The PI4IOE5V6408's registers, and the manufacturer field of its ID register (bits 7–5),
+#: which is how a different chip at the same address is told apart.
+_PI4IO_ID, _PI4IO_DIRECTION, _PI4IO_OUTPUT, _PI4IO_HIGH_Z = 0x01, 0x03, 0x05, 0x07
+_PI4IO_MAKER = 0b101
+
+
+def set_leds(entries: list[str], root: Path = LEDS) -> list[tuple[Path, str]]:
+    """Set each ``name=brightness`` switch, and return what each read before, to put back.
+
+    A switch that is missing means a wiring written for another board; one this user can't
+    write is the ``gpio`` group the radio's pins need anyway.
+    """
+    previous: list[tuple[Path, str]] = []
+    for entry in entries:
+        name, _, value = entry.partition("=")
+        path = root / name / "brightness"
+        if not path.exists():
+            raise NodeError("failed", f"{path} does not exist — this board has no {name} switch")
+        try:
+            before = path.read_text(encoding="ascii").strip()
+            path.write_text(value, encoding="ascii")
+        except PermissionError:
+            raise NodeError("permission", f"no write permission on {path}") from None
+        previous.append((path, before))
+    return previous
+
+
+def restore_leds(previous: list[tuple[Path, str]]) -> None:
+    """Put each switch back as :func:`set_leds` found it, last first (best-effort)."""
+    for path, before in reversed(previous):
+        try:
+            path.write_text(before, encoding="ascii")
+        except OSError as exc:
+            log.warning("could not put %s back to %s: %s", path, before, exc)
+
+
+def drive_pi4io(bus: int, address: int, high: list[int], dev: Path = Path("/dev")) -> None:
+    """Drive ``high``'s pins of a PI4IOE5V6408 high, as outputs, and leave the rest inputs.
+
+    The output level is written before the direction, so a pin becomes an output already
+    high rather than glitching low first. The ID register is read first: on a board where
+    this is the radio's own expander, silence there is the radio not being attached — the
+    one failure worth saying in those words.
+    """
+    path = dev / f"i2c-{bus}"
+    _check_device(str(path), "no-i2c", "I2C bus")
+    import fcntl
+
+    mask = sum(1 << pin for pin in high) & 0xFF
+    fd = os.open(path, os.O_RDWR)
+    try:
+        try:
+            fcntl.ioctl(fd, _I2C_SLAVE, address)
+        except OSError as exc:
+            raise NodeError("busy", f"{address:#04x} on {path} is held: {exc}") from None
+        try:
+            os.write(fd, bytes([_PI4IO_ID]))
+            ident = os.read(fd, 1)[0]
+        except OSError:
+            raise NodeError("absent", f"nothing answers at {address:#04x} on {path}") from None
+        if ident >> 5 != _PI4IO_MAKER:
+            raise NodeError(
+                "absent", f"{address:#04x} on {path} is not a PI4IOE5V6408 (ID {ident:#04x})"
+            )
+        for register, value in (
+            (_PI4IO_OUTPUT, mask),
+            (_PI4IO_DIRECTION, mask),
+            (_PI4IO_HIGH_Z, 0xFF & ~mask),
+        ):
+            os.write(fd, bytes([register, value]))
+    finally:
+        os.close(fd)
+    log.info("PI4IO %#04x on %s: pins %s high", address, path, high)
+
+
+def prepare_board(wiring: dict) -> list[tuple[Path, str]]:
+    """Switch on what the chip needs before the radio library touches it.
+
+    The board's LED-class switches first (power, pin routing), then its RF expander, which
+    is only reachable once the header it sits on is powered. Returns the switches' previous
+    states, which the caller puts back when the node ends — including when it never got
+    going, so a failed start leaves the header as it found it.
+    """
+    previous = set_leds(list(wiring.get("leds") or ()), root=LEDS)
+    if previous:
+        import time
+
+        time.sleep(POWER_SETTLE_S)
+    try:
+        if int(wiring.get("pi4io_bus", -1)) >= 0:
+            drive_pi4io(
+                int(wiring["pi4io_bus"]),
+                int(wiring.get("pi4io_address", 0x43)),
+                list(wiring.get("pi4io_high") or ()),
+            )
+    except BaseException:
+        restore_leds(previous)
+        raise
+    return previous
+
+
 def _persist_contacts(store: Any, path: Path) -> None:
     """Snapshot the contact list after every change, the way the firmware writes flash."""
 
@@ -298,7 +413,6 @@ async def run_node(config: dict, report) -> int:  # noqa: ANN001 - (dict) -> Non
         The process exit status.
     """
     import importlib
-    import inspect
 
     try:
         rt = importlib.import_module(RUNTIME)
@@ -318,6 +432,38 @@ async def run_node(config: dict, report) -> int:  # noqa: ANN001 - (dict) -> Non
     bus, cs = int(wiring.get("bus_id", 0)), int(wiring.get("cs_id", 0))
     _check_device(f"/dev/spidev{bus}.{cs}", "no-spi", "SPI overlay")
     _check_device(f"/dev/gpiochip{int(wiring.get('gpio_chip', 0))}", "no-gpio", "GPIO chip")
+
+    # The board's switches go back as they were however the node ends — a radio that never
+    # came up included — so a failed start leaves the header as it found it.
+    switched = prepare_board(wiring)
+    try:
+        return await _serve(
+            state,
+            wiring,
+            seed,
+            report,
+            models=models,
+            sx1262=sx1262,
+            companion_mod=companion_mod,
+            identity_mod=identity_mod,
+        )
+    finally:
+        restore_leds(switched)
+
+
+async def _serve(  # noqa: PLR0913 - the library modules run_node imported, handed on
+    state: Path,
+    wiring: dict,
+    seed: dict,
+    report,  # noqa: ANN001 - (dict) -> None
+    *,
+    models: Any,
+    sx1262: Any,
+    companion_mod: Any,
+    identity_mod: Any,
+) -> int:
+    """Bring the radio up on a prepared board, report ready, and serve until told to stop."""
+    import inspect
 
     # The saved preferences decide the radio the chip is brought up on; the seed only fills
     # in a node that has never saved any.

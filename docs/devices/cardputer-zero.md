@@ -95,11 +95,36 @@ real size. Closing the window quits MeshTerm.
 
 ## Radios
 
-The Cardputer Zero has no LoRa radio built in. Once MeshTerm runs on it, there will be
-three ways to add one:
+The Cardputer Zero has no LoRa radio built in. There are three ways to add one:
 
 | Radio | Status |
 | --- | --- |
+| M5Stack's **Cap LoRa-1262** add-on board | Works, with no setup. MeshTerm runs the mesh node itself while it's open, the same way it does on a uConsole. |
 | A MeshCore companion on USB | Expected to work as on any Linux computer. |
 | A MeshCore companion over Bluetooth | Expected to work as on any Linux computer. |
-| M5Stack's **Cap LoRa-1262** add-on board | Not wired up. Its pins on the Cardputer Zero are known, but MeshTerm still needs two setup steps it can't do yet: switching on the board's antenna chip, and freeing two of the expansion header's pins from the USB port that shares them. |
+
+### The Cap LoRa-1262
+
+Push the Cap onto the expansion header at the back, then start MeshTerm. The device screen
+lists it as **Cap LoRa-1262**, and `meshterm --spi` reaches it from the command line.
+
+The Cap has no MeshCore firmware of its own: it's just a radio chip. So while MeshTerm is
+open, MeshTerm *is* the node, the way it is on a uConsole's AIO board. It needs the radio
+library installed beside MeshTerm:
+
+```bash
+pip install 'mesh-term[spi]'
+```
+
+When MeshTerm connects, it does three things the Cardputer Zero needs before the radio
+answers. It switches on the power to the expansion header, which is off until something
+asks for it. It makes sure two of the header's pins are connected to the radio and not to
+the USB port that shares them. And it switches on the Cap's antenna path. When MeshTerm
+quits, it switches the header's power back off, so the Cap doesn't drain the battery
+while nothing is using it.
+
+A new node starts on MeshCore's US/Canada settings (910.525 MHz). Anywhere else, change
+them on **Device config** before you send anything. The node's key, contacts, and channels
+are kept in `~/.meshterm/radio/spidev0.1/`.
+
+The Cap also carries a GPS. MeshTerm doesn't read it yet.

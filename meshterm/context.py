@@ -792,16 +792,19 @@ class AppContext:
         )
 
     def spi_wiring_for(self, spidev: str) -> SpiWiring:
-        """The wiring for the radio on ``spidev``: a profile's that names it, else the AIO's.
+        """The wiring for the radio on ``spidev``: a profile's, a shipped board's, else the AIO's.
 
         A remembered or listed SPI radio is known by its device node alone, so its pins come
-        from whichever SPI profile is on that node; with none, the defaults are the only
-        wiring there is (and the right one for the board they describe).
+        from whichever SPI profile is on that node; with none, from the board MeshTerm knows
+        that node on when this machine is that board (the Cardputer Zero's Cap); and
+        otherwise the defaults are the only wiring there is.
         """
+        from .core.spiradio import builtin_wiring
+
         for profile in self.settings.profiles.values():
             if profile.is_spi and (profile.spi or SpiWiring()).spidev == spidev:
                 return profile.spi or SpiWiring()
-        return SpiWiring()
+        return builtin_wiring(spidev) or SpiWiring()
 
     def _resolve_ble_endpoint(self) -> tuple[str | None, str | None]:
         """Return the ``(address, pin)`` to open over Bluetooth, or ``(None, None)`` for serial.

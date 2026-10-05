@@ -12,6 +12,7 @@ import io
 import json
 import sys
 import textwrap
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,31 @@ def test_a_wiring_table_states_only_what_differs() -> None:
 def test_a_wiring_mistake_is_refused_not_ignored(table: dict, complaint: str) -> None:
     """A misspelt pin would otherwise leave a default in force and a deaf radio."""
     with pytest.raises(ValueError, match=complaint.replace("(", r"\(").replace(")", r"\)")):
+        SpiWiring.from_toml(table)
+
+
+def test_a_board_s_switches_and_expander_come_from_the_table() -> None:
+    """``leds`` holds switch strings and ``pi4io_high`` pins: each list is checked as its own."""
+    wiring = SpiWiring.from_toml(
+        {"leds": ["ext_5v_out=1"], "pi4io_bus": 1, "pi4io_address": 0x44, "pi4io_high": [0, 3]}
+    )
+    assert wiring == SpiWiring(
+        leds=("ext_5v_out=1",), pi4io_bus=1, pi4io_address=0x44, pi4io_high=(0, 3)
+    )
+
+
+@pytest.mark.parametrize(
+    ("table", "complaint"),
+    [
+        ({"leds": [1]}, "leds = [1] is not a tuple"),
+        ({"pi4io_high": ["0"]}, "pi4io_high = ['0'] is not a tuple"),
+        ({"leds": ["ext_5v_out"]}, "leds entry 'ext_5v_out' is not name=brightness"),
+        ({"leds": ["ext_5v_out=on"]}, "leds entry 'ext_5v_out=on' is not name=brightness"),
+    ],
+)
+def test_a_malformed_switch_is_refused(table: dict, complaint: str) -> None:
+    """A switch the node couldn't set would fail at connect; the file is where to say so."""
+    with pytest.raises(ValueError, match=complaint.replace("[", r"\[").replace("]", r"\]")):
         SpiWiring.from_toml(table)
 
 
@@ -216,6 +242,68 @@ def test_a_listed_radio_is_wired_by_the_profile_on_its_node(contexts) -> None:  
     ctx = contexts(profiles=profiles)
     assert ctx.spi_wiring_for("/dev/spidev0.0") == other
     assert ctx.spi_wiring_for("/dev/spidev1.0") == SpiWiring()
+
+
+# --- radios that need no profile -----------------------------------------------------------
+
+
+@pytest.fixture()
+def cardputer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A machine with the Cardputer Zero's SPI node, its board marker under ``tmp_path``.
+
+    Returns the marker, which a test removes to make the machine some other Raspberry Pi
+    with the same ``/dev/spidev0.1``.
+    """
+    marker = tmp_path / "ext_5v_out"
+    marker.mkdir()
+    monkeypatch.setattr(spiradio, "spi_present", lambda w: w.spidev == "/dev/spidev0.1")
+    monkeypatch.setattr(
+        spiradio,
+        "BUILTIN_RADIOS",
+        (
+            spiradio.BuiltinRadio("", SpiWiring()),
+            spiradio.BuiltinRadio("Cap LoRa-1262", spiradio.CARDPUTER_ZERO_CAP, marker=str(marker)),
+        ),
+    )
+    return marker
+
+
+def test_the_cardputer_cap_is_listed_with_no_profile(cardputer: Path) -> None:
+    """On a Cardputer Zero the Cap is a radio like the AIO: there, named, and wired."""
+    radios = spiradio.spi_radios({})
+    assert [(d.port, d.name) for d in radios] == [("/dev/spidev0.1", "Cap LoRa-1262")]
+    assert radios[0].spi == spiradio.CARDPUTER_ZERO_CAP
+
+
+def test_a_bare_spidev_node_is_not_a_cardputer(cardputer: Path) -> None:
+    """``spidev0.1`` is on every Pi with SPI on; only the board's own switch says Cardputer."""
+    cardputer.rmdir()
+    assert spiradio.spi_radios({}) == []
+    assert spiradio.builtin_wiring("/dev/spidev0.1") is None
+
+
+def test_a_profile_on_the_cap_s_node_wins(cardputer: Path) -> None:
+    """A profile on the same node is the owner's word about it, and replaces the shipped one."""
+    mine = replace(spiradio.CARDPUTER_ZERO_CAP, use_dio3_tcxo=False)
+    profiles = {"cap": DeviceProfile(name="cap", transport="spi", spi=mine)}
+    radios = spiradio.spi_radios(profiles)
+    assert [(d.name, d.spi) for d in radios] == [("cap", mine)]
+
+
+def test_the_cap_is_what_spi_and_a_remembered_node_reach(contexts, cardputer: Path) -> None:  # noqa: ANN001
+    """``--spi``, and a radio remembered by its node, both resolve to the Cap's wiring."""
+    assert contexts(spi_override=True).resolve_spi() == spiradio.CARDPUTER_ZERO_CAP
+    assert contexts().spi_wiring_for("/dev/spidev0.1") == spiradio.CARDPUTER_ZERO_CAP
+
+
+def test_the_cardputer_cap_wiring_is_the_one_the_hardware_answered_on() -> None:
+    """The lines M5's factory test drives, on the node the panel shares, power from the LED."""
+    cap = spiradio.CARDPUTER_ZERO_CAP
+    assert cap.spidev == "/dev/spidev0.1"
+    assert (cap.reset_pin, cap.busy_pin, cap.irq_pin) == (26, 22, 23)
+    assert cap.leds == ("ext_5v_out=1", "ext_usb_gpio_fun=0")
+    assert (cap.pi4io_bus, cap.pi4io_address, cap.pi4io_high) == (1, 0x43, (0,))
+    assert cap.use_dio2_rf and cap.use_dio3_tcxo
 
 
 # --- finding a Python for the node ---------------------------------------------------------

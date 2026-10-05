@@ -127,6 +127,61 @@ def test_radio_kwargs_pass_only_what_the_constructor_accepts() -> None:
     }
 
 
+def _switch(root: Path, name: str, state: str) -> Path:
+    """A stand-in for ``/sys/class/leds/<name>``, reading ``state``."""
+    (root / name).mkdir(parents=True)
+    path = root / name / "brightness"
+    path.write_text(state, encoding="ascii")
+    return path
+
+
+def test_board_switches_are_set_and_put_back_as_found(tmp_path: Path) -> None:
+    """The Cap's power and pin routing go on for the node and back to how they were after."""
+    power = _switch(tmp_path, "ext_5v_out", "0")
+    routing = _switch(tmp_path, "ext_usb_gpio_fun", "255")
+    previous = radionode.set_leds(["ext_5v_out=1", "ext_usb_gpio_fun=0"], root=tmp_path)
+    assert (power.read_text(), routing.read_text()) == ("1", "0")
+    radionode.restore_leds(previous)
+    assert (power.read_text(), routing.read_text()) == ("0", "255")
+
+
+def test_a_missing_switch_is_a_wiring_for_another_board(tmp_path: Path) -> None:
+    """No such switch means the wiring describes a board this isn't — said, not ignored."""
+    with pytest.raises(radionode.NodeError, match="this board has no ext_5v_out switch"):
+        radionode.set_leds(["ext_5v_out=1"], root=tmp_path)
+
+
+def test_a_failed_expander_puts_the_switches_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Cap that isn't there leaves the header unpowered again, not switched on for nothing."""
+    power = _switch(tmp_path, "ext_5v_out", "0")
+    monkeypatch.setattr(radionode, "LEDS", tmp_path)
+    monkeypatch.setattr(radionode, "POWER_SETTLE_S", 0)
+
+    def absent(*_args: object) -> None:
+        raise radionode.NodeError("absent", "nothing answers at 0x43 on /dev/i2c-1")
+
+    monkeypatch.setattr(radionode, "drive_pi4io", absent)
+    wiring = {"leds": ["ext_5v_out=1"], "pi4io_bus": 1, "pi4io_high": [0]}
+    with pytest.raises(radionode.NodeError) as err:
+        radionode.prepare_board(wiring)
+    assert err.value.kind == "absent"
+    assert power.read_text() == "0"
+
+
+def test_an_expander_on_a_missing_bus_is_named(tmp_path: Path) -> None:
+    """No ``/dev/i2c-N`` is its own kind, with the fix the parent knows how to say."""
+    with pytest.raises(radionode.NodeError) as err:
+        radionode.drive_pi4io(1, 0x43, [0], dev=tmp_path)
+    assert err.value.kind == "no-i2c"
+
+
+def test_a_board_with_no_switches_prepares_nothing() -> None:
+    """The AIO's wiring has neither, and its node starts exactly as it always did."""
+    assert radionode.prepare_board({"bus_id": 1, "pi4io_bus": -1}) == []
+
+
 def test_an_identity_is_minted_once_and_then_kept(tmp_path: Path) -> None:
     """A node's key is made the first time and read back every time after."""
     minted = iter([b"\x11" * 32, b"\x22" * 32])

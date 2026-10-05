@@ -79,9 +79,13 @@ itself — it runs the node while it is connected and lets go of the radio when 
 It needs Linux and the radio library; [the uConsole manual](../devices/uconsole.md#step-2--install-the-radio-library)
 shows how to install that.
 
-**An AIO v1 needs no configuration.** Its wiring is MeshTerm's default, so whenever
-`/dev/spidev1.0` exists the device screen lists it as **SPI radio**, and `meshterm --spi`
-reaches it. Any other board is added with a profile that states how it is wired.
+**Two boards need no configuration.** An AIO v1's wiring is MeshTerm's default, so
+whenever `/dev/spidev1.0` exists the device screen lists it as **SPI radio**. M5Stack's
+Cap LoRa-1262 on a Cardputer Zero ships with MeshTerm too, and is listed as **Cap
+LoRa-1262** on a Cardputer Zero (see [the Cardputer Zero page](../devices/cardputer-zero.md#the-cap-lora-1262)).
+Either way, `meshterm --spi` reaches it. Any other board is added with a profile that
+states how it is wired, and a profile on the same `/dev/spidev*` replaces the shipped
+wiring.
 
 **Why a profile, and not a prompt on the device screen.** A USB companion describes itself:
 plug it in and there is nothing to ask. An SPI radio says nothing about how it is wired, and

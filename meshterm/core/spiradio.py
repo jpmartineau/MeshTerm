@@ -204,14 +204,73 @@ def gpio_chip(wiring: SpiWiring) -> int:
     return 0 if found is None else found
 
 
+#: The M5Stack Cap LoRa-1262 on a Cardputer Zero's 14-pin EXT header, confirmed on the
+#: hardware and against M5's own factory test (which names the same three lines): the SX1262
+#: on the second chip select of SPI0, which it shares with the panel on the first. The Cap's
+#: header is unpowered until the device tree's ``ext_5v_out`` switch is on, and two of its
+#: pins (reset, interrupt) reach the chip only while ``ext_usb_gpio_fun`` routes them to GPIO
+#: rather than to USB. Its PI4IOE5V6408 at 0x43 on I2C 1 enables the RF path from pin P0,
+#: which Meshtastic's Cardputer variant drives the same way. DIO2 switches the antenna and
+#: DIO3 feeds a 1.8 V TCXO, as on the AIO.
+CARDPUTER_ZERO_CAP = SpiWiring(
+    bus_id=0,
+    cs_id=1,
+    reset_pin=26,
+    busy_pin=22,
+    irq_pin=23,
+    leds=("ext_5v_out=1", "ext_usb_gpio_fun=0"),
+    pi4io_bus=1,
+    pi4io_address=0x43,
+    pi4io_high=(0,),
+)
+
+
+@dataclass(frozen=True)
+class BuiltinRadio:
+    """A radio whose wiring ships with MeshTerm, listed with no profile where its board is.
+
+    Attributes:
+        name: What the device screen calls it; empty for the plain "SPI radio".
+        wiring: How it is wired.
+        marker: A path only its board has, for a radio whose ``/dev/spidev*`` node alone
+            would claim every Raspberry Pi with SPI switched on. Empty when the node is
+            telling enough on its own (the AIO's ``spidev1.0``).
+    """
+
+    name: str
+    wiring: SpiWiring
+    marker: str = ""
+
+    def present(self) -> bool:
+        """Whether this machine is its board: the SPI node exists, and the marker if any."""
+        return spi_present(self.wiring) and (not self.marker or os.path.exists(self.marker))
+
+
+#: The radios MeshTerm knows the wiring of, in the order they are listed. A profile on the
+#: same SPI node wins over any of them.
+BUILTIN_RADIOS = (
+    BuiltinRadio("", SpiWiring()),
+    BuiltinRadio("Cap LoRa-1262", CARDPUTER_ZERO_CAP, marker="/sys/class/leds/ext_5v_out"),
+)
+
+
+def builtin_wiring(spidev: str) -> SpiWiring | None:
+    """The shipped wiring for the radio on ``spidev``, when this machine is its board."""
+    for radio in BUILTIN_RADIOS:
+        if radio.wiring.spidev == spidev and radio.present():
+            return radio.wiring
+    return None
+
+
 def spi_radios(
     profiles: Mapping[str, DeviceProfile] | None, listed: Iterable[DiscoveredDevice] = ()
 ) -> list[DiscoveredDevice]:
     """The radios on this machine's own SPI bus, as devices — THE one answer to "which are here".
 
     One per ``transport = "spi"`` profile whose ``/dev/spidev*`` node exists, named by the
-    profile; and, where no profile covers it, one for the uConsole AIO's device node when it
-    exists, wired with the defaults. Nothing is probed — a radio on the bus has no node
+    profile; and, where no profile covers its node, one per :data:`BUILTIN_RADIOS` entry
+    whose board this machine is — the uConsole AIO whenever its node exists, the Cardputer
+    Zero's Cap on a Cardputer Zero. Nothing is probed — a radio on the bus has no node
     running until one is chosen — so a radio is listed exactly when there is a device node
     to open. The device screen and ``meshterm devices`` both list from here, so the two can
     never disagree about what is attached.
@@ -225,13 +284,14 @@ def spi_radios(
     """
     seen = {d.stable_id for d in listed}
     wirings = [(p.spi or SpiWiring(), p.name) for p in (profiles or {}).values() if p.is_spi]
+    wirings = [(w, name) for w, name in wirings if spi_present(w)]
     covered = {wiring.spidev for wiring, _name in wirings}
-    if SpiWiring().spidev not in covered:
-        wirings.append((SpiWiring(), ""))
+    for builtin in BUILTIN_RADIOS:
+        if builtin.wiring.spidev not in covered and builtin.present():
+            wirings.append((builtin.wiring, builtin.name))
+            covered.add(builtin.wiring.spidev)
     radios: list[DiscoveredDevice] = []
     for wiring, name in wirings:
-        if not spi_present(wiring):
-            continue
         device = spi_device(wiring, name=name)
         if device.stable_id in seen:
             continue
@@ -387,10 +447,18 @@ def explain(kind: str, detail: str, wiring: SpiWiring, holder: str | None = None
         )
     if kind == "no-gpio":
         return f"/dev/gpiochip{gpio_chip(wiring)} does not exist — check `gpio_chip` in the profile"
-    if kind == "permission":
+    if kind == "no-i2c":
         return (
-            f"{detail} — add yourself to the spi and gpio groups "
-            "(`sudo usermod -aG spi,gpio $USER`) and log in again"
+            f"/dev/i2c-{wiring.pi4io_bus} does not exist — enable I2C "
+            "(`dtparam=i2c_arm=on` in /boot/firmware/config.txt) and reboot"
+        )
+    if kind == "absent":
+        return f"{detail} — is the radio attached, and seated the right way round?"
+    if kind == "permission":
+        groups = "spi,gpio,i2c" if wiring.pi4io_bus >= 0 else "spi,gpio"
+        return (
+            f"{detail} — add yourself to the {groups.replace(',', ', ')} groups "
+            f"(`sudo usermod -aG {groups} $USER`) and log in again"
         )
     if kind == "unsupported":
         return detail
@@ -577,6 +645,10 @@ async def start_node(wiring: SpiWiring, state: Path, *, node_name: str) -> NodeP
             "txen_pin": wiring.txen_pin,
             "rxen_pin": wiring.rxen_pin,
             "en_pins": list(wiring.en_pins) or None,
+            "leds": list(wiring.leds),
+            "pi4io_bus": wiring.pi4io_bus,
+            "pi4io_address": wiring.pi4io_address,
+            "pi4io_high": list(wiring.pi4io_high),
             "use_dio2_rf": wiring.use_dio2_rf,
             "use_dio3_tcxo": wiring.use_dio3_tcxo,
             "is_waveshare": wiring.is_waveshare,

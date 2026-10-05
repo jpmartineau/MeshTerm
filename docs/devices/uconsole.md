@@ -283,6 +283,8 @@ en_pins = [27]   # the AIO v2 needs this
 | `reset_pin`, `busy_pin`, `irq_pin` | `25`, `24`, `26` | The chip's reset, busy and interrupt (DIO1) lines. |
 | `txen_pin`, `rxen_pin` | `-1`, `-1` | An external RF switch's transmit/receive-enable lines, if the board has one. |
 | `en_pins` | `[]` | Power-enable lines to raise before the chip is touched. The **AIO v2 needs `[27]`.** |
+| `leds` | `[]` | Switches the board's device tree exposes as LEDs (under `/sys/class/leds/`), each written as `"name=brightness"`. They are set before the chip is touched and put back as they were when MeshTerm lets go. The Cardputer Zero powers its expansion header this way; its Cap needs no profile, but this is what one would say: `["ext_5v_out=1", "ext_usb_gpio_fun=0"]`. |
+| `pi4io_bus`, `pi4io_address`, `pi4io_high` | `-1`, `0x43`, `[]` | A PI4IOE5V6408 I/O expander that switches the radio's antenna path: its I2C bus (`-1` for none), its address, and the pins to drive high. |
 | `use_dio2_rf`, `use_dio3_tcxo` | `true`, `true` | Whether DIO2 drives the RF switch and DIO3 a TCXO (both on for the AIO). |
 | `is_waveshare` | `false` | The Waveshare HAT's wiring quirks, which the radio library knows about. |
 | `python` | `""` (empty) | An interpreter to run the node under, when the one MeshTerm would find on its own isn't the one you want. Empty lets MeshTerm look. |
