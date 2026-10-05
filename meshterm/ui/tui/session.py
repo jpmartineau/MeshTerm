@@ -228,24 +228,28 @@ def _read_clipboard() -> str:
         return ""
 
 
-def _reclaim_last_column() -> bool:
-    """Whether to reclaim the terminal's final column.
+def _reclaim_last_column() -> bool | None:
+    """Whether to reclaim the terminal's final column — or ``None``, to ask the terminal.
 
-    Some terminals (and prompt_toolkit's size probe on them) report the window one column
-    narrower than it really is, so the frame is drawn to ``columns - 1`` and the true last
-    column sits unused — visibly selectable to the right of the border. When this is on,
-    :class:`_WidthExtendedOutput` tells both the renderer and the frame compositor the
-    window is one column wider, and that final column gets drawn.
+    prompt_toolkit's Windows console output reports the window one column narrower than it
+    really is, on purpose (see :func:`_probe_hides_last_column`), so the frame is drawn to
+    ``columns - 1`` and the true last column sits unused — visibly selectable to the right of
+    the border. When this is on, :class:`_WidthExtendedOutput` tells both the renderer and
+    the frame compositor the window is one column wider, and that final column gets drawn.
 
-    This is a gate, not a certainty: it is *correct* only when the probe under-reports. On a
-    terminal whose width probe is already right, the extra column falls off the real screen and
-    the frame would wrap and tear — which is exactly PicoCalc's exact-width console, so
-    :data:`~meshterm.platforms.PICOCALC_LYRA` defaults this off.
+    It is *correct* only where the probe hid the column. Everywhere else the extra column
+    falls off the real screen, and since prompt_toolkit draws with autowrap off, each row's
+    phantom last cell is written over the real one before it: whatever sits flush right
+    loses its final character. On Linux that cut the header's battery gauge, so a full pack's
+    bare ``100`` read ``10`` and 99% read ``9%``. Hence the default is a question rather than
+    an answer: ``None`` means "reclaim if, and only if, the output this session draws on is
+    one whose probe hides the column", decided once that output exists.
 
     Three sources, in confidence order, because the person at the keyboard can see the
-    column and the platform can only guess at it: ``MESHTERM_FULL_WIDTH=0``/``=1`` for a
-    one-off, then the ``full_width`` preference (``yes``/``no``; ``auto`` — the default —
-    steps aside), then the platform's own verdict.
+    column and the code can only infer it: ``MESHTERM_FULL_WIDTH=0``/``=1`` for a one-off,
+    then the ``full_width`` preference (``yes``/``no``; ``auto`` — the default — steps
+    aside), then the platform, which answers ``False`` outright where its console is exact
+    (:data:`~meshterm.platforms.PICOCALC_LYRA`) and otherwise leaves it to the terminal.
 
     Read fresh on every call (never cached at import time) so it reflects whichever platform
     :func:`~meshterm.platforms.set_platform` installed for this process — see that module's
@@ -259,7 +263,26 @@ def _reclaim_last_column() -> bool:
     preferred = current_preferences().full_width
     if preferred != "auto":
         return preferred == "yes"
-    return get_platform().width_reclaim
+    return None if get_platform().width_reclaim else False
+
+
+def _probe_hides_last_column(output: Any) -> bool:
+    """Whether prompt_toolkit sizes ``output`` one column narrower than its window.
+
+    True of its Windows console output and nothing else. ``Win32Output.get_size`` takes the
+    visible width as ``srWindow.Right - srWindow.Left`` (an inclusive span, so one short) and
+    then caps it below the buffer's right margin — "windows will wrap otherwise" — and
+    ``Windows10_Output`` and ``ConEmuOutput`` both hand their size to the ``Win32Output``
+    they hold. A POSIX terminal's ``Vt100_Output`` reads ``TIOCGWINSZ``, which is exact, so
+    there is nothing there to reclaim.
+    """
+    if sys.platform != "win32":
+        return False  # prompt_toolkit's win32 module asserts the platform on import
+    from prompt_toolkit.output.win32 import Win32Output
+
+    return isinstance(output, Win32Output) or isinstance(
+        getattr(output, "win32_output", None), Win32Output
+    )
 
 
 #: What each ``color_depth`` preference value asks for. ``auto`` is deliberately absent: it
@@ -1789,18 +1812,23 @@ class TuiSession:
         * :class:`~meshterm.ui.tui.colsnap.PinnedOutput`, where
           :func:`~meshterm.ui.tui.colsnap.enabled` — every glyph prompt_toolkit's renderer
           writes lands in the column that renderer measured it into.
-        * :class:`_WidthExtendedOutput`, where :func:`_reclaim_last_column` — outermost, since
-          the size it reports is what both renderers and the compositor lay out against.
+        * :class:`_WidthExtendedOutput`, where :func:`_reclaim_last_column` — or, left to the
+          terminal, where :func:`_probe_hides_last_column` — outermost, since the size it
+          reports is what both renderers and the compositor lay out against.
 
         With neither, this is ``None`` and prompt_toolkit builds its own output as before.
         """
         pin = colsnap.enabled()
         reclaim = _reclaim_last_column()
-        if self._output is not None or not (pin or reclaim):
+        if self._output is not None or not (pin or reclaim is not False):
             return self._output
         from prompt_toolkit.output.defaults import create_output
 
         output: Any = create_output()
+        if reclaim is None:
+            reclaim = _probe_hides_last_column(output)
+        if not (pin or reclaim):
+            return None
         if pin:
             output = colsnap.PinnedOutput(output)
         if reclaim:

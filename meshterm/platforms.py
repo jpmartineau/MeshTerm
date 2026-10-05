@@ -97,10 +97,12 @@ class Platform:
             own, so one can change without the other following. :attr:`footer_fkeys` is the
             yes/no reading of it.
         width_reclaim: Whether the session may report one extra terminal column (see
-            :class:`~meshterm.ui.tui.session._WidthExtendedOutput`). Correctness-critical
-            on PicoCalc's exact-width console: a phantom extra column tears the frame, so
-            this is ``False`` there. ``MESHTERM_FULL_WIDTH`` remains an explicit override
-            on top of this default.
+            :class:`~meshterm.ui.tui.session._WidthExtendedOutput`). ``True`` only *lets*
+            it: the column is reclaimed where the terminal's size probe hid one, which is
+            prompt_toolkit's Windows console output and nothing else
+            (:func:`~meshterm.ui.tui.session._probe_hides_last_column`). ``False`` on
+            PicoCalc's exact-width console, where a phantom extra column tears the frame.
+            ``MESHTERM_FULL_WIDTH`` remains an explicit override on top of this default.
         emoji: Whether emoji icons render at all. ``False`` means every icon funnel routes
             through a compact single-BMP-glyph table instead (P3), and neither half of the
             emoji alignment runs — the reserve-two measurement

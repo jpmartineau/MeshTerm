@@ -157,11 +157,11 @@ _SILENCE_CHOICES: dict[int, str] = {
 #: scheduler's own choices so the two never drift.
 _QUIET_CHOICES: dict[int, str] = {s: f"{s} s" for s in QUIET_CHOICES_S}
 
-#: How the terminal-width reclaim can be asked for: follow the platform's own verdict, or
+#: How the terminal-width reclaim can be asked for: follow the terminal's own size probe, or
 #: overrule it in either direction. The row's description asks a yes/no question ("use the
 #: column ... ?"), so the values answer it in those words rather than naming the mechanism
-#: twice. See :func:`meshterm.ui.tui.session._reclaim_last_column` for why a terminal may
-#: need to disagree with its platform.
+#: twice. See :func:`meshterm.ui.tui.session._reclaim_last_column` for which terminals hide
+#: a column, and what reclaiming one that isn't hidden costs.
 _WIDTH_CHOICES: dict[str, str] = {"auto": "auto", "yes": "yes", "no": "no"}
 
 #: How many colours to send the terminal. ``auto`` is the honest default and the only
