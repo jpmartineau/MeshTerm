@@ -110,15 +110,15 @@ _BADGE_RIGHT = "▌"
 
 
 def _type_cell(device: DiscoveredDevice) -> Text:
-    """The TYPE-column badge for ``device`` as a styled fragment.
+    """The transport badge that leads ``device``'s row, as a styled fragment.
 
     Serial is a bare plug emoji (two cells, its own colour). Bluetooth is the rune on its blue
     badge, flanked by half-block slivers in the same blue so the fill reads as a slightly
     rounded chip a touch wider than the lone rune rather than a single hard-edged cell.
 
-    The plug carries a leading space so its two cells sit centred under the "TYPE" heading,
-    lining up with the Bluetooth rune (which the badge's left half-block already nudges in a
-    cell) rather than hugging the column's left edge.
+    The plug carries a leading space so its two cells sit centred on the Bluetooth rune
+    (which the badge's left half-block already nudges in a cell) rather than hugging the
+    column's left edge.
     """
     if device.is_tcp:
         return Text(" " + _TCP_ICON)
@@ -479,9 +479,6 @@ async def prompt_device(
             keys=_SHORTCUTS,
             key_hint=_shortcut_hint(len(store.hidden_ids())),
             live=keep_looking,
-            # Said outright because the rows no longer imply it: scrolling is switched on by
-            # a row pinning a head block, and none of these do any more.
-            hscroll=True,
         )
         # Esc (``None``) and the Quit row both mean "leave the picker" — surface that to the
         # caller as ``None`` so it can exit the program instead of continuing device-less.
@@ -848,10 +845,10 @@ def _build_items(
 ) -> list:
     """Build the aligned splash rows (a muted header + one :class:`Choice` per device).
 
-    The row for each device leads with its display name (the remembered node's name when
-    known, else the hardware name), followed by a TYPE glyph marking the transport, the
-    HARDWARE column (the remembered firmware model, else the USB vendor) with its tag, and the
-    connection target last; columns are padded to a shared width so they align. Confirmed
+    The row for each device leads with a badge marking the transport, then its display name
+    (the remembered node's name when known, else the hardware name), the HARDWARE column
+    (the remembered firmware model, else the USB vendor) with its tag, and the connection
+    target last; columns are padded to a shared width so they align. Confirmed
     companions sort to the top (most-recent first), wear their name in white and a bright tag;
     the remembered default is starred. Trailing rows let the user name a network device by hand
     and quit here.
@@ -860,7 +857,9 @@ def _build_items(
     a model string, not a heading. Each lane used to be squeezed against a budget so the row
     fitted the box, and on a narrow terminal (or beside a 36-cell CoreBluetooth UUID) that cut
     the name the reader came to read down to its first five letters. A row wider than the box
-    now runs off its edge instead, and ←→ slide the highlighted row to read it to its end. The
+    now runs off its edge instead, and ←→ pan the whole table — header and every device row
+    together (:attr:`~meshterm.ui.tui.select.Choice.pans`), so each lane stays under its
+    label wherever the reader has panned to, and stays panned as the highlight moves. The
     address goes last because it is the lane the reader needs least: it tells two similar
     rows apart, which the name and the hardware usually already have.
 
@@ -893,26 +892,24 @@ def _build_items(
     port_label = (
         "PORT / ADDRESS" if has_serial and has_address else "ADDRESS" if has_address else "PORT"
     )
-    # The TYPE column holds a small transport badge (at most 3 cells); its heading is wider,
-    # so the four-cell "TYPE" label sets the column width and every badge pads out to it.
-    type_w = len("TYPE")
+    # The badge column leads, unlabelled: a plug or a Bluetooth rune says what it is, and a
+    # heading over three cells of picture would only push the name a lane further right.
+    type_w = max(_type_cell(d).cell_len for d in devices)
     names = {d.stable_id: _display_name(d, registry) for d in devices}
     name_w = max(len("DEVICE"), *(cell_len(name) for name in names.values()))
     hardware_w = max(len("HARDWARE"), *(cell_len(_hardware_label(d, registry)) for d in devices))
     tags = {d.stable_id: _tag(d, d.stable_id in known) for d in devices}
     tag_w = max(cell_len(text) for text, _ in tags.values())
 
-    # A muted, aligned header, resolved against the render width because it is *pinned*: it
-    # leads the device rows as their landmark, so a long detection list keeps the lane names
-    # overhead as it scrolls — and a pinned row that wraps is drawn outside the body slice,
-    # where the second line costs the list a device. Every label is the one form, in full; a
-    # header wider than the box is cropped at its edge like the rows under it. The indent
+    # A muted, aligned header that leads the device rows as their landmark, so a long
+    # detection list keeps the lane names overhead as it scrolls. Every label is the one form,
+    # in full, and it pans with the rows, so a label is always over its lane. The indent
     # mirrors the row pointer (2) and the star column (2) so each label sits over its own lane.
-    lanes = [Lane("DEVICE", name_w + 2), Lane("TYPE", type_w + 2), Lane("HARDWARE", hardware_w + 2)]
+    lanes = [Lane("", type_w + 2), Lane("DEVICE", name_w + 2), Lane("HARDWARE", hardware_w + 2)]
     if tag_w:
         lanes.append(Lane("", tag_w + 2))  # the tag rides under HARDWARE's heading
     lanes.append(Lane(port_label))
-    header = Separator(lambda width: column_header(lanes, width, indent=4), heading=True)
+    header = Separator(lambda width: column_header(lanes, width, indent=4), heading=True, pans=True)
 
     items: list = [header]
     for device in devices:
@@ -921,16 +918,16 @@ def _build_items(
         row = Text()
         row.append("★" if is_remembered else " ", style="warn" if is_remembered else "")
         row.append(" ")
-        # A confirmed companion wears its name in white so it stands out from mere detections.
-        row.append(_pad(names[device.stable_id], name_w), style="device.known" if is_known else "")
-        row.append("  ")
-        # The TYPE badge marks the transport: a plug emoji for serial, or the Bluetooth rune
-        # on its blue badge for BLE. It's built with its own colours, then the column is
-        # padded with plain spaces — so the blue fill hugs just the badge, and the differing
-        # badge widths (emoji 2 cells, rune-plus-edges 3) still line up under "TYPE".
+        # The badge marks the transport: a plug emoji for serial, or the Bluetooth rune on its
+        # blue badge for BLE. It's built with its own colours, then the column is padded with
+        # plain spaces — so the blue fill hugs just the badge, and the differing badge widths
+        # still line up.
         cell = _type_cell(device)
         row.append_text(cell)
         row.append(" " * max(0, type_w - cell.cell_len))
+        row.append("  ")
+        # A confirmed companion wears its name in white so it stands out from mere detections.
+        row.append(_pad(names[device.stable_id], name_w), style="device.known" if is_known else "")
         row.append("  ")
         row.append(_pad(_hardware_label(device, registry), hardware_w), style="muted")
         row.append("  ")
@@ -938,7 +935,7 @@ def _build_items(
             tag, tag_style = tags[device.stable_id]
             row.append(_pad(tag, tag_w), style=tag_style)
             row.append("  ")
-        # Nothing is pinned here, so ←→ slide the whole row. The Trophy case pins its
+        # Nothing is pinned here, so ←→ pan the whole row. The Trophy case pins its
         # rank/date/score lanes because those always fit and only the walk overflows, which
         # makes them the reader's place in a long list. This list inverts that: every lane is
         # drawn whole, so on a narrow terminal any of them may run past the edge, and pinning
@@ -947,7 +944,7 @@ def _build_items(
         # Only a network device opts into Delete-to-remove: it's listed solely from its
         # remembered endpoint, so forgetting it is the only way it leaves the picker. A scanned
         # serial/BLE device would just reappear, so Delete stays inert on those rows.
-        items.append(Choice(title=row, value=device, deletable=device.is_tcp))
+        items.append(Choice(title=row, value=device, deletable=device.is_tcp, pans=True))
     items.extend(_action_rows())
     return items
 

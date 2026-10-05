@@ -1624,12 +1624,13 @@ def test_device_picker_shortens_nothing_and_puts_the_address_last() -> None:
 
     The lanes used to be squeezed against a budget so the row fitted the box, and beside a
     36-cell CoreBluetooth UUID that cut a name down to ``Johnp…`` and the UUID to its tail.
-    Now a row wider than the box runs off its edge and ←→ read the rest, so the address,
-    the lane the reader needs least, goes last where running off the edge costs least.
+    Now a row wider than the box runs off its edge and ←→ pan to the rest, so the address,
+    the lane the reader needs least, goes last where running off the edge costs least. The
+    transport badge leads the row, with no heading over it.
     """
     from meshterm.core.discovery import DiscoveredDevice
     from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
-    from meshterm.ui.device_picker import _build_items
+    from meshterm.ui.device_picker import _build_items, _display_name
 
     name = "MeshCore-Johnputer Wardriver"
     uuid = "12345678-1234-1234-1234-123456789ABC"
@@ -1654,9 +1655,15 @@ def test_device_picker_shortens_nothing_and_puts_the_address_last() -> None:
                 # The target is whole, and nothing follows it.
                 assert row.endswith(device.target), platform.name
             assert name in rows[devices[0].stable_id] and adapter in rows[devices[2].stable_id]
-            # The header is unabridged at any width the row needs, ADDRESS last.
+            # The header is unabridged at any width the row needs, ADDRESS last, and the
+            # badge column it starts over has no label.
             header = items[0].text(1000)
-            assert header.split() == ["DEVICE", "TYPE", "HARDWARE", "PORT", "/", "ADDRESS"]
+            assert header.split() == ["DEVICE", "HARDWARE", "PORT", "/", "ADDRESS"]
+            for device in devices:
+                row = rows[device.stable_id]
+                name_at = row.index(_display_name(device, {}))
+                assert header.index("DEVICE") == cell_len(row[:name_at]) + 2  # + the pointer
+                assert row[:name_at].strip(), "the badge comes before the name"
     finally:
         set_platform(REGULAR)
 
@@ -3630,22 +3637,60 @@ def test_a_hint_too_long_for_its_box_drops_atoms_rather_than_its_tail() -> None:
     )
 
 
-def test_the_splash_scrolls_the_whole_row_it_is_on() -> None:
-    """←→ move the entire row, lanes included, rather than sliding the tail under them.
+def test_a_panning_list_slides_its_header_and_rows_as_one() -> None:
+    """←→ pan a table: its header and every row by one shift, kept as the highlight moves.
 
-    The Trophy case pins its rank/date/score lanes because those always fit and only the
-    walk overflows, so they are the reader's place in a long list. This list inverts that:
-    every lane is drawn whole, so on a narrow terminal any of them may run past the edge,
-    and pinning the head would leave part of a long name the one thing ←→ could not reach.
-
-    Scrolling has to be asked for outright here, because it is a row pinning a head block
-    that normally turns it on and no row does now.
+    The per-row scroll slides the highlighted row alone and drops its shift on ↑↓, which is
+    right for a list of independent long lines and wrong for a table, whose lanes mean
+    nothing once they have slid out from under their labels. A row that is not part of the
+    table (an action row under it) stays where it is.
     """
+    from meshterm.ui.tui import Choice, SelectScreen, Separator
+
+    # A header is laid out like a row: its first two cells are the pointer column.
+    header = Separator("  " + "NAME".ljust(10) + "-" * 30 + " WHERE", pans=True)
+    rows = [
+        Choice("alpha".ljust(10) + "x" * 30 + " far-a", "a", pans=True),
+        Choice("beta".ljust(10) + "y" * 30 + " far-b", "b", pans=True),
+    ]
+    quit_row = Choice("Quit", "q")
+    screen = SelectScreen("t", [header, *rows, Separator(" "), quit_row], filterable=False)
+    width = 30
+
+    def lines() -> list[str]:
+        return _plain(screen.render_body(width)).split("\n")
+
+    first = lines()
+    assert "←→ scroll" in screen.footer_hint  # the table overflows, so ←→ say so
+    screen.handle("right")
+    screen.handle("right")
+    panned = lines()
+    assert panned[0] != first[0] and panned[1] != first[1] and panned[2] != first[2]
+    # Every line of the table moved by the same amount: the dash run under the header
+    # starts in the same column as the x and y runs under it.
+    starts = [line.index(ch) for line, ch in zip(panned[:3], "-xy", strict=True)]
+    assert len(set(starts)) == 1, panned
+    assert panned[-1] == first[-1], "the Quit row is not part of the table"
+
+    screen.handle("down")
+    assert lines()[0] == panned[0], "moving the highlight keeps the pan"
+
+    for _ in range(20):
+        screen.handle("right")
+    end = lines()
+    # Clamped at the widest line's tail, with each label over its lane.
+    assert end[0].rstrip().endswith("WHERE") and end[1].rstrip().endswith("far-a")
+    assert end[0].index("WHERE") == end[1].index("far-a") == end[2].index("far-b")
+    assert all(cell_len(line) <= width for line in end)
+
+
+def test_the_splash_pans_its_table_on_every_platform() -> None:
+    """The splash's header and device rows pan together, and its action rows stay put."""
     from meshterm.core.device_store import RememberedDevice
     from meshterm.core.discovery import serial_device
-    from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
+    from meshterm.platforms import CARDPUTER_ZERO, PICOCALC_LYRA, REGULAR, set_platform
     from meshterm.ui.device_picker import _build_items
-    from meshterm.ui.tui import Choice, SelectScreen
+    from meshterm.ui.tui import Choice, SelectScreen, Separator
 
     radio = serial_device("COM7", name="Wardriver")
     registry = {
@@ -3659,25 +3704,25 @@ def test_the_splash_scrolls_the_whole_row_it_is_on() -> None:
         )
     }
     try:
-        for platform, width in ((REGULAR, 66), (PICOCALC_LYRA, 47)):
+        for platform in (REGULAR, PICOCALC_LYRA, CARDPUTER_ZERO):
             set_platform(platform)
             items = _build_items([radio], registry[radio.stable_id], registry)
-            screen = SelectScreen(
-                "Select a companion device", items, filterable=False, hscroll=True
-            )
-            row = next(it for it in items if isinstance(it, Choice))
-            assert not row.hscroll_from, "no lane is pinned on the splash any more"
+            table = [it for it in items if getattr(it, "pans", False)]
+            assert isinstance(table[0], Separator) and table[0].heading
+            assert [it.value for it in table[1:]] == [radio]
+            assert not any(
+                it.pans for it in items if isinstance(it, Choice) and it.value is not radio
+            ), "Add a network device and Quit are not table rows"
 
-            before = _plain(screen.render_body(width)[1])
-            for _ in range(3):
+            width = platform.readable_cols - platform.dialog_margin - 4
+            screen = SelectScreen("Select a companion device", items, filterable=False)
+            before = _plain(screen.render_body(width)).split("\n")
+            for _ in range(20):
                 screen.handle("right")
-            after = _plain(screen.render_body(width)[1])
-            assert before != after, platform.name
-            # The head moved with everything else: what was at the left edge is gone.
-            assert not after.startswith(before[:8]), f"the lanes stayed put on {platform.name}"
-            # And the name is what scrolled out of view, which is the point -- it is the
-            # part a narrow terminal cuts, so it has to be reachable.
-            assert "Wardriver" in before
+            after = _plain(screen.render_body(width)).split("\n")
+            assert "Wardriver" in before[1] and "Wardriver" not in after[1], platform.name
+            # Panned to the end, the address sits under its label.
+            assert after[0].index("PORT") == after[1].index("COM7"), platform.name
     finally:
         set_platform(REGULAR)
 

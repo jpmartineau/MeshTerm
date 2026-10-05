@@ -81,6 +81,12 @@ class Choice:
             of keeping its natural one for ←→ to slide over — nothing past the edge of such a
             row is worth sliding to, and a highlight that flipped the row back to a cut-off
             chart would undo the fit on exactly the row being read.
+        pans: The row is a line of a *table* that ←→ pan as one: every panning row and
+            panning column header (:attr:`Separator.pans`) slides by the same shift, so the
+            lanes stay under their labels however far the reader has panned, and the shift
+            survives ↑↓ rather than snapping back on each new row. Declaring it turns the
+            list's panning on, the way :attr:`hscroll_from` turns scrolling on; rows that
+            don't pan (an action row under the table) stay put. See :class:`SelectScreen`.
     """
 
     title: str | Text | Callable[[], str | Text] | Callable[[int], str | Text]
@@ -89,6 +95,7 @@ class Choice:
     detail: str | Text | Callable[[], str | Text] | None = None
     hscroll_from: int = 0
     fitted: bool = False
+    pans: bool = False
 
     def __post_init__(self) -> None:
         """Read the title callable's arity once, so no paint has to ask again."""
@@ -238,12 +245,18 @@ class Separator:
             would shadow the heading it sits under). Set through
             :func:`~meshterm.ui.menus.section_heading`, or by hand on a column header that
             *is* its block's only landmark.
+        pans: The column header of a table that ←→ pan as one (see :attr:`Choice.pans`):
+            drawn in its fullest form and slid with the rows under it, so each label stays
+            over its lane. It is laid out like a row — its first two cells are the pointer
+            column, which stays put while the rest slides — which is how
+            :func:`~meshterm.ui.menus.column_header` already indents it.
     """
 
     title: str | Text | Callable[[int], str | Text]
     style: str = "muted"
     pinned: bool = False
     heading: bool = False
+    pans: bool = False
 
     def text(self, width: int) -> str | Text:
         """The row's content at ``width`` cells, resolving a width-aware title."""
@@ -258,9 +271,20 @@ Item = "Choice | Separator"
 #: self-fitting column header or self-eliding row returns its fullest form.
 _UNBOUNDED = 10_000
 
+#: Cells a choice row's pointer (``❯ `` / ``  ``) takes — the column a panning header keeps
+#: still too, so its labels slide in step with the rows (see :attr:`Separator.pans`).
+_POINTER = 2
+
+
+def _pans(items: list) -> bool:
+    """Whether any of ``items`` is a table row or header that ←→ pan (see :attr:`Choice.pans`)."""
+    return any(getattr(item, "pans", False) for item in items)
+
+
 #: The navigation actions that move the highlight to another row, so an ``hscroll`` list
 #: drops the current row's horizontal shift (each row scrolls on its own — see
-#: :meth:`SelectScreen.handle`). The filter edits reset it in their own branches.
+#: :meth:`SelectScreen.handle`). The filter edits reset it in their own branches. A panning
+#: list keeps its shift: the table is what moved, not the row.
 _HSHIFT_RESET_ACTIONS = frozenset(
     {
         "up",
@@ -371,7 +395,11 @@ class SelectScreen(Screen):
                 on its own, independently of the rest of the screen. A row may hold a head
                 block out of the scroll (:attr:`Choice.hscroll_from`), so only its
                 overflowing run slides; whichever edges the line then continues past wear a
-                :func:`~meshterm.ui.pathline.cut_mark`.
+                :func:`~meshterm.ui.pathline.cut_mark`. A list whose rows *pan*
+                (:attr:`Choice.pans`) scrolls differently, and takes precedence: ←→ slide
+                the whole table — its column header and every panning row by one shared
+                shift, clamped to the widest of them — and the shift stays put as the
+                highlight moves.
             hscroll_hint: The footer atom surfaced (as the second ` · ` atom, right after
                 the move atom) while ``hscroll`` is on and the highlighted row overflows —
                 so ←→ advertises itself exactly when it would do something. Ignored when
@@ -407,6 +435,9 @@ class SelectScreen(Screen):
             self._hscroll_auto and any(getattr(item, "hscroll_from", 0) > 0 for item in items)
         )
         self._hscroll_hint = hscroll_hint
+        # A row built as a line of a table turns panning on, as a pinned head turns on
+        # scrolling (see Choice.pans); it is read off the rows each time they change.
+        self._pan = _pans(items)
         # Shortcuts are the non-filterable list's compensation for having no filter: the
         # letters are free, so a list may spend them (see the ``keys`` argument).
         self._keys: dict[str, Any] = {} if filterable else dict(keys or {})
@@ -460,6 +491,7 @@ class SelectScreen(Screen):
         self._items = items
         if self._hscroll_auto:
             self._hscroll = any(getattr(item, "hscroll_from", 0) > 0 for item in items)
+        self._pan = _pans(items)
         self.title = title
         self._prompt = prompt
         self._filter = ""
@@ -500,6 +532,7 @@ class SelectScreen(Screen):
             self._hscroll = self._hscroll or any(
                 getattr(item, "hscroll_from", 0) > 0 for item in items
             )
+        self._pan = _pans(items)
         if title is not None:
             self.title = title
         if prompt is not None:
@@ -508,7 +541,8 @@ class SelectScreen(Screen):
         index = next((i for i, c in enumerate(selectable) if c.value == was), None)
         if index is None:
             index = max(0, min(position, len(selectable) - 1))
-            self._hshift = 0  # a different row is highlighted now
+            if not self._pan:
+                self._hshift = 0  # a different row is highlighted now; a pan is the table's
         self._index = index
 
     # --- filtering -----------------------------------------------------------
@@ -624,7 +658,7 @@ class SelectScreen(Screen):
             atoms = self._key_hint(current.value if current is not None else None)
             if atoms:
                 base = splice_hint(base, atoms)
-        if self._hscroll and self._hscroll_hint and self._selected_overflows():
+        if (self._hscroll or self._pan) and self._hscroll_hint and self._selected_overflows():
             base = _insert_atom(base, self._hscroll_hint)
         if self._filter:
             base = _esc_verb(base, "clear")
@@ -639,8 +673,12 @@ class SelectScreen(Screen):
         nothing reads as overflowing until a real width is known). Asked of
         :meth:`_max_hshift` rather than of the raw label width, so a row that pins a head
         block (:attr:`Choice.hscroll_from`) is judged on the run that would actually move —
-        the marks a scrolled row spends cells on included.
+        the marks a scrolled row spends cells on included. A panning list asks the same of
+        the whole table rather than of one row, since ←→ move the table wherever the
+        highlight is standing.
         """
+        if self._pan and self._last_width > 0:
+            return self._pan_limit(self._last_width) > 0
         if not self._hscroll or self._last_width <= 0:
             return False
         current = self._current_choice()
@@ -718,7 +756,10 @@ class SelectScreen(Screen):
         # can't shift at all. Measured fresh each paint — a callable title may have changed
         # width — against the row's content area (width less the 2-cell pointer).
         self._last_width = width
-        if self._hscroll and self._hshift:
+        if self._pan:
+            # A panning list slides the table as one, as far as its widest line's tail.
+            self._hshift = max(0, min(self._hshift, self._pan_limit(width)))
+        elif self._hscroll and self._hshift:
             avail = max(1, width - 2)
             sel_len = cell_len(_plain(selected.scroll_text(avail))) if selected is not None else 0
             anchor = selected.hscroll_from if selected is not None else 0
@@ -757,11 +798,22 @@ class SelectScreen(Screen):
         for item in rows:
             if isinstance(item, Separator):
                 # A Text title carries its own spans (a two-colour column header); a plain
-                # string is drawn uniformly in the separator's style. Separators never
-                # h-scroll — the shift rides the highlighted choice row alone.
-                title = item.text(width)
+                # string is drawn uniformly in the separator's style. A separator h-scrolls
+                # only as a panning table's column header — the per-row shift rides the
+                # highlighted choice row alone.
+                title = item.text(_UNBOUNDED if item.pans and self._pan else width)
                 content = title if isinstance(title, Text) else Text(title, style=item.style)
-                if item.pinned:
+                if item.pans and self._pan:
+                    # Its fullest form, slid with the rows, its pointer column held still:
+                    # one line however wide, since its labels must stay over their lanes.
+                    slid = self._scroll_window(content, _POINTER, width)
+                    drawn = [render_to_ansi(slid, width, no_wrap=True)]
+                    if item.pinned:
+                        self._pinned_header = (len(lines), drawn[0])
+                    elif item.heading:
+                        block = list(drawn)
+                        self._sticky_headers.append((len(lines), block))
+                elif item.pinned:
                     # A pinned header is drawn *outside* the body slice and is exactly one
                     # row tall, so it crops like a row rather than wrapping — a column
                     # header too wide for the terminal ellipsizes instead of stealing a
@@ -811,8 +863,10 @@ class SelectScreen(Screen):
             # the 2-cell pointer). The exception is the highlighted row of an ``hscroll``
             # list, which keeps its natural form: ←→ slide the full line, and a row that
             # pre-elided itself would have nothing left to slide over — unless the row
-            # declares its fitted form complete (``Choice.fitted``).
-            if self._hscroll and is_sel:
+            # declares its fitted form complete (``Choice.fitted``). A panning table's rows
+            # all keep their natural form, highlighted or not: the pan slides every one.
+            panned = self._pan and item.pans
+            if panned or (self._hscroll and not self._pan and is_sel):
                 label = item.scroll_text(max(1, width - 2))
             else:
                 label = item.text(max(1, width - 2))
@@ -823,9 +877,10 @@ class SelectScreen(Screen):
             # keeps its colour. A plain string is styled uniformly as before.
             text = Text(pointer, style=style)
             label_text = label if isinstance(label, Text) else Text(label)
-            if self._hscroll and self._hshift and is_sel:
-                # Only the highlighted row slides, and only its label — the 2-cell pointer
-                # stays pinned. Every other row (and separator) renders unshifted.
+            if panned or (self._hscroll and not self._pan and self._hshift and is_sel):
+                # Only the label slides — the 2-cell pointer stays pinned. Per-row scrolling
+                # moves the highlighted row alone; a pan moves every row of the table, and
+                # draws its cut marks at the shift of 0 too, where a line runs off the edge.
                 label_text = self._scroll_window(label_text, item.hscroll_from, max(1, width - 2))
             text.append_text(label_text)
             text.style = style
@@ -856,6 +911,40 @@ class SelectScreen(Screen):
             return 0  # the whole run is in view unscrolled: nothing to slide to
         steps = -(-max(0, run - (lane - 1)) // self._HSCROLL_STEP)
         return steps * self._HSCROLL_STEP
+
+    def _pan_limit(self, width: int) -> int:
+        """How far ←→ may pan this list's table at ``width``: to its widest line's tail.
+
+        Every panning line is measured on the same terms — a row in the content area after
+        its pointer, a column header over the whole width with its pointer column held — so
+        the two measure the same table and agree on where it ends.
+
+        The stop is the exact shift that brings the widest line's tail to the edge, not the
+        whole :attr:`_HSCROLL_STEP` past it that :meth:`_max_hshift` takes for one row. Here
+        every line moves, so a whole-step stop would leave the entire table ending short of
+        the edge — and a box sized to its content (the startup splash) would shrink under the
+        reader on the last press, shedding hint atoms as it went. At the exact stop the
+        widest line meets the edge with no right-hand mark: its first hidden cell is past
+        its own end.
+        """
+        avail = max(1, width - _POINTER)
+
+        def tail(cells: int, anchor: int, room: int) -> int:
+            lane = max(1, room - anchor)
+            run = max(0, cells - anchor)
+            return 0 if run <= lane else run - (lane - 1)  # the left mark costs a cell
+
+        limit = 0
+        for item in self._rows():
+            if not getattr(item, "pans", False):
+                continue
+            if isinstance(item, Separator):
+                cells = cell_len(_plain(item.text(_UNBOUNDED)))
+                limit = max(limit, tail(cells, _POINTER, width))
+            else:
+                cells = cell_len(_plain(item.scroll_text(avail)))
+                limit = max(limit, tail(cells, item.hscroll_from, avail))
+        return limit
 
     def _scroll_window(self, label: Text, anchor: int, avail: int) -> Text:
         """The highlighted row's label with its head pinned and its run slid ``_hshift`` in.
@@ -916,7 +1005,7 @@ class SelectScreen(Screen):
     def handle(self, action: str, data: str = "") -> None:
         """Move the highlight, edit the filter, or commit/cancel the selection."""
         choices = self._choices()
-        if self._hscroll and action in _HSHIFT_RESET_ACTIONS:
+        if self._hscroll and not self._pan and action in _HSHIFT_RESET_ACTIONS:
             self._hshift = 0  # moving off a row abandons its scroll — each row scrolls alone
         if action == "up":
             if choices:
@@ -954,10 +1043,10 @@ class SelectScreen(Screen):
             # (e.g. a remembered network device in the picker); elsewhere it's inert.
             if choices and choices[self._index].deletable:
                 self.resolve(DeleteRequest(choices[self._index].value))
-        elif action == "left" and self._hscroll:
+        elif action == "left" and (self._hscroll or self._pan):
             self._hshift = max(0, self._hshift - self._HSCROLL_STEP)
-        elif action == "right" and self._hscroll:
-            self._hshift += self._HSCROLL_STEP  # clamped to the highlighted row's tail at render
+        elif action == "right" and (self._hscroll or self._pan):
+            self._hshift += self._HSCROLL_STEP  # clamped at render, to the row's or table's tail
         elif action == "escape":
             # A typed filter is the most recent thing the reader entered, so Esc peels that
             # before it leaves — the map and the mesh walk's rule, now every filtering
