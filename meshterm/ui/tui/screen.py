@@ -646,6 +646,16 @@ class ListWindow:
     Each screen owns its own cursor, so this is a rule its ``handle`` keeps, not something
     this class can enforce.
 
+    **A window is for a list the highlight walks**, which is why :meth:`fit` and
+    :meth:`fit_blocks` take the highlight with no default. Every row a window hides must be
+    one the arrows can reach by walking onto it, since the window follows the highlight.
+    Rows nothing ever highlights (a log, a results table) belong to the page instead,
+    where the frame scrolls them and edge scroll (:meth:`Screen.edge_scroll`) reaches them.
+    Windowed privately, they made the page exactly as tall as the screen, so the frame
+    saw nothing to scroll: ↓ on the last row did nothing while a ``↓ n more`` sat under it
+    (the trace screen's results, JP 2026-10-04). ``None`` is still a highlight argument,
+    for a list whose rows the highlight has just left for another part of the same screen.
+
     Attributes:
         top: First list row the window shows (clamped by :meth:`fit` each paint).
         page: Rows the window carried on the last :meth:`fit` — the paging stride.
@@ -656,7 +666,7 @@ class ListWindow:
         self.top = 0
         self.page = 6
 
-    def fit(self, n: int, win: int, index: int | None = None) -> tuple[int, int]:
+    def fit(self, n: int, win: int, index: int | None) -> tuple[int, int]:
         """Settle the window over ``n`` rows into ``win`` lines: ``(top, count)``.
 
         The edge markers eat the window's boundary rows exactly when rows hide
@@ -666,8 +676,10 @@ class ListWindow:
         Args:
             n: Total list rows.
             win: Lines the window may spend — on content and markers alike.
-            index: A highlighted row that must stay visible, or ``None`` when the
-                window scrolls free (a cursor-less log; ``top`` is just clamped).
+            index: The highlighted row, which must stay visible, or ``None`` while the
+                highlight is elsewhere on the screen (``top`` is then just clamped).
+                Required: a window over rows no highlight walks hides them from the
+                arrows (see the class docstring).
 
         Returns:
             The first visible row and how many rows to draw. Rows hidden above
@@ -694,7 +706,7 @@ class ListWindow:
         self.page = count
         return top, count
 
-    def fit_blocks(self, heights: list[int], win: int, index: int | None = None) -> tuple[int, int]:
+    def fit_blocks(self, heights: list[int], win: int, index: int | None) -> tuple[int, int]:
         """Settle the window over variable-height rows: ``(top, count)`` blocks to draw.
 
         The hanging-wrap sibling of :meth:`fit`, for a list whose rows are *blocks* of
@@ -706,8 +718,9 @@ class ListWindow:
         Args:
             heights: Rendered line count per list row.
             win: Lines the window may spend — on content and markers alike.
-            index: A highlighted row that must stay visible, or ``None`` when the window
-                scrolls free (``top`` is then just clamped).
+            index: The highlighted row, which must stay visible, or ``None`` while the
+                highlight is elsewhere on the screen (``top`` is then just clamped).
+                Required, as for :meth:`fit`.
 
         Returns:
             The first visible row and how many rows to draw, as :meth:`fit` returns them.

@@ -64,9 +64,9 @@ the next Trace will walk — composed by hand, or auto-resolved from the device'
 route or the stored history and labelled with that provenance — else the most recent
 stored trace), the run's robust aggregates, the wire spec that route amounts to, the
 action list, then the results — per-hop median SNR with quality bars and the
-individual traces newest-first — scrolling in a window beneath the pinned controls:
-PgUp/PgDn/Home/End slide it (↑/↓ belong to the action cursor), and faint ``↑/↓ n
-more`` markers count what the window hides.
+individual traces newest-first — on the same page: ↑/↓ belong to the action cursor and
+edge-scroll on into the results past the last action, and PgUp/PgDn/Home/End page the
+whole screen.
 
 Both path lanes draw through THE path widget (:mod:`~meshterm.ui.pathline`) and break
 at hop boundaries under their own value column: a route folds between nodes — never
@@ -102,7 +102,7 @@ from .menus import icon_lane, icon_mark, marked_label, section_heading
 from .pathline import PathHop, PathLine, cut_to, hops_atom, path_line
 from .theme import snr_style
 from .tui.render import render_lines, render_to_ansi
-from .tui.screen import ListWindow, Screen
+from .tui.screen import Screen
 from .tui.spinner import Spinner, spinner_interval
 from .widgets import NodeResolver, highlighted_hash, link_text, route_path
 
@@ -363,9 +363,10 @@ class TraceScreen(Screen):
 
     ↑/↓ move the cursor over the action rows and Enter commits the selected one — the
     cursor opens on Trace, so plain Enter still just traces. The results (per-hop
-    medians and the trace log) scroll in a window beneath the pinned controls with
-    PgUp/PgDn/Home/End, and Esc (or the Back row) backs out, cancelling any
-    in-flight trace; already-recorded traces are kept.
+    medians and the trace log) follow the actions on the page: ↓ off the last action
+    edge-scrolls on into them, PgUp/PgDn/Home/End page the whole screen, and Esc (or
+    the Back row) backs out, cancelling any in-flight trace; already-recorded traces
+    are kept.
     """
 
     floating = False
@@ -498,9 +499,6 @@ class TraceScreen(Screen):
         self._actions: tuple[str, ...] = tuple(actions)
         self._index = self._actions.index("trace")
         self._pin_cursor = False  # only pin the view while ↑/↓ are actually in use
-        #: The results window under the pinned actions (per-hop medians + trace
-        #: log); PgUp/PgDn slide it while the route and controls hold still.
-        self._tail_window = ListWindow()
 
     # --- state -----------------------------------------------------------------
 
@@ -670,15 +668,15 @@ class TraceScreen(Screen):
     def handle(self, action: str, data: str = "") -> None:
         """Move the action cursor, commit the selected action, scroll, or dismiss.
 
-        ↑/↓ belong to the action cursor; PgUp/PgDn/Home/End slide the results
-        window beneath the pinned controls, so a long trace log can be read while
-        the route and actions stay on screen.
+        ↑/↓ belong to the action cursor, and past the last action edge scroll carries
+        them on down the results; PgUp/PgDn/Home/End page the whole screen, the
+        cursor left where it was until an arrow brings it back.
         """
         if action == "enter":
             self._commit_action()
         elif action == "up":
             # Both ends clamp rather than wrap — the app-wide rule for a row cursor:
-            # a highlight that leaps end to end takes the results window with it.
+            # a highlight that leaps end to end takes the page with it.
             self._index = max(0, self._index - 1)
             self._pin_cursor = True
         elif action == "down":
@@ -686,16 +684,16 @@ class TraceScreen(Screen):
             self._pin_cursor = True
         elif action == "pageup":
             self._pin_cursor = False
-            self._tail_window.top -= self._tail_window.page
+            self.scroll_pages(-1)
         elif action in ("pagedown", "space"):
             self._pin_cursor = False
-            self._tail_window.top += self._tail_window.page
+            self.scroll_pages(1)
         elif action in ("home", "ctrl_home"):
             self._pin_cursor = False
-            self._tail_window.top = 0
+            self.scroll_to_top()
         elif action in ("end", "ctrl_end"):
             self._pin_cursor = False
-            self._tail_window.to_end()
+            self.scroll_to_bottom()
         elif action == "escape":
             self.cancel()
             self.resolve(None)
@@ -841,24 +839,16 @@ class TraceScreen(Screen):
             # trace-settings group.
             if key in ("explore", "reverse", "samples"):
                 lines.append("")
-        tail = self._tail_lines(stats, current, width)
-        if tail:
-            # The results scroll in a window beneath the pinned controls (see
-            # ListWindow): the route and actions never leave the screen, however
-            # long a sampling session's log grows.
-            win = max(3, self._scroll_viewport - len(lines))
-            top, count = self._tail_window.fit(len(tail), win)
-            if top > 0:
-                lines.append(render_to_ansi(ListWindow.marker(top, "above"), width))
-            lines.extend(tail[top : top + count])
-            below = len(tail) - top - count
-            if below > 0:
-                lines.append(render_to_ansi(ListWindow.marker(below, "below"), width))
+        # The results are page, not a window of their own: nothing highlights them, so a
+        # private window would hide its rows from the arrows and leave the frame a page
+        # exactly as tall as the screen — edge scroll would have nothing to scroll (see
+        # ListWindow). The frame scrolls them, ↓ off the last action carries on into them.
+        lines.extend(self._tail_lines(stats, current, width))
         self._scroll_total = max(1, len(lines))
         return lines
 
     def _tail_lines(self, stats: TraceStats, current: TraceResult | None, width: int) -> list[str]:
-        """The windowed results block: per-hop medians, then the trace log.
+        """The results block under the actions: per-hop medians, then the trace log.
 
         Memoized per traces revision while idle — the block re-renders every stored
         trace, and between completions nothing in it moves. A *running* trace skips

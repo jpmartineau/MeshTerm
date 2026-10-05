@@ -233,7 +233,12 @@ deliberately, one at a time, and say why in the code.
   rows, a list's empty state stands in. A page with no highlight (the map, which pans; a
   plain page, whose ↑↓ already scroll) has nothing to edge, and one whose kept line is
   not a highlight the arrows walk — the remote CLI's prompt, ↑↓ recalling history — sets
-  `edge_scrolls = False`.
+  `edge_scrolls = False`. **What no arrow walks is page, never a private window.** A
+  `ListWindow` is for a list the highlight walks (`fit` takes the highlight, with no
+  default), since every row it hides must be one an arrow reaches by walking onto it.
+  A log or a results table goes on the page, where the frame scrolls it. The trace
+  screen's results were once windowed under its actions: the page came out exactly the
+  screen's height, so ↓ on the last action did nothing while `↓ n more` sat under it.
 - Grouped-list section headings use `section_heading("Label")` → `── Label ──` in the
   bold `heading` grey, never the frame's accent: a rule in the border's colour reads as
   part of the frame. A chat's day divider wears the same dress. That is also what makes a heading *sticky* (it pins to the top row while its section

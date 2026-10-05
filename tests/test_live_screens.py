@@ -322,6 +322,44 @@ async def test_trace_screen_multi_trace_reports_progress_and_abort_keeps_landed(
     assert session.stack == []
 
 
+async def test_trace_results_are_page_that_edge_scroll_reaches() -> None:
+    """Once traced, ↓ on the last action scrolls on down the results to the oldest trace.
+
+    The results used to sit in a window of their own, sized to whatever the controls
+    left: the page was then exactly the screen's height, so the frame had nothing to
+    scroll and ↓ on Trace did nothing while ``↓ n more`` sat under it.
+    """
+    from meshterm.ui.tui import frame
+
+    screen, _ = _trace_screen()
+    for _ in range(12):  # a log long enough to carry the actions off the top
+        screen.start_trace()
+        await screen._worker
+
+    def view() -> list[str]:
+        lines = screen.render_body(72)
+        visible, _above, _below = frame._visible_slice(screen, lines, 16)
+        return [_plain([line]).strip() for line in visible]
+
+    def press(action: str) -> None:
+        if not screen.edge_scroll(action):
+            screen.handle(action)
+
+    body = _plain(screen.render_body(72))
+    assert "more" not in body  # every result is on the page; nothing is windowed off
+    view()
+    press("down")  # Trace is the last action: the cursor pins on it…
+    view()
+    for _ in range(30):
+        press("down")  # …and each further ↓ scrolls the page a line
+        view()
+    page = view()
+    assert page[-1].startswith("#1")  # the oldest trace closes the page
+    assert not any("❯" in line for line in page)  # the actions scrolled off the top
+    press("up")  # the snap-back: Trace comes back before anything moves
+    assert any("❯" in line and "Trace" in line for line in view())
+
+
 async def test_trace_screen_seeds_route_from_previous_trace() -> None:
     """Before any fresh reply, the stored route shows, marked as previous."""
     old = _trace(4.0)
