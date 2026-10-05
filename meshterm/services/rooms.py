@@ -21,6 +21,7 @@ Session-scoped state on the :class:`~meshterm.context.AppContext` (``ctx.rooms``
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import TYPE_CHECKING
 
@@ -45,6 +46,8 @@ class RoomService:
         #: When each room was last heard from this session (a login or a post), on the
         #: monotonic clock, keyed by room peer.
         self._heard: dict[str, float] = {}
+        #: The login on its way to each room, and the password it carries, keyed by peer.
+        self._inflight: dict[str, tuple[asyncio.Future, str]] = {}
 
     @staticmethod
     def _peer(room: Contact) -> str:
@@ -54,14 +57,17 @@ class RoomService:
     def password(self, room: Contact) -> str | None:
         """The password to log in to ``room`` with, or ``None`` when we hold none.
 
-        The room password first — it is what a member was given, and what got us in —
-        then the room's admin password, which Repeater admin may already remember and
-        which gets us in as its admin. ``""`` is a password (an open room).
+        The room's admin password first, when Repeater admin (or a join) remembers one: it
+        gets us everything the room password does and more. The order is not taste — a
+        room's login *replaces* a known member's role with the one the password earns, so
+        an owner who logged in with the room password would be demoted to member until
+        their next admin login. Then the room password. ``""`` is a password (a blank
+        login the room accepted).
         """
-        stored = self._ctx.room_store.password(room) if self._ctx.room_store else None
-        if stored is not None:
-            return stored
-        return self._ctx.admin_store.get(room)
+        admin = self._ctx.admin_store.get(room)
+        if admin:
+            return admin
+        return self._ctx.room_store.password(room) if self._ctx.room_store else None
 
     def joined(self, room: Contact) -> bool:
         """Whether MeshTerm can log in to ``room`` without asking for a password."""
@@ -100,18 +106,32 @@ class RoomService:
         )
 
     def login_due(self, room: Contact) -> bool:
-        """Whether opening ``room`` should log in to it: a password at hand and a quiet room."""
-        return self.joined(room) and not self.heard_recently(room)
+        """Whether opening ``room`` should log in: a password at hand, and a quiet room.
+
+        Never while a login to it is already on its way — that one's answer is this one's.
+        """
+        return (
+            self.joined(room)
+            and not self.heard_recently(room)
+            and self._peer(room) not in self._inflight
+        )
 
     async def login(self, room: Contact, password: str) -> RoomLogin:
         """Log in to ``room`` with ``password`` — one exchange — and remember the outcome.
 
         An accepted login is remembered the way each password is kept: the access and the
-        room password in the room store, an admin password in the admin store (shared with
-        Repeater admin, which will log in with it silently from now on). A login the node
-        *refused* forgets the password that was tried; one that met silence keeps
-        everything, since a room also stays silent for a wrong password and only a
-        password that once worked is ever stored.
+        room password in the room store (:meth:`~meshterm.core.room_store.RoomStore.
+        record` says what each kind of acceptance proves), and an admin password typed in
+        in the admin store, shared with Repeater admin, which logs in with it silently from
+        then on. A login the node *refused* forgets the password that was tried; one that
+        met silence keeps everything, since a room also stays silent for a wrong password
+        and only a password that once worked is ever stored.
+
+        One login to a room at a time, whoever asks. A login can take most of its reply
+        budget, and a room view closed and opened again inside it would otherwise send a
+        second one — both of which the room answers by restarting its catch-up. A caller
+        asking with the password already on its way shares that login's answer; one with
+        a different password waits for it to finish, then sends its own.
 
         Args:
             room: The room server to log in to.
@@ -124,11 +144,38 @@ class RoomService:
             Exception: Propagates a device error (no connection, a contact the companion
                 cannot address); nothing is remembered then.
         """
+        peer = self._peer(room)
+        running = self._inflight.get(peer)
+        if running is not None:
+            task, sent = running
+            if sent == password:
+                return await asyncio.shield(task)
+            try:
+                await asyncio.shield(task)
+            except Exception:  # noqa: BLE001 - its own caller hears about its failure
+                pass
+        task = asyncio.ensure_future(self._login_once(room, password))
+        self._inflight[peer] = (task, password)
+        # Cleared when the exchange ends, not when this caller stops waiting: a room view
+        # closed mid-login leaves the login running, and it is still the one in flight.
+        task.add_done_callback(lambda done: self._settle(peer, done))
+        return await asyncio.shield(task)
+
+    def _settle(self, peer: str, task: asyncio.Future) -> None:
+        """Forget a finished login as the one in flight, retrieving a failure no one awaits."""
+        if self._inflight.get(peer, (None, None))[0] is task:
+            del self._inflight[peer]
+        if not task.cancelled():
+            task.exception()
+
+    async def _login_once(self, room: Contact, password: str) -> RoomLogin:
+        """One login exchange, and what its outcome means for the stores and the session."""
         device = await self._ctx.device()
         login = await device.room_login(room, password)
         if self._ctx.room_store is not None:
             self._ctx.room_store.record(room, password, login)
-        if login.access is RoomAccess.ADMIN:
+        if login.access is RoomAccess.ADMIN and password:
+            # A blank login proves the room knows us, not what the admin password is.
             self._ctx.admin_store.record(room, password, LoginResult.ACCEPTED)
         elif login.result is LoginResult.REFUSED and password == self._ctx.admin_store.get(room):
             self._ctx.admin_store.record(room, password, login.result)

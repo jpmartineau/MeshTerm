@@ -40,8 +40,9 @@ class RoomMembership:
         key: The :func:`~meshterm.core.admin_store.admin_key` the room is stored under —
             the same key its admin password has, so the two stores agree on which room is
             which (the record's key in the file, not one of its fields).
-        password: The room password that got us in, ``""`` for a room open to anyone, or
-            ``None`` when we got in as its admin (that password lives in the admin store).
+        password: The room password that got us in, ``""`` for a blank login the room
+            accepted (an open room, or one that knew us), or ``None`` when no room password
+            is known — we got in as its admin, whose password lives in the admin store.
         access: The access the room granted at our last login: a
             :class:`~meshterm.core.models.RoomAccess` value.
         label: The room's name, for display.
@@ -136,27 +137,50 @@ class RoomStore:
         record`), for the room password: kept when the room accepts it, forgotten when the
         node *refuses* it, and left as it is when nothing came back — silence is not a
         verdict, and from a room it is also how a wrong password sounds, so a password that
-        never once worked is simply never written. An admin login is remembered as the
-        access alone; its password is the admin store's to keep.
+        never once worked is simply never written.
+
+        "Accepted" is not one proof, though, and a password is only kept for what it proved:
+
+        * **Admin** with a password typed in: the password is the admin store's to keep
+          (it is the room's admin password); here, only the access, beside whatever room
+          password was already remembered.
+        * **Member** with a password typed in: that password is the room password.
+        * **Read-only** proves nothing about the password at all — a room that lets
+          readers in lets *any* password in — so it never replaces one already
+          remembered, which may be a member's; it is kept only where nothing was.
+        * **Blank** asks "do you know me?" and proves only that the room does. It never
+          replaces a remembered password either: a member the room forgets on its next
+          restart would otherwise have swapped a password that works for one that can't.
 
         Args:
             room: The room the login addressed.
             password: The password that was tried.
             login: How the login ended.
         """
+        records = self._load()
+        key = admin_key(room)
+        known = records.get(key)
         if login.result is LoginResult.ACCEPTED and login.access is not None:
-            records = self._load()
-            key = admin_key(room)
+            kept = known.password if known is not None else None
+            if login.access is RoomAccess.ADMIN and password:
+                remembered = kept
+            elif login.access is RoomAccess.MEMBER and password:
+                remembered = password
+            else:
+                remembered = kept if kept is not None else password
             records[key] = RoomMembership(
                 key=key,
-                password=None if login.access is RoomAccess.ADMIN else password,
+                password=remembered,
                 access=login.access.value,
                 label=room.name,
                 last_login=utcnow().isoformat(),
             )
             self._write(records)
-        elif login.result is LoginResult.REFUSED:
-            self.forget(room)
+        elif login.result is LoginResult.REFUSED and known is not None:
+            # Only the password the node turned down is forgotten.
+            if known.password == password:
+                records.pop(key)
+                self._write(records)
 
     def forget(self, room: Contact) -> None:
         """Remove everything remembered about ``room``.

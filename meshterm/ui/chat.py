@@ -363,6 +363,15 @@ class ChatScreen(Screen):
     #: What an empty transcript says.
     _empty_text = "No messages yet — say hello!"
 
+    @property
+    def _replies(self) -> bool:
+        """Whether Enter on a picked message replies to it (else it opens its paths).
+
+        Where there are many voices and an @mention to say which one is answered — and
+        only while there is a compose line to put the reply on.
+        """
+        return self._multiparty and self._composing
+
     def _compose_line(self, width: int) -> RenderableType:
         """The compose line under the transcript: the input, with its byte budget.
 
@@ -690,7 +699,7 @@ class ChatScreen(Screen):
         message = self._messages[self._selected]
         sender, _ = self._sender_and_body(message)
         who = "this message" if message.outbound or sender == "·" else sender
-        if self._multiparty:
+        if self._replies:
             return Text(
                 f"↩ Enter to reply to {who} with an @mention · End to cancel",
                 style="accent",
@@ -758,7 +767,7 @@ class ChatScreen(Screen):
         """
         if action == "enter":
             if self._selected is not None:
-                if self._multiparty:
+                if self._replies:
                     self._begin_reply()
                 else:
                     self._open_paths(self._selected)
@@ -868,7 +877,7 @@ class ChatScreen(Screen):
         is one line); an empty result never opens the dialog. One paste dialog at a time,
         scheduled off the key handler like the paths view.
         """
-        if self._paste_open:
+        if self._paste_open or not self._composing:
             return
         clean = "".join(ch if ch.isprintable() else " " for ch in data).strip()
         if not clean:

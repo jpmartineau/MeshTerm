@@ -316,14 +316,81 @@ class _Ctx:
         return self._device
 
 
-def test_the_room_password_is_tried_before_the_admin_password(tmp_path: Path) -> None:
-    """A member's password first; the admin password, which also gets us in, after."""
+def test_the_admin_password_is_tried_before_the_room_password(tmp_path: Path) -> None:
+    """A login replaces a known member's role, so the room password would demote an owner."""
     ctx = _Ctx(tmp_path, MockDevice())
     assert ctx.rooms.password(ROOM) is None and not ctx.rooms.joined(ROOM)
-    ctx.admin_store.remember(ROOM, "admin")
-    assert ctx.rooms.password(ROOM) == "admin"
     ctx.room_store.record(ROOM, "hello", RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER))
     assert ctx.rooms.password(ROOM) == "hello"
+    ctx.admin_store.remember(ROOM, "admin")
+    assert ctx.rooms.password(ROOM) == "admin"
+
+
+def test_read_only_never_replaces_the_room_password(rooms: RoomStore) -> None:
+    """A room that lets readers in lets any password in: that proves nothing about one."""
+    rooms.record(ROOM, "hello", RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER))
+    rooms.record(ROOM, "helo", RoomLogin(LoginResult.ACCEPTED, RoomAccess.READ_ONLY))
+    assert rooms.password(ROOM) == "hello"
+    assert rooms.access(ROOM) is RoomAccess.READ_ONLY
+    first = RoomStore(rooms._path.with_name("other.json"))
+    first.record(ROOM, "guess", RoomLogin(LoginResult.ACCEPTED, RoomAccess.READ_ONLY))
+    assert first.password(ROOM) == "guess", "with nothing better, it is what gets back in"
+
+
+def test_a_blank_login_never_replaces_a_password(rooms: RoomStore) -> None:
+    """Blank proves the room knows us — until it restarts and forgets a member."""
+    rooms.record(ROOM, "hello", RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER))
+    rooms.record(ROOM, "", RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER))
+    assert rooms.password(ROOM) == "hello"
+    rooms.record(ROOM, "", RoomLogin(LoginResult.ACCEPTED, RoomAccess.ADMIN))
+    assert rooms.password(ROOM) == "hello"
+
+
+def test_an_admin_login_keeps_the_room_password_beside_it(rooms: RoomStore) -> None:
+    """The admin password lives in the admin store; the member's stays here as the fallback."""
+    rooms.record(ROOM, "hello", RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER))
+    rooms.record(ROOM, "admin", RoomLogin(LoginResult.ACCEPTED, RoomAccess.ADMIN))
+    assert rooms.password(ROOM) == "hello" and rooms.access(ROOM) is RoomAccess.ADMIN
+
+
+def test_a_refusal_forgets_only_the_password_it_refused(rooms: RoomStore) -> None:
+    """A node turning one password down says nothing about another."""
+    rooms.record(ROOM, "hello", RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER))
+    rooms.record(ROOM, "other", RoomLogin(LoginResult.REFUSED))
+    assert rooms.password(ROOM) == "hello"
+
+
+async def test_a_blank_admin_login_leaves_the_admin_password_alone(tmp_path: Path) -> None:
+    """Repeater admin shares that password; a blank probe must not erase it."""
+    ctx = _Ctx(tmp_path, MockDevice())
+    await ctx.rooms.login(ROOM, "admin")
+    login = await ctx.rooms.login(ROOM, "")
+    assert login.access is RoomAccess.ADMIN
+    assert ctx.admin_store.get(ROOM) == "admin"
+
+
+async def test_one_login_to_a_room_at_a_time(tmp_path: Path) -> None:
+    """A view closed and reopened mid-login shares the login rather than sending another."""
+    device = MockDevice()
+    ctx = _Ctx(tmp_path, device)
+    ctx.room_store.record(ROOM, "hello", RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER))
+    sent: list[str] = []
+    original = device.room_login
+
+    async def slow(room, password):  # noqa: ANN001, ANN202
+        sent.append(password)
+        await asyncio.sleep(0.05)
+        return await original(room, password)
+
+    device.room_login = slow
+    first = asyncio.ensure_future(ctx.rooms.login(ROOM, "hello"))
+    await asyncio.sleep(0)
+    assert not ctx.rooms.login_due(ROOM), "a login on its way is not due again"
+    second = await ctx.rooms.login(ROOM, "hello")
+    assert (await first) == second
+    assert sent == ["hello"]
+    third = await ctx.rooms.login(ROOM, "hello")  # once it is answered, a new one may go
+    assert third and sent == ["hello", "hello"]
 
 
 async def test_joining_with_the_room_password_makes_us_a_member(tmp_path: Path) -> None:
@@ -890,3 +957,34 @@ def test_chat_send_to_a_room_is_a_post(cli) -> None:  # noqa: ANN001
     receipt = json.loads(cli("--json", "chat", "send", "--to", "Lakeside BBS", "hi").stdout)
     assert receipt["kind"] == "room"
     assert receipt["acked"] is False, "this simulator never joined, so the room drops it"
+
+
+async def test_a_read_only_member_is_asked_for_a_password_and_offered_no_retry() -> None:
+    """^L asks (the room password is what lets a reader post); ^R would only be dropped."""
+    unacked = ChatMessage(text="lost", outbound=True, peer=ROOM.key_prefix, acked=False)
+    screen, calls = _view([unacked], access=RoomAccess.READ_ONLY)
+    assert screen._retry_target() is None
+    assert "^R" not in screen.footer_hint
+    screen.handle("login")
+    while screen._login_open:
+        await asyncio.sleep(0)
+    assert calls["asked"] == 1
+
+
+async def test_a_read_only_member_picks_a_post_to_see_its_paths_not_to_reply() -> None:
+    """With no compose line, Enter on a post has nothing to prime, and a paste nowhere to go."""
+    screen, _ = _view(_board(), access=RoomAccess.READ_ONLY)
+    opened: list[ChatMessage] = []
+
+    async def paths(message: ChatMessage) -> None:
+        opened.append(message)
+
+    screen._paths = paths
+    screen.handle("paste", "pasted text")
+    assert not screen._paste_open and screen._editor.text == ""
+    screen.handle("up")
+    assert screen.footer_hint.startswith("Enter paths")
+    screen.handle("enter")
+    await asyncio.sleep(0)
+    assert screen._editor.text == ""
+    assert [m.text for m in opened] == ["I'll check it"]

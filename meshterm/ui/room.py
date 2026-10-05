@@ -281,16 +281,29 @@ class RoomScreen(ChatScreen):
     def handle(self, action: str, data: str = "") -> None:
         """^L logs in; everything else is the chat's."""
         if action == "login":
-            self.begin_login(ask=self._login_state in (NO_REPLY, REFUSED, NOT_JOINED))
+            # Asked for, rather than sent with what is remembered, wherever that would only
+            # repeat the outcome on screen: after silence (a room's answer to a wrong
+            # password too), and when all we are is read-only — the room password is what
+            # lets a reader post.
+            ask = self._login_state in (NO_REPLY, REFUSED, NOT_JOINED) or (
+                self._access is RoomAccess.READ_ONLY
+            )
+            self.begin_login(ask=ask)
             self._session.invalidate()
             return
         super().handle(action, data)
+
+    def _retry_target(self) -> ChatMessage | None:
+        """An unacknowledged post to send again — never for a reader the room won't hear."""
+        return super()._retry_target() if self._composing else None
 
     @property
     def footer_hint(self) -> str:
         """Key hint: the chat's, in a board's words, with ^L while a login could start."""
         if self._selected is not None:
             code = " · ^U QR" if self._picked_urls() else ""
+            if not self._composing:  # nowhere to put a reply: Enter shows the post's paths
+                return f"Enter paths{code} · ↑↓ pick · ^End/Esc cancel"
             return f"Enter reply (@mention) · ^P paths{code} · ↑↓ pick · ^End/Esc cancel"
         atoms = ["Enter send"] if self._composing else []
         atoms.append("↑ pick a message")
