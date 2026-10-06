@@ -282,6 +282,16 @@ def test_a_bare_spidev_node_is_not_a_cardputer(cardputer: Path) -> None:
     assert spiradio.builtin_wiring("/dev/spidev0.1") is None
 
 
+def test_the_cap_reports_itself_by_name(cardputer: Path) -> None:
+    """The node's model is the board's name: the Cap, even under a profile that tweaks it."""
+    assert spiradio.board_name(spiradio.CARDPUTER_ZERO_CAP) == "Cap LoRa-1262"
+    tweaked = replace(spiradio.CARDPUTER_ZERO_CAP, use_dio3_tcxo=False)
+    assert spiradio.board_name(tweaked) == "Cap LoRa-1262"
+    assert spiradio.board_name(SpiWiring()) == ""  # the AIO's node: no board name to give
+    cardputer.rmdir()
+    assert spiradio.board_name(spiradio.CARDPUTER_ZERO_CAP) == ""  # some other Pi
+
+
 def test_a_profile_on_the_cap_s_node_wins(cardputer: Path) -> None:
     """A profile on the same node is the owner's word about it, and replaces the shipped one."""
     mine = replace(spiradio.CARDPUTER_ZERO_CAP, use_dio3_tcxo=False)

@@ -258,6 +258,19 @@ BUILTIN_RADIOS = (
 )
 
 
+def board_name(wiring: SpiWiring) -> str:
+    """The name of the shipped board ``wiring``'s radio is on, or ``""`` for none.
+
+    What the node reports as its model, so the Cap reads as "Cap LoRa-1262" wherever a
+    device's model is shown. Matched by the SPI node on this machine's board rather than
+    by the whole wiring, so a profile that adjusts the Cap's pins is still the Cap.
+    """
+    for radio in BUILTIN_RADIOS:
+        if radio.name and radio.wiring.spidev == wiring.spidev and radio.present():
+            return radio.name
+    return ""
+
+
 def builtin_wiring(spidev: str) -> SpiWiring | None:
     """The shipped wiring for the radio on ``spidev``, when this machine is its board."""
     for radio in BUILTIN_RADIOS:
@@ -692,6 +705,7 @@ async def start_node(wiring: SpiWiring, state: Path, *, node_name: str) -> NodeP
             "gps_baud": wiring.gps_baud,
         },
         "seed": {"node_name": node_name, **DEFAULT_SEED},
+        "model": board_name(wiring),
     }
     log_path = state / "node.log"
     _rotate(log_path)

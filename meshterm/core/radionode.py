@@ -77,7 +77,8 @@ RUNTIME = "openhop_core"
 BEGIN_ATTEMPTS = 3
 BEGIN_BACKOFF_S = 1.5
 
-#: The model string the frame server reports, which MeshTerm shows as the device model.
+#: The model string the frame server reports, which MeshTerm shows as the device model,
+#: for a radio on a board MeshTerm doesn't know by name (the Cap reports "Cap LoRa-1262").
 DEVICE_MODEL = "MeshTerm SPI node"
 
 log = logging.getLogger("radionode")
@@ -635,8 +636,9 @@ async def run_node(config: dict, report) -> int:  # noqa: ANN001 - (dict) -> Non
     """Bring the node up, report ready, and serve until told to stop.
 
     Args:
-        config: ``state_dir``, ``wiring`` (the board's pins and switches) and ``seed``
-            (name and radio settings for a node with no ``prefs.json`` yet).
+        config: ``state_dir``, ``wiring`` (the board's pins and switches), ``seed``
+            (name and radio settings for a node with no ``prefs.json`` yet) and ``model``
+            (the board's name, reported as the device model; :data:`DEVICE_MODEL` without).
         report: Sends the one status line to the parent.
 
     Returns:
@@ -672,6 +674,7 @@ async def run_node(config: dict, report) -> int:  # noqa: ANN001 - (dict) -> Non
             wiring,
             seed,
             report,
+            model=str(config.get("model") or DEVICE_MODEL),
             models=models,
             sx1262=sx1262,
             companion_mod=companion_mod,
@@ -687,6 +690,7 @@ async def _serve(  # noqa: PLR0913 - the library modules run_node imported, hand
     seed: dict,
     report,  # noqa: ANN001 - (dict) -> None
     *,
+    model: str,
     models: Any,
     sx1262: Any,
     companion_mod: Any,
@@ -790,7 +794,7 @@ async def _serve(  # noqa: PLR0913 - the library modules run_node imported, hand
             port=0,
             bind_address="127.0.0.1",
             local_hash=public_key[0],
-            device_model=DEVICE_MODEL,
+            device_model=model,
             client_idle_timeout_sec=None,
         )
         await server.start()
