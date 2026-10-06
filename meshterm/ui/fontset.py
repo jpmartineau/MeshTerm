@@ -28,7 +28,7 @@ from __future__ import annotations
 #: shared slots give a few glyphs more than one codepoint. Verified against a live table
 #: dump of the installed font (2026-08-01, post-P3 build). On 2026-10-06, the two powerline
 #: chevrons of the path chips (U+E0B0, U+E0B1) took the donor slots of U+2559 and U+255B.
-#: No live dump checked that build yet.
+#: The same day, a dump of the font installed on the Lyra matched this table exactly.
 # fmt: off
 FONT_RANGES: tuple[tuple[int, int], ...] = (
     (0x0020, 0x007F), (0x00A0, 0x00A0), (0x00A7, 0x00A7), (0x00A9, 0x00A9),
