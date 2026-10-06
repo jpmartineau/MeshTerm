@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """The ``channels`` tool: create, join, and manage mesh channels.
 
-Interactively it opens a full-screen channel manager (see :mod:`meshterm.ui.channels`) — a
-first-class, phone-app-style experience for creating private channels, adding public ``#``
-channels, joining with a key, importing a scanned ``meshcore://`` link, and sharing any
-channel as a QR code. On the CLI it exposes ``list``, ``add``, ``join``, ``import``,
-``share``, ``clear`` and ``scope`` subcommands for scripted use.
+In the menu, the tool opens a full-screen channel manager (refer to
+:mod:`meshterm.ui.channels`). The manager is a complete feature, similar to a phone app.
+With it, the user can create a private channel, add a public ``#`` channel, join a channel
+with a key, import a scanned ``meshcore://`` link, and share any channel as a QR code. On
+the CLI, the tool gives the ``list``, ``add``, ``join``, ``import``, ``share``, ``clear``,
+and ``scope`` subcommands for use in scripts.
 
-Channels are also *listed* by the ``chat`` tool for picking a conversation; this tool owns
-everything to do with configuring the slots themselves.
+The ``chat`` tool also lists the channels, so that the user can select a conversation. But
+this tool owns all the configuration of the slots.
 """
 
 from __future__ import annotations
@@ -49,11 +50,11 @@ class ChannelsTool(Tool):
         """Open the channel manager (menu) or run a scripted action (CLI).
 
         Args:
-            ctx: Shared application context.
-            params: A ``cli_action`` with its arguments (CLI), or empty for the menu.
+            ctx: The shared application context.
+            params: A ``cli_action`` and its arguments (CLI), or empty for the menu.
 
         Returns:
-            A :class:`ToolResult` recording what happened (the menu path shows nothing).
+            A :class:`ToolResult` that holds what occurred. The menu path shows nothing.
         """
         action = params.get("cli_action")
         if action is not None:
@@ -61,16 +62,16 @@ class ChannelsTool(Tool):
 
         from ..ui.channels import manage_channels
 
-        # No message: the manager acknowledged its work on the way out, which meant telling
-        # the reader that changes they had just watched land were applied. The count still
-        # goes to the run log through ``summary``, which is the record of what an invocation
-        # did rather than anything shown.
+        # No message. The manager once acknowledged its work when the user left it. That
+        # told the user that the changes were applied, but the user saw them occur already.
+        # The count still goes to the run log through ``summary``. ``summary`` is the
+        # record of what a run did, not a thing that the screen shows.
         return ToolResult(summary={"changes": await manage_channels(ctx)})
 
     # -- CLI --------------------------------------------------------------------
 
     async def _run_cli(self, ctx: AppContext, action: str, params: dict[str, Any]) -> ToolResult:
-        """Dispatch a scripted CLI action."""
+        """Run the handler for a scripted CLI action."""
         if action == "add":
             return await self._cli_add(ctx, params)
         if action == "join":
@@ -98,13 +99,13 @@ class ChannelsTool(Tool):
         )
 
     async def _cli_add(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Add a public, private-random, or explicitly-keyed channel on a slot."""
+        """Add a channel on a slot: public, private with a random key, or with a given key."""
         from ..ui.channels import write_channel
 
         device = await ctx.device()
         idx = int(params["index"])
         name = str(params["name"])
-        if name.startswith("#"):  # public: firmware derives the key from the name
+        if name.startswith("#"):  # public: the firmware derives the key from the name
             await write_channel(ctx, device, idx, name, None)
             secret = derive_secret(name)
         else:
@@ -117,7 +118,7 @@ class ChannelsTool(Tool):
         )
 
     async def _cli_join(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Join a channel from a name and an explicit key."""
+        """Join a channel with a name and a given key."""
         from ..ui.channels import write_channel
 
         device = await ctx.device()
@@ -147,11 +148,11 @@ class ChannelsTool(Tool):
         )
 
     async def _cli_share(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Print a channel's share link, with its QR code in the menu.
+        """Print the share link of a channel. In the menu, also show its QR code.
 
-        The one command that names a channel's key deliberately, so it is the one place
-        the secret and the share URL leave the app at all — every other channel document
-        carries the identity and stops there.
+        This is the only command that shows the key of a channel on purpose. Thus it is
+        the only place where the secret and the share URL go out of the app. Each other
+        channel document holds the identity of the channel and nothing more.
         """
         from ..core.channel_probe import read_channel_slots
 
@@ -171,12 +172,13 @@ class ChannelsTool(Tool):
         )
 
     async def _cli_clear(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Clear a channel slot, removing the channel from the device.
+        """Clear a channel slot. This removes the channel from the device.
 
-        The scriptable face of the channel manager's *Clear this slot*: an empty name
-        makes the firmware read the slot as unused. The ``--yes`` gate lives on the CLI
-        command (a private channel's key is lost with the slot unless it's saved
-        elsewhere), mirroring the interactive flow's danger confirmation.
+        This is the script form of "Clear this slot" in the channel manager. An empty
+        name makes the firmware read the slot as unused. The ``--yes`` gate is on the CLI
+        command, because the key of a private channel is lost with the slot if it is not
+        saved in a different place. The gate is the same as the danger confirmation of
+        the interactive flow.
         """
         from ..core.channel_probe import read_channel_slots
         from ..ui.channels import write_channel
@@ -190,27 +192,28 @@ class ChannelsTool(Tool):
                 report=(_cleared(idx, False),),
                 exit_code=exitcodes.NO_RESULT,
             )
-        await write_channel(ctx, device, idx, "", None)  # empty name => the slot reads as unused
+        await write_channel(ctx, device, idx, "", None)  # an empty name marks the slot as unused
         return ToolResult(
             summary={"index": idx, "cleared": True},
             report=(_cleared(idx, True),),
         )
 
     async def _cli_scope(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Read, set or clear the region a channel's messages are sent under.
+        """Read, set, or clear the scope of a channel: the region its messages are sent in.
 
-        The scriptable face of the detail page's *Send scope…*. The scope is MeshTerm's to
-        keep (the firmware has none per channel; the send sets the companion's session
-        scope around each message), so setting one writes nothing to the radio — the slot
-        is read only to learn which channel is in it, since the scope is keyed by the
-        channel's identity and follows it to any slot.
+        This is the script form of "Send scope…" on the detail page. MeshTerm keeps the
+        scope, because the firmware has no scope for each channel. When MeshTerm sends a
+        message, it sets the session scope of the companion around that message. Thus,
+        when this command sets a scope, it writes nothing to the device. It reads the slot
+        only to find which channel is in it, because the scope is keyed by the identity of
+        the channel. The scope follows the channel to any slot.
 
-        With no region, the plain face prints the scope alone, the way ``config get`` prints
-        one value — and a channel with none prints ``-`` and exits 0: "no scope, so the
-        device default" is an answer about a channel that is there, not an empty result. A
-        set or a clear prints nothing, and the document always carries the channel and its
-        scope (``null`` for none). Only an empty slot, with no channel to answer about,
-        exits 5.
+        With no region, the plain face prints only the scope, as ``config get`` prints one
+        value. A channel with no scope prints ``-`` and exits 0, because "no scope, so the
+        device default" is an answer about a channel that exists. It is not an empty
+        result. A set or a clear prints nothing. The document always holds the channel and
+        its scope (``null`` for no scope). Only an empty slot exits 5, because it has no
+        channel to answer about.
         """
         from ..core.channel_probe import read_channel_slots
 
@@ -220,8 +223,9 @@ class ChannelsTool(Tool):
         region = params.get("region")
         if slot is None:
             if region is not None or params.get("clear"):
-                # A write names a channel that isn't there: a bad argument, not an empty
-                # answer — exit 5 would tell a script the scope was set and read back empty.
+                # A write names a channel that does not exist. That is a bad argument, not an
+                # empty answer. Exit 5 tells a script that the scope was set and then read
+                # back as empty, which is false.
                 import typer
 
                 raise typer.BadParameter(f"slot {idx} is empty; there is no channel to scope")
@@ -244,12 +248,12 @@ class ChannelsTool(Tool):
 
     @staticmethod
     async def _show_qr(ctx: AppContext, name: str, url: str) -> None:
-        """Draw a channel's share link as a QR code — in the menu, and only there.
+        """Draw the share link of a channel as a QR code, only in the menu.
 
-        The QR is for a phone pointed at the screen, and there it takes the whole screen
-        (:func:`~meshterm.ui.qr.share_screen`). Piped into a file it is a block of block
-        characters wrapped around the one thing that is actually the answer, so a scripted
-        run states the link and nothing else.
+        The QR code is for a phone that points at the screen. There, the code fills the
+        whole screen (:func:`~meshterm.ui.qr.share_screen`). In a file (through a pipe),
+        the code is only a mass of block characters around the link, and the link is the
+        real answer. Thus a scripted run prints the link and nothing else.
         """
         from ..ui.qr import share_screen
         from ..ui.surface import TuiUi
@@ -314,8 +318,9 @@ class ChannelsTool(Tool):
             ),
         ) -> None:
             if not yes:
-                # A usage error, in the parser's own words and under its own status — not a
-                # red line printed onto whatever is reading this command's output.
+                # A usage error, in the words of the parser and with its exit status. It is
+                # not a red line printed into the program that reads the output of this
+                # command.
                 raise typer.BadParameter(
                     "clearing a slot removes the channel (a private channel's key is lost "
                     "unless you have it saved). Re-run with --yes to confirm."
@@ -349,14 +354,16 @@ class ChannelsTool(Tool):
 
 
 def _channel_listing(slots: list, store: object | None = None) -> Listing:
-    """The configured slots, one record each.
+    """The configured slots, one record for each slot.
 
-    The one listing whose record *is* a shared shape rather than carrying one: a row that
-    nested its only field under a ``channel`` key would make ``jq '.[].channel.name'``
-    out of a listing whose every column is already the channel.
+    This is the only listing whose record is a shared shape itself, instead of a record
+    that holds one. Each column of this listing is already the channel. If each row put
+    its only field under a ``channel`` key, a query must be ``jq '.[].channel.name'``
+    for no reason.
 
-    ``SCOPE`` is the region the channel's messages are sent under (``-`` and ``null`` for
-    the device default), read from the region store the send path reads.
+    ``SCOPE`` is the region that the messages of the channel are sent in (``-`` and
+    ``null`` for the device default). The value comes from the region store, which the
+    send path also reads.
     """
     from ..ui import fields
     from ..ui.report import Listing
@@ -389,15 +396,15 @@ def _channel_listing(slots: list, store: object | None = None) -> Listing:
 def _scoped(
     idx: int, name: str | None, secret: bytes | None, scope: str | None, *, changed: bool
 ) -> Facts:
-    """What ``channels scope`` read or set: the channel and the region it sends into.
+    """What ``channels scope`` read or set: the channel and the region that it sends into.
 
     Args:
         idx: The slot index.
-        name: The channel name, or ``None`` for a slot that turned out to be empty.
+        name: The channel name, or ``None`` if the slot is empty.
         secret: The 16-byte key, or ``None`` for an empty slot.
-        scope: The channel's scope now, or ``None`` for the device default.
-        changed: Whether this run set or cleared it — then the plain face is silent, the
-            way every write's is; a read prints the scope alone.
+        scope: The current scope of the channel, or ``None`` for the device default.
+        changed: Whether this run set or cleared the scope. If it did, the plain face
+            prints nothing, as for each write. A read prints only the scope.
 
     Returns:
         The facts block.
@@ -410,10 +417,11 @@ def _scoped(
     if name is not None and secret is not None:
         public = is_public_channel(name, secret)
         channel = ChannelRef(slot=idx, name=name, public=public, hash=channel_hash(secret))
-    # A channel with no scope answers `-` plain (and `null` in the document): "the device
-    # default" is an answer about a channel that is there, where the bare form's usual
-    # silence for an absent value would leave only the exit status to say it. An empty
-    # slot has no channel to answer about, so it keeps that silence (and its exit 5).
+    # A channel with no scope prints `-` on the plain face (and `null` in the document).
+    # "The device default" is an answer about a channel that exists. Usually the bare form
+    # prints nothing for an absent value, and then only the exit status can give this
+    # answer. An empty slot has no channel to answer about, so it keeps that silence (and
+    # its exit 5).
     value = Rendered(scope, scope or script.NONE) if channel is not None else None
     return Facts(
         key="channel",
@@ -425,17 +433,18 @@ def _scoped(
 
 
 def _written(idx: int, name: str | None, secret: bytes | None, *, shown: bool = True) -> Facts:
-    """What a slot now holds, after ``add``, ``join``, ``import`` or ``share``.
+    """What a slot holds now, after ``add``, ``join``, ``import``, or ``share``.
 
-    All four write or read the same thing and all four know the key they wrote, so all
-    four state the same shape. The plain face prints the share URL alone where the caller
-    asked to be given something to pass on (``add``, ``share``) and nothing at all where
-    it did not (``join``, ``import``): those two were handed the key, and reading it back
-    to them is not an answer.
+    All four commands write or read the same thing, and all four know the key that they
+    wrote. Thus all four give the same shape. The plain face prints only the share URL
+    when the caller asked for something to give to other persons (``add``, ``share``). It
+    prints nothing when the caller did not ask for it (``join``, ``import``). The caller
+    gave the key to these two commands, and to read the key back to the caller is not an
+    answer.
 
     Args:
         idx: The slot index.
-        name: The channel name, or ``None`` for a slot that turned out to be empty.
+        name: The channel name, or ``None`` if the slot is empty.
         secret: The 16-byte key, or ``None`` for an empty slot.
         shown: Whether the plain face prints the URL.
 
@@ -468,7 +477,7 @@ def _written(idx: int, name: str | None, secret: bytes | None, *, shown: bool = 
 
 
 def _cleared(idx: int, cleared: bool) -> Facts:
-    """What ``channels clear`` did — nothing plain, since the status already said it."""
+    """What ``channels clear`` did. The plain face prints nothing, because the status said it."""
     from ..ui import fields
     from ..ui.report import SILENT, Facts
 

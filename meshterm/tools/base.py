@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The tool plugin contract and registry.
+"""The contract and the registry of the tool plugins.
 
-A *tool* is one menu option / CLI subcommand. Subclass :class:`Tool`, decorate it with
-:func:`register`, and implement :meth:`Tool.run`. The same registry drives both the
-interactive menu and the Typer CLI, and :meth:`Tool.execute` wraps every invocation in a
-logged ``runs`` row, so new tools get persistence and logging for free.
+A *tool* is one menu item and one CLI subcommand. To make a tool, subclass :class:`Tool`,
+decorate it with :func:`register`, and implement :meth:`Tool.run`. The same registry
+controls the interactive menu and the Typer CLI. :meth:`Tool.execute` puts each run of a
+tool in a logged ``runs`` row. Thus a new tool gets storage and logging with no more
+work.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..core import exitcodes
 
-if TYPE_CHECKING:  # avoid importing typer/context at module load for fast startup
+if TYPE_CHECKING:  # do not import typer or the context at module load, for a fast start
     import typer
 
     from ..context import AppContext
@@ -24,34 +25,36 @@ if TYPE_CHECKING:  # avoid importing typer/context at module load for fast start
 
 @dataclass(slots=True)
 class ToolResult:
-    """The outcome of a tool execution.
+    """The result of a run of a tool.
 
     Attributes:
-        summary: JSON-serializable summary persisted to the run record.
-        message: Optional human-readable closing message. The *menu's* closing line — a
-            scripted run does not print it (see
+        summary: A summary that can be serialized to JSON. It is stored in the record of
+            the run.
+        message: An optional closing message for a person. It is the closing line of the
+            *menu*. A scripted run does not print it (refer to
             :func:`~meshterm.cli._execute_and_render`), because on the command line it
-            restates the output above it and the exit status below it.
-        artifacts: Paths to any files produced (e.g. generated visualizations).
-        exit_code: The status a scripted run should exit with — see
-            :mod:`meshterm.core.exitcodes`. Left at ``OK`` by everything that worked;
-            set to ``NO_RESULT`` by a tool that ran fine and found nothing to report, so
-            a caller can tell an empty mesh from a full one without counting lines. A
-            *failure* is raised, not returned, so this never carries one.
-        report: **The answer**, as data (see :mod:`meshterm.ui.report`). A scripted run
-            states it here and the CLI boundary hands it to a renderer, exactly as it
-            already does with ``exit_code`` — the tool says what happened, and something
-            else turns that into bytes or into a process status. It used to be printed
-            instead, which meant the answer was gone by the time anything could ask for it
-            in another format, which is why ``--json`` reached two commands and stopped.
+            repeats the output above it and the exit status below it.
+        artifacts: The paths of the files that the tool made (for example, generated
+            visualizations).
+        exit_code: The status with which a scripted run must exit. Refer to
+            :mod:`meshterm.core.exitcodes`. A tool that worked keeps ``OK``. A tool that
+            ran correctly and found nothing to report sets ``NO_RESULT``. Thus a caller
+            can tell an empty mesh from a full one, and does not have to count lines. A
+            *failure* is raised, not returned, so this value never holds one.
+        report: **The answer**, as data (refer to :mod:`meshterm.ui.report`). A scripted
+            run puts it here, and the CLI boundary gives it to a renderer. The boundary
+            does the same with ``exit_code``: the tool says what occurred, and other code
+            changes that into bytes or into a process status. Before, the tool printed
+            the answer instead. Then the answer was gone before anything could ask for it
+            in another format. That is why ``--json`` got to two commands and stopped.
 
-            ``None`` for the menu path and for a feature with no scripted face at all (the
-            map, the dashboard), which keep working unchanged.
+            ``None`` for the menu path, and for a feature that has no scripted face (the
+            map, the dashboard). These continue to work with no change.
 
-            Not folded into ``summary``: that is the *run log's* record of what this
-            invocation did, written to the ``runs`` table on every execution including a
-            menu run. Putting a five-hour ``monitor`` capture in SQLite would be the price
-            of one field fewer.
+            It is not part of ``summary``. ``summary`` is the record in the *run log* of
+            what this run did, and each run writes it to the ``runs`` table, also a menu
+            run. If ``report`` is part of it, a five-hour ``monitor`` capture goes into
+            SQLite. That is the cost of one field fewer.
     """
 
     summary: dict[str, Any] = field(default_factory=dict)
@@ -62,27 +65,31 @@ class ToolResult:
 
 
 class Tool(ABC):
-    """Base class for all MeshTerm features.
+    """The base class for all MeshTerm features.
 
     Class Attributes:
-        name: CLI identifier (kebab-case), unique across tools.
-        title: Display name shown as the interactive menu item and on the tool's result
-            window. Capitalized, and kept identical to the screen the item opens so the
-            menu never promises one name and delivers another. Falls back to ``name``.
-        help: One-line description shown in the menu and ``--help`` (no trailing period).
-        icon: Emoji drawn before the title in the interactive menu (and only there — the
-            result window keeps the plain title). Single-codepoint, emoji-presentation
-            glyphs only, so the two-cell width holds across terminals (see
-            :mod:`meshterm.ui.tui.emoji_width`).
-        category: Grouping label used to organize the interactive menu.
-        order: Sort key within a category (lower sorts first).
-        menu_visible: Whether the tool appears in the interactive menu. Set ``False`` for
-            CLI-only tools (e.g. startup-time diagnostics with no place in a connected
-            session); such tools still register a CLI subcommand as usual.
-        popup: Whether the menu stays pushed while this tool runs, so the tool's prompts
-            and result float over it as modal popups (the quit-dialog pattern) instead of
-            replacing the screen. For quick dialog-sized tools; a tool that pushes its
-            own full screen keeps the default.
+        name: The CLI identifier (kebab-case). It is unique among the tools.
+        title: The name that the interactive menu item and the result screen of the tool
+            show. It starts with a capital letter. It is the same as the name of the
+            screen that the item opens, so that the menu never shows one name and opens
+            another. If it is empty, ``name`` is used.
+        help: The one-line description in the menu and in ``--help`` (with no period at
+            the end).
+        icon: The emoji that the interactive menu draws before the title (only there:
+            the result screen keeps the plain title). Use only glyphs of one code point
+            with emoji presentation, so that the width of two cells is the same on all
+            terminals (refer to :mod:`meshterm.ui.tui.emoji_width`).
+        category: The group label that organizes the interactive menu.
+        order: The sort key in a category (a lower value comes first).
+        menu_visible: Whether the tool is in the interactive menu. Set ``False`` for a
+            tool that is only for the CLI (for example, diagnostics at startup, which
+            have no place in a connected session). Such a tool registers a CLI
+            subcommand as usual.
+        popup: Whether the menu stays pushed while this tool runs. Then the prompts and
+            the result of the tool float over the menu as modal dialogs (the pattern of
+            the quit dialog), and do not replace the screen. This is for quick tools of
+            the size of a dialog. A tool that pushes its own full screen keeps the
+            default.
     """
 
     name: str = ""
@@ -96,39 +103,40 @@ class Tool(ABC):
 
     @abstractmethod
     async def run(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Execute the tool's work.
+        """Do the work of the tool.
 
         Args:
-            ctx: Shared application context (console, device, repository, ...).
-            params: Validated parameters for this invocation.
+            ctx: The shared application context (console, device, repository, and other
+                items).
+            params: The validated parameters for this run.
 
         Returns:
-            A :class:`ToolResult` describing the outcome.
+            A :class:`ToolResult` that describes the result.
         """
 
     async def prompt_params(self, ctx: AppContext) -> dict[str, Any]:
-        """Interactively gather parameters for the menu.
+        """Ask the user for the parameters of a menu run.
 
-        The default implementation requires no parameters. Tools override this to ask
-        the user through :attr:`AppContext.ui` — a dialog or a select list in the menu, and
-        nothing at all on the CLI, where the arguments came off the command line.
+        The default implementation has no parameters. A tool overrides this method to ask
+        the user through :attr:`AppContext.ui`: a dialog or a select list in the menu.
+        On the CLI, it asks nothing, because the arguments came from the command line.
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
 
         Returns:
-            A parameter dict compatible with :meth:`run`.
+            A dict of parameters that :meth:`run` accepts.
         """
         return {}
 
     def register_cli(self, app: typer.Typer) -> None:
         """Register this tool as a Typer subcommand.
 
-        The default registers a no-argument command. Tools with parameters override this
-        to declare typed options, then delegate to :meth:`execute`.
+        The default registers a command with no arguments. A tool with parameters
+        overrides this method to declare typed options, and then calls :meth:`execute`.
 
         Args:
-            app: The Typer application to add the command to.
+            app: The Typer application that gets the command.
         """
         from ..cli import run_tool_command
 
@@ -137,20 +145,20 @@ class Tool(ABC):
             run_tool_command(self, {})
 
     async def execute(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Run the tool wrapped in run-logging and error capture.
+        """Run the tool, with a log of the run and a capture of its errors.
 
-        Opens a ``runs`` row before execution and closes it with the final status and
-        summary afterward, regardless of success.
+        This method opens a ``runs`` row before the run. After the run, it closes the row
+        with the final status and the summary, also when the run failed.
 
         Args:
-            ctx: Shared application context.
-            params: Parameters for this invocation.
+            ctx: The shared application context.
+            params: The parameters for this run.
 
         Returns:
             The :class:`ToolResult` from :meth:`run`.
 
         Raises:
-            Exception: Re-raises any error from :meth:`run` after recording it.
+            Exception: Each error from :meth:`run`, raised again after it is stored.
         """
         import typer
 
@@ -168,24 +176,27 @@ class Tool(ABC):
             DeviceConfigError,
             DeviceCommandError,
             PreferenceError,
-            # A tool rejecting one of its own arguments (an unresolvable `--to`) raises
-            # what the parser would have. It is a usage error, not a fault.
+            # When a tool refuses one of its own arguments (a `--to` that it cannot
+            # resolve), it raises the same error as the parser. It is a usage error, not a
+            # fault.
             typer.BadParameter,
             typer.Abort,
             typer.Exit,
         ) as exc:
-            # Expected user-facing condition (no/ambiguous device, a bad config or
-            # preference value, a bad argument, or a transient command failure): record it
-            # but don't dump a traceback; callers print the message cleanly.
+            # An expected condition for the user (no device or an ambiguous device, a bad
+            # config or preference value, a bad argument, or a temporary failure of a
+            # command). Store it, but do not write a traceback. The callers print the
+            # message cleanly.
             ctx.repo.finish_run(run_id, "error", {"error": str(exc)})
             ctx.log.debug("run %s aborted: %s", run_id, exc)
             raise
-        except Exception as exc:  # noqa: BLE001 - we record then re-raise
+        except Exception as exc:  # noqa: BLE001 - we store it, then raise it again
             ctx.repo.finish_run(run_id, "error", {"error": str(exc)})
             if is_connection_lost(exc):
-                # The radio was unplugged or powered off mid-command. Every layer above
-                # already knows how to say that in one line; a stack of serial internals
-                # describes how the driver found out, which is not the same question.
+                # The device was disconnected or switched off during a command. Each
+                # layer above knows how to say that in one line. A stack of serial
+                # internals tells how the driver found the problem, and that is a
+                # different question.
                 ctx.log.warning("run %s lost the device connection: %s", run_id, exc)
             else:
                 ctx.log.exception("run %s failed: %s", run_id, exc)
@@ -197,20 +208,22 @@ class Tool(ABC):
 
 _REGISTRY: dict[str, Tool] = {}
 
-#: Explicit menu ordering for tool categories. The menu asks "What would you like to
-#: do?", so its sections answer that: each names a *doing*, not a subject, and holds
-#: everything that shares it. Message leads (the everyday features, plus the book you
-#: pick a recipient from), then Watch (what the mesh is doing, what it did, what to be
-#: told about), Explore (where the nodes are, how they reach each other, and the boards
-#: that score the walking), then the two owners a setting can belong to — This node, the
-#: radio in your hand, and Other nodes, someone else's over the mesh.
+#: The explicit order of the tool categories in the menu. The menu asks "What would you
+#: like to do?", so its sections answer that question. Each section names an *activity*,
+#: not a subject, and holds all the items for that activity. Message is first (the
+#: features for each day, and the list from which you select a recipient). Then come Watch
+#: (what the mesh does, what it did, and what to get notifications about) and Explore
+#: (where the nodes are, how they get to each other, and the boards that score the walks).
+#: Then come the two owners of a setting: This node (the radio in your hand) and Other
+#: nodes (the radio of another person, over the mesh).
 #:
-#: This app closes the list as the third and last *owner*, after the radio in your hand and
-#: someone else's over the mesh: the program in front of you. It holds the one thing that
-#: changes how MeshTerm behaves (Preferences) and the four pages that say what MeshTerm is
-#: — questions none of the doings above can hold, and which nothing on the mesh can answer.
-#: It sits last because a reader who has run out of things to do is who goes looking for it.
-#: Categories not listed here sort last, alphabetically, so a new category still appears.
+#: This app ends the list as the third and last *owner*, after the radio in your hand and
+#: the radio of another person over the mesh: it is the program in front of you. It holds
+#: the one item that changes how MeshTerm behaves (Preferences), and the four pages that
+#: say what MeshTerm is. These are questions that no activity above can hold, and that
+#: nothing on the mesh can answer. This app is last because the user who has nothing more
+#: to do is the user who looks for it. Categories that are not in this list come last, in
+#: alphabetical order. Thus a new category is always in the menu.
 _CATEGORY_ORDER = [
     "Message",
     "Watch",
@@ -222,7 +235,7 @@ _CATEGORY_ORDER = [
 
 
 def _category_rank(category: str) -> int:
-    """Return a category's sort rank (its position in ``_CATEGORY_ORDER``, else last)."""
+    """Return the sort rank of a category (its position in ``_CATEGORY_ORDER``, or last)."""
     try:
         return _CATEGORY_ORDER.index(category)
     except ValueError:
@@ -230,16 +243,16 @@ def _category_rank(category: str) -> int:
 
 
 def register(cls: type[Tool]) -> type[Tool]:
-    """Class decorator that instantiates a tool and adds it to the registry.
+    """A class decorator that makes an instance of a tool and adds it to the registry.
 
     Args:
         cls: The :class:`Tool` subclass to register.
 
     Returns:
-        The unchanged class (so the decorator is transparent).
+        The class with no change (thus the decorator is transparent).
 
     Raises:
-        ValueError: If the tool has no ``name`` or the name is already registered.
+        ValueError: If the tool has no ``name``, or if the name is already registered.
     """
     instance = cls()
     if not instance.name:
@@ -251,14 +264,14 @@ def register(cls: type[Tool]) -> type[Tool]:
 
 
 def all_tools() -> list[Tool]:
-    """Return all registered tools sorted by category rank, then order, then name.
+    """Return all the registered tools, sorted by category rank, then order, then name.
 
-    Categories are ordered by :data:`_CATEGORY_ORDER` (Mesh first), so the first-class
-    Chat and Channels tools lead the menu; within a category, ``order`` then ``name`` break
-    ties.
+    :data:`_CATEGORY_ORDER` sets the order of the categories (Mesh first). Thus the main
+    tools, Chat and Channels, come first in the menu. In a category, ``order`` and then
+    ``name`` decide a tie.
 
     Returns:
-        The registered tool instances in stable menu order.
+        The registered tool instances, in a stable menu order.
     """
     return sorted(
         _REGISTRY.values(),
@@ -267,12 +280,12 @@ def all_tools() -> list[Tool]:
 
 
 def get_tool(name: str) -> Tool | None:
-    """Look up a registered tool by name.
+    """Find a registered tool by its name.
 
     Args:
-        name: The tool's ``name``.
+        name: The ``name`` of the tool.
 
     Returns:
-        The tool instance, or ``None`` if not registered.
+        The tool instance, or ``None`` if no tool has that name.
     """
     return _REGISTRY.get(name)

@@ -1,19 +1,25 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The ``tx-optimize`` tool: tune a remote node's TX power for the best signal at a target.
+"""The ``tx-optimize`` tool: tune the TX power of a remote node for the best signal at a target.
 
-You force a path (just like ``trace``) ending at the **target** node where SNR is
-measured. The node one hop *before* the target — one you hold admin rights on — is the
-node whose transmit power gets swept and tuned. Admin passwords are remembered between
-runs.
+You force a path (the same as for ``trace``) that ends at the **target** node, where
+MeshTerm measures the SNR. The node one hop *before* the target is the node whose transmit
+power MeshTerm sweeps and tunes. You must have admin rights on that node. MeshTerm keeps
+the admin passwords from one run to the next.
 
-In the interactive menu one two-step dialog chooses the link — the node to tune
-(repeaters you hold credentials for lead the list), then the target whose reception is
-optimized — and the live sweep screen (:mod:`meshterm.ui.tx_screen`) takes it from
-there, armed but idle: route, range, step, and samples are adjusted in place, nothing
-transmits until Sweep is committed, levels land in a bar chart as they are measured, and
-the apply decision is made *after* the sweep, over the evidence. On the CLI it stays a
-scriptable one-shot with the full flag set (``--path``, range, step, samples,
-``--apply``), and progress streams like a trace.
+In the interactive menu, one dialog with two steps selects the link. First, it selects
+the node to tune (the repeaters for which you have credentials come first in the list).
+Then it selects the target whose reception MeshTerm optimizes. Then the live sweep screen
+(:mod:`meshterm.ui.tx_screen`) continues. It is ready, but it does nothing yet:
+
+- You adjust the route, the range, the step, and the samples on the screen.
+- Nothing transmits until you start Sweep.
+- The levels go into a bar chart as MeshTerm measures them.
+- You decide whether to apply the result *after* the sweep, when you can see the
+  evidence.
+
+On the CLI, the tool stays a scriptable single run with the full set of flags
+(``--path``, range, step, samples, ``--apply``), and it streams its progress as a trace
+does.
 """
 
 from __future__ import annotations
@@ -30,47 +36,48 @@ from ..services import trace_runner, tx_optimizer
 from ..ui.widgets import tx_opt_summary, tx_opt_table
 from .base import Tool, ToolResult, register
 
-#: Trace count per TX level — kept to single digits so the radio's duty cycle stays sane
-#: and the per-level sweep finishes in reasonable time.
+#: The number of traces for each TX level. It stays below 10, so that the duty cycle of the
+#: radio stays in safe limits and the sweep of each level ends in a reasonable time.
 MAX_SAMPLES = 9
 
 
 @register
 class TxOptimizeTool(Tool):
-    """Tune a remote node's TX power for the strongest, most reliable signal at a target."""
+    """Tune the TX power of a remote node for the strongest, most reliable signal at a target."""
 
     name = "tx-optimize"
     title = "TX optimize"
     icon = "📶"
     help = "Tune a remote node's TX power for a target"
     category = "Other nodes"
-    order = 20  # like Repeater admin: a remote radio, changed over the mesh
+    order = 20  # the same as Repeater admin: a remote radio, changed over the mesh
 
     async def prompt_params(self, ctx: AppContext) -> dict[str, Any] | None:
-        """Nothing to gather here — the link is picked inside :meth:`run`.
+        """Nothing to collect here. The user selects the link in :meth:`run`.
 
-        The two picks are one stepped dialog, and the sweep screen opens the moment it
-        closes; keeping them together in :meth:`_run_live` keeps the contacts read (the one
-        slow thing on the way in) shared between the dialog's rows and the sweep's resolver.
+        The two selections are one dialog with steps, and the sweep screen opens
+        immediately when that dialog closes. :meth:`_run_live` keeps them together. Thus the
+        dialog rows and the resolver of the sweep share one read of the contacts (the only
+        slow step before the screen opens).
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
 
         Returns:
-            ``{"live": True}`` — the menu's marker for the interactive path.
+            ``{"live": True}``: the marker of the menu for the interactive path.
         """
         return {"live": True}
 
     async def execute(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Run — without the outer run row on the live path.
+        """Run, with no outer run row on the live path.
 
-        The live screen opens its own ``runs`` row for the sweep (matching what a
-        scripted invocation records), so wrapping the screen session in another row
-        would double-log it. Scripted runs keep the base class's logging.
+        The live screen opens its own ``runs`` row for the sweep (the same row that a
+        scripted run stores). If another row goes around the screen session, the log has
+        the sweep two times. Scripted runs keep the logging of the base class.
 
         Args:
-            ctx: Shared application context.
-            params: Parameters for this invocation.
+            ctx: The shared application context.
+            params: The parameters for this run.
 
         Returns:
             The :class:`ToolResult` from :meth:`run`.
@@ -80,16 +87,17 @@ class TxOptimizeTool(Tool):
         return await super().execute(ctx, params)
 
     async def run(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Open the live sweep (menu) or run the scripted optimization (CLI).
+        """Open the live sweep (menu), or run the scripted optimization (CLI).
 
         Args:
-            ctx: Shared application context.
-            params: ``live`` from the menu (both nodes are picked in one dialog); or ``path``,
-                ``samples``, ``tx_min``, ``tx_max``, ``step``, ``apply``, optional
-                ``password``/``viz``, and the injected ``_run_id`` from the CLI.
+            ctx: The shared application context.
+            params: ``live`` from the menu (the user selects the two nodes in one dialog).
+                Or, from the CLI: ``path``, ``samples``, ``tx_min``, ``tx_max``, ``step``,
+                ``apply``, the optional ``password`` and ``viz``, and the injected
+                ``_run_id``.
 
         Returns:
-            A :class:`ToolResult` with the optimum and any chart path.
+            A :class:`ToolResult` with the optimum and the chart path, if there is one.
         """
         if params.get("live"):
             return await self._run_live(ctx)
@@ -98,36 +106,38 @@ class TxOptimizeTool(Tool):
     # -- interactive (menu) ---------------------------------------------------------
 
     async def _run_live(self, ctx: AppContext) -> ToolResult:
-        """Pick the link in one stepped dialog, then run the sweep screen over the menu.
+        """Select the link in one dialog with steps, then run the sweep screen over the menu.
 
-        The two picks — the node to tune, then the node to measure at — are one floating
-        list that turns its page (:func:`~meshterm.ui.menus.run_wizard`): Esc on the
-        second step turns back to the first with the picked node still highlighted, Esc
-        on the first leaves. The dialog is gone before the sweep screen opens, so Esc from
-        the sweep lands on the main menu: the link was a question on the way in, not a
-        place to come back to. It used to be two pickers, each kept pushed under the
-        sweep as a hub — three frames deep for a sweep, and two popups stacked on the way
-        in, which read as two places rather than one question in two parts.
+        The two selections (first the node to tune, then the node at which to measure) are
+        one floating list that turns its page (:func:`~meshterm.ui.menus.run_wizard`).
+        Esc on the second step turns back to the first step, and the selected node stays
+        highlighted. Esc on the first step leaves. The dialog closes before the sweep screen
+        opens, so Esc from the sweep goes to the main menu. The link was a question before
+        the screen, not a place to come back to. Before, there were two pickers, and each
+        stayed pushed under the sweep as a hub. That put the sweep three frames deep, and
+        put two dialogs on top of each other before it. They looked like two places, not
+        one question in two parts.
 
-        No login here: the screen logs in inside the first Sweep commit, so backing
-        out of an idle screen never touched the radio beyond the contact reads.
+        There is no login here. The screen logs in when the user starts the first Sweep.
+        Thus, if the user leaves an idle screen, MeshTerm did nothing with the radio but
+        read the contacts.
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
 
         Returns:
-            A :class:`ToolResult` echoing the sweep's recorded summary.
+            A :class:`ToolResult` that repeats the stored summary of the sweep.
         """
         from ..ui.admin_picker import admin_picker_rows
         from ..ui.menus import WizardPage, run_wizard
         from ..ui.surface import TuiUi
         from ..ui.tx_screen import open_tx_optimize
 
-        if not isinstance(ctx.ui, TuiUi):  # pragma: no cover - guarded by the menu-only caller
+        if not isinstance(ctx.ui, TuiUi):  # pragma: no cover - only the menu calls this
             raise RuntimeError("the live TX sweep is only available in the menu")
 
-        # Through the session cache: this entry flow runs on every open, and the contacts
-        # table is a slow read on a busy node (see
+        # Read through the session cache. This entry flow runs each time the tool opens, and
+        # the contacts table is a slow read on a busy node (refer to
         # :class:`~meshterm.services.device_state.DeviceState`).
         contacts = await ctx.devstate.contacts()
         items, candidates = admin_picker_rows(ctx, contacts)
@@ -151,8 +161,8 @@ class TxOptimizeTool(Tool):
             admin = admin_of(values)
             targets = _target_items(contacts, admin)
             if not targets:
-                # The tuned node is the only contact there is: a typed hex key prefix is the
-                # only way to name the target, floated over the dialog's first page.
+                # The tuned node is the only contact. Thus a typed hex key prefix is the only
+                # way to name the target. Its prompt floats over the first page of the dialog.
                 return ctx.ui.session.text(
                     "TX optimize — measure at · step 2 of 2",
                     prompt=f"Hex key prefix of the node that hears {admin.name}:",
@@ -167,7 +177,7 @@ class TxOptimizeTool(Tool):
             )
 
         answers = await run_wizard(ctx.ui.session, [node_page, target_page])
-        if answers is None:  # Esc on the first step — out to the menu
+        if answers is None:  # Esc on the first step: back to the menu
             return ToolResult(summary={})
         admin_node = admin_of(answers)
         target = str(answers[1]).strip()
@@ -180,7 +190,7 @@ class TxOptimizeTool(Tool):
             target_hash = target_contact.public_key or target_contact.key_prefix
         else:
             target_label = target
-            target_hash = target  # a typed hex prefix stands for itself
+            target_hash = target  # a typed hex prefix is its own hash
 
         summary = await open_tx_optimize(
             ctx,
@@ -191,17 +201,19 @@ class TxOptimizeTool(Tool):
         return ToolResult(summary=summary)
 
     async def _login(self, ctx: AppContext, admin_node: Contact, params: dict[str, Any]) -> None:
-        """Authenticate against the admin node, remembering a working password.
+        """Log in to the admin node, and keep a password that works.
 
         Args:
-            ctx: Shared application context.
-            admin_node: The node we're about to tune.
-            params: Tool params (may carry an explicit ``password`` on the CLI).
+            ctx: The shared application context.
+            admin_node: The node that we will tune.
+            params: The tool parameters (on the CLI, they can hold an explicit
+                ``password``).
 
         Raises:
-            DeviceCommandError: If the node rejected the login (the stored password, now
-                known bad, is forgotten so the next run asks fresh) — or if it never
-                answered, in which case the password is untested and is kept.
+            DeviceCommandError: If the node refused the login. MeshTerm then forgets the
+                stored password, because it is known to be bad, and the next run asks
+                again. Also if the node never answered. Then the password is not tested,
+                and MeshTerm keeps it.
         """
         device = await ctx.device()
         password = await self._resolve_password(ctx, admin_node, params)
@@ -221,15 +233,15 @@ class TxOptimizeTool(Tool):
     # -- scripted (CLI) ---------------------------------------------------------------
 
     async def _run_cli(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Resolve the link, log in, sweep TX power, render results, and apply the winner.
+        """Resolve the link, log in, sweep the TX power, render the results, and apply the best.
 
         Args:
-            ctx: Shared application context.
-            params: ``path``, ``samples``, ``tx_min``, ``tx_max``, ``step``, ``apply``,
-                optional ``password``/``viz``, and the injected ``_run_id``.
+            ctx: The shared application context.
+            params: ``path``, ``samples``, ``tx_min``, ``tx_max``, ``step``, ``apply``, the
+                optional ``password`` and ``viz``, and the injected ``_run_id``.
 
         Returns:
-            A :class:`ToolResult` with the optimum and any chart path.
+            A :class:`ToolResult` with the optimum and the chart path, if there is one.
         """
         from ..ui.surface import TuiUi
 
@@ -237,8 +249,8 @@ class TxOptimizeTool(Tool):
         device = await ctx.device()
         contacts = await device.get_contacts()
 
-        # Resolve the forced path to hashes, then pull out the target (last hop) and the
-        # admin node we tune (the hop before it).
+        # Resolve the forced path to hashes. Then get the target (the last hop) and the admin
+        # node that we tune (the hop before the target).
         path = trace_runner.parse_trace_path(params["path"], contacts)
         admin_node, target_label = _resolve_link(path, contacts)
 
@@ -286,8 +298,9 @@ class TxOptimizeTool(Tool):
                 persist_trace=lambda t: ctx.repo.record_trace(run_id, t),
             )
 
-        # No trace got through at any TX level: nothing was tuned, the node was left at
-        # its original power. Usually a wrong/unreachable path rather than a weak link.
+        # No trace got through at any TX level. Thus nothing was tuned, and the node stays
+        # at its original power. Usually the cause is a path that is wrong or that cannot be
+        # reached, not a weak link.
         no_result = result.best_snr is None
         if result.applied:
             ctx.log.info("set TX power %s on %s", result.best_tx, admin_node.name)
@@ -316,8 +329,8 @@ class TxOptimizeTool(Tool):
 
         return ToolResult(
             report=report,
-            # No level got a trace through, so nothing was measured and nothing was tuned:
-            # the sweep ran and has nothing to report.
+            # No level got a trace through. Thus nothing was measured and nothing was tuned.
+            # The sweep ran and has nothing to report.
             exit_code=exitcodes.NO_RESULT if no_result else exitcodes.OK,
             summary={
                 "target": result.target,
@@ -336,27 +349,28 @@ class TxOptimizeTool(Tool):
     async def _resolve_password(
         self, ctx: AppContext, admin_node: Contact, params: dict[str, Any]
     ) -> str:
-        """Find the admin password: explicit flag, remembered, or an interactive prompt.
+        """Find the admin password: from the flag, from the store, or from a prompt.
 
-        The question this asks is **"is anyone there to answer?"**, and it used to ask
-        ``--json`` instead — a flag about what the output looks like, which cannot answer
-        it and answered it wrong in both directions: with the flag a piped run failed
-        cleanly, and without it a scheduled run on a terminal sat waiting for a password
-        nobody was going to type. ``ctx.interactive`` reads stdin, which is where the
-        answer actually is.
+        The question that this method asks is **"is a person there to answer?"**. Before,
+        it asked ``--json`` instead. That flag is about the look of the output, so it
+        cannot answer the question, and its answer was wrong in both directions. With the
+        flag, a piped run failed cleanly. Without it, a scheduled run on a terminal waited
+        for a password, but no person was there to type it. ``ctx.interactive`` reads stdin,
+        which is where the answer is.
 
         Args:
-            ctx: Shared application context.
-            admin_node: The node we're about to log in to.
-            params: Tool params (may carry an explicit ``password``).
+            ctx: The shared application context.
+            admin_node: The node that we will log in to.
+            params: The tool parameters (they can hold an explicit ``password``).
 
         Returns:
-            The password to log in with.
+            The password for the login.
 
         Raises:
-            typer.BadParameter: If no password is available and nobody can be asked for
-                one. A usage error rather than a device failure: nothing was transmitted,
-                and no retry helps until the command line carries the password.
+            typer.BadParameter: If no password is available and MeshTerm cannot ask
+                anyone for one. This is a usage error, not a device failure: nothing was
+                transmitted, and a retry cannot help until the command line has the
+                password.
         """
         password = params.get("password") or ctx.admin_store.get(admin_node)
         if password:
@@ -366,8 +380,8 @@ class TxOptimizeTool(Tool):
                 f"no admin password for {admin_node.name!r}; pass --password or run once "
                 "interactively to store it."
             )
-        # This resolver only runs on the scripted CLI path (the menu logs in inside the pushed
-        # sweep screen), so the surface here is PlainUi — no screen stack, no floating.
+        # This resolver runs only on the scripted CLI path (the menu logs in from the pushed
+        # sweep screen). Thus the surface here is PlainUi: no screen stack, no floating.
         entered = await ctx.ui.text(f"Admin password for {admin_node.name}:", password=True)
         if not entered:
             raise typer.BadParameter("an admin password is required to tune a remote node.")
@@ -386,9 +400,10 @@ class TxOptimizeTool(Tool):
             path: str = typer.Option(
                 ...,
                 "--path",
-                # No ``-p`` short form: ``-p`` is the global ``--profile``, and
-                # ``_globals_first`` lifts a group option ahead of the subcommand wherever it
-                # is typed — so a leaf ``-p`` could never reach this option, only shadow it.
+                # No ``-p`` short form. ``-p`` is the global ``--profile``, and
+                # ``_globals_first`` moves a group option in front of the subcommand, at any
+                # position where it is typed. Thus a leaf ``-p`` can never get to this option.
+                # It can only hide it.
                 help="Forced path ending at the target (e.g. 'Repeater,Target' or '3d,f2')",
             ),
             samples: int = typer.Option(3, "--samples", "-n", help="Traces per TX level"),
@@ -416,23 +431,24 @@ class TxOptimizeTool(Tool):
 
 
 def _resolve_link(path: str, contacts: list[Contact]) -> tuple[Contact, str]:
-    """Split a forced path into the admin node we tune and the target's display label.
+    """Divide a forced path into the admin node that we tune and the label of the target.
 
     Args:
-        path: The comma-separated hash path (output of ``parse_trace_path``).
-        contacts: Known contacts, used to map hashes back to names/keys.
+        path: The hash path, with commas between the hops (the output of
+            ``parse_trace_path``).
+        contacts: The known contacts. They change hashes back into names and keys.
 
     Returns:
-        ``(admin_node, target_label)`` — the second-to-last hop as a full
-        :class:`Contact` (needed for login), and a friendly name for the last hop.
+        ``(admin_node, target_label)``: the second-to-last hop as a full :class:`Contact`
+        (it is necessary for the login), and a friendly name for the last hop.
 
     Raises:
-        typer.BadParameter: If the path has fewer than two hops — the argument is what is
-            wrong and nothing was transmitted, so that is a usage error (exit 2), not a
-            device failure.
-        DeviceCommandError: If the admin hop can't be matched to a known contact carrying a
-            public key. That one *is* about the mesh: the path is well formed and we simply
-            have not heard from the node it names.
+        typer.BadParameter: If the path has fewer than two hops. The argument is wrong and
+            nothing was transmitted. Thus that is a usage error (exit 2), not a device
+            failure.
+        DeviceCommandError: If no known contact with a public key matches the admin hop.
+            That error *is* about the mesh: the path is correct, but we have not heard
+            from the node that it names.
     """
     hops = [h for h in path.split(",") if h]
     if len(hops) < 2:
@@ -451,14 +467,14 @@ def _resolve_link(path: str, contacts: list[Contact]) -> tuple[Contact, str]:
 
 
 def _contact_for_hash(hash_hex: str, contacts: list[Contact]) -> Contact | None:
-    """Return the contact whose key matches a path-hop hash, if any.
+    """Return the contact whose key matches the hash of a path hop, if there is one.
 
     Args:
-        hash_hex: A path hop hash (a leading slice of the node's public key).
-        contacts: Known contacts to match against.
+        hash_hex: The hash of a path hop (the first part of the public key of the node).
+        contacts: The known contacts to compare with.
 
     Returns:
-        The matching :class:`Contact`, or ``None``.
+        The :class:`Contact` that matches, or ``None``.
     """
     needle = hash_hex.lower().removeprefix("0x")
     for c in contacts:
@@ -472,18 +488,20 @@ def _contact_for_hash(hash_hex: str, contacts: list[Contact]) -> Contact | None:
 
 
 def _target_items(contacts: list[Contact], admin: Contact) -> list:
-    """The *measure at* list's rows, ordered by how recently each node was heard.
+    """The rows of the *measure at* list, in the order of how recently each node was heard.
 
-    Rows carry the contact's **name** as their value, since a typed hex prefix stands in the
-    same place (see :meth:`TxOptimizeTool._run_live`). Empty when the tuned node is the only
-    contact there is — the caller falls back to a typed prefix.
+    The value of each row is the **name** of the contact, because a typed hex prefix can
+    go in the same place (refer to :meth:`TxOptimizeTool._run_live`). The list is empty
+    when the tuned node is the only contact. Then the caller asks for a typed prefix.
 
     Args:
-        contacts: The device's known contacts.
-        admin: The already-picked tuned node (excluded — it can't measure itself).
+        contacts: The known contacts of the device.
+        admin: The tuned node, which the user already selected. It is not in the list,
+            because it cannot measure itself.
 
     Returns:
-        One :class:`~meshterm.ui.tui.select.Choice` per other contact, freshest first.
+        One :class:`~meshterm.ui.tui.select.Choice` for each other contact, the most
+        recently heard first.
     """
     from rich.text import Text
 
@@ -492,9 +510,10 @@ def _target_items(contacts: list[Contact], admin: Contact) -> list:
     from ..ui.widgets import DEFAULT_GLYPH, NODE_GLYPHS
 
     def row(contact: Contact) -> Any:
-        # The type mark keeps its own fixed hue; the *name* takes the node's key-derived
-        # colour like every other list of nodes (a style on the Text itself would be the
-        # row's base and would paint the name the type's colour too).
+        # The type mark keeps its own fixed hue. The *name* gets the hue of the node, which
+        # comes from its key, the same as in each other list of nodes. (A style on the
+        # Text itself becomes the base of the row, and then the name also gets the colour
+        # of the type.)
         glyph, glyph_style = NODE_GLYPHS.get(contact.node_type, DEFAULT_GLYPH)
         label = Text()
         label.append(f"{glyph} ", style=glyph_style)
@@ -517,10 +536,10 @@ def _fmt_snr(snr: float | None) -> str:
     """Format an optional SNR for the progress description.
 
     Args:
-        snr: SNR in dB, or ``None``.
+        snr: The SNR in dB, or ``None``.
 
     Returns:
-        A short fixed-width string like ``+5.1`` or ``  n/a``.
+        A short string with a fixed width, for example ``+5.1`` or ``  n/a``.
     """
     return f"{snr:+.1f}" if snr is not None else " n/a"
 
@@ -528,33 +547,33 @@ def _fmt_snr(snr: float | None) -> str:
 def _sweep_report(
     result: TxOptResult, path: str, admin_node: Contact, contacts: list[Contact]
 ) -> tuple:
-    """State a TX sweep: the outcome, then every level measured.
+    """State a TX sweep: the result, then each measured level.
 
-    The winner comes first, because it is what the command was asked for and what a caller
-    acts on; the per-level records follow, so the choice can be checked against the
-    measurements it was made from. The menu's ``★`` on the winning row has no column here
-    — ``optimal_tx_dbm`` above the table already names it, and a mark is something to look
-    at rather than something to test.
+    The best level comes first, because the command was asked for it, and a caller acts
+    on it. The records of each level come after it, so that a person can compare the
+    choice with the measurements that it came from. The ``★`` that the menu puts on the
+    best row has no column here. ``optimal_tx_dbm`` above the table already names that
+    level, and a mark is a thing to look at, not a thing to test.
 
-    The two nodes become the shared node shape, and here that matters more than anywhere
-    else: on the plain line they are told apart by nothing but their names, and a caller
-    correlating a sweep with a trace has no key to join on.
+    The two nodes use the shared node shape. Here that is more important than in other
+    places. On the plain line, only their names tell them apart. Without the shape, a
+    caller who compares a sweep with a trace has no key to join them on.
 
     Args:
         result: The completed sweep.
-        path: The forced route the traces walked, as hex hops.
+        path: The forced route that the traces went through, as hex hops.
         admin_node: The node whose TX power was tuned.
-        contacts: The contact list, for placing the target by name.
+        contacts: The contact list, to find the target by its name.
 
     Returns:
-        The report's blocks.
+        The blocks of the report.
     """
     from ..ui import fields
     from ..ui.fields import NodeRef
     from ..ui.report import Facts, Listing
 
     def node(name: str) -> NodeRef | None:
-        """One end of the tuned link as the shared node shape."""
+        """One end of the tuned link, in the shared node shape."""
         contact = next((c for c in contacts if c.name == name), None)
         if contact is None:
             return NodeRef(name=name) if name else None
@@ -583,8 +602,8 @@ def _sweep_report(
             "path": path,
             "optimal_tx_dbm": result.best_tx,
             "target_snr_db": result.best_snr,
-            # A fraction in [0, 1], not a formatted "1.00": the plain column rounds for
-            # the eye and the document keeps the number a number.
+            # A fraction in [0, 1], not a formatted "1.00". The plain column rounds it so
+            # that it is easy to read, and the document keeps the number as a number.
             "reliability": result.best_success_rate,
             "previous_tx_dbm": result.original_tx,
             "applied": result.applied,

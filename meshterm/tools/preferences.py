@@ -1,19 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The ``preferences`` tool: how MeshTerm itself behaves.
+"""The ``preferences`` tool: the behaviour of MeshTerm itself.
 
-Interactively it opens the Preferences page (see :mod:`meshterm.ui.preferences`), which
-stages changes and hands them back here to write. On the CLI it exposes the same
-preferences as ``show`` / ``get`` / ``set`` / ``reset``, so a value can be changed from a
-shell — or from a script setting a machine up — without launching the full-screen session.
+In the menu, the tool opens the Preferences page (refer to :mod:`meshterm.ui.preferences`).
+The page stages the changes and returns them to this tool, which writes them. On the CLI,
+the tool gives the same preferences through ``show``, ``get``, ``set``, and ``reset``.
+Thus a user can change a value from a shell, and a script can change it when it sets up a
+machine, without the full-screen session.
 
-Everything funnels through :meth:`PreferencesTool.run`, which applies a list of operations
-and saves the file once at the end: one write per invocation, whether it came from the page
-staging eleven changes or from a single ``preferences set``.
+All changes go through :meth:`PreferencesTool.run`. It applies a list of operations and
+saves the file one time at the end. Thus each run writes the file one time. This is true
+for eleven changes that the page staged, and for one ``preferences set``.
 
-This is deliberately the *app's* tool, not the radio's. It reads nothing from the
-companion, transmits nothing, and works with no device attached at all — which is why it
-leads the **This app** section (the third owner, after this node and other nodes) rather
-than sitting beside Device config.
+This tool is the tool of the app, not of the device, on purpose. It reads nothing from the
+companion, it transmits nothing, and it works with no device connected. For this reason,
+it is the first row of the **This app** section (the third owner, after this node and
+other nodes), and it is not next to Device config.
 """
 
 from __future__ import annotations
@@ -39,24 +40,24 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 @register
 class PreferencesTool(Tool):
-    """View and change MeshTerm's own preferences, saved to ``preferences.toml``."""
+    """Show and change the preferences of MeshTerm, which are saved to ``preferences.toml``."""
 
     name = "preferences"
     title = "Preferences"
     icon = "⚙"
     help = "How MeshTerm behaves — startup, sending, history, …"
     category = "This app"
-    order = 5  # leads the section: the one row there that changes MeshTerm, not describes it
+    order = 5  # first in the section. Its row changes MeshTerm, and the other rows describe it
 
     async def prompt_params(self, ctx: AppContext) -> dict[str, Any] | None:
-        """Open the Preferences page and collect the changes it staged.
+        """Open the Preferences page and collect the changes that it staged.
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
 
         Returns:
-            ``{"ops": [("set", key, value), …]}`` to write, or ``None`` if the reader left
-            with nothing staged.
+            ``{"ops": [("set", key, value), …]}`` to write, or ``None`` if the user left
+            with no staged changes.
         """
         from ..ui.preferences import edit_preferences
 
@@ -66,22 +67,22 @@ class PreferencesTool(Tool):
         return {"ops": [("set", key, value) for key, value in staged.items()]}
 
     async def run(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Apply a list of preference operations, saving the file once if anything changed.
+        """Apply a list of preference operations. If a value changed, save the file one time.
 
-        Operations are ``("show",)``, ``("get", key)``, ``("set", key, value)``, and
-        ``("reset",)``. They run in order, so a scripted ``set`` after a ``reset`` lands on
-        top of the defaults rather than under them.
+        The operations are ``("show",)``, ``("get", key)``, ``("set", key, value)``, and
+        ``("reset",)``. They run in order. Thus a scripted ``set`` after a ``reset``
+        changes the value from its default, and the ``reset`` does not remove that change.
 
         Args:
-            ctx: Shared application context.
-            params: ``ops`` — the operations to perform.
+            ctx: The shared application context.
+            params: ``ops``: the operations to do.
 
         Returns:
-            A :class:`ToolResult` counting the preferences changed.
+            A :class:`ToolResult` with the number of changed preferences.
 
         Raises:
-            PreferenceError: If a key is unknown or a value fails its spec — reported
-                cleanly by the CLI rather than as a traceback.
+            PreferenceError: If a key is unknown, or if a value does not agree with its
+                spec. The CLI reports this as a clear error, not as a traceback.
         """
         from ..services import consolefont
         from ..ui.preferences import preferences_table
@@ -101,9 +102,9 @@ class PreferencesTool(Tool):
                 else:
                     ctx.ui.show(preferences_table(prefs, ctx.console.width))
             elif action == "get":
-                # The bare value and nothing else — the caller named the key, and
-                # whether it is overridden is what `show`'s DEFAULT lane answers. The
-                # document keeps both, since a parser has no lane to read them off.
+                # Only the bare value, because the caller named the key. The DEFAULT lane
+                # of `show` tells if the value is overridden. The document keeps both,
+                # because a parser has no lane to read them from.
                 spec = get_spec(op[1])
                 if scripted:
                     blocks.append(_one(prefs, spec))
@@ -128,16 +129,18 @@ class PreferencesTool(Tool):
         if changes:
             prefs.save()
         if any(c["key"] == "weekly_flood_advert" for c in applied):
-            # Switching the weekly advert on starts its week rather than sending, so the
-            # instant is recorded as it happens — from the page and a shell alike — and
-            # not whenever the scheduler next looks (see meshterm.core.advert_store).
+            # When the user switches the weekly advert on, its week starts, but nothing is
+            # sent. Thus MeshTerm stores the instant when it occurs (from the page and from
+            # a shell), and not when the scheduler next looks (refer to
+            # meshterm.core.advert_store).
             ctx.advert_store.set_enabled(bool(prefs.weekly_flood_advert))
         if not scripted and any(c["key"] == consolefont.PREFERENCE_KEY for c in applied):
-            # The one preference whose effect is outside the app: the console's font is
-            # the console's, so it takes hold now rather than next launch. The kernel
-            # sends SIGWINCH on a VT font change, so prompt_toolkit repaints the whole
-            # frame at the new row count by itself. Menu-only — a scripted run was typed
-            # into a console it does not own (see meshterm.services.consolefont).
+            # The only preference that has an effect outside the app. The font belongs to
+            # the console, so the change occurs now, not at the next start. The kernel
+            # sends SIGWINCH when the font of a VT changes. Thus prompt_toolkit paints the
+            # whole frame again at the new row count by itself. This occurs only in the
+            # menu, because a user typed a scripted run into a console that the run does
+            # not own (refer to meshterm.services.consolefont).
             consolefont.apply(prefs.get(consolefont.PREFERENCE_KEY))
         if scripted and any(op[0] in ("set", "reset") for op in ops):
             blocks.append(_written(applied, prefs))
@@ -203,20 +206,20 @@ __all__ = ["PreferencesTool", "PreferenceError"]
 
 
 def _script_value(spec: PrefSpec, value: Any) -> str:
-    """A preference's value in the form ``preferences set`` accepts back.
+    """The value of a preference, in the form that ``preferences set`` accepts.
 
-    :func:`~meshterm.core.preferences.format_value` writes for the page: a number carries
-    its unit (``5 s``), so a bare figure in the VALUE lane still says what it counts. That
-    unit is exactly what :func:`~meshterm.core.preferences.parse_value` will not take
-    back, so the scripted dump drops it. Booleans keep ``on``/``off`` and an enum keeps
-    its own key, both of which do round-trip.
+    :func:`~meshterm.core.preferences.format_value` writes for the page: a number has its
+    unit (``5 s``), so that a bare number in the VALUE lane tells what it counts. But
+    :func:`~meshterm.core.preferences.parse_value` does not accept that unit, so the
+    scripted output removes it. A boolean keeps ``on`` or ``off``, and an enum keeps its
+    own key. Both of these round-trip.
 
     Args:
-        spec: The preference the value belongs to.
+        spec: The preference that the value is for.
         value: Its current value.
 
     Returns:
-        The scripted rendering.
+        The value as text for a script.
     """
     if spec.value_type == "bool":
         return "on" if value else "off"
@@ -228,9 +231,10 @@ def _script_value(spec: PrefSpec, value: Any) -> str:
 def _row(prefs: Preferences, spec: PrefSpec) -> dict[str, Any]:
     """One preference as a report row, in the shared setting shape.
 
-    ``overridden`` is the fact the plain face makes a reader derive by comparing two
-    columns; a document that carried the same two numbers and left the comparison to the
-    consumer would be handing over homework it has the answer to.
+    On the plain face, the user compares two columns to find if a value is overridden.
+    ``overridden`` gives this fact directly. If a document gives the same two numbers and
+    lets the consumer compare them, the consumer must do work for which the document
+    already has the answer.
     """
     from ..ui.fields import Rendered
 
@@ -239,8 +243,8 @@ def _row(prefs: Preferences, spec: PrefSpec) -> dict[str, Any]:
         "key": spec.key,
         "value": Rendered(value, _script_value(spec, value)),
         "type": spec.value_type,
-        # The reader's word for an enum's own key — never what `set` takes, which is the
-        # key itself and rides in `value`.
+        # The word that the user sees for the key of an enum. It is never what `set` takes:
+        # `set` takes the key itself, which is in `value`.
         "label": (spec.choices or {}).get(value) if spec.value_type == "enum" else None,
         "redacted": False,
         "default": Rendered(spec.default, _script_value(spec, spec.default)),
@@ -250,7 +254,7 @@ def _row(prefs: Preferences, spec: PrefSpec) -> dict[str, Any]:
 
 
 def _columns() -> tuple:
-    """The preference row's columns, shared by ``show`` and ``get``."""
+    """The columns of a preference row, which ``show`` and ``get`` share."""
     from ..ui import fields
 
     return (
@@ -266,13 +270,13 @@ def _columns() -> tuple:
 
 
 def _listing(prefs: Preferences) -> Listing:
-    """Every preference, its value, its built-in default, and what it is for.
+    """Each preference, with its value, its built-in default, and its purpose.
 
-    ``DESCRIPTION`` comes straight from :attr:`PrefSpec.help` — the text is already
-    written, one short line each, and as the *last* column it can never disturb an
-    alignment or wrap. It used to be cut for parser hygiene, which is a bargain the plain
-    face no longer has to make: a listing is read by a person now, and a person choosing a
-    preference is exactly who that sentence was written for.
+    ``DESCRIPTION`` comes directly from :attr:`PrefSpec.help`. That text is already
+    written, with one short line for each preference. Because it is the last column, it
+    can never break an alignment or cause a wrap. Before, the listing removed it, to keep
+    the output clean for a parser. The plain face does not have to do that now: a person
+    reads the listing, and the sentence was written for a person who selects a preference.
 
     Args:
         prefs: The preference set to report.
@@ -291,7 +295,7 @@ def _listing(prefs: Preferences) -> Listing:
 
 
 def _one(prefs: Preferences, spec: PrefSpec) -> Facts:
-    """One preference: the bare value plain, the whole setting object in the document."""
+    """One preference: the bare value on the plain face, the full setting object in the document."""
     from ..ui.report import BARE, Facts
 
     return Facts(
@@ -304,11 +308,11 @@ def _one(prefs: Preferences, spec: PrefSpec) -> Facts:
 
 
 def _written(applied: list[dict[str, Any]], prefs: Preferences) -> Facts:
-    """What ``set`` or ``reset`` changed — nothing plain, a record for whoever wants one.
+    """What ``set`` or ``reset`` changed: nothing on the plain face, and a record for a log.
 
-    The plain face says it in the exit status and in the acknowledgement on stderr, which
-    is the whole answer for a person. A caller managing a machine's configuration wants to
-    know *what moved*, and had no way to ask.
+    The plain face gives the result in the exit status and in the acknowledgement on
+    stderr. For a person, that is the whole answer. A caller that manages the setup of a
+    machine wants to know what changed, and before, it had no way to ask.
     """
     from ..ui import fields
     from ..ui.report import SILENT, Column, Facts

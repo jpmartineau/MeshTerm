@@ -1,17 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The ``map`` tool: plot the mesh's located nodes on an OpenStreetMap terminal map.
+"""The ``map`` tool: plot the located nodes of the mesh on an OpenStreetMap terminal map.
 
-Nodes that share their location in adverts are collected from the passive-monitor history
-(:meth:`~meshterm.persistence.repository.Repository.heard_nodes`), our own node is added when
-its position is known, and everything is drawn over a real street basemap rendered as Unicode
-braille (streets, rivers, place names — the same terminal-map idea as ``mapscii``).
+The tool collects the nodes that share their location in adverts from the passive-monitor
+history (:meth:`~meshterm.persistence.repository.Repository.heard_nodes`). It adds our node
+when its position is known. Then it draws all the nodes over a real street basemap,
+rendered as Unicode braille (streets, rivers, place names). This is the same terminal-map
+idea as ``mapscii``.
 
-Menu-only: it opens a full-screen, pannable/zoomable map (see
-:mod:`meshterm.ui.map_screen`) and registers no CLI subcommand, because a map is a picture
-and the scripted CLI deals in facts (see :meth:`MapTool.register_cli`). Repeaters are
-prioritised over ordinary nodes: a distinct marker, drawn on top. The basemap is
-best-effort — with no network (and no cached tiles) the nodes are plotted on a blank grid
-instead, and the tool still works offline.
+Menu only: the tool opens a full-screen map that the user can pan and zoom (refer to
+:mod:`meshterm.ui.map_screen`). It registers no CLI subcommand, because a map is a picture,
+and the scripted CLI gives facts (refer to :meth:`MapTool.register_cli`). Repeaters have
+priority over ordinary nodes: they have a different marker, drawn on top. The basemap is a
+best effort. With no network (and no cached tiles), the tool plots the nodes on a blank
+grid, and it still works offline.
 """
 
 from __future__ import annotations
@@ -26,15 +27,15 @@ from .base import Tool, ToolResult, register
 
 
 def _fraction(ctx: AppContext, params: dict[str, Any]) -> float:
-    """How much of the mesh a map opens framed on: the flag if one was passed, else the preference.
+    """The fraction of the mesh that a new map frames: the flag if given, else the preference.
 
-    ``--fraction`` is resolved here rather than as the Typer option's default because the
-    options are declared at CLI *registration* time — before a context, and so before the
-    preferences file has been read.
+    ``--fraction`` is resolved here, not as the default of the Typer option, because the
+    options are declared when the CLI is registered. That occurs before a context exists,
+    and thus before MeshTerm reads the preferences file.
 
     Args:
-        ctx: Shared application context.
-        params: This invocation's parameters.
+        ctx: The shared application context.
+        params: The parameters of this run.
 
     Returns:
         The fraction to frame.
@@ -49,7 +50,7 @@ if TYPE_CHECKING:
 
 @register
 class MapTool(Tool):
-    """Show the mesh's location-sharing nodes on a braille OpenStreetMap map."""
+    """Show the nodes of the mesh that share a location on a braille OpenStreetMap map."""
 
     name = "map"
     title = "Map"
@@ -59,16 +60,18 @@ class MapTool(Tool):
     order = 10
 
     async def run(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Gather the located nodes and open the interactive map.
+        """Collect the located nodes and open the interactive map.
 
-        Menu-only (see :meth:`register_cli`), so there is one path through here.
+        The tool is for the menu only (refer to :meth:`register_cli`), so this method has
+        one path.
 
         Args:
-            ctx: Shared application context.
-            params: Optional ``fraction`` — how much of the mesh to open framed on.
+            ctx: The shared application context.
+            params: An optional ``fraction``: the part of the mesh to frame when the map
+                opens.
 
         Returns:
-            A :class:`ToolResult` summarizing how many nodes were plotted.
+            A :class:`ToolResult` with the number of plotted nodes.
         """
         from ..ui.map_screen import open_map
 
@@ -93,25 +96,25 @@ class MapTool(Tool):
             },
         )
 
-    # -- marker gathering -------------------------------------------------------
+    # -- the markers ------------------------------------------------------------
 
     async def _gather(self, ctx: AppContext) -> list[MapMarker]:
-        """Collect every located node to plot (see :func:`gather_markers`)."""
+        """Collect each located node to plot (refer to :func:`gather_markers`)."""
         return await gather_markers(ctx)
 
     def register_cli(self, app: typer.Typer) -> None:
-        """Register no CLI command — a map is a picture, and pictures are menu-only.
+        """Register no CLI command, because a map is a picture, and pictures are menu only.
 
-        Every other feature has a scripted face because its answer is a set of facts a
-        script can act on. A map's answer is a *drawing*: braille cells whose meaning is
-        their position on a grid and whose nodes are told apart by colour, which is
-        exactly what the scripted CLI does not have (see :mod:`meshterm.ui.script`). A
-        one-shot render there would be an unparseable block of glyphs, and stripping its
-        colour to match the rest of the CLI would make it unreadable as well.
+        Each other feature has a scripted face, because its answer is a set of facts that
+        a script can use. The answer of a map is a drawing. Its braille cells get their
+        meaning from their position on a grid, and colour tells its nodes apart. The
+        scripted CLI does not have these (refer to :mod:`meshterm.ui.script`). A one-shot
+        render on the CLI is a block of glyphs that no program can parse. If the render
+        has no colour, as the rest of the CLI, a person cannot read it either.
 
-        The located nodes themselves are still scriptable — ``meshterm contacts`` lists
-        every one of them, coordinates included.
+        A script can still get the located nodes: ``meshterm contacts`` lists each of
+        them, with their coordinates.
 
         Args:
-            app: The Typer application (untouched).
+            app: The Typer application (not changed).
         """

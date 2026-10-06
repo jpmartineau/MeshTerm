@@ -1,13 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The ``devices`` tool: enumerate attached serial, SPI, and in-range Bluetooth companions.
+"""The ``devices`` tool: list the connected serial, SPI, and in-range Bluetooth companions.
 
-Discovery never opens the radio — it only lists what is attached or advertising. This is a
-CLI-only, read-only inventory (``menu_visible = False``): by the time the interactive menu is
-up a device is already selected, so the listing has no job there — it belongs on the command
-line as a startup-time "which port/address is my radio?" diagnostic. It marks devices already
-confirmed as MeshCore companions (and the active one). Selecting a companion is a startup-only
-concern: pass ``--port`` or ``--ble`` on the CLI (remembered after it connects), or pick from
-the prompt shown when the menu launches (which smoke-tests the choice before confirming it).
+Discovery never opens the device. It only lists the devices that are connected or that
+send a BLE advertisement. This tool is a read-only inventory, for the CLI only
+(``menu_visible = False``). When the interactive menu opens, a device is already selected,
+so the listing has no purpose there. It is a diagnostic on the command line at startup,
+for the question "which port/address is my radio?". It marks the devices that MeshTerm
+already confirmed as MeshCore companions, and it marks the active device. The user selects
+a companion only at startup. Give ``--port`` or ``--ble`` on the CLI (MeshTerm remembers
+it after it connects), or select from the prompt that shows when the menu starts. That
+prompt does a smoke test of the selection before it confirms it.
 """
 
 from __future__ import annotations
@@ -32,16 +34,16 @@ from .base import Tool, ToolResult, register
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..ui.report import Listing
 
-#: The ``MESHCORE`` verdict per discovery confidence tier, for devices we have *not* yet
-#: confirmed. The USB vendor ID is only a hint — a native-USB board or a bare bridge chip
-#: is a "maybe", never a "yes" — so nothing is billed as MeshCore until a connection proves
-#: it.
+#: The ``MESHCORE`` verdict for each discovery confidence tier, for the devices that
+#: MeshTerm did not confirm yet. The USB vendor ID is only a hint: a native-USB board or a
+#: bare bridge chip is a "maybe", never a "yes". Thus no device is called MeshCore until a
+#: connection proves it.
 _MAYBE: dict[str, str] = {"board": "maybe", "bridge": "maybe", "unknown": "no"}
 
 
 @register
 class DevicesTool(Tool):
-    """List attached serial, SPI, and in-range Bluetooth companions; mark likely and active."""
+    """List the serial, SPI, and in-range Bluetooth companions, and mark likely and active ones."""
 
     name = "devices"
     title = "Devices"
@@ -51,21 +53,22 @@ class DevicesTool(Tool):
     menu_visible = False  # CLI-only: a startup diagnostic with no place in a connected session
 
     async def run(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Enumerate attached and advertising devices, and state them as a listing.
+        """Find the connected devices and the devices that send BLE advertisements, as a listing.
 
         Args:
-            ctx: Shared application context.
-            params: Unused beyond the menu's selection bookkeeping.
+            ctx: The shared application context.
+            params: Not used, except for the selection bookkeeping of the menu.
 
         Returns:
-            A :class:`ToolResult` summarizing how many devices were found.
+            A :class:`ToolResult` with the number of devices found.
         """
         if ctx.mock:
-            # `--mock` promises a session with no real hardware, and a scan is the one
-            # thing this tool does — it walked the serial ports and switched the Bluetooth
-            # radio on regardless, which is a promise broken on the first command a
-            # stranger without a radio would try. So under --mock the simulator *is* the
-            # inventory: one row, and nothing on the machine touched.
+            # `--mock` promises a session with no real hardware, and a scan is the only
+            # thing that this tool does. Before, the tool examined the serial ports and
+            # switched the Bluetooth radio on, also with `--mock`. Thus a new user without
+            # a companion saw that promise broken on the first command that they tried.
+            # Now, with --mock, the simulator is the inventory: one row, and the tool does
+            # not touch the machine.
             devices = [
                 DiscoveredDevice(
                     transport=TRANSPORT_MOCK,
@@ -76,9 +79,10 @@ class DevicesTool(Tool):
         else:
             scan_ble = params.get("ble", True)
             devices = await discover_all(ble=scan_ble) if scan_ble else discover_devices()
-            # A radio on the SPI bus is attached the way a serial port is, but nothing
-            # enumerates it: it is listed from its device node, as the device screen lists it
-            # — and the port its board's GPS answers on is listed as part of it, not beside it.
+            # A radio on the SPI bus is connected as a serial port is, but nothing lists it
+            # automatically. Thus the tool lists it from its device file, as the device
+            # screen lists it. The port on which the GPS of its board answers is listed as
+            # part of the radio, not next to it.
             devices = without_radio_ports(devices, ctx.settings.profiles)
             devices += spi_radios(ctx.settings.profiles, devices)
         known = ctx.device_store.load_all()
@@ -91,7 +95,7 @@ class DevicesTool(Tool):
                 else None
             )
         except DeviceSelectionError:
-            spi = None  # an ambiguous --spi: the listing is how the reader finds out which
+            spi = None  # an ambiguous --spi: the listing shows the user which one
 
         active_target = (
             ctx.ble_override
@@ -100,10 +104,11 @@ class DevicesTool(Tool):
             or (active.target if active else None)
         )
 
-        # A refused Bluetooth scan is not the same as a quiet one, and the difference is
-        # invisible in the listing — both simply lack BLE rows. Say so whether or not
-        # anything else was found: a serial board being present does not make a companion
-        # the reader expected over Bluetooth any less missing.
+        # A refused Bluetooth scan is not the same as a scan that found nothing. The
+        # listing does not show the difference, because both have no BLE rows. Thus tell
+        # the user, also if the scan found other devices. A serial board that is present
+        # does not change the fact that a companion that the user expected over Bluetooth
+        # is missing.
         blocked = ble_unavailable_reason()
         if blocked:
             from ..ui import script
@@ -113,11 +118,12 @@ class DevicesTool(Tool):
             )
 
         if not devices:
-            # Not an error: the scan ran and found nothing. Said on stderr so a caller
-            # redirecting stdout still hears it, and reported as NO_RESULT so a script can
-            # branch on it without matching prose. The empty listing still reaches the
-            # machine face as `[]`, which is a document a consumer can read — where an
-            # empty stdout is a parse error it would have to tell apart from a real one.
+            # Not an error: the scan ran and found nothing. The message goes to stderr, so
+            # that a caller that redirects stdout still gets it. The exit status is
+            # NO_RESULT, so that a script can branch on it without a match on the text.
+            # The empty listing still goes to the machine face as `[]`, which is a document
+            # that a consumer can read. An empty stdout is a parse error, and the consumer
+            # must then tell it apart from a real parse error.
             from ..ui import script
 
             script.stderr_console().print(
@@ -127,13 +133,13 @@ class DevicesTool(Tool):
         return ToolResult(
             summary={"count": len(devices)},
             report=(_listing(devices, known, remembered, active_target),),
-            # Changed from the 0 this used to return under --json: a rendering flag has no
-            # business changing the report, and the plain path has always said 5 here.
+            # Before, this returned 0 with --json. We changed it, because a rendering flag
+            # must not change the report, and the plain path always gave 5 here.
             exit_code=exitcodes.OK if devices else exitcodes.NO_RESULT,
         )
 
     def register_cli(self, app: typer.Typer) -> None:
-        """Register the ``devices`` subcommand (inventory only; no connection).
+        """Register the ``devices`` subcommand (only an inventory, with no connection).
 
         Args:
             app: The Typer application.
@@ -143,8 +149,8 @@ class DevicesTool(Tool):
         @app.command(
             name=self.name,
             help=self.help,
-            # The listing used to close with a line explaining its own markers and how to
-            # act on a row. That is help, and this is where help goes.
+            # Before, the listing ended with a line that explained its markers and how to
+            # use a row. That text is help, and help goes here.
             epilog="Select a device with --port TARGET or --ble TARGET, using the "
             "TARGET column verbatim; an SPI radio with --spi, or -p and its profile.",
         )
@@ -157,24 +163,28 @@ class DevicesTool(Tool):
 
 
 def _listing(devices: list, known: dict, remembered: object, active_target: str | None) -> Listing:
-    """The device inventory, stated once for both faces.
+    """The device inventory, given one time for both faces.
 
-    ``TARGET`` leads because it is the field a caller acts on — it is what ``--port`` and
-    ``--ble`` take, verbatim. The menu's two markers become columns of their own
-    (``ACTIVE``, and ``MESHCORE`` for the confirmed star), because a glyph in a margin is
-    something to look at rather than something to test.
+    ``TARGET`` is first, because a caller uses that field: ``--port`` and ``--ble`` take it
+    exactly as it is. The two markers of the menu become columns (``ACTIVE``, and
+    ``MESHCORE`` for the confirmed star), because a person can look at a glyph in a
+    margin, but a program cannot test it.
 
-    ``MESHCORE`` is three-valued and stays that way: ``yes`` only once a connection has
-    proved the device speaks the protocol, ``maybe`` for a USB vendor ID that suggests a
-    LoRa board or a bridge chip, ``no`` for anything else. A vendor ID is a hint, and the
-    column would be lying if it rounded one up — which is why the machine face carries the
-    same three words rather than the boolean it used to.
+    ``MESHCORE`` has three values, and it keeps them:
+
+    - ``yes`` only after a connection proved that the device uses the protocol.
+    - ``maybe`` for a USB vendor ID that suggests a LoRa board or a bridge chip.
+    - ``no`` for all other devices.
+
+    A vendor ID is a hint. If the column changes a hint to ``yes``, the column gives false
+    information. For this reason, the machine face has the same three words, and not
+    the boolean that it had before.
 
     Args:
         devices: The discovered devices.
-        known: Remembered device records, keyed by stable id.
+        known: The remembered device records, keyed by stable id.
         remembered: The remembered default device, if there is one.
-        active_target: The target this invocation is (or would be) using.
+        active_target: The target that this run uses (or would use).
 
     Returns:
         The listing.
@@ -207,15 +217,15 @@ def _listing(devices: list, known: dict, remembered: object, active_target: str 
         columns=(
             fields.word("target", "TARGET"),
             fields.word("transport", "TRANSPORT"),
-            # The two halves `target` is one of, kept apart for a caller that has to know
-            # which transport it is holding without parsing the target for a colon.
+            # The two possible forms of `target`, kept separate. Thus a caller knows which
+            # transport it has, and it does not have to parse the target for a colon.
             fields.hidden("port"),
             fields.hidden("address"),
             fields.name("label", "NAME"),
             fields.name("hardware", "HARDWARE"),
             fields.word("meshcore", "MESHCORE"),
-            # What the "maybe" was derived from. A person reading the column has the
-            # vendor label beside it and can see for themselves; a program cannot.
+            # The source of the "maybe". A person who reads the column sees the vendor
+            # label next to it, but a program cannot.
             fields.hidden("confidence"),
             fields.word("serial_number", "SERIAL"),
             fields.hidden("stable_id"),

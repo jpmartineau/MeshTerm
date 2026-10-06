@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The ``rooms`` tool: the room servers your radio knows, and joining them.
+"""The ``rooms`` tool: the room servers that your device knows, and how to join them.
 
-Interactively it opens the Rooms page (see :mod:`meshterm.ui.rooms`) — every room server
-the radio knows, joined ones first, each with a page to join it, log in again, open its
-board, or forget it. On the CLI it exposes ``list``, ``join`` and ``forget``.
+In the menu, the tool opens the Rooms page (refer to :mod:`meshterm.ui.rooms`). The page
+lists each room server that the device knows, with the joined rooms first. Each room has a
+page where the user can join it, log in again, open its board, or forget it. On the CLI,
+the tool gives ``list``, ``join``, and ``forget``.
 
-A room's board is *read* in Chat, the way a channel's messages are; this tool owns
-everything to do with getting in, as the ``channels`` tool owns everything to do with
-configuring a slot.
+The user reads the board of a room in Chat, as for the messages of a channel. This tool
+owns all the steps to get in, as the ``channels`` tool owns all the configuration of a
+slot.
 """
 
 from __future__ import annotations
@@ -28,24 +29,24 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 @register
 class RoomsTool(Tool):
-    """Join room servers, and keep track of the ones you have."""
+    """Join room servers, and keep a list of the rooms that you joined."""
 
     name = "rooms"
     title = "Rooms"
     icon = "📌"
     help = "Join room servers' message boards"
     category = "Message"
-    order = 25  # beside Channels: the other half of what Chat lists
+    order = 25  # next to Channels: the other half of the items that Chat lists
 
     async def run(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
         """Open the Rooms page (menu) or run a scripted action (CLI).
 
         Args:
-            ctx: Shared application context.
-            params: A ``cli_action`` with its arguments (CLI), or empty for the menu.
+            ctx: The shared application context.
+            params: A ``cli_action`` and its arguments (CLI), or empty for the menu.
 
         Returns:
-            A :class:`ToolResult` recording what happened (the menu path shows nothing).
+            A :class:`ToolResult` that holds what occurred. The menu path shows nothing.
         """
         action = params.get("cli_action")
         if action == "join":
@@ -62,12 +63,12 @@ class RoomsTool(Tool):
     # -- CLI --------------------------------------------------------------------
 
     async def _rooms(self, ctx: AppContext) -> list[Contact]:
-        """Every room server the radio knows, as the session's contact cache holds it."""
+        """Each room server that the device knows, as the contact cache of the session has it."""
         await ctx.device()
         return [c for c in await ctx.devstate.contacts() if c.is_room]
 
     async def _room(self, ctx: AppContext, needle: str) -> Contact:
-        """The room server a name or key prefix names — a usage error for anything else."""
+        """The room server for a name or a key prefix. Any other value is a usage error."""
         folded = needle.casefold()
         contacts = await ctx.devstate.contacts()
         for contact in contacts:
@@ -79,7 +80,7 @@ class RoomsTool(Tool):
         raise typer.BadParameter(f"no room server matches {needle!r}")
 
     async def _cli_list(self, ctx: AppContext) -> ToolResult:
-        """List every room server the radio knows: joined, access, heard, posts, unread."""
+        """List each room server that the device knows: joined, access, heard, posts, unread."""
         rooms = await self._rooms(ctx)
         peers = [_peer(r) for r in rooms]
         lasts = ctx.repo.last_chat_messages(rooms=peers)
@@ -105,19 +106,20 @@ class RoomsTool(Tool):
         )
 
     async def _cli_join(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Log in to a room server — one exchange — and print the access it granted.
+        """Log in to a room server (one exchange), and print the access that it gave.
 
-        The password is ``--password``, else the one MeshTerm remembers for the room (its
-        admin password, then its room password); one that works is remembered, exactly as
-        the Rooms page remembers it. ``--flood`` forgets the route the radio learned to the
-        room first, the way round a route gone stale. The room then sends every post the
-        radio hasn't seen, one at a time — they wait on the radio for whatever reads it next
-        (``chat listen``, the menu), and ``chat history`` has them from then on.
+        The password is ``--password``. If there is no ``--password``, it is the password
+        that MeshTerm remembers for the room (its admin password, then its room password).
+        MeshTerm remembers a password that works, exactly as the Rooms page remembers it.
+        ``--flood`` first forgets the route to the room that the device learned. This is
+        the solution for a stale route. Then the room sends each post that the device did
+        not receive yet, one at a time. The posts wait on the device for the next program
+        that reads it (``chat listen``, the menu). After that, ``chat history`` has them.
 
-        A room never says no: a wrong password gets no reply at all. So silence is a
-        failure here (exit 4), explained in the Rooms page's own words — how the login went
-        out, when the room was last heard, and whether this password has worked before —
-        and whatever password was remembered is kept.
+        A room never says no: a wrong password gets no reply. Thus no reply is a failure
+        here (exit 4). The error message uses the words of the Rooms page: how the login
+        went out, when the room was last heard, and if this password worked before.
+        MeshTerm keeps the remembered password, if there is one.
         """
         from ..core.connection import DeviceCommandError
         from ..ui.rooms import silence_explanation, valid_password
@@ -147,7 +149,7 @@ class RoomsTool(Tool):
         )
 
     async def _cli_forget(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Stop logging in to a room and forget its password; its stored posts are kept."""
+        """Do not log in to a room again, and forget its password. Its stored posts stay."""
         room = await self._room(ctx, str(params["room"]))
         was = ctx.rooms.joined(room)
         ctx.rooms.forget(room)
@@ -199,7 +201,7 @@ class RoomsTool(Tool):
 
 
 def _peer(room: Contact) -> str:
-    """The room's key as its conversation stores it."""
+    """The key prefix of the room, as its conversation stores it."""
     return (room.key_prefix or room.public_key[:12] or "").lower()
 
 
@@ -216,11 +218,11 @@ def _node(room: Contact) -> NodeRef:
 
 
 def _listing(records: list[dict]) -> Listing:
-    """``rooms list``: one room per record, joined ones first.
+    """``rooms list``: one room in each record, with the joined rooms first.
 
-    ``ACCESS`` is ``-`` for a room not joined (the document's ``joined`` says so outright);
-    ``HEARD`` is when the room was last heard on the air, the one column that says whether
-    a login has any chance of reaching it.
+    ``ACCESS`` is ``-`` for a room that is not joined (``joined`` in the document says this
+    directly). ``HEARD`` is the time when the room was last heard on the air. It is the
+    only column that shows if a login can possibly get to the room.
     """
     from ..ui import fields
     from ..ui.report import Listing
@@ -241,11 +243,11 @@ def _listing(records: list[dict]) -> Listing:
 
 
 def _joined(room: Contact, access: str, flood: bool | None) -> Facts:
-    """What ``rooms join`` won: the access a room granted, bare — the one fact asked for.
+    """What ``rooms join`` got: only the access that a room gave, the one fact asked for.
 
-    The room and how the login went out ride in the document; the plain face prints the
-    access word alone (``member``, ``admin`` or ``read-only``), which is what a script
-    deciding whether it may post branches on.
+    The room, and how the login went out, are in the document. The plain face prints only
+    the access word (``member``, ``admin``, or ``read-only``). A script uses this word to
+    decide if it can post.
     """
     from ..ui import fields
     from ..ui.report import BARE, Facts
@@ -268,7 +270,7 @@ def _joined(room: Contact, access: str, flood: bool | None) -> Facts:
 
 
 def _forgotten(room: Contact, was: bool) -> Facts:
-    """What ``rooms forget`` did: silent on the plain face, the room and the fact in JSON."""
+    """What ``rooms forget`` did: nothing on the plain face, the room and the fact in JSON."""
     from ..ui import fields
     from ..ui.report import SILENT, Facts
 

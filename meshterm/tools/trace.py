@@ -1,28 +1,28 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The trace tools: path traces, live in the menu, one-shot on the CLI.
+"""The trace tools: path traces, live in the menu, and a single run on the CLI.
 
-A trace is one walked path — the protocol has no destination field, so "target" is
-purely a UX notion — and the menu splits the feature along exactly that line:
+A trace is one walked path. The protocol has no destination field, so "target" is only
+a UX concept. The menu divides the feature at exactly that line:
 
-* **Trace target** (``trace``): *can I reach this node?* Pick a target from a
-  recency-ordered list; the live screen composes/explores symmetric routes that turn
-  at the target and come home over the mirrored hops. The list stays pushed underneath
-  for the whole visit, so Esc from a walk lands back on the row that launched it —
-  freshly re-sorted by what was just traced — and the next node is one Enter away.
-* **Trace path** (``trace-path``): *how far can a route I build carry?* No target and
-  no picker — the whole walk is composed hop by hop and only has to end within our
-  own earshot. Traces record under the ``(path)`` sentinel, keeping composed walks
-  out of the target picker's history.
+* **Trace target** (``trace``): *can I get to this node?* Select a target from a list in
+  the order of recency. The live screen composes and explores symmetric routes that turn
+  at the target and come back over the mirrored hops. The list stays pushed below for
+  the full visit. Thus Esc from a walk goes back to the row that started it (sorted
+  again by the last trace), and the next node is one Enter away.
+* **Trace path** (``trace-path``): *how far can a route that I make go?* No target and
+  no picker. The user composes the full walk hop by hop, and it must only end at a node
+  that our node can hear. The traces are stored under the ``(path)`` sentinel, so the
+  composed walks stay out of the history of the target picker.
 
-Both open the live trace screen (:mod:`meshterm.ui.trace_screen`) armed but idle:
-nothing transmits until Trace is committed, which runs the chosen sample count
-(1–8 traces, paced between transmissions — repeaters penalize, and can blacklist,
-nodes that burst traffic, so multi-trace runs always sleep a cooldown between sends).
-On the CLI each stays a scriptable one-shot: run one trace, print the route and
-per-hop SNR, exit.
+Both tools open the live trace screen (:mod:`meshterm.ui.trace_screen`) ready but idle.
+Nothing transmits until the user starts Trace, which runs the selected sample count
+(1–8 traces, with a pause between transmissions). Repeaters penalize, and can
+blacklist, nodes that transmit in bursts. Thus a run of more than one trace always
+waits a cooldown between sends. On the CLI, each tool stays a scriptable single run:
+run one trace, print the route and the SNR of each hop, and exit.
 
-Both front ends persist identically: one ``runs`` row per trace, recorded under it, so
-stored history reads the same no matter where it came from.
+The two front ends store the same data: one ``runs`` row for each trace, with the trace
+stored under it. Thus the stored history is the same, wherever it came from.
 """
 
 from __future__ import annotations
@@ -48,47 +48,48 @@ from .base import Tool, ToolResult, register
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..ui.contactlist import ContactListScreen, ContactRow
 
-#: The characters a stored trace target must consist of to be treated as a hex key
-#: prefix when folding it back to a contact name in the target picker.
+#: The characters that a stored trace target must contain, and only these, to be a hex key
+#: prefix when the target picker folds it back to a contact name.
 _HEX_DIGITS = frozenset("0123456789abcdef")
 
 
 @register
 class TraceTool(Tool):
-    """Trace the path to a target and watch per-hop SNR, live or scripted."""
+    """Trace the path to a target and watch the SNR of each hop, live or scripted."""
 
     name = "trace"
     title = "Trace target"
     icon = "🎯"
     help = "Trace a target and watch per-hop SNR"
     category = "Explore"
-    order = 30  # see a node above, walk to it here
+    order = 30  # find a node with the tool above, and walk to it here
 
     async def prompt_params(self, ctx: AppContext) -> dict[str, Any] | None:
-        """Nothing to gather here — the target picker lives inside :meth:`run`.
+        """Nothing to collect here. The target picker is in :meth:`run`.
 
-        The pick and the screen it opens share the contacts read and the routing width,
-        and the live path skips the base class's run row (see :meth:`execute`), so the
-        whole entry flow sits in :meth:`_run_live` rather than half of it here.
+        The selection and the screen that it opens share the read of the contacts and the
+        routing width. Also, the live path does not use the run row of the base class
+        (refer to :meth:`execute`). Thus the full entry flow is in :meth:`_run_live`, and
+        not half of it here.
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
 
         Returns:
-            ``{"live": True}`` — the menu's marker for the interactive path.
+            ``{"live": True}``: the marker of the menu for the interactive path.
         """
         return {"live": True}
 
     async def execute(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Run — without the outer run row on the live path.
+        """Run, with no outer run row on the live path.
 
-        The live screen opens one ``runs`` row *per trace* (matching what a scripted
-        invocation records), so wrapping the whole screen session in another row would
-        double-log it. Scripted runs keep the base class's logging.
+        The live screen opens one ``runs`` row *for each trace* (the same row that a
+        scripted run stores). If another row goes around the full screen session, the log
+        has each trace two times. Scripted runs keep the logging of the base class.
 
         Args:
-            ctx: Shared application context.
-            params: Parameters for this invocation.
+            ctx: The shared application context.
+            params: The parameters for this run.
 
         Returns:
             The :class:`ToolResult` from :meth:`run`.
@@ -98,16 +99,16 @@ class TraceTool(Tool):
         return await super().execute(ctx, params)
 
     async def run(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Open the live screen (menu) or run one persisted trace (CLI).
+        """Open the live screen (menu), or run one stored trace (CLI).
 
         Args:
-            ctx: Shared application context.
-            params: ``live`` from the menu (the target is picked on the screen); or
-                ``target`` (str), optional ``path``, and the injected ``_run_id``
-                from the CLI.
+            ctx: The shared application context.
+            params: ``live`` from the menu (the user selects the target on the screen).
+                Or, from the CLI: ``target`` (str), the optional ``path``, and the
+                injected ``_run_id``.
 
         Returns:
-            A :class:`ToolResult` with the trace's outcome.
+            A :class:`ToolResult` with the result of the trace.
         """
         if params.get("live"):
             return await self._run_live(ctx)
@@ -116,26 +117,27 @@ class TraceTool(Tool):
     # -- interactive (menu) -------------------------------------------------------
 
     async def _run_live(self, ctx: AppContext) -> ToolResult:
-        """Ask for the target in a popup, then run the live screen over the menu.
+        """Ask for the target in a dialog, then run the live screen over the menu.
 
-        The picker is a *question*, not a place: a floating list over the menu, gone the
-        moment a target is picked, so the trace screen opens straight over the menu and
-        Esc from it lands there. It used to stay pushed as a hub under the trace screen —
-        Esc out of a trace landed back on the list, which read as two places where the
-        trace is the whole visit; tracing another node is opening the tool again.
+        The picker is a *question*, not a place. It is a floating list over the menu, and
+        it closes immediately when the user selects a target. Thus the trace screen opens
+        directly over the menu, and Esc from it goes back there. Before, the picker stayed
+        pushed as a hub under the trace screen, and Esc from a trace went back to the
+        list. That looked like two places, but the trace is the full visit. To trace
+        another node, the user opens the tool again.
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
 
         Returns:
-            A :class:`ToolResult` counting the screen opened and the traces run.
+            A :class:`ToolResult` that counts the opened screen and the traces that ran.
         """
         from ..ui.trace_screen import open_trace
         from ..ui.tui.screen import CANCEL
 
         picker = await self._build_picker(ctx)
         if picker is None:
-            # Nothing to list (or no full-screen session): the target is typed instead.
+            # Nothing to list (or no full-screen session): the user types the target.
             target = await self._prompt_target(ctx)
         else:
             chosen = await ctx.ui.session.run_dialog(picker)
@@ -145,39 +147,41 @@ class TraceTool(Tool):
         return ToolResult(summary={"sessions": 1, "traces": await open_trace(ctx, target)})
 
     async def _prompt_target(self, ctx: AppContext) -> str | None:
-        """Ask for a target by hand — the way in when there is no list to pick from.
+        """Ask the user to type a target: the way in when there is no list to select from.
 
-        Reached with no known contacts at all (an empty list would be nothing to pick from)
-        and on any surface without a full-screen session. It is also the only way to trace a
-        bare key prefix for a node the device doesn't carry as a contact. A question like
-        the list it stands in for, so it floats over the menu rather than filling the frame.
+        MeshTerm comes here when there are no known contacts (an empty list gives nothing
+        to select), and on each surface that has no full-screen session. It is also the
+        only way to trace a bare key prefix of a node that the device does not have as a
+        contact. It is a question, the same as the list that it replaces. Thus it floats
+        over the menu, and does not fill the frame.
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
 
         Returns:
-            The typed target, or ``None`` if it was left blank or cancelled.
+            The typed target, or ``None`` if the user left it blank or cancelled it.
         """
         entered = await ctx.ui.text("Target node (name or key prefix):", floating=True)
         return entered.strip() if entered else None
 
     async def _build_picker(self, ctx: AppContext) -> ContactListScreen | None:
-        """Build the trace-target picker, or ``None`` when there is no list to draw.
+        """Make the trace target picker, or return ``None`` when there is no list to draw.
 
-        The same ``NAME · TRACED · HEARD · PKTS · KEY`` lanes, Ctrl+arrow sort ring, and
-        type-to-filter the Contacts screen and the courier recipient draw — but with every
-        node type listed (a trace answers *can I reach this node?* for a repeater or room
-        just as for a companion) and an extra ``TRACED`` lane: how long ago each node was
-        last traced. The list opens sorted by ``TRACED`` descending, so the most recently
-        traced node leads and never-traced ones gather at the bottom. Enter commits the
-        highlighted node as the target.
+        It has the same ``NAME · TRACED · HEARD · PKTS · KEY`` lanes, Ctrl+arrow sort ring,
+        and type-to-filter as the Contacts screen and the courier recipient. But it lists
+        all the node types (a trace answers *can I get to this node?* for a repeater or a
+        room, the same as for a companion). It also has one more lane, ``TRACED``: how
+        long ago each node was last traced. The list opens sorted by ``TRACED``, in
+        descending order. Thus the most recently traced node comes first, and the nodes
+        that were never traced are at the bottom. Enter commits the highlighted node as
+        the target.
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
 
         Returns:
-            The picker, or ``None`` when there is nothing to list — see
-            :meth:`_prompt_target`.
+            The picker, or ``None`` when there is nothing to list (refer to
+            :meth:`_prompt_target`).
         """
         from ..ui.contactlist import (
             TRACE_LANES,
@@ -188,9 +192,10 @@ class TraceTool(Tool):
         from ..ui.surface import TuiUi
         from ..ui.widgets import ContactsSort
 
-        # Through the session cache: this picker runs on every Trace open, and the contacts
-        # table is a slow round-trip on a busy node — re-reading it here (in front of the
-        # already-cached trace screen) is what kept opening Trace feeling like a stall. See
+        # Read through the session cache. This picker runs each time that Trace opens, and
+        # the contacts table is a slow round trip on a busy node. When MeshTerm read it
+        # again here (before the trace screen, which is already cached), Trace seemed to
+        # stop each time it opened. Refer to
         # :class:`~meshterm.services.device_state.DeviceState`.
         contacts = await ctx.devstate.contacts()
         if not contacts or not isinstance(ctx.ui, TuiUi):
@@ -204,26 +209,27 @@ class TraceTool(Tool):
             footer_hint="↑↓ move · ^←→↑↓ sort · type to filter · Enter select · Esc back",
             lanes=TRACE_LANES,
         )
-        # The contact list is a full-screen page everywhere else; here it is a question
-        # asked on the way in, so it floats over the menu like every other lead-in pick.
+        # In all other places, the contact list is a full-screen page. Here it is a
+        # question before the screen opens, so it floats over the menu, the same as each
+        # other selection before a tool.
         picker.floating = True
         return picker
 
     @staticmethod
     def _picker_rows(ctx: AppContext, contacts: list[Contact]) -> list[ContactRow]:
-        """The picker's lane data for ``contacts``, read fresh from stored history.
+        """The lane data of the picker for ``contacts``, read again from the stored history.
 
-        Both the ``TRACED`` ages and the packet counts come from the repository, so this is
-        cheap enough to redo every time a trace hands the picker back — which is what keeps
-        the lane the list is *sorted* by honest about the walk that just happened.
+        The ``TRACED`` ages and the packet counts both come from the repository. Thus it
+        costs little to do this again each time that a trace returns to the picker. That
+        keeps the lane by which the list is *sorted* correct for the last walk.
 
         Args:
-            ctx: Shared application context.
-            contacts: The device's contacts, as listed.
+            ctx: The shared application context.
+            contacts: The contacts of the device, as listed.
 
         Returns:
-            One :class:`~meshterm.ui.contactlist.ContactRow` per contact, in the order
-            given (the screen sorts them).
+            One :class:`~meshterm.ui.contactlist.ContactRow` for each contact, in the given
+            order (the screen sorts them).
         """
         from ..ui.contactlist import ContactRow
         from ..ui.widgets import contact_packets
@@ -246,18 +252,18 @@ class TraceTool(Tool):
     # -- scripted (CLI) -------------------------------------------------------------
 
     async def _run_cli(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Run one trace, persist it, and print the route and per-hop summary.
+        """Run one trace, store it, and print the route and the summary of each hop.
 
-        One transmission per invocation is a hard rule on the CLI — repeaters
-        penalize (and can blacklist) nodes that burst traffic — so scripted sampling
-        means invoking again (with your own pacing between runs).
+        On the CLI, one transmission for each run is a strict rule, because repeaters
+        penalize (and can blacklist) nodes that transmit in bursts. Thus, to take more
+        samples in a script, run the command again (with your own pause between runs).
 
         Args:
-            ctx: Shared application context.
-            params: ``target`` (str), optional ``path``, and the injected ``_run_id``.
+            ctx: The shared application context.
+            params: ``target`` (str), the optional ``path``, and the injected ``_run_id``.
 
         Returns:
-            A :class:`ToolResult` with the trace's outcome.
+            A :class:`ToolResult` with the result of the trace.
         """
         return await _trace_once_cli(
             ctx, params["_run_id"], target=params["target"], path_spec=params.get("path")
@@ -279,9 +285,10 @@ class TraceTool(Tool):
             path: str | None = typer.Option(
                 None,
                 "--path",
-                # No ``-p`` short form: ``-p`` is the global ``--profile``, and
-                # ``_globals_first`` lifts a group option ahead of the subcommand wherever it
-                # is typed — so a leaf ``-p`` could never reach this option, only shadow it.
+                # No ``-p`` short form. ``-p`` is the global ``--profile``, and
+                # ``_globals_first`` moves a group option in front of the subcommand, at any
+                # position where it is typed. Thus a leaf ``-p`` can never get to this option.
+                # It can only hide it.
                 help="Force a route: comma-separated contact names/hex prefixes (e.g. 3d,f2,3d)",
             ),
         ) -> None:
@@ -293,7 +300,7 @@ class TraceTool(Tool):
 
 @register
 class TracePathTool(Tool):
-    """Walk a hand-composed route — no target — and see how far it carries."""
+    """Walk a route that you compose by hand (no target), and see how far it goes."""
 
     name = "trace-path"
     title = "Trace path"
@@ -303,22 +310,22 @@ class TracePathTool(Tool):
     order = 32
 
     async def prompt_params(self, ctx: AppContext) -> dict[str, Any] | None:
-        """No parameters to gather — a path walk has no target to pick.
+        """No parameters to collect, because a path walk has no target to select.
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
 
         Returns:
-            ``{"live": True}`` — the route itself is composed on the screen.
+            ``{"live": True}``. The user composes the route itself on the screen.
         """
         return {"live": True}
 
     async def execute(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Run — without the outer run row on the live path (see :class:`TraceTool`).
+        """Run, with no outer run row on the live path (refer to :class:`TraceTool`).
 
         Args:
-            ctx: Shared application context.
-            params: Parameters for this invocation.
+            ctx: The shared application context.
+            params: The parameters for this run.
 
         Returns:
             The :class:`ToolResult` from :meth:`run`.
@@ -328,15 +335,15 @@ class TracePathTool(Tool):
         return await super().execute(ctx, params)
 
     async def run(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Open the live path-walk screen (menu) or run one persisted trace (CLI).
+        """Open the live path walk screen (menu), or run one stored trace (CLI).
 
         Args:
-            ctx: Shared application context.
-            params: ``live`` from the menu; or ``path`` (str, required) and the
-                injected ``_run_id`` from the CLI.
+            ctx: The shared application context.
+            params: ``live`` from the menu. Or, from the CLI: ``path`` (str, necessary)
+                and the injected ``_run_id``.
 
         Returns:
-            A :class:`ToolResult` with the walk's outcome.
+            A :class:`ToolResult` with the result of the walk.
         """
         if params.get("live"):
             from ..ui.trace_screen import open_trace_path
@@ -363,9 +370,10 @@ class TracePathTool(Tool):
             path: str = typer.Option(
                 ...,
                 "--path",
-                # No ``-p`` short form: ``-p`` is the global ``--profile``, and
-                # ``_globals_first`` lifts a group option ahead of the subcommand wherever it
-                # is typed — so a leaf ``-p`` could never reach this option, only shadow it.
+                # No ``-p`` short form. ``-p`` is the global ``--profile``, and
+                # ``_globals_first`` moves a group option in front of the subcommand, at any
+                # position where it is typed. Thus a leaf ``-p`` can never get to this option.
+                # It can only hide it.
                 help="The whole walk: comma-separated contact names/hex prefixes "
                 "(must end within earshot of this node)",
             ),
@@ -376,42 +384,45 @@ class TracePathTool(Tool):
 async def _trace_once_cli(
     ctx: AppContext, run_id: int, *, target: str, path_spec: str | None
 ) -> ToolResult:
-    """Run one persisted trace and print the route and per-hop summary (CLI body).
+    """Run one stored trace, and print the route and the summary of each hop (CLI body).
 
-    Shared by both scripted trace commands: ``trace`` passes its target (path
-    optional — the device routes without one), ``trace-path`` passes the
-    :data:`~meshterm.core.models.PATH_TRACE_TARGET` sentinel with a required path.
+    The two scripted trace commands share this function. ``trace`` gives its target (the
+    path is optional, because the device can route without one). ``trace-path`` gives the
+    :data:`~meshterm.core.models.PATH_TRACE_TARGET` sentinel and a necessary path.
 
     Args:
-        ctx: Shared application context.
-        run_id: The already-open run row to record under.
-        target: The label the trace persists under.
-        path_spec: The forced route as typed (names/hex, comma-separated), if any.
+        ctx: The shared application context.
+        run_id: The run row, already open, under which to store the trace.
+        target: The label under which the trace is stored.
+        path_spec: The forced route as typed (names or hex, with commas between them), if
+            there is one.
 
     Returns:
-        A :class:`ToolResult` with the trace's outcome.
+        A :class:`ToolResult` with the result of the trace.
     """
     from ..ui.surface import TuiUi
 
     is_walk = target == PATH_TRACE_TARGET
     device = await ctx.device()
 
-    # Our own device's name labels both endpoints of the path (first hop's origin,
-    # last hop's destination); fall back to a neutral label if it's unavailable.
+    # The name of our device is the label of the two ends of the path (the origin of the
+    # first hop, and the destination of the last hop). If the name is not available, use a
+    # neutral label.
     self_info = await device.get_self_info()
     device_label = str(self_info.get("name") or LOCAL_DEVICE_LABEL)
-    # Our own public key, so the route's endpoints (us) carry a hash like every
-    # other hop, addressed at the same path-hash width.
+    # Our own public key. Thus the ends of the route (our node) have a hash, the same as
+    # each other hop, at the same path hash width.
     device_hash = str(self_info.get("public_key") or "") or None
 
-    # Resolve repeater hashes in the results to contact names where we know them,
-    # so the tables read as names instead of opaque hex prefixes.
+    # Resolve the repeater hashes in the results to contact names, when we know them. Thus
+    # the tables show names, not hex prefixes that tell nothing.
     contacts = await device.get_contacts()
     resolve = trace_runner.make_node_resolver(contacts)
 
-    # Resolve an optional forced path (names/hex) to the hex string the radio wants.
-    # Leaving it blank is fully supported for a *target* trace: the device reuses the
-    # route it already learned (or floods if it has none). A path walk always has one.
+    # Resolve an optional forced path (names or hex) to the hex string that the radio
+    # accepts. A blank path is fully supported for a *target* trace: the device uses again
+    # the route that it already learned (or floods if it has no route). A path walk always
+    # has a path.
     path: str | None = None
     if path_spec:
         path = trace_runner.parse_trace_path(path_spec, contacts)
@@ -424,8 +435,8 @@ async def _trace_once_cli(
 
     stats = TraceStats.from_traces(target, [result])
     if isinstance(ctx.ui, TuiUi):
-        # The stats panel renders route + per-hop readings for the single trace (its
-        # medians collapse to the readings themselves).
+        # The stats panel renders the route and the readings of each hop for the single
+        # trace (its medians are the same as the readings themselves).
         ctx.ui.show(
             stats_panel(
                 stats,
@@ -459,9 +470,9 @@ async def _trace_once_cli(
         message = f"[ok]✓[/ok] traced [brand]{target}[/brand]{via}"
     else:
         message = f"[err]✗[/err] no reply from [brand]{target}[/brand]{via}"
-    # A trace that never came home is not a failure of the command — the radio did
-    # transmit and the walk did run. It is a walk with nothing to report, which is what
-    # NO_RESULT says, and it is the answer a script most often branches on.
+    # A trace that never came back is not a failure of the command: the radio transmitted,
+    # and the walk ran. It is a walk with nothing to report, which is what NO_RESULT says.
+    # It is also the answer on which a script most often branches.
     return ToolResult(
         summary=summary,
         message=message,
@@ -478,30 +489,32 @@ def _trace_report(
     resolve: Any,
     device_hash: str | None,
 ) -> tuple:
-    """State one trace: the walk's outcome, then its per-hop readings.
+    """State one trace: the result of the walk, then the readings of each hop.
 
-    Two blocks. The first is what the walk *did* — one fact per line, ``route`` among them
-    as a drawn line, every node named and carrying the hash it was addressed by. The
-    second is a record per hop, and it names its two ends by that same **hash** rather than
-    repeating the names: the route line above is where the names are, and the hash is what
-    joins the two blocks (it is what carries a node's identity here, the way its colour
-    does on a screen). The document embeds the whole node at both ends instead, because a
-    structural join needs no key and each edge should be readable on its own.
+    Two blocks. The first block is what the walk *did*: one fact on each line. ``route``
+    is one of these facts, as a drawn line, and each node in it has a name and the hash by
+    which it was addressed. The second block has a record for each hop. It names the two
+    ends of a hop by that same **hash**, and does not repeat the names. The names are in
+    the route line above, and the hash joins the two blocks (here, the hash shows the
+    identity of a node, as its colour does on a screen). The document puts the full node
+    at the two ends instead, because a structural join does not use a key, and each edge
+    must be readable alone.
 
-    Our own node is a hop like any other, named and hashed. The menu draws it as ``★``
-    because a reader never has to be told which node is theirs; this line is as often read
-    out of a file by somebody who was not at the prompt when it ran.
+    Our node is a hop like any other, with a name and a hash. The menu draws it as ``★``,
+    because the user never has to be told which node is theirs. But this line is often
+    read from a file by a person who was not at the prompt when it ran.
 
     Args:
         result: The trace that ran.
-        target: The label it was addressed to.
+        target: The label to which it was addressed.
         path: The forced route as hex, or ``None`` when the device routed it.
-        device_label: Our own node's name, at both ends of the walk.
-        resolve: Maps a hop hash to a friendly name when known.
-        device_hash: Our own public key, so our ends carry a hash like every other hop.
+        device_label: The name of our node, at the two ends of the walk.
+        resolve: Maps a hop hash to a friendly name, when the name is known.
+        device_hash: Our own public key, so that our ends have a hash, the same as each
+            other hop.
 
     Returns:
-        The report's blocks.
+        The blocks of the report.
     """
     from ..ui import fields
     from ..ui.fields import NodeRef
@@ -510,14 +523,14 @@ def _trace_report(
     hash_bytes = result.path_hash_bytes
 
     def short(value: str | None) -> str | None:
-        """A hash at the width this trace addressed nodes by."""
+        """A hash, at the width with which this trace addressed the nodes."""
         if not value:
             return None
         raw = value.lower().removeprefix("0x")
         return raw[: hash_bytes * 2] if hash_bytes else raw
 
     def node(label: str) -> NodeRef:
-        """One end of a hop as the shared node shape."""
+        """One end of a hop, in the shared node shape."""
         if not label or label == device_label:
             return NodeRef(name=device_label, hash=short(device_hash), is_self=True)
         return NodeRef(name=resolve(label) or None, hash=short(label))
@@ -536,11 +549,11 @@ def _trace_report(
             fields.integer("hops", "hops"),
             fields.snr("min_snr_db", "min_snr_db"),
             fields.decimal("rtt_ms", "rtt_ms", ".0f"),
-            # New surface on the machine face: the model has always carried the TX power
-            # the walk ran at, and the plain facts block has no room for it.
+            # A new field on the machine face. The model always had the TX power at which
+            # the walk ran, and the plain facts block has no space for it.
             fields.hidden("tx_dbm"),
-            # What `hash` means on this walk's nodes, so a consumer can join two traces
-            # that addressed the same node at different widths.
+            # What `hash` means on the nodes of this walk. Thus a consumer can join two
+            # traces that addressed the same node at different widths.
             fields.hidden("hash_bytes"),
             fields.route("route", "route"),
         ),
@@ -580,22 +593,23 @@ def _trace_report(
 def _last_traced_by_name(
     contacts: list[Contact], traced: dict[str, datetime]
 ) -> dict[str, datetime]:
-    """Map each contact's name to when that node was last traced.
+    """Map the name of each contact to the time when that node was last traced.
 
-    The Trace picker's ``TRACED`` lane and default sort read this. Stored trace targets are
-    filed exactly as the user addressed them — a contact name one day, a raw hex key prefix
-    another — so each target is folded onto the contact it names (by name, case-insensitively,
-    or as a prefix of a contact's public key) and the *latest* trace time wins, so a node
-    traced under both spellings still shows one honest "last traced" age. This is the inverse
-    of the picker's old recent-targets fold, kept per-contact rather than as a name list.
+    The ``TRACED`` lane and the default sort of the Trace picker read this map. The stored
+    trace targets are filed exactly as the user addressed them: a contact name one day, a
+    raw hex key prefix on another day. Thus each target is folded onto the contact that it
+    names (by name, case-insensitive, or as a prefix of the public key of a contact). The
+    *latest* trace time wins. Thus a node that was traced under the two spellings still
+    shows one correct "last traced" age. This is the inverse of the old fold of recent
+    targets in the picker, kept for each contact, not as a list of names.
 
     Args:
-        contacts: The device's current contacts.
+        contacts: The current contacts of the device.
         traced: ``target → last-traced time`` from
             :meth:`~meshterm.persistence.repository.Repository.target_last_traced`.
 
     Returns:
-        ``contact name → last-traced time`` for every contact the history can place.
+        ``contact name → last-traced time`` for each contact that the history can find.
     """
     by_fold = {c.name.casefold(): c.name for c in contacts}
     out: dict[str, datetime] = {}
@@ -611,8 +625,8 @@ def _last_traced_by_name(
             note(named, when)
             continue
         needle = target.lower().removeprefix("0x")
-        # Only fold plausible key prefixes (≥2 bytes of hex) — a short hex-looking *name*
-        # like "ace" must not be mistaken for an address.
+        # Fold only possible key prefixes (≥2 bytes of hex). A short *name* that looks like
+        # hex, such as "ace", must not be mistaken for an address.
         if len(needle) >= 4 and all(ch in _HEX_DIGITS for ch in needle):
             for contact in contacts:
                 if (contact.public_key or "").lower().startswith(needle):

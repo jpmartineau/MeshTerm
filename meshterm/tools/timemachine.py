@@ -1,14 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The ``timemachine`` tool: explore everything the recorder ever heard.
+"""The ``timemachine`` tool: explore all that the recorder ever heard.
 
-Opens the Time Machine (see :mod:`meshterm.ui.timemachine_screen`): pick the whole mesh
-or any node ever observed and read its history as braille charts — reception volume,
-the median-SNR band, the hour-of-day rhythm, packets and nodes per day, first-ever
-arrivals — over a switchable 24 h / 7 d / 30 d / all-time window. The passive monitor
-has been writing this history since the first session; this is where it pays off.
+The tool opens the Time Machine (refer to :mod:`meshterm.ui.timemachine_screen`). The
+user selects the whole mesh, or any node that MeshTerm ever heard, and reads its history
+as braille charts: the reception volume, the median-SNR band, the rhythm by hour of the
+day, the packets and nodes for each day, and the first arrivals. The time window is 24 h,
+7 d, 30 d, or all the time, and the user can change it. The passive monitor writes this
+history, and it started in the first session. This tool is where that history becomes
+useful.
 
-Menu-only: the explorer is interactive by nature (subjects, windows, scrolling); the
-``monitor`` and ``nodes`` subcommands remain the scripted views over the same data.
+Menu only: the explorer is interactive (subjects, time windows, scroll). The ``monitor``
+and ``nodes`` subcommands stay the scripted listings of the same data.
 """
 
 from __future__ import annotations
@@ -23,24 +25,24 @@ from .base import Tool, ToolResult, register
 
 @register
 class TimeMachineTool(Tool):
-    """Read the mesh's recorded past: per-node timelines, daily volumes, arrivals."""
+    """Read the stored history of the mesh: node timelines, daily volumes, arrivals."""
 
     name = "timemachine"
     title = "Time machine"
     icon = "⏳"
     help = "Recorded history — timelines, rhythms, arrivals"
     category = "Watch"
-    order = 40  # the past tense of the Dashboard above it
+    order = 40  # the Dashboard above it, but for the past
 
     async def prompt_params(self, ctx: AppContext) -> dict[str, Any] | None:
-        """Run the explorer; there are never parameters to collect.
+        """Run the explorer. It has no parameters to collect.
 
-        The screen presents everything itself and returns when dismissed, so
-        returning ``None`` tells the menu the invocation is complete (the same
+        The screen shows all its content itself, and it returns when the user leaves it.
+        Thus the return value ``None`` tells the menu that the run is complete (the same
         pattern as the ``dashboard`` tool).
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
 
         Returns:
             Always ``None``.
@@ -51,20 +53,20 @@ class TimeMachineTool(Tool):
         return None
 
     async def run(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Nothing runs here: the Time Machine lives inside :meth:`prompt_params`.
+        """Nothing runs here: the Time Machine is in :meth:`prompt_params`.
 
         Args:
-            ctx: Shared application context.
-            params: Unused.
+            ctx: The shared application context.
+            params: Not used.
 
         Returns:
-            An empty :class:`ToolResult` (only reachable from a scripted call).
+            An empty :class:`ToolResult` (only a scripted call comes here).
         """
         return ToolResult(summary={})
 
     def register_cli(self, app: typer.Typer) -> None:
-        """Register no CLI command — the Time Machine is an interactive explorer.
+        """Register no CLI command, because the Time Machine is an interactive explorer.
 
         Args:
-            app: The Typer application (untouched).
+            app: The Typer application (not changed).
         """

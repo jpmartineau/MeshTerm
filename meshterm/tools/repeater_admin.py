@@ -1,16 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
 """The ``repeater-admin`` tool: set up remote repeaters and room servers over the mesh.
 
-Interactively it opens the repeater-admin flow (see :mod:`meshterm.ui.repeater_admin`):
-pick a node (credentialed ones lead the list), log in with a remembered or prompted
-password, and land in a device-configuration-style editor speaking the node's text CLI —
-including the repeater-only knobs the local editor never had (TX delay, Direct TX delay,
-airtime factor, advert intervals) — plus one-shot actions (advert, clock sync, password,
-reboot) and the readline-style remote command line.
+In the menu, the tool opens the repeater-admin flow (refer to
+:mod:`meshterm.ui.repeater_admin`):
 
-On the CLI it stays a scriptable one-shot: ``repeater-admin <node> <command…>`` logs in
-(remembered password, or ``--password``) and prints the node's reply — one transmission
-per invocation, the trace tool's rule.
+1. The user selects a node. The nodes with stored credentials are first in the list.
+2. The user logs in with a remembered password, or with a password that a prompt asks
+   for.
+3. The user goes to an editor similar to Device config, which uses the text CLI of the
+   node. The editor includes the settings that only a repeater has, which the local
+   editor never had (TX delay, Direct TX delay, airtime factor, advert intervals). It also
+   has one-shot actions (advert, clock sync, password, reboot) and a remote command line
+   similar to readline.
+
+On the CLI, the tool stays a one-shot command for scripts. ``repeater-admin <node>
+<command…>`` logs in (with the remembered password, or with ``--password``) and prints the
+reply of the node. Each run does one transmission, which is the rule of the trace tool.
 """
 
 from __future__ import annotations
@@ -31,23 +36,23 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 @register
 class RepeaterAdminTool(Tool):
-    """Configure a remote repeater/room server: settings, actions, and its raw CLI."""
+    """Configure a remote repeater or room server: settings, actions, and its raw CLI."""
 
     name = "repeater-admin"
     title = "Repeater admin"
     icon = "🗼"
     help = "Run a remote repeater — settings and actions"
     category = "Other nodes"
-    order = 10  # the remote sibling of the local config tools
+    order = 10  # the remote equivalent of the local config tools
 
     async def prompt_params(self, ctx: AppContext) -> dict[str, Any] | None:
-        """Run the interactive flow; there are never parameters to collect.
+        """Run the interactive flow. It has no parameters to collect.
 
-        The flow presents everything itself (the same pattern as ``config``),
-        so returning ``None`` tells the menu the invocation is complete.
+        The flow shows all its content itself (the same pattern as ``config``). Thus the
+        return value ``None`` tells the menu that the run is complete.
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
 
         Returns:
             Always ``None``.
@@ -61,21 +66,21 @@ class RepeaterAdminTool(Tool):
         """Send one CLI command to a remote node and print its reply (scripted path).
 
         Args:
-            ctx: Shared application context.
-            params: ``node`` (contact name), ``command`` (the CLI text), and an
-                optional ``password`` overriding the remembered one.
+            ctx: The shared application context.
+            params: ``node`` (the contact name), ``command`` (the CLI text), and an
+                optional ``password`` that replaces the remembered password.
 
         Returns:
-            A :class:`ToolResult` carrying the node's reply (or its absence).
+            A :class:`ToolResult` with the reply of the node (or with no reply).
         """
         device = await ctx.device()
         contacts = await device.get_contacts()
         name = str(params["node"])
         node = next((c for c in contacts if c.name == name), None)
-        # Both of these are the *argument* being wrong, and nothing has gone out over
-        # the air when either fires — so they are usage errors (2), not device failures
-        # (4), whose promise to a caller is that a retry is worth trying. `tx-optimize`
-        # already answered the identical question this way for the identical condition.
+        # In both cases, the argument is wrong, and nothing went out on the air. Thus they
+        # are usage errors (2), not device failures (4). A device failure tells a caller
+        # that a retry can help. `tx-optimize` already gave the same answer for the same
+        # condition.
         if node is None:
             raise typer.BadParameter(f"unknown contact: {name!r}")
 
@@ -103,8 +108,9 @@ class RepeaterAdminTool(Tool):
         return ToolResult(
             report=(_answered(node, command, reply),),
             summary={"node": name, "command": command, "replied": reply is not None},
-            # Silence is not failure — the command may well have landed — but there is
-            # nothing to report, and a script waiting on output should know which it got.
+            # No reply is not a failure, because the command possibly arrived. But there is
+            # nothing to report, and a script that waits for output must know which result
+            # it got.
             exit_code=exitcodes.OK if reply is not None else exitcodes.NO_RESULT,
         )
 
@@ -131,16 +137,16 @@ class RepeaterAdminTool(Tool):
 
 
 def _answered(node: Contact, command: str, reply: str | None) -> Facts:
-    """What a remote node said back.
+    """The reply of a remote node.
 
-    ``reply`` is the node's own text, whole and verbatim — the plain face prints it bare
-    (as text and never as markup, so a reply holding a square bracket is a reply holding a
-    square bracket), and the document carries it raw, multi-line where the node sent
-    several lines.
+    ``reply`` is the text of the node, complete and exact. The plain face prints it bare,
+    as text and never as markup. Thus a square bracket in a reply stays a square bracket.
+    The document holds it raw, with more than one line if the node sent more than one
+    line.
 
-    It is deliberately **not parsed**. MeshTerm does not know the remote node's CLI
-    grammar, and a document that pretended to would be inventing structure a consumer
-    would then depend on.
+    On purpose, it is **not parsed**. MeshTerm does not know the CLI grammar of the remote
+    node. If the document parses it, the document invents a structure, and a consumer
+    then depends on that structure.
     """
     from ..ui import fields
     from ..ui.fields import NodeRef

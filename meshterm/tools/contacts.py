@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The ``contacts`` tool: list the contacts this node knows about.
+"""The ``contacts`` tool: list the contacts that this node knows.
 
-The menu opens the sortable Contacts screen, which leads with our own node; the CLI
-prints the contact list alone, because our own node is not a contact — ``meshterm info``
-reports it, in far more detail than a row could hold.
+The menu opens the Contacts screen, which you can sort and which starts with our node.
+The CLI prints only the contact list, because our node is not a contact.
+``meshterm info`` reports our node, with much more detail than a row can hold.
 """
 
 from __future__ import annotations
@@ -24,58 +24,61 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 @register
 class ContactsTool(Tool):
-    """List this node and its known contacts, each with its path-hash prefix."""
+    """List this node and its known contacts, each with its hash."""
 
     name = "contacts"
     title = "Contacts"
     icon = "👥"
     help = "Known contacts — last heard, packets, type"
     category = "Message"
-    order = 40  # the address book the three above pick their recipient from
+    order = 40  # the address book from which the three tools above select a recipient
 
     async def run(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Query the device and render the contacts list.
+        """Query the device and render the contact list.
 
         Args:
-            ctx: Shared application context.
-            params: Unused.
+            ctx: The shared application context.
+            params: Not used.
 
         Returns:
-            A :class:`ToolResult` summarizing the number of known contacts.
+            A :class:`ToolResult` with a summary of the number of known contacts.
         """
         from ..ui.surface import TuiUi
         from ..ui.widgets import ContactsSort, ordered_contacts
 
-        # Read through the session cache: on a busy node the contacts table is a slow
-        # round-trip, and re-fetching it (plus self-info) on every menu visit is a chief cause
-        # of sluggish navigation. The cache holds them for the session and refreshes contacts
-        # in the background (see :class:`~meshterm.services.device_state.DeviceState`).
+        # Read through the session cache. On a busy node, the contacts table is a slow
+        # round trip. If MeshTerm reads it again (and the self info) at each visit to the
+        # menu, that is a main cause of slow navigation. The cache keeps them for the session
+        # and reads the contacts again in the background (refer to
+        # :class:`~meshterm.services.device_state.DeviceState`).
         info = await ctx.devstate.self_info()
         contacts = await ctx.devstate.contacts()
 
-        # The path-hash prefix — the leading slice of a key a forced path addresses — is
-        # ``mode + 1`` bytes wide; highlight it in every key. The mode is an optional read,
-        # so fall back to no highlighting when the firmware doesn't report it.
+        # The hash (the first part of a key, which a forced path uses as the address) is
+        # ``mode + 1`` bytes wide. Light it in each key. The mode is an optional read. Thus
+        # if the firmware does not report it, light nothing.
         try:
             mode = await ctx.devstate.path_hash_mode()
-        except Exception:  # noqa: BLE001 - optional read; absence just skips highlighting
+        except Exception:  # noqa: BLE001 - an optional read. If it is absent, nothing is lit.
             mode = None
         prefix_bytes = (mode + 1) if isinstance(mode, int) and 0 <= mode <= 3 else 0
 
-        # Overheard-packet tallies from background monitoring, keyed by node hash; a
-        # contact we've never passively overheard simply has no entry.
+        # The counts of overheard packets from the background monitor, keyed by node hash.
+        # A contact that we never overheard passively has no entry.
         counts = {n.node: n.count for n in ctx.repo.heard_nodes() if n.node}
 
         self_name = str(info.get("name") or "this node")
         self_key = str(info.get("public_key") or "")
-        # Opens most-recently-heard first: the list's job is "who's out there right now",
-        # and a freshest-first order answers that on sight — an A→Z roll call doesn't. The
-        # Ctrl+arrows re-sort from there (and ``--sort`` picks the CLI's order).
+        # The list opens with the most recently heard node first. The list must answer "who
+        # is out there now", and an order with the newest first answers that immediately.
+        # A list from A to Z does not. Then the Ctrl+arrows sort the list again (and
+        # ``--sort`` sets the order of the CLI).
         sort_name = str(params.get("sort") or "heard")
 
-        # In the menu, hand the list to the interactive screen so the Ctrl+arrows re-sort it
-        # live — its ring spans the shared contact list's four columns (hash included); on the
-        # scripted CLI, print the plain listing once in the requested order.
+        # In the menu, give the list to the interactive screen, so that the Ctrl+arrows sort
+        # it again while it is open. Their ring goes through the four columns of the shared
+        # contact list (also the hash). On the scripted CLI, print the plain listing one
+        # time, in the requested order.
         if isinstance(ctx.ui, TuiUi):
             from ..ui.contactlist import SORT_COLUMNS, SORT_OPENS_ASCENDING
             from ..ui.contacts_screen import open_contacts
@@ -107,10 +110,10 @@ class ContactsTool(Tool):
                 "heard", "--sort", "-s", help="Order contacts by: heard, name, packets"
             ),
         ) -> None:
-            # `ContactsSort.from_name` falls back to the first column for an unknown name,
-            # deliberately, so a saved preference written by an older build cannot wedge
-            # the menu's list. On the command line the same silence hides a typo: the
-            # caller asked for one order and got another, with nothing said.
+            # For an unknown name, `ContactsSort.from_name` uses the first column. This is
+            # on purpose, so that a saved preference from an older build cannot block the
+            # list of the menu. On the command line, the same silence hides a typing error:
+            # the caller asked for one order and got another, and nothing said so.
             if sort not in ContactsSort.names():
                 choices = ", ".join(ContactsSort.names())
                 raise typer.BadParameter(f"--sort must be one of: {choices} (got {sort!r})")
@@ -118,21 +121,23 @@ class ContactsTool(Tool):
 
 
 def _listing(contacts: list[Contact], counts: dict[str, int], prefix_bytes: int) -> Listing:
-    """The contact list, stated once for both faces.
+    """The contact list, stated one time for the two faces.
 
-    ``TYPE`` is the node's advertised role in words, where the menu draws a coloured glyph:
-    a monochrome ``▲`` would need a legend and the CLI has no legends. ``HEARD`` is a
-    relative age, because "recently?" is the question this listing is opened to answer.
-    ``HASH`` is the token ``--path`` and ``--to`` take — it used to have to be sliced out
-    of ``KEY`` by hand — and ``LOCATION`` is a fact the model has always carried and no
-    column had room for. ``KEY`` stays full and last, so it runs off the right harmlessly
-    and is never elided: a truncated key is not something a caller can hand back.
+    ``TYPE`` is the advertised role of the node, in words. The menu draws a coloured glyph
+    there, but a monochrome ``▲`` must have a legend, and the CLI has no legends.
+    ``HEARD`` is a relative age, because the user opens this listing to ask "recently?".
+    ``HASH`` is the token that ``--path`` and ``--to`` accept. Before, the user had to cut
+    it out of ``KEY`` by hand. ``LOCATION`` is a fact that the model always had, but no
+    column had space for it. ``KEY`` stays full and last. Thus it goes off the right side
+    with no harm and is never cut: a caller cannot give a truncated key back to a command.
 
     Args:
         contacts: The contacts, already in the requested order.
-        counts: Overheard-packet tallies keyed by node id (from passive monitoring).
-        prefix_bytes: The device's path-hash width, which is what makes ``HASH`` the
-            token a forced path addresses this node by rather than an arbitrary slice.
+        counts: The counts of overheard packets, keyed by node id (from the passive
+            monitor).
+        prefix_bytes: The path hash width of the device. Because of it, ``HASH`` is the
+            token by which a forced path addresses this node, not a random part of the
+            key.
 
     Returns:
         The listing.
@@ -171,7 +176,7 @@ def _listing(contacts: list[Contact], counts: dict[str, int], prefix_bytes: int)
             fields.position(),
         ),
         rows=rows,
-        # The node's four lanes are not contiguous: what a reader scans for — who, what,
-        # how recently, how much — comes first, and the two long hex fields go right.
+        # The four lanes of the node are not together. What the user looks for (who, what,
+        # how recently, how much) comes first, and the two long hex fields go to the right.
         order=("NAME", "TYPE", "HEARD", "PKTS", "HASH", "LOCATION", "KEY"),
     )

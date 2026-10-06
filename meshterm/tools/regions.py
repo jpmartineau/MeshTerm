@@ -1,23 +1,28 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The ``regions`` command: ask a repeater which regions it relays floods for.
+"""The ``regions`` command: ask a repeater for which regions it relays floods.
 
-``meshterm regions <repeater>`` sends the anonymous regions request (firmware 1.12+, no
-login) and prints the answer — the regions it relays scoped floods for, and whether it also
-relays unscoped ones. One request, one transmission, per invocation: the repeater
-rate-limits the question, and nothing here retries it.
+``meshterm regions <repeater>`` sends the anonymous regions request (firmware 1.12 or
+later, no login) and prints the answer. The answer gives the regions for which the
+repeater relays scoped floods, and it tells if the repeater also relays unscoped floods.
+Each run sends one request, which is one transmission. The repeater limits the rate of
+this question, and nothing here tries it again.
 
-It is a command-line face only. In the menu the same question lives on a repeater's node
-page (*Ask which regions it carries*), beside the answer it last gave, so there is no menu
-row for it here.
+This tool has only a command-line face. In the menu, the same question is on the node page
+of a repeater ("Ask which regions it carries"), next to the last answer of that repeater.
+Thus the menu has no row for this tool.
 
-The answer is learned into the region store either way, exactly as the node page learns it,
-so a scoped flood heard afterwards can be traced back to a region this repeater named.
+In both cases, MeshTerm adds the answer to the region store, exactly as the node page does.
+Thus MeshTerm can trace a scoped flood that it hears later back to a region that this
+repeater named.
 
-Exit status, per the CLI's rules: ``0`` when it answered with anything (unscoped floods
-alone are an answer), ``5`` when it answered and named nothing at all — it relays no floods
-— ``2`` for a contact that does not exist or is known not to be a repeater (nothing was
-sent), and ``4`` when it never answered, which is what a repeater out of direct reach does:
-the request is only answered when it arrives from a neighbour or over a known route.
+The exit status, by the rules of the CLI:
+
+- ``0`` if the repeater answered with any value (only unscoped floods is also an answer).
+- ``5`` if it answered and named nothing (it relays no floods).
+- ``2`` for a contact that does not exist, or that is known not to be a repeater (nothing
+  was sent).
+- ``4`` if it never answered. A repeater that is out of direct reach does this, because it
+  answers the request only when the request comes from a neighbour or over a known route.
 """
 
 from __future__ import annotations
@@ -52,16 +57,16 @@ class RegionsTool(Tool):
         """Send the regions request to one repeater and report its answer.
 
         Args:
-            ctx: Shared application context.
-            params: ``node``, the repeater's contact name.
+            ctx: The shared application context.
+            params: ``node``: the contact name of the repeater.
 
         Returns:
-            The answer as a report; ``NO_RESULT`` when it named nothing.
+            The answer as a report. ``NO_RESULT`` if the repeater named nothing.
 
         Raises:
-            typer.BadParameter: For an unknown contact, or one known not to be a repeater —
-                both decided before anything is sent.
-            DeviceCommandError: When the repeater never answered.
+            typer.BadParameter: For an unknown contact, or for a contact that is known not
+                to be a repeater. The method finds both before it sends anything.
+            DeviceCommandError: If the repeater never answered.
         """
         device = await ctx.device()
         contacts = await device.get_contacts()
@@ -102,11 +107,11 @@ class RegionsTool(Tool):
 
 
 def _answer(node: Contact, unscoped: bool, regions: list[str]) -> Facts:
-    """The repeater's answer, stated once for both faces.
+    """The answer of the repeater, given one time for both faces.
 
-    Three facts: who answered, whether it relays unscoped floods, and the regions it relays
-    scoped floods for — the wildcard kept out of that list, since it names no region (see
-    :func:`~meshterm.ui.fields.regions`).
+    Three facts: which node answered, if it relays unscoped floods, and the regions for
+    which it relays scoped floods. That list does not include the wildcard, because the
+    wildcard names no region (refer to :func:`~meshterm.ui.fields.regions`).
     """
     from ..ui import fields
     from ..ui.fields import NodeRef

@@ -1,16 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The ``watchtower`` tool: a passive sentinel over the nodes you care about.
+"""The ``watchtower`` tool: a passive sentinel for the nodes that are important to you.
 
-Opens the Watchtower screen (see :mod:`meshterm.ui.watchtower_screen`): the alert log
-with acknowledge/clear, the watchlist, and per-node rules. The rules themselves run in
-the background for the whole session (see :mod:`meshterm.services.watchtower`) — a
-silence alarm when a starred node goes quiet, an SNR-sag warning when its receptions
-degrade, a recovery note when it returns, and a mesh-wide heads-up when a never-before-
-seen node appears. Unacknowledged alerts show as the ``▲ n`` badge in the header, so
-nothing here needs to be open to be on duty.
+The tool opens the Watchtower screen (refer to :mod:`meshterm.ui.watchtower_screen`): the
+alert log with acknowledge and clear, the watchlist, and the rules for each node. The
+rules run in the background for the whole session (refer to
+:mod:`meshterm.services.watchtower`):
 
-Menu-only: the sentinel is inherently a live, session-long service; scripted runs can
-read the same history through ``monitor``/``nodes``.
+- A silence alarm when MeshTerm no longer hears a starred node.
+- An SNR-sag warning when the receptions of the node become weaker.
+- A recovery note when the node comes back.
+- A notice for the whole mesh when a node appears that MeshTerm never heard before.
+
+The header shows the alerts that are not acknowledged as the ``▲ n`` badge. Thus this
+screen does not have to be open for the watch to work.
+
+Menu only: the sentinel is always a live service for the whole session. Scripted runs can
+read the same history through ``monitor`` and ``nodes``.
 """
 
 from __future__ import annotations
@@ -25,24 +30,24 @@ from .base import Tool, ToolResult, register
 
 @register
 class WatchtowerTool(Tool):
-    """Watch starred nodes: silence alarms, SNR sag, new-node sightings."""
+    """Watch starred nodes: silence alarms, SNR sag, and new nodes that are heard."""
 
     name = "watchtower"
     title = "Watchtower"
     icon = "🚨"
     help = "Alerts on watched nodes — silence, SNR sag"
     category = "Watch"
-    order = 30  # after the live views: the section's always-on alerting eye
+    order = 30  # after the live screens: the alerts of the section, which are always on
 
     async def prompt_params(self, ctx: AppContext) -> dict[str, Any] | None:
-        """Run the Watchtower screen; there are never parameters to collect.
+        """Run the Watchtower screen. It has no parameters to collect.
 
-        The screen presents everything itself and returns when dismissed, so
-        returning ``None`` tells the menu the invocation is complete (the same
+        The screen shows all its content itself, and it returns when the user leaves it.
+        Thus the return value ``None`` tells the menu that the run is complete (the same
         pattern as the ``dashboard`` tool).
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
 
         Returns:
             Always ``None``.
@@ -53,20 +58,20 @@ class WatchtowerTool(Tool):
         return None
 
     async def run(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Nothing runs here: the Watchtower lives inside :meth:`prompt_params`.
+        """Nothing runs here: the Watchtower is in :meth:`prompt_params`.
 
         Args:
-            ctx: Shared application context.
-            params: Unused.
+            ctx: The shared application context.
+            params: Not used.
 
         Returns:
-            An empty :class:`ToolResult` (only reachable from a scripted call).
+            An empty :class:`ToolResult` (only a scripted call comes here).
         """
         return ToolResult(summary={})
 
     def register_cli(self, app: typer.Typer) -> None:
-        """Register no CLI command — the Watchtower is a live, menu-only feature.
+        """Register no CLI command, because the Watchtower is a live feature for the menu only.
 
         Args:
-            app: The Typer application (untouched).
+            app: The Typer application (not changed).
         """

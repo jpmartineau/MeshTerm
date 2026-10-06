@@ -1,19 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The ``courier`` tool: store-and-forward messaging for contacts that aren't there yet.
+"""The ``courier`` tool: store-and-forward messages for contacts that MeshTerm cannot reach yet.
 
-Interactively it opens the outbox screen (see :mod:`meshterm.ui.courier_screen`):
-queued messages with their live state, the queueing flow (recipient → message →
-when), forced sends, and the delivered/given-up history. Delivery runs in the
-background for the whole session (see :mod:`meshterm.services.courier`): a queued
-message goes out when its contact is next heard — or at its scheduled time — as a normal
-direct message with acknowledgement tracking and polite exponential backoff, and the
-outcome lights the header's Watchtower badge.
+In the menu, the tool opens the outbox screen (refer to :mod:`meshterm.ui.courier_screen`).
+The screen shows the queued messages with their live state, the flow to queue a message
+(recipient → message → when), forced sends, and the history of the messages that were
+delivered or that the courier gave up. Delivery runs in the background for the whole
+session (refer to :mod:`meshterm.services.courier`). A queued message goes out when
+MeshTerm next hears its contact, or at its scheduled time. It goes as a normal direct
+message, with acknowledgement tracking and a polite exponential backoff. The result lights
+the Watchtower badge in the header.
 
-On the CLI the same outbox is scriptable through subcommands: ``queue`` adds a message
-(reading the contact list to address it — nothing is transmitted) for the next
-interactive session's courier to deliver, ``send`` forces one delivery attempt right now,
-and ``list`` / ``cancel`` / ``clear`` inspect and prune the outbox — the scriptable face
-of the outbox screen's own Send-now, Cancel, and Clear-finished actions.
+On the CLI, subcommands give script access to the same outbox:
+
+- ``queue`` adds a message for the courier of the next interactive session to deliver. It
+  reads the contact list to address the message, but it transmits nothing.
+- ``send`` forces one delivery try now.
+- ``list``, ``cancel``, and ``clear`` examine the outbox and remove entries from it.
+
+These subcommands are the script form of the Send-now, Cancel, and Clear-finished actions
+of the outbox screen.
 """
 
 from __future__ import annotations
@@ -33,24 +38,24 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 @register
 class CourierTool(Tool):
-    """Queue messages for offline contacts; they go out when the contact is next heard."""
+    """Queue messages for offline contacts. A message goes out when its contact is next heard."""
 
     name = "courier"
     title = "Courier"
     icon = "📨"
     help = "Outbox that delivers when a contact is heard"
     category = "Message"
-    order = 30  # after Chat and Channels: the same conversations, minus the waiting around
+    order = 30  # after Chat and Channels: the same conversations, but without the wait
 
     async def prompt_params(self, ctx: AppContext) -> dict[str, Any] | None:
-        """Run the outbox screen; there are never parameters to collect.
+        """Run the outbox screen. It has no parameters to collect.
 
-        The screen presents everything itself and returns when dismissed, so
-        returning ``None`` tells the menu the invocation is complete (the same
+        The screen shows all its content itself, and it returns when the user leaves it.
+        Thus the return value ``None`` tells the menu that the run is complete (the same
         pattern as the ``dashboard`` tool).
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
 
         Returns:
             Always ``None``.
@@ -61,14 +66,14 @@ class CourierTool(Tool):
         return None
 
     async def run(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Dispatch a scripted CLI action (the menu path lives in :meth:`prompt_params`).
+        """Run the handler for a scripted CLI action (the menu path is :meth:`prompt_params`).
 
         Args:
-            ctx: Shared application context.
-            params: A ``cli_action`` naming the outbox action, plus its arguments.
+            ctx: The shared application context.
+            params: A ``cli_action`` that names the outbox action, and its arguments.
 
         Returns:
-            A :class:`ToolResult` describing the action's outcome.
+            A :class:`ToolResult` that gives the result of the action.
         """
         action = params.get("cli_action", "queue")
         if action == "list":
@@ -84,15 +89,15 @@ class CourierTool(Tool):
     # -- CLI --------------------------------------------------------------------
 
     async def _cli_queue(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Queue one message from the CLI (transmits nothing).
+        """Queue one message from the CLI. This transmits nothing.
 
         Args:
-            ctx: Shared application context.
-            params: ``contact`` (contact name), ``text`` (the message body), and an
-                optional local ``at`` clock time (``HH:MM``, next occurrence).
+            ctx: The shared application context.
+            params: ``contact`` (the contact name), ``text`` (the message body), and an
+                optional local clock time ``at`` (``HH:MM``, the next occurrence).
 
         Returns:
-            A :class:`ToolResult` describing the queued entry.
+            A :class:`ToolResult` that describes the queued entry.
         """
         from ..ui.courier_screen import parse_clock
         from ..ui.watchtower_screen import contact_watch_key
@@ -102,8 +107,8 @@ class CourierTool(Tool):
         name = str(params["contact"])
         needle = name.casefold()
         contact = next((c for c in contacts if c.name.casefold() == needle), None)
-        # The named contact, not the radio: nothing is queued and nothing is sent, so
-        # these are bad arguments (2) rather than device failures (4).
+        # The problem is the named contact, not the device. Nothing is queued and nothing
+        # is sent, so these are bad arguments (2) instead of device failures (4).
         if contact is None:
             raise typer.BadParameter(f"unknown contact: {name!r}")
         key = contact_watch_key(contact)
@@ -135,10 +140,11 @@ class CourierTool(Tool):
         )
 
     async def _cli_list(self, ctx: AppContext) -> ToolResult:
-        """State the outbox — waiting entries then finished ones.
+        """Give the outbox: first the waiting entries, then the finished entries.
 
-        A read-only view over the stored outbox: it needs no device, so it works the same
-        whether or not a radio is attached (the scriptable face of the outbox screen).
+        This is a read-only listing of the stored outbox. It does not use the device, so it
+        works the same when a device is connected and when it is not. It is the script
+        form of the outbox screen.
         """
         entries = ctx.courier_store.entries()
         return ToolResult(
@@ -148,16 +154,17 @@ class CourierTool(Tool):
         )
 
     async def _cli_send(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Force one delivery attempt for a waiting entry, right now.
+        """Try one forced delivery of a waiting entry, now.
 
-        The scriptable ``Send now`` — one forced attempt through the same courier the
-        outbox screen uses, skipping the "wait until the contact is heard" eligibility check.
+        This is the script form of ``Send now``. It tries one forced delivery through the
+        same courier that the outbox screen uses. It does not do the eligibility check
+        ("wait until the contact is heard").
         """
         ident = int(params["id"])
         if ctx.courier_store.get(ident) is None:
-            # A bad argument, not a device failure: the outbox is a local file, nothing was
-            # transmitted, and no retry will make an id exist. Exit 4 told a caller to try
-            # again; exit 2 tells it to fix the command, which is the truth.
+            # A bad argument, not a device failure. The outbox is a local file, nothing was
+            # transmitted, and no retry can make an id exist. Exit 4 told a caller to try
+            # again. Exit 2 tells it to correct the command, and that is the true answer.
             raise typer.BadParameter(f"no outbox entry #{ident} (see `courier list`)")
         outcome = await ctx.courier.attempt_now(ident)
         notes = {
@@ -177,7 +184,7 @@ class CourierTool(Tool):
         )
 
     async def _cli_cancel(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Remove a waiting entry from the outbox (finished ones use ``clear``)."""
+        """Remove a waiting entry from the outbox (for a finished entry, use ``clear``)."""
         ident = int(params["id"])
         if ctx.courier_store.cancel(ident):
             ctx.ui.ack(f"[warn]cancelled outbox entry #{ident}[/warn]")
@@ -193,7 +200,7 @@ class CourierTool(Tool):
         )
 
     async def _cli_clear(self, ctx: AppContext) -> ToolResult:
-        """Drop every finished (delivered / given-up) entry, leaving the queue untouched."""
+        """Remove each finished entry (delivered or given up), and keep the queue as it is."""
         before = len(ctx.courier_store.entries())
         ctx.courier_store.clear_done()
         cleared = before - len(ctx.courier_store.entries())
@@ -260,12 +267,13 @@ class CourierTool(Tool):
 
 
 def _recipient(name: str | None, node_key: str | None) -> object:
-    """The outbox's addressee as the shared node shape.
+    """The addressee of the outbox entry, as the shared node shape.
 
-    The outbox stores a name and the 12-hex id it addresses, so three of the five fields
-    are honestly ``null`` — and the id goes in ``hash`` rather than ``key``, because that
-    is what it is. A key is the full value and is never truncated by this app's choosing;
-    calling a six-byte prefix one would hand a caller something ``--to`` cannot take.
+    The outbox stores a name and the key prefix (12 hex digits) that it addresses. Thus
+    three of the five fields are correctly ``null``. The key prefix goes in ``hash``
+    instead of ``key``, because it is a short id, not a full key. A key is the full value,
+    and MeshTerm never truncates a key by its own choice. If MeshTerm calls a six-byte
+    prefix a key, it gives a caller a value that ``--to`` cannot accept.
     """
     from ..ui.fields import NodeRef
 
@@ -275,10 +283,10 @@ def _recipient(name: str | None, node_key: str | None) -> object:
 def _queued(message: QueuedMessage, name: str, not_before: object) -> Facts:
     """What ``courier queue`` put in the outbox.
 
-    The plain face prints the **id and nothing else**, because the id is the one fact a
-    caller has to keep — it is what ``send`` and ``cancel`` take — and everything else on
-    the line is what they just typed. The document carries the rest, because a caller
-    logging the queue has no other record of it.
+    The plain face prints **only the id**, because the id is the only fact that a caller
+    must keep: ``send`` and ``cancel`` take it. All the other data on the line is what the
+    caller typed. The document holds the rest, because a caller that logs the queue has no
+    other record of it.
     """
     from ..ui import fields
     from ..ui.report import Facts
@@ -301,13 +309,13 @@ def _queued(message: QueuedMessage, name: str, not_before: object) -> Facts:
 
 
 def _outbox(entries: list) -> Listing:
-    """The outbox, waiting entries then finished ones.
+    """The outbox: first the waiting entries, then the finished entries.
 
-    The deliberate asymmetry between the two time columns: ``SCHEDULED`` is an
-    *appointment* the caller set with ``--at``, so it stays a wall-clock instant, and
-    ``FINISHED`` is an age, because "how long ago did it go" is what anyone reading a
-    delivered row wants. The mixed widths are the price of both columns being right, and
-    ``--absolute`` makes them uniform for anyone who dislikes it.
+    The two time columns are different on purpose. ``SCHEDULED`` is an appointment that
+    the caller set with ``--at``, so it stays a wall-clock instant. ``FINISHED`` is an
+    age, because a person who reads a delivered row wants to know how long ago it went.
+    Thus the two columns have different widths, but both columns are correct.
+    ``--absolute`` makes them the same for a person who does not like the difference.
     """
     from ..core.courier_store import DELIVERED, QUEUED
     from ..ui import fields
@@ -326,11 +334,11 @@ def _outbox(entries: list) -> Listing:
                 "id": m.ident,
                 "state": state,
                 "node": _recipient(m.node_name, m.node_key),
-                # An entry with no scheduled time goes as soon as the contact is heard,
-                # which is not a time and so is not one here either.
+                # An entry with no scheduled time goes when the contact is next heard. That
+                # is not a time, so this field has no time either.
                 "scheduled_at": m.not_before,
                 "finished_at": m.finished,
-                # Not shortened the way the outbox screen shortens it: nothing wraps here.
+                # Not shortened as the outbox screen shortens it, because nothing wraps here.
                 "text": m.text,
             }
         )
@@ -349,11 +357,11 @@ def _outbox(entries: list) -> Listing:
 
 
 def _attempted(ident: int, outcome: str) -> Facts:
-    """What one forced delivery attempt came to.
+    """The result of one forced delivery try.
 
-    ``outcome`` is one of the closed set the help lists, kept verbatim — spaces and all —
-    so both faces say the same word and a script matching ``no ack`` matches what a person
-    reads.
+    ``outcome`` is one value of the closed set that the help gives. It is kept exactly,
+    with its spaces. Thus both faces show the same word, and a script that matches
+    ``no ack`` matches the text that a person reads.
     """
     from ..ui import fields
     from ..ui.report import Facts
@@ -366,11 +374,11 @@ def _attempted(ident: int, outcome: str) -> Facts:
 
 
 def _did(*facts: tuple[str, object]) -> Facts:
-    """An acknowledgement as data: nothing plain, a document for whoever is logging.
+    """An acknowledgement as data: nothing on the plain face, and a document for a log.
 
-    ``cancel`` and ``clear`` say everything they have to say in their exit status, which
-    is the right plain answer — but a caller that wants to record *what* was cancelled has
-    nowhere to read it, and that is what the document is for.
+    ``cancel`` and ``clear`` give all their information in their exit status, and that is
+    the correct plain answer. But a caller that wants to store what was cancelled has no
+    other place to read it. The document is for that caller.
     """
     from ..ui import fields
     from ..ui.report import SILENT, Facts

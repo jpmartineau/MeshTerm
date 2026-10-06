@@ -1,15 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The Trophy case tool: the record-setting walks the trace tools have turned up.
+"""The Trophy case tool: the record-setting walks that the trace tools found.
 
-The menu face opens the browser (:mod:`meshterm.ui.records_screen`): every discipline's
-records — longest distance, farthest node, most nodes (with and without revisits),
-weakest surviving link, biggest loop — each under its own description, opened for their
-full stats, re-walked in Trace path, or deleted. Records are *earned* on the trace
-screens, where every walk that comes home is scored and offered to the boards (see
-:mod:`meshterm.services.records`); this tool never transmits.
+The menu face opens the browser (:mod:`meshterm.ui.records_screen`). It shows the records
+of each discipline: longest distance, farthest node, most nodes (with and without
+revisits), weakest link that survived, and biggest loop. Each discipline has its own
+description. The user can open a record to see all its stats, walk it again in Trace
+path, or delete it. The records are earned on the trace screens: each walk that comes
+back is scored and offered to the boards (refer to :mod:`meshterm.services.records`). This
+tool never transmits.
 
-The CLI face prints the stored boards: ``meshterm records`` reads the tables so a script
-(or a curious shell) can see the standings without a device attached.
+The CLI face prints the stored boards. ``meshterm records`` reads the tables, so that a
+script (or a user at a shell) can see the standings without a connected device.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from ..services.records import CATEGORIES, CATEGORY_BY_ID, Category
 from ..ui.script import NONE
 from .base import Tool, ToolResult, register
 
-#: The hash widths a record can be set at: MeshCore's path hashes are 1, 2 or 4 bytes.
+#: The hash widths at which a record can be set: MeshCore path hashes are 1, 2, or 4 bytes.
 WIDTHS = (1, 2, 4)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -37,24 +38,24 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 @register
 class TrophyCaseTool(Tool):
-    """The record-setting mesh walks the trace tools scored, browsed or listed."""
+    """The record-setting mesh walks that the trace tools scored, to browse or to list."""
 
     name = "records"
     title = "Trophy case"
     icon = "🏆"
     help = "Record-setting walks, scored from every trace"
     category = "Explore"
-    order = 40  # what the two walks above it score into
+    order = 40  # the two walks above it put their scores here
 
     async def prompt_params(self, ctx: AppContext) -> dict[str, Any] | None:
-        """Open the browser; returning ``None`` completes the invocation with no run row.
+        """Open the browser. The return value ``None`` completes the run with no run row.
 
-        The screen reads stored records and transmits nothing (and logs no rows of its
-        own), so it lives in :meth:`prompt_params` and needs no logged run — the mesh walk /
-        dashboard pattern.
+        The screen reads stored records and transmits nothing (and it logs no rows of its
+        own). Thus it is in :meth:`prompt_params`, and it does not need a logged run. The
+        mesh walk and the dashboard use the same pattern.
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
 
         Returns:
             Always ``None``.
@@ -65,11 +66,11 @@ class TrophyCaseTool(Tool):
         return None
 
     async def run(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Print the stored boards — only reachable from a scripted call (never transmits).
+        """Print the stored boards. Only a scripted call comes here (this never transmits).
 
         Args:
-            ctx: Shared application context.
-            params: ``category``/``width`` filters and the injected ``_run_id``.
+            ctx: The shared application context.
+            params: The ``category`` and ``width`` filters, and the injected ``_run_id``.
 
         Returns:
             A :class:`ToolResult` with the record count.
@@ -83,12 +84,12 @@ class TrophyCaseTool(Tool):
     def _show_records(
         self, ctx: AppContext, *, category: str | None, width: int | None
     ) -> ToolResult:
-        """State the stored record boards (no device, no transmissions).
+        """Give the stored record boards (with no device, and with no transmission).
 
         Args:
-            ctx: Shared application context.
-            category: Only this category id, or ``None`` for every discipline.
-            width: Only this hash width, or ``None`` for every width.
+            ctx: The shared application context.
+            category: Only this category id, or ``None`` for all the disciplines.
+            width: Only this hash width, or ``None`` for all the widths.
 
         Returns:
             A :class:`ToolResult` with the record count.
@@ -98,8 +99,8 @@ class TrophyCaseTool(Tool):
         from ..ui.report import Listing
 
         wanted = [CATEGORY_BY_ID[category]] if category in CATEGORY_BY_ID else CATEGORIES
-        # Names come from stored history alone — no contacts, because this command reads
-        # the database and must work with no radio attached at all.
+        # The names come only from the stored history, not from the contacts, because this
+        # command reads the database. It must work with no device connected.
         resolve = trace_runner.make_node_resolver(None, ctx.repo.node_names())
 
         rows: list[dict] = []
@@ -125,19 +126,19 @@ class TrophyCaseTool(Tool):
             key="records",
             columns=(
                 fields.word("category", "CATEGORY"),
-                # The contract's word for the concept. The plain heading stays WIDTH,
-                # which is what a column of 1/2/4 reads as.
+                # The word of the contract for this concept. The plain heading stays
+                # WIDTH, because a column of 1, 2, or 4 reads as a width.
                 fields.integer("hash_bytes", "WIDTH"),
                 _score_column(),
                 fields.word("unit", "UNIT"),
-                # `>=273.0` is not a number, and a consumer comparing scores must be able
-                # to see the qualifier without string-matching a prefix off its own data.
+                # `>=273.0` is not a number. A consumer that compares scores must see the
+                # qualifier without a string match on a prefix of its own data.
                 fields.hidden("lower_bound"),
                 fields.when("recorded_at", "RECORDED"),
                 fields.word("version", "VERSION"),
-                # The transmitted spec, hop-aligned with the route beside it. It has no
-                # column — a route line already runs off the right — but it is what a
-                # caller re-walks with, so the document carries it.
+                # The transmitted spec, aligned hop for hop with the route next to it. It
+                # has no column, because a route line already goes past the right edge.
+                # But a caller uses it to walk the path again, so the document holds it.
                 fields.hidden("path"),
                 fields.route(),
             ),
@@ -152,7 +153,7 @@ class TrophyCaseTool(Tool):
         )
 
     def register_cli(self, app: typer.Typer) -> None:
-        """Register the ``records`` subcommand (read-only record listing).
+        """Register the ``records`` subcommand (a read-only listing of the records).
 
         Args:
             app: The Typer application.
@@ -177,9 +178,9 @@ class TrophyCaseTool(Tool):
         ) -> None:
             tool_params: dict[str, Any] = {}
             if category:
-                # An unknown id used to select *every* discipline, so a misspelled
-                # `--category long_hual` came back as "no records" — exit 5, which is
-                # exactly what a real empty result looks like. A closed set refuses.
+                # Before, an unknown id selected all the disciplines. Thus a misspelled
+                # `--category long_hual` returned "no records" with exit 5, which is the
+                # same as a real empty result. A closed set refuses an unknown id.
                 if category not in CATEGORY_BY_ID:
                     choices = ", ".join(CATEGORY_BY_ID)
                     raise typer.BadParameter(
@@ -187,9 +188,9 @@ class TrophyCaseTool(Tool):
                     )
                 tool_params["category"] = category
             if width is not None:
-                # The same closed set as --category, for the same reason: `--width 3`
-                # found nothing and exited 5, indistinguishable from an empty database,
-                # and `--width 0` was falsy and so quietly listed every width.
+                # A closed set, as for --category, for the same reason. `--width 3` found
+                # nothing and exited 5, which was the same as an empty database. And
+                # `--width 0` was falsy, so it listed all the widths with no warning.
                 if width not in WIDTHS:
                     choices = ", ".join(map(str, WIDTHS))
                     raise typer.BadParameter(f"--width must be one of: {choices} (got {width})")
@@ -199,17 +200,17 @@ class TrophyCaseTool(Tool):
 
 @dataclass(frozen=True, slots=True)
 class _Score:
-    """A record's score, and the one thing about it a bare number cannot carry.
+    """The score of a record, and the one fact about it that a bare number cannot hold.
 
-    ``format_score`` writes ``273.0 km`` for a reader; the unit is its own column here so
-    the ``SCORE`` column is one comparable number per row. What has to travel *with* the
-    number is the ``>=`` on a Longest-distance walk whose kilometre total is incomplete —
-    some hop on it has no known position, so the distance is a floor rather than a
-    measurement, and dropping the qualifier would turn a lower bound into a claim.
+    ``format_score`` writes ``273.0 km`` for a person. Here the unit has its own column,
+    so that the ``SCORE`` column has one comparable number in each row. But one thing must
+    stay with the number: the ``>=`` on a Longest-distance walk whose kilometre total is
+    not complete. A hop on that walk has no known position, so the distance is a minimum,
+    not a measurement. Without the qualifier, a lower bound becomes a claim.
 
-    The plain face wears the prefix; the document keeps the number a number and says
-    ``lower_bound`` beside it, because a consumer comparing scores cannot be asked to
-    string-match a prefix off the front of its own data.
+    The plain face shows the prefix. The document keeps the number as a number, and it
+    gives ``lower_bound`` next to it. The reason is that a consumer that compares scores
+    must not have to match a prefix at the start of its own data.
     """
 
     value: float
@@ -218,7 +219,7 @@ class _Score:
 
     @property
     def text(self) -> str:
-        """The score as the SCORE column prints it, qualifier and all."""
+        """The score as the SCORE column prints it, with the qualifier."""
         if self.category.unit == "nodes":
             drawn = str(int(self.value))
         elif self.category.unit == "dB":
@@ -229,7 +230,7 @@ class _Score:
 
 
 def _score_column() -> Column:
-    """The SCORE column: the qualified figure plain, the bare number in the document."""
+    """The SCORE column: the qualified number on the plain face, the bare number in a document."""
     from ..ui.report import Column, Lane
 
     return Column(
@@ -246,22 +247,23 @@ def _score_column() -> Column:
 
 
 def _route(record: DiscoveredPath, resolve: Callable[[str], str | None]) -> list[NodeRef]:
-    """A record's walk as the shared route shape.
+    """The walk of a record, as the shared route shape.
 
-    Each hop is named where history knows the node and carries the hash it was actually
-    transmitted at — the spec's own hop, at this record's width — so the line can be read
-    against the ``path`` a re-walk would take. Where the two lists disagree in length the
-    node id stands in, which is the only identity that hop has.
+    Each hop has a name if the history knows the node. Each hop also has the hash with
+    which it was transmitted (the hop of the spec itself, at the width of this record).
+    Thus a person can compare the line with the ``path`` that a new walk uses. If the
+    two lists have different lengths, the node id is used instead. That id is the only
+    identity that the hop has.
 
-    Our own node never appears in a record's walk: a discovery is scored on what it
-    reached, and the two ends of it are somebody else's.
+    Our node is never in the walk of a record. A discovery is scored on what it reached,
+    and its two ends are the nodes of other persons.
 
     Args:
         record: The record whose walk to render.
-        resolve: Maps a node id to a friendly name, or ``None`` when unknown.
+        resolve: Gives the friendly name of a node id, or ``None`` if the name is unknown.
 
     Returns:
-        The hops in propagation order.
+        The hops, in the order that the packet went through them.
     """
     from ..ui.fields import NodeRef
 

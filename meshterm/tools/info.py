@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The ``info`` tool: show the connected companion device's identity and radio config."""
+"""The ``info`` tool: show the identity and the radio settings of the connected device."""
 
 from __future__ import annotations
 
@@ -23,9 +23,9 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 @register
 class InfoTool(Tool):
-    """Display device identity and radio configuration.
+    """Show the identity and the radio settings of the device.
 
-    The known-contacts list lives in the separate ``nodes`` tool.
+    The list of known contacts is in the separate ``nodes`` tool.
     """
 
     name = "info"
@@ -33,17 +33,17 @@ class InfoTool(Tool):
     icon = "📋"
     help = "Show device status, identity, and radio config"
     category = "This node"
-    order = 10  # what it is, before anything that changes it
+    order = 10  # what it is, before the tools that change it
 
     async def run(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Query the device and render its live status plus its full configuration.
+        """Query the device, and render its live status and all its settings.
 
         Args:
-            ctx: Shared application context.
-            params: Unused.
+            ctx: The shared application context.
+            params: Not used.
 
         Returns:
-            A :class:`ToolResult` summarizing the device name.
+            A :class:`ToolResult` with the device name in its summary.
         """
         from rich.console import Group
 
@@ -52,10 +52,10 @@ class InfoTool(Tool):
         device = await ctx.device()
         snapshot = await cached_snapshot(ctx, device)
 
-        # On the CLI this is the *status* report and nothing else: how the radio is doing
-        # right now, one fact per line. What it is set to is `config show`'s answer, in
-        # the very keys `config get`/`config set` take, so printing the settings here as
-        # well would be the same table twice under two different spellings.
+        # On the CLI, this is only the status report: the current condition of the device,
+        # one fact on each line. The settings are the answer of `config show`, with the
+        # same keys that `config get` and `config set` take. If this command also prints
+        # the settings, the same table shows two times, with two different spellings.
         session = getattr(ctx.ui, "session", None)
         if session is None:
             return ToolResult(
@@ -66,16 +66,17 @@ class InfoTool(Tool):
         from ..ui.device_info_screen import DeviceInfoScreen
 
         custom = await device.get_custom_vars()
-        # A live status panel (role, firmware, battery, clock, radio/packet statistics)
-        # above every current setting with a short explanation of each. The panel is read
-        # once; only the table differs between the two states, and it is cheap to rebuild.
+        # A live status panel (role, firmware, battery, clock, radio and packet statistics)
+        # above all the current settings, each with a short explanation. The panel is read
+        # one time. Only the table is different between the two states, and it is fast to
+        # build again.
         panel = await _status_panel(device, snapshot)
 
         def page(reveal_pin: bool) -> Group:
             return Group(panel, Text(""), config_table(snapshot, custom, reveal_pin=reveal_pin))
 
-        # The page is its own screen because it has a key of its own: the pairing PIN is
-        # masked until ``p`` uncovers it.
+        # The page is a separate screen, because it has its own keyboard key: the pairing
+        # PIN is masked until ``p`` shows it.
         await session.run_screen(
             DeviceInfoScreen(session, page, title=self.title, conceals=has_pin(snapshot))
         )
@@ -98,18 +99,19 @@ class InfoTool(Tool):
 
 
 async def _read_status(device: Device) -> dict[str, Any]:
-    """Read every live status value the firmware will answer for, best-effort.
+    """Read each live status value that the firmware gives, as a best effort.
 
-    The one place the device is asked. Both faces build from what it returns: the menu's
-    panel composes prose rows out of these values, the CLI prints them one fact per line
-    (see :func:`_status_panel` and :func:`status_facts`). Every read is optional —
-    firmware predating a query simply contributes nothing — so this works on any device.
+    This is the only place that asks the device. Both faces use what it returns: the panel
+    of the menu makes prose rows from these values, and the CLI prints them one fact on
+    each line (refer to :func:`_status_panel` and :func:`status_facts`). Each read is
+    optional, because firmware that is older than a query gives nothing for it. Thus this
+    function works on any device.
 
     Args:
         device: The connected device to query.
 
     Returns:
-        The merged raw readings: ``info``, ``battery``, ``stats`` and ``clock``.
+        The merged raw readings: ``info``, ``battery``, ``stats``, and ``clock``.
     """
     return {
         "info": await _try(device.get_device_info) or {},
@@ -122,16 +124,17 @@ async def _read_status(device: Device) -> dict[str, Any]:
 async def _status_panel(device: Device, snapshot: dict) -> Panel:
     """Build the live status panel: role, firmware, battery, clock, and statistics.
 
-    The menu's face of :func:`_read_status` — each row a short phrase rather than an
+    This is the menu face of :func:`_read_status`. Each row is a short phrase, not an
     atomic value, because a person reads "-110 dBm noise floor · last RSSI -62 dBm" in one
-    go where a script wants the three numbers apart.
+    step. A script wants the three numbers separately.
 
     Args:
         device: The connected device to query.
-        snapshot: The already-built settings snapshot (for role and identity fields).
+        snapshot: The settings snapshot that is already built (for the role and identity
+            fields).
 
     Returns:
-        A Rich :class:`Panel` of label/value status rows.
+        A Rich :class:`Panel` of status rows, each with a label and a value.
     """
     rows: list[tuple[str, Text]] = []
     readings = await _read_status(device)
@@ -191,34 +194,35 @@ async def _status_panel(device: Device, snapshot: dict) -> Panel:
 
 
 def _firmware(info: dict) -> str:
-    """The firmware version and build joined, or ``""`` when neither was reported."""
+    """The firmware version and build, joined, or ``""`` if the device reported neither."""
     return " ".join(str(info[k]) for k in ("ver", "fw_build") if info.get(k))
 
 
 async def status_facts(device: Device, snapshot: dict) -> Facts:
-    """The device's live status as one set of facts.
+    """The live status of the device, as one set of facts.
 
-    The CLI's face of :func:`_read_status`. Where the panel writes a phrase per row, this
-    writes one value per key and puts the unit *in the key* — ``battery_v``, ``uptime_s``,
-    ``noise_floor_dbm`` — so nothing has to be pulled back out of prose. A number never
-    carries a unit in its value, on either face.
+    This is the CLI face of :func:`_read_status`. The panel writes a phrase in each row,
+    but this function writes one value for each key. It puts the unit in the key
+    (``battery_v``, ``uptime_s``, ``noise_floor_dbm``), so that no program must get the
+    number out of prose. On both faces, a number never has a unit in its value.
 
-    The three second-valued readings and the clock drift carry a **gloss** beside the
-    figure: ``uptime_s  93784  (1d 2h)``. This is the one key/value block that may, and
-    the reason is that it is the one with no ``get`` and no ``set`` behind it — there is no
-    round trip to protect, the key still says what the number counts, and ``93784`` is a
-    reading nobody can hold in their head. The document carries the number alone, having
-    nowhere useful to put a phrase.
+    The three readings in seconds and the clock drift have a **gloss** next to the number:
+    ``uptime_s  93784  (1d 2h)``. This is the only key/value block that can have a gloss.
+    The reason is that it is the only block with no ``get`` and no ``set`` behind it. Thus
+    there is no round trip to protect, the key still tells what the number counts, and
+    ``93784`` is a value that no person can easily understand. The document holds only the
+    number, because it has no useful place for a phrase.
 
-    A reading the firmware did not answer for is **left out** of the plain block rather
-    than dashed: these are optional queries, and a missing key says "this device does not
-    report it" where a dash would claim it reported nothing. The document keeps the key and
-    writes ``null`` — see :attr:`~meshterm.ui.report.Facts.omit_absent` for why the two
-    faces disagree here on purpose.
+    If the firmware gave no answer for a reading, the plain block **leaves out** that
+    reading, and it does not show a dash. These are optional queries. A missing key says
+    "this device does not report it", but a dash says that it reported nothing. The
+    document keeps the key and writes ``null``. Refer to
+    :attr:`~meshterm.ui.report.Facts.omit_absent` for the reason why the two faces are
+    different here on purpose.
 
     Args:
         device: The connected device to query.
-        snapshot: The already-built settings snapshot (for role and identity).
+        snapshot: The settings snapshot that is already built (for the role and identity).
 
     Returns:
         The facts block.
@@ -233,8 +237,8 @@ async def status_facts(device: Device, snapshot: dict) -> Facts:
     adv_type = snapshot.get("adv_type")
     clock = readings["clock"]
     values: dict[str, Any] = {
-        # Identity first: which radio this is. Everything it *can be set to* is
-        # `config show`'s answer, not this one.
+        # The identity is first: which device this is. All the values that it can be set
+        # to are the answer of `config show`, not of this command.
         "name": snapshot.get("name"),
         "public_key": str(snapshot.get("public_key") or "").lower() or None,
         "role": node_type_label(adv_type),
@@ -286,7 +290,7 @@ async def status_facts(device: Device, snapshot: dict) -> Facts:
 
 
 def _glossed(key: str, gloss: Callable[[int], str]) -> Column:
-    """A seconds reading printed as its own number with a readable span beside it."""
+    """A reading in seconds, printed as its number with a readable duration next to it."""
     from ..ui import script
     from ..ui.report import Column, Lane
 
@@ -299,14 +303,14 @@ def _glossed(key: str, gloss: Callable[[int], str]) -> Column:
 
 
 def _span_gloss(seconds: int) -> str:
-    """``93784`` → ``1d 2h``: the figure a person can hold in their head."""
+    """``93784`` → ``1d 2h``: a value that a person can easily understand."""
     from ..ui import script
 
     return script.duration(seconds)
 
 
 def _drift_gloss(seconds: int) -> str:
-    """The device clock's error, in the direction a reader would say it."""
+    """The error of the device clock, in the words that a person uses (fast or slow)."""
     from ..ui import script
 
     if abs(seconds) < 2:
@@ -315,15 +319,15 @@ def _drift_gloss(seconds: int) -> str:
 
 
 async def _try(read) -> Any | None:
-    """Await a device read, returning ``None`` when the firmware doesn't support it."""
+    """Await a device read. Return ``None`` if the firmware does not support it."""
     try:
         return await read()
-    except Exception:  # noqa: BLE001 - optional read; absence is acceptable
+    except Exception:  # noqa: BLE001 - an optional read. If it is absent, that is acceptable.
         return None
 
 
 def _drift(device_epoch: int) -> str:
-    """Describe the device clock's drift against this computer's clock."""
+    """Describe the drift of the device clock, compared with the clock of this computer."""
     drift = device_epoch - int(time.time())
     if abs(drift) < 2:
         return "(in sync)"
@@ -332,7 +336,7 @@ def _drift(device_epoch: int) -> str:
 
 
 def _uptime(secs: int) -> str:
-    """Render an uptime as ``3d 2h 41m`` (seconds shown only under a minute)."""
+    """Render an uptime as ``3d 2h 41m`` (the seconds show only below one minute)."""
     if secs < 60:
         return f"{secs} s"
     days, rem = divmod(secs, 86400)

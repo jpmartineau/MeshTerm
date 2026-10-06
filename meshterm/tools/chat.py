@@ -1,16 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The ``chat`` tool: channel and direct messaging over the mesh.
+"""The ``chat`` tool: channel messages and direct messages over the mesh.
 
-Interactively it opens a conversation picker and then a live, full-screen chat (see
-:mod:`meshterm.ui.chat`) where sent and received messages stream together — or, for a room
-server, its board (:mod:`meshterm.ui.room`). On the CLI it exposes ``send``, ``history``,
-``list`` and ``listen`` subcommands for scripted use; a room is addressed by ``--to`` like a
-contact. Channels and rooms are only *listed* here for picking: configuring channel slots is
-the ``channels`` tool's, and joining a room is the ``rooms`` tool's.
+In the menu, it opens a conversation picker, and then a live chat on the full screen
+(refer to :mod:`meshterm.ui.chat`). There, the sent messages and the received messages
+stream together. For a room server, it opens the board of the room instead
+(:mod:`meshterm.ui.room`). On the CLI, it has the ``send``, ``history``, ``list``, and
+``listen`` subcommands for scripts. You address a room with ``--to``, the same as a
+contact. This tool only *lists* channels and rooms, so that you can select one. The
+``channels`` tool configures the channel slots, and the ``rooms`` tool joins a room.
 
-Every inbound message is recorded to history by the always-on
-:class:`~meshterm.services.chat_service.ChatService`, and outbound messages are recorded on
-send, so ``history`` reflects the full transcript regardless of which path produced it.
+The :class:`~meshterm.services.chat_service.ChatService` always runs and stores each
+received message in the history. Each sent message is stored when it is sent. Thus
+``history`` shows the full transcript, whichever path made each message.
 """
 
 from __future__ import annotations
@@ -66,7 +67,7 @@ if TYPE_CHECKING:
     from ..core.channel_probe import ChannelSlot
     from ..ui.report import Facts, Listing
 
-#: How many recent messages ``chat history`` prints by default.
+#: The number of recent messages that ``chat history`` prints by default.
 _HISTORY_LIMIT = 50
 
 
@@ -82,29 +83,30 @@ class ChatTool(Tool):
     order = 10
 
     async def prompt_params(self, ctx: AppContext) -> dict[str, Any] | None:
-        """Nothing to gather here — the conversation picker lives inside :meth:`run`.
+        """Nothing to collect here. The conversation picker is in :meth:`run`.
 
-        The picker has to *stay pushed* while a chat runs, so backing out of a thread lands
-        on the very list it was opened from — same cursor, same typed filter. A prompt
-        gathered here would resolve, and pop, before the tool ran.
+        The picker must *stay pushed* while a chat runs. Thus, when the user leaves a
+        thread, the user goes back to the same list that opened it, with the same
+        highlight and the same typed filter. A prompt here resolves, and pops, before the
+        tool runs.
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
 
         Returns:
-            ``{"live": True}`` — the menu's marker for the interactive path.
+            ``{"live": True}``: the marker of the menu for the interactive path.
         """
         return {"live": True}
 
     async def run(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Open a live chat (menu) or perform a scripted messaging action (CLI).
+        """Open a live chat (menu), or do a scripted message action (CLI).
 
         Args:
-            ctx: Shared application context.
-            params: Either ``conversation`` (menu) or a ``cli_action`` with its arguments.
+            ctx: The shared application context.
+            params: ``conversation`` (menu), or a ``cli_action`` with its arguments.
 
         Returns:
-            A :class:`ToolResult` summarizing what happened.
+            A :class:`ToolResult` with a summary of what occurred.
         """
         action = params.get("cli_action")
         if action is not None:
@@ -114,24 +116,25 @@ class ChatTool(Tool):
     # -- interactive picker -----------------------------------------------------
 
     async def _run_live(self, ctx: AppContext) -> ToolResult:
-        """Keep the conversation picker pushed and open chats above it until it is left.
+        """Keep the conversation picker pushed, and open chats above it until the user leaves.
 
-        One screen for the whole visit, so backing out of a thread lands on the row it was
-        opened from with the typed filter still narrowing the list. The picker used to be
-        rebuilt from scratch each round and the cursor put back by a ``default=`` restore,
-        which recovers the cursor alone — and only while the row it names still exists.
+        One screen stays for the full visit. Thus, when the user leaves a thread, the user
+        goes back to the row that opened it, and the typed filter still narrows the list.
+        Before, each round made the picker again from nothing, and a ``default=`` restore
+        put the highlight back. That restored only the highlight, and only while its row
+        was still there.
 
-        The rows *are* data: an exchange moves its thread up the recency order, and deleting
-        a history hollows its dot and demotes the row to the alphabetical tail. So they are
-        re-read and swapped in place after each chat and each delete, which follows the
-        highlighted thread wherever it moved to.
+        The rows *are* data. An exchange moves its thread up in the order of recency. A
+        delete of a history makes its dot hollow and moves the row down to the alphabetical
+        end of the list. Thus, after each chat and each delete, the rows are read again and
+        replaced in place. The highlight follows its thread to its new position.
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
 
         Returns:
-            A :class:`ToolResult` counting the conversations opened and the messages the
-            last one showed.
+            A :class:`ToolResult` that counts the opened conversations and the messages that
+            the last one showed.
         """
         from ..ui.chat import open_chat
         from ..ui.tui import SelectScreen
@@ -140,14 +143,14 @@ class ChatTool(Tool):
         picker = SelectScreen(
             "Chat — pick a conversation",
             await self._picker_items(ctx),
-            # Enter pushes the chat screen, so the committing verb is `open`. Neither the
-            # scroll nor the erase atom is written into the base: the select list splices
-            # each in exactly when its key would act — ←→ only while the highlighted row
-            # overflows, Del only on a thread that has history to lose — and the three of
-            # them together are what has to stay inside 72 cells (the archive preview's list
-            # is the same arithmetic). `Del erase` is that budget's doing: the row already
-            # names the conversation, so the atom spends its cells on the verb, and `erase`
-            # is the word the app uses elsewhere for taking data away.
+            # Enter pushes the chat screen, so the committing verb is `open`. The base hint
+            # does not contain the scroll atom or the erase atom. The select list adds each
+            # one only when its key does something: ←→ only while the highlighted row is
+            # too long, and Del only on a thread that has history to lose. The three
+            # together must fit in 72 cells (the list of the archive preview has the same
+            # calculation). That limit is the reason for `Del erase`. The row already names
+            # the conversation, so the atom uses its cells for the verb. Also, `erase` is
+            # the word that the app uses in other places when it removes data.
             footer_hint="↑↓ move · type to filter · Enter open · Esc back",
             delete_hint="Del erase",
         )
@@ -158,7 +161,7 @@ class ChatTool(Tool):
                 choice = await visit.result()
                 if isinstance(choice, DeleteRequest):
                     await self._delete_history(ctx, choice.value)
-                elif choice is CANCEL or choice is None:  # Esc — out to the menu
+                elif choice is CANCEL or choice is None:  # Esc: back to the menu
                     return ToolResult(summary={"conversations": opened, "messages": shown})
                 else:
                     shown = await open_chat(ctx, choice)
@@ -166,66 +169,72 @@ class ChatTool(Tool):
                 picker.replace_items(await self._picker_items(ctx))
 
     async def _picker_items(self, ctx: AppContext) -> list:
-        """Build the picker's rows: the pinned lane names, then Channels, Rooms and Direct.
+        """Make the rows of the picker: the pinned lane names, then Channels, Rooms, and Direct.
 
-        Read fresh every time the list is built or swapped, so a thread that just gained
-        messages sits where its recency puts it. Cheap enough to redo after each chat: the
-        two device reads go through the session cache and the rest is stored history.
+        The rows are read again each time that the list is made or replaced. Thus a thread
+        that got new messages is at the position that its recency gives it. It costs
+        little to do this after each chat: the two device reads go through the session
+        cache, and the rest is stored history.
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
 
         Returns:
-            The :class:`~meshterm.ui.tui.select.Choice` / ``Separator`` rows, in display
-            order.
+            The :class:`~meshterm.ui.tui.select.Choice` and ``Separator`` rows, in the
+            order on the screen.
         """
-        # Through the session cache: this picker runs on every Chat open, and its two
-        # reads — the channel-slot probe and the contacts table — are the two slowest
-        # round-trips on a companion. Reading them from the device each time is what made
-        # opening Chat stall for seconds (the cached chat screen behind it never got the
-        # chance to help). The cache holds channels until the channel editor writes a
-        # slot and refreshes contacts in the background (see
+        # Read through the session cache. This picker runs each time that Chat opens. Its
+        # two reads (the channel slot probe and the contacts table) are the two slowest
+        # round trips on a companion. When MeshTerm read them from the device each time,
+        # Chat stopped for seconds when it opened (the cached chat screen behind it had no
+        # chance to help). The cache keeps the channels until the channel editor writes a
+        # slot, and reads the contacts again in the background (refer to
         # :class:`~meshterm.services.device_state.DeviceState`).
         channels = _channels_from_slots(await ctx.devstate.channel_slots())
         contacts = await ctx.devstate.contacts()
-        # Only companion nodes are listed under Direct — we don't DM repeaters, rooms, or
-        # sensors; a contact whose type was never advertised gets the benefit of the doubt
-        # (the app-wide DM rule, see is_direct_messageable). Room servers have their own
-        # section: somewhere you join and post, not someone you message.
+        # Direct lists only companion nodes. We do not send direct messages to repeaters,
+        # rooms, or sensors. A contact that never advertised its type is accepted (the
+        # app-wide DM rule, refer to is_direct_messageable). Room servers have their
+        # own section: a room is a place that you join and post to, not a person to whom
+        # you send a message.
         companions = [c for c in contacts if is_direct_messageable(c.node_type)]
-        # Only rooms we have joined — as only channels on a slot are listed. Joining is the
-        # Rooms page's (see meshterm.ui.rooms).
+        # Only the rooms that we joined, in the same way as only the channels on a slot are
+        # listed. The Rooms page joins rooms (refer to meshterm.ui.rooms).
         rooms = [
             Conversation(label=c.name, is_channel=False, contact=c)
             for c in contacts
             if is_room(c.node_type) and ctx.rooms.joined(c)
         ]
         room_peers = [conv.peer for conv in rooms if conv.peer]
-        # A stable snapshot orders the rows (so the list doesn't reshuffle under the
-        # cursor), while a self-refreshing view feeds each row's live preview
-        # (see _LiveLasts). A room's latest is its latest *post*.
+        # A stable snapshot sets the order of the rows (so that the list does not change its
+        # order under the highlight). A lookup that reads itself again gives the live preview
+        # of each row (refer to _LiveLasts). The latest message of a room is its latest
+        # *post*.
         lasts = ctx.repo.last_chat_messages(rooms=room_peers)
         live = _LiveLasts(ctx, seed=lasts, rooms=room_peers)
-        # Names in previews/mentions resolve back to keys for their hue (the app-wide
-        # colour rule); a name no contact or stored advert carries stays muted. A room
-        # post names its author by key, which resolves the other way.
+        # The names in previews and mentions resolve back to keys for their hue (the
+        # app-wide colour rule). A name that no contact and no stored advert has stays
+        # muted. A room post names its author by key, which resolves in the other
+        # direction.
         stored_names = ctx.repo.node_names()
         key_of = make_name_key_resolver(contacts, stored_names)
         name_of = make_node_resolver(contacts, stored_names)
 
-        # List contacts by recency — those with messages first, newest exchange at the top —
-        # then the never-contacted ones alphabetically (see _recency_key). Rooms the same.
+        # List the contacts by recency: first the contacts with messages, with the newest
+        # exchange at the top. Then the contacts with no messages, in alphabetical order
+        # (refer to _recency_key). The same for rooms.
         direct = [Conversation(label=c.name, is_channel=False, contact=c) for c in companions]
         direct.sort(key=lambda conv: _recency_key(conv, lasts))
         rooms.sort(key=lambda conv: _recency_key(conv, lasts))
-        # One measurement for the whole list, headings and rows alike, taken before either is
-        # built: the name lane is only as wide as the names actually in it, and every cell it
-        # gives back goes to the message preview (see _lanes).
+        # One measurement for the full list, the headings and the rows, done before they are
+        # made. The name lane is only as wide as the names in it, and each cell that it does
+        # not use goes to the message preview (refer to _lanes).
         lanes = _lanes(channels + rooms + direct)
 
-        # The lane names pin for the whole picker (they mean the same in both groups),
-        # so scrolling into Direct keeps them overhead with that group's heading under
-        # them, instead of the header vanishing one row in — see Screen.sticky_rows.
+        # The lane names pin for the full picker (they have the same meaning in the two
+        # groups). Thus, when the list scrolls into Direct, they stay at the top, with the
+        # heading of that group under them. Otherwise the header goes away after one row.
+        # Refer to Screen.sticky_rows.
         items: list = [
             Separator(lambda w: _picker_header(lanes, w), pinned=True),
             section_heading("📡 Channels"),
@@ -235,7 +244,7 @@ class ChatTool(Tool):
                 Choice(
                     title=_row_title(ctx, conversation, live, key_of, lanes),
                     value=conversation,
-                    # ←→ slide the message alone; the lanes in front of it hold (_Lanes.head).
+                    # ←→ move only the message. The lanes before it stay (_Lanes.head).
                     hscroll_from=lanes.head,
                 )
             )
@@ -251,8 +260,8 @@ class ChatTool(Tool):
                 )
             )
         if not rooms:
-            # Said, not left out: "how do I get on a room?" is a question people bring here,
-            # and an empty section answers where to go.
+            # Show this, do not omit it. Users come here with the question "how do I get on
+            # a room?", and an empty section tells them where to go.
             items.append(Separator("  no rooms joined — join one on the Rooms page"))
 
         items.append(section_heading("👤 Direct"))
@@ -262,8 +271,8 @@ class ChatTool(Tool):
                     Choice(
                         title=_row_title(ctx, conversation, live, key_of, lanes),
                         value=conversation,
-                        # Del offers to delete this thread's stored history —
-                        # only where there is history to delete.
+                        # Del offers to delete the stored history of this thread, only
+                        # where there is history to delete.
                         deletable=lasts.get(conversation.key) is not None,
                         hscroll_from=lanes.head,
                     )
@@ -275,14 +284,15 @@ class ChatTool(Tool):
 
     @staticmethod
     async def _delete_history(ctx: AppContext, conversation: Conversation) -> None:
-        """Confirm and delete one direct conversation's — or room's — stored history.
+        """Confirm, then delete the stored history of one direct conversation or one room.
 
-        Deleting history is irreversible data loss, so the confirm wears the reserved
-        red (``destructive``): Cancel on the left, the committing Delete on the right.
-        On confirm the peer's messages are removed from the database and the thread's
-        unread count is cleared; the contact itself (a device-side record) is untouched.
-        A room's posts go from this machine only. The room keeps its own, and won't send
-        them again: it has seen them acknowledged.
+        A delete of history is a data loss that cannot be undone. Thus the confirm has the
+        reserved red (``destructive``): Cancel on the left, and the committing Delete on
+        the right. When the user confirms, MeshTerm deletes the messages of the peer from
+        the database and clears the unread count of the thread. The contact itself (a
+        record on the device) does not change. The posts of a room go only from this
+        machine. The room keeps its own posts, and does not send them again, because it
+        got the acknowledgements for them.
         """
         prompt = (
             f"Delete the posts stored from {conversation.label}? They are removed from "
@@ -308,9 +318,9 @@ class ChatTool(Tool):
         """Dispatch a scripted CLI action.
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
             action: One of ``send``, ``history``, ``listen``, ``list``.
-            params: The action's arguments.
+            params: The arguments of the action.
 
         Returns:
             A :class:`ToolResult` for the action.
@@ -324,22 +334,24 @@ class ChatTool(Tool):
         return await self._cli_list(ctx)
 
     async def _cli_send(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Send a channel or direct message and report whether it was acknowledged.
+        """Send a channel message or a direct message, and report whether it was acknowledged.
 
-        A channel broadcast has nothing to report — there is no acknowledgement on a
-        channel — so it prints nothing and lets the exit status say it went out. A direct
-        message prints its ``acked`` state, which is the one thing the send does not
-        already tell the caller: the radio accepted it either way, and whether the peer
-        answered is a separate fact.
+        A channel broadcast has nothing to report, because a channel has no
+        acknowledgement. Thus it prints nothing, and the exit status says that the message
+        went out. A direct message prints its ``acked`` state. That is the one thing that
+        the send does not already tell the caller: the radio accepted the message in the
+        two cases, and the answer of the peer is a separate fact.
 
-        A channel message goes out under the channel's send scope, or under ``scope`` for
-        this one message (a region name, or ``*`` for unscoped); the document says which it
-        went under. A radio that can't send under the scope refuses before anything is
-        transmitted, and that is a failure (exit 1), never a quiet unscoped send.
+        A channel message goes out under the send scope of the channel, or under ``scope``
+        for this one message (a region name, or ``*`` for unscoped). The document says
+        which scope it went out under. If the radio cannot send under the scope, it
+        refuses before it transmits anything. That is a failure (exit 1), never a silent
+        unscoped send.
 
-        ``--to`` a room server posts to it. The room acknowledges a post once it has stored
-        it, so ``acked`` reads the same way; a room that no longer knows us (it restarted,
-        or we never joined) drops the post unacknowledged — ``rooms join`` first.
+        ``--to`` a room server posts to the room. The room acknowledges a post after it
+        stores it, so ``acked`` has the same meaning. A room that no longer knows us (it
+        restarted, or we never joined) discards the post with no acknowledgement. Use
+        ``rooms join`` first.
         """
         device = await ctx.device()
         text = str(params["text"])
@@ -364,13 +376,13 @@ class ChatTool(Tool):
         )
 
     async def _cli_history(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Print a conversation's stored transcript — for a room, its board by author.
+        """Print the stored transcript of a conversation. For a room, print its board by author.
 
-        A room's transcript is its posts (its command replies are left out, as on its
-        board in the menu), and it names each post's author where a direct transcript
-        names the peer: the room is the conversation the caller already named, and every
-        post in it has a different writer. Our own posts name our node, as every hop of
-        ours does on this face.
+        The transcript of a room is its posts. Its command replies are not in it, the same
+        as on its board in the menu. Where a direct transcript names the peer, the
+        transcript of a room names the author of each post. The reason: the room is the
+        conversation that the caller already named, and the posts in it have different
+        writers. Our own posts name our node, as each of our hops does on this face.
         """
         limit = int(params.get("limit") or _HISTORY_LIMIT)
         channel = params.get("channel")
@@ -407,27 +419,28 @@ class ChatTool(Tool):
         )
 
     async def _cli_listen(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Tail inbound messages live in the console (and record them to history).
+        """Show the received messages live in the console (and store them in the history).
 
-        A plain-console receiver, outside the full-screen menu: it starts the always-on
-        listener and prints each message as it arrives. Doubles as a diagnostic — with the
-        pump's debug logging enabled (``--debug`` on the CLI) it shows whether messages are
-        being pulled from the companion at all.
+        A receiver on the plain console, outside the full-screen menu. It starts the
+        listener that always runs, and prints each message when it arrives. It is also a
+        diagnostic: with the debug logging of the pump on (``--debug`` on the CLI), it
+        shows whether MeshTerm gets messages from the companion.
 
         Args:
-            ctx: Shared application context.
-            params: ``seconds`` — how long to listen (``0``/``None`` = until interrupted).
+            ctx: The shared application context.
+            params: ``seconds``: how long to listen (``0`` or ``None`` means until an
+                interrupt).
 
         Returns:
-            A :class:`ToolResult` with how many messages were seen.
+            A :class:`ToolResult` with the number of heard messages.
         """
         from ..ui import script
 
         seconds = params.get("seconds") or 0
         await ctx.device()
-        await ctx.chat.start()  # begins recording inbound to history too
-        # About the run, not part of its answer: stderr, so a redirected stdout holds
-        # nothing but messages.
+        await ctx.chat.start()  # also starts to store the received messages in the history
+        # This line is about the run, and is not part of its answer. Thus it goes to stderr,
+        # so that a redirected stdout holds only messages.
         script.stderr_console().print(
             "listening for messages"
             + (f" for {seconds}s" if seconds else " — press Ctrl-C to stop"),
@@ -467,7 +480,7 @@ class ChatTool(Tool):
                 if seconds:
                     await asyncio.sleep(seconds)
                 else:
-                    await asyncio.Event().wait()  # until Ctrl-C / cancellation
+                    await asyncio.Event().wait()  # until Ctrl-C or a cancellation
             except (KeyboardInterrupt, asyncio.CancelledError):  # pragma: no cover - interactive
                 pass
             finally:
@@ -479,7 +492,7 @@ class ChatTool(Tool):
         )
 
     async def _cli_list(self, ctx: AppContext) -> ToolResult:
-        """List channels, contacts, and their most recent message."""
+        """List the channels, the contacts, and the most recent message of each."""
         device = await ctx.device()
         channels = await _read_channels(device)
         contacts = await device.get_contacts()
@@ -549,14 +562,15 @@ class ChatTool(Tool):
 
 
 def _cli_scope(scope: str, channel: int | None) -> str:
-    """Check ``--scope`` before anything is sent: a region the firmware could hold, or ``*``.
+    """Check ``--scope`` before anything is sent: a region that the firmware can hold, or ``*``.
 
-    A usage error (exit 2), not a device failure: nothing has been transmitted yet. A
-    direct message has no scope to give it here — the firmware floods a DM under the
-    session scope like anything else, but only a channel send sets one for itself.
+    A bad value is a usage error (exit 2), not a device failure, because nothing was
+    transmitted yet. Here, a direct message has no scope to get. The firmware floods a
+    DM under the session scope, the same as all other packets, but only a channel send
+    sets a scope for itself.
 
     Raises:
-        typer.BadParameter: For a direct send, or a name the firmware would refuse.
+        typer.BadParameter: For a direct send, or for a name that the firmware refuses.
     """
     from ..core.regions import WILDCARD, RegionNameError, normalize, validate
 
@@ -571,11 +585,11 @@ def _cli_scope(scope: str, channel: int | None) -> str:
 
 
 def _enable_receive_debug() -> None:
-    """Route the message-pull and library debug logs to the console for diagnosis.
+    """Send the debug logs of the message pull and of the library to the console.
 
-    Raises the ``meshcore`` and connection-layer loggers to DEBUG and attaches a stderr
-    handler, so ``chat listen --debug`` shows whether inbound messages are being pulled
-    from the companion (the receive path) at all.
+    This function sets the ``meshcore`` logger and the logger of the connection layer to
+    DEBUG, and attaches a stderr handler. Thus ``chat listen --debug`` shows whether
+    MeshTerm pulls received messages from the companion (the receive path) at all.
     """
     import logging
     import sys
@@ -589,22 +603,23 @@ def _enable_receive_debug() -> None:
 
 
 def _channels_from_slots(slots: list[ChannelSlot]) -> list[Conversation]:
-    """Turn cached channel slots into channel conversations, always offering Public (slot 0).
+    """Change cached channel slots into channel conversations, and always offer Public (slot 0).
 
     The picker reads its channels through the session cache
-    (:meth:`~meshterm.services.device_state.DeviceState.channel_slots`) so it reuses the one
-    slow slot probe instead of re-walking every slot on each Chat open; this maps that cached
-    :class:`~meshterm.core.channel_probe.ChannelSlot` list onto the picker's
-    :class:`~meshterm.core.models.Conversation` rows. Channel 0 (the default public channel) is
-    synthesised when the firmware reports no slot for it, so there is always somewhere to chat —
-    the same guarantee :func:`_read_channels` (the CLI path) makes.
+    (:meth:`~meshterm.services.device_state.DeviceState.channel_slots`). Thus it uses the one
+    slow slot probe again, and does not read each slot again each time that Chat opens.
+    This function maps that cached :class:`~meshterm.core.channel_probe.ChannelSlot` list
+    onto the :class:`~meshterm.core.models.Conversation` rows of the picker. When the
+    firmware reports no slot for channel 0 (the default public channel), this function
+    makes one. Thus there is always a place to chat. :func:`_read_channels` (the CLI path)
+    gives the same guarantee.
 
     Args:
         slots: The configured channel slots, from the session cache.
 
     Returns:
-        One :class:`~meshterm.core.models.Conversation` per slot, with Public prepended when
-        slot 0 is absent.
+        One :class:`~meshterm.core.models.Conversation` for each slot, with Public at the
+        start when slot 0 is absent.
     """
     conversations = [
         Conversation(
@@ -631,23 +646,23 @@ def _channels_from_slots(slots: list[ChannelSlot]) -> list[Conversation]:
 
 
 async def _read_channels(device: Device) -> list[Conversation]:
-    """Probe channel slots and return them as channel conversations.
+    """Probe the channel slots, and return them as channel conversations.
 
-    Channel 0 (the default public channel) is always offered even when the firmware reports
-    no configured slots, so there is always somewhere to chat.
+    This function always offers channel 0 (the default public channel), also when the
+    firmware reports no configured slots. Thus there is always a place to chat.
 
     Args:
         device: The connected device to probe.
 
     Returns:
-        One :class:`~meshterm.core.models.Conversation` per configured channel (at least
-        channel 0).
+        One :class:`~meshterm.core.models.Conversation` for each configured channel (at
+        least channel 0).
     """
     conversations: list[Conversation] = []
     for idx in range(CHANNEL_SLOT_PROBE_CAP):
         try:
             channel = await device.get_channel(idx)
-        except Exception:  # noqa: BLE001 - firmware may not support channel reads
+        except Exception:  # noqa: BLE001 - the firmware may not support channel reads
             break
         if channel:
             name = str(channel.get("channel_name") or idx)
@@ -676,11 +691,11 @@ async def _read_channels(device: Device) -> list[Conversation]:
 
 
 def _resolve_contact(contacts: list[Contact], needle: str) -> Contact:
-    """Find a contact by exact name (case-insensitive) or key-prefix match.
+    """Find a contact by its exact name (case-insensitive), or by a key prefix that matches.
 
     Args:
         contacts: The known contacts.
-        needle: A contact name or public-key prefix.
+        needle: A contact name, or a prefix of a public key.
 
     Returns:
         The matching contact.
@@ -697,18 +712,19 @@ def _resolve_contact(contacts: list[Contact], needle: str) -> Contact:
 
 
 def _recency_key(conversation: Conversation, lasts: dict) -> tuple:
-    """Sort key ordering conversations by recency, then name.
+    """A sort key that puts the conversations in order of recency, then of name.
 
-    Conversations that have been chatted with sort first, most-recent exchange at the top;
-    those never chatted with sort after them, alphabetically by label. The leading ``0``/``1``
-    keeps the two groups apart so their differently-typed tie-breakers never compare.
+    The conversations that have messages come first, with the most recent exchange at the
+    top. The conversations with no messages come after them, in alphabetical order of
+    label. The ``0`` or ``1`` at the start keeps the two groups apart. Thus their
+    tie-breakers, which have different types, are never compared.
 
     Args:
         conversation: The conversation to rank.
-        lasts: Map of conversation key to its most recent message.
+        lasts: A map from the conversation key to its most recent message.
 
     Returns:
-        A tuple usable as a ``sorted`` key.
+        A tuple that ``sorted`` can use as a key.
     """
     last: ChatMessage | None = lasts.get(conversation.key)
     if last is not None:
@@ -717,22 +733,25 @@ def _recency_key(conversation: Conversation, lasts: dict) -> tuple:
 
 
 class _LiveLasts:
-    """A self-refreshing view of each conversation's most recent message.
+    """A lookup of the most recent message of each conversation, which reads itself again.
 
-    The picker snapshots :meth:`~meshterm.persistence.repository.Repository.last_chat_messages`
-    once to *order* the rows (so the list never reshuffles under the cursor), but the row
-    previews read through this so a message arriving while the list is open updates the
-    sender/text preview on the next repaint. It re-queries the repository at most a few times a
-    second (bounded by ``ttl``) rather than once per row per repaint, so a wide list stays cheap.
+    The picker takes one snapshot of
+    :meth:`~meshterm.persistence.repository.Repository.last_chat_messages` to set the *order*
+    of the rows (so that the list never changes its order under the highlight). But the row
+    previews read through this lookup. Thus, when a message arrives while the list is open,
+    the next paint shows the new sender and text in the preview. The lookup queries the
+    repository again a few times each second at most (``ttl`` sets the limit), not one time
+    for each row on each paint. Thus a wide list stays fast.
     """
 
     def __init__(
         self, ctx: AppContext, *, seed: dict, ttl: float = 0.5, rooms: list[str] | None = None
     ) -> None:
-        """Bind to a context, seeding the cache with the snapshot already loaded at open.
+        """Bind to a context, and start the cache with the snapshot that was read at open.
 
-        ``rooms`` are the room servers' peers among the conversations, so a refresh reads
-        a room's latest *post* just as the seed did (see ``Repository.last_chat_messages``).
+        ``rooms`` are the peers of the room servers in the conversations. Thus a new read
+        gets the latest *post* of a room, the same as the first snapshot did (refer to
+        ``Repository.last_chat_messages``).
         """
         self._ctx = ctx
         self._ttl = ttl
@@ -741,48 +760,50 @@ class _LiveLasts:
         self._at = time.monotonic()
 
     def get(self, key: str) -> ChatMessage | None:
-        """Return the latest message for ``key``, refreshing the cache once its TTL lapses."""
+        """Return the latest message for ``key``. Read the cache again when its TTL ends."""
         now = time.monotonic()
         if now - self._at >= self._ttl:
             try:
                 self._cache = self._ctx.repo.last_chat_messages(rooms=self._rooms)
-            except Exception:  # noqa: BLE001 - keep the last good snapshot on a read error
+            except Exception:  # noqa: BLE001 - if a read error occurs, keep the last snapshot
                 pass
             self._at = now
         return self._cache.get(key)
 
 
-#: Width of the unread-badge lane between the label and the age (fits ``● 999``).
+#: The width of the unread badge lane, between the label and the age (``● 999`` fits).
 _BADGE_WIDTH = 5
-#: Width of the relative-age lane between the badge and the preview (right-aligned; fits ``now``
-#: and two-digit spans like ``59m`` / ``23h``), so every row's message text starts in one column.
+#: The width of the relative age lane, between the badge and the preview. It is right-aligned.
+#: ``now`` and two-digit spans such as ``59m`` and ``23h`` fit. Thus the message text of each
+#: row starts in the same column.
 _AGE_WIDTH = 3
-#: Floor for the conversation lane. The header word is ``CONVERSATION`` (12 cells) and the
-#: lane carries a two-cell gap after it, so anything narrower than this runs the heading
-#: straight into ``NEW`` on a mesh whose every name is ``Bob``.
+#: The minimum width of the conversation lane. The header word is ``CONVERSATION`` (12 cells)
+#: and the lane has a gap of two cells after it. If the lane is narrower, the heading touches
+#: ``NEW`` on a mesh where each name is ``Bob``.
 _LABEL_MIN = 12
-#: Ceiling for it. The lane is sized to the longest name it actually holds (see
-#: :func:`_lanes`), and this is where that stops paying: one very long name would otherwise
-#: buy padding in front of every *short* one. It holds the long-but-ordinary shape of a
-#: repeater-style name (``YUL-Cartierville``), a name past it ellipsizes — the row is a way
-#: in to the conversation, whose own screen is titled with the whole name — and every cell
-#: the ceiling saves goes to the preview.
+#: The maximum width of the lane. The lane width is the length of the longest name in it
+#: (refer to :func:`_lanes`), and at this width that rule is no longer useful. Without this
+#: limit, one very long name puts padding before each *short* name. This width holds the
+#: long but usual shape of a repeater name (``YUL-Cartierville``). A longer name ends with
+#: an ellipsis. The row only opens the conversation, and the title of its screen has the
+#: full name. Each cell that this limit saves goes to the preview.
 _LABEL_MAX = 16
 
 
 @dataclass(frozen=True)
 class _Lanes:
-    """The picker's fixed lane widths, measured once per list build.
+    """The fixed lane widths of the picker, measured one time each time the list is made.
 
-    Both the column header and every row are laid out from one of these, so the headings
-    cannot drift off the columns they name. Only the first two vary: the marker is the
-    platform's own glyph width (a channel glyph is double-cell on regular and single on the
-    PicoCalc console) and the label lane is sized to the longest name the list actually
-    holds, within :data:`_LABEL_MIN` / :data:`_LABEL_MAX`.
+    The column header and each row get their layout from one of these objects. Thus the
+    headings cannot move away from the columns that they name. Only the first two widths
+    change. The marker has the glyph width of the platform (a channel glyph is two cells
+    on regular, and one cell on the PicoCalc console). The label lane has the width of the
+    longest name in the list, between :data:`_LABEL_MIN` and :data:`_LABEL_MAX`.
 
     Attributes:
-        marker: The leading glyph lane — a channel glyph or contact dot plus its space.
-        label: Cells the conversation name is padded/ellipsized to.
+        marker: The first glyph lane: a channel glyph or a contact dot, and its space.
+        label: The number of cells to which the conversation name is padded or cut with an
+            ellipsis.
     """
 
     marker: int
@@ -790,57 +811,58 @@ class _Lanes:
 
     @property
     def head(self) -> int:
-        """Cells before the preview: everything ←→ leave pinned (:attr:`Choice.hscroll_from`).
+        """The cells before the preview: all that ←→ do not move (:attr:`Choice.hscroll_from`).
 
-        Marker, name, unread badge and age, with the two-cell gap that follows each — the
-        columns that say *which conversation this row is*. The preview is the only run that
-        slides, which is the point: the lanes are the reader's place in the list and they
-        already fit.
+        The marker, the name, the unread badge, and the age, each with the gap of two cells
+        after it. These columns say *which conversation this row is*. The preview is the
+        only part that moves, and that is the purpose. The lanes show the user where the
+        user is in the list, and they already fit.
         """
         return self.marker + self.label + 2 + _BADGE_WIDTH + 2 + _AGE_WIDTH + 2
 
 
 def _lanes(conversations: list[Conversation]) -> _Lanes:
-    """Measure the picker's lanes against the conversations it is about to draw.
+    """Measure the lanes of the picker for the conversations that it will draw.
 
-    The name lane used to be a flat 22 cells, which is a wide claim on a 72-column terminal
-    and a very wide one on the PicoCalc's 53: every cell it holds past the longest name in
-    the list is padding taken straight out of the last-message preview. Sized to the content
-    instead, a mesh of ``Alice`` and ``Bob`` keeps its names inside the header word's own
-    lane and gives everything else to the messages.
+    Before, the name lane was always 22 cells. That is wide on a terminal of 72 cells, and
+    very wide on the 53 cells of the PicoCalc. Each cell after the longest name in the list
+    is padding that the preview of the last message loses. When the width comes from the
+    content, a mesh of ``Alice`` and ``Bob`` keeps its names in the lane of the header word,
+    and gives all the other cells to the messages.
 
     Args:
-        conversations: Every row the list will hold, channels and direct alike.
+        conversations: All the rows that the list will hold, channels and direct.
 
     Returns:
-        The lane widths for both the header and the rows.
+        The lane widths for the header and for the rows.
     """
     longest = max((cell_len(c.label) for c in conversations), default=0)
     return _Lanes(
-        # The marker is "glyph + space", and the glyph is the platform's: double-cell on
-        # regular, single on the console font. Read from the widget rather than assumed, so
-        # the two groups' lanes line up on both platforms — a contact's dot is padded to
-        # whatever a channel's glyph measures here (see _append_marker).
+        # The marker is "glyph + space", and the glyph comes from the platform: two cells on
+        # regular, one cell on the console font. The width is read from the widget, not
+        # assumed. Thus the lanes of the two groups align on the two platforms: the dot of
+        # a contact is padded to the width of a channel glyph here (refer to
+        # _append_marker).
         marker=cell_len(channel_glyph("Public", None)) + 1,
         label=max(_LABEL_MIN, min(_LABEL_MAX, longest)),
     )
 
 
 def _picker_header(lanes: _Lanes, width: int) -> str:
-    """Column headers over the picker's fixed lanes (see :func:`_title` for the layout).
+    """Column headers above the fixed lanes of the picker (the layout is in :func:`_title`).
 
-    The indent covers the select screen's pointer column (2 cells, drawn on choice rows but
-    not separators) plus the marker lane, so each header lands exactly over its column.
-    ``NEW`` counts the unread messages, ``LAST`` is the last message's age, and ``MESSAGE``
-    is that message — short words, because the lanes under the first two are a badge and an
-    age, and a heading longer than its lane runs into the next one's. ``LAST`` still borrows
-    its lane's trailing gap (the age lane is three cells), which leaves a space before the
-    preview.
+    The indent covers the pointer column of the select screen (2 cells, drawn on choice
+    rows but not on separators) and the marker lane. Thus each header is exactly above its
+    column. ``NEW`` counts the unread messages, ``LAST`` is the age of the last message,
+    and ``MESSAGE`` is that message. The words are short, because the lanes under the
+    first two are a badge and an age, and a heading that is longer than its lane touches
+    the next heading. ``LAST`` also uses the gap after its lane (the age lane is three
+    cells), and that leaves a space before the preview.
 
-    Resolved against the render width (the header row is pinned, so it must stay one row):
-    on a terminal too narrow for the whole line, ``MESSAGE`` gives its cells back as ``MSG``
-    rather than the line wrapping or losing the label (see
-    :func:`~meshterm.ui.menus.column_header`).
+    The header is resolved for the render width (the header row is pinned, so it must
+    stay one row). On a terminal that is too narrow for the full line, ``MESSAGE`` becomes
+    ``MSG`` and gives back its cells. Thus the line does not wrap and does not lose the
+    label (refer to :func:`~meshterm.ui.menus.column_header`).
     """
     return column_header(
         [
@@ -863,22 +885,24 @@ def _row_title(
     *,
     name_of: NodeResolver | None = None,
 ) -> Callable[[], str | Text]:
-    """Return a picker-row title *callable* the select screen re-renders on each repaint.
+    """Return the row title as a *callable* that the select screen renders on each paint.
 
-    Both the unread badge and the last-message preview are read live, so a message arriving
-    while the picker sits open updates that row's ``●`` count *and* its sender/text preview on
-    the next repaint (the session already repaints ~1×/s for the header).
+    The unread badge and the preview of the last message are both read live. Thus, when a
+    message arrives while the picker is open, the next paint changes the ``●`` count of
+    that row *and* its preview of the sender and text (the session already paints
+    approximately one time each second, for the header).
 
     Args:
-        ctx: Shared application context (for the live unread count).
-        conversation: The conversation the row represents.
-        lasts: The self-refreshing latest-message view feeding the preview.
-        key_of: Maps a sender name back to its node's key, for the preview hues.
-        lanes: The list's measured lane widths.
-        name_of: Maps a room post's author key to a name (rooms only).
+        ctx: The shared application context (for the live unread count).
+        conversation: The conversation of the row.
+        lasts: The lookup of the latest messages, which reads itself again and gives the
+            preview.
+        key_of: Maps a sender name back to the key of its node, for the hues of the preview.
+        lanes: The measured lane widths of the list.
+        name_of: Maps the author key of a room post to a name (only for rooms).
 
     Returns:
-        A zero-argument callable producing the current row title.
+        A callable with no arguments, which makes the current row title.
     """
     return lambda: _title(ctx, conversation, lasts, key_of, lanes, name_of=name_of)
 
@@ -892,24 +916,30 @@ def _title(
     *,
     name_of: NodeResolver | None = None,
 ) -> str | Text:
-    """Build a picker row as fixed-width, colour-coded lanes.
+    """Make a picker row from lanes of fixed width, with colour codes.
 
-    Alignment carries the readability — marker, label, unread badge, relative age, and preview
-    each sit in their own lane, so every row's message text starts in the same column. Colour is
-    purposeful: a direct contact's name takes its key-derived palette hue (a channel label stays
-    base), the leading dot is the standard companion pink with its shape marking history, the
-    unread ``●`` badge is red, the age is muted, and the preview mutes its body while lighting
-    sender names and ``@mentions`` in their key-derived hue — the same colours the live
-    transcript uses. The row is always a Rich :class:`~rich.text.Text` so those spans survive
-    under the select screen's row highlight.
+    The alignment makes the row easy to read. The marker, the label, the unread badge, the
+    relative age, and the preview each have their own lane. Thus the message text of each
+    row starts in the same column. Each colour has a purpose:
+
+    - The name of a direct contact gets the palette hue that comes from its key (a channel
+      label keeps the base style).
+    - The first dot is the standard companion pink, and its shape shows the history.
+    - The unread ``●`` badge is red, and the age is muted.
+    - The preview mutes its body, and lights the sender names and the ``@mentions`` in the
+      hues that come from their keys. These are the same colours as in the live transcript.
+
+    The row is always a Rich :class:`~rich.text.Text`, so that those spans stay under the
+    row highlight of the select screen.
 
     Args:
-        ctx: Shared application context (for the live unread count).
-        conversation: The conversation the row represents.
-        lasts: The self-refreshing latest-message view.
-        key_of: Maps a preview sender/mention name back to its node's key.
-        lanes: The list's measured lane widths.
-        name_of: Maps a room post's author key to a name (rooms only).
+        ctx: The shared application context (for the live unread count).
+        conversation: The conversation of the row.
+        lasts: The lookup of the latest messages, which reads itself again.
+        key_of: Maps a sender name or a mention name in the preview back to the key of its
+            node.
+        lanes: The measured lane widths of the list.
+        name_of: Maps the author key of a room post to a name (only for rooms).
 
     Returns:
         The row title as a styled :class:`~rich.text.Text`.
@@ -924,15 +954,15 @@ def _title(
         label_style = name_style(conversation.label, contact.public_key or contact.key_prefix)
     text.append(fit_cells(conversation.label, lanes.label), style=label_style or None)
     text.append("  ")
-    # Unread badge lane (_BADGE_WIDTH cells): a red ● with the count in warn, or blank filler so
-    # the following lanes still line up on rows with nothing unread.
+    # The unread badge lane (_BADGE_WIDTH cells): a red ● with the count in warn, or blank
+    # spaces. Thus the lanes after it still align on rows with nothing unread.
     if unread:
         text.append("●", style="err")
         text.append(f" {unread}".ljust(_BADGE_WIDTH - 1), style="warn")
     else:
         text.append(" " * _BADGE_WIDTH)
-    # Relative-age lane (right-aligned) sits between the badge and the message text, so the ages
-    # stack in one tidy column and the previews all start at the same place.
+    # The relative age lane (right-aligned) is between the badge and the message text. Thus
+    # the ages are in one neat column, and all the previews start at the same position.
     age = _ago(last.created_at) if last is not None else ""
     text.append("  ")
     text.append(f"{age:>{_AGE_WIDTH}}", style="muted")
@@ -942,31 +972,33 @@ def _title(
     return text
 
 
-#: The standard companion pink — the shared plain-node ``●`` colour — the contact dot's
-#: hue: the shape (filled/hollow) marks history, the colour marks "a companion", and the
-#: name beside it carries the person's own key-derived hue.
+#: The standard companion pink (the shared colour of the plain node ``●``) is the hue of the
+#: contact dot. The shape (filled or hollow) shows the history, the colour shows "a
+#: companion", and the name next to it has the hue that comes from the key of the person.
 _COMPANION_DOT_STYLE = NODE_GLYPHS[NODE_TYPE_CHAT][1]
 
-#: A room's marker: the room server's own ``■``, in its type colour — the mark the map and
-#: the contact list give a room. The console font has no hollow square, so it carries no
-#: history state; the preview lane says whether there is anything to read, or to join.
+#: The marker of a room: the ``■`` of the room server, in the colour of its type. The map
+#: and the contact list give a room the same mark. The console font has no hollow square,
+#: so the marker shows no history state. The preview lane says whether there is something
+#: to read, or a room to join.
 _ROOM_MARK = NODE_GLYPHS[NODE_TYPE_ROOM]
 
 
 def _append_marker(
     text: Text, conversation: Conversation, last: ChatMessage | None, lanes: _Lanes
 ) -> None:
-    """Prepend the row's leading marker — a channel glyph or a contact dot — in its own lane.
+    """Add the first marker of the row (a channel glyph or a contact dot) in its own lane.
 
-    A channel keeps its openness marker (＃ / 🌐 / 🔒). A contact gets a small circle in the
-    standard companion pink — filled (``●``) once we've exchanged messages, a hollow ring
-    (``○``) before any — so the hollow-vs-filled shape marks whether there's history while the
-    name itself carries the person's key-derived hue.
+    A channel keeps its marker for open or private (＃ / 🌐 / 🔒). A contact gets a small
+    circle in the standard companion pink. It is filled (``●``) after we exchanged
+    messages, and a hollow ring (``○``) before that. Thus the shape (hollow or filled)
+    shows whether there is history, and the name itself has the hue that comes from the
+    key of the person.
 
-    The dot is padded out to :attr:`_Lanes.marker`, which is measured from the channel glyph
-    itself rather than assumed: that glyph is double-cell on regular and single-cell on the
-    PicoCalc console font, so a hard-coded pad lined the two sections up on one platform and
-    left every channel row a cell to the left of every direct row on the other.
+    The dot is padded to :attr:`_Lanes.marker`, which is measured from the channel glyph
+    itself, not assumed. That glyph is two cells on regular and one cell on the PicoCalc
+    console font. A fixed pad aligned the two sections on one platform. On the other
+    platform, it put each channel row one cell to the left of each direct row.
     """
     if conversation.is_channel:
         glyph = channel_glyph(conversation.label, conversation.secret)
@@ -984,19 +1016,23 @@ def _append_marker(
 def _preview_text(
     last: ChatMessage, key_of: NameKeyResolver, name_of: NodeResolver | None = None
 ) -> Text:
-    """A muted last-message preview with sender names and ``@mentions`` lit in their hue.
+    """A muted preview of the last message, with sender names and ``@mentions`` lit in their hue.
 
-    Mirrors the live transcript: our own messages get a ``you:`` prefix, an inbound channel
-    message's inline ``Name:`` sender is coloured in its key-derived hue (muted when no known
-    node carries the name), a room post leads with its author — named by key the way the room
-    view names them (:func:`~meshterm.ui.room.author_label`) — and every ``@[Name]`` mention
-    reads as a bare ``@Name`` the same way, so the list and the chat speak the same colour
-    language.
+    It is the same as the live transcript:
 
-    The preview is built *whole*, however long the message ran. It used to be clipped to a
-    fixed 40 cells, which is a cut nothing could undo: the row is what ←→ scroll now, and a
-    preview pre-truncated to roughly the visible lane would have had nothing left to reveal.
-    The list cuts it at the right edge like any other row; the scroll walks past that.
+    - Our own messages get a ``you:`` prefix.
+    - In a received channel message, the inline ``Name:`` sender gets the hue that comes from
+      its key (muted when no known node has the name).
+    - A room post starts with its author, named by key in the same way as the room screen
+      names authors (:func:`~meshterm.ui.room.author_label`).
+    - Each ``@[Name]`` mention shows as a bare ``@Name``, in the same way.
+
+    Thus the list and the chat use the same colour language.
+
+    The preview is made *in full*, however long the message is. Before, it was cut to a
+    fixed 40 cells, and nothing could undo that cut. Now ←→ scroll the row. A preview that
+    was cut before to approximately the visible lane has nothing more to show. The list
+    cuts it at the right edge, the same as any other row, and the scroll goes past that.
     """
     body_raw = last.text.replace("\n", " ")
     text = Text()
@@ -1024,10 +1060,10 @@ def _preview_text(
 
 
 def _append_body(text: Text, body: str, key_of: NameKeyResolver) -> None:
-    """Append ``body`` to ``text``, muted, lighting up the names it mentions.
+    """Append ``body`` to ``text``, muted, and light the names that it mentions.
 
-    Each ``@[Name]`` is drawn in that node's key-derived hue, or left muted when the
-    name resolves to no node we know.
+    Each ``@[Name]`` is drawn in the hue that comes from the key of that node. It stays
+    muted when the name resolves to no node that we know.
     """
     pos = 0
     for match in MENTION.finditer(body):
@@ -1041,11 +1077,11 @@ def _append_body(text: Text, body: str, key_of: NameKeyResolver) -> None:
 
 
 def _ago(when: Any) -> str:
-    """The column age for a message time, through THE grammar (``format_age``).
+    """The column age for a message time, through the only grammar (``format_age``).
 
-    One deliberate difference from the widget: a missing or naive timestamp (a stray one
-    from the wire) reads as a *blank* lane rather than ``never`` — the picker wants an
-    empty cell there, not a word.
+    There is one difference from the widget, on purpose. A missing or naive timestamp (a
+    bad value from the wire) shows as a *blank* lane, not as ``never``. The picker must
+    have an empty cell there, not a word.
     """
     if getattr(when, "tzinfo", None) is None:
         return ""
@@ -1053,11 +1089,12 @@ def _ago(when: Any) -> str:
 
 
 def _channel_ref(idx: int | None, label: str, secret: bytes | None) -> ChannelRef:
-    """One channel as the shared shape, from whatever the surface knows about it.
+    """One channel in the shared shape, from what the surface knows about it.
 
-    A transcript row and a live message know a slot and a label but not the key, so
-    ``public`` is read off the name where the secret is not in hand — which is what the
-    leading ``#`` means and how a public channel is written everywhere else in the app.
+    A transcript row and a live message know a slot and a label, but not the key. Thus,
+    when the secret is not available, ``public`` comes from the name. A ``#`` at the start
+    of the name means a public channel, and the app writes a public channel that way in
+    all other places.
     """
     return ChannelRef(
         slot=int(idx or 0),
@@ -1068,21 +1105,22 @@ def _channel_ref(idx: int | None, label: str, secret: bytes | None) -> ChannelRe
 
 
 def _message_columns(*, author_lane: bool = False) -> tuple:
-    """One transcript row's columns, shared by ``history`` and the ``listen`` stream.
+    """The columns of one transcript row, shared by ``history`` and the ``listen`` stream.
 
-    ``DIR`` carries what the menu's transcript writes into its sender lane as the word
-    "you": which way a message went is a fact of its own, and spending the name lane on it
-    made our own name a value that lane could not otherwise hold. ``PEER`` is therefore
+    ``DIR`` holds what the transcript of the menu writes into its sender lane as the word
+    "you". The direction of a message is a separate fact. When the name lane held it, our
+    own name became a value that the lane could not hold in other cases. Thus ``PEER`` is
     always the *other* party.
 
-    ``TEXT`` is last and escaped: it is the rest of the line, and "the rest of the line"
-    stops being true the moment a body holds a newline — after which the remainder reads
-    as a second record with an empty time. The document carries the body raw, a JSON string
-    holding a newline natively.
+    ``TEXT`` is last and escaped. It is the rest of the line, and "the rest of the line"
+    is not true when a body holds a newline. After the newline, the rest looks like a
+    second record with an empty time. The document holds the raw body, because a JSON
+    string can hold a newline.
 
-    ``author`` is a room post's writer, in every document (``null`` off a room) so one
-    command answers in one shape; ``author_lane`` draws it as ``AUTHOR`` too, for a room's
-    transcript, where it is the column a reader is there for.
+    ``author`` is the writer of a room post. It is in each document (``null`` when the
+    conversation is not a room), so that one command answers in one shape. For the
+    transcript of a room, ``author_lane`` also draws it as ``AUTHOR``, because there it is
+    the column that the user wants to see.
     """
     from dataclasses import replace
 
@@ -1092,9 +1130,10 @@ def _message_columns(*, author_lane: bool = False) -> tuple:
     return (
         fields.when("created_at", "TIME"),
         fields.word("direction", "DIR"),
-        # One column for whichever end the conversation had; the document keeps the two
-        # apart, because a parser cannot tell a channel from a contact by its label. A
-        # room's transcript names the room on every row, so there AUTHOR stands instead.
+        # One column for the other end of the conversation, whichever type it is. The
+        # document keeps the two types apart, because a parser cannot tell a channel from a
+        # contact by its label. The transcript of a room names the room on each row, so
+        # there AUTHOR is in its place.
         replace(peer, lanes=()) if author_lane else peer,
         fields.node("node", lanes=()),
         fields.channel("channel", lanes=()),
@@ -1106,11 +1145,11 @@ def _message_columns(*, author_lane: bool = False) -> tuple:
 
 
 def _author_column(*, lane: bool) -> Any:
-    """A room post's author: the shared node object, drawn as one hop — ``Name (hash)``.
+    """The author of a room post: the shared node object, drawn as one hop (``Name (hash)``).
 
-    The hop's grammar (:func:`~meshterm.ui.script.route`), because that is the plain
-    face's one way of naming a node by name *and* key: an author nothing names is its hash
-    alone, never an empty ``()``.
+    It uses the grammar of a hop (:func:`~meshterm.ui.script.route`), because that is the
+    one way in which the plain face names a node by name *and* key. When nothing names an
+    author, the author is only its hash, never an empty ``()``.
     """
     from dataclasses import replace
 
@@ -1128,7 +1167,7 @@ def _author_column(*, lane: bool) -> Any:
 
 
 def _self_ref(info: dict) -> NodeRef:
-    """Our own node, from the companion's self info — how a post of ours names its author."""
+    """Our node, from the self info of the companion: how one of our posts names its author."""
     key = str(info.get("public_key") or "").lower()
     return NodeRef(
         name=str(info.get("name") or "") or None,
@@ -1140,7 +1179,7 @@ def _self_ref(info: dict) -> NodeRef:
 
 
 def _author_ref(author: str, name_of: NodeResolver | None) -> NodeRef:
-    """A post's author as a node: its hash always, its name where something names it."""
+    """The author of a post as a node: always its hash, and its name if something names it."""
     from ..ui.room import author_label
 
     label, key = author_label(author, name_of) if name_of is not None else (author, None)
@@ -1154,15 +1193,15 @@ def _transcript(
     name_of: NodeResolver | None = None,
     me: NodeRef | None = None,
 ) -> Listing:
-    """A conversation's stored messages, oldest first, one record each.
+    """The stored messages of a conversation, oldest first, one record for each.
 
     Args:
         messages: The transcript.
-        room: Whether it is a room's board: each row then names its author, in an
-            ``AUTHOR`` lane standing where ``PEER`` would (the peer being the room on
-            every row).
-        name_of: Names an author's key, for a room.
-        me: Our own node, the author of our own posts in a room.
+        room: Whether it is the board of a room. Then each row names its author, in an
+            ``AUTHOR`` lane in the place of ``PEER`` (because the peer is the room on
+            each row).
+        name_of: Names the key of an author, for a room.
+        me: Our node, the author of our own posts in a room.
     """
     from ..ui.report import Listing
 
@@ -1201,12 +1240,12 @@ def _transcript(
 
 
 def _live_messages() -> Listing:
-    """The shape ``chat listen`` streams: what arrived, as it arrived.
+    """The shape that ``chat listen`` streams: what arrived, when it arrived.
 
-    ``TIME`` is absolute here where the transcript's is an age, and for the reason the
-    whole time rule turns on: every row of a live tail would read ``now``, which is no
-    information at all. There is no ``DIR`` lane — everything a tail hears came in — and
-    the body goes last, so the one field with no width can never push a lane.
+    Here ``TIME`` is absolute, but in the transcript it is an age. The reason is the base
+    of the full time rule: with ages, each row of a live tail shows ``now``, which gives no
+    information. There is no ``DIR`` lane, because all that a tail hears came in. The
+    body goes last, so that the one field with no width can never push a lane.
     """
     from dataclasses import replace
 
@@ -1223,8 +1262,8 @@ def _live_messages() -> Listing:
             pin(fields.plain_only(fields.name("conversation", "PEER")), 16),
             fields.node("node", lanes=()),
             fields.channel("channel", lanes=()),
-            # A room post's writer rides in the document; the tail itself names the room,
-            # which is the node that sent it.
+            # The writer of a room post is in the document. The tail itself names the room,
+            # which is the node that sent the post.
             _author_column(lane=False),
             pin(fields.snr("snr_db", "SNR_DB"), 6),
             fields.free("text", "TEXT"),
@@ -1236,11 +1275,11 @@ def _live_messages() -> Listing:
 
 
 def _conversations(ctx: AppContext, rows: list, lasts: dict) -> Listing:
-    """Every channel and contact, with the last thing said in each.
+    """Each channel and contact, with the last message in each.
 
-    ``LAST`` is an age rather than an instant: a conversation list is scanned for what is
-    warm, and ``never`` is a real answer — the conversation exists and nothing has been
-    said in it.
+    ``LAST`` is an age, not an instant. A user looks through a conversation list for the
+    conversations that are active. ``never`` is a real answer: the conversation exists,
+    and it has no messages.
     """
     from ..ui import fields
     from ..ui.report import Listing
@@ -1275,9 +1314,9 @@ def _conversations(ctx: AppContext, rows: list, lasts: dict) -> Listing:
                 ),
                 "unread": ctx.chat.unread(conversation.key),
                 "last_message_at": last.created_at if last is not None else None,
-                # Not truncated to 40 cells the way the picker's preview is: nothing here
-                # wraps, so there is no reason to cut a message short — but a body that
-                # holds a newline would still end the record, so it is folded flat.
+                # Not cut to 40 cells, as the preview of the picker is. Nothing here wraps,
+                # so there is no reason to make a message shorter. But a body that holds a
+                # newline still ends the record, so it is folded flat.
                 "last_text": last.text if last is not None else None,
             }
         )
@@ -1306,16 +1345,16 @@ def _sent(
 ) -> Facts:
     """What one ``chat send`` did.
 
-    A direct message prints its ``acked`` state, which is the one thing the send does not
-    already tell the caller: the radio accepted it either way, and whether the peer
-    answered is a separate fact. A channel broadcast prints nothing, because there *is* no
-    acknowledgement on a channel — and the document says that in the one way the plain
-    face never could, with ``null`` rather than ``false``.
+    A direct message prints its ``acked`` state. That is the one thing that the send does
+    not already tell the caller: the radio accepted the message in the two cases, and the
+    answer of the peer is a separate fact. A channel broadcast prints nothing, because a
+    channel *has* no acknowledgement. The document says that in the one way that the plain
+    face cannot: with ``null``, not ``false``.
 
-    The document also carries the ``scope`` a channel message went out under, in the same
-    shape a received frame's scope takes (:func:`~meshterm.ui.fields.scope`): the region,
-    ``unscoped``, or ``null`` where it isn't known (a direct message, or a default scope
-    that couldn't be read).
+    The document also holds the ``scope`` under which a channel message went out, in the
+    same shape as the scope of a received packet (:func:`~meshterm.ui.fields.scope`): the
+    region, ``unscoped``, or ``null`` when it is not known (a direct message, or a default
+    scope that MeshTerm could not read).
     """
     from dataclasses import replace
 
@@ -1342,16 +1381,16 @@ def _sent(
     return Facts(
         key="sent",
         fields=(
-            # `acked` is the only lane: the caller named the recipient and the radio
-            # accepting the message is what a zero exit already says, so the one fact
+            # `acked` is the only lane. The caller named the recipient, and a zero exit
+            # already says that the radio accepted the message. Thus the one fact that is
             # left to report is whether the peer answered.
             fields.hidden("kind"),
             fields.node("node", lanes=()),
             fields.channel("channel", lanes=()),
             fields.hidden("sent"),
             fields.flag("acked", "acked"),
-            # Document only: a direct message has no scope of its own to print, and a
-            # channel send prints nothing at all.
+            # Only in the document. A direct message has no scope of its own to print, and a
+            # channel send prints nothing.
             replace(fields.scope("scope", "scope"), lanes=()),
         ),
         values={

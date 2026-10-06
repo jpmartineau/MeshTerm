@@ -1,16 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The ``dashboard`` tool: the live mesh overview, at the top of the Watch section.
+"""The ``dashboard`` tool: the live overview of the mesh, at the top of the Watch section.
 
-Opens the full-screen dashboard (see :mod:`meshterm.ui.dashboard_screen`): the two-hour
-all-packet activity chart with its pulse line, the session's traffic tallies by packet
-class, and the window's RF health beside the radio's own live numbers. (The per-packet
-stream is the Live feed tool, right below.) It leads the Watch section because it answers
-the section's first question — *what's going on out there?* — before any specific tool
-is reached for.
+The tool opens the full-screen dashboard (refer to :mod:`meshterm.ui.dashboard_screen`).
+It shows the activity chart of all packets for two hours with its pulse line, the traffic
+counts of the session for each packet class, and the RF health of the window next to the
+live numbers of the radio itself. (The stream of each packet is the Live feed tool,
+directly below.) The dashboard is first in the Watch section, because it answers the
+first question of the section (what occurs on the mesh now?) before the user goes to a
+specific tool.
 
-Menu-only: the dashboard is inherently live (it rides the event hub and repaints every
-second), so there is no scripted one-shot to register — the ``monitor`` and ``contacts``
-subcommands cover scripted inspection.
+Menu only: the dashboard is always live (it uses the event hub and paints again each
+second). Thus there is no scripted one-shot command to register. The ``monitor`` and
+``contacts`` subcommands are the script commands to examine the mesh.
 """
 
 from __future__ import annotations
@@ -25,24 +26,24 @@ from .base import Tool, ToolResult, register
 
 @register
 class DashboardTool(Tool):
-    """Watch everything going on on the mesh: activity, traffic, RF health."""
+    """Watch all that occurs on the mesh: activity, traffic, RF health."""
 
     name = "dashboard"
     title = "Dashboard"
     icon = "📊"
     help = "The mesh live — activity, traffic, RF health"
     category = "Watch"
-    order = 10  # the section's overview, above the tools it summarizes
+    order = 10  # the overview of the section, above the tools that it summarizes
 
     async def prompt_params(self, ctx: AppContext) -> dict[str, Any] | None:
-        """Run the live dashboard; there are never parameters to collect.
+        """Run the live dashboard. It has no parameters to collect.
 
-        The screen presents everything itself and returns when dismissed, so
-        returning ``None`` tells the menu the invocation is complete (the same
+        The screen shows all its content itself, and it returns when the user leaves it.
+        Thus the return value ``None`` tells the menu that the run is complete (the same
         pattern as the ``advert`` tool).
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
 
         Returns:
             Always ``None``.
@@ -53,20 +54,20 @@ class DashboardTool(Tool):
         return None
 
     async def run(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Nothing runs here: the dashboard lives inside :meth:`prompt_params`.
+        """Nothing runs here: the dashboard is in :meth:`prompt_params`.
 
         Args:
-            ctx: Shared application context.
-            params: Unused.
+            ctx: The shared application context.
+            params: Not used.
 
         Returns:
-            An empty :class:`ToolResult` (only reachable from a scripted call).
+            An empty :class:`ToolResult` (only a scripted call comes here).
         """
         return ToolResult(summary={})
 
     def register_cli(self, app: typer.Typer) -> None:
-        """Register no CLI command — the dashboard is a live, menu-only screen.
+        """Register no CLI command, because the dashboard is a live screen for the menu only.
 
         Args:
-            app: The Typer application (untouched).
+            app: The Typer application (not changed).
         """

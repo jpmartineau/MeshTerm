@@ -1,31 +1,33 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The ``diagnostics`` tool: everything a bug report needs, in one block worth pasting.
+"""The ``diagnostics`` tool: all that is necessary for a bug report, in one block to paste.
 
-A report that opens with "it crashed" costs two or three round trips before anyone knows
-which MeshTerm, which OS, which terminal, which radio — and the person who hit the bug is
-usually the one least able to answer, because half of it is resolved at boot and never
-shown. This states all of it at once.
+If a report starts with "it crashed", two or three questions and answers are necessary
+before anyone knows which MeshTerm, which OS, which terminal, and which radio. The person
+who found the bug is usually the person who can answer least, because MeshTerm finds half
+of these facts at boot and never shows them. This tool states all of them at one time.
 
-**What it deliberately does not say.** The block is designed to be pasted in public by
-somebody who has not read it, so nothing that identifies a person or unlocks anything may
-be in it: no pairing PIN, no admin password, no channel secret, no private key, no
-position, and no contact's name or key. The mesh is described in **aggregate** — how many
-rows of each kind, and the span of time they cover — which is the half that explains a bug
-(a database with four observations and one with four hundred thousand fail differently)
-without naming anyone the reporter talks to. :func:`~meshterm.core.hostinfo.host` and
-:meth:`~meshterm.persistence.repository.Repository.table_counts` hold that line on their
-own side, so it cannot be crossed here by accident.
+**What it does not say, on purpose.** The block is made for a person who pastes it in
+public and did not read it. Thus it must not contain anything that identifies a person or
+unlocks anything: no pairing PIN, no admin password, no channel secret, no private key, no
+position, and no name or key of a contact. The block describes the mesh only in
+**totals**: how many rows of each type, and the span of time that they cover. That half
+explains a bug (a database with four observations and one with four hundred thousand fail
+in different ways), and it names nobody that the reporter talks to.
+:func:`~meshterm.core.hostinfo.host` and
+:meth:`~meshterm.persistence.repository.Repository.table_counts` keep that limit on their
+own side. Thus this module cannot go past it by accident.
 
-**One report, three faces**, which is the whole reason this is a report and not a
-``print``: the menu draws it as a written page (see :mod:`meshterm.ui.diagnostics`) and
-saves it as markdown, ``meshterm diagnostics`` prints the same facts as aligned records for
-anyone who would rather redirect than read, and ``--json`` hands them to whatever files the
-issue. The document face is the one that leaves this machine, so it is the one written in
-the format an issue tracker already renders.
+**One report, three faces.** That is the only reason why this is a report and not a
+``print``. The menu draws it as a written page (refer to :mod:`meshterm.ui.diagnostics`)
+and saves it as markdown. ``meshterm diagnostics`` prints the same facts as aligned
+records, for a person who wants to redirect them and not read them. ``--json`` gives
+them to the program that files the issue. The document face is the face that leaves this
+machine. Thus it is written in a format that an issue tracker already renders.
 
-The device is asked but never required. A report about a radio that will not connect is
-exactly the report that most needs to be filed, so a failure to reach it becomes a fact in
-the block (``connected``/``error``) rather than an error that replaces it.
+The tool asks the device, but the device is not necessary. A report about a radio that
+does not connect is the report that it is most necessary to file. Thus, when the tool
+cannot get to the device, that failure becomes a fact in the block (``connected`` and
+``error``), and not an error that replaces the block.
 """
 
 from __future__ import annotations
@@ -41,32 +43,33 @@ from .base import Tool, ToolResult, register
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..ui.report import Report
 
-#: What the saved file is called, in the config directory beside the log it sits next to
-#: in a bug report. Named for the app rather than just ``diagnostics.md`` because the one
-#: thing that happens to this file is being moved somewhere else and attached, and by then
-#: the directory it came from is no longer saying what it is.
+#: The name of the saved file, in the config directory, next to the log that it goes with
+#: in a bug report. The name includes the app name, and is not only ``diagnostics.md``.
+#: The reason: the only thing that occurs to this file is that a person moves it to a
+#: different place and attaches it. Then the directory that it came from no longer tells
+#: what it is.
 DIAGNOSTICS_FILENAME = "meshterm-diagnostics.md"
 
 
 @register
 class DiagnosticsTool(Tool):
-    """What MeshTerm, this machine, this terminal and this radio actually are."""
+    """What MeshTerm, this machine, this terminal, and this radio are."""
 
     name = "diagnostics"
     title = "Diagnostics"
     icon = "🩺"
     help = "Version, host, terminal, and device facts for a bug report"
     category = "This app"
-    order = 7  # after Preferences (the row that changes MeshTerm), before the pages
+    order = 7  # after Preferences (the row that changes MeshTerm), and before the pages
 
     def register_cli(self, app: Any) -> None:
-        """Register the command, with the one option that turns the answer into a file.
+        """Register the command, with the one option that changes the answer into a file.
 
-        ``--out`` is spelled the way ``config export-key --out`` already spells it, rather
-        than inventing a second word for writing an answer to a path. Plain redirection
-        still works and is not replaced by it — what the option adds is a file whose
-        columns are laid out at full width instead of at whatever the terminal happened to
-        be, which is the difference between a readable attachment and a folded one.
+        ``--out`` has the same spelling as ``config export-key --out``. We did not make a
+        second word to write an answer to a path. Plain redirection continues to work, and
+        the option does not replace it. The option adds a file whose columns have the full
+        width, and not the width that the terminal had at that time. That is the
+        difference between an attachment that a person can read and a folded one.
         """
         import typer
 
@@ -81,18 +84,18 @@ class DiagnosticsTool(Tool):
             run_tool_command(self, {"out": out})
 
     async def prompt_params(self, ctx: AppContext) -> dict[str, Any] | None:
-        """Open the page in the menu; returning ``None`` completes with no run row.
+        """Open the page in the menu. The return value ``None`` ends with no run row.
 
-        The same shape the About pages use — and the same screen, since the page *is* one:
-        the menu's whole interaction is the reading of it, and a run row recording that
-        somebody looked at their own version number would be a line in the log for every
-        glance. Saving from the page is likewise not a run.
+        The About pages use the same shape, and the same screen, because this page is a
+        written page too. In the menu, the user only reads it. If a run row stores that a
+        person looked at their own version number, the log gets a line for each look. A
+        save from the page is also not a run.
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
 
         Returns:
-            Always ``None`` in the menu; the CLI never reaches this.
+            Always ``None`` in the menu. The CLI never gets to this method.
         """
         from ..ui.diagnostics import open_diagnostics_page
 
@@ -101,18 +104,18 @@ class DiagnosticsTool(Tool):
         return None
 
     async def run(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """State the diagnostics, or write them to a file — only reachable from the CLI.
+        """State the diagnostics, or write them to a file. Only the CLI gets to this method.
 
-        With ``--out`` the answer *becomes the path*, the same trade ``config export-key``
-        makes: a caller who asked for a file wants to be told where it is, not handed the
-        contents they just redirected into it.
+        With ``--out``, the answer *is the path*. ``config export-key`` makes the same
+        choice. A caller who asked for a file wants to know where it is. The caller does
+        not want to get again the contents that it sent into that file.
 
         Args:
-            ctx: Shared application context.
-            params: ``out`` — a destination path, or ``None`` to print the block.
+            ctx: The shared application context.
+            params: ``out``: a destination path, or ``None`` to print the block.
 
         Returns:
-            A :class:`ToolResult` carrying the block, or the path it was written to.
+            A :class:`ToolResult` that holds the block, or the path of the written file.
         """
         report = await build_report(ctx)
         out = params.get("out")
@@ -129,23 +132,24 @@ class DiagnosticsTool(Tool):
 
 
 async def build_report(ctx: AppContext) -> Report:
-    """Gather every diagnostic fact, as the report both faces render.
+    """Collect all the diagnostic facts, as the report that the two faces render.
 
-    Seven blocks in the order a reader needs them: what this program is, what it is running
-    on, what it is drawing into, what radio it found, how much history it has, what that
-    history is made of, and what has been changed from the defaults. Each carries a
-    ``caption``, which is what the markdown face turns into the page's ``##`` landmarks.
+    Seven blocks, in the order that is most useful to the user: what this program is, the
+    machine it runs on, the terminal it draws into, the radio it found, how much history it
+    has, what that history contains, and what is changed from the defaults. Each block has
+    a ``caption``. The markdown face changes the captions into the ``##`` landmarks of the
+    page.
 
-    The five :class:`~meshterm.ui.report.Facts` blocks merge into one flat JSON object and
-    the two :class:`~meshterm.ui.report.Listing` blocks keep a key of their own — which is
-    also why the table counts are a listing, since a table named after a fact would
-    otherwise be able to collide with it.
+    The five :class:`~meshterm.ui.report.Facts` blocks merge into one flat JSON object.
+    The two :class:`~meshterm.ui.report.Listing` blocks each keep their own key. That is
+    also why the table counts are a listing: if they were facts, a table with the same name
+    as a fact could collide with it.
 
     Args:
-        ctx: Shared application context.
+        ctx: The shared application context.
 
     Returns:
-        The seven-block report.
+        The report of seven blocks.
     """
     return (
         _app_facts(),
@@ -159,36 +163,41 @@ async def build_report(ctx: AppContext) -> Report:
 
 
 def markdown_source(report: Report, *, when: datetime | None = None) -> str:
-    """The whole block as a markdown document — the page's source, and the file's contents.
+    """The full block as a markdown document: the source of the page, and the file contents.
 
-    Markdown because both places this goes already speak it: the menu draws it through
-    :func:`~meshterm.ui.markdown.render_markdown`, the same renderer behind the About
-    pages, so the page gets real ``##`` landmarks that pin as it scrolls and that its
-    section jumps step by; and an issue tracker renders it as written, with no fence and
-    no apology. The command line keeps its aligned records — that face is a stream a
-    person greps, and headings are furniture on it.
+    It is markdown because the two places where this text goes already use markdown. The
+    menu draws it through :func:`~meshterm.ui.markdown.render_markdown`, the same renderer
+    as the About pages. Thus the page gets real ``##`` landmarks, which pin while the page
+    scrolls and which the section jumps go to. An issue tracker renders it as it is
+    written, with no fence and no apology. The command line keeps its aligned records,
+    because that face is a stream that a person searches with grep, and headings only add
+    clutter to it.
 
     Args:
-        report: The blocks to write out.
-        when: The moment to stamp in the colophon (defaults to now, local). Injectable so
-            the same report can be rendered twice and compared.
+        report: The blocks to write.
+        when: The time to put in the colophon (the default is now, in local time). A
+            caller can give it, so that the same report can be rendered two times and
+            compared.
 
     Returns:
-        Markdown source, ready for :func:`~meshterm.ui.markdown.render_markdown` or a file.
+        The markdown source, ready for :func:`~meshterm.ui.markdown.render_markdown` or
+        for a file.
     """
     from .. import __version__
     from ..ui.renderers import markdown_blocks
 
     stamp = (when or datetime.now().astimezone()).strftime("%Y-%m-%d %H:%M")
     return (
-        # The `#` title carries what the frame around it cannot — which is the same reason
-        # `about.md` has one and the other three written pages do not. The screen is already
-        # headed "Diagnostics"; repeating that would spend the page's first line saying
-        # nothing, while the version belongs at the top of a file somebody will open later.
-        # Emphasis makes it the muted qualifier beside the name.
+        # The `#` title holds what the frame around it cannot hold. For the same reason,
+        # `about.md` has one and the other three written pages do not. The screen already
+        # has the heading "Diagnostics". If the title repeats it, the first line of the
+        # page says nothing. But the version must be at the top of a file that a
+        # person will open later. The emphasis makes the version the muted qualifier next
+        # to the name.
         f"# MeshTerm diagnostics *v{__version__}*\n\n"
-        # The standfirst sits flush and muted under the title, and says the one thing a
-        # reader needs before reading any of it: this is safe to hand over.
+        # The standfirst is flush and muted under the title. It says the one thing that the
+        # user must know before the user reads the rest: it is safe to give this text to
+        # other persons.
         "Everything a bug report opens with. Nothing here is private.\n\n"
         f"{markdown_blocks(report)}\n\n"
         "---\n\n"
@@ -197,21 +206,22 @@ def markdown_source(report: Report, *, when: datetime | None = None) -> str:
 
 
 def default_path(ctx: AppContext) -> Path:
-    """Where the page saves when nobody named a place: beside the log, in the config dir.
+    """Where the page saves when no place is given: next to the log, in the config directory.
 
-    The config directory rather than the working directory, which in the menu is wherever
-    the reader happened to launch from and is not somewhere they can be told to look. It
-    is also where the log already lives, so "send me both" names one folder.
+    It is the config directory, not the working directory. In the menu, the working
+    directory is the directory from which the user started MeshTerm, and nobody can tell
+    the user where that is. The log is also in the config directory, so "send me both"
+    names one folder.
     """
     return ctx.settings.config_dir / DIAGNOSTICS_FILENAME
 
 
 def write_markdown(source: str, path: Path | str) -> Path:
-    """Write a markdown document to ``path``, creating its directory.
+    """Write a markdown document to ``path``, and make its directory.
 
-    **Always markdown**, whatever face the run was printing. This file exists to be
-    attached to an issue and read there, and an issue tracker renders markdown; anyone who
-    wants the machine face can redirect ``--json`` and already has a better name for that
+    **Always markdown**, whatever face the run printed. This file is for an attachment to
+    an issue, where people read it, and an issue tracker renders markdown. A person who
+    wants the machine face can redirect ``--json``, and already has a better name for that
     file than this one.
 
     Args:
@@ -219,10 +229,10 @@ def write_markdown(source: str, path: Path | str) -> Path:
         path: The destination.
 
     Returns:
-        The path written.
+        The path of the written file.
 
     Raises:
-        OSError: If the directory cannot be made or the file cannot be written.
+        OSError: If the directory cannot be made, or if the file cannot be written.
     """
     written = Path(path)
     written.parent.mkdir(parents=True, exist_ok=True)
@@ -231,7 +241,7 @@ def write_markdown(source: str, path: Path | str) -> Path:
 
 
 def _written_to(written: Path) -> Any:
-    """The answer a ``--out`` run gives: the path, alone on the plain face."""
+    """The answer of a ``--out`` run: only the path, on the plain face."""
     from ..ui import fields
     from ..ui.report import BARE, Facts
 
@@ -245,7 +255,7 @@ def _written_to(written: Path) -> Any:
 
 
 def _app_facts() -> Any:
-    """What this program is: version, how it was installed, and where it keeps things."""
+    """What this program is: the version, how it was installed, and where it keeps data."""
     from .. import __version__
     from ..core import hostinfo
     from ..ui import fields
@@ -263,7 +273,7 @@ def _app_facts() -> Any:
 
 
 def _host_facts() -> Any:
-    """The machine underneath: which OS, which build, which processor, which Python."""
+    """The machine below MeshTerm: which OS, which build, which processor, which Python."""
     from ..core import hostinfo
     from ..ui import fields
     from ..ui.report import Facts
@@ -288,13 +298,14 @@ def _host_facts() -> Any:
 
 
 def _terminal_facts() -> Any:
-    """The terminal, and every verdict about it resolved once at boot.
+    """The terminal, and each decision about it that MeshTerm made one time at boot.
 
-    Its own section rather than more host facts, because these are what a "it looks wrong"
-    report is actually about, and a reader skimming for them should not have to pass the
-    processor architecture on the way. Whether icons draw, whether the path widget's
-    separators draw, which platform flavour resolved and *why* — each is decided from the
-    environment before the first frame and none of it is visible on any screen.
+    These facts have their own section, and are not more host facts. The reason: a report
+    of "it looks wrong" is about these facts. A user who looks quickly for them must not
+    have to read the processor architecture first. Whether icons draw, whether the
+    separators of the path widget draw, which platform flavour resolved, and *why*:
+    MeshTerm decides each of these from the environment before the first frame, and no
+    screen shows them.
     """
     from ..core import hostinfo
     from ..platforms import get_platform
@@ -330,24 +341,25 @@ def _terminal_facts() -> Any:
             "platform": get_platform().name,
             "icons": emoji.supported,
             "icons_source": emoji.source,
-            # The face, and which terminal it was read from — an unidentified terminal
-            # (or an ssh session, where the font lives on the far client) has no answer,
-            # and saying so is worth more than naming a font nobody here can see.
+            # The font face, and the terminal from which it was read. A terminal that is not
+            # identified (or an ssh session, where the font is on the far client) has no
+            # answer. To say so is better than to name a font that nobody here can see.
             "font": f"{font.face} ({font.source})" if font else None,
-            # Level and source together: `none (font:windows-terminal)` is a measurement
-            # and `unknown (ssh)` is an admission, and they lead somewhere different.
+            # The level and the source together. `none (font:windows-terminal)` is a
+            # measurement and `unknown (ssh)` says that MeshTerm does not know. They lead
+            # to different places.
             "powerline": f"{powerline.level} ({powerline.source})",
         },
     )
 
 
 async def _device_facts(ctx: AppContext) -> Any:
-    """The radio: what it is, how it is attached, and what its link is set to.
+    """The radio: what it is, how it is connected, and the settings of its link.
 
-    Best-effort by design. Every value here is ``None`` on a machine whose radio is
-    unplugged, asleep, or refusing to pair — and ``connected: false`` with the failure's
-    own words in ``error`` is a better first line for that bug report than a command that
-    refused to produce one.
+    This function does what it can, on purpose. Each value here is ``None`` on a machine
+    whose radio is disconnected, asleep, or does not pair. For that bug report,
+    ``connected: false`` with the words of the failure in ``error`` is a better first line
+    than a command that did not make a report.
     """
     from ..ui import fields
     from ..ui.report import Facts
@@ -387,7 +399,7 @@ async def _device_facts(ctx: AppContext) -> Any:
             radio_cr=snapshot.get("radio_cr"),
             tx_power_dbm=snapshot.get("tx_power"),
         )
-    except Exception as exc:  # noqa: BLE001 - any failure to reach the radio is the fact
+    except Exception as exc:  # noqa: BLE001 - each failure to get to the radio is the fact
         values["error"] = str(exc) or exc.__class__.__name__
 
     return Facts(
@@ -412,11 +424,11 @@ async def _device_facts(ctx: AppContext) -> Any:
 
 
 def _mesh_facts(ctx: AppContext) -> Any:
-    """How much history this install holds, and where it holds it.
+    """How much history this installation holds, and where it holds it.
 
-    Counts and a span, never a row. The span is the fact that sizes every other number
-    here: a thousand observations over two years and a thousand in an afternoon describe
-    two different installs, and only one of them has a radio worth suspecting.
+    Counts and a span, never a row. The span gives the scale of each other number here.
+    A thousand observations in two years and a thousand in an afternoon describe two
+    different installations, and only one of them has a radio that is possibly faulty.
     """
     from ..core.preferences import current
     from ..persistence.logging import log_path
@@ -442,8 +454,8 @@ def _mesh_facts(ctx: AppContext) -> Any:
             "config_dir": ctx.settings.config_dir,
             "db_size_kb": _size_kb(db_path),
             "log_level": preferences.log_level,
-            # How much the log holds, so a maintainer asking for it knows what they are
-            # asking for — and so a file still at zero says the level never let it write.
+            # How much the log holds. Thus a maintainer who asks for it knows what to expect.
+            # Also, a file that is still at zero shows that the level never let it write.
             "log_size_kb": _size_kb(log_path(ctx.settings.config_dir)),
             "runs_failed": ctx.repo.failed_run_count(),
             "first_heard": first,
@@ -453,12 +465,12 @@ def _mesh_facts(ctx: AppContext) -> Any:
 
 
 def _table_listing(ctx: AppContext) -> Any:
-    """Every table in the database and how many rows it holds.
+    """Each table in the database, and how many rows it holds.
 
-    A listing rather than more facts, for two reasons. The keys are discovered from the
-    schema rather than declared, so a table named after a fact could otherwise collide
-    with it in the merged JSON object; and this genuinely is a set of records — one per
-    table — which is the shape a reader and a parser both already know.
+    A listing, and not more facts, for two reasons. First, the keys come from the schema,
+    and are not declared. Thus, if they were facts, a table with the same name as a fact
+    could collide with it in the merged JSON object. Second, this is in fact a set of
+    records (one for each table), and a person and a parser both already know that shape.
     """
     from ..ui import fields
     from ..ui.report import Column, Listing
@@ -473,11 +485,11 @@ def _table_listing(ctx: AppContext) -> Any:
 
 
 def _preference_listing(ctx: AppContext) -> Any:
-    """The preferences that differ from their defaults — the whole list, and only those.
+    """The preferences that are not at their defaults: all of them, and only those.
 
-    An override is the only part of the preference set that can explain anything: the
-    defaults are in the source, the same for everyone, and dumping all forty would bury
-    the two the reporter actually changed.
+    An override is the only part of the preferences that can explain something. The
+    defaults are in the source, and they are the same for all users. If the list shows
+    all forty preferences, the two that the reporter changed are hard to find.
     """
     from ..core.preferences import current
     from ..ui import fields
@@ -496,14 +508,14 @@ def _preference_listing(ctx: AppContext) -> Any:
 
 
 def _rows_lane() -> Any:
-    """The row-count lane: right-aligned, because a column of magnitudes only compares aligned."""
+    """The lane of row counts: right-aligned, because only aligned numbers are easy to compare."""
     from ..ui.report import Lane
 
     return Lane(header="ROWS", render=lambda v: str(v if v is not None else 0), align="right")
 
 
 def _size_kb(path: Any) -> int | None:
-    """A file's size in whole kilobytes, or ``None`` when it is not there to measure."""
+    """The size of a file in whole kilobytes, or ``None`` when there is no file to measure."""
     if path is None:
         return None
     try:
@@ -513,18 +525,18 @@ def _size_kb(path: Any) -> int | None:
 
 
 async def _snapshot(ctx: AppContext, device: Any) -> dict:
-    """The device's settings snapshot, or an empty one when the read fails."""
+    """The snapshot of the device settings, or an empty snapshot when the read fails."""
     from ..ui.config_editor import cached_snapshot
 
     try:
         return await cached_snapshot(ctx, device)
-    except Exception:  # noqa: BLE001 - a settings read that fails leaves the radio facts blank
+    except Exception:  # noqa: BLE001 - if the settings read fails, the radio facts stay blank
         return {}
 
 
 async def _device_info(device: Any) -> dict:
-    """The device's self-description, or an empty one when the firmware does not answer."""
+    """The self-description of the device, or an empty one when the firmware does not answer."""
     try:
         return await device.get_device_info() or {}
-    except Exception:  # noqa: BLE001 - firmware predating the query contributes nothing
+    except Exception:  # noqa: BLE001 - firmware older than the query gives nothing
         return {}

@@ -1,21 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The About MeshTerm tools: the four written pages in the menu's last section.
+"""The About MeshTerm tools: the four written pages in the last section of the menu.
 
-*About MeshTerm*, *About the author*, *Join Discord*, *Support MeshTerm* — in that
-order, which is the order a stranger asks the questions in: what is this, who made it,
-where is everyone, how do I help. They share the *This app* section with Preferences,
-which leads it: the section is the app's own, and the one row that *changes*
-MeshTerm sits above the four that describe it.
-Each is a page rather than a feature: it reads nothing, transmits nothing, and needs no
-device, so it opens straight to its screen (see :mod:`meshterm.ui.about`) instead of
-prompting for anything first.
+The pages are "About MeshTerm", "About the author", "Join Discord", and "Support
+MeshTerm", in that order. A new user asks the questions in the same order: what is this,
+who made it, where are the other users, and how can I help. The pages share the "This
+app" section with Preferences, which is first in it. The section belongs to the app
+itself, and the only row that changes MeshTerm is above the four rows that describe it.
+Each item is a page, not a feature. It reads nothing, it transmits nothing, and it does
+not use a device. Thus it opens directly to its screen (refer to :mod:`meshterm.ui.about`),
+and it does not ask for anything first.
 
-Each also keeps a CLI face — ``meshterm about``, ``meshterm about-author``,
-``meshterm discord``, ``meshterm support`` — printing the same page to the terminal, so
-the answers are reachable from a shell without launching the full-screen session.
+Each page also has a CLI face (``meshterm about``, ``meshterm about-author``,
+``meshterm discord``, ``meshterm support``) that prints the same page to the terminal.
+Thus a user can get the answers from a shell without the full-screen session.
 
-The pages themselves are written in markdown under ``meshterm/assets/pages`` (see
-:mod:`meshterm.ui.about`); nothing here knows what any of them say.
+The pages are written in markdown in ``meshterm/assets/pages`` (refer to
+:mod:`meshterm.ui.about`). Nothing in this module knows the content of a page.
 """
 
 from __future__ import annotations
@@ -31,34 +31,34 @@ if TYPE_CHECKING:
 
 
 class _AboutTool(Tool):
-    """Shared behaviour for the four About pages: open the screen, or print the page.
+    """The shared behaviour of the four About pages: open the screen, or print the page.
 
-    The pages differ only in their title, icon, and content, so everything else — the
-    menu-only screen open, the printing CLI face, the run row — lives here once. A
-    subclass supplies :meth:`page`, and nothing more.
+    The pages are different only in their title, icon, and content. Thus all the other
+    parts (the screen that opens only in the menu, the CLI face that prints, the run row)
+    are in this class, one time. A subclass gives :meth:`page`, and nothing more.
     """
 
     category = "This app"
 
     @staticmethod
     def page() -> MarkdownDoc:
-        """Build this page's content.
+        """Build the content of this page.
 
-        Overridden by each page. Subclasses import their builder *inside* the override
-        rather than at module scope: the registry imports every tool module at startup
-        (see :func:`~meshterm.tools.load_all_tools`), and a page's content is only ever
-        wanted once someone actually opens it.
+        Each page overrides this method. A subclass imports its builder in the override,
+        not at module scope. The reason is that the registry imports each tool module at
+        startup (refer to :func:`~meshterm.tools.load_all_tools`), but the content of a
+        page is necessary only when a user opens it.
         """
         raise NotImplementedError
 
     async def prompt_params(self, ctx: AppContext) -> dict[str, Any] | None:
-        """Open the page; returning ``None`` completes the invocation with no run row.
+        """Open the page. The return value ``None`` completes the run with no run row.
 
-        The page transmits nothing and stores nothing, so — like the Trophy case and the
-        mesh walk — it lives here rather than in :meth:`run`, and logs no run of its own.
+        The page transmits nothing and stores nothing. Thus, as with the Trophy case and
+        the mesh walk, it opens here, not in :meth:`run`, and it logs no run of its own.
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
 
         Returns:
             Always ``None``.
@@ -69,18 +69,18 @@ class _AboutTool(Tool):
         return None
 
     async def run(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """State the page — only reachable from the CLI (the menu opens the screen).
+        """Give the page. Only the CLI comes to this method (the menu opens the screen).
 
-        Without its scannable codes: a QR is a second rendering of a link the page already
-        prints, drawn for a phone pointed at a screen, and redirected into a file it is a
-        block of block characters around nothing new.
+        The page has no QR codes here. A QR code is a second rendering of a link that the
+        page already prints. It is drawn for a phone that points at a screen. In a
+        redirected file, it is only a mass of block characters, with no new information.
 
         Args:
-            ctx: Shared application context.
-            params: Unused beyond the injected ``_run_id``.
+            ctx: The shared application context.
+            params: Not used, except for the injected ``_run_id``.
 
         Returns:
-            A :class:`ToolResult` naming the page that was shown.
+            A :class:`ToolResult` that names the page that was shown.
         """
         return ToolResult(
             summary={"page": self.name},
@@ -90,13 +90,13 @@ class _AboutTool(Tool):
 
 @register
 class AboutMeshTermTool(_AboutTool):
-    """What MeshTerm is, where it came from, and the terms it ships under."""
+    """What MeshTerm is, where it came from, and the terms under which it is distributed."""
 
     name = "about"
     title = "About MeshTerm"
     icon = "📖"
     help = "What this is, and the terms it ships under"
-    order = 10  # the question a stranger asks first
+    order = 10  # the first question of a new user
 
     @staticmethod
     def page() -> MarkdownDoc:
@@ -108,13 +108,13 @@ class AboutMeshTermTool(_AboutTool):
 
 @register
 class AboutAuthorTool(_AboutTool):
-    """The person behind MeshTerm, on the mesh and off it."""
+    """The person who made MeshTerm, on the mesh and off the mesh."""
 
     name = "about-author"
     title = "About the author"
     icon = "👤"
     help = "The person behind MeshTerm, on and off the mesh"
-    order = 20  # who made the thing you just read about
+    order = 20  # who made the app that the previous page describes
 
     @staticmethod
     def page() -> MarkdownDoc:
@@ -126,13 +126,13 @@ class AboutAuthorTool(_AboutTool):
 
 @register
 class JoinDiscordTool(_AboutTool):
-    """The community server: one invite link, and a QR of it for a phone to read."""
+    """The community server: one invite link, and its QR code for a phone to read."""
 
     name = "discord"
     title = "Join Discord"
     icon = "🔗"
     help = "The invite link to the MeshTerm community server"
-    order = 25  # where everyone else is, once you know what this is and who made it
+    order = 25  # where the other users are, after the user knows what this is and who made it
 
     @staticmethod
     def page() -> MarkdownDoc:
@@ -144,13 +144,13 @@ class JoinDiscordTool(_AboutTool):
 
 @register
 class SupportProjectTool(_AboutTool):
-    """What keeps MeshTerm going, and the ways — paid and unpaid — to help it along."""
+    """What MeshTerm needs to continue, and the paid and unpaid ways to help it."""
 
     name = "support"
     title = "Support MeshTerm"
     icon = "💰"
     help = "What keeps MeshTerm going, and how to help"
-    order = 30  # the ask, and only once the pages before it have earned it
+    order = 30  # the request for help, only after the pages before it earned it
 
     @staticmethod
     def page() -> MarkdownDoc:
@@ -161,20 +161,21 @@ class SupportProjectTool(_AboutTool):
 
 
 def _written_page(name: str, title: str, doc: MarkdownDoc) -> Facts:
-    """One prose page, stated once for both faces.
+    """One prose page, given one time for both faces.
 
-    **Wrapped**, and that is the one deliberate exception to "no line wrapping". The rule
-    exists so a *record* is never split across two lines with its fields landing under the
-    wrong headings; a paragraph has no records and no headings, and left unwrapped these
-    four pages print as single six-hundred-cell lines no terminal can read. So the page is
-    drawn on a console :data:`~meshterm.ui.script.PAGE_WIDTH` cells wide — a fixed width,
-    not the terminal's, so the same paragraph reads the same piped, redirected, or shipped
-    as the document's ``text``.
+    The page is **wrapped**. This is the only exception, on purpose, to the "no line
+    wrapping" rule. The rule makes sure that a record is never divided across two lines,
+    with its fields under the wrong headings. A paragraph has no records and no headings.
+    Without a wrap, these four pages print as lines of six hundred cells, and in a
+    terminal, nobody can read such a line. Thus the page is drawn on a console that is
+    :data:`~meshterm.ui.script.PAGE_WIDTH` cells wide. This is a fixed width, not the width
+    of the terminal. Thus the same paragraph looks the same in a pipe, in a redirected
+    file, or in the ``text`` of the document.
 
-    ``links`` is the one machine-actionable thing on a page of prose, and the one thing the
-    menu bothers to draw a QR of. ``text`` is the page's plain rendering rather than a fold
-    of the markdown into nested JSON: a structured markdown tree would be a second
-    rendering, not data, and nothing would consume it.
+    ``links`` is the only part of a prose page that a program can use, and the only part
+    that the menu draws as a QR code. ``text`` is the plain rendering of the page, not the
+    markdown changed into nested JSON. A structured markdown tree is a second rendering,
+    not data, and no program uses one.
     """
     from .. import __version__
     from ..ui import fields
@@ -193,8 +194,8 @@ def _written_page(name: str, title: str, doc: MarkdownDoc) -> Facts:
         values={
             "page": name,
             "title": title,
-            # Duplicated from the package on purpose: a page's own facts are part of its
-            # content, and this is the version its `{version}` placeholder resolved to.
+            # A copy of the package value, on purpose. The facts of a page are part of its
+            # content, and this is the version that its `{version}` placeholder became.
             "version": __version__,
             "text": text,
             "links": _links(text),
@@ -205,7 +206,7 @@ def _written_page(name: str, title: str, doc: MarkdownDoc) -> Facts:
 
 
 def _rendered_page(doc: MarkdownDoc) -> str:
-    """The page as plain text, folded to the fixed page width."""
+    """The page as plain text, wrapped at the fixed page width."""
     import io
 
     from rich.console import Console
@@ -225,11 +226,12 @@ def _rendered_page(doc: MarkdownDoc) -> str:
 
 
 def _links(text: str) -> list[str]:
-    """Every URL the page carries, in document order, de-duplicated.
+    """All the URLs on the page, in document order, and each URL one time.
 
-    Read off the rendered page rather than the markdown source, so a link written as a
-    reference and a link written inline both count once and both read as what the reader
-    sees. Trailing punctuation is not part of a URL and is trimmed.
+    The function reads the URLs from the rendered page, not from the markdown source.
+    Thus a reference link and an inline link both count one time, and both are the text
+    that the user sees. Punctuation at the end is not part of a URL, so the function
+    removes it.
     """
     import re
 

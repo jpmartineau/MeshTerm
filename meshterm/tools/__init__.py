@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Pluggable tools (menu options / CLI subcommands).
+"""Tools that plug in: the menu items and the CLI subcommands.
 
-Importing this package eagerly imports every tool module so that each one's ``@register``
-decorator populates the shared registry. New features only need to add a module here.
+When this package is imported, it imports each tool module immediately. Thus the
+``@register`` decorator of each module adds its tools to the shared registry. A new feature
+must only add a module here.
 """
 
 from __future__ import annotations
@@ -16,9 +17,10 @@ __all__ = ["Tool", "all_tools", "get_tool", "register", "load_all_tools"]
 
 
 def load_all_tools() -> None:
-    """Import every sibling module so its tools self-register.
+    """Import each sibling module, so that its tools add themselves to the registry.
 
-    Modules whose names start with an underscore (and ``base``) are skipped.
+    This function does not import the modules whose names start with an underscore, or
+    ``base``.
     """
     package = __name__
     for mod in pkgutil.iter_modules(__path__):
@@ -27,5 +29,5 @@ def load_all_tools() -> None:
         importlib.import_module(f"{package}.{mod.name}")
 
 
-# Populate the registry on import so the CLI and menu see every tool.
+# Fill the registry when the package is imported, so that the CLI and the menu get each tool.
 load_all_tools()

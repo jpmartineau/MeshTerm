@@ -1,17 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The ``walk`` tool: the mesh's observed shape, explored one node at a time.
+"""The ``walk`` tool: the observed shape of the mesh, explored one node at a time.
 
-Opens the full-screen Mesh walk (see :mod:`meshterm.ui.walk_screen`): a walkable
-browser over the evidence graph — trace walks, firmware routes, overheard relay
-chains, repeater neighbour tables. One node holds the focus, its neighbourhood draws
-as SNR-coloured braille edges on a small clean canvas, and its links list beneath as
-rows with quality bars and evidence; Enter walks the graph, ⌫ backtracks along the
-breadcrumb trail, and typing finds any node (islands included). The geographic map
-answers *where* the mesh is; the walk answers *how it hangs together*.
+The tool opens the full-screen Mesh walk (refer to :mod:`meshterm.ui.walk_screen`). It is
+a browser in which the user walks over the evidence graph: trace walks, firmware routes,
+heard relay chains, and repeater neighbour tables. One node has the focus. Its
+neighbourhood draws as SNR-coloured braille edges on a small clean canvas, and its links
+show below it as rows with quality bars and evidence. Enter walks the graph, ⌫ goes back
+along the breadcrumb trail, and typed text finds any node (also the islands). The
+geographic map tells where the mesh is. The walk tells how the nodes of the mesh connect.
 
-Menu-only: the walk is an interactive reading of stored evidence (and transmits
-nothing), so there is no scripted one-shot to register — ``trace``-family commands
-already print path evidence in scripted runs.
+Menu only: with the walk, the user examines stored evidence interactively (and the walk
+transmits nothing). Thus there is no scripted one-shot command to register. The commands
+of the ``trace`` family already print path evidence in scripted runs.
 """
 
 from __future__ import annotations
@@ -26,29 +26,29 @@ from .base import Tool, ToolResult, register
 
 @register
 class WalkTool(Tool):
-    """See how the mesh hangs together: the observed link graph, walkable."""
+    """See how the nodes of the mesh connect: the observed link graph, which the user walks."""
 
     name = "walk"
     title = "Mesh walk"
-    # A single-codepoint emoji (like every other tool icon), not a VS16 sequence: the
-    # emoji-width calibration strips VS16 on terminals that render it narrow, which would
+    # A single-codepoint emoji (as all the other tool icons are), not a VS16 sequence. On a
+    # terminal that renders VS16 narrow, the emoji-width calibration removes VS16. Thus it can
     # measure a 🕸️ one cell short of how it paints and drift this row's help text right of
-    # the column the others align to. The wireframe globe reads as the logical topology,
-    # the geographic map's 🌍 counterpart.
+    # the column to which the other rows align. The wireframe globe shows the logical
+    # topology. It is the equivalent of the 🌍 of the geographic map.
     icon = "🌐"
     help = "Walk the observed topology — links and SNR"
     category = "Explore"
-    order = 20  # beside Map: the logical shape next to the geographic one
+    order = 20  # next to Map: the logical shape next to the geographic shape
 
     async def prompt_params(self, ctx: AppContext) -> dict[str, Any] | None:
-        """Run the walk; there are never parameters to collect.
+        """Run the walk. It has no parameters to collect.
 
-        The screen presents everything itself and returns when dismissed, so
-        returning ``None`` tells the menu the invocation is complete (the same
+        The screen shows all its content itself, and it returns when the user leaves it.
+        Thus the return value ``None`` tells the menu that the run is complete (the same
         pattern as the ``dashboard`` tool).
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
 
         Returns:
             Always ``None``.
@@ -59,20 +59,20 @@ class WalkTool(Tool):
         return None
 
     async def run(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Nothing runs here: the walk lives inside :meth:`prompt_params`.
+        """Nothing runs here: the walk is in :meth:`prompt_params`.
 
         Args:
-            ctx: Shared application context.
-            params: Unused.
+            ctx: The shared application context.
+            params: Not used.
 
         Returns:
-            An empty :class:`ToolResult` (only reachable from a scripted call).
+            An empty :class:`ToolResult` (only a scripted call comes here).
         """
         return ToolResult(summary={})
 
     def register_cli(self, app: typer.Typer) -> None:
-        """Register no CLI command — the walk is an interactive, menu-only screen.
+        """Register no CLI command, because the walk is an interactive screen for the menu only.
 
         Args:
-            app: The Typer application (untouched).
+            app: The Typer application (not changed).
         """

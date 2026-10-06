@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The ``config`` tool: every device setting, and the operations on the box itself.
+"""The ``config`` tool: each device setting, and the operations on the device itself.
 
-Interactively it opens the Device config page (see :mod:`meshterm.ui.config_editor`) —
-settings staged and applied in place, with the clock, backup/restore, the identity key,
-reboot and factory reset as actions below them. On the CLI it exposes generic key/value
-subcommands plus backup/restore, channels, custom vars, and a ``--yes``-gated set of
-destructive operations. Everything funnels through :func:`apply_ops`: the page's Apply and
-its actions, :meth:`ConfigTool.run` for the scripted commands, and the standalone ``advert``
-tool's sends all run through the one executor.
+In the menu, it opens the Device config page (refer to :mod:`meshterm.ui.config_editor`).
+There, the settings are staged and applied in place, and the clock, backup and restore,
+the identity key, reboot, and factory reset are actions below them. On the CLI, it has
+generic key and value subcommands, and also backup and restore, channels, custom
+variables, and a set of destructive operations that must have ``--yes``. All of these go
+through :func:`apply_ops`. The Apply and the actions of the page, :meth:`ConfigTool.run`
+for the scripted commands, and the sends of the standalone ``advert`` tool all run
+through the one executor.
 """
 
 from __future__ import annotations
@@ -38,7 +39,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 @register
 class ConfigTool(Tool):
-    """View and edit the connected device's full configuration."""
+    """Show and edit all the settings of the connected device."""
 
     name = "config"
     title = "Device config"
@@ -48,14 +49,14 @@ class ConfigTool(Tool):
     order = 20
 
     async def prompt_params(self, ctx: AppContext) -> dict[str, Any] | None:
-        """Run the Device config page; there are never parameters to collect.
+        """Run the Device config page. There are never parameters to collect.
 
-        The page applies what is staged and runs its actions itself, logging a ``runs`` row
-        for each Apply (the same pattern as ``repeater-admin``), so by the time the reader
-        backs out there is nothing left for :meth:`run` to do.
+        The page itself applies the staged values and runs its actions, and logs a ``runs``
+        row for each Apply (the same pattern as ``repeater-admin``). Thus, when the user
+        leaves, :meth:`run` has nothing more to do.
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
 
         Returns:
             Always ``None``.
@@ -66,14 +67,14 @@ class ConfigTool(Tool):
         return None
 
     async def run(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Execute a list of configuration operations against the device.
+        """Do a list of setting operations on the device.
 
         Args:
-            ctx: Shared application context.
-            params: ``ops`` — a list of operation tuples (see module docstring).
+            ctx: The shared application context.
+            params: ``ops``: a list of operation tuples (refer to the module docstring).
 
         Returns:
-            A :class:`ToolResult` summarizing how many values changed.
+            A :class:`ToolResult` with a summary of how many values changed.
         """
         device = await ctx.device()
         ops: list[tuple] = list(params.get("ops") or [])
@@ -104,7 +105,7 @@ class ConfigTool(Tool):
 
         @config_app.callback(invoke_without_command=True)
         def _root(ctx: typer.Context) -> None:
-            """Show the configuration when no subcommand is given."""
+            """Show all the current settings when no subcommand is given."""
             if ctx.invoked_subcommand is None:
                 run_tool_command(self, {"ops": [("show",)]})
 
@@ -196,30 +197,30 @@ class ConfigTool(Tool):
         app.add_typer(config_app, name=self.name)
 
 
-# -- op execution (shared by the tool and the interactive editor) -------------
+# -- op execution (the tool and the interactive editor share it) --------------
 
 
 async def apply_ops(
     ctx: AppContext, device: Device, snapshot: dict, ops: list[tuple]
 ) -> tuple[int, list[str], Report]:
-    """Execute a list of configuration operation tuples against ``device``.
+    """Do a list of setting operation tuples on ``device``.
 
-    This is the single executor for every config operation, used by :meth:`ConfigTool.run`
-    (the scripted commands) and by the Device config page — its Apply, one staged value at a
-    time, and its actions (reboot, backup/restore, key management, factory reset), which run
-    immediately rather than staging.
+    This is the only executor for all the setting operations. :meth:`ConfigTool.run` (the
+    scripted commands) uses it, and the Device config page uses it too: for its Apply, one
+    staged value at a time, and for its actions (reboot, backup and restore, key
+    management, factory reset). The actions run immediately, and are not staged.
 
     Args:
-        ctx: Shared application context (for console output).
-        device: The connected device to act on.
-        snapshot: The current device snapshot; updated in place as settings change so
-            coupled commands rebuild from current values.
-        ops: Operation tuples (see the module docstring).
+        ctx: The shared application context (for console output).
+        device: The connected device on which to do the operations.
+        snapshot: The current device snapshot. It is changed in place when settings
+            change, so that coupled commands are made again from the current values.
+        ops: The operation tuples (refer to the module docstring).
 
     Returns:
-        A ``(changes, artifacts, report)`` triple: the number of value changes applied,
-        any file paths produced, and the blocks stating what happened (empty for the
-        menu, which shows its own acknowledgements).
+        A ``(changes, artifacts, report)`` triple: the number of applied value changes,
+        the paths of the files that were made, and the blocks that state what occurred
+        (empty for the menu, which shows its own acknowledgements).
     """
     changes = 0
     artifacts: list[str] = []
@@ -232,10 +233,10 @@ async def apply_ops(
             if block is not None:
                 report.append(block)
         elif kind == "get":
-            # The bare value, nothing else: the caller named the key, so repeating it back
-            # is one more thing for `$(meshterm config get name)` to strip off. The same
-            # shape `sysctl -n` and `git config --get` print. The document keeps the key,
-            # the type and an enum's label, none of which the bare form has room for.
+            # Only the bare value. The caller named the key, so if the output repeats it,
+            # `$(meshterm config get name)` must remove one more thing. `sysctl -n` and
+            # `git config --get` print the same shape. The document keeps the key, the type,
+            # and the label of an enum, and the bare form has space for none of them.
             spec = get_spec(op[1])
             report.append(_one_setting(spec, spec.getter(snapshot)))
         elif kind == "set":
@@ -265,9 +266,10 @@ async def apply_ops(
         elif kind == "advert":
             flood = len(op) > 1 and bool(op[1])
             await device.send_advert(flood)
-            # A flood advert, however it was asked for, restarts this device's week: the
-            # weekly one only ever goes out a full week after the last (see
-            # AdvertScheduler). A zero-hop reaches only the neighbours, and resets nothing.
+            # A flood advert, however it was requested, starts the week of this device again.
+            # The weekly advert goes out only a full week after the last one (refer to
+            # AdvertScheduler). A zero-hop advert gets only to the neighbours, and resets
+            # nothing.
             public_key = str(snapshot.get("public_key") or "")
             if flood and public_key:
                 ctx.advert_store.mark_flood(public_key)
@@ -277,8 +279,8 @@ async def apply_ops(
         elif kind == "share":
             report.append(await _share_contact(ctx, snapshot))
         elif kind == "sync_clock":
-            # The same step the on-connect service runs in the background
-            # (:mod:`meshterm.services.clock_sync`); here it is acknowledged and reported.
+            # The same step that the on-connect service runs in the background
+            # (:mod:`meshterm.services.clock_sync`). Here, it is acknowledged and reported.
             done = await set_clock(device)
             if done.written:
                 ctx.ui.ack(f"[ok]✓[/ok] device clock set to [brand]{done.stamp}[/brand]")
@@ -293,8 +295,8 @@ async def apply_ops(
                     "clock",
                     changes=int(done.written),
                     set_at=done.set_at,
-                    # What the clock was off by *before* the set: the fact worth logging,
-                    # and the one this command destroys by succeeding.
+                    # The clock error *before* the set. That is the fact to log, and when
+                    # this command succeeds, it removes that fact.
                     drift_s=done.drift_s,
                 )
             )
@@ -303,8 +305,9 @@ async def apply_ops(
             ctx.ui.ack("[warn]device rebooting[/warn]")
             report.append(_acted("reboot", rebooted=True))
             if ctx.active_transport is not None:
-                # Run from the menu's command line, this hands off to the reconnect dialog
-                # as the config editor's reboot does; a scripted run has no watcher to wake.
+                # When this runs from the command line of the menu, it gives control to the
+                # reconnect dialog, as the reboot of the config editor does. A scripted run
+                # has no watcher to wake.
                 ctx.announce_reboot()
         elif kind == "export_key":
             report.append(await _export_key(ctx, device, op[1] if len(op) > 1 else None, artifacts))
@@ -317,20 +320,21 @@ async def apply_ops(
             await device.factory_reset()
             ctx.ui.ack("[err]device factory-reset[/err]")
             report.append(_acted("factory_reset", factory_reset=True))
-        else:  # pragma: no cover - guarded by the call sites that build ops
+        else:  # pragma: no cover - the call sites that make ops prevent this
             raise DeviceCommandError(f"unknown config operation: {kind}")
     if applied:
         report.append(_applied(applied))
-    # Drop any session-cached facts these ops may have changed, so the next screen re-reads
-    # the truth rather than a stale copy (see meshterm.services.device_state.DeviceState). A
-    # reboot/reconnect resets the whole cache on its own; these cover the in-place edits.
+    # Remove the facts in the session cache that these ops can have changed. Thus the next
+    # screen reads the true values again, not an old copy (refer to
+    # meshterm.services.device_state.DeviceState). A reboot or a reconnect resets the full
+    # cache itself. These lines are for the edits in place.
     kinds = {op[0] for op in ops}
     _WHOLESALE = {"restore", "import_key", "factory_reset"}
     if kinds & _WHOLESALE:
         ctx.devstate.reset()
     else:
         if "set" in kinds:
-            ctx.devstate.invalidate_config()  # self-info fields + path-hash mode
+            ctx.devstate.invalidate_config()  # the self-info fields and the path hash mode
         if "set_channel" in kinds:
             ctx.devstate.invalidate_channels()
     return changes, artifacts, tuple(report)
@@ -339,24 +343,25 @@ async def apply_ops(
 async def _apply_setting(
     ctx: AppContext, device: Device, key: str, raw: Any, snapshot: dict
 ) -> dict[str, Any]:
-    """Parse, apply and record one setting; keep ``snapshot`` consistent.
+    """Parse, apply, and store one setting, and keep ``snapshot`` consistent.
 
-    The local snapshot is updated with the new value so a later coupled change in the
-    same batch (e.g. another radio field) is rebuilt from current values.
+    The local snapshot gets the new value. Thus a later coupled change in the same batch
+    (for example, another radio field) is made again from the current values.
 
     Returns:
-        The change, as ``{"key", "previous", "value"}``. The *previous* value is read off
-        the snapshot before it is overwritten: a caller managing a machine's configuration
-        wants to know what moved, and it is gone the moment this returns.
+        The change, as ``{"key", "previous", "value"}``. The *previous* value is read from
+        the snapshot before it is overwritten. A caller that manages the settings of a
+        machine wants to know what changed, and the old value is gone when this function
+        returns.
     """
     spec = get_spec(key)
     value = parse_value(spec, raw, snapshot)
     previous = spec.getter(snapshot)
     await spec.apply(device, value, snapshot)
     snapshot[key] = value
-    # Remember what we set, keyed by the device's own public key, so a forgetful device (a
-    # firmware-less radio bridge) can be offered its settings back on the next connect (see
-    # meshterm.core.settings_store). Provenance-gated: only values changed through MeshTerm.
+    # Keep what we set, keyed by the public key of the device. Thus a device that forgets
+    # (a radio bridge with no firmware) can get its settings back at the next connect (refer
+    # to meshterm.core.settings_store). Only the values that MeshTerm changed are kept.
     if ctx.settings_store is not None:
         ctx.settings_store.remember(str(snapshot.get("public_key") or ""), key, value)
     if key == "flood_scope":
@@ -366,21 +371,21 @@ async def _apply_setting(
 
 
 def learn_default_scope(ctx: AppContext, snapshot: dict) -> None:
-    """Take in the default flood scope a config read or write has just seen.
+    """Keep the default flood scope that a settings read or a settings write got.
 
-    Two things want it. The region store learns the name (source ``default``): it is the
-    region this station's own plain floods carry, so it is the first name any of them will
-    be resolved against. And the session cache holds it (``devstate``), since a channel with
-    no scope of its own records its messages as sent under the default, and this saves that
-    record a round trip.
+    Two parts of MeshTerm use it. The region store learns the name (source ``default``).
+    It is the region that the plain floods of our node have, so it is the first name
+    against which any of them is resolved. The session cache (``devstate``) also keeps
+    it, because a channel with no scope of its own stores its messages as sent under the
+    default. Thus that store does not have to do a round trip.
 
-    A snapshot whose read of the default failed (firmware before 1.15) carries no
-    ``flood_scope`` key at all, and teaches nothing.
+    A snapshot whose read of the default failed (firmware before 1.15) has no
+    ``flood_scope`` key, and gives nothing to learn.
 
     Args:
-        ctx: Shared application context.
-        snapshot: A :func:`~meshterm.core.device_config.build_snapshot` result, or one an
-            apply has just updated.
+        ctx: The shared application context.
+        snapshot: A :func:`~meshterm.core.device_config.build_snapshot` result, or a
+            snapshot that an apply has changed.
     """
     if "flood_scope" not in snapshot:
         return
@@ -396,17 +401,17 @@ def learn_default_scope(ctx: AppContext, snapshot: dict) -> None:
 
 
 async def _show(ctx: AppContext, device: Device, snapshot: dict) -> Listing | None:
-    """Print every current setting, plus any custom variables.
+    """Print each current setting, and the custom variables, if there are any.
 
-    The menu shows the annotated table; a scripted run gets one ``key value`` line per
-    setting, keyed exactly as ``config get`` and ``config set`` name them, so a line read
-    out of ``show`` can be typed straight back in. The labels and descriptions the table
-    carries are for a reader choosing a setting, and this reader has already chosen.
+    The menu shows the table with notes. A scripted run gets one ``key value`` line for
+    each setting, with the key exactly as ``config get`` and ``config set`` name it. Thus
+    a line from ``show`` can be typed back in directly. The labels and descriptions in the
+    table help a user who selects a setting, but this user already selected.
 
-    The pairing PIN stays concealed here, as it is in the table: this is the whole-device
-    dump, the thing that gets redirected into a file and pasted into a bug report, and the
-    PIN is the one value on it that lets someone else's phone onto the radio.
-    ``config get device_pin`` names it deliberately.
+    The pairing PIN stays hidden here, as it is in the table. This is the dump of the full
+    device: a person redirects it into a file and pastes it into a bug report. The PIN is
+    the one value in it that lets the phone of another person connect to the radio.
+    ``config get device_pin`` names it on purpose.
     """
     from ..ui import fields, script
     from ..ui.config_editor import PIN_KEY, conceal, config_table
@@ -428,17 +433,17 @@ async def _show(ctx: AppContext, device: Device, snapshot: dict) -> Listing | No
             rows.append(
                 {
                     "key": spec.key,
-                    # A masked PIN is *withheld*, which is not a value: the document says
-                    # so with `redacted` and writes `null`, rather than shipping six
-                    # bullets a consumer would have to recognise as a mask.
+                    # A masked PIN is *withheld*, and that is not a value. The document says
+                    # so with `redacted` and writes `null`. It does not send six bullets
+                    # that a consumer must recognize as a mask.
                     "value": fields.Rendered(None if redacted else value, masked),
                     "type": spec.value_type,
                     "label": (spec.choices or {}).get(value) if spec.value_type == "enum" else None,
                     "redacted": redacted,
                 }
             )
-    # Custom variables are experimental firmware fields with no spec, so they are namespaced
-    # rather than mixed in — a reader can tell which lines `config set` will take.
+    # Custom variables are experimental firmware fields with no spec. Thus they have their
+    # own namespace, and are not mixed in. A user can tell which lines `config set` accepts.
     rows.extend(
         {
             "key": f"custom.{key}",
@@ -453,26 +458,27 @@ async def _show(ctx: AppContext, device: Device, snapshot: dict) -> Listing | No
         key="settings",
         columns=_setting_columns(),
         rows=rows,
-        # An array to a parser and a `sysctl -a` block to a reader: a header line over two
-        # columns whose keys *are* the answer would be furniture.
+        # An array for a parser, and a `sysctl -a` block for a person. A header line above
+        # two columns whose keys *are* the answer adds nothing.
         headed=False,
     )
 
 
 def _script_value(spec: SettingSpec, value: Any) -> str:
-    """A setting's value in the form ``config set`` accepts back.
+    """The value of a setting, in the form that ``config set`` accepts back.
 
-    :func:`~meshterm.core.device_config.format_value` writes for a reader choosing a
-    setting: an enum reads ``0 (off)``, an unset string reads ``(not set)``, an unreported
-    one reads ``?``. None of those three survive a round trip —
-    :func:`~meshterm.core.device_config.parse_value` wants a bare integer for an enum, and
-    would take the words ``(not set)`` as the literal value of a string. So the scripted
-    dump prints what can be typed back: the enum's number, the empty string as ``""``, and
-    :data:`~meshterm.ui.script.NONE` for a value the firmware never reported (which is an
-    absence, not a value, and is the one line ``config set`` should not be handed back).
+    :func:`~meshterm.core.device_config.format_value` writes for a user who selects a
+    setting. An enum shows as ``0 (off)``, a string with no value shows as ``(not set)``,
+    and a value that the device did not report shows as ``?``. None of those three can go
+    in and come back out unchanged. :func:`~meshterm.core.device_config.parse_value` must
+    have a bare integer for an enum, and takes the words ``(not set)`` as the literal value
+    of a string. Thus the scripted dump prints what can be typed back: the number of the
+    enum, the empty string as ``""``, and :data:`~meshterm.ui.script.NONE` for a value
+    that the firmware never reported. That last one is an absence, not a value, and it is
+    the one line that must not go back to ``config set``.
 
     Args:
-        spec: The setting the value belongs to.
+        spec: The setting of the value.
         value: Its current value, or ``None`` when the device did not report it.
 
     Returns:
@@ -490,13 +496,13 @@ def _script_value(spec: SettingSpec, value: Any) -> str:
 
 
 async def _share_contact(ctx: AppContext, snapshot: dict) -> Facts:
-    """State this node's contact card — with the QR code drawn in the menu, full-frame.
+    """State the contact card of this node, with the QR code drawn on the full frame in the menu.
 
-    The QR is for a phone pointed at the screen, and there it takes the whole screen
-    (:func:`~meshterm.ui.qr.share_screen`). Redirected into a file it is a block of
-    block characters around the one thing that is the answer, so a scripted run states the
-    link by itself. There is no machine face for the code either, and never will be: it is
-    a second rendering of ``url``.
+    The QR code is for a phone that points at the screen, and there it fills the screen
+    (:func:`~meshterm.ui.qr.share_screen`). In a redirected file, it is a block of block
+    characters around the one thing that is the answer. Thus a scripted run states only
+    the link. There is also no machine face for the code, and there never will be one,
+    because it is a second rendering of ``url``.
     """
     from ..ui import fields
     from ..ui.config_editor import contact_share_url
@@ -527,11 +533,12 @@ async def _share_contact(ctx: AppContext, snapshot: dict) -> Facts:
 
 
 async def _backup(device: Device, snapshot: dict, path: Path) -> tuple[Path, dict[str, int]]:
-    """Write a TOML backup of the current configuration.
+    """Write a TOML backup of the current settings.
 
     Returns:
-        The path written and how much went into it, counted the way the file counts —
-        a setting the firmware never reported is not in the backup and is not in the tally.
+        The path of the written file, and how much went into it, counted in the same way
+        as the file counts. A setting that the firmware never reported is not in the
+        backup, and is not in the count.
     """
     from ..core.device_config import DEVICE_SETTINGS
 
@@ -549,15 +556,16 @@ async def _backup(device: Device, snapshot: dict, path: Path) -> tuple[Path, dic
 async def _restore(
     ctx: AppContext, device: Device, snapshot: dict, path: Path, dry_run: bool
 ) -> tuple[int, list[Block]]:
-    """Apply (or preview) a backup file against the current configuration.
+    """Apply (or preview) a backup file over the current settings.
 
-    The plan is the answer on a dry run and a record on a real one, so the same listing
-    serves both — drawn for a reader only when nothing was changed, since a run that *did*
-    change things already said so, setting by setting, on stderr.
+    On a dry run, the plan is the answer. On a real run, it is a record. Thus the same
+    listing is for the two runs. It is drawn for a person only when nothing changed,
+    because a run that *did* change settings already said so on stderr, one setting at a
+    time.
 
     Returns:
-        The number of changes applied (always ``0`` for a dry run), and the blocks stating
-        what was planned or done.
+        The number of applied changes (always ``0`` for a dry run), and the blocks that
+        state what was planned or done.
     """
     from ..ui import fields
     from ..ui.report import SILENT, Facts, Listing
@@ -617,16 +625,16 @@ async def _restore(
 async def _export_key(
     ctx: AppContext, device: Device, out: Path | None, artifacts: list[str]
 ) -> Facts:
-    """Export the private key, to a file if ``out`` is given, else as the answer itself.
+    """Export the private key: to a file if ``out`` is given, or else as the answer itself.
 
-    Either way the plain face prints **one bare line** — the key, or the path it was
-    written to — because ``config export-key > key.hex`` is expected to hold the key and
-    nothing else, and a caller that asked for a file wants the name of it. The warning
-    that comes with either belongs beside it on screen, not in the file, so it goes to
-    stderr with every other acknowledgement.
+    In the two cases, the plain face prints **one bare line**: the key, or the path of the
+    file that holds it. The reason: ``config export-key > key.hex`` must hold the key and
+    nothing else, and a caller that asked for a file wants its name. The warning that
+    comes with each of them must be next to it on the screen, not in the file. Thus it
+    goes to stderr with all the other acknowledgements.
 
-    This document carries a private key when one was asked for. That is what the command
-    is, exactly as on the plain face, and no extra gate is introduced here.
+    This document holds a private key when the caller asked for one. That is the purpose
+    of the command, the same as on the plain face, and this function adds no more gate.
     """
     from ..ui import fields
     from ..ui.report import BARE, Facts
@@ -654,12 +662,12 @@ async def _export_key(
 
 
 async def _read_channels(device: Device) -> list[dict]:
-    """Probe channel slots and return the configured ones."""
+    """Probe the channel slots, and return the configured slots."""
     channels: list[dict] = []
     for idx in range(CHANNEL_SLOT_PROBE_CAP):
         try:
             ch = await device.get_channel(idx)
-        except Exception:  # noqa: BLE001 - firmware may not support channel reads
+        except Exception:  # noqa: BLE001 - the firmware may not support channel reads
             break
         if ch:
             channels.append(ch)
@@ -667,27 +675,27 @@ async def _read_channels(device: Device) -> list[dict]:
 
 
 def _require_yes(yes: bool, what: str) -> None:
-    """Abort a destructive CLI command unless ``--yes`` was passed.
+    """Stop a destructive CLI command, unless the user gave ``--yes``.
 
-    Raised as a :class:`typer.BadParameter` rather than printed and exited: a missing
-    confirmation *is* a usage error, so it belongs on stderr in the parser's own words and
-    under the parser's own status (see :mod:`meshterm.core.exitcodes`). Printing it in red
-    on stdout put a colour, and a sentence that is not the command's answer, into whatever
-    was reading the command's answer.
+    This function raises a :class:`typer.BadParameter`, and does not print and exit. A
+    missing confirmation *is* a usage error. Thus it must go to stderr, in the words of the
+    parser, and with the status of the parser (refer to :mod:`meshterm.core.exitcodes`).
+    Before, the function printed it in red on stdout. That put a colour, and a sentence
+    that is not the answer of the command, into the program that read the answer.
 
     Args:
-        yes: Whether the user passed ``--yes``.
-        what: Human-readable description of the consequence.
+        yes: Whether the user gave ``--yes``.
+        what: A description of the result, for a person.
 
     Raises:
-        typer.BadParameter: If confirmation was not given.
+        typer.BadParameter: If the user did not confirm.
     """
     if not yes:
         raise typer.BadParameter(f"{what}. Re-run with --yes to confirm.")
 
 
 def _setting_columns() -> tuple:
-    """One setting row's columns, shared by ``config show`` and ``config get``."""
+    """The columns of one setting row, shared by ``config show`` and ``config get``."""
     from ..ui import fields
 
     return (
@@ -700,11 +708,11 @@ def _setting_columns() -> tuple:
 
 
 def _one_setting(spec: SettingSpec, value: Any) -> Facts:
-    """One setting: the bare value plain, the whole object in the document.
+    """One setting: the bare value on the plain face, and the full object in the document.
 
-    ``config get device_pin`` is the one place the PIN is named deliberately, so it is
-    **not** redacted here — the caller asked for that key by name, which is a different
-    act from dumping every setting into a file.
+    ``config get device_pin`` is the one place where the caller names the PIN on purpose.
+    Thus it is **not** redacted here. The caller asked for that key by name, and that is a
+    different act from a dump of all the settings into a file.
     """
     from ..ui import fields
     from ..ui.report import BARE, Facts
@@ -725,10 +733,10 @@ def _one_setting(spec: SettingSpec, value: Any) -> Facts:
 
 
 def _applied(applied: list[dict[str, Any]]) -> Facts:
-    """What a ``set`` changed — nothing plain, a record for whoever is logging it.
+    """What a ``set`` changed: nothing on the plain face, and a record for a program that logs it.
 
-    The exit status is the plain answer and the acknowledgement on stderr is the reassurance;
-    neither is something a script can read back later to find out *what moved*.
+    The exit status is the plain answer, and the acknowledgement on stderr tells the user
+    that all is well. A script cannot read either of them later to find *what changed*.
     """
     from ..ui import fields
     from ..ui.report import SILENT, Column, Facts
@@ -766,10 +774,10 @@ def _channel_written(idx: int, name: str, secret: bytes | None) -> Facts:
 
 
 def _backed_up(written: Path, counts: dict[str, int]) -> Facts:
-    """What ``config backup`` wrote, and how much of it.
+    """What ``config backup`` wrote, and how much.
 
-    The plain face prints the path bare — it is what the caller keeps, and what the thing
-    that ran the command reads next.
+    The plain face prints only the path. The caller keeps the path, and the program that
+    ran the command reads it next.
     """
     from ..ui import fields
     from ..ui.report import BARE, Facts
@@ -789,11 +797,12 @@ def _backed_up(written: Path, counts: dict[str, int]) -> Facts:
 
 
 def _acted(key: str, **facts: Any) -> Facts:
-    """An action, stated as data: nothing plain, a document for whoever wanted a record.
+    """An action, stated as data: nothing on the plain face, and a document for a record.
 
-    Every one of these prints nothing on the plain face today and should keep doing so —
-    ``config advert`` says all it has to say in its exit status. But "prints nothing" is an
-    answer a person can act on and a program cannot, so the machine face gets the fact.
+    Each of these actions prints nothing on the plain face now, and must continue to print
+    nothing. ``config advert`` says all that it has to say in its exit status. But "prints
+    nothing" is an answer on which a person can act, and a program cannot. Thus the
+    machine face gets the fact.
     """
     from ..ui import fields
     from ..ui.report import SILENT, Column, Facts

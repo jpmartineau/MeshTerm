@@ -1,16 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The ``livefeed`` tool: every packet as it arrives, right under the dashboard.
+"""The ``livefeed`` tool: each packet when it arrives, directly below the dashboard.
 
-Opens the full-screen live feed (see :mod:`meshterm.ui.livefeed_screen`): the
-streaming packet list that used to be the dashboard's bottom panel, promoted to its
-own menu entry — newest first, every class, Enter opening any row in the shared
-packet viewer. It sits directly under the dashboard because the two split one
-question between them: the dashboard summarizes *what's going on out there*, the
-feed shows every individual packet behind those numbers.
+The tool opens the full-screen live feed (refer to :mod:`meshterm.ui.livefeed_screen`).
+This is the streaming packet list that was the bottom panel of the dashboard before. Now
+it has its own menu entry. It shows the newest packets first and all the classes, and
+Enter opens any row in the shared packet viewer. It is directly below the dashboard,
+because the two tools share one question. The dashboard summarizes what occurs on the
+mesh, and the feed shows each packet behind those numbers.
 
-Menu-only: the feed is inherently live (it rides the event hub and repaints every
-second), so there is no scripted one-shot to register — the ``monitor`` subcommand
-covers scripted packet-watching.
+Menu only: the feed is always live (it uses the event hub and paints again each second).
+Thus there is no scripted one-shot command to register. The ``monitor`` subcommand is the
+script command to watch packets.
 """
 
 from __future__ import annotations
@@ -25,24 +25,24 @@ from .base import Tool, ToolResult, register
 
 @register
 class LiveFeedTool(Tool):
-    """Watch every packet stream in, newest first, and open any in the viewer."""
+    """Watch each packet as it arrives, newest first, and open any packet in the viewer."""
 
     name = "livefeed"
     title = "Live feed"
     icon = "📰"
     help = "Every packet as it arrives, newest first"
     category = "Watch"
-    order = 20  # right under the dashboard it was promoted out of
+    order = 20  # directly below the dashboard, which it came out of
 
     async def prompt_params(self, ctx: AppContext) -> dict[str, Any] | None:
-        """Run the live feed; there are never parameters to collect.
+        """Run the live feed. It has no parameters to collect.
 
-        The screen presents everything itself and returns when dismissed, so
-        returning ``None`` tells the menu the invocation is complete (the same
+        The screen shows all its content itself, and it returns when the user leaves it.
+        Thus the return value ``None`` tells the menu that the run is complete (the same
         pattern as the ``dashboard`` tool).
 
         Args:
-            ctx: Shared application context.
+            ctx: The shared application context.
 
         Returns:
             Always ``None``.
@@ -53,20 +53,20 @@ class LiveFeedTool(Tool):
         return None
 
     async def run(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Nothing runs here: the feed lives inside :meth:`prompt_params`.
+        """Nothing runs here: the feed is in :meth:`prompt_params`.
 
         Args:
-            ctx: Shared application context.
-            params: Unused.
+            ctx: The shared application context.
+            params: Not used.
 
         Returns:
-            An empty :class:`ToolResult` (only reachable from a scripted call).
+            An empty :class:`ToolResult` (only a scripted call comes here).
         """
         return ToolResult(summary={})
 
     def register_cli(self, app: typer.Typer) -> None:
-        """Register no CLI command — the feed is a live, menu-only screen.
+        """Register no CLI command, because the feed is a live screen for the menu only.
 
         Args:
-            app: The Typer application (untouched).
+            app: The Typer application (not changed).
         """

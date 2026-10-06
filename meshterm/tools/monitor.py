@@ -1,19 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The ``monitor`` tool: a bounded foreground capture of what the mesh is saying.
+"""The ``monitor`` tool: a foreground capture of the mesh traffic, for a limited time.
 
-Passive monitoring records every advert and telemetry frame the companion overhears —
-with SNR, RSSI, and any shared location — to the database, building the longitudinal
-history that the map's packet counts and the nodes list read back. It transmits nothing;
-it only listens.
+Passive monitoring stores each advert and telemetry packet that the companion hears in the
+database, with its SNR, its RSSI, and any shared location. Over time, this makes the
+history that the packet counts of the map and the nodes list read. The tool transmits
+nothing. It only listens.
 
-Recording is always on: the session-wide
-:class:`~meshterm.services.event_hub.EventHub` overhears every packet, and
-:class:`~meshterm.services.monitor_service.MonitorService` (``ctx.monitor``) writes them
-to history as one of its subscribers, from the moment the radio opens. In the menu the
-live packet counters show in the persistent header and the accumulated data surfaces
-through Nodes and Map, so there is no separate screen here — this tool is CLI-only:
-``meshterm monitor --seconds 60`` tails each overheard packet to the console and
-summarizes the window when it ends.
+MeshTerm always stores this history. The session-wide
+:class:`~meshterm.services.event_hub.EventHub` receives each packet, and
+:class:`~meshterm.services.monitor_service.MonitorService` (``ctx.monitor``) is one of its
+subscribers. From the time that the connection to the device opens, the service writes
+the packets to the history. In the menu, the live packet counters show in the header,
+which is always visible, and the stored data shows on Nodes and Map. Thus this tool has no
+screen, and it is CLI only. ``meshterm monitor --seconds 60`` prints each heard packet to
+the console, and it gives a summary of the window when the window ends.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 @register
 class MonitorTool(Tool):
-    """Capture overheard packets in the foreground for a bounded window (CLI only)."""
+    """Capture heard packets in the foreground for a limited time window (CLI only)."""
 
     name = "monitor"
     title = "Monitor"
@@ -45,18 +45,18 @@ class MonitorTool(Tool):
     help = "Capture overheard packets live for a while and summarize them"
     category = "Watch"
     order = 50
-    menu_visible = False  # recording is always on; in the menu the header/Nodes/Map show it
+    menu_visible = False  # always stored. In the menu, the header, Nodes, and Map show it
 
     async def execute(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
         """Run directly, without a logged ``runs`` row.
 
-        The capture's observations are recorded under the monitor service's own
-        ``monitor`` run, so wrapping this invocation in a second run row (as the base
-        :meth:`Tool.execute` would) would double-log the session.
+        The monitor service stores the observations of the capture under its own
+        ``monitor`` run. The base :meth:`Tool.execute` puts each run in a run row. A second
+        run row for this run logs the session two times.
 
         Args:
-            ctx: Shared application context.
-            params: Parameters for this invocation.
+            ctx: The shared application context.
+            params: The parameters for this run.
 
         Returns:
             The :class:`ToolResult` from :meth:`run`.
@@ -64,29 +64,30 @@ class MonitorTool(Tool):
         return await self.run(ctx, params)
 
     async def run(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
-        """Record overheard packets in the foreground for a bounded window.
+        """Store heard packets in the foreground for a limited time window.
 
-        Connects the device, ensures history recording and the event hub are running,
-        and tails each overheard packet to the console until the window ends (or the
-        user interrupts). Observations are persisted by the monitor service exactly as
-        in an interactive session; this adds a live console view and a window-scoped
-        heard-node summary on top.
+        The method connects the device, and it makes sure that the history storage and
+        the event hub run. Then it prints each heard packet to the console until the
+        window ends (or until the user interrupts it). The monitor service stores the
+        observations exactly as in an interactive session. This method adds a live
+        console output, and a summary of the nodes that were heard in the window.
 
         Args:
-            ctx: Shared application context.
-            params: ``seconds`` — how long to capture (``0``/``None`` = until Ctrl-C).
+            ctx: The shared application context.
+            params: ``seconds``: the duration of the capture (``0`` or ``None`` = until
+                Ctrl-C).
 
         Returns:
-            A :class:`ToolResult` with the window's packet and node counts.
+            A :class:`ToolResult` with the packet count and the node count of the window.
         """
         from ..ui import script
 
         seconds = int(params.get("seconds") or 0)
-        await ctx.device()  # surface connection problems before announcing the capture
-        await ctx.monitor.start()  # register history recording before the hub pumps
+        await ctx.device()  # show a connection problem before the capture is announced
+        await ctx.monitor.start()  # register history storage before the hub sends events
         await ctx.events.start()
-        # The announcement is about the run, not part of its answer, so it goes to stderr
-        # and stays out of `meshterm monitor -s 60 > packets.txt`.
+        # The announcement is about the run, and it is not part of the answer. Thus it goes
+        # to stderr, and it stays out of `meshterm monitor -s 60 > packets.txt`.
         script.stderr_console().print(
             "monitoring" + (f" for {seconds}s" if seconds else " — press Ctrl-C to stop"),
             style="muted",
@@ -112,8 +113,9 @@ class MonitorTool(Tool):
                     "snr_db": obs.snr,
                     "rssi_dbm": obs.rssi,
                     "position": _position(obs.lat, obs.lon),
-                    # The region a flood was sent into, resolved against the names known
-                    # right now; a direct frame (or a class with no route) has none.
+                    # The region that a flood was sent into, found from the region names
+                    # that are known now. A direct packet (or a class with no route) has
+                    # no region.
                     "scope": ctx.region_store.scope_of(obs.raw),
                     "path": _relays(obs.path),
                 }
@@ -125,7 +127,7 @@ class MonitorTool(Tool):
                 if seconds:
                     await asyncio.sleep(seconds)
                 else:
-                    await asyncio.Event().wait()  # until Ctrl-C / cancellation
+                    await asyncio.Event().wait()  # until Ctrl-C or cancellation
             except (KeyboardInterrupt, asyncio.CancelledError):  # pragma: no cover - interactive
                 pass
             finally:
@@ -137,8 +139,9 @@ class MonitorTool(Tool):
             by_node.setdefault(obs.node, []).append(obs)
         nodes = [HeardNode.from_observations(node, group) for node, group in by_node.items()]
         nodes.sort(key=lambda n: n.last_seen, reverse=True)
-        # The window is over, so its facts are worth saying — on stderr, where everything
-        # about a run goes, keeping the packets a caller redirected the run for on their own.
+        # The window is over, so its facts are useful. They go to stderr, where all the
+        # information about a run goes. Thus the packets, which are the reason that the
+        # caller redirected the output, stay alone on stdout.
         script.stderr_console().print(
             f"captured {len(seen)} packet{'' if len(seen) == 1 else 's'} "
             f"from {len(nodes)} node{'' if len(nodes) == 1 else 's'}"
@@ -153,7 +156,7 @@ class MonitorTool(Tool):
         )
 
     def register_cli(self, app: typer.Typer) -> None:
-        """Register the ``monitor`` subcommand (the bounded foreground capture).
+        """Register the ``monitor`` subcommand (the foreground capture for a limited time).
 
         Args:
             app: The Typer application.
@@ -170,17 +173,18 @@ class MonitorTool(Tool):
 
 
 def _position(lat: float | None, lon: float | None) -> Position | None:
-    """A reception's shared position, or ``None`` where the packet carried none."""
+    """The shared position of a reception, or ``None`` if the packet had no position."""
     return Position(lat, lon) if lat is not None and lon is not None else None
 
 
 def _relays(path: str | None) -> list[str] | None:
-    """A packet's relay chain as hashes, in propagation order.
+    """The relay chain of a packet as hashes, in the order that the packet went through.
 
-    Hashes rather than the shared node shape, and that is the honest answer: nothing
-    resolves a relay to a node at reception time, so a node object per hop would be four
-    ``null``s wrapped round a hash. ``[]`` is a direct reception (zero hops); ``None``
-    means the packet class carries no path at all, which is a different fact.
+    The function returns hashes instead of the shared node shape, and that is the correct
+    answer. At reception time, nothing finds the node for a relay. Thus a node object for
+    each hop has only four ``null`` values around a hash. ``[]`` is a direct reception
+    (zero hops). ``None`` means that the packet class has no path, which is a different
+    fact.
     """
     if path is None:
         return None
@@ -188,14 +192,14 @@ def _relays(path: str | None) -> list[str] | None:
 
 
 def _live_packets() -> Listing:
-    """The shape the live capture streams: one record per packet, as it lands.
+    """The shape that the live capture streams: one record for each packet, when it arrives.
 
-    ``TIME`` is absolute where a listing's times are ages, and for the reason the whole
-    rule turns on: every row of a live tail would read ``now``. ``SCOPE`` says which region
-    a flood was sent into (:func:`~meshterm.ui.fields.scope`), ``null`` in the document for
-    a frame that has none. The **name goes last**, so
-    the one field with no width cannot push a lane — which is what finally let the two
-    streams have columns at all, and with them the quoting could go.
+    ``TIME`` is an absolute time, but the times of a listing are usually ages. The reason
+    is the base of that rule: in a live output, an age shows ``now`` in each row. ``SCOPE``
+    gives the region that a flood was sent into (:func:`~meshterm.ui.fields.scope`). In
+    the document, it is ``null`` for a packet that has no scope. The **name goes last**,
+    so the only field with no width cannot push a lane. This change finally let the two
+    streams have columns, and with the columns, the quoting was no longer necessary.
     """
     from dataclasses import replace
 
@@ -215,16 +219,17 @@ def _live_packets() -> Listing:
         columns=(
             pin(fields.instant("observed_at", "TIME"), 25),
             node,
-            # The packet class, which the plain stream has never had room for. New
-            # surface: the simulator does not exercise every class, so a consumer should
-            # treat an unfamiliar word as a word rather than an error.
+            # The packet class. The plain stream never had space for it. This field is new,
+            # and the simulator does not make each class. Thus a consumer must read an
+            # unfamiliar word as a word, not as an error.
             fields.hidden("kind"),
             pin(fields.snr("snr_db", "SNR_DB"), 6),
             pin(fields.decimal("rssi_dbm", "RSSI_DBM", ".0f"), 8),
             pin(fields.position(), 19),
-            # The flood's scope — a region name, ``unknown`` or ``unscoped``, ``-`` for a
-            # frame with none. Pinned to hold the two words whole; a long region name
-            # overruns and pushes the row right, which is why NAME still goes last.
+            # The scope of the flood: a region name, ``unknown``, or ``unscoped``, and ``-``
+            # for a packet with no scope. The width is pinned to hold the two words
+            # complete. A long region name overruns and pushes the row to the right, so
+            # NAME still goes last.
             pin(fields.scope(), 10),
             fields.hidden("path"),
         ),
@@ -233,18 +238,19 @@ def _live_packets() -> Listing:
 
 
 def _heard(heard: list[HeardNode]) -> Listing:
-    """The capture window's per-node summary: what each node did over the whole window.
+    """A summary of the capture window for each node: what the node did in the whole window.
 
-    The aggregate the live stream cannot give — a count, a median, a best — one record per
-    node heard, most recently heard first.
+    The summary gives the aggregates that the live stream cannot give (a count, a median,
+    a best value). It has one record for each heard node, and the most recently heard
+    node is first.
 
-    Drawn **for a person only**. Every figure in it is computable from the records that
-    scrolled past above it, and emitting it as a second *shape* of line in the middle of an
-    otherwise homogeneous NDJSON stream would cost every consumer a discriminator it would
-    never otherwise need.
+    It is drawn **for a person only**. A program can calculate each value in it from the
+    records above it. The NDJSON stream has lines of only one shape. If the summary was a
+    second shape of line in that stream, each consumer must have a discriminator, which
+    no consumer needs for the other lines.
 
     Args:
-        heard: Aggregated per-node statistics for the window.
+        heard: The aggregated statistics of each node for the window.
 
     Returns:
         The listing.
