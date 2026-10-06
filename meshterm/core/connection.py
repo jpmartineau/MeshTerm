@@ -22,12 +22,12 @@ import re
 import socket
 import sys
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator, Callable, Iterable
-from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext, suppress
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from . import transmit_gate
 from .channels import CHANNEL_SLOT_PROBE_CAP
@@ -199,7 +199,9 @@ _DISCARD_TIMEOUT_S = 2.0
 #: connection on Windows is intermittently flaky (a slow-advertising peripheral is missed by
 #: bleak's internal lookup, or the link-layer connect races the just-finished discovery scan);
 #: a single retry recovers the common case without meaningfully delaying a genuinely absent
-#: device. This retries only the *link open* — never a rejected PIN and never a mesh transmit.
+#: device. A link that opens and then drops during service discovery, which a Cardputer
+#: Zero's radio does now and then, is retried the same way. This retries only the *link
+#: open* — never a rejected PIN and never a mesh transmit.
 _BLE_CONNECT_ATTEMPTS = 2
 
 #: Pause between BLE link-open attempts (seconds), giving the OS radio a beat to settle.
@@ -725,10 +727,35 @@ _PAIRING_REFUSED = frozenset(
 )
 
 
+#: What a link that opened and then dropped before the session was up reads as. BlueZ's
+#: bleak backend says "failed to discover services, device disconnected" when the peer is
+#: lost during service discovery — on a Cardputer Zero an HCI Connection Timeout (0x08)
+#: 1.7 s in, at any signal strength, with no security exchange begun; the next attempt
+#: connected. A radio hiccup, so it is retried like a link that never opened.
+_BLE_DROP_HINTS = ("device disconnected",)
+
+
+def _chain_says(exc: BaseException, hints: tuple[str, ...]) -> bool:
+    """Whether ``exc``, or anything it was raised from, mentions one of ``hints``.
+
+    Walks the whole ``__cause__``/``__context__`` chain, so a bleak error wrapped by the
+    meshcore transport is still recognized.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        text = str(current).lower()
+        if any(hint in text for hint in hints):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
 def _is_ble_auth_error(exc: BaseException) -> bool:
     """Return whether ``exc`` (or any it was raised from) is a BLE authentication rejection.
 
-    Walks the whole ``__cause__``/``__context__`` chain matching :data:`_BLE_AUTH_HINTS`, so a
+    Matches :data:`_BLE_AUTH_HINTS` along the exception chain, so a
     ``BleakGATTProtocolError`` wrapped by the meshcore transport is still recognized.
 
     Args:
@@ -737,15 +764,16 @@ def _is_ble_auth_error(exc: BaseException) -> bool:
     Returns:
         ``True`` if the failure is a missing/rejected pairing rather than a dropped link.
     """
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        text = str(current).lower()
-        if any(hint in text for hint in _BLE_AUTH_HINTS):
-            return True
-        current = current.__cause__ or current.__context__
-    return False
+    return _chain_says(exc, _BLE_AUTH_HINTS)
+
+
+def _is_ble_link_drop(exc: BaseException) -> bool:
+    """Whether opening the link failed because it dropped, not because security refused it.
+
+    An authentication refusal can end in a disconnect too, so anything that reads as one
+    is never a drop: a wrong or missing PIN must reach the PIN handling, never a retry.
+    """
+    return not _is_ble_auth_error(exc) and _chain_says(exc, _BLE_DROP_HINTS)
 
 
 #: ``errno`` values a serial open fails with, by what they mean for the reader.
@@ -907,12 +935,21 @@ class _ConnectingClients(list):
         connecting: Whether ``connect()`` is still running; while it is, a disconnect is
             recorded here and *not* passed on to meshcore (see
             :func:`_hold_disconnects_while_connecting`).
+        hung_up: Set when the link dropped after BlueZ had asked for the PIN: the companion
+            refusing the pairing, which no retry inside bleak will undo.
     """
 
     connecting = True
 
+    def __init__(self, clients: Iterable[object] = ()) -> None:
+        """Start from ``clients`` (none, normally) and no hang-up."""
+        super().__init__(clients)
+        self.hung_up = asyncio.Event()
 
-def _hold_disconnects_while_connecting(connection) -> _ConnectingClients:  # noqa: ANN001
+
+def _hold_disconnects_while_connecting(  # noqa: ANN001
+    connection, pin_asked: Callable[[], bool] = lambda: False
+) -> _ConnectingClients:
     """Keep meshcore from dropping its bleak client while that client is still connecting.
 
     On Linux, BlueZ answers a link attempt that failed to synchronise
@@ -930,8 +967,16 @@ def _hold_disconnects_while_connecting(connection) -> _ConnectingClients:  # noq
     the link really cannot be made, and once ``connect()`` returns, disconnects reach
     meshcore as before, because the client keeps calling this same wrapper.
 
+    The one drop that is not bleak's to retry is the companion hanging up on a pairing: a
+    PIN-protected companion (an ESP32 one, measured on a Cardputer Zero) answers the UART
+    subscribe by asking for the PIN, and on a refused or wrong one it disconnects rather
+    than refusing the subscribe. Held back, that left ``connect()`` waiting out its timeout
+    on a dead link and never asking for the PIN. A drop after BlueZ asked for the PIN is
+    therefore flagged on ``hung_up``, for the connect to give up on as a pairing failure.
+
     Args:
         connection: The ``meshcore.BLEConnection`` about to connect.
+        pin_asked: Whether BlueZ has asked this connect's agent for the PIN yet.
 
     Returns:
         The record of clients seen, whose ``connecting`` flag the caller clears once
@@ -945,6 +990,10 @@ def _hold_disconnects_while_connecting(connection) -> _ConnectingClients:  # noq
     def _handle_disconnect(client) -> None:  # noqa: ANN001 - a bleak client
         seen.append(client)
         if seen.connecting:
+            if pin_asked():
+                _log.debug("BLE companion hung up on the pairing it asked for")
+                seen.hung_up.set()
+                return
             _log.debug("BLE link attempt dropped while connecting; bleak retries it")
             return
         forward(client)
@@ -953,6 +1002,42 @@ def _hold_disconnects_while_connecting(connection) -> _ConnectingClients:  # noq
     # ``connect()``, so an instance attribute set now is the callback every client gets.
     connection.handle_disconnect = _handle_disconnect
     return seen
+
+
+class _PairingHungUp(Exception):
+    """The companion disconnected after asking for the PIN: a refused or missing pairing.
+
+    Worded to read as an authentication failure (:data:`_BLE_AUTH_HINTS`), because it is
+    one, so the connect's PIN handling takes it from here rather than the link retry.
+    """
+
+
+async def _unless_hung_up(connect: Awaitable[Any], hung_up: asyncio.Event) -> Any:
+    """Await ``connect``, unless the companion hangs up on its pairing first.
+
+    Args:
+        connect: The meshcore ``connect()`` coroutine.
+        hung_up: Set by :func:`_hold_disconnects_while_connecting` on that hang-up.
+
+    Returns:
+        What ``connect`` returned.
+
+    Raises:
+        _PairingHungUp: If the hang-up came first; ``connect`` is cancelled.
+    """
+    task = asyncio.ensure_future(connect)
+    waiter = asyncio.ensure_future(hung_up.wait())
+    try:
+        await asyncio.wait({task, waiter}, return_when=asyncio.FIRST_COMPLETED)
+        if task.done():
+            return task.result()
+        raise _PairingHungUp("authentication failed: the companion hung up on the pairing")
+    finally:
+        waiter.cancel()
+        if not task.done():
+            task.cancel()
+            with suppress(BaseException):
+                await task
 
 
 class _WriteRefusals(list):
@@ -1895,6 +1980,9 @@ class MeshCoreDevice(Device):
         #: its own reference the moment the peripheral vanishes — see :meth:`_release_ble_client`
         #: for why nothing else can close it, and what that costs when it stays open.
         self._ble_client = None  # type: ignore[var-annotated]  # bleak.BleakClient
+        #: The BlueZ agent answering this device's pairing while a connect runs (Linux; see
+        #: :meth:`_ble_pairing_agent`), so the connect can tell a pairing refusal from a drop.
+        self._ble_agent: object | None = None
         # Serializes channel reads. The meshcore library's get_channel waits for "the next
         # CHANNEL_INFO event" with no correlation to the index it asked for, and the dispatcher
         # fans that event to *every* in-flight waiter — so two concurrent reads both resolve on
@@ -2011,9 +2099,17 @@ class MeshCoreDevice(Device):
         Returns:
             The connected ``MeshCore`` client, or ``None`` if the peripheral never answered.
         """
-        async with self._ble_pairing_agent():
-            await self._pair_ble(force=False)
-            return await self._open_ble(mesh_core, allow_repair=True)
+        async with self._ble_pairing_agent() as agent:
+            self._ble_agent = agent
+            try:
+                await self._pair_ble(force=False)
+                return await self._open_ble(mesh_core, allow_repair=True)
+            finally:
+                self._ble_agent = None
+
+    def _pin_was_asked(self) -> bool:
+        """Whether BlueZ asked this connect's agent for the PIN (see :class:`bluez.PinAgent`)."""
+        return bool(getattr(self._ble_agent, "asked", False))
 
     def _ble_pairing_agent(self) -> AbstractAsyncContextManager[object]:
         """Answer BlueZ's own pairing requests for this device while connecting (Linux only).
@@ -2130,9 +2226,11 @@ class MeshCoreDevice(Device):
         ``BLEDevice`` (when the picker's scan produced one) is passed through so the client
         connects to it directly instead of re-discovering the address.
 
-        Only ``ConnectionError`` is retried: a PIN/bond rejection or any other GATT failure
-        propagates unchanged on the first attempt so the auth handling in :meth:`_open_ble`
-        (and a genuine wrong-PIN) is never looped. Each attempt builds its own client through
+        A link that opened and then dropped before the session was up (see
+        :func:`_is_ble_link_drop`) is retried the same way: it is the radio, not the device
+        refusing. Nothing else is: a PIN/bond rejection or any other GATT failure propagates
+        unchanged on the first attempt so the auth handling in :meth:`_open_ble` (and a
+        genuine wrong-PIN) is never looped. Each attempt builds its own client through
         :meth:`_connect_owned_ble`, which closes it before letting any failure out — a
         retried attempt therefore starts from a released link, never a leaked one.
 
@@ -2148,13 +2246,15 @@ class MeshCoreDevice(Device):
                 because this is the one failure where the device was never reached at all,
                 and "didn't answer as a MeshCore device" sent people looking at the firmware.
         """
-        last_exc: ConnectionError | None = None
+        last_exc: Exception | None = None
         for attempt in range(_BLE_CONNECT_ATTEMPTS):
             if attempt:
                 await asyncio.sleep(_BLE_CONNECT_RETRY_DELAY_S)
             try:
                 return await self._connect_owned_ble(mesh_core)
-            except ConnectionError as exc:
+            except Exception as exc:  # noqa: BLE001 - only a link failure is kept and retried
+                if not (isinstance(exc, ConnectionError) or _is_ble_link_drop(exc)):
+                    raise
                 _log.debug(
                     "BLE link to %s failed to open (attempt %d/%d): %s",
                     self._address,
@@ -2163,14 +2263,14 @@ class MeshCoreDevice(Device):
                     exc,
                 )
                 last_exc = exc
-        assert last_exc is not None  # the loop always runs; only ConnectionError falls through
+        assert last_exc is not None  # the loop always runs; only a link failure falls through
         where = self._address or "the selected Bluetooth device"
         _log.warning("BLE link to %s never opened: %s", where, last_exc)
         raise DeviceCommandError(
             f"couldn't open a Bluetooth link to {where} ({_BLE_CONNECT_ATTEMPTS} tries) — it "
-            "wasn't found, or didn't accept the connection. It may be out of range, powered "
-            "off, or connected to a phone or another computer (a companion takes one "
-            "connection at a time)."
+            "wasn't found, didn't accept the connection, or dropped it while connecting. It "
+            "may be out of range, powered off, or connected to a phone or another computer (a "
+            "companion takes one connection at a time)."
         ) from last_exc
 
     async def _connect_owned_ble(self, mesh_core):  # type: ignore[no-untyped-def]
@@ -2228,7 +2328,7 @@ class MeshCoreDevice(Device):
         # removed by hand. Pairing is ours to run on every platform that has an API for it
         # (see :meth:`_pair_ble`).
         connection = BLEConnection(address=self._address, device=self._ble_device, pin=None)
-        seen = _hold_disconnects_while_connecting(connection)
+        seen = _hold_disconnects_while_connecting(connection, self._pin_was_asked)
         refused = _record_write_refusals(connection)
         mc = mesh_core(
             connection,
@@ -2236,7 +2336,7 @@ class MeshCoreDevice(Device):
             auto_reconnect=False,
         )
         try:
-            started = await mc.connect()
+            started = await _unless_hung_up(mc.connect(), seen.hung_up)
         except BaseException:
             self._ble_client = _held_client(connection, seen)
             await MeshCoreDevice._discard_meshcore(mc)

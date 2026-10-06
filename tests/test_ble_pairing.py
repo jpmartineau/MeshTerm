@@ -427,3 +427,105 @@ def test_every_link_open_attempt_failing_raises_the_last_error() -> None:
     assert isinstance(excinfo.value.__cause__, ConnectionError)
     assert len(_FakeMeshCore.built) == conn_mod._BLE_CONNECT_ATTEMPTS
     assert all(not c.cx.link_open for c in _FakeMeshCore.built)
+
+
+class _BleakError(Exception):
+    """Stand-in for ``bleak.exc.BleakError``, which carries what happened only as text."""
+
+
+def test_a_link_that_drops_while_connecting_is_retried() -> None:
+    """BlueZ losing the peer during service discovery is the radio, so it gets the retry.
+
+    Seen on a Cardputer Zero: an HCI Connection Timeout 1.7 s in, with no security
+    exchange begun, and the next attempt connected.
+    """
+    _FakeMeshCore.reset(_BleakError("failed to discover services, device disconnected"), "ok")
+    dev = _device()
+
+    client = asyncio.run(dev._create_ble_with_retry(_FakeMeshCore))
+
+    assert len(_FakeMeshCore.built) == 2
+    assert _FakeMeshCore.built[0].cx.link_open is False, "the dropped attempt leaked"
+    assert client is _FakeMeshCore.built[1]
+
+
+def test_an_auth_refusal_that_ends_in_a_disconnect_is_never_retried() -> None:
+    """A refused PIN can drop the link too; it goes to the PIN handling, not round again."""
+    _FakeMeshCore.reset(_AuthError("Insufficient Authentication: device disconnected"), "ok")
+    dev = _device()
+
+    with pytest.raises(_AuthError):
+        asyncio.run(dev._create_ble_with_retry(_FakeMeshCore))
+
+    assert len(_FakeMeshCore.built) == 1
+
+
+def test_any_other_failure_is_not_retried() -> None:
+    """Only a link that never opened or that dropped is the radio's; the rest surface at once."""
+    _FakeMeshCore.reset(_BleakError("Characteristic 6e400003 was not found"), "ok")
+    dev = _device()
+
+    with pytest.raises(_BleakError):
+        asyncio.run(dev._create_ble_with_retry(_FakeMeshCore))
+
+    assert len(_FakeMeshCore.built) == 1
+
+
+class _Connection:
+    """A ``BLEConnection`` stand-in: just the drop handler the guard wraps."""
+
+    def __init__(self) -> None:
+        self.forwarded: list[object] = []
+
+    def handle_disconnect(self, client: object) -> None:
+        self.forwarded.append(client)
+
+
+def test_a_hang_up_after_the_pin_was_asked_is_flagged_not_held() -> None:
+    """The retries bleak makes are held back; a companion refusing its pairing is not one."""
+    asked = False
+    connection = _Connection()
+    seen = conn_mod._hold_disconnects_while_connecting(connection, lambda: asked)
+
+    connection.handle_disconnect("first try")  # bleak's 0x3e retry: held, nothing flagged
+    assert not seen.hung_up.is_set()
+    asked = True
+    connection.handle_disconnect("after the PIN")
+    assert seen.hung_up.is_set()
+    assert connection.forwarded == []  # still held while connecting
+
+
+def test_a_hang_up_ends_the_connect_as_a_pairing_failure() -> None:
+    """The connect stops waiting on a dead link and says why, in the PIN handling's words."""
+
+    async def scenario() -> bool:
+        hung_up = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def connect() -> str:
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+            return "never"
+
+        asyncio.get_running_loop().call_later(0.05, hung_up.set)
+        with pytest.raises(conn_mod._PairingHungUp) as excinfo:
+            await conn_mod._unless_hung_up(connect(), hung_up)
+        assert conn_mod._is_ble_auth_error(excinfo.value)
+        return cancelled.is_set()
+
+    assert asyncio.run(scenario()), "the abandoned connect was left running"
+
+
+def test_a_connect_that_finishes_first_is_returned() -> None:
+    """No hang-up, no change: the connect's own answer comes back."""
+
+    async def scenario() -> str:
+        async def connect() -> str:
+            return "started"
+
+        return await conn_mod._unless_hung_up(connect(), asyncio.Event())
+
+    assert asyncio.run(scenario()) == "started"

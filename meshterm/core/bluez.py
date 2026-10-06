@@ -205,7 +205,7 @@ def device_tail(address: str) -> str:
 
 
 @asynccontextmanager
-async def answering(address: str, pin: str | None) -> AsyncIterator[None]:
+async def answering(address: str, pin: str | None) -> AsyncIterator[PinAgent]:
     """Be BlueZ's default pairing agent for one device while a connect runs.
 
     BlueZ does not wait to be asked to pair. When the companion refuses the UART subscribe
@@ -230,7 +230,9 @@ async def answering(address: str, pin: str | None) -> AsyncIterator[None]:
         pin: Its PIN, or ``None`` to refuse.
 
     Yields:
-        Nothing; the agent is live for the body of the ``async with``.
+        The agent, live for the body of the ``async with``. Its ``asked`` says whether
+        BlueZ asked it for the PIN, which is how the connect tells a companion that hung
+        up on a pairing from a link that merely dropped.
     """
     bus = None
     agent = PinAgent(f"/net/meshterm/connect{os.getpid()}", pin, device_tail(address))
@@ -250,7 +252,7 @@ async def answering(address: str, pin: str | None) -> AsyncIterator[None]:
     except Exception as exc:  # noqa: BLE001 - no bus, no BlueZ: connect without an agent
         _log.debug("couldn't stand in as the BlueZ agent: %s", exc)
     try:
-        yield
+        yield agent
     finally:
         if bus is not None:
             try:
