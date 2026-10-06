@@ -1,15 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Declarative registry of every settable device configuration value.
+"""Declarative registry of all the device settings that MeshTerm can change.
 
-Each :class:`SettingSpec` describes one tunable setting: how to read its current value
-from a device snapshot, how to parse/validate/format it, and how to apply it back to the
-:class:`~meshterm.core.connection.Device`. The same registry drives the interactive
-editor, the ``config`` CLI subcommands, and TOML backup/restore — add a setting once and
-it appears everywhere, mirroring the tool registry pattern.
+Each :class:`SettingSpec` describes one setting that the user can change. It tells how to
+read the current value from a device snapshot, how to parse, validate, and format the
+value, and how to apply the value to the :class:`~meshterm.core.connection.Device`. The
+same registry controls the interactive editor, the ``config`` CLI subcommands, and the
+TOML backup and restore. When you add a setting one time, it shows in all these places.
+This is the same pattern as the tool registry.
 
-Settings whose protocol command takes several fields at once (radio, coordinates, tuning,
-telemetry modes) rebuild the full command from the current snapshot plus the one changed
-field, so a single setting can be edited in isolation.
+Some settings have a protocol command that takes several fields together (radio,
+coordinates, tuning, telemetry modes). For these settings, the apply builds the full
+command again from the current snapshot and the one changed field. Thus the user can
+edit one setting alone.
 """
 
 from __future__ import annotations
@@ -21,48 +23,53 @@ from typing import Any
 from . import regions
 from .connection import Device, repeat_freq_allowed
 
-# Display categories, in the order the editor and `config show` present them.
+# The display categories, in the order that the editor and `config show` show them.
 CATEGORIES = ("Identity", "Radio", "Tuning", "Behavior", "Experimental")
 
 
 class DeviceConfigError(ValueError):
-    """Raised when a value cannot be parsed or fails validation.
+    """Raised when a value cannot be parsed, or when it is not valid.
 
-    The message is user-facing (printed directly by the CLI and editor).
+    The message is for the user (the CLI and the editor print it directly).
     """
 
 
 @dataclass(slots=True)
 class SettingSpec:
-    """Specification for one settable configuration value.
+    """The specification for one setting.
 
     Attributes:
-        key: Canonical key (matches the ``SELF_INFO`` field name where one exists).
-        label: Human-friendly name for display.
-        help: One-line description.
+        key: The canonical key (the same as the ``SELF_INFO`` field name, if there is
+            one).
+        label: The name that the user sees.
+        help: A description on one line.
         category: One of :data:`CATEGORIES`.
         value_type: ``"str" | "int" | "float" | "bool" | "enum"``.
-        choices: For ``enum``, a mapping of allowed int value to label.
-        minimum: Inclusive lower bound for numeric types, if any.
-        maximum: Inclusive upper bound for numeric types, if any.
-        strict_choices: When ``True`` (the default) an ``enum`` value must be one of
-            :attr:`choices`. When ``False`` the choices are offered as a convenience menu
-            but any in-range integer is still accepted — used for firmware fields whose
-            full value domain we don't enumerate exhaustively.
-        max_key: Snapshot key holding this setting's *device-reported* inclusive maximum
-            (e.g. ``max_tx_power`` bounding ``tx_power``). Checked by :func:`parse_value`
-            when it is given a snapshot, tightening the static :attr:`maximum` to what
-            the connected hardware actually supports.
-        max_length: For ``str`` values, the longest accepted string (protocol field
-            widths, e.g. the flood scope's 31-byte name slot).
-        decimals: For ``float`` values, the fixed decimal places a value is shown with and
-            rounded to on parse, so what is applied is what the row showed; ``None`` keeps
-            the value as given.
-        validate: A last rule for a typed, in-range value, given the snapshot when there
-            is one: it returns the complaint, or ``None``. For what a bound can't state —
-            the PIN's "zero or six digits", relaying only on an allowed frequency.
-        getter: Extracts the current value from a snapshot dict.
-        apply: Coroutine applying a parsed value to a device, given the snapshot.
+        choices: For ``enum``, a map from each valid int value to its label.
+        minimum: The inclusive lower limit for numeric types, if there is one.
+        maximum: The inclusive upper limit for numeric types, if there is one.
+        strict_choices: When ``True`` (the default), an ``enum`` value must be one of
+            :attr:`choices`. When ``False``, the choices are a menu for convenience, but
+            the spec accepts all integers in the range. Use it for firmware fields for
+            which we do not list all the possible values.
+        max_key: The snapshot key that holds the inclusive maximum of this setting, as
+            the device reports it (for example, ``max_tx_power`` is the limit for
+            ``tx_power``). :func:`parse_value` checks it when it gets a snapshot. This
+            makes the static :attr:`maximum` smaller, to the value that the connected
+            hardware supports.
+        max_length: For ``str`` values, the maximum length of an accepted string (the
+            widths of protocol fields, for example the 31-byte name slot of the flood
+            scope).
+        decimals: For ``float`` values, the fixed number of decimal places. The row shows
+            the value with this number of places, and the parse rounds the value to it.
+            Thus the applied value is the value that the row showed. ``None`` keeps the
+            value as it is given.
+        validate: A last rule for a typed value in the range. It gets the snapshot when
+            there is one. It returns the complaint, or ``None``. Use it for a rule that a
+            limit cannot give: for example, the PIN's "zero or six digits", or the relay
+            only on a frequency that the firmware accepts.
+        getter: Gets the current value from a snapshot dict.
+        apply: A coroutine that applies a parsed value to a device. It gets the snapshot.
     """
 
     key: str
@@ -82,28 +89,29 @@ class SettingSpec:
     validate: Callable[[Any, dict | None], str | None] | None = None
 
 
-# --- value parsing / formatting ----------------------------------------------
+# --- parse and format a value ------------------------------------------------
 
 _TRUE = {"1", "true", "yes", "on", "y"}
 _FALSE = {"0", "false", "no", "off", "n"}
 
 
 def parse_value(spec: SettingSpec, raw: Any, snapshot: dict | None = None) -> Any:
-    """Parse and validate a raw value (typically a CLI/TOML string) for ``spec``.
+    """Parse and validate a raw value (usually a CLI or TOML string) for ``spec``.
 
     Args:
         spec: The target setting.
-        raw: The raw value to coerce (string or already-typed scalar).
-        snapshot: Optional device snapshot; when given and the spec names a
-            :attr:`~SettingSpec.max_key`, the device-reported maximum found there
-            tightens the static bound (e.g. TX power capped at this board's max).
+        raw: The raw value to convert (a string, or a scalar that has a type already).
+        snapshot: An optional device snapshot. If it is given and the spec names a
+            :attr:`~SettingSpec.max_key`, the maximum that the device reports there makes
+            the static limit smaller (for example, the TX power is limited to the maximum
+            of this board).
 
     Returns:
-        The typed, range-checked value ready for :meth:`SettingSpec.apply`.
+        The typed value, with its range checked, ready for :meth:`SettingSpec.apply`.
 
     Raises:
-        DeviceConfigError: If the value is the wrong type, out of range, or breaks the
-            setting's own :attr:`~SettingSpec.validate` rule.
+        DeviceConfigError: If the value has the wrong type, is out of range, or breaks
+            the :attr:`~SettingSpec.validate` rule of the setting.
     """
     value = _parse_typed(spec, raw, snapshot)
     if spec.validate is not None:
@@ -114,15 +122,16 @@ def parse_value(spec: SettingSpec, raw: Any, snapshot: dict | None = None) -> An
 
 
 def _parse_typed(spec: SettingSpec, raw: Any, snapshot: dict | None) -> Any:
-    """:func:`parse_value` short of the setting's own rule: the type, bounds and choices."""
+    """:func:`parse_value` without the rule of the setting itself: type, limits, choices."""
     text = str(raw).strip()
     if spec.value_type == "str":
         # `config show` prints an empty string as the two characters `""`, because a key
-        # with nothing after it reads as a truncated line rather than as an empty value.
-        # A value the dump prints has to be one `set` takes back (CLAUDE.md, "A value must
-        # round-trip"), so the quotes come off here — otherwise feeding a dump back in
-        # silently replaces every empty setting with a pair of quote marks, and the next
-        # dump looks identical, so nothing ever tells you.
+        # with no text after it looks like a truncated line, not like an empty value. A
+        # value that the dump prints must be a value that `set` accepts (CLAUDE.md, "A
+        # value must round-trip"). Thus the quotes are removed here. If they stay, a dump
+        # that you give back as input replaces each empty setting with a pair of
+        # quotation marks, and nothing tells you. The next dump looks the same, thus you
+        # never know.
         if text == '""':
             text = ""
         if spec.max_length is not None and len(text) > spec.max_length:
@@ -138,8 +147,9 @@ def _parse_typed(spec: SettingSpec, raw: Any, snapshot: dict | None) -> Any:
             return False
         raise DeviceConfigError(f"{spec.key}: expected a boolean, got {raw!r}")
 
-    # Numeric (int / enum / float): wrap only the conversion, so a DeviceConfigError
-    # raised by the range/enum checks below is not caught and rewrapped here.
+    # Numeric (int / enum / float): the try wraps only the conversion. Thus this handler
+    # does not catch and wrap again a DeviceConfigError from the range and enum checks
+    # below.
     try:
         if spec.value_type == "float":
             value: Any = float(text)
@@ -167,15 +177,16 @@ def _parse_typed(spec: SettingSpec, raw: Any, snapshot: dict | None) -> Any:
 
 
 def effective_maximum(spec: SettingSpec, snapshot: dict | None) -> float | None:
-    """The inclusive maximum for ``spec``: the device-reported one when known, else static.
+    """The inclusive maximum for ``spec``: the device value if it is known, else the static one.
 
     Args:
         spec: The setting.
-        snapshot: The device snapshot the reported maximum is read from (may be ``None``).
+        snapshot: The device snapshot from which the function reads the reported maximum
+            (can be ``None``).
 
     Returns:
-        The tighter of the spec's static bound and the snapshot's ``max_key`` value, or
-        ``None`` when neither exists.
+        The smaller of the static limit of the spec and the ``max_key`` value of the
+        snapshot, or ``None`` when neither exists.
     """
     maximum = spec.maximum
     if snapshot is not None and spec.max_key is not None:
@@ -190,14 +201,14 @@ def effective_maximum(spec: SettingSpec, snapshot: dict | None) -> float | None:
 
 
 def format_value(spec: SettingSpec, value: Any) -> str:
-    """Render a value for display.
+    """Render a value to show it.
 
     Args:
-        spec: The setting the value belongs to.
-        value: The current value (may be ``None`` if unknown).
+        spec: The setting of the value.
+        value: The current value (can be ``None`` if it is not known).
 
     Returns:
-        A human-readable string.
+        A string that a person can read.
     """
     if value is None:
         return "?"
@@ -221,68 +232,74 @@ async def build_snapshot(
     self_info: dict | None = None,
     path_hash_mode: int | None = None,
 ) -> dict:
-    """Read a device's full current configuration into one dict.
+    """Read all the current settings of a device into one dict.
 
-    Merges ``SELF_INFO`` with the separately-read tuning parameters and path-hash mode.
-    Optional reads that a given firmware does not support are skipped silently so the rest
-    of the snapshot still renders.
+    The function merges ``SELF_INFO`` with the tuning parameters and the path-hash mode,
+    which it reads separately. If a firmware does not support an optional read, the
+    function skips that read and tells nothing. Thus the remaining part of the snapshot
+    still renders.
 
     Args:
         device: A connected device.
-        self_info: An already-read ``SELF_INFO`` dict to reuse instead of asking the
-            radio again — a menu caller passes the devstate session cache here, saving
-            a round-trip on every screen open. Omit to read live (a refresh after a
-            restore or reset must not trust any cache).
-        path_hash_mode: An already-read path-hash mode to reuse, on the same terms.
+        self_info: A ``SELF_INFO`` dict that was read already, to use again instead of a
+            new request to the device. A menu caller gives the devstate session cache
+            here, and this saves a round trip each time that a screen opens. Omit it to
+            read the live values (a new read after a restore or a reset must not trust a
+            cache).
+        path_hash_mode: A path-hash mode that was read already, to use again with the
+            same conditions.
 
     Returns:
-        A dict keyed like ``SELF_INFO`` plus ``rx_delay``, ``airtime_factor``,
-        ``path_hash_mode``, ``autoadd_config``, ``autoadd_max_hops`` and ``flood_scope``,
-        with the device-query frame's facts (``ble_pin``, ``model``, client ``repeat``)
-        underneath and, where the firmware relays at all, its ``repeat_freqs``.
+        A dict with the keys of ``SELF_INFO``, and also ``rx_delay``,
+        ``airtime_factor``, ``path_hash_mode``, ``autoadd_config``,
+        ``autoadd_max_hops``, and ``flood_scope``. Below these, it has the facts of the
+        device-query frame (``ble_pin``, ``model``, client ``repeat``). If the firmware
+        can relay, the dict also has its ``repeat_freqs``.
     """
     snapshot = dict(self_info if self_info is not None else await device.get_self_info())
     try:
         snapshot.update(await device.get_tuning())
-    except Exception:  # noqa: BLE001 - optional read; absence is acceptable
+    except Exception:  # noqa: BLE001 - an optional read. Its absence is acceptable.
         pass
     if path_hash_mode is not None:
         snapshot["path_hash_mode"] = path_hash_mode
     else:
         try:
             snapshot["path_hash_mode"] = await device.get_path_hash_mode()
-        except Exception:  # noqa: BLE001 - optional read; absence is acceptable
+        except Exception:  # noqa: BLE001 - an optional read. Its absence is acceptable.
             pass
     try:
         snapshot["autoadd_config"] = await device.get_autoadd_config()
-    except Exception:  # noqa: BLE001 - optional read; absence is acceptable
+    except Exception:  # noqa: BLE001 - an optional read. Its absence is acceptable.
         pass
     try:
         hops = await device.get_autoadd_max_hops()
-    except Exception:  # noqa: BLE001 - optional read; absence is acceptable
+    except Exception:  # noqa: BLE001 - an optional read. Its absence is acceptable.
         hops = None
     if hops is not None:
         snapshot["autoadd_max_hops"] = hops
     try:
         snapshot["flood_scope"] = await device.get_default_flood_scope()
-    except Exception:  # noqa: BLE001 - optional read; absence is acceptable
+    except Exception:  # noqa: BLE001 - an optional read. Its absence is acceptable.
         pass
-    # The device-query frame is a *different* payload from SELF_INFO, and some settings
-    # only exist there — the BLE pairing code among them, which real firmware reports as
-    # ``ble_pin`` and never puts in SELF_INFO. Without this the Device PIN row could only
-    # ever render "?" on hardware: writable, but with no way to read back what you wrote.
-    # Merged underneath, so a key SELF_INFO also carries keeps the SELF_INFO value (the
-    # same precedence ``probe_device`` uses when it folds the two together).
+    # The device-query frame is a payload that is different from SELF_INFO, and some
+    # settings are only there. One of them is the BLE pairing code: real firmware reports
+    # it as ``ble_pin``, and never puts it in SELF_INFO. Without this read, the Device PIN
+    # row can only render "?" on hardware. The user can write the PIN, but cannot read
+    # back what was written. The frame goes below SELF_INFO in the merge. Thus, if
+    # SELF_INFO also has a key, the SELF_INFO value stays (``probe_device`` uses the same
+    # priority when it merges the two).
     try:
         snapshot = {**await device.get_device_info(), **snapshot}
-    except Exception:  # noqa: BLE001 - optional read; absence is acceptable
+    except Exception:  # noqa: BLE001 - an optional read. Its absence is acceptable.
         pass
-    # Client repeat (firmware v9+) may only be switched on where the firmware allows. The
-    # ranges are one more round trip, so they are asked only of firmware that can relay.
+    # Client repeat (firmware v9+) can be switched on only where the firmware lets it. The
+    # ranges cost one more round trip. Thus MeshTerm asks for them only from firmware that
+    # can relay.
     if "repeat" in snapshot:
         try:
             freqs = await device.get_allowed_repeat_freqs()
-        except Exception:  # noqa: BLE001 - optional read; absence is acceptable
+        except Exception:  # noqa: BLE001 - an optional read. Its absence is acceptable.
             freqs = []
         if freqs:
             snapshot["repeat_freqs"] = [tuple(pair) for pair in freqs]
@@ -292,20 +309,23 @@ async def build_snapshot(
 # --- coupled-command apply helpers -------------------------------------------
 
 
-# Several settings do not have a command of their own: the firmware takes latitude and
-# longitude together, and the four radio parameters together, so changing one means
-# re-sending its siblings unchanged. Those siblings are read from ``snapshot``, which is
-# the caller's picture of the device — and that picture is read *once*, before the first
-# write. So each of these appliers records what it just set, and the reason is a bug that
-# reached a real device: restoring a backup that differed in both latitude and longitude
-# applied ``adv_lat`` (preserving the stale longitude), then ``adv_lon`` (preserving the
-# stale *latitude*) — and the second write silently undid the first. Same for a restore
-# touching two radio fields. Writing back keeps every later sibling in the same batch
-# honest, whether the batch comes from ``config restore`` or the editor's staged changes.
+# Several settings do not have their own command. The firmware takes latitude and
+# longitude together, and the four radio parameters together. Thus, to change one of them,
+# MeshTerm must send the related fields again with no change. MeshTerm reads these related
+# fields from ``snapshot``, which is the image of the device that the caller has. The
+# caller reads this image only one time, before the first write. Thus each of these
+# appliers writes the value that it set into the snapshot. The reason is a bug that
+# occurred on a real device. A backup had a different latitude and a different longitude.
+# Its restore applied ``adv_lat`` (and kept the old longitude), then ``adv_lon`` (and kept
+# the old latitude). Thus the second write cancelled the first, and nothing showed it. The
+# same occurred for a restore that changed two radio fields. Because each applier writes
+# its value back, each later related field in the same batch is correct. This is true
+# when the batch comes from ``config restore``, and when it comes from the staged changes
+# of the editor.
 
 
 def _radio_apply(field_name: str) -> Callable[[Device, Any, dict], Awaitable[None]]:
-    """Build an apply that updates one radio field, preserving the others."""
+    """Build an apply that updates one radio field, and keeps the other fields."""
 
     async def apply(device: Device, value: Any, snapshot: dict) -> None:
         params = {
@@ -315,8 +335,9 @@ def _radio_apply(field_name: str) -> Callable[[Device, Any, dict], Awaitable[Non
             "cr": snapshot.get("radio_cr"),
         }
         params[field_name] = value
-        # Client repeat rides the same command, and the firmware reads its absence as off:
-        # restate it, or retuning the radio quietly stops the node relaying.
+        # Client repeat goes in the same command, and the firmware reads its absence as
+        # off. Thus send it again. If not, a change of the radio settings stops the relay
+        # of the node, and nothing shows it.
         await device.set_radio(
             params["freq"],
             params["bw"],
@@ -330,7 +351,7 @@ def _radio_apply(field_name: str) -> Callable[[Device, Any, dict], Awaitable[Non
 
 
 def _coords_apply(field_name: str) -> Callable[[Device, Any, dict], Awaitable[None]]:
-    """Build an apply that updates one coordinate, preserving the other."""
+    """Build an apply that updates one coordinate, and keeps the other."""
 
     async def apply(device: Device, value: Any, snapshot: dict) -> None:
         lat = value if field_name == "adv_lat" else snapshot.get("adv_lat", 0.0)
@@ -342,7 +363,7 @@ def _coords_apply(field_name: str) -> Callable[[Device, Any, dict], Awaitable[No
 
 
 def _tuning_apply(field_name: str) -> Callable[[Device, Any, dict], Awaitable[None]]:
-    """Build an apply that updates one tuning field, preserving the other."""
+    """Build an apply that updates one tuning field, and keeps the other."""
 
     async def apply(device: Device, value: Any, snapshot: dict) -> None:
         rx = value if field_name == "rx_delay" else snapshot.get("rx_delay", 0.0)
@@ -354,7 +375,7 @@ def _tuning_apply(field_name: str) -> Callable[[Device, Any, dict], Awaitable[No
 
 
 def _telemetry_apply(field_name: str) -> Callable[[Device, Any, dict], Awaitable[None]]:
-    """Build an apply that updates one telemetry mode, preserving the others."""
+    """Build an apply that updates one telemetry mode, and keeps the others."""
 
     async def apply(device: Device, value: Any, snapshot: dict) -> None:
         base = (
@@ -368,7 +389,7 @@ def _telemetry_apply(field_name: str) -> Callable[[Device, Any, dict], Awaitable
 
 
 async def _client_repeat_apply(device: Device, value: Any, snapshot: dict) -> None:
-    """Switch client repeat, restating the four radio fields it travels with."""
+    """Switch client repeat, and send again the four radio fields that go with it."""
     radio = [snapshot.get(key) for key in ("radio_freq", "radio_bw", "radio_sf", "radio_cr")]
     if any(field is None for field in radio):
         raise DeviceConfigError(
@@ -379,10 +400,11 @@ async def _client_repeat_apply(device: Device, value: Any, snapshot: dict) -> No
 
 
 def _flood_scope_valid(value: Any, snapshot: dict | None) -> str | None:
-    """Refuse a default scope name the firmware would refuse (see :func:`regions.validate`).
+    """Refuse a default scope name that the firmware refuses (refer to :func:`regions.validate`).
 
-    ``max_length`` counts characters; the firmware counts UTF-8 bytes, and a repeater could
-    never list back a name with a space or comma in it. Empty is valid — it clears.
+    ``max_length`` counts characters, but the firmware counts UTF-8 bytes. Also, a
+    repeater can never list back a name that has a space or a comma in it. An empty value
+    is valid: it clears the scope.
     """
     if not str(value or "").strip():
         return None
@@ -394,7 +416,7 @@ def _flood_scope_valid(value: Any, snapshot: dict | None) -> str | None:
 
 
 async def _autoadd_hops_apply(device: Device, value: Any, snapshot: dict) -> None:
-    """Set the auto-add hop limit, restating the bitmask it travels behind."""
+    """Set the auto-add hop limit, and send again the bitmask that comes before it."""
     flags = snapshot.get("autoadd_config")
     if flags is None:
         raise DeviceConfigError(
@@ -405,14 +427,14 @@ async def _autoadd_hops_apply(device: Device, value: Any, snapshot: dict) -> Non
 
 
 def _pin_rule(value: Any, snapshot: dict | None) -> str | None:
-    """The firmware takes a pairing PIN of zero (none) or exactly six digits, nothing else."""
+    """The firmware accepts only a pairing PIN of zero (no PIN) or of exactly six digits."""
     if value == 0 or 100000 <= value <= 999999:
         return None
     return f"must be 0 (no PIN) or six digits, got {value}"
 
 
 def _repeat_rule(value: Any, snapshot: dict | None) -> str | None:
-    """Relaying goes on only at a frequency the firmware allows it (when both are known)."""
+    """The relay goes on only at a frequency that the firmware lets it use (if both are known)."""
     if not value or not snapshot:
         return None
     ranges, freq = snapshot.get("repeat_freqs"), snapshot.get("radio_freq")
@@ -427,17 +449,19 @@ def _get(key: str) -> Callable[[dict], Any]:
     return lambda snapshot: snapshot.get(key)
 
 
-# The firmware's TELEM_MODE_DENY / TELEM_MODE_ALLOW_FLAGS / TELEM_MODE_ALLOW_ALL: nobody, the
-# contacts whose telemetry permission flag is set, or anyone who asks. There is no mode 3.
-# The labels stay short because the widest value sizes the editor's value lane for every row.
+# TELEM_MODE_DENY / TELEM_MODE_ALLOW_FLAGS / TELEM_MODE_ALLOW_ALL of the firmware: nobody,
+# the contacts that have the telemetry permission flag set, or all who ask. There is no
+# mode 3. The labels are short, because the widest value sets the width of the value lane
+# of the editor for all rows.
 _TELEMETRY_CHOICES = {0: "deny", 1: "by contact", 2: "allow all"}
 
-# adv_loc_policy / multi_acks are single firmware bytes; we list the values seen in the
-# wild but keep them non-strict so an unfamiliar value is still accepted.
+# adv_loc_policy / multi_acks are single firmware bytes. We list the values that we know
+# from real use, but the choices are not strict. Thus a value that we do not know is still
+# accepted.
 _ADV_LOC_CHOICES = {0: "off", 1: "on"}
 _MULTI_ACKS_CHOICES = {0: "off", 1: "on"}
-# path_hash_mode is a 2-bit field; the hash size carried per hop is mode + 1 bytes. The field
-# has room for a mode 3, but CMD_SET_PATH_HASH_MODE refuses it (``cmd_frame[2] >= 3``).
+# path_hash_mode is a 2-bit field. The hash size for each hop is mode + 1 bytes. The field
+# has space for a mode 3, but CMD_SET_PATH_HASH_MODE refuses it (``cmd_frame[2] >= 3``).
 _PATH_HASH_CHOICES = {
     0: "1-byte hashes (default)",
     1: "2-byte hashes",
@@ -446,7 +470,7 @@ _PATH_HASH_CHOICES = {
 
 
 def _telemetry_spec(key: str, label: str) -> SettingSpec:
-    """Build a telemetry-mode setting spec (shared shape for base/loc/env)."""
+    """Build a telemetry-mode setting spec (the same shape for base, loc, and env)."""
     return SettingSpec(
         key=key,
         label=label,
@@ -466,17 +490,17 @@ def _telemetry_spec(key: str, label: str) -> SettingSpec:
 
 @dataclass(frozen=True, slots=True)
 class RadioPreset:
-    """A named, standard set of radio parameters applied as one unit.
+    """A named, standard set of radio parameters that MeshTerm applies as one unit.
 
     Attributes:
-        name: The preset's name, spelled exactly as MeshCore's own list spells it, so
-            this list can be read against the phone app or the web flasher.
-        freq: Carrier frequency in MHz.
-        bw: Channel bandwidth in kHz.
-        sf: LoRa spreading factor.
-        cr: LoRa coding-rate denominator (5-8 = 4/5-4/8).
-        path_hash_size: Per-hop path-hash size in bytes where the preset names one (a
-            few regions run 2-byte hashes); ``None`` leaves that setting where it is.
+        name: The name of the preset, spelled exactly as the MeshCore list spells it.
+            Thus you can compare this list with the phone app or the web flasher.
+        freq: The carrier frequency in MHz.
+        bw: The channel bandwidth in kHz.
+        sf: The LoRa spreading factor.
+        cr: The denominator of the LoRa coding rate (5-8 = 4/5-4/8).
+        path_hash_size: The path-hash size for each hop in bytes, if the preset names one
+            (some areas use 2-byte hashes). ``None`` does not change that setting.
     """
 
     name: str
@@ -488,11 +512,11 @@ class RadioPreset:
 
     @property
     def summary(self) -> str:
-        """The four parameters on one line, in the order MeshCore's own list prints."""
+        """The four parameters on one line, in the order that the MeshCore list prints them."""
         return f"{self.freq:.3f} SF{self.sf} BW{self.bw:g} CR{self.cr}"
 
     def as_settings(self) -> dict[str, Any]:
-        """Return this preset as a ``{setting_key: value}`` mapping for staging."""
+        """Return this preset as a ``{setting_key: value}`` map that the editor can stage."""
         values: dict[str, Any] = {
             "radio_freq": self.freq,
             "radio_bw": self.bw,
@@ -500,23 +524,25 @@ class RadioPreset:
             "radio_cr": self.cr,
         }
         if self.path_hash_size is not None:
-            # The firmware stores the *mode*, one less than the size it carries per hop
-            # (see _PATH_HASH_CHOICES); MeshCore's own config GUI converts it the same way.
+            # The firmware stores the mode, which is one less than the size for each hop
+            # (refer to _PATH_HASH_CHOICES). The config GUI of MeshCore converts it in the
+            # same way.
             values["path_hash_mode"] = self.path_hash_size - 1
         return values
 
 
-# MeshCore's suggested radio settings, mirrored verbatim — names, order and values — from
-# the list its apps, the web flasher and config.meshcore.dev all read at
-# ``https://api.meshcore.nz/api/v1/config`` (``config.suggested_radio_settings.entries``),
-# fetched 2026-09-04. The presets are community-maintained and they move: through 2025
-# most regions left the original 250 kHz / SF11 modulation for a "narrow" 62.5 kHz one,
-# which is why MeshCore still lists the settings it superseded under its own
-# "(Deprecated)" names — nodes that never re-tuned are still out there on them.
+# The radio settings that MeshCore suggests, copied exactly (names, order, and values)
+# from the list at ``https://api.meshcore.nz/api/v1/config``
+# (``config.suggested_radio_settings.entries``). The MeshCore apps, the web flasher, and
+# config.meshcore.dev all read this list. We downloaded it on 2026-09-04. The community
+# maintains the presets, and they change. During 2025, most areas changed from the
+# original 250 kHz / SF11 modulation to a "narrow" 62.5 kHz modulation. For this reason,
+# MeshCore still lists the old settings with its own "(Deprecated)" names: some nodes did
+# not change their radio settings, and they still use them.
 #
-# Every node on a mesh must match all four parameters, so the only useful preset is the
-# one the local mesh actually runs. A handful of regions also name a path-hash size,
-# which the preset stages alongside the radio fields exactly as MeshCore's GUI does.
+# Each node on a mesh must have the same four parameters. Thus the only useful preset is
+# the preset that the local mesh uses. Some areas also name a path-hash size. The preset
+# stages it with the radio fields, exactly as the MeshCore GUI does.
 RADIO_PRESETS: list[RadioPreset] = [
     RadioPreset("Australia", 915.800, 250.0, 10, 5),
     RadioPreset("Australia (Narrow)", 916.575, 62.5, 7, 8),
@@ -543,19 +569,20 @@ RADIO_PRESETS: list[RadioPreset] = [
     RadioPreset("Vietnam (Deprecated)", 920.250, 250.0, 11, 5),
 ]
 
-#: Frequencies are set in kHz steps, so a snapshot matches a preset within half of one.
+#: Frequencies are set in steps of 1 kHz. Thus a snapshot matches a preset when it is
+#: within half a step.
 _FREQ_TOLERANCE_MHZ = 0.0005
 
 
 def current_preset(snapshot: dict[str, Any]) -> RadioPreset | None:
-    """Return the preset the radio is tuned to, or ``None`` where it matches none.
+    """Return the preset that the radio is tuned to, or ``None`` if it matches no preset.
 
-    Matched on the four radio parameters alone — the ones every node on the mesh has to
-    agree on — never on the path-hash size a few presets also carry, which is how
-    MeshCore's own config GUI reads "which of these am I on?".
+    The match uses only the four radio parameters, which must be the same on each node of
+    the mesh. It never uses the path-hash size that some presets also have. The config
+    GUI of MeshCore answers "which of these am I on?" in the same way.
 
     Args:
-        snapshot: A device snapshot (or one with staged values merged over it).
+        snapshot: A device snapshot (or a snapshot with staged values merged over it).
     """
     for preset in RADIO_PRESETS:
         freq, bw = snapshot.get("radio_freq"), snapshot.get("radio_bw")
@@ -581,7 +608,7 @@ DEVICE_SETTINGS: list[SettingSpec] = [
         "The name other nodes see",
         "Identity",
         "str",
-        max_length=31,  # the firmware's 32-byte name field, its terminator included
+        max_length=31,  # the 32-byte name field of the firmware, with its terminator
         getter=_get("name"),
         apply=lambda d, v, s: d.set_name(v),
     ),
@@ -608,12 +635,13 @@ DEVICE_SETTINGS: list[SettingSpec] = [
         apply=_coords_apply("adv_lon"),
     ),
     SettingSpec(
-        # Written as ``device_pin`` (the name the CLI, the backup TOML and ``set_devicepin``
-        # all use) but *read* as ``ble_pin``, which is what the firmware calls it in the
-        # device-query frame — the only place it appears. Keeping the key means existing
-        # backups still restore; reading the firmware's own name means the row shows a
-        # value instead of "?" on real hardware. The fallback keeps the canonical key
-        # working for anything that reports it directly.
+        # MeshTerm writes it as ``device_pin`` (the name that the CLI, the backup TOML, and
+        # ``set_devicepin`` use), but reads it as ``ble_pin``. This is the name that the
+        # firmware uses in the device-query frame, which is the only place where it
+        # occurs. Because we keep the key, old backups still restore. Because we read the
+        # name of the firmware, the row shows a value instead of "?" on real hardware.
+        # The fallback lets the canonical key work for all sources that report it
+        # directly.
         "device_pin",
         "Device PIN",
         "Code a phone needs to pair over Bluetooth",
@@ -632,7 +660,8 @@ DEVICE_SETTINGS: list[SettingSpec] = [
         "Must match every other node on your mesh",
         "Radio",
         "float",
-        # The bounds CMD_SET_RADIO_PARAMS itself enforces (150–2500 MHz, 7–500 kHz below).
+        # The limits that CMD_SET_RADIO_PARAMS itself applies (150–2500 MHz, and 7–500 kHz
+        # below).
         minimum=150.0,
         maximum=2500.0,
         getter=_get("radio_freq"),
@@ -677,17 +706,18 @@ DEVICE_SETTINGS: list[SettingSpec] = [
         "How loud this radio transmits",
         "Radio",
         "int",
-        minimum=-9,  # CMD_SET_RADIO_TX_POWER's floor; the ceiling is the board's own
+        minimum=-9,  # the minimum of CMD_SET_RADIO_TX_POWER. The board sets the maximum
         maximum=30,
         max_key="max_tx_power",
         getter=_get("tx_power"),
         apply=lambda d, v, s: d.set_tx_power(v),
     ),
     SettingSpec(
-        # Client repeat (firmware v9+): the companion relays mesh traffic like a repeater.
-        # Reported in the device-query frame as ``repeat`` and written as the optional last
-        # byte of the radio command, so it restates the radio and every radio change
-        # restates it (see _radio_apply). The firmware allows it only on a few frequencies.
+        # Client repeat (firmware v9+): the companion relays mesh traffic as a repeater
+        # does. The device-query frame reports it as ``repeat``. MeshTerm writes it as the
+        # optional last byte of the radio command. Thus it sends the radio settings again,
+        # and each radio change sends it again (refer to _radio_apply). The firmware lets
+        # it work only on some frequencies.
         "client_repeat",
         "Repeat",
         "Relay mesh traffic; allowed frequencies only",
@@ -697,9 +727,10 @@ DEVICE_SETTINGS: list[SettingSpec] = [
         apply=_client_repeat_apply,
         validate=_repeat_rule,
     ),
-    # Tuning. Both are firmware floats moved over the wire ×1000; the ranges are the
-    # firmware's own constrain() bounds. (The repeater-side TX delay factors are *not*
-    # here: companion firmware ignores them — they are remote-CLI settings on repeaters.)
+    # Tuning. Both are firmware floats, sent over the wire ×1000. The ranges are the
+    # constrain() limits of the firmware itself. (The TX delay factors of a repeater are
+    # not here: companion firmware ignores them. They are remote-CLI settings on
+    # repeaters.)
     SettingSpec(
         "airtime_factor",
         "Airtime factor",
@@ -745,8 +776,8 @@ DEVICE_SETTINGS: list[SettingSpec] = [
         apply=lambda d, v, s: d.set_autoadd_config(v),
     ),
     SettingSpec(
-        # The firmware compares it with an advert's path hash count: 0 is no limit, 1 is
-        # direct neighbours only, N admits up to N-1 hops. Capped at 64.
+        # The firmware compares it with the path hash count of an advert: 0 is no limit, 1
+        # is only direct neighbours, N accepts a maximum of N-1 hops. The maximum is 64.
         "autoadd_max_hops",
         "Auto-add max hops",
         "Only auto-add nodes this near; 1 = direct, 0 = any",
@@ -812,11 +843,12 @@ DEVICE_SETTINGS: list[SettingSpec] = [
 
 _BY_KEY: dict[str, SettingSpec] = {s.key: s for s in DEVICE_SETTINGS}
 
-#: Every key that was once a device setting and no longer is — none yet. A retired key is
-#: never reused, for the reason :data:`meshterm.core.preferences.RETIRED` gives, and with
-#: more at stake here: the settings store remembers values to *restore onto the radio*, so a
-#: key that came back meaning something else would offer to write the old value's number
-#: into the new setting. ``tests/test_retired.py`` fails a registry that takes one back.
+#: All the keys that were device settings before and are not now. There are none yet. A
+#: retired key is never used again, for the reason that
+#: :data:`meshterm.core.preferences.RETIRED` gives. Here the risk is larger: the settings
+#: store keeps values to restore them to the radio. If a key comes back with a different
+#: meaning, the store offers to write the number of the old value into the new setting.
+#: ``tests/test_retired.py`` fails a registry that uses a retired key again.
 RETIRED: frozenset[str] = frozenset()
 
 
@@ -835,7 +867,7 @@ def get_spec(key: str) -> SettingSpec:
         The matching :class:`SettingSpec`.
 
     Raises:
-        DeviceConfigError: If no such setting exists.
+        DeviceConfigError: If there is no such setting.
     """
     spec = _BY_KEY.get(key)
     if spec is None:
@@ -845,9 +877,9 @@ def get_spec(key: str) -> SettingSpec:
 
 
 def settings_by_category() -> list[tuple[str, list[SettingSpec]]]:
-    """Return settings grouped by category in display order.
+    """Return the settings in groups by category, in display order.
 
     Returns:
-        A list of ``(category, specs)`` pairs following :data:`CATEGORIES` order.
+        A list of ``(category, specs)`` pairs, in the order of :data:`CATEGORIES`.
     """
     return [(cat, [s for s in DEVICE_SETTINGS if s.category == cat]) for cat in CATEGORIES]

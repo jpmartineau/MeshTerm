@@ -1,18 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
-"""What an overheard frame is *addressed to* — the packet body nobody else parses.
+"""The addressing of an overheard packet: the part of the packet body that no other code parses.
 
-The companion's RX packet log hands every overheard frame to the meshcore library, which
-splits off the header it always understands — route type, payload class, relay path — and
-leaves the rest as an undecoded ``pkt_payload`` blob. The library then decodes that blob
-for exactly two classes: an advert (the identity and location it carries) and a
-channel-text frame (its channel fingerprint, MAC and ciphertext). Every other class — the
-direct messages, requests, responses, path returns, acks and traces that make up half of
-what a busy mesh puts on the air — arrives as bytes, which is why an origin-less flood
-used to have nothing to say about itself beyond its class.
+The RX packet log of the companion gives each overheard packet to the meshcore library.
+The library separates the header, which it always understands: the route type, the
+payload class, and the relay path. It keeps the remainder as an undecoded ``pkt_payload``
+blob. Then the library decodes that blob for only two classes: an advert (the identity
+and the location in it) and a channel text packet (its channel fingerprint, MAC, and
+ciphertext). Each other class arrives as bytes: the direct messages, requests, responses,
+path returns, acks, and traces. These are half of the packets that a busy mesh transmits.
+For this reason, a flood without an origin once showed nothing about itself except its
+class.
 
-Those bytes are not opaque. MeshCore addresses a frame in the first few of them, and the
-layout is fixed per payload class — as published in the protocol's own ``docs/payloads.md``
-and ``docs/packet_format.md``:
+But these bytes are not opaque data. MeshCore puts the addressing of a packet in the first
+few bytes, and the layout is fixed for each payload class. The protocol publishes these
+layouts in its ``docs/payloads.md`` and ``docs/packet_format.md``:
 
 ===========================  ==========================================================
 class                        body layout
@@ -25,35 +26,38 @@ class                        body layout
 ``GRP_TXT``/``GRP_DATA``     ``[channel hash:1][MAC:2][ciphertext]``
 ===========================  ==========================================================
 
-One class also breaks the rule the *header* follows. Every other frame's ``path`` field is
-the list of relay hashes it has crossed; a ``TRACE``'s is a list of **signed SNR bytes**,
-one per hop traversed — see :func:`trace_link_snrs`, which is what reads it, and which
-exists because reading those bytes as hashes fabricated adjacency in the topology graph.
+One class also breaks the rule that the header follows. In each other packet, the ``path``
+field is the list of the relay hashes that the packet went through. In a ``TRACE``, it is a
+list of **signed SNR bytes**, one for each hop that the packet went through. Refer to
+:func:`trace_link_snrs`, which reads this field. That function exists because MeshTerm
+once read these bytes as hashes, and this put false adjacency into the topology graph.
 
-Endpoints are named by a *hash* — the leading byte of the node's public key, the same
-one-byte identity the relay path's hops use — so they resolve through the app's ordinary
-node resolver and land on the same names, hues and collisions as every hop does. An
-anonymous request is the exception: having no shared secret to be recognised by yet, it
-carries its sender's whole public key (the protocol docs' "sender's Ed25519 public key" —
-the ``Packet.h`` header comment still calls it "ephemeral", but the login payloads it
-carries are addressed to a node that has to know who logged in, and the docs' field table
-is the later word). What is recovered here is only ever addressing: who a frame is for,
-who it says it is from, which channel it belongs to, the token it carries. The ciphertext
-is left alone (a channel we hold the key for is decrypted in
-:mod:`~meshterm.core.channels`, by MAC-confirmed key, and nothing else on the mesh is ours
-to read).
+An endpoint is identified by a hash: the first byte of the public key of the node. This is
+the same one-byte identity that the hops of the relay path use. Thus endpoints resolve
+through the usual node resolver of the app, and they get the same names, hues, and
+collisions as each hop. An anonymous request is the exception. It has no shared secret yet
+by which the receiver can recognize it, so it carries the full public key of its sender.
+(The protocol documents call it the "sender's Ed25519 public key". The comment in the
+``Packet.h`` header still calls it "ephemeral". But the login payloads that it carries go
+to a node that must know who logged in, and the field table of the documents is the later
+statement.) This module recovers only the addressing: for whom a packet is, from whom it
+says it is, the channel that it is part of, and the token that it carries. This module does
+not decrypt the ciphertext. (A channel for which we have the key is decrypted in
+:mod:`~meshterm.core.channels`, by a key that the MAC confirms. No other data on the mesh
+is ours to read.)
 
-Two things are checked before a single byte is trusted, because a wrong slice would
-produce not an error but a plausible-looking hash. The frame's **payload version** must be
-the one these layouts describe — v1, the only version deployed, and the only one whose
-hashes are one byte and whose MAC is two (the header reserves two bits for a v2 that
-widens both). And the body must be **long enough** to hold the layout its class promises.
-Either check failing yields nothing at all.
+MeshTerm does two checks before it trusts one byte, because a wrong slice does not cause an
+error: it gives a hash that looks correct. First, the payload version of the packet
+must be the version that these layouts describe. This is v1, the only version in use, and
+the only version with one-byte hashes and a two-byte MAC. (The header keeps two bits for a
+v2 that makes both of them wider.) Second, the body must be long enough for the layout
+that its class promises. If one of the two checks fails, the result is empty.
 
-The recovered fields are merged straight into the frame's raw payload (see
-:func:`~meshterm.core.connection.packet_observation_from_event`) under their own keys, so
-every reader — the live feed's lane, the packet viewer's card, the repository's stored
-columns — reads them exactly as it reads the two classes the library decoded itself.
+The recovered fields are merged directly into the raw payload of the packet (refer to
+:func:`~meshterm.core.connection.packet_observation_from_event`), each under its own key.
+Thus each part of the app that reads the payload (the lane of the live feed, the card of
+the packet viewer, the stored columns of the repository) reads these fields the same way
+that it reads the two classes that the library decoded itself.
 """
 
 from __future__ import annotations
@@ -61,70 +65,77 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-#: Payload classes MeshCore addresses with a pair of one-byte key hashes: the recipient
-#: first, the sender second, then the MAC and the ciphertext. A direct message, a request
-#: to a repeater, its response, and a returned path all share this envelope.
+#: The payload classes that MeshCore addresses with a pair of one-byte key hashes: first the
+#: recipient, then the sender, then the MAC and the ciphertext. A direct message, a request
+#: to a repeater, its response, and a returned path all use this envelope.
 ADDRESSED_CLASSES = frozenset({"REQ", "RESPONSE", "TEXT_MSG", "PATH"})
 
-#: Payload classes carrying the ``[channel hash][MAC][ciphertext]`` channel envelope: a
-#: channel's text messages and its datagrams. Only ``GRP_DATA`` is decoded here — the
-#: library already breaks ``GRP_TXT`` out itself, into these very same field names — but
-#: both are stored, decrypted and named by the same code from here on.
+#: The payload classes that carry the ``[channel hash][MAC][ciphertext]`` channel envelope:
+#: the text messages of a channel and its datagrams. This module decodes only ``GRP_DATA``,
+#: because the library already decodes ``GRP_TXT`` itself, into the same field names. But
+#: after this point, the same code stores, decrypts, and names the two classes.
 CHANNEL_CLASSES = frozenset({"GRP_TXT", "GRP_DATA"})
 
-#: Bytes of a public key a frame names an endpoint by — one, the same one-byte identity a
-#: relay-path hop carries, which is why an endpoint resolves through the ordinary node
-#: resolver (and collides exactly as a hop does). Fixed by :data:`_PAYLOAD_V1`.
+#: The number of bytes of a public key by which a packet identifies an endpoint. It is one:
+#: the same one-byte identity that a hop of a relay path carries. This is why an endpoint
+#: resolves through the usual node resolver (and has the same collisions as a hop).
+#: :data:`_PAYLOAD_V1` sets this value.
 ENDPOINT_HASH_BYTES = 1
 
-#: The payload version these layouts describe: 1-byte endpoint hashes and a 2-byte MAC.
-#: The header's two version bits reserve a v2 that widens both, so a frame announcing any
-#: other version is left undecoded rather than sliced by v1's offsets.
+#: The payload version that these layouts describe: 1-byte endpoint hashes and a 2-byte
+#: MAC. The two version bits of the header keep a v2 that makes both of them wider. Thus a
+#: packet that announces a different version stays undecoded. MeshTerm does not slice it
+#: with the offsets of v1.
 _PAYLOAD_V1 = 0
 
-#: Bytes of the MAC that follows the addressing.
+#: The number of bytes of the MAC that follows the addressing.
 _MAC = 2
-#: Bytes of a full public key, carried whole by an anonymous request's sender.
+#: The number of bytes of a full public key. An anonymous request carries the full key of
+#: its sender.
 _KEY = 32
-#: Bytes of a frame's own token — an ack's checksum, a trace's tag.
+#: The number of bytes of the token of a packet: the checksum of an ack, or the tag of a
+#: trace.
 _TOKEN = 4
 
 
 def frame_addressing(payload: Mapping[str, Any]) -> dict[str, str]:
-    """Recover what a raw RX-logged frame addresses, from its undecoded body.
+    """Recover the addressing of a raw packet from the RX log, from its undecoded body.
 
-    Reads the leading bytes of ``pkt_payload`` according to the frame's payload class
-    (see the module docstring's table), and returns them as hex under the raw-payload keys
-    the rest of the app reads:
+    Reads the first bytes of ``pkt_payload`` in the layout of the payload class of the
+    packet (refer to the table in the module docstring). Returns them as hex, under the
+    raw-payload keys that the remainder of the app reads:
 
-    * ``dest_hash`` — the recipient's one-byte key hash (every addressed class).
-    * ``src_hash`` — the sender's one-byte key hash (the two-hash classes).
-    * ``cipher_mac`` — the two-byte MAC that follows them: a tag over the encrypted
-      message, and so a fingerprint identifying *which* message a frame carries without
-      being able to read it.
-    * ``src_key`` — the sender's *whole* public key, which an anonymous request carries
-      instead of a hash (it has no shared secret to be recognised by yet).
-    * ``ack_crc`` — an ack's four-byte checksum of the message it acknowledges, hex in
-      wire order: the same form the companion reports its *own* delivery acks in, so the
-      two can be compared.
-    * ``trace_tag`` — a trace's tag, the token its reply is matched by. Read as the
-      little-endian ``uint32`` the firmware writes and shown as eight hex digits, so it
-      reads as the same number a trace reply's ``tag`` does rather than byte-reversed.
-    * ``chan_hash``/``cipher_mac``/``crypted`` — a channel datagram's envelope, the same
-      three fields the library breaks a channel *text* frame into.
+    * ``dest_hash``: the one-byte key hash of the recipient (each addressed class).
+    * ``src_hash``: the one-byte key hash of the sender (the classes with two hashes).
+    * ``cipher_mac``: the two-byte MAC that follows the hashes. It is a tag over the
+      encrypted message. Thus it is a fingerprint that identifies which message a packet
+      carries, but it does not let MeshTerm read that message.
+    * ``src_key``: the full public key of the sender. An anonymous request carries it
+      instead of a hash, because the request has no shared secret yet by which the
+      receiver can recognize it.
+    * ``ack_crc``: the four-byte checksum in an ack of the message that the ack
+      acknowledges, as hex in wire order. The companion reports its own delivery acks in
+      the same form, so MeshTerm can compare the two.
+    * ``trace_tag``: the tag of a trace, the token that matches the trace to its reply. It
+      is read as the little-endian ``uint32`` that the firmware writes, and shown as eight
+      hex digits. Thus it is the same number as the ``tag`` of a trace reply, not that
+      number with its bytes in reverse order.
+    * ``chan_hash``/``cipher_mac``/``crypted``: the envelope of a channel datagram. These
+      are the same three fields into which the library divides a channel text packet.
 
-    Hashes and keys are the bytes as they sit on the wire, hex-encoded — a hash reads
-    exactly as the path hops beside it do.
+    Hashes and keys are the bytes in their order on the wire, encoded as hex. Thus a hash
+    has the same form as the path hops next to it.
 
     Args:
-        payload: The frame's raw payload, as the RX-log event carried it (needs
-            ``payload_typename`` and the undecoded ``pkt_payload`` bytes; ``payload_ver``
-            is honoured when present).
+        payload: The raw payload of the packet, as the RX-log event carried it. It must
+            have ``payload_typename`` and the undecoded ``pkt_payload`` bytes. If
+            ``payload_ver`` is present, the function obeys it.
 
     Returns:
-        The recovered fields, or an empty mapping when the class carries no addressing,
-        the body is missing, the frame announces a payload version these layouts don't
-        describe, or the body is too short to hold the layout its class promises.
+        The recovered fields. The mapping is empty when the class carries no addressing,
+        when the body is missing, when the packet announces a payload version that these
+        layouts do not describe, or when the body is too short for the layout that its
+        class promises.
     """
     typename = payload.get("payload_typename")
     body = payload.get("pkt_payload")
@@ -132,7 +143,7 @@ def frame_addressing(payload: Mapping[str, Any]) -> dict[str, str]:
         return {}
     version = payload.get("payload_ver")
     if version is not None and version != _PAYLOAD_V1:
-        return {}  # a wider hash/MAC: v1's offsets would slice the wrong bytes
+        return {}  # a wider hash and MAC: the v1 offsets get the wrong bytes
     body = bytes(body)
 
     hash_w = ENDPOINT_HASH_BYTES
@@ -142,12 +153,13 @@ def frame_addressing(payload: Mapping[str, Any]) -> dict[str, str]:
         return {
             "dest_hash": body[:hash_w].hex(),
             "src_hash": body[hash_w : hash_w * 2].hex(),
-            # The MAC an addressed frame carries is a tag over *this* message's plaintext,
-            # so two frames sharing one (between the same pair) are copies of the same
-            # message — a fingerprint that needs no key to compare. It is what lets the
-            # message-paths view group a direct message's own retransmissions and tell them
-            # from the next message's, which content-matching does for a channel frame we
-            # can decrypt (see :mod:`~meshterm.services.message_paths`).
+            # The MAC of an addressed packet is a tag over the plaintext of this message.
+            # Thus two packets with the same MAC (between the same pair) are copies of the
+            # same message. MeshTerm can compare this fingerprint without a key. With it,
+            # the message-paths screen can group the retransmissions of a direct message
+            # and separate them from those of the next message. For a channel packet that
+            # we can decrypt, a match of the content does this (refer to
+            # :mod:`~meshterm.services.message_paths`).
             "cipher_mac": body[hash_w * 2 : hash_w * 2 + _MAC].hex(),
         }
     if typename == "ANON_REQ":
@@ -162,13 +174,14 @@ def frame_addressing(payload: Mapping[str, Any]) -> dict[str, str]:
             return {}
         return {"ack_crc": body[:_TOKEN].hex()}
     if typename == "TRACE":
-        # tag, auth code, flags — the shortest trace is one that collected no hops yet.
+        # The tag, the auth code, and the flags. The shortest trace has no hops yet.
         if len(body) < _TOKEN * 2 + 1:
             return {}
-        # The firmware memcpy's the tag straight out of a uint32, and the library reads a
-        # trace reply's back the same way: little-endian, so the two agree on the number.
+        # The firmware copies the tag directly from a uint32 (memcpy), and the library
+        # reads the tag of a trace reply the same way: little-endian. Thus the two agree
+        # on the number.
         return {"trace_tag": f"{int.from_bytes(body[:_TOKEN], 'little'):08x}"}
-    if typename == "GRP_DATA":  # GRP_TXT's twin, which the library leaves undecoded
+    if typename == "GRP_DATA":  # like GRP_TXT, but the library does not decode it
         if len(body) < hash_w + _MAC:
             return {}
         return {
@@ -180,30 +193,32 @@ def frame_addressing(payload: Mapping[str, Any]) -> dict[str, str]:
 
 
 def trace_link_snrs(payload: Mapping[str, Any]) -> list[float] | None:
-    """Recover the per-hop link readings a ``TRACE`` frame collected, from its path field.
+    """Recover the link reading of each hop that a ``TRACE`` packet collected, from its path.
 
-    A trace is the one class whose header ``path`` field does not hold relay hashes. The
-    firmware grows it by **one signed SNR byte per hop the packet traverses** — the
-    reading the relaying node heard its predecessor at — which is how a trace reply can
-    report a whole route's link quality without a second field, and what the meshcore
-    parser's ``# Beware of traces where pathes are mixed`` warns about. Read as hashes it
-    is not merely useless but actively false: the bytes resolve to whichever nodes happen
-    to share those leading digits and enter the topology graph as adjacency that was never
-    observed.
+    A trace is the only class in which the ``path`` field of the header does not hold relay
+    hashes. The firmware adds **one signed SNR byte for each hop that the packet goes
+    through**. Each byte is the SNR at which a node that relayed the packet heard the node
+    before it. This is how a trace reply can report the link quality of a full route
+    without a second field. It is also the subject of the warning
+    ``# Beware of traces where pathes are mixed`` in the meshcore parser. If MeshTerm reads
+    these bytes as hashes, the result is not only useless but false. The bytes resolve to
+    the nodes that have the same first digits by chance. Then they go into the topology
+    graph as adjacency that nobody observed.
 
-    The distinction is measurable, not theoretical. Across a captured population of 1,604
-    traces (2,221 path entries), every entry read as a signed byte over four lands inside
-    the LoRa SNR band, spanning −10.5 to +15.0 dB — where relay hashes, being uniform over
-    the byte, would put roughly five in six outside it.
+    This difference is measured, not theoretical. In a captured population of 1,604 traces
+    (2,221 path entries), each entry, read as a signed byte divided by four, is in the LoRa
+    SNR band, from −10.5 to +15.0 dB. But relay hashes are uniform over the byte, so
+    approximately five in six relay hashes are outside that band.
 
     Args:
-        payload: The frame's raw payload as the RX-log event carried it (needs
-            ``payload_typename``, ``path_len`` and the hex ``path``).
+        payload: The raw payload of the packet, as the RX-log event carried it. It must
+            have ``payload_typename``, ``path_len``, and the hex ``path``.
 
     Returns:
-        One SNR in dB per traversed hop, in the order the packet walked them, or ``None``
-        when the frame is not a trace or its path field is unreadable at the announced
-        length. A trace nobody has relayed yet correctly yields an empty list.
+        One SNR in dB for each hop that the packet went through, in the order of the hops.
+        ``None`` when the packet is not a trace, or when its path field cannot be read at
+        the announced length. For a trace that no node relayed yet, the result is an empty
+        list, and this result is correct.
     """
     if payload.get("payload_typename") != "TRACE":
         return None
@@ -219,10 +234,10 @@ def trace_link_snrs(payload: Mapping[str, Any]) -> list[float] | None:
     except ValueError:
         return None
     if len(readings) < hop_count:
-        return None  # short of what it announced: the tail would be invented, not read
+        return None  # shorter than announced: the missing end can only be invented
     return [_snr_db(b) for b in readings[:hop_count]]
 
 
 def _snr_db(byte: int) -> float:
-    """Decode one wire SNR byte: a signed value in quarter-decibels."""
+    """Decode one SNR byte from the wire: a signed value in quarter decibels."""
     return (byte - 256 if byte >= 128 else byte) / 4.0

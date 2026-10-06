@@ -1,52 +1,56 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The software MeshCore node MeshTerm runs on a radio wired straight to the host.
+"""MeshTerm runs this software MeshCore node on a radio that is wired directly to the host.
 
-A board like the uConsole's AIO puts an SX1262 on the host's SPI bus with no
-microcontroller and no firmware in front of it, so there is no companion to talk to until
-something runs one. This file is that something: MeshTerm starts it as a **child process**
-when it connects (:mod:`meshterm.core.spiradio` is the parent's half), talks to it over the
-standard companion protocol on a loopback port like any network companion, and ends it when
-it disconnects — so the radio's pins are held exactly as long as MeshTerm is using them.
+A board such as the AIO of the uConsole puts an SX1262 on the SPI bus of the host, with no
+microcontroller and no firmware in front of it. Thus there is no companion to talk to
+until a program runs one. This file is that program. MeshTerm starts it as a **child
+process** when it connects (:mod:`meshterm.core.spiradio` is the half of the parent).
+MeshTerm talks to it through the standard companion protocol on a loopback port, the same
+as with a network companion. MeshTerm stops it when it disconnects. Thus the node holds
+the pins of the radio for exactly as long as MeshTerm uses them.
 
-**Self-contained on purpose.** Nothing here imports MeshTerm. The radio library
-(``openhop_core``) is an optional install that often lives in a different interpreter than
-MeshTerm's — the one-file build cannot import it at all, and on a uConsole it usually sits
-in its own venv — so the parent runs *this file* by path under whichever Python has the
-library. Standard library plus ``openhop_core``, and nothing else, is the contract that
-makes that work; ``tests/test_radionode.py`` holds it.
+**Self-contained on purpose.** No part of this file imports MeshTerm. The radio library
+(``openhop_core``) is an optional install, and it is often in a different interpreter
+from the MeshTerm interpreter. The one-file build cannot import it, and on a uConsole it
+is usually in its own venv. Thus the parent runs this file by its path, with the Python
+that has the library. The contract that makes this work is: the standard library and
+``openhop_core``, and nothing else. ``tests/test_radionode.py`` makes sure that the
+contract stays true.
 
-**What firmware would remember, this remembers.** The library keeps preferences, channels
-and contacts in memory only, which is why a node run this way used to come up with no
-channels after every restart. Everything a firmware companion keeps in flash is kept in the
-state directory the parent names instead:
+**This file keeps what firmware keeps.** The library keeps prefs, channels, and contacts
+only in memory. For this reason, a node that ran in this way once started with no
+channels after each restart. Now all the data that a firmware companion keeps in flash is
+kept in the state directory that the parent names:
 
 =================  =============================================================
-``identity.key``   the node's private seed — its identity on the mesh
-``prefs.json``     name, radio settings, TX power, position, the other prefs —
-                   and, on a board with a GPS, its switch and interval
+``identity.key``   the private seed of the node: its identity on the mesh
+``prefs.json``     name, radio settings, TX power, position, the other prefs,
+                   and also, on a board with a GPS, the GPS switch and interval
 ``channels.json``  the channel table, slot by slot
 ``contacts.json``  the contact list
 =================  =============================================================
 
-**What firmware would do with a GPS, this does.** A board whose wiring names a GPS port
-(the Cardputer Zero's Cap) gets the two settings MeshCore's companion firmware gives a
-board with a receiver — ``gps`` to run it and ``gps_interval`` to pace it — reported and
-set as custom variables, which is where MeshTerm's Device config already looks for them.
-While it runs, a valid fix becomes the node's position: the one its self-info reports
-and, when the node shares its location, its adverts carry (:class:`Gps`).
+**This file does with a GPS what firmware does.** A board can have a wiring that names a
+GPS port (the Cap of the Cardputer Zero). This board gets the two settings that the
+MeshCore companion firmware gives to a board with a receiver: ``gps`` to run it, and
+``gps_interval`` to set its rate. The node reports and sets them as custom variables,
+because Device config in MeshTerm already looks for them there. While the GPS runs, a
+valid fix becomes the position of the node. This is the position that its self-info
+reports, and that its adverts carry when the node shares its location (:class:`Gps`).
 
-**Talking to the parent.** The parent reads exactly one JSON line from this process's
-stdout: ``{"event": "ready", "port": …, "public_key": …}`` once the frame server is
-listening, or ``{"event": "error", "kind": …, "message": …}`` if the radio could not be
-opened. The library prints its own diagnostics to stdout, so the real stdout is set aside
-for that one line and everything else is sent to stderr, which the parent keeps as the
-node's log.
+**Messages to the parent.** The parent reads exactly one JSON line from the stdout of this
+process: ``{"event": "ready", "port": …, "public_key": …}`` when the frame server
+listens, or ``{"event": "error", "kind": …, "message": …}`` if the radio did not open.
+The library prints its own diagnostics to stdout. Thus the node keeps the real stdout for
+that one line only, and sends all other output to stderr. The parent keeps stderr as the
+log of the node.
 
-**Letting go of the radio.** GPIO lines requested through the character device and an open
-``spidev`` are the kernel's to release, and it releases them when the process ends however
-it ends. The work is making sure the process *does* end with its parent: it exits when its
-stdin reaches end-of-file (the parent closing it, or the parent dying and the kernel closing
-it), and on Linux it also asks for ``SIGTERM`` the moment its parent goes.
+**The release of the radio.** The kernel releases the GPIO lines that the node requested
+through the character device, and the open ``spidev``. It releases them when the process
+ends, in any way that it ends. Thus the work is to make sure that the process ends with
+its parent. The process exits when its stdin gets to end-of-file (when the parent closes
+it, or when the parent dies and the kernel closes it). On Linux, it also asks for
+``SIGTERM`` at the moment that its parent stops.
 """
 
 from __future__ import annotations
@@ -66,47 +70,51 @@ import time
 from pathlib import Path
 from typing import Any
 
-#: The radio library this node runs on. ``pymc_core`` (its name before 2026) is not
-#: supported here: it needs three shims that ``openhop_core`` made unnecessary, and the
-#: standalone bridge still carries them for anyone on it.
+#: The radio library that this node runs on. This file does not support ``pymc_core``
+#: (the name of the library before 2026). It needs three shims that ``openhop_core`` made
+#: unnecessary, and the standalone bridge still has them for the users of the old library.
 RUNTIME = "openhop_core"
 
-#: How many times ``radio.begin()`` is tried when a GPIO line is busy, and the pause before
-#: each retry. A node that just exited released its lines as it went, so the retries are for
-#: a line some *other* program is letting go of — not for waiting out a program that holds it.
+#: The number of times that the node tries ``radio.begin()`` when a GPIO line is busy, and
+#: the pause before each retry. A node that exited released its lines when it stopped.
+#: Thus the retries are for a line that a different program is in the process of
+#: releasing. They are not to wait until a program that holds the line stops.
 BEGIN_ATTEMPTS = 3
 BEGIN_BACKOFF_S = 1.5
 
-#: The model string the frame server reports, which MeshTerm shows as the device model,
-#: for a radio on a board MeshTerm doesn't know by name (the Cap reports "Cap LoRa-1262").
+#: The model string that the frame server reports for a radio on a board that MeshTerm
+#: does not know by name. MeshTerm shows it as the device model (the Cap reports
+#: "Cap LoRa-1262").
 DEVICE_MODEL = "MeshTerm SPI node"
 
 log = logging.getLogger("radionode")
 
 
-# --- errors the parent is told about -------------------------------------------------------
+# --- errors that go to the parent ----------------------------------------------------------
 
 
 class NodeError(Exception):
-    """A failure to bring the node up, with the ``kind`` the parent words its message by.
+    """A failure to start the node, with the ``kind`` that the parent uses for its message.
 
-    Kinds: ``runtime`` (the radio library is missing or too old), ``no-spi`` / ``no-gpio`` /
-    ``no-i2c`` (the device node doesn't exist), ``permission`` (it exists but this user
-    can't open it), ``busy`` (another program holds the radio's pins), ``absent`` (the board
-    is there but the radio on it doesn't answer), and ``failed`` (anything else).
+    The kinds are: ``runtime`` (the radio library is missing or too old), ``no-spi`` /
+    ``no-gpio`` / ``no-i2c`` (the device file does not exist), ``permission`` (it exists,
+    but this user cannot open it), ``busy`` (a different program holds the pins of the
+    radio), ``absent`` (the board is there, but the radio on it does not answer), and
+    ``failed`` (all other failures).
     """
 
     def __init__(self, kind: str, message: str) -> None:
-        """Carry ``message`` as the error text and ``kind`` as its classification."""
+        """Keep ``message`` as the error text, and ``kind`` as its classification."""
         super().__init__(message)
         self.kind = kind
 
 
 class _Recent(logging.Handler):
-    """Keeps the library's recent error lines, to tell *why* ``radio.begin()`` gave up.
+    """Keeps the recent error lines of the library, to tell why ``radio.begin()`` stopped.
 
-    The GPIO manager answers a busy or forbidden pin by logging the reason and calling
-    ``sys.exit``, so the reason exists only as a log line; this is where it is read back.
+    When a pin is busy or forbidden, the GPIO manager logs the reason and calls
+    ``sys.exit``. Thus the reason exists only as a log line. The node reads it back from
+    this handler.
     """
 
     def __init__(self) -> None:
@@ -119,7 +127,7 @@ class _Recent(logging.Handler):
 
 
 def classify_begin_failure(lines: list[str]) -> str:
-    """The error kind a failed ``radio.begin()`` amounts to, from the library's log lines."""
+    """The error kind of a failed ``radio.begin()``, from the log lines of the library."""
     text = " ".join(lines).lower()
     if "already in use" in text or "resource busy" in text:
         return "busy"
@@ -132,14 +140,14 @@ def classify_begin_failure(lines: list[str]) -> str:
 
 
 def _write_json(path: Path, value: Any) -> None:
-    """Replace ``path`` with ``value`` as JSON in one rename (a crash keeps the old file)."""
+    """Replace ``path`` with ``value`` as JSON in one rename (after a crash, the old file stays)."""
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(value, indent=2), encoding="utf-8")
     tmp.replace(path)
 
 
 def _read_json(path: Path) -> Any:
-    """``path`` parsed as JSON, or ``None`` when it is missing or unreadable."""
+    """``path`` parsed as JSON, or ``None`` when it is missing or cannot be read."""
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -147,11 +155,12 @@ def _read_json(path: Path) -> Any:
 
 
 def load_identity_seed(state: Path, mint) -> bytes:  # noqa: ANN001 - () -> bytes
-    """The node's private seed from ``identity.key``, minting and saving one if there is none.
+    """The private seed of the node from ``identity.key``, or a new one that it mints and saves.
 
     Args:
-        state: The node's state directory.
-        mint: Makes a fresh seed (the library's key generator) when none is saved yet.
+        state: The state directory of the node.
+        mint: Makes a new seed (the key generator of the library) when no seed is saved
+            yet.
     """
     path = state / "identity.key"
     try:
@@ -182,11 +191,12 @@ def prefs_to_json(prefs: Any) -> dict:
 
 
 def apply_saved_prefs(prefs: Any, saved: Any) -> None:
-    """Load ``prefs.json`` into a ``NodePrefs`` in place, field by field.
+    """Read ``prefs.json`` into a ``NodePrefs`` in place, one field at a time.
 
-    Only fields the library's ``NodePrefs`` still declares are taken, each coerced to the
-    type its default has, so a field the library dropped is ignored and a hand-edited value
-    of the wrong type is skipped rather than carried into the radio.
+    The function takes only the fields that the ``NodePrefs`` of the library still
+    declares. It converts each value to the type of the default of that field. Thus it
+    ignores a field that the library removed. It also skips a value of the wrong type from
+    a hand edit, and does not send it to the radio.
     """
     if not isinstance(saved, dict):
         return
@@ -223,7 +233,7 @@ def channels_to_json(store: Any) -> list[dict]:
 
 
 def saved_channels(saved: Any) -> list[tuple[int, str, bytes]]:
-    """``channels.json`` as ``(idx, name, secret)`` triples, skipping malformed entries."""
+    """``channels.json`` as ``(idx, name, secret)`` triples, without the malformed entries."""
     out = []
     for entry in saved if isinstance(saved, list) else []:
         try:
@@ -237,24 +247,27 @@ def saved_channels(saved: Any) -> list[tuple[int, str, bytes]]:
 
 
 def preamble_for_sf(spreading_factor: int) -> int:
-    """The LoRa preamble, in symbols, MeshCore uses at a spreading factor: 32 up to SF8, else 16.
+    """The LoRa preamble (symbols) that MeshCore uses at a spreading factor: 32 up to SF8, else 16.
 
-    This is MeshCore's own rule (``RadioLibWrapper::preambleLengthForSF``), and the receiver
-    has to follow it, not only the transmitter. The SX1262 waits for the sync word only about
-    as long as the preamble it was told to expect, so a node listening for 12 symbols against
-    a mesh sending 32 locks on, gives up, and locks on again further along the same preamble
-    — and decodes a packet only when it happens to lock on near the end. That was the whole
-    of "the uConsole misses replies other radios hear": the preamble was a fixed 12, the
-    library's default, and at SF7 the mesh sends 32.
+    This is the rule of MeshCore itself (``RadioLibWrapper::preambleLengthForSF``). The
+    receiver must also obey it, not only the transmitter. The SX1262 waits for the sync
+    word only for approximately the length of the preamble that it expects. Thus a node
+    that listens for 12 symbols, on a mesh that sends 32, locks on, stops, and locks on
+    again later in the same preamble. It decodes a packet only when it locks on near the
+    end by chance. That was the full cause of "the uConsole misses replies other radios
+    hear": the preamble was a fixed 12 (the default of the library), and at SF7 the mesh
+    sends 32.
     """
     return 32 if spreading_factor <= 8 else 16
 
 
 def radio_kwargs(signature_params, wiring: dict, prefs: Any) -> dict:  # noqa: ANN001
-    """The ``SX1262Radio`` constructor arguments: the board's wiring plus the saved radio.
+    """The ``SX1262Radio`` constructor arguments: the wiring of the board and the saved radio.
 
-    Passes only what this library version's constructor accepts, so a knob it lacks is
-    dropped instead of refusing the call. ``None`` means "not set" and is never passed.
+    The function gives only the arguments that the constructor of this library version
+    accepts. Thus, if the constructor does not have a parameter, the function removes it,
+    and the constructor does not refuse the call. ``None`` means "not set", and the
+    function never gives it.
     """
     wanted = dict(wiring)
     wanted.update(
@@ -269,7 +282,7 @@ def radio_kwargs(signature_params, wiring: dict, prefs: Any) -> dict:  # noqa: A
 
 
 def _check_device(path: str, missing_kind: str, what: str) -> None:
-    """Refuse early, with the right kind, when a device node is absent or unopenable."""
+    """Refuse early, with the correct kind, when a device file is absent or cannot be opened."""
     if not os.path.exists(path):
         raise NodeError(missing_kind, f"{path} does not exist — is the {what} enabled?")
     if not os.access(path, os.R_OK | os.W_OK):
@@ -278,28 +291,32 @@ def _check_device(path: str, missing_kind: str, what: str) -> None:
 
 # --- the board around the chip -------------------------------------------------------------
 
-#: Where the kernel puts the switches a device tree hands to ``gpio-leds``.
+#: The directory where the kernel puts the switches that a device tree gives to
+#: ``gpio-leds``.
 LEDS = Path("/sys/class/leds")
 
-#: How long a header that was just powered gets before anything on it is spoken to. The
-#: Cap's regulator and expander are up well inside this; the chip's own reset follows anyway.
+#: The time that a header gets after it is powered on, before the node talks to a part on
+#: it. The regulator and the expander of the Cap are ready well before this time. Also,
+#: the chip does its own reset after this.
 POWER_SETTLE_S = 0.1
 
-#: ``I2C_SLAVE``: address the open ``/dev/i2c-*`` at one device. Refused (``EBUSY``) while a
-#: kernel driver is bound to that address, which is the right answer — it is then not ours.
+#: ``I2C_SLAVE``: point the open ``/dev/i2c-*`` at one device. The kernel refuses it
+#: (``EBUSY``) while a kernel driver is bound to that address. This is the correct answer,
+#: because then the device is not ours to use.
 _I2C_SLAVE = 0x0703
 
-#: The PI4IOE5V6408's registers, and the manufacturer field of its ID register (bits 7–5),
-#: which is how a different chip at the same address is told apart.
+#: The registers of the PI4IOE5V6408, and the manufacturer field of its ID register (bits
+#: 7–5). This field tells a different chip at the same address apart from it.
 _PI4IO_ID, _PI4IO_DIRECTION, _PI4IO_OUTPUT, _PI4IO_HIGH_Z = 0x01, 0x03, 0x05, 0x07
 _PI4IO_MAKER = 0b101
 
 
 def set_leds(entries: list[str], root: Path = LEDS) -> list[tuple[Path, str]]:
-    """Set each ``name=brightness`` switch, and return what each read before, to put back.
+    """Set each ``name=brightness`` switch, and return the old value of each, to put it back.
 
-    A switch that is missing means a wiring written for another board; one this user can't
-    write is the ``gpio`` group the radio's pins need anyway.
+    A missing switch means that the wiring was written for a different board. If this user
+    cannot write to a switch, the user is not in the ``gpio`` group, which is also
+    necessary for the pins of the radio.
     """
     previous: list[tuple[Path, str]] = []
     for entry in entries:
@@ -317,7 +334,7 @@ def set_leds(entries: list[str], root: Path = LEDS) -> list[tuple[Path, str]]:
 
 
 def restore_leds(previous: list[tuple[Path, str]]) -> None:
-    """Put each switch back as :func:`set_leds` found it, last first (best-effort)."""
+    """Put each switch back as :func:`set_leds` found it, the last one first (best effort)."""
     for path, before in reversed(previous):
         try:
             path.write_text(before, encoding="ascii")
@@ -326,12 +343,13 @@ def restore_leds(previous: list[tuple[Path, str]]) -> None:
 
 
 def drive_pi4io(bus: int, address: int, high: list[int], dev: Path = Path("/dev")) -> None:
-    """Drive ``high``'s pins of a PI4IOE5V6408 high, as outputs, and leave the rest inputs.
+    """Drive the ``high`` pins of a PI4IOE5V6408 high as outputs, and keep the rest as inputs.
 
-    The output level is written before the direction, so a pin becomes an output already
-    high rather than glitching low first. The ID register is read first: on a board where
-    this is the radio's own expander, silence there is the radio not being attached — the
-    one failure worth saying in those words.
+    The function writes the output level before the direction. Thus a pin becomes an
+    output that is already high, and does not glitch low first. The function reads the ID
+    register first. On a board where this is the expander of the radio itself, no answer
+    there means that the radio is not attached. That is the one failure that the message
+    must give in those words.
     """
     path = dev / f"i2c-{bus}"
     _check_device(str(path), "no-i2c", "I2C bus")
@@ -365,12 +383,13 @@ def drive_pi4io(bus: int, address: int, high: list[int], dev: Path = Path("/dev"
 
 
 def prepare_board(wiring: dict) -> list[tuple[Path, str]]:
-    """Switch on what the chip needs before the radio library touches it.
+    """Switch on the parts that the chip must have before the radio library uses it.
 
-    The board's LED-class switches first (power, pin routing), then its RF expander, which
-    is only reachable once the header it sits on is powered. Returns the switches' previous
-    states, which the caller puts back when the node ends — including when it never got
-    going, so a failed start leaves the header as it found it.
+    First the LED-class switches of the board (power, pin routing), then its RF expander.
+    The node can get to the expander only after the header that it is on has power. The
+    function returns the previous states of the switches. The caller puts them back when
+    the node ends, also when the node did not start. Thus a failed start leaves the header
+    as it was.
     """
     previous = set_leds(list(wiring.get("leds") or ()), root=LEDS)
     if previous:
@@ -390,25 +409,27 @@ def prepare_board(wiring: dict) -> list[tuple[Path, str]]:
 
 # --- the GPS beside the chip ---------------------------------------------------------------
 
-#: The custom variables a board with a GPS answers to, by MeshCore firmware's own names.
+#: The custom variables of a board with a GPS, with the names of the MeshCore firmware.
 GPS_VARS = ("gps", "gps_interval")
 
-#: The firmware's ceiling on ``gps_interval`` (``constrain(…, 0, 86400)``): one day.
+#: The maximum of ``gps_interval`` in the firmware (``constrain(…, 0, 86400)``): one day.
 GPS_INTERVAL_MAX_S = 86400
 
-#: NMEA allows a sentence 82 characters; a partial line well past that is noise on the wire,
-#: not a sentence still arriving, and is dropped rather than grown.
+#: NMEA lets a sentence have 82 characters. A partial line that is much longer is noise on
+#: the wire, not a sentence that is still arriving. Thus the node removes it, and does not
+#: make it longer.
 _NMEA_MAX = 512
 
 
 def nmea_fix(line: str) -> tuple[float, float] | None:
-    """The position one NMEA sentence reports as a valid fix, as ``(lat, lon)``, or ``None``.
+    """The position that one NMEA sentence reports as a valid fix, as ``(lat, lon)``, or ``None``.
 
-    Two sentences carry a fix, from any constellation's talker (``GP``, ``GN``, ``GL``,
-    ``GA``, ``GB``…): RMC, valid when its status is ``A``, and GGA, valid when its fix
-    quality isn't ``0``. Everything else is ``None`` — another sentence, a sentence whose
-    checksum doesn't match (a byte lost on the wire), a field that isn't a coordinate, and
-    the no-fix sentences a receiver sends until it has one.
+    Two sentences carry a fix, from the talker of any constellation (``GP``, ``GN``,
+    ``GL``, ``GA``, ``GB``…): RMC, which is valid when its status is ``A``, and GGA, which
+    is valid when its fix quality is not ``0``. All other input gives ``None``: a different
+    sentence, a sentence with a checksum that does not match (a byte lost on the wire), a
+    field that is not a coordinate, and the no-fix sentences that a receiver sends until it
+    has a fix.
     """
     line = line.strip()
     body, star, given = line.removeprefix("$").partition("*")
@@ -434,7 +455,7 @@ def nmea_fix(line: str) -> tuple[float, float] | None:
 
 
 def _degrees(value: str, hemisphere: str, hemispheres: str, degree_digits: int) -> float:
-    """NMEA's ``ddmm.mmmm`` (``dddmm.mmmm`` east–west) and its hemisphere, as signed degrees."""
+    """The NMEA ``ddmm.mmmm`` (``dddmm.mmmm`` east–west) and its hemisphere, as signed degrees."""
     if len(hemisphere) != 1 or hemisphere not in hemispheres or len(value) <= degree_digits:
         raise ValueError(value)
     minutes = float(value[degree_digits:])
@@ -445,7 +466,7 @@ def _degrees(value: str, hemisphere: str, hemispheres: str, degree_digits: int) 
 
 
 def _saved_int(saved: dict, key: str, default: int) -> int:
-    """``saved[key]`` as an int, or ``default`` where it is missing or isn't one."""
+    """``saved[key]`` as an int, or ``default`` if it is missing or is not an int."""
     try:
         return int(saved.get(key, default))
     except (TypeError, ValueError):
@@ -453,25 +474,28 @@ def _saved_int(saved: dict, key: str, default: int) -> int:
 
 
 class Gps:
-    """The board's GPS receiver, run the way MeshCore companion firmware runs one.
+    """The GPS receiver of the board, which runs in the same way as in MeshCore companion firmware.
 
-    Two settings, under the firmware's names and with its defaults: ``gps``, off until it is
-    switched on and remembered across restarts, and ``gps_interval``, the seconds between
-    position updates — ``0``, the default, takes every fix, which is the firmware's one a
-    second. The receiver's NMEA is read on the node's own event loop (a few sentences a
-    second is nothing beside the radio), and a valid fix is written into the node's
-    preferences, which is where its self-info frame and its adverts both read the position
-    from. Firmware keeps a fix in RAM only; here the position is saved with the node's other
-    preferences whenever they are, and once more as the node shuts down, so a restart
-    indoors begins from the last fix rather than from a position set by hand long ago.
+    There are two settings, with the names and the defaults of the firmware. ``gps`` is off
+    until the user switches it on, and the node remembers it across restarts.
+    ``gps_interval`` is the number of seconds between position updates. ``0`` (the
+    default) takes each fix, which is one fix each second in the firmware. The node reads
+    the NMEA of the receiver on its own event loop (some sentences each second is a very
+    small load compared to the radio). It writes a valid fix into the prefs of the node.
+    The self-info frame and the adverts of the node read the position from there. Firmware
+    keeps a fix only in RAM. Here, the node saves the position with its other prefs each
+    time that it saves them, and one more time when the node shuts down. Thus, after a
+    restart indoors, the node starts from the last fix, not from a position that the user
+    set by hand long ago.
 
     Attributes:
-        port: The receiver's serial port.
+        port: The serial port of the receiver.
         baud: Its line speed.
         enabled: Whether ``gps`` is on.
         interval_s: ``gps_interval``.
-        node: The companion whose position a fix moves; set once it exists.
-        moved: Whether a fix has moved the position since the preferences were last saved.
+        node: The companion whose position a fix moves. It is set when the companion
+            exists.
+        moved: Whether a fix has moved the position since the last save of the prefs.
     """
 
     def __init__(self, port: str, baud: int, saved: Any = None) -> None:
@@ -490,19 +514,19 @@ class Gps:
 
     @property
     def running(self) -> bool:
-        """Whether the receiver's port is open and being read."""
+        """Whether the port of the receiver is open, and the node reads it."""
         return self._fd is not None
 
     def custom_vars(self) -> dict[str, str]:
-        """The two settings as the firmware reports them: ``gps`` says whether it *runs*."""
+        """The two settings as the firmware reports them: ``gps`` tells whether the GPS runs."""
         return {"gps": "1" if self.running else "0", "gps_interval": str(self.interval_s)}
 
     def saved(self) -> dict[str, int]:
-        """The two settings as ``prefs.json`` keeps them, under the firmware's field names."""
+        """The two settings as ``prefs.json`` keeps them, with the field names of the firmware."""
         return {"gps_enabled": int(self.enabled), "gps_interval": self.interval_s}
 
     def set_var(self, name: str, value: str) -> bool:
-        """Set ``gps`` or ``gps_interval``; ``False`` refuses the value, changing nothing."""
+        """Set ``gps`` or ``gps_interval``. ``False`` refuses the value and changes nothing."""
         value = value.strip()
         if name == "gps" and value in ("0", "1"):
             if value == "1":
@@ -521,15 +545,16 @@ class Gps:
             except ValueError:
                 return False
             self.interval_s = min(max(seconds, 0), GPS_INTERVAL_MAX_S)
-            self._next_at = 0.0  # the new pace counts from the next fix
+            self._next_at = 0.0  # the new rate starts at the next fix
             return True
         return False
 
     def start(self) -> None:
-        """Open the port raw at the receiver's speed and read it on the running loop.
+        """Open the port raw, at the speed of the receiver, and read it on the running loop.
 
         Raises:
-            OSError: The port can't be opened or set up (missing, not ours, not a tty).
+            OSError: The port cannot be opened or set up (it is missing, not ours, or not a
+                tty).
         """
         if self._fd is not None:
             return
@@ -558,19 +583,19 @@ class Gps:
         log.info("GPS on %s at %d baud", self.port, self.baud)
 
     def stop(self) -> None:
-        """Stop reading and close the port; the position keeps the last fix."""
+        """Stop the read and close the port. The position keeps the last fix."""
         fd, self._fd = self._fd, None
         if fd is None:
             return
         try:
             asyncio.get_running_loop().remove_reader(fd)
-        except RuntimeError:  # no loop left to remove it from: closing is enough
+        except RuntimeError:  # no loop to remove it from: the close is sufficient
             pass
         os.close(fd)
         log.info("GPS on %s stopped", self.port)
 
     def _readable(self) -> None:
-        """Read what the port has; a port that hangs up or fails is stopped, not retried."""
+        """Read the data that the port has. Stop a port that hangs up or fails, with no retry."""
         try:
             chunk = os.read(self._fd, 4096)  # type: ignore[arg-type]
         except BlockingIOError:
@@ -579,14 +604,14 @@ class Gps:
             log.warning("GPS on %s failed: %s", self.port, exc)
             self.stop()
             return
-        if not chunk:  # hung up: it would read as ready forever
+        if not chunk:  # hung up: if it is not stopped, it reads as ready forever
             log.warning("GPS on %s hung up", self.port)
             self.stop()
             return
         self.feed(chunk)
 
     def feed(self, chunk: bytes, now: float | None = None) -> None:
-        """Take bytes as they arrive and act on each whole sentence among them."""
+        """Take bytes when they arrive, and act on each complete sentence in them."""
         *lines, self._pending = (self._pending + chunk).split(b"\n")
         if len(self._pending) > _NMEA_MAX:
             self._pending = b""
@@ -596,10 +621,10 @@ class Gps:
                 self._take(fix, time.monotonic() if now is None else now)
 
     def _take(self, fix: tuple[float, float], now: float) -> None:
-        """Make ``fix`` the node's position, once per interval."""
+        """Make ``fix`` the position of the node, one time in each interval."""
         if self.node is None or now < self._next_at:
             return
-        if not self._fixed:  # once a start, and never where: a log is pasted into issues
+        if not self._fixed:  # one time per start, never the position: users paste logs in issues
             log.info("GPS has a fix")
             self._fixed = True
         prefs = self.node.prefs
@@ -610,7 +635,7 @@ class Gps:
 
 
 def _persist_contacts(store: Any, path: Path) -> None:
-    """Snapshot the contact list after every change, the way the firmware writes flash."""
+    """Write a snapshot of the contact list after each change, as the firmware writes flash."""
 
     def save() -> None:
         try:
@@ -633,16 +658,17 @@ def _persist_contacts(store: Any, path: Path) -> None:
 
 
 async def run_node(config: dict, report) -> int:  # noqa: ANN001 - (dict) -> None
-    """Bring the node up, report ready, and serve until told to stop.
+    """Start the node, report ready, and serve until the parent tells it to stop.
 
     Args:
-        config: ``state_dir``, ``wiring`` (the board's pins and switches), ``seed``
-            (name and radio settings for a node with no ``prefs.json`` yet) and ``model``
-            (the board's name, reported as the device model; :data:`DEVICE_MODEL` without).
+        config: ``state_dir``, ``wiring`` (the pins and switches of the board), ``seed``
+            (name and radio settings for a node that has no ``prefs.json`` yet), and
+            ``model`` (the name of the board, reported as the device model. Without it,
+            :data:`DEVICE_MODEL`).
         report: Sends the one status line to the parent.
 
     Returns:
-        The process exit status.
+        The exit status of the process.
     """
     import importlib
 
@@ -665,8 +691,8 @@ async def run_node(config: dict, report) -> int:  # noqa: ANN001 - (dict) -> Non
     _check_device(f"/dev/spidev{bus}.{cs}", "no-spi", "SPI overlay")
     _check_device(f"/dev/gpiochip{int(wiring.get('gpio_chip', 0))}", "no-gpio", "GPIO chip")
 
-    # The board's switches go back as they were however the node ends — a radio that never
-    # came up included — so a failed start leaves the header as it found it.
+    # The switches of the board go back to how they were, in any way that the node ends,
+    # also when the radio did not start. Thus a failed start leaves the header as it was.
     switched = prepare_board(wiring)
     try:
         return await _serve(
@@ -696,11 +722,11 @@ async def _serve(  # noqa: PLR0913 - the library modules run_node imported, hand
     companion_mod: Any,
     identity_mod: Any,
 ) -> int:
-    """Bring the radio up on a prepared board, report ready, and serve until told to stop."""
+    """Start the radio on a prepared board, report ready, and serve until told to stop."""
     import inspect
 
-    # The saved preferences decide the radio the chip is brought up on; the seed only fills
-    # in a node that has never saved any.
+    # The saved prefs decide the radio settings with which the chip starts. The seed only
+    # gives values to a node that has never saved prefs.
     prefs = models.NodePrefs(
         node_name=seed.get("node_name", "MeshTerm"),
         tx_power_dbm=seed.get("tx_power_dbm", 22),
@@ -730,7 +756,7 @@ async def _serve(  # noqa: PLR0913 - the library modules run_node imported, hand
             if radio.begin():
                 break
             kind = classify_begin_failure(recent.lines)
-        except SystemExit:  # the GPIO manager's answer to a busy or forbidden pin
+        except SystemExit:  # the answer of the GPIO manager to a busy or forbidden pin
             kind = classify_begin_failure(recent.lines)
         except Exception as exc:  # noqa: BLE001 - reported to the parent, not raised
             recent.lines.append(str(exc))
@@ -785,7 +811,7 @@ async def _serve(  # noqa: PLR0913 - the library modules run_node imported, hand
             if gps.enabled:
                 try:
                     gps.start()
-                except OSError as exc:  # the radio still works; `gps` reads 0 until it opens
+                except OSError as exc:  # the radio still works, and `gps` reads 0 until it opens
                     log.warning("GPS on %s did not open: %s", gps.port, exc)
         public_key = node.get_public_key()
         server = companion_mod.CompanionFrameServer(
@@ -798,8 +824,8 @@ async def _serve(  # noqa: PLR0913 - the library modules run_node imported, hand
             client_idle_timeout_sec=None,
         )
         await server.start()
-        # The one push the library's frame server doesn't subscribe to: every overheard frame
-        # with its SNR/RSSI, which MeshTerm's live feed is built from.
+        # The one push that the frame server of the library does not subscribe to: each
+        # overheard packet with its SNR/RSSI. The live feed of MeshTerm is built from these.
         node.add_push_callback("rx_log_data", server.push_rx_raw)
         port = server._server.sockets[0].getsockname()[1]
     except Exception:
@@ -816,7 +842,7 @@ async def _serve(  # noqa: PLR0913 - the library modules run_node imported, hand
         if gps is not None:
             gps.stop()
             if gps.moved:
-                node._save_prefs()  # the last fix, so a restart begins where the node was
+                node._save_prefs()  # the last fix, thus a restart starts where the node was
         for step in (server.stop, node.stop):
             try:
                 await step()
@@ -829,17 +855,18 @@ async def _serve(  # noqa: PLR0913 - the library modules run_node imported, hand
 
 
 def _forget_edge_threads(radio: Any) -> None:
-    """Spare the radio's cleanup two seconds spent waiting on a thread that can't hear it.
+    """Save the radio cleanup two seconds of wait for a thread that cannot hear it.
 
-    The library watches the IRQ pin from a daemon thread parked in a 30-second ``poll``,
-    which its stop event cannot cut short, and ``cleanup()`` joins that thread for up to
-    two seconds before it closes the pins — so every shutdown waited the full two seconds
-    for nothing. On the Cardputer Zero that was 2.2 s of a 3.4 s exit, against the three
-    seconds the launcher allows between its SIGTERM and its SIGKILL (measured 2026-10-06).
-    The thread is a daemon and its line is the kernel's to release when the process ends,
-    so it is told to stop and then dropped from the manager's books, and cleanup closes the
-    pins without waiting on it. A library that keeps its threads somewhere else is left
-    alone: the cleanup is slower, not wrong.
+    The library watches the IRQ pin from a daemon thread that waits in a 30-second
+    ``poll``. The stop event of the thread cannot cut this poll short. ``cleanup()`` joins
+    that thread for a maximum of two seconds before it closes the pins. Thus each shutdown
+    waited the full two seconds for no result. On the Cardputer Zero, that was 2.2 s of a
+    3.4 s exit, and the launcher gives only three seconds between its SIGTERM and its
+    SIGKILL (measured 2026-10-06). The thread is a daemon, and the kernel releases its line
+    when the process ends. Thus this function tells the thread to stop, then removes it
+    from the thread list of the manager. Then the cleanup closes the pins and does not wait
+    for the thread. If a library keeps its threads in a different place, this function
+    does nothing: the cleanup is slower, but not wrong.
     """
     manager = getattr(radio, "_gpio_manager", None)
     stops = getattr(manager, "_edge_stop_events", None)
@@ -852,11 +879,11 @@ def _forget_edge_threads(radio: Any) -> None:
 
 
 def apply_preamble(radio: Any, symbols: int) -> None:
-    """Give a running radio a new preamble length, for both what it sends and what it hears.
+    """Give a running radio a new preamble length, for the packets that it transmits and hears.
 
-    The driver reads ``preamble_length`` afresh for every transmission, but reception keeps
-    the packet parameters it was last given, so those are re-sent from standby and the chip
-    put back to listening.
+    The driver reads ``preamble_length`` again for each transmission. But the receive path
+    keeps the last packet parameters that it got. Thus the function sends these parameters
+    again from standby, and then puts the chip back in listen mode.
     """
     if getattr(radio, "preamble_length", symbols) == symbols:
         return
@@ -874,20 +901,21 @@ def apply_preamble(radio: Any, symbols: int) -> None:
 
 
 def _persistent_companion(base: type, state: Path, gps: Gps | None = None) -> type:
-    """``CompanionRadio`` with its preferences written to ``prefs.json`` on every change.
+    """``CompanionRadio``, which writes its prefs to ``prefs.json`` at each change.
 
-    ``_save_prefs`` is the library's own hook for exactly this ("subclasses that need
-    persistence … should override this method"), called after every preference setter.
-    With a ``gps``, the board's two GPS settings are among its custom variables, as the
-    firmware lists them, and are saved beside the preferences the library knows.
+    ``_save_prefs`` is the hook of the library for exactly this purpose ("subclasses that
+    need persistence … should override this method"). The library calls it after each
+    prefs setter. With a ``gps``, the two GPS settings of the board are in its custom
+    variables, as the firmware lists them. The class saves them next to the prefs that the
+    library knows.
     """
 
     class PersistentCompanion(base):  # type: ignore[misc, valid-type]
         def set_radio_params(self, freq_hz: int, bw_hz: int, sf: int, cr: int) -> bool:
-            """Retune, and bring the preamble along when the spreading factor moves it.
+            """Tune again, and also change the preamble when the spreading factor changes it.
 
-            The library retunes the modulation but leaves the packet parameters alone, and
-            the preamble is one of them (see :func:`preamble_for_sf`).
+            The library tunes the modulation again, but does not change the packet
+            parameters, and the preamble is one of them (refer to :func:`preamble_for_sf`).
             """
             ok = super().set_radio_params(freq_hz, bw_hz, sf, cr)
             if ok:
@@ -895,14 +923,14 @@ def _persistent_companion(base: type, state: Path, gps: Gps | None = None) -> ty
             return ok
 
         def get_custom_vars(self) -> dict[str, str]:
-            """The library's variables, and a GPS board's two as firmware reports them."""
+            """The variables of the library, and the two of a GPS board as firmware reports them."""
             found = super().get_custom_vars()
             if gps is not None:
                 found.update(gps.custom_vars())
             return found
 
         def set_custom_var(self, name: str, value: str) -> bool:
-            """Set a variable; ``gps`` and ``gps_interval`` run the receiver and are saved."""
+            """Set a variable. ``gps`` and ``gps_interval`` control the receiver and are saved."""
             if gps is None or name not in GPS_VARS:
                 return super().set_custom_var(name, value)
             if not gps.set_var(name, value):
@@ -925,7 +953,7 @@ def _persistent_companion(base: type, state: Path, gps: Gps | None = None) -> ty
 
 
 async def _until_told_to_stop() -> None:
-    """Wait for stdin to close or a SIGTERM/SIGINT — the parent's two ways of saying stop."""
+    """Wait until stdin closes, or for a SIGTERM/SIGINT: the two ways that the parent says stop."""
     loop = asyncio.get_running_loop()
     stop = asyncio.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -947,7 +975,7 @@ async def _until_told_to_stop() -> None:
 
 
 def _die_with_parent() -> None:
-    """On Linux, have the kernel send SIGTERM when the parent exits (best-effort)."""
+    """On Linux, make the kernel send SIGTERM when the parent exits (best effort)."""
     if not sys.platform.startswith("linux"):
         return
     try:
@@ -960,12 +988,12 @@ def _die_with_parent() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Entry point: ``python radionode.py --config '<json>'``."""
+    """The entry point: ``python radionode.py --config '<json>'``."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--config", required=True, help="the node's configuration, as JSON")
     args = parser.parse_args(argv)
 
-    # One line on the real stdout is the parent's; everything else goes to stderr.
+    # One line on the real stdout is for the parent. All other output goes to stderr.
     status = os.fdopen(os.dup(1), "w", encoding="utf-8")
     os.dup2(2, 1)
     sys.stdout = sys.stderr

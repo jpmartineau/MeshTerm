@@ -1,26 +1,29 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Persistence for channels created through MeshTerm, so they survive a device that forgets.
+"""The store for the channels that MeshTerm made, for a device that forgets them.
 
-Most companions keep their own channel table in firmware, so MeshTerm reads channels live from
-the device and never has to remember them. A firmware-less radio bridge is the exception: it
-holds its channels only in RAM, so every one is lost when the bridge process restarts — the
-Channels page comes up empty each session even though you added channels last time.
+Most companions keep their own channel table in firmware. Thus MeshTerm reads the channels live
+from the device, and does not have to remember them. A radio bridge without firmware is the
+exception. It keeps its channels only in RAM, so it loses all of them when the bridge process
+restarts. Then the Channels page is empty in each session, although you added channels in the
+last session.
 
-This store is the durable backup for exactly that case. It records every channel *written
-through MeshTerm* (the channel manager and the ``channels`` CLI both go through
-:func:`~meshterm.ui.channels.write_channel`), keyed by the device's own public key so two radios
-keep separate sets. On connect, :func:`reconcile` replays any remembered channel the device
-isn't currently reporting into a free slot — *filling gaps, never overwriting an occupied slot*.
+This store is the durable backup for exactly that case. It stores each channel that was written
+through MeshTerm. (The channel manager and the ``channels`` CLI both go through
+:func:`~meshterm.ui.channels.write_channel`.) The key is the public key of the device itself, so
+that two devices keep separate sets. At connect time, :func:`reconcile` replays each remembered
+channel that the device does not report now into a free slot. It fills gaps, and it never
+overwrites a slot that is in use.
 
-The gate is provenance, not device type: only channels you wrote through MeshTerm are recorded,
-so a firmware radio you never edit through MeshTerm keeps an empty record and is left completely
-untouched (with nothing remembered, ``reconcile`` does a single identity probe and returns). A
-firmware-less bridge, where every channel is necessarily created through MeshTerm, gets its
-whole set back.
+The gate is the origin of a channel, not the device type. The store keeps only the channels that
+you wrote through MeshTerm. Thus a device with firmware that you never edit through MeshTerm
+keeps an empty record, and MeshTerm does not change it at all. (When nothing is remembered,
+``reconcile`` does a single identity probe and returns.) A radio bridge without firmware gets its
+full set back, because each of its channels was necessarily made through MeshTerm.
 
-Like the operator preferences (mutes, watched nodes, admin passwords), this is global machine
-state in a small JSON file (``<config_dir>/channels.json``), not the per-invocation SQLite
-database. Reads are served from memory after the first load; the rare, user-driven writes flush
+This store is global machine state in a small JSON file (``<config_dir>/channels.json``), the
+same as the other state of the user (mutes, watched nodes, admin passwords). It is not in the
+SQLite database, which can be different for each run. After the first read, the store gives all
+reads from memory. The writes are rare and come from the user. Each write goes to disk
 immediately and atomically.
 """
 
@@ -46,53 +49,59 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class RememberedChannel:
-    """One channel MeshTerm remembers for a device: its slot, name, and 16-byte secret."""
+    """One channel that MeshTerm remembers for a device: its slot, name, and 16-byte secret."""
 
     idx: int
     name: str
     secret: bytes
 
-    #: Fields this record once held and must never hold again under another meaning (see
-    #: :data:`meshterm.core.preferences.RETIRED` for why a name is never reused).
+    #: The fields that this record held before. It must never hold them again with a
+    #: different meaning (refer to :data:`meshterm.core.preferences.RETIRED` for the
+    #: reason that a name is never used again).
     RETIRED: ClassVar[frozenset[str]] = frozenset()
 
     @property
     def identity(self) -> str:
-        """The channel's slot-independent intrinsic identity (see :func:`channel_identity`)."""
+        """The intrinsic identity of the channel, which does not depend on the slot.
+
+        Refer to :func:`channel_identity`.
+        """
         return channel_identity(self.name, self.secret)
 
 
 def _norm(pubkey: str) -> str:
-    """Normalise a device public key to the lowercase hex used as the store's device key."""
+    """Normalize the public key of a device to lowercase hex, the device key of the store."""
     return (pubkey or "").lower().removeprefix("0x")
 
 
 class ChannelStore:
-    """Reads and writes the per-device set of MeshTerm-managed channels, memory-first.
+    """Reads and writes the set of MeshTerm-managed channels for each device, in memory first.
 
-    Interact through :meth:`channels` (a device's remembered channels), :meth:`remember` (record
-    a channel written to a slot), and :meth:`forget` (a cleared slot). The backing map is loaded
-    once on first access and kept in memory; each mutation persists the whole map atomically.
+    Use :meth:`channels` (the remembered channels of a device), :meth:`remember` (store a
+    channel that was written to a slot), and :meth:`forget` (a cleared slot). The store reads
+    the map one time at the first access, and keeps it in memory. Each change writes the full
+    map atomically.
     """
 
     def __init__(self, path: Path) -> None:
-        """Open the store against a JSON file location.
+        """Open the store on the location of a JSON file.
 
         Args:
-            path: Path to the JSON state file (created lazily on the first remembered channel).
+            path: Path to the JSON state file (made only when the first channel is
+                remembered).
         """
         self._path = path
         self._devices: dict[str, list[RememberedChannel]] | None = None
 
     @property
     def _state(self) -> dict[str, list[RememberedChannel]]:
-        """The device -> remembered-channels map, loaded from disk on first access."""
+        """The map from device to remembered channels, read from disk at the first access."""
         if self._devices is None:
             self._devices = self._load()
         return self._devices
 
     def _load(self) -> dict[str, list[RememberedChannel]]:
-        """Parse the file into the device map, or empty on a missing/corrupt file."""
+        """Parse the file into the device map (empty if the file is missing or corrupt)."""
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -112,21 +121,22 @@ class ChannelStore:
         return devices
 
     def channels(self, pubkey: str) -> list[RememberedChannel]:
-        """The channels remembered for a device (a copy, in slot order), empty if none."""
+        """The remembered channels of a device (a copy, in slot order), empty if there are none."""
         return sorted(self._state.get(_norm(pubkey), []), key=lambda c: c.idx)
 
     def remember(self, pubkey: str, idx: int, name: str, secret: bytes) -> None:
-        """Record the channel now occupying a slot, replacing any prior entry for that slot.
+        """Store the channel that is now in a slot, and replace the earlier entry for that slot.
 
-        Called after a channel is written to the device through MeshTerm. A slot already
-        holding an identical channel is a no-op (no needless write).
+        MeshTerm calls this function after it writes a channel to the device. If the slot
+        already holds an identical channel, the function does nothing (no unnecessary write).
 
         Args:
-            pubkey: The device's own public key.
-            idx: The slot the channel was written to.
+            pubkey: The public key of the device itself.
+            idx: The slot to which the channel was written.
             name: The channel name.
-            secret: The channel's effective 16-byte secret (a name-derived channel stores the
-                derived key so it can be replayed without re-deriving).
+            secret: The effective 16-byte secret of the channel. For a channel whose key
+                comes from its name, the store keeps the derived key. Thus MeshTerm can
+                replay the channel without a new derivation.
         """
         key = _norm(pubkey)
         if not key:
@@ -142,7 +152,10 @@ class ChannelStore:
         self._save()
 
     def forget(self, pubkey: str, idx: int) -> None:
-        """Drop the channel remembered for a slot (a cleared slot); persist only a real change."""
+        """Remove the remembered channel of a cleared slot.
+
+        Write the file only for a real change.
+        """
         key = _norm(pubkey)
         channels = self._state.get(key)
         if not channels or not any(c.idx == idx for c in channels):
@@ -151,7 +164,10 @@ class ChannelStore:
         self._save()
 
     def _save(self) -> None:
-        """Persist the whole device map atomically (a crash mid-write keeps the old file)."""
+        """Write the full device map atomically.
+
+        If a crash occurs during the write, the old file stays.
+        """
         data = {
             "devices": {
                 pubkey: [
@@ -166,7 +182,7 @@ class ChannelStore:
 
 
 def _channel_from_json(entry: object) -> RememberedChannel | None:
-    """Parse one stored channel entry, or ``None`` if it is malformed."""
+    """Parse one stored channel entry, or return ``None`` if it is malformed."""
     if not isinstance(entry, dict):
         return None
     try:
@@ -181,23 +197,25 @@ def _channel_from_json(entry: object) -> RememberedChannel | None:
 
 
 async def reconcile(store: ChannelStore, device: Device) -> int:
-    """Replay a device's remembered channels into any slots it isn't already reporting.
+    """Replay the remembered channels of a device into the slots that it does not report now.
 
-    Restores each remembered channel the device is missing (matched by intrinsic identity, so a
-    channel that moved slots still counts as present) into its remembered slot when free, else
-    the lowest free slot. An occupied slot is never overwritten, so a firmware radio that kept
-    its own channels is left as-is.
+    The function restores each remembered channel that the device does not have. It compares
+    the channels by intrinsic identity, so a channel that moved to a different slot still
+    counts as present. The channel goes into its remembered slot when that slot is free, else
+    into the lowest free slot. The function never overwrites a slot that is in use. Thus a
+    device with firmware that kept its own channels stays as it is.
 
-    Read-cheap by design: with nothing remembered for this device it does a single identity
-    probe and returns, so a firmware radio you don't manage through MeshTerm pays almost nothing.
-    Best-effort — the caller runs it on connect and must not let a failure here break connecting.
+    The function reads little, by design. When nothing is remembered for this device, it does
+    a single identity probe and returns. Thus a device with firmware that you do not manage
+    through MeshTerm pays almost nothing. The function is best-effort. The caller runs it at
+    connect time, and must not let a failure here break the connection.
 
     Args:
-        store: The channel store to read remembered channels from.
-        device: The freshly connected device to reconcile.
+        store: The channel store from which to read the remembered channels.
+        device: The device that connected a moment ago, to reconcile.
 
     Returns:
-        The number of channels restored (0 when nothing needed replaying).
+        The number of channels that were restored (0 when no replay was necessary).
     """
     info = await device.get_self_info()
     remembered = store.channels(info.get("public_key", ""))
@@ -221,15 +239,15 @@ async def reconcile(store: ChannelStore, device: Device) -> int:
         else:
             empty_run += 1
             if empty_run >= CHANNEL_SLOT_EMPTY_RUN:
-                break  # off the end of a never-rejecting firmware; nothing more configured
+                break  # past the end, on a firmware that never refuses. No more channels.
 
     restored = 0
     for channel in remembered:
         if channel.identity in present_ids:
-            continue  # already on the device (possibly at another slot) — leave it be
+            continue  # already on the device (maybe in another slot). Do not change it.
         target = channel.idx if channel.idx not in used else _next_free_slot(used)
         if target is None:
-            break  # every slot is full; nothing more we can restore
+            break  # each slot is full. Nothing more can be restored.
         await device.set_channel(target, channel.name, channel.secret)
         used.add(target)
         present_ids.add(channel.identity)
@@ -238,5 +256,8 @@ async def reconcile(store: ChannelStore, device: Device) -> int:
 
 
 def _next_free_slot(used: set[int]) -> int | None:
-    """The lowest slot index not in ``used`` within the stock capacity, or ``None`` if full."""
+    """The lowest slot index that is not in ``used``, in the stock capacity.
+
+    The function returns ``None`` if all the slots are full.
+    """
     return next((i for i in range(MAX_CHANNELS) if i not in used), None)

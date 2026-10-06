@@ -1,26 +1,29 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Reopening the session in Windows Terminal, which is where MeshTerm looks like itself.
+"""Open the session again in Windows Terminal, where MeshTerm looks as it was designed.
 
-MeshTerm is drawn with emoji icons, braille charts and powerline path chips. Whether any
-of that reaches the screen is decided by the *terminal*, not by MeshTerm and not really by
-the font either: a modern terminal, asked for a character its font lacks, quietly borrows
-the glyph from another font on the machine. That is why the app looks right in Windows
-Terminal, in VS Code's terminal, and on macOS and Linux — and why it looks right there
-even though the font the reader chose usually holds almost none of it. Measured on a
-development machine, the everyday choices — Hack Nerd Font, JetBrains Mono, Fira Code,
-Source Code Pro — carry no braille at all, and no monospace font anywhere carries emoji.
+MeshTerm draws emoji icons, braille charts, and powerline path chips. The terminal decides
+if these glyphs get to the screen. MeshTerm does not decide it, and the font does not
+really decide it either. When a modern terminal must draw a character that its font does
+not have, it gets the glyph from another font on the machine, and it does not tell the
+user. This behaviour is the reason that the app looks correct in Windows Terminal, in the
+terminal of VS Code, and on macOS and Linux. It also looks correct there when the font
+that the user chose has almost none of these glyphs, which is usually the case. We
+measured the frequent choices on a development machine (Hack Nerd Font, JetBrains Mono,
+Fira Code, Source Code Pro): they have no braille at all. No monospace font anywhere has
+emoji.
 
-The classic Windows console does not do that. It draws what its one font holds and boxes
-for the rest, so on that host the emoji cannot be shown *at all* — the only two fonts on a
-Windows machine with emoji glyphs, Segoe UI Emoji and Segoe UI Symbol, are proportional,
-and a console will not take a proportional font. No font choice fixes it, which leaves
-exactly one thing that does: a different terminal.
+The classic Windows console does not do that. It draws the glyphs that its one font has,
+and it draws boxes for all the other characters. Thus on that host, the emoji cannot show
+at all. The only two fonts on a Windows machine with emoji glyphs (Segoe UI Emoji and
+Segoe UI Symbol) are proportional, and a console does not accept a proportional font. No
+font choice corrects this problem. Only one thing corrects it: a different terminal.
 
-So when MeshTerm finds itself in that console and Windows Terminal is installed — it is on
-every Windows 11 machine, and a free install on 10 — it offers to reopen itself there.
-One keypress, and the app looks the way it was drawn instead of the way conhost can
-manage. Declining falls back to :mod:`meshterm.core.consolefont`, which makes the best of
-the console the reader chose to stay in.
+Thus, when MeshTerm finds that it runs in that console and Windows Terminal is installed,
+it offers to open itself again in Windows Terminal. Windows Terminal is on each Windows 11
+machine, and it is a free install on Windows 10. After one key press, the app looks as it
+was drawn, not as conhost can show it. If the user declines, MeshTerm uses
+:mod:`meshterm.core.consolefont`, which gets the best result from the console that the
+user chose to stay in.
 """
 
 from __future__ import annotations
@@ -44,8 +47,8 @@ __all__ = [
 def available() -> str | None:
     """The path to ``wt.exe``, or ``None`` when Windows Terminal is not installed.
 
-    Found on ``PATH``, where Windows puts an execution alias for it under
-    ``%LOCALAPPDATA%/Microsoft/WindowsApps``.
+    The function looks for it on ``PATH``. Windows puts an execution alias for Windows
+    Terminal there, in ``%LOCALAPPDATA%/Microsoft/WindowsApps``.
     """
     if sys.platform != "win32" or os.environ.get(REOPENED_ENV):
         return None
@@ -55,32 +58,35 @@ def available() -> str | None:
 def reopen() -> bool:
     """Start this session again in Windows Terminal, in the same directory.
 
-    The new window is not a child in any meaningful sense — the caller exits immediately
-    afterwards and the two never talk — so nothing is waited on and no pipes are held.
+    The new window is not a child process in a useful sense. The caller exits immediately
+    after this call, and the two processes never communicate. Thus the function waits for
+    nothing and keeps no pipes.
 
     Returns:
-        Whether Windows Terminal was started. ``False`` leaves the caller exactly where it
-        was, which is why the offer is only ever a detour and never a dead end.
+        Whether Windows Terminal started. ``False`` leaves the caller exactly where it was.
+        Thus the offer cannot leave the user without a session. If it fails, the session
+        continues in this terminal.
     """
     terminal = available()
     if terminal is None:
         return False
     try:
-        # `--` ends wt's own option parsing, so MeshTerm's flags reach MeshTerm rather
-        # than being read as Windows Terminal's (verified: `--mock` and `--profile x`
-        # arrive intact). `-d` keeps the working directory, which relative paths given
-        # on the command line depend on.
-        subprocess.Popen(  # noqa: S603 - the argv is ours, not the reader's
+        # `--` stops the option parsing of wt. Thus the flags of MeshTerm go to MeshTerm,
+        # and Windows Terminal does not read them as its own flags (checked: `--mock` and
+        # `--profile x` arrive unchanged). `-d` keeps the working directory, because the
+        # relative paths on the command line depend on it.
+        subprocess.Popen(  # noqa: S603 - the argv is ours, not the user's
             [
                 terminal,
                 "-w",
                 "new",
                 "--size",
                 _wanted_size(),
-                # Otherwise the tab is titled with the executable's full path, which on a
-                # downloaded build is a line of Downloads folder. The icon is not ours to
-                # set: Windows Terminal takes that from a profile, and a bare command line
-                # is not one, so it gets the generic console glyph.
+                # Without this title, the title of the tab is the full path of the
+                # executable. On a downloaded build, that path fills a line with the
+                # Downloads folder. MeshTerm cannot set the icon: Windows Terminal gets the
+                # icon from a profile, and a command line alone is not a profile. Thus the
+                # tab gets the generic console glyph.
                 "--title",
                 "MeshTerm",
                 "-d",
@@ -97,14 +103,15 @@ def reopen() -> bool:
 
 
 def _wanted_size() -> str:
-    """The window to ask Windows Terminal for, as ``cols,rows``.
+    """The window size to ask Windows Terminal for, as ``cols,rows``.
 
-    Asked for, because without ``-w new`` the session lands as a *tab* in whatever window
-    happens to be open and inherits its size, and without ``--size`` a new window takes the
-    reader's global launch size, which is a setting about their shell and not about this
-    app. The dimensions themselves are
-    :func:`~meshterm.core.relaunch.wanted_size`'s, shared with every other terminal
-    MeshTerm reopens itself in; only the spelling is Windows Terminal's.
+    MeshTerm asks for a new window of a known size. Without ``-w new``, the session opens
+    as a tab in the window that is open at that time, and it gets the size of that window.
+    Without ``--size``, a new window gets the global launch size of the user. That size is
+    for the shell of the user, not for this app. The dimensions come from
+    :func:`~meshterm.core.relaunch.wanted_size`, which all the other terminals that
+    MeshTerm opens itself again in also use. Only the format is specific to Windows
+    Terminal.
     """
     cols, rows = wanted_size()
     return f"{cols},{rows}"

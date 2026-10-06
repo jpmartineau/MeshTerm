@@ -1,53 +1,60 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Rating contacts by how much they are worth a slot in the device's contact table.
+"""Rate contacts by their value for a slot in the contact table of the device.
 
-A companion's contact table is finite, and a mesh fills it with whatever adverts happen to
-arrive — so a radio left running long enough ends up holding mostly nodes heard once, in
-passing, from four hops away, while there is no room left to *discover* anyone new. The
-Contacts screen's bulk sweep (see :func:`~meshterm.ui.sweep_screen.archive_contacts`) is how
-that table gets its headroom back, and this module is the judgement it runs on: one score
-per contact, so the sweep can take the weakest and leave the ones you would actually miss.
+The contact table of a companion has a limited size, and a mesh fills it with all the
+adverts that come. Thus, after a device runs for a long time, the table holds mostly nodes
+that were heard one time, in passing, from four hops away. Then there is no space to
+discover new nodes. The bulk sweep of the Contacts screen (refer to
+:func:`~meshterm.ui.sweep_screen.archive_contacts`) gives the table its free space back.
+This module gives the judgement that the sweep uses: one score for each contact. Thus the
+sweep can take the weakest contacts and keep the contacts that you do not want to lose.
 
-**The score is additive, never multiplicative.** Six terms, each normalised to ``0..1`` and
-weighted (:class:`ScoreWeights`), summed. A product would let a single zero annihilate an
-otherwise strong contact — a node that never advertised a position would score nothing at
-all however much you talk to it — which is exactly the failure mode a "quality" heuristic
-must not have.
+**The score is additive, never multiplicative.** It is the sum of six terms. Each term is
+normalized to ``0..1`` and weighted (:class:`ScoreWeights`). With a product, one zero can
+remove all the value of a contact that is strong in all the other terms. For example, a
+node that never advertised a position gets a score of zero, however much you talk to it.
+A "quality" heuristic must not have exactly this failure mode.
 
-**An unknown scores neutral, not zero.** This is the load-bearing rule. Roughly half the
-contacts on a real mesh advertise no location, plenty are never overheard as a relayed
-packet so have no hop count, and a channel poster whose name matches no contact cannot be
-attributed at all. If "we don't know" resolved to ``0.0``, every one of those would sink to
-the bottom *together*, and the sweep would archive by how much metadata a node happens to
-broadcast rather than by how much it is worth. So a term that cannot be computed returns
-``None`` and is filled with the **population median** of the contacts that could compute it
-(:func:`_fill_unknowns`) — the contact lands exactly where an average peer would on that
-axis, and the decision falls to the axes that *are* known. It is also why the two least
-reliable terms carry the two smallest weights.
+**An unknown gets a neutral score, not zero.** This is the most important rule.
+Approximately half of the contacts on a real mesh advertise no location. Many are never
+overheard as a relayed packet, so they have no hop count. A channel poster whose name
+matches no contact cannot be attributed at all. If "we do not know" gives ``0.0``, all of
+these contacts go to the bottom together. Then the sweep archives by the quantity of
+metadata that a node broadcasts, instead of by the value of the node.
 
-**A newcomer gets time to earn its keep.** Every term above rewards accumulated evidence,
-so a node first heard this morning is indistinguishable from one that has been quiet for a
-year — both have one advert and no history. :attr:`ScoreWeights.grace` therefore adds a
-bonus that decays linearly to nothing over :attr:`ScoreWeights.grace_days`, enough to lift a
-newcomer clear of the sweep for a fortnight while it either becomes a real neighbour or
-doesn't. A contact MeshTerm has *never* heard (added by hand, or inherited from the device
-before this history began) has no arrival time to decay from and is protected outright
-rather than being punished for MeshTerm's own ignorance — see :data:`PROTECT_UNOBSERVED`.
+Thus a term that cannot be calculated returns ``None``. :func:`_fill_unknowns` fills it
+with the **population median** of the contacts that have a value for it. The contact then
+gets exactly the position of an average peer on that axis, and the axes that are known
+make the decision. This rule is also the reason why the two least reliable terms have the
+two smallest weights.
 
-**Some contacts are never candidates.** A score is a heuristic and a heuristic must not
-overrule an explicit choice, so :func:`protection_for` short-circuits five cases before any
-arithmetic: a contact you locked, a watched node, anyone you have sent a direct message to,
-a repeater whose admin credentials are stored, and the unobserved contact above. They are
-still scored and still ranked — they are real contacts and the percentile scale is the whole
-population — but they are never swept.
+**A newcomer gets time to show its value.** Each term above rewards evidence that collects
+over time. Thus a node first heard this morning looks the same as a node that was quiet
+for a year: both have one advert and no history. For this reason,
+:attr:`ScoreWeights.grace` adds a bonus that decays linearly to nothing over
+:attr:`ScoreWeights.grace_days`. The bonus is large enough to keep a newcomer out of the
+sweep for two weeks. In that time, the newcomer becomes a real neighbour, or it does not.
 
-**The score is never displayed.** A raw ``47.3`` means nothing without the distribution it
-came from. What this module hands a screen instead is a *rank* — the list comes back ordered,
-and :attr:`~ScoredContact.percentile` places one contact in the field without a legend and
-without going stale when the weights change (see :func:`percentile_rank`). What a screen draws
-beside a contact is neither: the archive preview shows the :class:`ContactSignals` themselves, a
-lane per measured kind, because the thing a reader can check against what they know is the
-evidence, not this module's reading of it.
+A contact that MeshTerm never heard (added by hand, or copied from the device before this
+history started) has no arrival time from which to decay. Thus it is protected completely,
+instead of punished because MeshTerm does not know it (refer to
+:data:`PROTECT_UNOBSERVED`).
+
+**Some contacts are never candidates.** A score is a heuristic, and a heuristic must not
+overrule an explicit choice. Thus :func:`protection_for` short-circuits five cases before
+any arithmetic: a contact that you locked, a watched node, each contact that you sent a
+direct message to, a repeater whose admin credentials are stored, and the unobserved
+contact above. These contacts still get a score and a rank, because they are real
+contacts and the percentile scale is the whole population. But the sweep never takes them.
+
+**The score is never shown.** A raw ``47.3`` means nothing without the distribution that it
+came from. Instead, this module gives a screen a rank. The list comes back in order, and
+:attr:`~ScoredContact.percentile` puts one contact in the field. The percentile needs no
+legend, and it does not become stale when the weights change (refer to
+:func:`percentile_rank`). But a screen draws neither of them next to a contact. The archive
+preview shows the :class:`ContactSignals` themselves, one lane for each type of
+measurement. The reason: the user can compare the evidence with what the user knows. The
+user cannot do that with the interpretation of this module.
 """
 
 from __future__ import annotations
@@ -60,31 +67,34 @@ from statistics import median
 from .geo import haversine_km
 from .models import Contact
 
-#: Protection reason: the reader locked this contact from its page. The most explicit claim
-#: there is — a lock says nothing but "never archive this one" — so it is checked first.
+#: Protection reason: the user locked this contact on its page. This is the most explicit
+#: claim of all (a lock says only "never archive this one"), so the code checks it first.
 PROTECT_LOCKED = "locked"
 
-#: Protection reason: the node is starred in the Watchtower. An explicit pin outranks every
-#: heuristic in this module — the user already said this one matters.
+#: Protection reason: the node is starred in the Watchtower. An explicit pin is more
+#: important than each heuristic in this module, because the user already said that this
+#: node is important.
 PROTECT_WATCHED = "watched"
 
-#: Protection reason: you have sent this contact a direct message. Choosing to talk to
-#: someone is the strongest statement of intent the app can observe, and it should not be
-#: undone by a score. (Inbound-only traffic does *not* protect — anyone can message you.)
+#: Protection reason: you sent a direct message to this contact. A decision to talk to a
+#: person is the strongest statement of intent that the app can observe, and a score must
+#: not undo it. (Traffic that is only inbound does not protect a contact, because anyone
+#: can send you a message.)
 PROTECT_MESSAGED = "messaged"
 
-#: Protection reason: a repeater or room server whose admin password is stored. Archiving it
-#: costs the login, which is a far larger loss than a contact slot is a gain.
+#: Protection reason: a repeater or a room server whose admin password is stored. If the
+#: sweep archives it, the login is lost. That loss is much larger than the gain of one
+#: contact slot.
 PROTECT_ADMIN = "admin"
 
-#: Protection reason: MeshTerm has never heard this contact, so every evidence term is
-#: empty for a reason that says nothing about the node. It came from the device's own table
-#: (or was added by hand) before this history began; sweeping it would be archiving by how
-#: long MeshTerm has been running rather than by anything the contact did.
+#: Protection reason: MeshTerm never heard this contact. Thus each evidence term is empty,
+#: for a reason that tells nothing about the node. The contact came from the table of the
+#: device itself (or was added by hand) before this history started. A sweep of it archives
+#: by how long MeshTerm has run, not by an action of the contact.
 PROTECT_UNOBSERVED = "unobserved"
 
-#: The order protections are reported in when a contact qualifies for several — most
-#: deliberate first, so the preview explains a row by the strongest claim on it.
+#: The order of the protections when a contact qualifies for more than one. The most
+#: deliberate is first, so that the preview explains a row by its strongest claim.
 PROTECTION_ORDER = (
     PROTECT_LOCKED,
     PROTECT_WATCHED,
@@ -93,7 +103,7 @@ PROTECTION_ORDER = (
     PROTECT_UNOBSERVED,
 )
 
-#: How a protection reads in the UI, keyed by the constants above.
+#: The UI text of each protection, keyed by the constants above.
 PROTECTION_LABELS = {
     PROTECT_LOCKED: "locked",
     PROTECT_WATCHED: "watched",
@@ -105,38 +115,43 @@ PROTECTION_LABELS = {
 
 @dataclass(frozen=True)
 class ScoreWeights:
-    """The weights and half-lives the score is built from.
+    """The weights and half-lives from which the score is built.
 
-    The six term weights sum to 100, so a score reads as "out of 100" before the grace
-    bonus is added — though nothing displays it (see the module docstring: the UI shows the
-    percentile). Their relative sizes encode the ranking the operator asked for: direct
-    correspondence far above everything, recency next, then raw volume, then the three
-    weaker signals — of which the two least reliable (hops, distance) carry the least.
+    The sum of the six term weights is 100. Thus a score is "out of 100" before the grace
+    bonus is added, but nothing shows it (refer to the module docstring: the UI shows the
+    percentile). Their relative sizes encode the ranking that the user asked for: direct
+    correspondence much above all the others, then recency, then raw volume, then the
+    three weaker signals. Of these three, the two least reliable (hops, distance) have the
+    smallest weights.
 
     Attributes:
-        dm: Weight of direct-message correspondence — the heaviest term. A conversation is
-            the only signal here that required a human decision on *both* ends.
-        recency: Weight of how lately the contact was heard.
-        volume: Weight of how many times it has been heard.
-        channel: Weight of posting in channels the device is configured for.
-        hops: Weight of topological closeness (fewer relays is better).
-        distance: Weight of geographic closeness — the least reliable term, since about
-            half of a real mesh advertises no position at all.
-        grace: Bonus points a brand-new contact starts with, decaying linearly to zero over
-            :attr:`grace_days`. Large enough to clear most of the field, because the whole
-            point is that a newcomer has no evidence yet.
-        grace_days: How long the newcomer bonus takes to fade completely.
-        recency_half_life_days: Half-life of the recency term. Two weeks: long enough to
-            ride out a node that adverts weekly, short enough that a month of silence tells.
-        dm_half_life_days: Half-life of *conversation* recency. Deliberately much longer
-            than :attr:`recency_half_life_days` — someone you exchanged messages with in
-            the spring is still someone you correspond with, while a node last overheard in
-            the spring is simply gone.
+        dm: The weight of the direct-message correspondence. This is the heaviest term. A
+            conversation is the only signal here that needed a decision by a person at
+            both ends.
+        recency: The weight of how recently the contact was heard.
+        volume: The weight of how many times the contact was heard.
+        channel: The weight of the posts on the channels that are configured on the
+            device.
+        hops: The weight of topological closeness (fewer relays are better).
+        distance: The weight of geographic closeness. This is the least reliable term,
+            because approximately half of a real mesh advertises no position at all.
+        grace: The bonus points that a new contact starts with. They decay linearly to
+            zero over :attr:`grace_days`. The bonus is large enough to put the contact
+            above most of the field, because a newcomer has no evidence yet, and that is
+            the purpose of the bonus.
+        grace_days: The time that the newcomer bonus takes to go to zero.
+        recency_half_life_days: The half-life of the recency term. Two weeks: long enough
+            for a node that sends one advert each week, and short enough that a month of
+            silence has an effect.
+        dm_half_life_days: The half-life of the conversation recency. On purpose, it is
+            much longer than :attr:`recency_half_life_days`. A person that you exchanged
+            messages with in the spring is still a person that you correspond with. But a
+            node that was last overheard in the spring is gone.
         volume_saturation: The packet count at which the volume term reaches ``1.0``.
         dm_saturation: The message count at which the conversation-volume half reaches
             ``1.0``.
         channel_saturation: The post count at which the channel term reaches ``1.0``.
-        hops_midpoint: Hop count at which the hops term falls to ``0.5``.
+        hops_midpoint: The hop count at which the hops term falls to ``0.5``.
     """
 
     dm: float = 30.0
@@ -157,43 +172,51 @@ class ScoreWeights:
     hops_midpoint: float = 2.0
 
 
-#: The default weighting, used everywhere unless a caller passes its own.
+#: The default weights. All the code uses them, unless a caller gives its own.
 DEFAULT_WEIGHTS = ScoreWeights()
 
 
 @dataclass(frozen=True)
 class ContactSignals:
-    """Everything the score reads about one contact, already gathered from the history.
+    """All the data that the score reads about one contact, already collected from the history.
 
-    Assembled by :meth:`~meshterm.persistence.repository.Repository.contact_signals` in a
-    handful of grouped queries rather than per contact, so scoring a table of several
-    hundred costs a constant number of scans. Every optional field means *unknown* and is
-    filled with the population median before it is scored — never treated as zero.
+    :meth:`~meshterm.persistence.repository.Repository.contact_signals` assembles it in a
+    small number of grouped queries, not in one query for each contact. Thus the score of
+    a table of several hundred contacts costs a constant number of scans. Each optional
+    field means unknown. Before the scoring, the population median fills each such field.
+    MeshTerm never uses zero for it.
 
     Attributes:
-        node: The contact's 12-hex canonical id (how observations key a node).
-        heard_age_days: Days since the contact was last heard, or ``None`` if never.
-        packets: How many transmissions MeshTerm has heard *from* this node. Counts the
-            app's own reception history, so a fresh install legitimately reads zero for
-            everyone — which is why the sweep shows the whole ranked preview before acting.
-        dm_total: Direct messages exchanged with this contact, both directions.
-        dm_outbound: How many of those we sent. Non-zero protects the contact outright.
-        dm_age_days: Days since the most recent direct message either way, or ``None``.
-        channel_posts: Messages this contact posted on a configured channel, attributed by
-            the ``Name: `` prefix a channel message carries (the wire has no sender key).
-        channel_attributed: Whether that attribution was even possible — ``False`` when the
-            contact's name is shared by another contact or never appeared, so the term
-            reads unknown rather than "posted nothing".
-        hops: Median relay count of packets seen originating from this node, or ``None``
-            when none was ever overheard as a relayed frame.
-        distance_km: Great-circle distance from our own node, or ``None`` when either end
-            advertises no position.
-        known_days: Days since MeshTerm first heard this node, or ``None`` if never heard —
-            which is what :data:`PROTECT_UNOBSERVED` keys on.
+        node: The canonical id of the contact, 12 hex digits (the key of a node in the
+            observations).
+        heard_age_days: The age in days of the last time that the contact was heard, or
+            ``None`` if it was never heard.
+        packets: How many transmissions MeshTerm heard from this node. It counts the
+            reception history of the app itself. Thus a new install correctly reads zero
+            for all contacts. For this reason, the sweep shows the full ranked preview
+            before it acts.
+        dm_total: The direct messages exchanged with this contact, in the two directions.
+        dm_outbound: How many of those messages we sent. A value that is not zero
+            protects the contact completely.
+        dm_age_days: The age in days of the most recent direct message in either
+            direction, or ``None``.
+        channel_posts: The messages that this contact posted on a configured channel. The
+            attribution uses the ``Name: `` prefix of a channel message (the wire has no
+            sender key).
+        channel_attributed: Whether that attribution was possible at all. ``False`` when
+            another contact has the same name, or when the name never appeared. Then the
+            term is unknown, instead of "posted nothing".
+        hops: The median relay count of the packets heard from this node as their
+            originator, or ``None`` when no packet from it was ever overheard as a relayed
+            packet.
+        distance_km: The great-circle distance from our node, or ``None`` when one of the
+            two ends advertises no position.
+        known_days: The age in days of the first time that MeshTerm heard this node, or
+            ``None`` if it was never heard. :data:`PROTECT_UNOBSERVED` uses this ``None``.
         watched: Whether the node is starred in the Watchtower.
         has_admin: Whether admin credentials are stored for it.
-        locked: Whether the reader locked the contact against archiving (see
-            :meth:`~meshterm.core.contact_store.ContactStore.set_locked`).
+        locked: Whether the user locked the contact, so that the sweep cannot archive it
+            (refer to :meth:`~meshterm.core.contact_store.ContactStore.set_locked`).
     """
 
     node: str
@@ -214,24 +237,24 @@ class ContactSignals:
 
 @dataclass(frozen=True)
 class ScoredContact:
-    """One contact's standing among the others: its score, its rank, and the evidence for both.
+    """The position of one contact among the others: its score, its rank, and their evidence.
 
     Attributes:
-        contact: The contact this describes.
-        signals: The evidence the score was computed from.
-        score: The weighted sum plus any newcomer grace. Never displayed — see
-            :attr:`percentile`, and the module docstring for why.
-        percentile: Percentile rank within the scored population, ``0``–``100``. The
-            score's one publishable reading: self-calibrating (a mesh of 30 contacts and
-            one of 300 both read the same way), needing no legend, and still meaningful if
-            the weights are ever retuned.
-        protection: Why this contact can never be swept, or ``None`` if it can. One of the
-            ``PROTECT_*`` constants.
+        contact: The contact that this record describes.
+        signals: The evidence from which the score was calculated.
+        score: The weighted sum, plus the newcomer grace, if any. It is never shown. Refer
+            to :attr:`percentile`, and to the module docstring for the reason.
+        percentile: The percentile rank in the scored population, ``0`` to ``100``. This is
+            the only form of the score that MeshTerm shows. It calibrates itself (a mesh of
+            30 contacts and a mesh of 300 read the same way), it needs no legend, and it
+            keeps its meaning if the weights change.
+        protection: The reason why the sweep can never take this contact, or ``None`` if
+            it can. One of the ``PROTECT_*`` constants.
 
-    The **signals** are what a screen shows, not the score or its terms: the archive preview
-    draws one lane per measured kind straight off :attr:`signals` (see
-    :mod:`~meshterm.ui.sweep_screen`), so a reader auditing a sweep reads the evidence in
-    the same units it was gathered in rather than a phrase this module chose for them.
+    A screen shows the **signals**, not the score or its terms. The archive preview draws
+    one lane for each type of measurement directly from :attr:`signals` (refer to
+    :mod:`~meshterm.ui.sweep_screen`). Thus a user who examines a sweep reads the evidence
+    in the same units as it was collected, not in a phrase that this module chose.
     """
 
     contact: Contact
@@ -242,27 +265,27 @@ class ScoredContact:
 
     @property
     def protected(self) -> bool:
-        """Whether this contact is exempt from the sweep whatever its score."""
+        """Whether this contact is exempt from the sweep, with any score."""
         return self.protection is not None
 
     @property
     def protection_label(self) -> str:
-        """The protection's UI wording, or the empty string when unprotected."""
+        """The UI text of the protection, or the empty string when there is no protection."""
         return PROTECTION_LABELS.get(self.protection or "", "")
 
 
 # -- the individual terms ---------------------------------------------------------------
 #
-# Each returns a value in 0..1, or ``None`` for "cannot be computed from this contact's
-# evidence" — which the caller resolves to the population median rather than to zero.
+# Each term returns a value in 0..1, or ``None`` for "cannot be computed from this
+# contact's evidence". The caller changes ``None`` to the population median, not to zero.
 
 
 def _decay(age_days: float | None, half_life: float) -> float | None:
-    """Exponential decay from ``1.0`` at age zero, halving every ``half_life`` days.
+    """Exponential decay from ``1.0`` at age zero. The value halves each ``half_life`` days.
 
     Args:
-        age_days: How old the event is, or ``None`` if it never happened.
-        half_life: Days for the value to halve.
+        age_days: The age of the event, or ``None`` if it never occurred.
+        half_life: The number of days for the value to halve.
 
     Returns:
         The decayed weight, or ``None`` when ``age_days`` is ``None``.
@@ -273,15 +296,15 @@ def _decay(age_days: float | None, half_life: float) -> float | None:
 
 
 def _saturating(count: float, ceiling: float) -> float:
-    """A logarithmic ramp from ``0`` at zero to ``1`` at ``ceiling``, clipped above it.
+    """A logarithmic ramp from ``0`` at zero to ``1`` at ``ceiling``, clipped above ``ceiling``.
 
-    Logarithmic because the interesting difference is between 1 packet and 10, not between
-    90 and 100: a node heard ten times is emphatically not one tenth as established as one
-    heard a hundred times, and a linear ramp would say exactly that.
+    The ramp is logarithmic because the important difference is between 1 packet and 10,
+    not between 90 and 100. A node heard ten times is certainly not one tenth as
+    established as a node heard a hundred times, but a linear ramp says exactly that.
 
     Args:
-        count: The observed tally.
-        ceiling: The tally at which the term reaches ``1.0``.
+        count: The observed count.
+        ceiling: The count at which the term reaches ``1.0``.
 
     Returns:
         The ramped value, in ``0..1``.
@@ -292,13 +315,13 @@ def _saturating(count: float, ceiling: float) -> float:
 
 
 def term_recency(signals: ContactSignals, weights: ScoreWeights) -> float | None:
-    """How lately the contact was heard, decaying with a two-week half-life.
+    """How recently the contact was heard, with a decay that has a two-week half-life.
 
-    A contact never heard at all scores ``0.0`` rather than unknown: unlike a missing
-    location, "we have never received anything from this node" is real evidence about the
-    node, not a gap in what it chose to broadcast. (A contact MeshTerm has never heard
-    *because the history is younger than the contact* is caught earlier, by
-    :data:`PROTECT_UNOBSERVED`.)
+    A contact that was never heard gets ``0.0``, not unknown. A missing location is a gap
+    in what the node chose to broadcast. But "we have never received anything from this
+    node" is real evidence about the node. (Some contacts were never heard by MeshTerm,
+    because the history is younger than the contact. :data:`PROTECT_UNOBSERVED` catches
+    them before this term.)
     """
     if signals.heard_age_days is None:
         return 0.0
@@ -306,16 +329,16 @@ def term_recency(signals: ContactSignals, weights: ScoreWeights) -> float | None
 
 
 def term_volume(signals: ContactSignals, weights: ScoreWeights) -> float | None:
-    """How much traffic MeshTerm has heard from this node, on a saturating log ramp."""
+    """How much traffic MeshTerm heard from this node, on a log ramp that saturates."""
     return _saturating(signals.packets, weights.volume_saturation)
 
 
 def term_dm(signals: ContactSignals, weights: ScoreWeights) -> float | None:
-    """Direct correspondence: mostly how much, partly how lately.
+    """Direct correspondence: mostly how much, and partly how recently.
 
-    Split 60/40 between volume and recency so that a long exchange which has gone quiet
-    still counts for most of what it was worth — a conversation is a standing relationship,
-    not an event that expires. A contact with no messages at all scores ``0.0``: an absent
+    The split is 60/40 between volume and recency. Thus a long exchange that became quiet
+    still keeps most of its value, because a conversation is a lasting relationship, not an
+    event that expires. A contact with no messages gets ``0.0``, because a missing
     conversation is evidence, not a gap.
     """
     if signals.dm_total <= 0:
@@ -326,13 +349,14 @@ def term_dm(signals: ContactSignals, weights: ScoreWeights) -> float | None:
 
 
 def term_channel(signals: ContactSignals, weights: ScoreWeights) -> float | None:
-    """How much this contact posts on the channels the device is configured for.
+    """How much this contact posts on the channels that are configured on the device.
 
-    Returns ``None`` when the contact could not be attributed at all — a channel message
-    carries no sender key, only a ``Name: `` prefix, so a contact whose name is shared with
-    another contact (or which has simply never appeared as a prefix) is *unmeasured* rather
-    than silent. Scoring that as zero would quietly demote everyone whose name happens to
-    collide, which is a property of the name and not of the node.
+    Returns ``None`` when the contact could not be attributed at all. A channel message has
+    no sender key, only a ``Name: `` prefix. Thus a contact whose name another contact also
+    has (or whose name never appeared as a prefix) is not measured, which is different from
+    silent. If this term gives zero for such a contact, each contact whose name collides
+    with another name silently goes down. But that collision is a property of the name, not
+    of the node.
     """
     if not signals.channel_attributed:
         return None
@@ -340,10 +364,11 @@ def term_channel(signals: ContactSignals, weights: ScoreWeights) -> float | None
 
 
 def term_hops(signals: ContactSignals, weights: ScoreWeights) -> float | None:
-    """Topological closeness — a hyperbolic falloff, ``1.0`` direct and ``0.5`` at the midpoint.
+    """Topological closeness: a hyperbolic falloff, ``1.0`` direct and ``0.5`` at the midpoint.
 
-    Hyperbolic rather than exponential because the difference between four hops and five
-    barely matters, while the difference between zero and one matters a great deal.
+    The falloff is hyperbolic instead of exponential, because the difference between four
+    hops and five is almost not important. But the difference between zero and one is very
+    important.
     """
     if signals.hops is None:
         return None
@@ -351,13 +376,14 @@ def term_hops(signals: ContactSignals, weights: ScoreWeights) -> float | None:
 
 
 def term_distance(signals: ContactSignals, midpoint_km: float | None) -> float | None:
-    """Geographic closeness, scaled against *this mesh's own* median distance.
+    """Geographic closeness, scaled against the median distance of this mesh itself.
 
-    The midpoint is the population's median known distance rather than a constant, so the
-    term reads the same way on a dense downtown mesh and a sparse rural one — 50 km is far
-    in the first and unremarkable in the second, and a hardcoded threshold would have to be
-    wrong on at least one of them. Unknown when either end advertises no position, or when
-    too few contacts do for a median to mean anything.
+    The midpoint is the median known distance of the population, not a constant. Thus the
+    term has the same meaning on a dense downtown mesh and on a sparse rural mesh. 50 km is
+    far on the first and usual on the second, so a hardcoded threshold is wrong on one of
+    them at least. The term is unknown when one of the two ends advertises no position. It
+    is also unknown when too few contacts advertise a position for a median to have a
+    meaning.
     """
     if signals.distance_km is None or not midpoint_km:
         return None
@@ -365,10 +391,10 @@ def term_distance(signals: ContactSignals, midpoint_km: float | None) -> float |
 
 
 def term_grace(signals: ContactSignals, weights: ScoreWeights) -> float:
-    """The newcomer bonus, in points (not ``0..1``), decaying linearly to zero.
+    """The newcomer bonus, in points (not ``0..1``), which decays linearly to zero.
 
-    Returns ``0.0`` for a contact with no arrival time — that case is protected outright
-    (:data:`PROTECT_UNOBSERVED`) rather than granted a bonus it could keep forever.
+    Returns ``0.0`` for a contact with no arrival time. That case is protected completely
+    (:data:`PROTECT_UNOBSERVED`), instead of getting a bonus that it can keep forever.
     """
     if signals.known_days is None:
         return 0.0
@@ -380,13 +406,13 @@ def term_grace(signals: ContactSignals, weights: ScoreWeights) -> float:
 
 
 def protection_for(signals: ContactSignals) -> str | None:
-    """Why this contact can never be swept, or ``None`` if the score decides its fate.
+    """Why the sweep can never take this contact, or ``None`` if the score decides.
 
-    Checked in :data:`PROTECTION_ORDER` — most deliberate claim first — so a contact that
-    is both watched and messaged is explained by the star the user actually set.
+    The function checks in :data:`PROTECTION_ORDER` (the most deliberate claim first). Thus
+    a contact that is watched and also messaged is explained by the star that the user set.
 
     Args:
-        signals: The contact's gathered evidence.
+        signals: The collected evidence of the contact.
 
     Returns:
         One of the ``PROTECT_*`` constants, or ``None``.
@@ -408,26 +434,27 @@ def protection_for(signals: ContactSignals) -> str | None:
 
 
 #: How many contacts must advertise a position before their median is trusted as the
-#: distance term's midpoint. Below this the term is dropped for everyone (it would be
-#: calibrated against one or two nodes), which the median-fill then handles as any other
-#: unknown.
+#: midpoint of the distance term. Below this number, the term is removed for all contacts
+#: (if not, one or two nodes calibrate it). The median fill then handles it the same as any
+#: other unknown.
 _MIN_LOCATED = 4
 
-#: The term names, in the order the weighted sum walks them.
+#: The term names, in the order that the weighted sum uses them.
 _TERM_NAMES = ("dm", "recency", "volume", "channel", "hops", "distance")
 
 
 def _fill_unknowns(column: list[float | None]) -> list[float]:
-    """Replace every ``None`` in one term's column with the median of the known values.
+    """Replace each ``None`` in the column of one term with the median of the known values.
 
-    THE rule that keeps the sweep honest (see the module docstring): a contact that could
-    not be measured on an axis lands exactly where an average peer lands on it, so the
-    decision falls to the axes that *were* measurable. A column nobody could compute
-    collapses to ``0.5`` throughout — neutral, and therefore inert once weighted, since it
-    then shifts every contact by the same amount and changes no ordering.
+    This is the only rule that keeps the sweep honest (refer to the module docstring). A
+    contact that could not be measured on an axis gets exactly the position of an average
+    peer on that axis. Thus the axes that were measurable make the decision. If no contact
+    has a value in a column, all the column becomes ``0.5``. That value is neutral, and
+    thus has no effect after the weights apply, because it moves each contact by the same
+    amount and changes no order.
 
     Args:
-        column: One term's value per contact, with ``None`` for unknown.
+        column: The value of one term for each contact, with ``None`` for unknown.
 
     Returns:
         The same column with the gaps filled.
@@ -440,22 +467,22 @@ def _fill_unknowns(column: list[float | None]) -> list[float]:
 def _self_distance(
     contact: Contact, self_lat: float | None, self_lon: float | None
 ) -> float | None:
-    """Great-circle km from our own node to ``contact``, or ``None`` if either end is unplaced."""
+    """The great-circle km from our node to ``contact``, or ``None`` if an end has no position."""
     if self_lat is None or self_lon is None or not contact.has_location:
         return None
     return haversine_km(self_lat, self_lon, float(contact.lat), float(contact.lon))
 
 
 def percentile_rank(score: float, population: Sequence[float]) -> int:
-    """The percentile rank of ``score`` within ``population``, as an integer ``0``–``100``.
+    """The percentile rank of ``score`` in ``population``, as an integer ``0`` to ``100``.
 
-    Uses the standard mid-rank definition — everything strictly below, plus half of
-    everything equal — so a field of identical scores reads ``50`` for all of them rather
-    than ``0`` or ``100``, and the median contact reads about ``50``.
+    The function uses the standard mid-rank definition: all the values strictly below, plus
+    half of all the equal values. Thus, in a field of identical scores, all of them read
+    ``50`` instead of ``0`` or ``100``, and the median contact reads approximately ``50``.
 
     Args:
         score: The value to place.
-        population: Every score in the population, ``score`` included.
+        population: All the scores in the population, ``score`` included.
 
     Returns:
         The percentile rank, rounded to an integer.
@@ -475,25 +502,26 @@ def rank_contacts(
     self_lon: float | None = None,
     weights: ScoreWeights = DEFAULT_WEIGHTS,
 ) -> list[ScoredContact]:
-    """Score and rank a whole contact table, strongest first.
+    """Score and rank a full contact table, strongest first.
 
-    One pass to compute every term (leaving unknowns as ``None``), one pass to fill each
-    term's gaps with that term's population median, then the weighted sum plus grace. The
-    percentile is taken over the **whole** population — protected contacts included, since
-    they are real contacts and a rank that silently excluded them would not be a rank
-    against your contacts at all.
+    One pass calculates each term (and leaves the unknowns as ``None``). One pass fills the
+    gaps of each term with the population median of that term. Then the function adds the
+    weighted sum and the grace. The percentile uses the **whole** population, protected
+    contacts included. The reason: they are real contacts, and a rank that silently
+    excludes them is not a rank against your contacts at all.
 
     Args:
-        contacts: The contacts to rank (our own node is not among them).
-        signals: Gathered evidence keyed by 12-hex node id; a contact with no entry is
-            scored from an empty :class:`ContactSignals`, which protects it as unobserved.
-        self_lat: Our own node's advertised latitude, if it has one.
-        self_lon: Our own node's advertised longitude, if it has one.
-        weights: The weighting to score under.
+        contacts: The contacts to rank (our node is not one of them).
+        signals: The collected evidence, keyed by the 12-hex node id. A contact with no
+            entry gets its score from an empty :class:`ContactSignals`, which protects it
+            as unobserved.
+        self_lat: The advertised latitude of our node, if it has one.
+        self_lon: The advertised longitude of our node, if it has one.
+        weights: The weights for the score.
 
     Returns:
-        One :class:`ScoredContact` per input contact, highest score first. Ties break by
-        name so the order is stable between runs.
+        One :class:`ScoredContact` for each input contact, highest score first. The name
+        breaks ties, so that the order is stable between runs.
     """
     if not contacts:
         return []
@@ -504,8 +532,8 @@ def rank_contacts(
         found = signals.get(node) or ContactSignals(node=node)
         gathered.append(replace(found, distance_km=_self_distance(contact, self_lat, self_lon)))
 
-    # The distance term calibrates against this mesh's own spread, so it needs the whole
-    # population before any single contact can be scored on it.
+    # The distance term calibrates against the spread of this mesh itself. Thus it must
+    # have the whole population before any one contact can get a score on it.
     located = [s.distance_km for s in gathered if s.distance_km is not None]
     midpoint = median(located) if len(located) >= _MIN_LOCATED else None
 
@@ -548,23 +576,24 @@ def rank_contacts(
 
 
 def sweep_candidates(ranked: Sequence[ScoredContact], keep: int) -> list[ScoredContact]:
-    """The contacts a "keep the strongest ``keep``" sweep would actually remove, weakest first.
+    """The contacts that a "keep the strongest ``keep``" sweep removes, weakest first.
 
-    Protected contacts are never candidates, and — the subtlety — they **do not consume**
-    one of the kept slots: a table of 100 with 30 protected and ``keep=50`` sweeps the 50
-    weakest *sweepable* contacts, leaving 50 unprotected plus the 30 protected. Counting
-    protections against the target instead would mean starring a node quietly deepened the
-    next sweep, which is the opposite of what a star is for. The picker's rungs therefore
-    report their own real removal counts rather than arithmetic on the table size (see
-    :func:`~meshterm.ui.sweep_screen.archive_contacts`).
+    Protected contacts are never candidates. Also (and this is the subtle point), they
+    **do not use** one of the kept slots. For example, take a table of 100 contacts, with
+    30 protected and ``keep=50``. The sweep works only on the sweepable contacts, and it
+    keeps the 50 strongest of them. Thus 50 unprotected contacts stay, plus the 30
+    protected. If the protections count against the target, a star on a node silently
+    makes the next sweep deeper. That is the opposite of the purpose of a star.
+    Thus the rungs of the picker report their own real removal counts, not arithmetic on
+    the table size (refer to :func:`~meshterm.ui.sweep_screen.archive_contacts`).
 
     Args:
         ranked: The full ranking from :func:`rank_contacts`, strongest first.
         keep: How many unprotected contacts to keep.
 
     Returns:
-        The victims, weakest first — so the preview reads bottom-up, and a truncated read
-        of it still shows the ones going first.
+        The victims, weakest first. Thus the preview reads from the bottom up, and a
+        truncated part of it still shows the contacts that go first.
     """
     sweepable = [scored for scored in ranked if not scored.protected]
     if keep >= len(sweepable):
@@ -574,6 +603,9 @@ def sweep_candidates(ranked: Sequence[ScoredContact], keep: int) -> list[ScoredC
 
 
 def node_id(contact: Contact) -> str:
-    """The 12-hex canonical id a contact's history is keyed by (see ``observations.node``)."""
+    """The 12-hex canonical id that is the key of the history of a contact.
+
+    Refer to ``observations.node``.
+    """
     ident = contact.public_key or contact.key_prefix or ""
     return ident.lower().removeprefix("0x")[:12]

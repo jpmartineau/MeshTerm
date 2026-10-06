@@ -1,31 +1,33 @@
 # SPDX-License-Identifier: Apache-2.0
 """Pair a Bluetooth companion with its PIN through BlueZ, the Linux Bluetooth stack.
 
-A MeshCore companion puts its UART characteristic behind an *authenticated* bond (ENC+MITM),
-which on a device with a fixed PIN means Passkey Entry: the computer has to type the six
-digits in. On Linux, bleak's ``pair()`` cannot do that. It calls BlueZ's ``Device1.Pair`` and
-nothing else, and BlueZ gets a passkey only by asking a **pairing agent** — an object some
-program registers on the system bus to answer ``RequestPasskey``. On a desktop that agent is
-the Settings panel, in a terminal it is ``bluetoothctl``, over SSH it is usually nobody. With
-no agent to ask, BlueZ falls back to "Just Works", the firmware refuses a bond without MITM,
-and the PIN MeshTerm was handed never reached the radio at all. That is the Linux twin of the
-Windows gap :meth:`~meshterm.core.connection.MeshCoreDevice._pair_ble_windows` closes.
+A MeshCore companion puts its UART characteristic behind an authenticated bond (ENC+MITM).
+On a device with a fixed PIN, this means Passkey Entry: the computer must type the six
+digits. On Linux, the ``pair()`` of bleak cannot do that. It calls the ``Device1.Pair`` of
+BlueZ and nothing else. BlueZ gets a passkey only from a **pairing agent**: an object that a
+program registers on the system bus to answer ``RequestPasskey``.
 
-So MeshTerm registers its own agent for the length of one pairing, answering with the PIN it
-was given, and calls ``Pair`` from the *same* bus connection. BlueZ routes a pairing's agent
-requests to the agent of whoever called ``Pair`` (the system default agent is only the
-fallback), so this never takes over the desktop's agent and never answers for any other
-device's pairing.
+On a desktop, that agent is the Settings app. In a terminal, it is ``bluetoothctl``. Over
+SSH, there is usually no agent. When BlueZ has no agent to ask, it uses "Just Works"
+instead. Then the firmware refuses a bond without MITM, and the PIN that MeshTerm got never
+gets to the companion at all. This is the Linux equivalent of the Windows problem that
+:meth:`~meshterm.core.connection.MeshCoreDevice._pair_ble_windows` solves.
 
-The agent answers raw D-Bus messages (:class:`PinAgent`) rather than going through
-``dbus_fast``'s annotated ``ServiceInterface``: that one reads D-Bus signatures out of
-annotations like ``device: "o"``, which a linter takes for an undefined name and postponed
-annotations turn into a quoted string. A message handler has neither problem and can be
-exercised without a bus.
+Thus MeshTerm registers its own agent for the duration of one pairing. The agent answers
+with the PIN that MeshTerm got, and MeshTerm calls ``Pair`` from the same bus connection.
+BlueZ sends the agent requests of a pairing to the agent of the caller of ``Pair`` (the
+default agent of the system is only the fallback). Thus this agent never replaces the agent
+of the desktop, and never answers for the pairing of a different device.
 
-``dbus_fast`` is bleak's own dependency on Linux, so nothing new is installed; it is imported
-lazily, and every entry point here is best-effort — a missing system bus or BlueZ reports an
-``"error"`` outcome instead of raising.
+The agent answers raw D-Bus messages (:class:`PinAgent`). It does not use the annotated
+``ServiceInterface`` of ``dbus_fast``, because that class reads D-Bus signatures from
+annotations such as ``device: "o"``. A linter reads such an annotation as an undefined name,
+and postponed annotations change it into a quoted string. A message handler has neither
+problem, and a test can exercise it without a bus.
+
+``dbus_fast`` is a dependency of bleak on Linux, so MeshTerm installs nothing new. This
+module imports it lazily. Each entry point here is best-effort: if the system bus or BlueZ
+is missing, the entry point reports an ``"error"`` outcome and does not raise.
 """
 
 from __future__ import annotations
@@ -49,28 +51,32 @@ _PROPERTIES_IFACE = "org.freedesktop.DBus.Properties"
 _OBJECT_MANAGER_IFACE = "org.freedesktop.DBus.ObjectManager"
 _REJECTED = "org.bluez.Error.Rejected"
 _ALREADY_EXISTS = "org.bluez.Error.AlreadyExists"
-_AGENTS = "/org/bluez"  # where AgentManager1 lives
+_AGENTS = "/org/bluez"  # the object path of AgentManager1
 
-#: The agent's declared input/output capability. The companion is the side with the PIN
-#: (``DisplayOnly``), so we are the keyboard: ``KeyboardOnly`` makes the pairing Passkey
-#: Entry with us typing, which is the one method a fixed PIN can satisfy.
+#: The input and output capability that the agent declares. The companion is the side with
+#: the PIN (``DisplayOnly``), so we are the keyboard. ``KeyboardOnly`` makes the pairing
+#: Passkey Entry, and we type the passkey. This is the only method that a fixed PIN can
+#: satisfy.
 AGENT_CAPABILITY = "KeyboardOnly"
 
-#: How long to run discovery for a device BlueZ has forgotten (seconds). BlueZ drops an
-#: unpaired device it has stopped hearing after about half a minute, so one the picker
-#: listed a while ago may need hearing again before it can be paired.
+#: How long discovery runs for a device that BlueZ has forgotten (seconds). BlueZ removes an
+#: unpaired device approximately half a minute after it stops hearing that device. Thus a
+#: device that the picker showed some time ago may have to be heard again before it can be
+#: paired.
 DISCOVER_S = 6.0
 
-#: Bound on the ``Pair`` call itself (seconds). A healthy passkey pairing takes one to three
-#: seconds; this only has to outlast a slow radio, and stays well inside the probe's window.
+#: The time limit on the ``Pair`` call itself (seconds). A healthy passkey pairing takes one
+#: to three seconds. This limit must only be longer than a slow Bluetooth link, and it stays
+#: well in the time window of the probe.
 PAIR_TIMEOUT_S = 15.0
 
-#: Attempts at ``Pair`` when the link under it fails to come up, and the pause between them.
-#: A Raspberry Pi class radio drops three to seven link attempts per connect
-#: (``le-connection-abort-by-local``, HCI 0x3e). bleak retries those inside its own
-#: ``connect()``; BlueZ's ``Pair`` does not, and answers ConnectionAttemptFailed at once.
-#: Measured on a uConsole: the first Pair failed that way, the connect then went ahead
-#: unpaired, and the protected subscribe cost 32 s before the repair paired it after all.
+#: The number of ``Pair`` attempts when the link under it does not come up, and the pause
+#: between them. On the Bluetooth hardware of a Raspberry Pi class machine, three to seven
+#: link attempts fail for each connect (``le-connection-abort-by-local``, HCI 0x3e). bleak
+#: tries these again in its own ``connect()``. The ``Pair`` of BlueZ does not, and it
+#: answers ConnectionAttemptFailed immediately. Measured on a uConsole: the first Pair
+#: failed in that way, then the connect continued without a pairing, and the protected
+#: subscribe cost 32 s before the recovery paired it after all.
 PAIR_ATTEMPTS = 4
 PAIR_RETRY_DELAY_S = 0.5
 
@@ -78,7 +84,7 @@ _LINK_FLAKES = ("org.bluez.Error.ConnectionAttemptFailed",)
 
 
 def _link_flake(reply: Any) -> bool:
-    """Whether a ``Pair`` error is the link failing to come up — worth another try."""
+    """Whether a ``Pair`` error is a link that did not come up, which is worth one more try."""
     detail = reply.body[0] if reply.body and isinstance(reply.body[0], str) else ""
     return reply.error_name in _LINK_FLAKES or "le-connection-abort" in detail
 
@@ -87,29 +93,29 @@ _MAC = re.compile(r"^[0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5}$")
 
 
 def is_mac(address: str) -> bool:
-    """Whether ``address`` is a colon- or dash-separated 48-bit Bluetooth address."""
+    """Whether ``address`` is a 48-bit Bluetooth address, separated by colons or dashes."""
     return bool(_MAC.match(address or ""))
 
 
 def _normal(address: str) -> str:
-    """An address as BlueZ spells it: upper case, colon-separated."""
+    """An address in the form that BlueZ uses: upper case, separated by colons."""
     return address.replace("-", ":").upper()
 
 
 def status_name(error_name: str, body: list[Any] | None = None) -> str:
-    """Turn a BlueZ error into the lowercase words a message can quote.
+    """Change a BlueZ error into the lowercase words that a message can quote.
 
     ``org.bluez.Error.AuthenticationFailed`` → ``"authentication failed"``. The bare
-    ``org.bluez.Error.Failed`` says nothing on its own, so its text rides along
+    ``org.bluez.Error.Failed`` gives no information alone, so its text goes with it
     (``"failed: le-connection-abort-by-local"``).
 
     Args:
         error_name: The D-Bus error name from the reply.
-        body: The error reply's body, whose first item is BlueZ's detail string.
+        body: The body of the error reply. Its first item is the detail string of BlueZ.
 
     Returns:
-        The status, as :data:`~meshterm.core.connection._PAIRING_REFUSED` and its sibling
-        sets spell them.
+        The status, in the form that :data:`~meshterm.core.connection._PAIRING_REFUSED`
+        and its related sets use.
     """
     leaf = error_name.rsplit(".", 1)[-1]
     words = re.sub(r"(?<!^)(?=[A-Z])", " ", leaf).lower()
@@ -120,34 +126,36 @@ def status_name(error_name: str, body: list[Any] | None = None) -> str:
 
 
 class PinAgent:
-    """A BlueZ ``Agent1`` that answers one device's pairing with one PIN — or refuses it.
+    """A BlueZ ``Agent1`` that answers the pairing of one device with one PIN, or refuses it.
 
-    Installed as a message handler on the bus that calls ``Pair`` (see the module docstring
-    for why that bus), or made BlueZ's default agent for the length of a connect (see
-    :func:`answering`). It answers only calls addressed to its own object path, and only for
-    the device it was built for; anything else is ``Rejected``, so a pairing we did not start
-    can never be approved by us. Without a PIN it refuses every request at once, which is
-    the point of it there: the alternative is BlueZ waiting on an agent that doesn't exist.
+    MeshTerm installs it as a message handler on the bus that calls ``Pair`` (refer to the
+    module docstring for the reason for that bus). Or MeshTerm makes it the default agent of
+    BlueZ for the duration of a connect (refer to :func:`answering`). It answers only calls
+    to its own object path, and only for the device for which it was built. It answers each
+    other call with ``Rejected``, so it can never approve a pairing that we did not start.
+    Without a PIN, it refuses each request immediately. In that case, this is its purpose:
+    the alternative is that BlueZ waits for an agent that does not exist.
 
-    It never approves a pairing *without* the passkey (``RequestAuthorization``, the "Just
-    Works" yes/no). That is how a companion ends up with an unauthenticated bond — encryption
-    works, the UART characteristic still refuses — which is the stale-bond failure itself.
+    It never approves a pairing without the passkey (``RequestAuthorization``, the yes/no
+    of "Just Works"). That is how a companion gets an unauthenticated bond: the encryption
+    works, but the UART characteristic still refuses. This is the stale-bond failure itself.
 
     Attributes:
-        path: The object path the agent is registered at.
-        asked: Whether BlueZ actually asked for the PIN — a pairing that failed without
-            asking was refused before the passkey stage, which is a different story.
+        path: The object path at which the agent is registered.
+        asked: Whether BlueZ asked for the PIN. If a pairing failed and BlueZ did not ask,
+            the pairing was refused before the passkey stage, and that is a different
+            problem.
     """
 
     def __init__(self, path: str, pin: str | None, device_path: str) -> None:
         """Build the agent.
 
         Args:
-            path: The object path to answer at.
-            pin: The pairing PIN (digits), or ``None`` to refuse every request.
-            device_path: The one device it may answer for: its BlueZ object path, or the
-                path's ``/dev_…`` tail when the adapter isn't known yet (see
-                :func:`device_tail`).
+            path: The object path at which the agent answers.
+            pin: The pairing PIN (digits), or ``None`` to refuse each request.
+            device_path: The only device for which the agent can answer: its BlueZ object
+                path, or the ``/dev_…`` end of that path when the adapter is not known yet
+                (refer to :func:`device_tail`).
         """
         self.path = path
         self._pin = pin
@@ -161,7 +169,7 @@ class PinAgent:
             msg: A ``dbus_fast.Message``.
 
         Returns:
-            A reply ``Message``, or ``None`` when the message is not ours.
+            A reply ``Message``, or ``None`` when the message is not for this agent.
         """
         from dbus_fast import Message, MessageType
 
@@ -187,9 +195,9 @@ class PinAgent:
             self.asked = True
             return Message.new_method_return(msg, "s", [self._pin])
         if member == "RequestConfirmation":
-            # Numeric Comparison: approve only the number our PIN names. A companion with a
-            # fixed PIN never asks for this; one that does and shows another number is not
-            # the pairing we were told to make.
+            # Numeric Comparison: approve only the number that our PIN gives. A companion
+            # with a fixed PIN never asks for this. If a companion asks and shows a
+            # different number, it is not the pairing that MeshTerm was asked to make.
             self.asked = True
             if int(msg.body[1]) == int(self._pin):
                 return Message.new_method_return(msg)
@@ -200,39 +208,46 @@ class PinAgent:
 
 
 def device_tail(address: str) -> str:
-    """The ``/dev_AA_BB_…`` tail of the object path BlueZ gives the device at ``address``."""
+    """The ``/dev_AA_BB_…`` end of the object path that BlueZ gives the device at ``address``."""
     return "/dev_" + _normal(address).replace(":", "_")
 
 
 @asynccontextmanager
 async def answering(address: str, pin: str | None) -> AsyncIterator[PinAgent]:
-    """Be BlueZ's default pairing agent for one device while a connect runs.
+    """Be the default pairing agent of BlueZ for one device while a connect runs.
 
-    BlueZ does not wait to be asked to pair. When the companion refuses the UART subscribe
-    with *Insufficient Authentication*, BlueZ raises the link's security by itself and starts
-    SMP pairing, which needs an agent — and the one it asks is the **default** agent, not
-    ours (that routing is only for a ``Pair`` we call). With none registered, as on any
-    headless machine, it offers the companion ``DisplayYesNo``, lands on "Just Works", asks a
-    yes/no nobody is there to answer, and the companion hangs up on its 30 s SMP timeout.
-    Measured on a uConsole with btmon: 3.3 s to the question, 33.5 s to the hang-up, and only
-    then "requires a PIN". On a desktop the question goes to the desktop's dialog instead,
-    and answering it makes the unauthenticated bond that later refuses the subscribe.
+    BlueZ does not wait for a request to pair. When the companion refuses the UART
+    subscribe with *Insufficient Authentication*, BlueZ itself raises the security of the
+    link and starts SMP pairing. This pairing must have an agent, and BlueZ asks the
+    **default** agent, not ours (that routing is only for a ``Pair`` that we call). If no
+    agent is registered, as on each headless machine, BlueZ offers ``DisplayYesNo`` to the
+    companion and gets "Just Works". Then it asks a yes/no question that nobody is there to
+    answer, and the companion disconnects at its 30 s SMP timeout.
 
-    So for the length of the connect MeshTerm is the default agent, for this device only,
-    declared ``KeyboardOnly`` so the pairing BlueZ starts is Passkey Entry: with a PIN it types
-    it in and the connect pairs on the spot; without one it refuses at once and the refusal
-    arrives in seconds. Another device's pairing in that window is refused, not left hanging.
-    BlueZ keeps default agents as a stack, so unregistering hands the role back to whoever
-    held it. Best-effort: with no system bus it simply does nothing.
+    Measured on a uConsole with btmon: 3.3 s to the question, 33.5 s to the disconnect, and
+    only then "requires a PIN". On a desktop, the question goes to the dialog of the
+    desktop instead. If the user answers it, the result is the unauthenticated bond that
+    later refuses the subscribe.
+
+    Thus, for the duration of the connect, MeshTerm is the default agent, for this device
+    only. It declares ``KeyboardOnly``, so the pairing that BlueZ starts is Passkey Entry.
+    With a PIN, the agent types the PIN, and the connect pairs immediately. Without a PIN,
+    the agent refuses immediately, and the refusal arrives in seconds. If a different
+    device tries to pair in that time window, the agent refuses it, and does not let it
+    wait.
+
+    BlueZ keeps default agents as a stack. Thus, when MeshTerm unregisters its agent, the
+    role goes back to the agent that had it before. This is best-effort: if there is no
+    system bus, this function does nothing.
 
     Args:
-        address: The companion's Bluetooth address.
+        address: The Bluetooth address of the companion.
         pin: Its PIN, or ``None`` to refuse.
 
     Yields:
-        The agent, live for the body of the ``async with``. Its ``asked`` says whether
-        BlueZ asked it for the PIN, which is how the connect tells a companion that hung
-        up on a pairing from a link that merely dropped.
+        The agent, live for the body of the ``async with``. Its ``asked`` tells whether
+        BlueZ asked it for the PIN. With this, the connect can tell the difference between
+        a companion that disconnected during a pairing and a link that was only lost.
     """
     bus = None
     agent = PinAgent(f"/net/meshterm/connect{os.getpid()}", pin, device_tail(address))
@@ -267,7 +282,7 @@ async def answering(address: str, pin: str | None) -> AsyncIterator[PinAgent]:
 
 
 async def _call(bus: Any, path: str, interface: str, member: str, signature: str = "", body=None):
-    """Call a BlueZ method and return the raw reply (errors are left for the caller)."""
+    """Call a BlueZ method and return the raw reply (the caller handles the errors)."""
     from dbus_fast import Message
 
     return await bus.call(
@@ -289,7 +304,7 @@ def _is_error(reply: Any) -> bool:
 
 
 async def _objects(bus: Any) -> dict[str, dict[str, dict[str, Any]]]:
-    """Every BlueZ object, from ``GetManagedObjects`` (empty when BlueZ didn't answer)."""
+    """All the BlueZ objects, from ``GetManagedObjects`` (empty when BlueZ did not answer)."""
     reply = await _call(bus, "/", _OBJECT_MANAGER_IFACE, "GetManagedObjects")
     if _is_error(reply) or not reply.body:
         return {}
@@ -297,7 +312,7 @@ async def _objects(bus: Any) -> dict[str, dict[str, dict[str, Any]]]:
 
 
 def _value(props: dict[str, Any], name: str) -> Any:
-    """A property's plain value, unwrapping the ``Variant`` BlueZ sends."""
+    """The plain value of a property, without the ``Variant`` that BlueZ sends."""
     raw = props.get(name)
     return getattr(raw, "value", raw)
 
@@ -313,15 +328,15 @@ def _device_in(objects: dict[str, dict[str, dict[str, Any]]], address: str) -> s
 
 
 def _adapter_in(objects: dict[str, dict[str, dict[str, Any]]]) -> str | None:
-    """The first Bluetooth adapter's object path."""
+    """The object path of the first Bluetooth adapter."""
     return next((path for path, ifaces in objects.items() if _ADAPTER_IFACE in ifaces), None)
 
 
 async def _find_device(bus: Any, address: str, discover_s: float) -> tuple[str | None, bool]:
-    """Find the device's object path, listening for it briefly if BlueZ has forgotten it.
+    """Find the object path of the device. If BlueZ forgot it, listen for it a short time.
 
     Returns:
-        ``(path, paired)`` — ``path`` is ``None`` when it could not be heard.
+        ``(path, paired)``. ``path`` is ``None`` when the device could not be heard.
     """
     objects = await _objects(bus)
     path = _device_in(objects, address)
@@ -329,8 +344,8 @@ async def _find_device(bus: Any, address: str, discover_s: float) -> tuple[str |
         adapter = _adapter_in(objects)
         if adapter is None:
             return None, False
-        # A refusal here is fine: bleak or the desktop may already be discovering, which
-        # is all we need.
+        # A refusal here is not a problem: bleak or the desktop may already run discovery,
+        # and that is all that we need.
         await _call(bus, adapter, _ADAPTER_IFACE, "StartDiscovery")
         try:
             deadline = asyncio.get_running_loop().time() + discover_s
@@ -346,13 +361,13 @@ async def _find_device(bus: Any, address: str, discover_s: float) -> tuple[str |
 
 
 def _adapter_of(objects: dict[str, dict[str, dict[str, Any]]], path: str) -> str | None:
-    """The adapter a device hangs off — its own ``Adapter`` property, else the first one."""
+    """The adapter of a device: its own ``Adapter`` property, or else the first adapter."""
     own = _value(objects.get(path, {}).get(_DEVICE_IFACE, {}), "Adapter")
     return str(own) if own else _adapter_in(objects)
 
 
 async def _remove(bus: Any, path: str) -> Any:
-    """Forget a device's bond (``Adapter1.RemoveDevice``), which also forgets the device.
+    """Forget the bond of a device (``Adapter1.RemoveDevice``), and also the device itself.
 
     Returns:
         The raw reply, or ``None`` when there was no adapter to ask.
@@ -378,25 +393,27 @@ async def pair(
     discover_s: float = DISCOVER_S,
     pair_timeout_s: float = PAIR_TIMEOUT_S,
 ) -> tuple[str, str]:
-    """Pair the companion at ``address`` using ``pin``, through our own BlueZ agent.
+    """Pair the companion at ``address`` with ``pin``, through our own BlueZ agent.
 
-    Mirrors the Windows ceremony's contract: an existing bond is trusted unless ``force``,
-    which tears it down and pairs afresh — the heal for a bond the device has since lost.
+    This function has the same contract as the Windows procedure. It trusts an existing
+    bond, unless ``force`` is set. ``force`` removes the bond and pairs again: this is the
+    recovery for a bond that the device lost after the pairing.
 
     Args:
-        address: The companion's Bluetooth address.
+        address: The Bluetooth address of the companion.
         pin: Its pairing PIN (six digits).
         force: Whether to remove an existing bond first.
-        discover_s: How long to listen for a device BlueZ has forgotten.
-        pair_timeout_s: Bound on the ``Pair`` call.
+        discover_s: How long to listen for a device that BlueZ has forgotten.
+        pair_timeout_s: The time limit on the ``Pair`` call.
 
     Returns:
-        ``(outcome, status)`` in :class:`~meshterm.core.connection._BlePairing`'s vocabulary:
-        ``"reused"``, ``"paired"``, ``"absent"``, ``"failed"`` with the BlueZ status, or
-        ``"error"`` with what went wrong.
+        ``(outcome, status)``, in the vocabulary of
+        :class:`~meshterm.core.connection._BlePairing`: ``"reused"``, ``"paired"``,
+        ``"absent"``, ``"failed"`` with the BlueZ status, or ``"error"`` with a description
+        of the problem.
     """
     if not pin.isdigit():
-        return "failed", "authentication failed"  # a passkey is a number; this can't be it
+        return "failed", "authentication failed"  # a passkey is a number: this is not one
     try:
         bus = await _system_bus()
     except Exception as exc:  # noqa: BLE001 - no system bus / no dbus_fast: nothing to pair with
@@ -413,7 +430,7 @@ async def pair(
             if path is None:
                 return "absent", ""
         agent = PinAgent(f"/net/meshterm/agent{os.getpid()}", pin, path)
-        paired_link: str | None = None  # set once Pair has been asked to open a link
+        paired_link: str | None = None  # set when MeshTerm asks Pair to open a link
         bus.add_message_handler(agent.handle)
         try:
             reply = await _call(
@@ -439,10 +456,10 @@ async def pair(
             if _is_error(reply) and reply.error_name != _ALREADY_EXISTS:
                 status = status_name(reply.error_name, reply.body)
                 if not agent.asked and status == "authentication failed":
-                    # Refused before the passkey stage: the PIN was never in question.
+                    # Refused before the passkey stage: the PIN was not the problem.
                     status = "authentication rejected"
                 return "failed", status
-            # Trusted lets later connections through without an agent to authorize them.
+            # Trusted lets later connections through, with no agent to authorize them.
             from dbus_fast import Variant
 
             await _call(
@@ -452,12 +469,12 @@ async def pair(
             return "paired", ""
         finally:
             if paired_link is not None:
-                # ``Pair`` opens a link to pair over and BlueZ leaves it up. A companion that
-                # is connected stops advertising, and the connect that follows looks the
-                # device up by scanning for it, so it never finds it — measured on a
-                # uConsole: paired, then "couldn't open a link" after two 30 s tries. Put
-                # the link down so the connect meets an advertising device, as it would
-                # have without us.
+                # ``Pair`` opens a link for the pairing, and BlueZ keeps the link up. A
+                # connected companion stops its BLE advertisements. The connect that
+                # follows finds the device with a scan, so it never finds the device.
+                # Measured on a uConsole: paired, then "couldn't open a link" after two
+                # tries of 30 s. Close the link, so that the connect finds a device that
+                # advertises, the same as without this pairing.
                 await _call(bus, paired_link, _DEVICE_IFACE, "Disconnect")
             await _call(bus, _AGENTS, _AGENT_MANAGER_IFACE, "UnregisterAgent", "o", [agent.path])
             bus.remove_message_handler(agent.handle)
@@ -468,7 +485,7 @@ async def pair(
 
 
 async def is_paired(address: str) -> bool:
-    """Whether BlueZ holds a bond for ``address``. ``False`` on any failure to ask."""
+    """Whether BlueZ holds a bond for ``address``. ``False`` if the query fails in any way."""
     try:
         bus = await _system_bus()
     except Exception as exc:  # noqa: BLE001 - no bus: nothing is known to be paired
@@ -486,7 +503,7 @@ async def is_paired(address: str) -> bool:
 
 
 async def unpair(address: str) -> bool:
-    """Forget BlueZ's bond for ``address``. ``True`` only if a bond was removed."""
+    """Forget the bond that BlueZ has for ``address``. ``True`` only if a bond was removed."""
     try:
         bus = await _system_bus()
     except Exception as exc:  # noqa: BLE001 - no bus: nothing to remove

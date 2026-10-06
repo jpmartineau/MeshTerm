@@ -1,17 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Persistence for remote-node admin state: last-read settings and CLI history.
+"""The store for the admin state of remote nodes: the last-read settings and the CLI history.
 
-Reading a repeater's configuration costs one paced mesh round trip per value, so the
-repeater-admin screen never bulk-reads on open — it shows what the *last* read (or the
-last applied ``set``) said, stamped with when, and refreshes on demand. That cache lives
-here, per node (keyed like the admin passwords, by public key), in a small JSON file in
-the config directory (``<config_dir>/remote.json``) alongside each node's remote
-command-line history — global machine state, like the other JSON stores, deliberately
-outside the per-invocation SQLite database.
+A read of the settings of a repeater costs one paced round trip on the mesh for each value.
+Thus the repeater-admin screen never reads all the values when it opens. It shows what the
+last read (or the last applied ``set``) said, with its time, and it reads again when the
+user asks.
 
-The file is read into typed records (:class:`_RemoteNode`, each holding its
-:class:`CachedValue` settings) and written back out of them, never round-tripped as the
-raw JSON it was read as, so a field no record knows is gone after the next write.
+That cache is here, for each node, in a small JSON file in the config directory
+(``<config_dir>/remote.json``). The key is the public key of the node, the same as for the
+admin passwords. The same file holds the remote command-line history of each node. This is
+global machine state, the same as the other JSON stores. It is intentionally outside the
+SQLite database, which can be different for each run.
+
+The file is read into typed records (:class:`_RemoteNode`, each with its
+:class:`CachedValue` settings) and written back from them. The store never writes back the
+raw JSON that it read. Thus a field that no record knows is removed after the next write.
 """
 
 from __future__ import annotations
@@ -26,24 +29,27 @@ from .admin_store import admin_key
 from .atomicwrite import write_atomically
 from .models import Contact, utcnow
 
-#: How many command-line entries are kept per node (newest last).
+#: How many command-line entries the store keeps for each node (newest last).
 HISTORY_CAP = 100
 
 
 @dataclass(frozen=True, slots=True)
 class CachedValue:
-    """One remembered remote setting: what the node last said, and when.
+    """One remembered remote setting: what the node said last, and when.
 
     Attributes:
-        value: The value as stored text (empty when unsupported).
-        read_at: When it was read from (or written to) the node.
-        supported: ``False`` when the node answered the read with an error — its firmware
+        value: The value as stored text (empty when the node does not support the
+            setting).
+        read_at: When it was read from the node (or written to it).
+        supported: ``False`` when the node answered the read with an error: its firmware
             has no such setting (a board without a front-end module, a build without a
-            bridge). Kept apart from *never read*, which is no entry at all.
-        discovered: ``True`` for a setting the catalog hasn't got, learned from a command
-            the reader ran on *this node's* command line. Such a row reads ``n/a`` like any
-            other when the node stops answering it, and is removed only by hand: its key is
-            recorded nowhere else, so a misread reply must not be able to delete it.
+            bridge). This is separate from "never read", which is no entry at all.
+        discovered: ``True`` for a setting that the catalog does not have. MeshTerm
+            learned it from a command that the user ran on the command line of this node.
+            When the node no longer answers it, such a row reads ``n/a``, the same as each
+            other row. Only the user can remove it, by hand, because its key is stored
+            nowhere else. Thus a reply that MeshTerm reads incorrectly must not be able to
+            delete it.
     """
 
     value: str
@@ -51,15 +57,16 @@ class CachedValue:
     supported: bool = True
     discovered: bool = False
 
-    #: Fields this record once held and must never hold again under another meaning (see
-    #: :data:`meshterm.core.preferences.RETIRED` for why a name is never reused).
+    #: The fields that this record held before. It must never hold them again with a
+    #: different meaning (refer to :data:`meshterm.core.preferences.RETIRED` for the
+    #: reason that a name is never used again).
     RETIRED: ClassVar[frozenset[str]] = frozenset()
 
     @classmethod
     def read(cls, raw: object) -> CachedValue | None:
-        """Build a value from one file entry, or ``None`` when it is malformed.
+        """Build a value from one file entry, or ``None`` when the entry is malformed.
 
-        A supported entry must carry its value; an unsupported one carries none.
+        A supported entry must have its value. An unsupported entry has no value.
         """
         if not isinstance(raw, dict):
             return None
@@ -74,10 +81,10 @@ class CachedValue:
         )
 
     def to_json(self) -> dict:
-        """The entry as written, in the file's long-standing spelling.
+        """The entry as written, in the spelling that the file always used.
 
-        A supported value carries ``value``; an unsupported one says ``unsupported`` and
-        carries no value; ``discovered`` appears only when true.
+        A supported value has ``value``. An unsupported value has ``unsupported`` and no
+        value. ``discovered`` is present only when it is true.
         """
         entry: dict = {"value": self.value} if self.supported else {"unsupported": True}
         entry["read_at"] = self.read_at.isoformat() if self.read_at is not None else None
@@ -88,22 +95,23 @@ class CachedValue:
 
 @dataclass(slots=True)
 class _RemoteNode:
-    """Everything remembered about one remote node.
+    """All that MeshTerm remembers about one remote node.
 
     Attributes:
-        settings: Its cached settings, keyed by CLI parameter name.
+        settings: Its cached settings, with the CLI parameter name as the key.
         history: Its remote command-line history, oldest first.
     """
 
     settings: dict[str, CachedValue] = field(default_factory=dict)
     history: list[str] = field(default_factory=list)
 
-    #: Fields this record once held; none yet (see :attr:`CachedValue.RETIRED`).
+    #: The fields that this record held before. There are none yet (refer to
+    #: :attr:`CachedValue.RETIRED`).
     RETIRED: ClassVar[frozenset[str]] = frozenset()
 
     @classmethod
     def read(cls, raw: object) -> _RemoteNode:
-        """Build a node's record from its file entry, taking only the fields it knows."""
+        """Build the record of a node from its file entry, with only the fields it knows."""
         record = raw if isinstance(raw, dict) else {}
         settings: dict[str, CachedValue] = {}
         raw_settings = record.get("settings")
@@ -118,11 +126,11 @@ class _RemoteNode:
 
     @property
     def empty(self) -> bool:
-        """Whether there is nothing left to remember about this node."""
+        """Whether nothing remains to remember about this node."""
         return not self.settings and not self.history
 
     def to_json(self) -> dict:
-        """The record as written: its own fields and nothing it happened to be read with."""
+        """The record as written: its own fields only, not the other fields of the read entry."""
         return {
             "settings": {key: value.to_json() for key, value in self.settings.items()},
             "history": list(self.history),
@@ -130,18 +138,18 @@ class _RemoteNode:
 
 
 class RemoteStore:
-    """Reads and writes per-node remote-admin state (setting cache + CLI history)."""
+    """Reads and writes the remote-admin state of each node (setting cache and CLI history)."""
 
     def __init__(self, path: Path) -> None:
-        """Open the store against a JSON file location.
+        """Open the store on the location of a JSON file.
 
         Args:
-            path: Path to the JSON state file (created lazily on first write).
+            path: Path to the JSON state file (made only at the first write).
         """
         self._path = path
 
     def _load(self) -> dict[str, _RemoteNode]:
-        """Read every node's record, keyed by :func:`admin_key`; empty on trouble."""
+        """Read the records of all the nodes by :func:`admin_key` (empty at a problem)."""
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -151,40 +159,40 @@ class RemoteStore:
         return {str(key): _RemoteNode.read(raw) for key, raw in data.items()}
 
     def _node(self, node: Contact) -> _RemoteNode:
-        """One node's record, or an empty one when nothing is remembered."""
+        """The record of one node, or an empty record when nothing is remembered."""
         return self._load().get(admin_key(node)) or _RemoteNode()
 
     # -- the settings cache -------------------------------------------------------
 
     def settings(self, node: Contact) -> dict[str, CachedValue]:
-        """Every remembered setting for ``node``, keyed by CLI parameter name."""
+        """All the remembered settings for ``node``, with the CLI parameter name as the key."""
         return dict(self._node(node).settings)
 
     def remember_setting(self, node: Contact, key: str, value: str) -> None:
-        """Cache one setting's value for ``node``, stamped now."""
+        """Cache the value of one setting for ``node``, with the time now."""
         self._put(node, key, CachedValue(value=value, read_at=utcnow()))
 
     def remember_discovered(self, node: Contact, key: str, value: str) -> None:
-        """Cache a setting the catalog hasn't got, which ``node`` has just proved it has."""
+        """Cache a setting that is not in the catalog, which ``node`` proved that it has."""
         self._put(node, key, CachedValue(value=value, read_at=utcnow(), discovered=True))
 
     def remember_unsupported(self, node: Contact, key: str) -> None:
-        """Record that ``node`` answered a read of ``key`` with an error, stamped now."""
+        """Store that ``node`` answered a read of ``key`` with an error, with the time now."""
         self._put(node, key, CachedValue(value="", read_at=utcnow(), supported=False))
 
     def forget_setting(self, node: Contact, key: str) -> None:
-        """Drop one cached setting, so the row reads as never read."""
+        """Remove one cached setting, so that the row reads as never read."""
         records = self._load()
         record = records.get(admin_key(node))
         if record is not None and record.settings.pop(key, None) is not None:
             self._write(records)
 
     def _put(self, node: Contact, key: str, value: CachedValue) -> None:
-        """Store one setting's cache entry for ``node``, keeping it discovered if it was.
+        """Store the cache entry of one setting for ``node``, and keep the discovered flag.
 
-        A discovered row is refreshed by the same reads and writes as any other — through
-        :meth:`remember_setting` — and that must not quietly demote it to a catalog row it
-        has no entry for, which would leave a row nothing draws.
+        The same reads and writes as for each other row change a discovered row (through
+        :meth:`remember_setting`). That change must not quietly make it a catalog row,
+        because the catalog has no entry for it. If that occurs, nothing draws the row.
         """
         records = self._load()
         record = records.setdefault(admin_key(node), _RemoteNode())
@@ -197,30 +205,33 @@ class RemoteStore:
     # -- the command-line history ---------------------------------------------------
 
     def history(self, node: Contact) -> list[str]:
-        """The node's remote CLI history, oldest first."""
+        """The remote CLI history of the node, oldest first."""
         return list(self._node(node).history)
 
     def append_history(self, node: Contact, command: str) -> None:
-        """Append one sent command to the node's history (dropping an adjacent dupe)."""
+        """Add one sent command to the history of the node (not a repeat of the last command)."""
         command = command.strip()
         if not command:
             return
         records = self._load()
         record = records.setdefault(admin_key(node), _RemoteNode())
         if record.history and record.history[-1] == command:
-            return  # re-running the last command shouldn't stutter the recall
+            return  # a repeat of the last command must not add a duplicate to the recall
         record.history.append(command)
         del record.history[:-HISTORY_CAP]
         self._write(records)
 
     def _write(self, records: dict[str, _RemoteNode]) -> None:
-        """Persist ``records`` atomically (crash mid-write keeps the previous file)."""
+        """Write ``records`` atomically.
+
+        If a crash occurs during the write, the previous file stays.
+        """
         data = {key: record.to_json() for key, record in records.items() if not record.empty}
         write_atomically(self._path, json.dumps(data, indent=2))
 
 
 def _as_time(value: object) -> datetime | None:
-    """Parse a stored ISO-8601 timestamp, or ``None`` if absent or corrupt."""
+    """Parse a stored ISO-8601 timestamp, or return ``None`` if it is absent or corrupt."""
     if not isinstance(value, str):
         return None
     try:

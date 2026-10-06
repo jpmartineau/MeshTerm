@@ -1,34 +1,39 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Reopening the session in a Terminal window that looks like MeshTerm.
+"""Open the session again in a Terminal window that looks like MeshTerm.
 
-macOS Terminal is not the classic Windows console's problem over again. It falls back
-generously — ask it for a glyph its font lacks and it finds one somewhere — so nothing here
-is ever a box. The trouble is *what* it finds: no Mac monospace face carries the Braille
-Patterns block at all (SF Mono, Menlo, Monaco and Courier all measure zero), so the block
-the charts and the map's terrain are drawn from is borrowed from a **proportional** face
-and arrives at the wrong width. The screen is not empty, it is crooked, which is worse —
-nothing announces itself as broken and the reader has nothing to compare it against.
+The problem with macOS Terminal is not the same as the problem with the classic Windows
+console. Terminal uses fallback fonts freely: when its font does not have a glyph, it finds
+the glyph in a different font. Thus no glyph is ever drawn as a box. The problem is the
+font that Terminal finds. No Mac monospace font has the Braille Patterns block at all (SF
+Mono, Menlo, Monaco, and Courier all measure zero). The charts and the terrain of the map
+are drawn from that block. Thus Terminal gets the block from a **proportional** font, and
+the glyphs have the wrong width.
 
-The fix is a font, and a font means a Terminal profile that names it. Which raises the
-question this module exists to answer carefully: **whose terminal is it?**
+The screen is not empty, but it is crooked, and this is worse. Nothing shows that it is
+broken, and the user has nothing to compare it with.
 
-MeshTerm's palette is the 16-colour VT set (:data:`~meshterm.ui.theme._VT_SLOTS`) — a
-deliberately crude, deliberately CGA-ish thing that the app wears on purpose. Nobody should
-have to live in it to read their mail. So this module never touches the reader's default
-profile and never edits their preferences: it *adds* a profile named MeshTerm, and opens
-MeshTerm's own window in it. Their Terminal keeps whatever they chose, down to its
-translucency; ours is opaque and crude in a window of its own, and quitting leaves nothing
-behind.
+The solution is a font, and a font must have a Terminal profile that names it. This causes
+the question that this module exists to answer carefully: **whose terminal is it?**
 
-That also sidesteps a trap worth recording, because it costs an evening to find. Terminal
-rewrites ``~/Library/Preferences/com.apple.Terminal.plist`` **from memory when it quits**,
-so anything written into that file while Terminal is running is silently discarded later —
-and MeshTerm is always running inside it. Nothing here writes that file. A ``.terminal``
-file is handed to Terminal and *Terminal* does the importing, which is the one path that
-works from inside a live session.
+The palette of MeshTerm is the 16-colour VT set (:data:`~meshterm.ui.theme._VT_SLOTS`). It
+is a crude set of colours, like CGA, and the app uses it on purpose. But a user must not
+have to use these colours to read their mail. Thus this module never changes the default
+profile of the user, and never edits their Terminal preferences. It only adds a profile with
+the name MeshTerm, and opens the window of MeshTerm in that profile. The Terminal of the
+user keeps all their choices, also its translucency. Our window is opaque and crude, and it
+is a separate window. When the user quits MeshTerm, nothing stays.
 
-The profile is generated rather than shipped, from the same theme constant the app draws
-itself with, so the window can never disagree with the screen it is holding.
+This design also avoids a trap. We write the trap down, because it takes an evening to
+find. When Terminal quits, it writes ``~/Library/Preferences/com.apple.Terminal.plist``
+again **from its memory**. Thus, if a program writes into that file while Terminal runs,
+Terminal discards that change later, with no message. And MeshTerm always runs in
+Terminal. No code in this module writes that file. MeshTerm gives a ``.terminal`` file to
+Terminal, and Terminal itself does the import. This is the only path that works from a
+live session.
+
+MeshTerm generates the profile, instead of a file in the package. The profile comes from
+the same theme constant that the app uses to draw itself. Thus the window can never
+disagree with the screen in it.
 """
 
 from __future__ import annotations
@@ -43,26 +48,29 @@ from pathlib import Path
 
 from .relaunch import REOPENED_ENV, own_command, wanted_size
 
-#: The name the profile is installed under, and the name the reader sees in Terminal's
-#: settings list. Stable: renaming it would strand the copy already on their machine.
+#: The name under which the profile is installed, and the name that the user sees in the
+#: profile list of Terminal. It is stable: if we rename it, the copy that is already on the
+#: machine of the user stays there with no use.
 PROFILE_NAME = "MeshTerm"
 
-#: The bundled face, by its PostScript name — which is what an ``NSFont`` archive holds,
-#: and not the family name Font Book shows. Installed by :func:`install_font` from the copy
-#: in the package; see :mod:`meshterm.core.consolefont` for the Windows half of the same
-#: idea.
+#: The bundled font, by its PostScript name. An ``NSFont`` archive holds this name, not the
+#: family name that Font Book shows. :func:`install_font` installs the font from the copy
+#: in the package. Refer to :mod:`meshterm.core.consolefont` for the Windows part of the
+#: same idea.
 FONT_FACE = "CascadiaMonoPL-Regular"
 
-#: Points. Terminal's own default is 11; 13 is a size the braille charts read cleanly at on
-#: a Retina panel without the map losing rows.
+#: The size in points. The default of Terminal is 11. At 13, the braille charts are clear
+#: on a Retina display, and the map does not lose rows.
 FONT_SIZE = 13.0
 
-#: Where a user-installed font goes on macOS. No administrator rights, no installer, and
-#: the reader can undo it by dragging the file out of Font Book.
+#: The directory for a font that the user installs on macOS. No administrator rights and
+#: no installer are necessary. The user can undo the install: drag the file out of Font
+#: Book.
 USER_FONT_DIR = Path("~/Library/Fonts").expanduser()
 
-#: Terminal's key for each palette slot, in :data:`~meshterm.ui.theme._VT_SLOTS` order —
-#: the standard ANSI 16, dim bank then bright bank.
+#: The Terminal plist key for each palette slot, in the order of
+#: :data:`~meshterm.ui.theme._VT_SLOTS`: the 16 standard ANSI colours, first the dim bank,
+#: then the bright bank.
 _ANSI_KEYS: tuple[str, ...] = (
     "ANSIBlackColor",
     "ANSIRedColor",
@@ -84,18 +92,18 @@ _ANSI_KEYS: tuple[str, ...] = (
 
 
 def _archive(objects: list[object]) -> bytes:
-    """One ``NSKeyedArchiver`` document, as Terminal stores every colour and font.
+    """One ``NSKeyedArchiver`` document: the form of each colour and font in Terminal.
 
-    Terminal keeps these as nested binary plists inside the profile — an archived
-    ``NSColor`` or ``NSFont`` rather than a number and a string, because the profile is
-    written by AppKit rather than for us. The shape is small and fixed, so it is built
-    here rather than reached for through a dependency.
+    Terminal keeps these as nested binary plists in the profile: an archived ``NSColor``
+    or ``NSFont``, not a number and a string. This is because AppKit writes the profile,
+    and AppKit did not make this format for other programs. The structure is small and
+    fixed, so this module builds it, and does not get it from a dependency.
 
     Args:
         objects: The ``$objects`` array, with ``$null`` already at index 0.
 
     Returns:
-        The encoded archive. Binary, because :class:`plistlib.UID` has no XML spelling.
+        The encoded archive. It is binary, because :class:`plistlib.UID` has no XML form.
     """
     return plistlib.dumps(
         {
@@ -112,14 +120,15 @@ def ns_color(rgb: str) -> bytes:
     """An archived ``NSColor`` for a ``#rrggbb`` string.
 
     Args:
-        rgb: The colour, as the theme spells it.
+        rgb: The colour, in the form that the theme uses.
 
     Returns:
-        The archive Terminal expects in a colour key.
+        The archive that Terminal expects in a colour key.
     """
     channels = (int(rgb[index : index + 2], 16) / 255 for index in (1, 3, 5))
-    # Calibrated RGB, space-separated to six places and NUL-terminated: AppKit's own
-    # spelling, matched exactly because Terminal parses it rather than tolerating it.
+    # Calibrated RGB, with spaces between the values, six decimal places, and a NUL at the
+    # end. This is the form that AppKit itself writes. We match it exactly, because
+    # Terminal parses it strictly and does not accept a different form.
     packed = " ".join(f"{value:.6f}" for value in channels).encode("ascii") + b"\x00"
     return _archive(
         [
@@ -134,11 +143,11 @@ def ns_font(face: str = FONT_FACE, size: float = FONT_SIZE) -> bytes:
     """An archived ``NSFont``.
 
     Args:
-        face: The PostScript name of the face.
+        face: The PostScript name of the font.
         size: The size in points.
 
     Returns:
-        The archive Terminal expects in the ``Font`` key.
+        The archive that Terminal expects in the ``Font`` key.
     """
     return _archive(
         [
@@ -158,31 +167,32 @@ def ns_font(face: str = FONT_FACE, size: float = FONT_SIZE) -> bytes:
 def launch_command() -> str:
     """The shell line that starts this session again, for the profile to run.
 
-    Terminal starts the command from a **fresh login shell**, which is why this is a
-    string rather than an argv and why it carries what it needs explicitly. Nothing of the
-    current process's environment survives the hop — good news for the ``_PYI*`` variables
-    a frozen build must not pass on (see
-    :func:`~meshterm.core.relaunch.child_environment`, which exists for the Windows side
-    where they *do* survive), and bad news for a ``MESHTERM_HOME`` the reader set for this
-    invocation alone, which the README itself suggests doing. So every ``MESHTERM_*``
-    variable currently set is carried across, and the reopened-session marker with them.
+    Terminal starts the command from a **new login shell**. This is why the command is a
+    string and not an argv, and why it carries explicitly all that it needs. No part of the
+    environment of the current process goes through to the new shell. This is good for the
+    ``_PYI*`` variables, which a frozen build must not give to its child (refer to
+    :func:`~meshterm.core.relaunch.child_environment`, which exists for Windows, where these
+    variables do go through). But it is bad for a ``MESHTERM_HOME`` that the user set for
+    only this run, which the README itself tells the user to do. Thus the command carries
+    each ``MESHTERM_*`` variable that is set now, and also the marker of a reopened session.
 
-    The variables ride on ``/usr/bin/env`` rather than on a ``VAR=value`` prefix, and that
-    is not a stylistic choice. Terminal's own handling of the string is not something to
-    lean on: measured on macOS 26, the same command line runs under ``RunCommandAsShell``
-    *false* and fails under *true*, where Terminal takes the whole thing as the name of a
-    program and puts this on the screen::
+    The variables go on ``/usr/bin/env``, not on a ``VAR=value`` prefix, and this choice is
+    not a matter of style. We cannot trust how Terminal reads the string. A measurement on
+    macOS 26 showed that the same command line runs when ``RunCommandAsShell`` is false,
+    and fails when it is true. When it is true, Terminal uses the full string as the name
+    of a program, and shows this on the screen::
 
         Command not found: MESHTERM_REOPENED=1
         Could not create a new process and open a pseudo-tty
 
-    ``env`` is a real executable, so it is a valid argv *and* a valid shell line, and the
-    window cannot land on that message however Terminal decides to read it. ``env`` execs
-    the program in its own place, so nothing lingers behind it either — the window holds
-    MeshTerm and nothing else, and closing MeshTerm does not drop to a prompt.
+    ``env`` is a real executable, so the line is a valid argv and also a valid shell line.
+    Thus the window cannot show that message, however Terminal reads the line. ``env``
+    execs the program in its own place, so nothing stays behind it. The window holds
+    MeshTerm and nothing else, and when MeshTerm exits, the window does not go to a shell
+    prompt.
 
     Returns:
-        A command line Terminal can run with or without a shell.
+        A command line that Terminal can run with or without a shell.
     """
     carried = {name: value for name, value in os.environ.items() if name.startswith("MESHTERM_")}
     carried[REOPENED_ENV] = "1"
@@ -194,17 +204,16 @@ def launch_command() -> str:
 
 
 def build_profile(command: str | None = None) -> dict[str, object]:
-    """The MeshTerm profile, as Terminal's preferences hold it.
+    """The MeshTerm profile, in the form that the Terminal preferences hold it.
 
-    Every colour comes from :data:`~meshterm.ui.theme._VT_SLOTS`, so the window and the
-    app it is holding cannot disagree — change the theme and this follows on the next
-    write. The window size is
-    :func:`~meshterm.core.relaunch.wanted_size`'s, the same one Windows Terminal is asked
-    for.
+    Each colour comes from :data:`~meshterm.ui.theme._VT_SLOTS`. Thus the window and the
+    app in it cannot disagree: if you change the theme, the profile follows at the next
+    write. The window size comes from :func:`~meshterm.core.relaunch.wanted_size`, the same
+    size that MeshTerm asks Windows Terminal for.
 
     Args:
-        command: A shell line for the window to run on open, or ``None`` for a profile
-            that just sits in the list waiting to be chosen.
+        command: A shell line for the window to run when it opens. ``None`` gives a
+            profile that only stays in the list until somebody selects it.
 
     Returns:
         The profile dictionary, ready to write as a ``.terminal`` file.
@@ -219,9 +228,9 @@ def build_profile(command: str | None = None) -> dict[str, object]:
         "Font": ns_font(),
         "FontAntialias": True,
         "FontWidthSpacing": 1.0,
-        # Opaque on purpose. A braille raster over a translucent ground is unreadable, and
-        # a translucent profile is a perfectly reasonable thing for the reader to have --
-        # which is the whole argument for MeshTerm having a window of its own.
+        # Opaque on purpose. A braille raster on a translucent background cannot be read.
+        # But a translucent profile is a reasonable choice for the user to have. This is
+        # the full reason why MeshTerm has a window of its own.
         "BackgroundColor": ns_color("#000000"),
         "TextColor": ns_color("#aaaaaa"),
         "TextBoldColor": ns_color("#ffffff"),
@@ -229,9 +238,9 @@ def build_profile(command: str | None = None) -> dict[str, object]:
         "CursorColor": ns_color("#55ffff"),
         "CursorType": 0,
         "BlinkText": False,
-        # Bold is bold, not a jump to the bright bank. The theme states brightness as a
-        # colour (see the wordmark's own note); letting Terminal promote it as well would
-        # land a bank too high.
+        # Bold is bold, not a move to the bright bank. The theme gives brightness as a
+        # colour (refer to the note on the wordmark). If Terminal also promotes bold text,
+        # the colour goes one bank too high.
         "UseBrightBold": False,
         "columnCount": cols,
         "rowCount": rows,
@@ -240,49 +249,51 @@ def build_profile(command: str | None = None) -> dict[str, object]:
         "ShowActiveProcessInTitle": True,
         "ShowDimensionsInTitle": False,
         "ShowWindowSettingsNameInTitle": False,
-        # Close the window when MeshTerm exits cleanly, and keep it when it does not --
-        # a crash the reader never sees is a bug report nobody can write.
+        # Close the window when MeshTerm exits cleanly, and keep it open when it does not.
+        # If the user never sees a crash, nobody can write a bug report about it.
         "shellExitAction": 1,
     }
     for key, (_slot, _label, rgb) in zip(_ANSI_KEYS, _VT_SLOTS, strict=True):
         profile[key] = ns_color(rgb)
     if command is not None:
         profile["CommandString"] = command
-        # False, measured. Under *true* Terminal takes the whole string as a program name
-        # and the window says "Command not found: ..."; under false it runs. The opposite
-        # of what the key's name suggests, which is why it is written down.
+        # False, measured. When it is true, Terminal uses the full string as a program
+        # name, and the window shows "Command not found: ...". When it is false, the
+        # command runs. This is the opposite of what the name of the key suggests, so we
+        # write it down.
         profile["RunCommandAsShell"] = False
     return profile
 
 
 def launcher_path() -> Path:
-    """The little script the profile runs, beside the profile itself."""
+    """The small script that the profile runs, next to the profile itself."""
     from .config import default_config_dir
 
     return default_config_dir() / "launch.sh"
 
 
 def write_launcher() -> Path:
-    """Write the launcher, and return where it landed.
+    """Write the launcher, and return its path.
 
-    This exists for one reason, and it is the finding that shaped this module. Terminal
-    names an imported settings set **after the file** — ``MeshTerm.terminal`` becomes the
-    profile "MeshTerm" — and re-importing the *same bytes* reuses that profile, while
-    importing **different** bytes under the same filename creates "MeshTerm 1", then
-    "MeshTerm 2". Measured, by opening one file four times: three identical imports left
-    one profile, and the fourth, one word different, left two.
+    This function exists for one reason, and this reason is the finding that gave this
+    module its design. Terminal names an imported profile **after the file**:
+    ``MeshTerm.terminal`` becomes the profile "MeshTerm". If you import the same bytes
+    again, Terminal uses that profile again. But if you import different bytes with the
+    same file name, Terminal makes "MeshTerm 1", then "MeshTerm 2". We measured it: we
+    opened one file four times. Three identical imports left one profile. The fourth, with
+    one word changed, left two.
 
-    So the command cannot live in the profile. It carries ``sys.argv`` and the reader's
-    ``MESHTERM_*`` variables, which differ between ``meshterm`` and ``meshterm --mock``,
-    and a profile per command line would fill the reader's settings list with junk that
-    only they can remove.
+    Thus the command cannot be in the profile. The command carries ``sys.argv`` and the
+    ``MESHTERM_*`` variables of the user, which are different for ``meshterm`` and
+    ``meshterm --mock``. A profile for each command line fills the profile list of the user
+    with junk that only the user can remove.
 
-    Moving the variable part behind a fixed path fixes it exactly: the profile says
-    ``~/.meshterm/launch.sh`` and never changes, and this file underneath it says whatever
-    this launch happens to need.
+    A fixed path in front of the part that changes solves this problem exactly. The profile
+    names ``~/.meshterm/launch.sh`` and never changes. This file behind that path holds the
+    command that this run needs.
 
     Returns:
-        The path written, executable.
+        The path that was written. The file is executable.
     """
     path = launcher_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -297,10 +308,11 @@ def write_launcher() -> Path:
 
 
 def profile_path() -> Path:
-    """Where the generated ``.terminal`` file is kept.
+    """The path where MeshTerm keeps the generated ``.terminal`` file.
 
-    In MeshTerm's own directory rather than the Desktop: it is ours, it is the one place
-    that already survives an upgrade, and it moves with ``MESHTERM_HOME``.
+    The file is in the directory of MeshTerm, not on the Desktop. The file is ours. This
+    directory is the one place that already stays after an upgrade, and it moves with
+    ``MESHTERM_HOME``.
     """
     from .config import default_config_dir
 
@@ -308,13 +320,14 @@ def profile_path() -> Path:
 
 
 def write_profile(*, command: str | None = None) -> Path:
-    """Write the profile out, and return where it landed.
+    """Write the profile, and return its path.
 
     Args:
-        command: A shell line for the window to run, or ``None`` for a bare profile.
+        command: A shell line for the window to run, or ``None`` for a profile with no
+            command.
 
     Returns:
-        The path written.
+        The path that was written.
     """
     path = profile_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -323,25 +336,27 @@ def write_profile(*, command: str | None = None) -> Path:
 
 
 def font_installed() -> bool:
-    """Whether the bundled face is already in the reader's font directory."""
+    """Whether the bundled font is already in the font directory of the user."""
     from .consolefont import BUNDLED_FONT
 
     return (USER_FONT_DIR / BUNDLED_FONT.name).is_file()
 
 
 def install_font() -> bool:
-    """Copy the bundled face into the reader's own font directory.
+    """Copy the bundled font into the font directory of the user.
 
-    The one thing here that writes outside MeshTerm's own folder, which is why it is the
-    one thing worth asking about: a single file, in the reader's own Library, no
-    administrator rights, no installer, removable by dragging it out of Font Book. It
-    changes nothing about how their Terminal looks — it only makes the face available for
-    a profile to name.
+    This is the only part of this module that writes outside the folder of MeshTerm. This
+    is why it is the only part that is worth a question to the user. It is one file, in
+    the Library of the user. No administrator rights and no installer are necessary, and
+    the user can remove the file: drag it out of Font Book. It does not change how the
+    Terminal of the user looks. It only makes the font available, so that a profile can
+    name it.
 
-    Safe to repeat: an existing copy is left alone.
+    It is safe to do again: if a copy exists, the function does not change it.
 
     Returns:
-        Whether the font is installed and usable, including when it already was.
+        Whether the font is installed and usable. This includes the case where it was
+        already installed.
     """
     from .consolefont import BUNDLED_FONT
 
@@ -359,42 +374,44 @@ def install_font() -> bool:
 
 
 def in_apple_terminal() -> bool:
-    """Whether this session is drawing into macOS Terminal.
+    """Whether this session draws into macOS Terminal.
 
-    iTerm2, Ghostty, kitty, WezTerm and VS Code all set ``TERM_PROGRAM`` to their own
-    name, and several of them have both truecolor and a font the reader chose deliberately
-    — none of them wants anything this module offers.
+    iTerm2, Ghostty, kitty, WezTerm, and VS Code all set ``TERM_PROGRAM`` to their own
+    name. Several of them have truecolor and also a font that the user chose on purpose.
+    None of them needs anything that this module offers.
     """
     return sys.platform == "darwin" and os.environ.get("TERM_PROGRAM") == "Apple_Terminal"
 
 
 def available() -> bool:
-    """Whether reopening in MeshTerm's own window is a thing worth doing here.
+    """Whether it is useful here to open MeshTerm again in its own window.
 
-    ``False`` in a session that was itself reopened, which is what keeps a relaunch from
-    chaining into another one: the profile's own command carries the marker, because
-    Terminal starts it from a fresh shell that inherits nothing from us.
+    ``False`` in a session that is itself a reopened session. This stops a reopened
+    session from opening one more session, in a chain. The command of the profile carries
+    the marker, because Terminal starts the command from a new shell that gets nothing
+    from us.
     """
     return in_apple_terminal() and not os.environ.get(REOPENED_ENV)
 
 
 def reopen() -> bool:
-    """Open MeshTerm in a window using its own profile, and report whether it started.
+    """Open MeshTerm in a window with its own profile, and report whether it started.
 
-    ``open`` hands the file to Terminal, and **Terminal** imports the profile and opens the
-    window — the only route that works from inside a live session, since Terminal discards
-    external edits to its preferences when it quits.
+    ``open`` gives the file to Terminal, and **Terminal** imports the profile and opens
+    the window. This is the only path that works from a live session, because Terminal
+    discards the edits that other programs make to its preferences when it quits.
 
-    The new window is not a child in any meaningful sense: the caller exits immediately
-    afterwards and the two never talk.
+    In practice, the new window is not a child: the caller exits immediately after, and
+    the two never communicate.
 
-    Two files, not one: the launcher carries what varies and the profile points at it, so
-    the profile's bytes are the same on every launch and Terminal reuses the one settings
-    set instead of adding a numbered copy. :func:`write_launcher` has the measurement.
+    There are two files, not one. The launcher carries the parts that change, and the
+    profile points to the launcher. Thus the bytes of the profile are the same at each
+    start, and Terminal uses the same profile again instead of a numbered copy.
+    :func:`write_launcher` gives the measurement.
 
     Returns:
-        Whether ``open`` was launched. ``False`` leaves the caller exactly where it was,
-        so a failure here is a detour and never a dead end.
+        Whether MeshTerm started ``open``. ``False`` leaves the caller exactly where it
+        was. Thus a failure here only causes a different path, and never a dead end.
     """
     if not available():
         return False
@@ -404,7 +421,7 @@ def reopen() -> bool:
     except OSError:
         return False
     try:
-        subprocess.Popen(  # noqa: S603 - the argv is ours, not the reader's
+        subprocess.Popen(  # noqa: S603 - the argv is ours, not the user's
             ["/usr/bin/open", str(path)],
             close_fds=True,
         )

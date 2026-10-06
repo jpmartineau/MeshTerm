@@ -1,22 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Typed events carried by the always-on mesh event hub.
+"""Typed events that the always-on mesh event hub carries.
 
-These are the domain-level events that flow from the connected companion device out to
-any number of interested subscribers (see :class:`~meshterm.services.event_hub.EventHub`).
-Keeping them here — plain dataclasses with no I/O dependencies, alongside the other
-domain models — lets the hub, its subscribers, and the tests all speak the same language
-without importing the device layer.
+These are the domain-level events that go from the connected device to all the
+subscribers that want them (refer to :class:`~meshterm.services.event_hub.EventHub`).
+They are plain dataclasses with no I/O dependencies, and they are in this module with the
+other domain models. Thus the hub, its subscribers, and the tests all use the same types,
+and they do not import the device layer.
 
-The hub carries the unsolicited inbound streams a client reacts to: overheard packets
-(:class:`~meshterm.core.models.Observation`), inbound text messages
+The hub carries the unrequested inbound streams to which a client reacts: overheard
+packets (:class:`~meshterm.core.models.Observation`), inbound text messages
 (:class:`~meshterm.core.models.Message`), and delivery acknowledgements
-(:class:`~meshterm.core.models.Ack`). Further kinds (contact updates, path changes) slot
-in by adding an :class:`EventKind` member and stamping the payload onto a
-:class:`MeshEvent`; subscribers that don't ask for the new kind are unaffected.
+(:class:`~meshterm.core.models.Ack`). To add a new kind (contact updates, path changes),
+add an :class:`EventKind` member and put the payload into a :class:`MeshEvent`. A
+subscriber that does not ask for the new kind does not change.
 
-Correlated request/response replies (a trace's ``TRACE_DATA``, a login's result) are not
-carried here — those are awaited directly by the command that sent the request, so they
-work whether or not the hub is running.
+This module does not carry the replies that match a request (the ``TRACE_DATA`` of a
+trace, the result of a login). The command that sent the request waits for its reply
+directly. Thus these replies work when the hub runs and also when it does not run.
 """
 
 from __future__ import annotations
@@ -29,10 +29,10 @@ from .models import Ack, Message, Observation, utcnow
 
 
 class EventKind(str, Enum):
-    """The classes of event the hub can fan out.
+    """The classes of event that the hub can send to its subscribers.
 
-    A ``str`` enum so values log and serialize legibly. New client features add their own
-    members here.
+    It is a ``str`` enum, so that the values are easy to read in the log and when they are
+    serialized. New client features add their own members here.
     """
 
     OBSERVATION = "observation"
@@ -42,17 +42,19 @@ class EventKind(str, Enum):
 
 @dataclass(slots=True)
 class MeshEvent:
-    """One event delivered to hub subscribers.
+    """One event that the hub gives to its subscribers.
 
-    A thin envelope: :attr:`kind` selects who receives it and :attr:`payload` carries the
-    kind-specific data (an :class:`~meshterm.core.models.Observation` for
-    :attr:`EventKind.OBSERVATION`). Kind-specific accessors like :attr:`observation` give
-    callers a typed handle without matching on ``kind`` themselves.
+    It is a thin envelope. :attr:`kind` selects which subscribers receive it, and
+    :attr:`payload` carries the data for that kind (an
+    :class:`~meshterm.core.models.Observation` for :attr:`EventKind.OBSERVATION`). An
+    accessor for each kind, such as :attr:`observation`, gives callers a typed value. Thus
+    the callers do not have to match on ``kind`` themselves.
 
     Attributes:
-        kind: Which class of event this is; determines the payload type and routing.
-        payload: The kind-specific data object.
-        received_at: When the hub emitted the event (UTC).
+        kind: The class of this event. It sets the payload type and the subscribers that
+            receive the event.
+        payload: The data object for the kind.
+        received_at: The time when the hub sent the event (UTC).
     """
 
     kind: EventKind
@@ -61,17 +63,17 @@ class MeshEvent:
 
     @property
     def observation(self) -> Observation | None:
-        """The carried :class:`Observation`, or ``None`` if this isn't an observation."""
+        """The carried :class:`Observation`, or ``None`` if this event is not an observation."""
         return self.payload if isinstance(self.payload, Observation) else None
 
     @property
     def message(self) -> Message | None:
-        """The carried :class:`Message`, or ``None`` if this isn't a message."""
+        """The carried :class:`Message`, or ``None`` if this event is not a message."""
         return self.payload if isinstance(self.payload, Message) else None
 
     @property
     def ack(self) -> Ack | None:
-        """The carried :class:`Ack`, or ``None`` if this isn't an acknowledgement."""
+        """The carried :class:`Ack`, or ``None`` if this event is not an acknowledgement."""
         return self.payload if isinstance(self.payload, Ack) else None
 
     @classmethod

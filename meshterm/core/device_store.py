@@ -1,26 +1,30 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Persistence for confirmed companion devices.
+"""The store for confirmed companion devices.
 
-Every device that has ever spoken the MeshCore protocol to us successfully is remembered
-forever in a small JSON registry in the config directory (``<config_dir>/devices.json``),
-keyed by :attr:`~meshterm.core.discovery.DiscoveredDevice.stable_id` (a USB serial number
-when available, so the record survives a changed COM number). This is deliberately *not* in
-the SQLite database: the database can be swapped per-invocation with ``--db``, whereas the
-remembered devices are global machine state that should survive that.
+MeshTerm keeps each device that ever spoke the MeshCore protocol to it with success. It
+keeps the device permanently in a small JSON registry in the config directory
+(``<config_dir>/devices.json``). The key is
+:attr:`~meshterm.core.discovery.DiscoveredDevice.stable_id` (a USB serial number when
+there is one, so that the record stays valid after a change of the COM number). We do
+not put this registry in the SQLite database, and this is intentional. The ``--db`` flag
+can change the database for each run, but the remembered devices are global machine
+state that must stay after such a change.
 
-The registry also tracks which device was most recently connected (``last``), used to
-preselect and star a default on the startup splash. Membership in the registry is what marks
-a device as a confirmed MeshCore companion — the splash reserves its "MeshCore device" tag
-for these, rather than guessing from the USB vendor ID.
+The registry also keeps the device that was connected most recently (``last``). The
+startup splash uses it to select a default and to star it. A device is a confirmed
+MeshCore companion when it is in the registry. The splash gives its "MeshCore device" tag
+only to these devices, instead of a guess from the USB vendor ID.
 
-Alongside those it keeps ``hidden``: the stable ids the splash has been told to stop
-listing. It lives here rather than in the preferences because it is a fact about *this
-machine's* hardware — the USB adapters and dev boards permanently plugged into it that are
-not companions — and because the ids it holds are the registry's own. Hiding is a **splash**
-concern only: nothing else consults it, so ``--port`` and every scripted path still reach a
-hidden device by name. A hidden id need not be a remembered device (usually it is the
-opposite: a serial adapter nobody wants to see), so the set stands on its own rather than
-being a flag on a record.
+Next to these, the registry keeps ``hidden``: the stable ids that the splash must no
+longer list. This set is here, not in the preferences, for two reasons. It is a fact
+about the hardware of this machine: the USB adapters and development boards that are
+always connected to it and are not companions. Also, the ids in the set are the ids of
+the registry. The hidden set is only for the **splash**: nothing else uses it. Thus
+``--port`` and each scripted path can still get to a hidden device by name.
+
+A hidden id does not have to be a remembered device. Usually it is the opposite: a
+serial adapter that nobody wants to see. Thus the set is separate, and not a flag on a
+record.
 """
 
 from __future__ import annotations
@@ -42,27 +46,32 @@ from .models import utcnow
 
 @dataclass(slots=True)
 class RememberedDevice:
-    """A previously confirmed device recorded for next-time defaulting.
+    """A device that was confirmed before, stored to give a default the next time.
 
     Attributes:
-        stable_id: The device's :attr:`DiscoveredDevice.stable_id` at connect time.
-        port: The serial port it was last seen on (informational; may have changed). Blank
-            for a BLE/TCP device.
-        label: A friendly label for display in prompts and tables.
-        last_connected: ISO-8601 timestamp of the last successful connection.
-        node_name: The device's own mesh node name, learned at connect time (may be empty).
-        transport: ``"serial"``, ``"ble"``, or ``"tcp"`` — how this device was last reached.
-        address: The Bluetooth address, for a BLE device (blank otherwise), so it can be
-            reconnected directly without re-scanning.
-        hardware_model: The firmware's own model string (e.g. ``"Seeed Tracker T1000-E"``),
-            learned from the device-query at connect time. This is the only reliable source of
-            the model — a BLE companion advertises none — so it's remembered here to fill the
-            hardware column even when the device is merely attached, not connected. May be empty
-            for a serial device confirmed by an older firmware that predates the query.
-        host: The network host, for a TCP device (blank otherwise), so it can be reconnected
-            directly. A TCP companion isn't discoverable, so this remembered endpoint is the
-            *only* way it reappears in the picker.
-        tcp_port: The TCP port, for a TCP device (0 otherwise).
+        stable_id: The :attr:`DiscoveredDevice.stable_id` of the device at connect time.
+        port: The serial port on which MeshTerm last found the device (for information
+            only, because it can change). Blank for a BLE or TCP device.
+        label: A friendly label to show in prompts and tables.
+        last_connected: The ISO-8601 timestamp of the last successful connection.
+        node_name: The mesh node name of the device itself, learned at connect time (it
+            can be empty).
+        transport: ``"serial"``, ``"ble"``, or ``"tcp"``: how MeshTerm last connected to
+            this device.
+        address: The Bluetooth address, for a BLE device (blank for other devices). With
+            it, MeshTerm can connect again directly, without a new scan.
+        hardware_model: The model string of the firmware itself (for example
+            ``"Seeed Tracker T1000-E"``), learned from the device query at connect time.
+            This is the only reliable source of the model, because a BLE companion gives
+            no model in its BLE advertisement. Thus the store keeps it here, to fill the
+            hardware column also when the device is only attached and not connected. It
+            can be empty for a serial device that an older firmware confirmed, if that
+            firmware is older than the query.
+        host: The network host, for a TCP device (blank for other devices). With it,
+            MeshTerm can connect again directly. Discovery cannot find a TCP companion,
+            so this remembered endpoint is the only way for it to come back into the
+            picker.
+        tcp_port: The TCP port, for a TCP device (0 for other devices).
     """
 
     stable_id: str
@@ -76,23 +85,24 @@ class RememberedDevice:
     host: str = ""
     tcp_port: int = 0
 
-    #: Fields this record once held and must never hold again under another meaning (see
-    #: :data:`meshterm.core.preferences.RETIRED` for why a name is never reused).
+    #: The fields that this record held before. It must never hold them again with a
+    #: different meaning (refer to :data:`meshterm.core.preferences.RETIRED` for the
+    #: reason that a name is never used again).
     RETIRED: ClassVar[frozenset[str]] = frozenset()
 
     @property
     def is_ble(self) -> bool:
-        """Whether this remembered device was reached over Bluetooth LE."""
+        """Whether MeshTerm connected to this remembered device over Bluetooth LE."""
         return self.transport == TRANSPORT_BLE
 
     @property
     def is_tcp(self) -> bool:
-        """Whether this remembered device was reached over a TCP network connection."""
+        """Whether MeshTerm connected to this remembered device over a TCP network connection."""
         return self.transport == TRANSPORT_TCP
 
     @property
     def target(self) -> str:
-        """Where this device is reached.
+        """Where MeshTerm connects to this device.
 
         ``host:port`` for TCP, the BLE address for Bluetooth, else the serial port.
         """
@@ -109,20 +119,20 @@ class DeviceStore:
     """Reads and writes the registry of confirmed companion devices."""
 
     def __init__(self, path: Path) -> None:
-        """Open the store against a JSON file location.
+        """Open the store on the location of a JSON file.
 
         Args:
-            path: Path to the JSON state file (created lazily on first write).
+            path: Path to the JSON state file (made only at the first write).
         """
         self._path = path
 
     def _read(self) -> tuple[dict[str, RememberedDevice], str | None, set[str]]:
-        """Return the parsed ``(registry, last_id, hidden_ids)``; empty on a missing file.
+        """Return the parsed ``(registry, last_id, hidden_ids)``, empty for a missing file.
 
-        A missing or corrupt file is treated as "nothing remembered" rather than an error,
-        so a stray edit never blocks startup. An old flat-format file (a single record at
-        the top level, from before the registry) is migrated in-memory to a one-entry
-        registry so upgrades are seamless.
+        The function reads a missing or corrupt file as "nothing remembered", not as an
+        error. Thus a bad edit never stops the startup. An old flat-format file (a single
+        record at the top level, from before the registry) becomes a registry with one
+        entry, in memory. Thus an upgrade causes no problem.
         """
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
@@ -131,7 +141,7 @@ class DeviceStore:
         if not isinstance(data, dict):
             return {}, None, set()
 
-        # Old flat shape: a single record with ``stable_id`` at the top level.
+        # The old flat shape: a single record with ``stable_id`` at the top level.
         if "devices" not in data and "stable_id" in data:
             record = self._record_from(data)
             if record is None:
@@ -152,7 +162,7 @@ class DeviceStore:
 
     @staticmethod
     def _record_from(entry: object) -> RememberedDevice | None:
-        """Build a :class:`RememberedDevice` from one raw JSON entry, or ``None`` if invalid."""
+        """Build a :class:`RememberedDevice` from one raw JSON entry (``None`` if invalid)."""
         if not isinstance(entry, dict):
             return None
         try:
@@ -172,43 +182,45 @@ class DeviceStore:
             return None
 
     def load(self) -> RememberedDevice | None:
-        """Return the most recently connected device, or ``None`` if none is remembered.
+        """Return the device that was connected most recently, or ``None`` if there is none.
 
-        This is the "last known good" default used to preselect and star a row on the
-        startup splash and to resolve a port non-interactively.
+        This is the "last known good" default. The startup splash uses it to select a row
+        by default and to star it. MeshTerm also uses it to find a port when it cannot ask
+        the user.
 
         Returns:
-            The last-connected :class:`RememberedDevice`, or ``None``.
+            The :class:`RememberedDevice` that was connected last, or ``None``.
         """
         registry, last, _hidden = self._read()
         return registry.get(last) if last is not None else None
 
     def load_all(self) -> dict[str, RememberedDevice]:
-        """Return the full registry of confirmed devices, keyed by ``stable_id``."""
+        """Return the full registry of confirmed devices, with ``stable_id`` as the key."""
         registry, _last, _hidden = self._read()
         return registry
 
     def is_known(self, device: DiscoveredDevice) -> bool:
-        """Return whether ``device`` has ever been confirmed as a MeshCore companion."""
+        """Return whether ``device`` was ever confirmed as a MeshCore companion."""
         registry, _last, _hidden = self._read()
         return device.stable_id in registry
 
     def remember(
         self, device: DiscoveredDevice, *, node_name: str = "", hardware_model: str = ""
     ) -> None:
-        """Record ``device`` as a confirmed connection and the new default.
+        """Store ``device`` as a confirmed connection and as the new default.
 
-        Upserts the device into the registry (so it is remembered forever) and marks it as
-        the most recently connected one.
+        The function adds the device to the registry, or replaces its record (so that
+        MeshTerm keeps it permanently). It also marks the device as the device that was
+        connected most recently.
 
         Args:
-            device: The device that just connected successfully.
-            node_name: The device's own mesh node name, if known; preserved across
-                reconnects and shown in the picker. A blank value keeps any name already
-                on file for this device rather than erasing it.
-            hardware_model: The firmware's model string, if known; preserved the same way, so
-                a reconnect on firmware that couldn't answer the query doesn't erase a model
-                learned earlier.
+            device: The device that connected successfully a moment ago.
+            node_name: The mesh node name of the device itself, if known. The store keeps
+                it across reconnections, and the picker shows it. A blank value does not
+                remove the name that is already on file for this device. It keeps that name.
+            hardware_model: The model string of the firmware, if known. The store keeps it
+                in the same way. Thus a reconnection on firmware that could not answer the
+                query does not remove a model that MeshTerm learned before.
         """
         registry, _last, hidden = self._read()
         existing = registry.get(device.stable_id)
@@ -228,28 +240,30 @@ class DeviceStore:
             host=device.host or "",
             tcp_port=device.tcp_port or 0,
         )
-        # Connecting to a device is the plainest statement that it should be listed, so a
-        # confirmed one stops being hidden — otherwise it would vanish from the splash the
-        # moment it proved itself, which is the opposite of what hiding is for.
+        # A connection to a device is the clearest statement that the splash must list it.
+        # Thus a confirmed device is no longer hidden. If it stays hidden, it goes off the
+        # splash at the moment that it proves itself. That is the opposite of the purpose
+        # of the hidden set.
         hidden.discard(device.stable_id)
         self._write(registry, device.stable_id, hidden)
 
     def forget(self, stable_id: str) -> bool:
-        """Drop a remembered device from the registry.
+        """Remove a remembered device from the registry.
 
-        The inverse of :meth:`remember`: removes the record keyed by ``stable_id`` so the
-        device is no longer listed as a confirmed companion. Used by the device picker's
-        Delete action to prune a network (TCP) companion the user no longer wants — a TCP
-        device is listed *only* from its remembered endpoint, so forgetting it is what makes
-        it leave the picker. If the forgotten device was the most-recently-connected default,
-        that pointer is handed to the newest surviving record (or cleared when none remain),
-        so the next startup still preselects a sensible device.
+        This is the inverse of :meth:`remember`. It removes the record whose key is
+        ``stable_id``, so that the device is no longer listed as a confirmed companion. The
+        Delete action of the device picker uses it to remove a network (TCP) companion that
+        the user no longer wants. The picker lists a TCP device only from its remembered
+        endpoint, so the device goes out of the picker only when the store forgets it. If
+        the forgotten device was the default (the device connected most recently), that
+        pointer moves to the newest record that remains, or it is cleared when no record
+        remains. Thus the next startup still selects a sensible device by default.
 
         Args:
             stable_id: The :attr:`RememberedDevice.stable_id` of the device to forget.
 
         Returns:
-            ``True`` if a record was removed, ``False`` if none matched.
+            ``True`` if a record was removed, ``False`` if no record matched.
         """
         registry, last, hidden = self._read()
         if stable_id not in registry:
@@ -257,25 +271,26 @@ class DeviceStore:
         del registry[stable_id]
         if last == stable_id:
             last = max(registry, key=lambda k: registry[k].last_connected, default=None)
-        hidden.discard(stable_id)  # nothing left to hide it from
+        hidden.discard(stable_id)  # nothing remains to hide it from
         self._write(registry, last, hidden)
         return True
 
     def hidden_ids(self) -> set[str]:
-        """Return the stable ids the startup splash has been told not to list."""
+        """Return the stable ids that the startup splash must not list."""
         _registry, _last, hidden = self._read()
         return hidden
 
     def hide(self, stable_id: str) -> None:
-        """Stop listing ``stable_id`` on the startup splash, from now until it is shown again.
+        """Hide ``stable_id`` on the startup splash from now on, until it is shown again.
 
-        Kept forever, like the registry itself — the splash is a list of what is plugged into
-        this machine, and the adapters that are always plugged in and never companions are
-        the same ones every time. Hiding an id that is not remembered is normal and fine:
-        those are exactly the rows worth hiding.
+        The store keeps the hidden id permanently, the same as the registry itself. The
+        splash is a list of the hardware that is connected to this machine. The adapters
+        that are always connected, and that are never companions, are the same each time.
+        To hide an id that is not remembered is normal and correct: these are exactly the
+        rows that a user wants to hide.
 
         Args:
-            stable_id: The device's :attr:`DiscoveredDevice.stable_id`.
+            stable_id: The :attr:`DiscoveredDevice.stable_id` of the device.
         """
         registry, last, hidden = self._read()
         if stable_id in hidden:
@@ -284,11 +299,12 @@ class DeviceStore:
         self._write(registry, last, hidden)
 
     def show_all(self) -> int:
-        """Un-hide every hidden device; return how many were brought back.
+        """Show each hidden device again, and return how many devices came back.
 
-        The single way back, deliberately: hiding is per-row and un-hiding is not, because a
-        hidden row is not on screen to press a key on. Returning the count lets the caller
-        say what it just did.
+        This is the only way back, and this is intentional. The user hides one row at a
+        time, but this function shows all the rows again at one time. The reason: a hidden
+        row is not on the screen, so the user cannot press a key on it. The returned count
+        lets the caller tell what it did.
         """
         registry, last, hidden = self._read()
         if not hidden:
@@ -302,7 +318,7 @@ class DeviceStore:
         last: str | None,
         hidden: set[str],
     ) -> None:
-        """Persist the registry, its ``last`` pointer, and the splash's hidden ids."""
+        """Write the registry, its ``last`` pointer, and the hidden ids of the splash."""
         self._path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "devices": {
@@ -321,7 +337,8 @@ class DeviceStore:
                 for stable_id, record in registry.items()
             },
             "last": last,
-            # Sorted so the file does not churn between writes over set ordering alone.
+            # Sorted, so that a different set order alone does not change the file between
+            # writes.
             "hidden": sorted(hidden),
         }
         write_atomically(self._path, json.dumps(payload, indent=2))

@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Non-interactive device selection: turn discovery + memory into a chosen port.
+"""Device selection without user interaction: change discovery and memory into a chosen port.
 
-This is the logic used on the scripted CLI path (and as the fallback when the interactive
-picker is unavailable). It is pure and UI-free: it takes the currently discovered devices,
-the remembered default, and any explicit overrides, and returns a :class:`Resolution` — or
-raises :class:`DeviceSelectionError` with a ready-to-print, user-facing message.
+The scripted CLI path uses this logic. It is also the fallback when the interactive picker
+is not available. It is pure and has no UI. It takes the devices that are discovered now,
+the remembered default, and the explicit overrides. Then it returns a :class:`Resolution`,
+or it raises :class:`DeviceSelectionError` with a message for the user that is ready to
+print.
 """
 
 from __future__ import annotations
@@ -24,27 +25,28 @@ from .discovery import (
 
 
 class DeviceSelectionError(ValueError):
-    """Raised when no device can be chosen unambiguously.
+    """Raised when MeshTerm cannot choose one device without ambiguity.
 
-    The message is already formatted for display to the user (it lists the discovered
-    devices and how to disambiguate), so callers can print ``str(exc)`` directly.
+    The message is already formatted for the user. It lists the discovered devices, and
+    tells how to remove the ambiguity. Thus callers can print ``str(exc)`` directly.
     """
 
 
 @dataclass(slots=True)
 class Resolution:
-    """The outcome of resolving which device to use.
+    """The result of the decision about which device to use.
 
     Attributes:
-        port: The chosen connection target — the serial port for a serial device, or the
-            Bluetooth address for a BLE device. (Named ``port`` for historical reasons; use
-            :attr:`target`.)
-        device: The matching discovered device, when enumeration knows it (so the caller
-            can remember it on a successful connection). ``None`` for an explicit
-            target that is not currently enumerable.
+        port: The chosen connection target: the serial port for a serial device, or the
+            Bluetooth address for a BLE device. (Its name is ``port`` for historical
+            reasons. Use :attr:`target`.)
+        device: The discovered device that matches, when the enumeration knows it (so
+            that the caller can remember it after a successful connection). ``None`` for
+            an explicit target that the enumeration does not find now.
         source: Where the choice came from (``"port"``, ``"ble"``, ``"tcp"``, ``"profile"``,
-            ``"remembered"``, or ``"only"``), for logging and messaging.
-        transport: ``"serial"``, ``"ble"``, or ``"tcp"`` — the connection layer for the device.
+            ``"remembered"``, or ``"only"``), for logs and messages.
+        transport: ``"serial"``, ``"ble"``, or ``"tcp"``: the connection layer for the
+            device.
     """
 
     port: str
@@ -54,24 +56,25 @@ class Resolution:
 
     @property
     def target(self) -> str:
-        """The connection target (serial port or BLE address); alias for :attr:`port`."""
+        """The connection target (serial port or BLE address), another name for :attr:`port`."""
         return self.port
 
 
 def _find_by_target(devices: list[DiscoveredDevice], target: str) -> DiscoveredDevice | None:
-    """Return the discovered device whose port or BLE address equals ``target``."""
+    """Return the discovered device whose port or BLE address is ``target``."""
     return next((d for d in devices if d.target == target or d.port == target), None)
 
 
 def _resolve_tcp(endpoint: str, devices: list[DiscoveredDevice], source: str) -> Resolution:
     """Build a TCP :class:`Resolution` from a ``host[:port]`` string.
 
-    The endpoint is normalized (a bare host gains the default port) so the resulting target
-    matches how a remembered TCP device stores itself. A TCP companion isn't discoverable, so
-    any matching ``devices`` entry would only be a remembered one injected by the caller.
+    The function normalizes the endpoint (a bare host gets the default port). Thus the
+    target is the same as the target that a remembered TCP device stores. Discovery cannot
+    find a TCP companion. Thus an entry in ``devices`` that matches can only be a remembered
+    device that the caller added.
 
     Raises:
-        DeviceSelectionError: If ``endpoint`` isn't a valid ``host[:port]``.
+        DeviceSelectionError: If ``endpoint`` is not a valid ``host[:port]``.
     """
     try:
         host, port = parse_tcp_endpoint(endpoint)
@@ -83,7 +86,7 @@ def _resolve_tcp(endpoint: str, devices: list[DiscoveredDevice], source: str) ->
 
 
 def _format_device_list(devices: list[DiscoveredDevice]) -> str:
-    """Render discovered devices as an indented, human-readable bullet list."""
+    """Render the discovered devices as an indented bullet list for the user."""
     if not devices:
         return "  no serial devices detected"
     lines = []
@@ -103,41 +106,41 @@ def resolve_device(
     explicit_tcp: str | None = None,
     profile: DeviceProfile | None = None,
 ) -> Resolution:
-    """Decide which companion to connect to without prompting.
+    """Decide to which companion to connect, without a prompt.
 
-    Resolution priority:
+    The order of priority:
 
     1. ``explicit_tcp`` (an explicit ``--tcp`` network address).
     2. ``explicit_ble`` (an explicit ``--ble`` Bluetooth address).
     3. ``explicit_port`` (an explicit ``--port``).
-    4. A TCP profile's ``host:port``, or a serial profile's ``port``.
-    5. The remembered "last known good" device, if it is currently attached/in range.
-    6. The single *likely-LoRa* device, if exactly one is present — a port whose USB
-       vendor marks it a board or bridge, or a BLE/TCP endpoint. Ports that look like
-       nothing in particular are ignored at this step, because a platform may present
-       some unconditionally (every Mac carries two) and they would otherwise make the
-       count ambiguous forever.
-    7. The single attached device, if exactly one is present and *none* looked likely —
-       so an unrecognized-but-real adapter still resolves.
+    4. The ``host:port`` of a TCP profile, or the ``port`` of a serial profile.
+    5. The remembered "last known good" device, if it is attached or in range now.
+    6. The single likely-LoRa device, if exactly one is present. That is a port whose USB
+       vendor marks it as a board or a bridge, or a BLE or TCP endpoint. This step ignores
+       the ports that look like nothing in particular. The reason: a platform can show
+       some such ports always (each Mac has two). Without this rule, they make the count
+       ambiguous permanently.
+    7. The single attached device, if exactly one is present and no device looked likely.
+       Thus a real adapter that MeshTerm does not recognize still resolves.
 
-    Otherwise a :class:`DeviceSelectionError` is raised listing the candidates: the
-    likely ones where there are any, else everything attached under a message that does
-    not claim they are companions.
+    If no step chooses a device, the function raises a :class:`DeviceSelectionError` that
+    lists the candidates. These are the likely devices if there are any. Else they are all
+    the attached devices, under a message that does not claim that they are companions.
 
     Args:
-        devices: Currently discovered devices (serial and/or BLE).
-        remembered: The remembered default, if any.
-        explicit_port: A serial port supplied on the command line.
-        explicit_ble: A Bluetooth address supplied on the command line.
-        explicit_tcp: A network ``host[:port]`` supplied on the command line.
-        profile: A device profile supplied on the command line.
+        devices: The devices that are discovered now (serial, BLE, or both).
+        remembered: The remembered default, if there is one.
+        explicit_port: A serial port given on the command line.
+        explicit_ble: A Bluetooth address given on the command line.
+        explicit_tcp: A network ``host[:port]`` given on the command line.
+        profile: A device profile given on the command line.
 
     Returns:
-        A :class:`Resolution` naming the chosen target and transport.
+        A :class:`Resolution` that names the chosen target and transport.
 
     Raises:
-        DeviceSelectionError: If no device can be chosen unambiguously, or an explicit TCP
-            endpoint could not be parsed.
+        DeviceSelectionError: If MeshTerm cannot choose one device without ambiguity, or
+            if it could not parse an explicit TCP endpoint.
     """
     if explicit_tcp:
         return _resolve_tcp(explicit_tcp, devices, "tcp")
@@ -163,22 +166,24 @@ def resolve_device(
         if match is not None:
             return Resolution(match.target, match, "remembered", match.transport)
 
-    # Prefer the devices that actually look like companions. macOS is why this matters:
-    # every Mac permanently presents /dev/cu.Bluetooth-Incoming-Port and
-    # /dev/cu.debug-console, which carry no USB VID/PID and so score "unknown". Counting
-    # them put `len(devices) == 1` out of reach there — a Mac with exactly one real board
-    # attached saw three devices and refused to choose, so auto-detection could never fire
-    # on that platform and every Mac user met "Multiple companion devices detected" on a
-    # first run. Which device is plausible is already known, and already printed in the
-    # listing below as "[likely LoRa]"; this decides with it instead of only saying it.
+    # Prefer the devices that look like companions. This is important because of macOS.
+    # Each Mac always shows /dev/cu.Bluetooth-Incoming-Port and /dev/cu.debug-console.
+    # These device files have no USB VID/PID, so their score is "unknown". When MeshTerm
+    # counted them, `len(devices) == 1` was never true on a Mac. A Mac with exactly one
+    # real board attached found three devices and refused to choose. Thus auto-detection
+    # could never work on that platform, and each Mac user got "Multiple companion devices
+    # detected" at the first run. MeshTerm already knows which device is plausible, and
+    # the listing below already prints it as "[likely LoRa]". This code uses that
+    # knowledge to decide, not only to show it.
     likely = [d for d in devices if d.is_likely_lora]
 
     if len(likely) == 1:
         return Resolution(likely[0].target, likely[0], "only", likely[0].transport)
 
-    # Nothing recognizable: fall back to the whole list rather than narrowing to nothing,
-    # so a lone *unrecognized* adapter — a UART bridge carrying a VID we don't list, which
-    # is a real board more often than not — still connects exactly as it always has.
+    # Nothing is recognizable: use the full list, instead of a list that is narrowed to
+    # nothing. Thus a single adapter that MeshTerm does not recognize still connects
+    # exactly as it always did. (Such an adapter is a UART bridge with a VID that is not
+    # in our list, and usually it is a real board.)
     if not likely and len(devices) == 1:
         return Resolution(devices[0].target, devices[0], "only", devices[0].transport)
 
@@ -189,9 +194,9 @@ def resolve_device(
         )
 
     if not likely:
-        # Several ports attached, none of them plausible. "Multiple companion devices" is
-        # simply false here: on a bare Mac it names two virtual ports that are not
-        # companions at all, and then tells the reader to choose one of them.
+        # Several ports are attached, but no port is plausible. "Multiple companion
+        # devices" is false here. On a bare Mac, it names two virtual ports that are not
+        # companions, and then tells the user to choose one of them.
         raise DeviceSelectionError(
             "No companion devices detected among the attached ports.\n"
             f"{_format_device_list(devices)}\n"

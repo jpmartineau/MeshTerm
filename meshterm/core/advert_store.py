@@ -1,31 +1,36 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Persistence for the weekly flood advert: when each device's week began.
+"""Storage for the weekly flood advert: the time when the week of each device started.
 
-A MeshCore companion never advertises by itself — no timer, not even at boot; only an app
-asking (``CMD_SEND_SELF_ADVERT``) or a press on the device's own menu puts one on the air.
-So a node that nobody remembers to advertise slowly drops out of everyone else's contact
-list. The ``weekly_flood_advert`` preference is MeshTerm's answer, and deliberately a
-frugal one: at most one flood advert a week from any one device, and only once that device
-has gone a full week without one (see
+A MeshCore companion never sends an advert by itself. It has no timer, and it does not
+send an advert at boot. Only a request from an app (``CMD_SEND_SELF_ADVERT``) or a press
+on the menu of the device itself makes it transmit an advert. Thus, if nobody remembers to
+send an advert for a node, that node slowly goes out of the contact lists of all the other
+nodes. The ``weekly_flood_advert`` preference is the MeshTerm solution, and we made it
+economical on purpose. It sends a maximum of one flood advert each week from one device,
+and only after that device has had no flood advert for a full week (refer to
 :class:`~meshterm.services.advert_scheduler.AdvertScheduler`, which sends it).
 
-This store remembers what that rule needs, and nothing else:
+This store keeps the data that this rule must have, and no other data:
 
-* **when the preference was turned on** — turning it on starts the week rather than
-  sending, so a week has to pass before the first automatic advert from any device;
-* **per device** (keyed by its public key), **when its week began** — the last flood
-  advert that went out from it, whoever asked for it, or failing that the first time
-  MeshTerm connected to it.
+* **The time when the preference was turned on.** When the preference is turned on, the
+  week starts, but MeshTerm does not send an advert. Thus a week must pass before the
+  first automatic advert from a device.
+* **For each device** (with its public key as the key), **the time when its week
+  started.** This is the time of the last flood advert from the device. It is not
+  important who asked for that advert. If there is no such advert, it is the first time
+  that MeshTerm connected to the device.
 
-A device's advert is due one week after the *latest* of those instants. The clock is real
-time rather than run time, so a week with the app closed counts, and a due advert that the
-app did not live to send is still due the next time that device connects.
+The advert of a device is due one week after the later of these two times. The clock is
+real time, not run time. Thus a week in which the app is closed counts. Also, if an advert
+is due and the app stops before it sends the advert, the advert is still due the next time
+that the device connects.
 
-Like the remembered devices (:mod:`meshterm.core.device_store`), this is global machine
-state in a small JSON file (``<config_dir>/adverts.json``) rather than the per-invocation
-SQLite database, read into typed records and written back out of them (see
-:class:`AdvertStore`). A file in an older shape (the per-device cadences this replaced)
-reads as empty: every device simply starts its week again.
+This data is global state of the machine, the same as the remembered devices
+(:mod:`meshterm.core.device_store`). It is in a small JSON file
+(``<config_dir>/adverts.json``), not in the SQLite database of each invocation. The store
+reads the file into typed records, and writes the file from these records (refer to
+:class:`AdvertStore`). A file in an older shape (the per-device cadences that this store
+replaced) is read as empty. Then each device starts its week again.
 """
 
 from __future__ import annotations
@@ -39,33 +44,35 @@ from typing import ClassVar
 from .atomicwrite import write_atomically
 from .models import utcnow
 
-#: How long a device must go without a flood advert before the weekly one is due.
+#: The time that a device must be without a flood advert before the weekly advert is due.
 WEEK = timedelta(days=7)
 
-#: The quiet spells the ``advert_quiet_s`` preference offers, in seconds: how long the air
-#: must go without a packet, heard or sent, before the due advert goes out.
+#: The quiet periods that the ``advert_quiet_s`` preference offers, in seconds. A quiet
+#: period is the time that the air must have no packet (heard or sent) before MeshTerm
+#: sends the due advert.
 QUIET_CHOICES_S = (5, 15, 30, 60)
 
-#: The quiet spell waited for by default, in seconds.
+#: The default quiet period, in seconds.
 DEFAULT_QUIET_S = 30
 
 
 @dataclass(slots=True)
 class _Device:
-    """One device's record: when its week began.
+    """The record of one device: the time when its week started.
 
     Attributes:
-        since: The last flood advert from it, or its first connection, whichever is
-            later — the instant its week counts from.
+        since: The time of the last flood advert from the device, or of its first
+            connection, whichever is later. The week of the device starts at this time.
     """
 
     since: datetime | None = None
 
-    #: Fields this record once held and must never hold again under another meaning (see
-    #: :data:`meshterm.core.preferences.RETIRED` for why a name is never reused).
+    #: Fields that this record held before. The record must never hold them again with a
+    #: different meaning (refer to :data:`meshterm.core.preferences.RETIRED` for the
+    #: reason that a name is never used again).
     RETIRED: ClassVar[frozenset[str]] = frozenset(
         {
-            # The per-device cadences the weekly flood advert replaced.
+            # The per-device cadences that the weekly flood advert replaced.
             "direct_hours",
             "flood_hours",
             "last_direct",
@@ -75,36 +82,39 @@ class _Device:
 
     @classmethod
     def read(cls, raw: object) -> _Device:
-        """Build a record from the file's JSON, taking only the fields it knows."""
+        """Build a record from the JSON of the file, with only the fields that it knows."""
         record = raw if isinstance(raw, dict) else {}
         return cls(since=_as_time(record.get("since")))
 
     def to_json(self) -> dict:
-        """The record as written: its own fields and nothing it happened to be read with."""
+        """The record as the store writes it: its own fields, and no other field it read."""
         return {"since": _stamp(self.since)}
 
 
 @dataclass(slots=True)
 class _Document:
-    """The whole file: the switch-on instant, and every device's record by public key.
+    """The full file: the switch-on time, and the record of each device by public key.
 
     Attributes:
-        enabled_since: When the weekly advert was last switched on; ``None`` while off.
-        devices: Each device's record, keyed by its normalized public key.
+        enabled_since: The time when the weekly advert was last switched on. ``None``
+            while it is off.
+        devices: The record of each device, with its normalized public key as the key.
     """
 
     enabled_since: datetime | None = None
     devices: dict[str, _Device] = field(default_factory=dict)
 
-    #: Top-level fields this document once held; none yet (see :attr:`_Device.RETIRED`).
+    #: Top-level fields that this document held before. There are none yet (refer to
+    #: :attr:`_Device.RETIRED`).
     RETIRED: ClassVar[frozenset[str]] = frozenset()
 
     @classmethod
     def read(cls, raw: object) -> _Document:
-        """Build the document from the file's JSON, taking only the fields it knows.
+        """Build the document from the JSON of the file, with only the fields that it knows.
 
-        A file without a ``devices`` map is from before this shape — the per-device
-        cadences — and reads as empty rather than being mined for look-alike fields.
+        A file without a ``devices`` map is from before this shape (the per-device
+        cadences). The method reads it as empty. It does not search the file for fields
+        that look the same.
         """
         if not isinstance(raw, dict) or not isinstance(raw.get("devices"), dict):
             return cls()
@@ -114,7 +124,10 @@ class _Document:
         )
 
     def to_json(self) -> dict:
-        """The document as written: known fields only, so a stale one dies at the next save."""
+        """The document as the store writes it: only the known fields.
+
+        Thus an old field that the store does not know is removed at the next write.
+        """
         return {
             "enabled_since": _stamp(self.enabled_since),
             "devices": {key: device.to_json() for key, device in self.devices.items()},
@@ -122,28 +135,32 @@ class _Document:
 
 
 class AdvertStore:
-    """Reads and writes the weekly-advert clock: the switch-on instant, and each device's.
+    """Reads and writes the clock of the weekly advert: the switch-on time, and each device's.
 
-    The file is read into typed records and written back out of them — never round-tripped
-    as the raw JSON it was read as — so a field no record knows (a retired one, one a hand
-    edit invented) is gone after the next write.
+    The store reads the file into typed records, and writes the file from these records.
+    It never writes back the raw JSON that it read. Thus a field that no record knows (a
+    retired field, or a field that a hand edit added) is removed at the next write.
     """
 
     def __init__(self, path: Path) -> None:
-        """Open the store against a JSON file location.
+        """Open the store on the location of a JSON file.
 
         Args:
-            path: Path to the JSON state file (created lazily on first write).
+            path: The path to the JSON state file. The store makes the file at the first
+                write.
         """
         self._path = path
 
     @staticmethod
     def _key(public_key: str) -> str:
-        """Normalize a device public key into the storage key."""
+        """Normalize the public key of a device to the storage key."""
         return public_key.lower().removeprefix("0x")
 
     def _load(self) -> _Document:
-        """Read the file's document; an empty one when it is missing, corrupt or outdated."""
+        """Read the document of the file, or an empty one if the file is bad or missing.
+
+        A bad file is a corrupt file, or a file in an old shape.
+        """
         try:
             raw = json.loads(self._path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -151,24 +168,26 @@ class AdvertStore:
         return _Document.read(raw)
 
     def _write(self, document: _Document) -> None:
-        """Persist ``document`` atomically (a crash mid-write keeps the previous file)."""
+        """Write ``document`` atomically (after a crash during the write, the old file stays)."""
         write_atomically(self._path, json.dumps(document.to_json(), indent=2))
 
     # -- the switch ---------------------------------------------------------------------
 
     def enabled_since(self) -> datetime | None:
-        """When the weekly advert was last turned on, or ``None`` while it is off."""
+        """The time when the weekly advert was last turned on, or ``None`` while it is off."""
         return self._load().enabled_since
 
     def set_enabled(self, on: bool, when: datetime | None = None) -> None:
-        """Record the preference being turned on (starting the week) or off.
+        """Store that the preference is turned on (this starts the week) or off.
 
-        Turning it on always restarts the clock, even when it was already recorded as on:
-        the call means "it was switched on just now", and switching on never sends.
+        When the preference is turned on, the clock always starts again, also when the
+        store already has it as on. The call means "it was switched on just now". A
+        switch-on never sends an advert.
 
         Args:
             on: Whether the weekly advert is now on.
-            when: The switch-on instant (defaults to now); ignored when turning off.
+            when: The switch-on time (the default is now). The method ignores it when the
+                preference is turned off.
         """
         document = self._load()
         if on:
@@ -176,16 +195,16 @@ class AdvertStore:
         elif document.enabled_since is not None:
             document.enabled_since = None
         else:
-            return  # already off; nothing to write
+            return  # already off, thus nothing to write
         self._write(document)
 
     def sync_enabled(self, on: bool) -> None:
-        """Bring the recorded switch into line with the preference, where they disagree.
+        """Make the stored switch agree with the preference, if they are different.
 
-        The Preferences page and ``preferences set`` record the switch as it happens (see
-        :meth:`set_enabled`); this catches the one path neither sees, a hand edit of
-        ``preferences.toml``, so a preference found on with no switch-on instant starts its
-        week now instead of never.
+        The Preferences page and ``preferences set`` store the switch when it changes
+        (refer to :meth:`set_enabled`). This method catches the one path that these two do
+        not see: a hand edit of ``preferences.toml``. Thus, if the preference is on and has
+        no switch-on time, its week starts now, not never.
         """
         recorded = self.enabled_since() is not None
         if on != recorded:
@@ -194,31 +213,33 @@ class AdvertStore:
     # -- the devices ----------------------------------------------------------------------
 
     def week_began(self, public_key: str) -> datetime | None:
-        """When a device's own week began, or ``None`` if MeshTerm has never marked it."""
+        """The time when the week of a device started, or ``None`` if MeshTerm never marked it."""
         device = self._load().devices.get(self._key(public_key))
         return device.since if device is not None else None
 
     def arm(self, public_key: str, when: datetime | None = None) -> None:
-        """Start a device's week on its first connection, without sending anything.
+        """Start the week of a device at its first connection, and send nothing.
 
-        Only writes for a device with no mark yet, so it is safe to call on every connect.
+        The method writes only for a device that has no mark yet. Thus it is safe to call
+        it at each connection.
 
         Args:
-            public_key: The device's public key (hex).
-            when: The week's start (defaults to now).
+            public_key: The public key of the device (hex).
+            when: The start of the week (the default is now).
         """
         if self.week_began(public_key) is None:
             self.mark_flood(public_key, when=when)
 
     def mark_flood(self, public_key: str, when: datetime | None = None) -> None:
-        """Record a flood advert from a device, restarting its week.
+        """Store a flood advert from a device, and start its week again.
 
-        Called for the weekly advert and for a flood advert sent by hand alike, so the
-        next automatic one is never less than a week after the last of either.
+        MeshTerm calls this method for the weekly advert, and also for a flood advert that
+        the user sends by hand. Thus the next automatic advert is never less than a week
+        after the last advert of either type.
 
         Args:
-            public_key: The device's public key (hex).
-            when: The send time (defaults to now).
+            public_key: The public key of the device (hex).
+            when: The send time (the default is now).
         """
         document = self._load()
         document.devices[self._key(public_key)] = _Device(since=when or utcnow())
@@ -227,12 +248,13 @@ class AdvertStore:
     # -- the verdict ----------------------------------------------------------------------
 
     def due_at(self, public_key: str) -> datetime | None:
-        """When a device's weekly advert falls due, or ``None`` while it cannot.
+        """The time when the weekly advert of a device is due, or ``None`` while it cannot be.
 
-        ``None`` while the weekly advert is off, and for a device not yet armed.
+        The value is ``None`` while the weekly advert is off, and for a device that is not
+        armed yet.
 
         Args:
-            public_key: The device's public key (hex).
+            public_key: The public key of the device (hex).
         """
         document = self._load()
         device = document.devices.get(self._key(public_key))
@@ -241,21 +263,21 @@ class AdvertStore:
         return max(document.enabled_since, device.since) + WEEK
 
     def due(self, public_key: str, now: datetime | None = None) -> bool:
-        """Whether a device's weekly advert is due at ``now`` (defaults to now)."""
+        """Whether the weekly advert of a device is due at ``now`` (the default is now)."""
         at = self.due_at(public_key)
         return at is not None and (now or utcnow()) >= at
 
 
 def _stamp(when: datetime | None) -> str | None:
-    """A timestamp as the file stores it: ISO-8601, or ``null`` for absent."""
+    """A timestamp as the file stores it: ISO-8601, or ``null`` if there is no time."""
     return when.isoformat() if when is not None else None
 
 
 def _as_time(value: object) -> datetime | None:
-    """Parse a stored ISO-8601 timestamp, or ``None`` if absent/corrupt.
+    """Parse a stored ISO-8601 timestamp, or return ``None`` if it is absent or corrupt.
 
-    A timestamp without a zone is treated as corrupt too: the store only ever writes
-    aware UTC stamps, and a naive one would poison the ``due`` arithmetic.
+    The function also treats a timestamp without a time zone as corrupt. The store writes
+    only aware UTC timestamps, and a naive timestamp makes the ``due`` arithmetic wrong.
     """
     if not isinstance(value, str):
         return None

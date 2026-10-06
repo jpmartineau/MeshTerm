@@ -1,29 +1,33 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Persistence for device settings changed through MeshTerm, so they survive a forgetful device.
+"""The store for the device settings that MeshTerm changed, for a device that forgets them.
 
-Most companions keep their configuration in firmware, so MeshTerm reads settings live from the
-device each session and never has to remember them. A firmware-less radio bridge is the
-exception: it holds its configuration only in RAM, so the node name, radio parameters, and
-tuning you set last session are back to firmware defaults when the bridge process restarts.
+Most companions keep their settings in firmware. Thus MeshTerm reads the settings live from the
+device in each session, and does not have to remember them. A radio bridge without firmware is
+the exception. It keeps its settings only in RAM. Thus, when the bridge process restarts, the
+node name, the radio parameters, and the tuning that you set in the last session go back to the
+firmware defaults.
 
-This store is the durable backup for exactly that case. It records every setting *changed
-through MeshTerm* (the editor, the ``config`` CLI, and a TOML restore all funnel through
-:func:`~meshterm.tools.config._apply_setting`), keyed by the device's own public key so two
-radios keep separate sets. Unlike channels — which are silently replayed because a slot can be
-filled without overwriting anything — a setting is a single canonical value, so replaying a
-stale one could clobber a change made elsewhere. So the store never writes on its own: on
-connect it only *detects drift* between what it remembers and what the device now reports, and
-the startup offer (see :mod:`meshterm.ui.settings_offer`) lets the operator choose to restore
-the saved values, adopt the device's current ones, or stop remembering the device entirely.
+This store is the durable backup for exactly that case. It stores only the settings that were
+changed through MeshTerm. (The editor, the ``config`` CLI, and a TOML restore all go through
+:func:`~meshterm.tools.config._apply_setting`.) The key is the public key of the device itself,
+so that two devices keep separate sets.
 
-The gate is provenance, not device type: only settings you changed through MeshTerm are
-recorded, so a firmware radio you never edit through MeshTerm keeps an empty record and is never
-flagged. A firmware-less bridge, where the values necessarily came from MeshTerm, gets them back.
+Channels are different: MeshTerm replays them silently, because it can fill a slot without an
+overwrite. But a setting is a single canonical value, so a replay of an old value can overwrite a
+change that was made elsewhere. Thus the store never writes to the device on its own. At connect
+time, it only finds the drift between what it remembers and what the device now reports. Then
+the startup offer (refer to :mod:`meshterm.ui.settings_offer`) lets the user choose: restore the
+saved values, adopt the current values of the device, or forget the device completely.
 
-Like the other operator state (mutes, watched nodes, remembered channels), this is global
-machine state in a small JSON file (``<config_dir>/settings.json``), not the per-invocation
-SQLite database. Reads are served from memory after the first load; writes flush immediately
-and atomically.
+The gate is the origin of a value, not the device type. The store keeps only the settings that
+you changed through MeshTerm. Thus a device with firmware that you never edit through MeshTerm
+keeps an empty record, and MeshTerm never flags it. A radio bridge without firmware gets its
+values back, because those values necessarily came from MeshTerm.
+
+This store is global machine state in a small JSON file (``<config_dir>/settings.json``), the
+same as the other state of the user (mutes, watched nodes, remembered channels). It is not in
+the SQLite database, which can be different for each run. After the first read, the store gives
+all reads from memory. Each write goes to disk immediately and atomically.
 """
 
 from __future__ import annotations
@@ -45,43 +49,45 @@ from .device_config import (
 if TYPE_CHECKING:
     from .connection import Device
 
-# The JSON-native scalar types a setting value may take; anything else in a loaded file is
-# dropped as malformed (settings are strings, numbers, and booleans — never containers).
+# The JSON-native scalar types that a setting value can have. The store removes all other
+# values in a file that it reads, because they are malformed (settings are strings, numbers,
+# and booleans, never containers).
 _SCALARS = (str, int, float, bool)
 
 
 def _norm(pubkey: str) -> str:
-    """Normalise a device public key to the lowercase hex used as the store's device key."""
+    """Normalize the public key of a device to lowercase hex, the device key of the store."""
     return (pubkey or "").lower().removeprefix("0x")
 
 
 class SettingsStore:
-    """Reads and writes the per-device set of MeshTerm-changed settings, memory-first.
+    """Reads and writes the set of MeshTerm-changed settings for each device, in memory first.
 
-    Interact through :meth:`settings` (a device's remembered ``key -> value`` map),
-    :meth:`remember` (record one changed setting), :meth:`forget` (drop one), and
-    :meth:`forget_all` (stop remembering a device). The backing map is loaded once on first
-    access and kept in memory; each mutation persists the whole map atomically.
+    Use :meth:`settings` (the remembered ``key -> value`` map of a device), :meth:`remember`
+    (store one changed setting), :meth:`forget` (remove one setting), and :meth:`forget_all`
+    (forget a device). The store reads the map one time at the first access, and keeps it in
+    memory. Each change writes the full map atomically.
     """
 
     def __init__(self, path: Path) -> None:
-        """Open the store against a JSON file location.
+        """Open the store on the location of a JSON file.
 
         Args:
-            path: Path to the JSON state file (created lazily on the first remembered setting).
+            path: Path to the JSON state file (made only when the first setting is
+                remembered).
         """
         self._path = path
         self._devices: dict[str, dict[str, Any]] | None = None
 
     @property
     def _state(self) -> dict[str, dict[str, Any]]:
-        """The device -> remembered-settings map, loaded from disk on first access."""
+        """The map from device to remembered settings, read from disk at the first access."""
         if self._devices is None:
             self._devices = self._load()
         return self._devices
 
     def _load(self) -> dict[str, dict[str, Any]]:
-        """Parse the file into the device map, or empty on a missing/corrupt file."""
+        """Parse the file into the device map (empty if the file is missing or corrupt)."""
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -92,10 +98,10 @@ class SettingsStore:
         for pubkey, entries in (data.get("devices") or {}).items():
             if not isinstance(entries, dict):
                 continue
-            # Keep only plain scalar values of settings the registry knows: a container or
-            # null is a malformed entry, and a key that is no longer a setting (or a typo)
-            # is not something to offer to write back onto the radio. Whatever is left out
-            # here is gone from the file at its next save.
+            # Keep only the plain scalar values of the settings that the registry knows. A
+            # container or a null is a malformed entry. A key that is no longer a setting
+            # (or a typo) must not be offered for a write back to the device. All that is
+            # left out here is removed from the file at its next save.
             values = {
                 str(key): value
                 for key, value in entries.items()
@@ -106,19 +112,19 @@ class SettingsStore:
         return devices
 
     def settings(self, pubkey: str) -> dict[str, Any]:
-        """The settings remembered for a device (a copy), empty if none."""
+        """The settings that are remembered for a device (a copy), empty if there are none."""
         return dict(self._state.get(_norm(pubkey), {}))
 
     def remember(self, pubkey: str, key: str, value: Any) -> None:
-        """Record the value a setting was changed to, replacing any prior value for that key.
+        """Store the new value of a setting, and replace the earlier value for that key.
 
-        Called after a setting is applied to the device through MeshTerm. Re-recording the
-        same value is a no-op (no needless write).
+        MeshTerm calls this function after it applies a setting to the device. If the value
+        is the same as the stored value, the function does nothing (no unnecessary write).
 
         Args:
-            pubkey: The device's own public key.
+            pubkey: The public key of the device itself.
             key: The setting key (a :class:`~meshterm.core.device_config.SettingSpec` key).
-            value: The applied, already-typed scalar value.
+            value: The applied scalar value, already typed.
         """
         pub = _norm(pubkey)
         if not pub or not isinstance(value, _SCALARS):
@@ -131,7 +137,7 @@ class SettingsStore:
         self._save()
 
     def forget(self, pubkey: str, key: str) -> None:
-        """Drop one remembered setting; persist only a real change."""
+        """Remove one remembered setting. Write the file only for a real change."""
         pub = _norm(pubkey)
         values = self._state.get(pub)
         if not values or key not in values:
@@ -144,7 +150,7 @@ class SettingsStore:
         self._save()
 
     def forget_all(self, pubkey: str) -> None:
-        """Stop remembering a device's settings entirely; persist only a real change."""
+        """Forget all the settings of a device. Write the file only for a real change."""
         pub = _norm(pubkey)
         if pub not in self._state:
             return
@@ -152,7 +158,10 @@ class SettingsStore:
         self._save()
 
     def _save(self) -> None:
-        """Persist the whole device map atomically (a crash mid-write keeps the old file)."""
+        """Write the full device map atomically.
+
+        If a crash occurs during the write, the old file stays.
+        """
         data = {
             "devices": {
                 pubkey: dict(sorted(values.items()))
@@ -165,12 +174,12 @@ class SettingsStore:
 
 @dataclass(frozen=True)
 class SettingDrift:
-    """One setting whose remembered value differs from what the device now reports.
+    """One setting whose remembered value is not the value that the device now reports.
 
     Attributes:
         key: The setting key.
-        remembered: The value MeshTerm has saved for this device.
-        current: The value the device currently reports (``None`` if it reports none).
+        remembered: The value that MeshTerm stored for this device.
+        current: The value that the device reports now (``None`` if it reports no value).
     """
 
     key: str
@@ -179,22 +188,23 @@ class SettingDrift:
 
 
 def settings_drift(store: SettingsStore, pubkey: str, snapshot: dict) -> list[SettingDrift]:
-    """Return the remembered settings that differ from a device's current snapshot.
+    """Return the remembered settings that are different from the current snapshot of a device.
 
-    Values are compared by their *formatted* form (via the setting's spec), so a difference
-    only in representation — an integer that reads the same, a float the firmware rounds
-    identically — is not reported as drift. A remembered key the registry no longer knows is
-    skipped. With nothing remembered this returns an empty list, so a firmware radio you don't
-    manage through MeshTerm never shows drift.
+    The function compares the values in their formatted form (through the spec of the
+    setting). Thus a difference only in representation (an integer that reads the same, a
+    float that the firmware rounds to the same value) is not reported as drift. The function
+    skips a remembered key that the registry no longer knows. When nothing is remembered, the
+    function returns an empty list. Thus a device with firmware that you do not manage through
+    MeshTerm never shows drift.
 
     Args:
-        store: The settings store to read remembered values from.
-        pubkey: The device's own public key.
-        snapshot: The device's current configuration (see
+        store: The settings store from which to read the remembered values.
+        pubkey: The public key of the device itself.
+        snapshot: The current settings of the device (refer to
             :func:`~meshterm.core.device_config.build_snapshot`).
 
     Returns:
-        The drifted settings, in the registry's key order.
+        The settings with drift, in the key order of the registry.
     """
     remembered = store.settings(pubkey)
     if not remembered:
@@ -204,7 +214,7 @@ def settings_drift(store: SettingsStore, pubkey: str, snapshot: dict) -> list[Se
         try:
             spec = get_spec(key)
         except DeviceConfigError:
-            continue  # a key the current registry no longer defines
+            continue  # a key that the current registry no longer defines
         current = snapshot.get(key)
         if format_value(spec, saved) != format_value(spec, current):
             drifted.append(SettingDrift(key=key, remembered=saved, current=current))
@@ -213,29 +223,33 @@ def settings_drift(store: SettingsStore, pubkey: str, snapshot: dict) -> list[Se
 
 
 def _ordered_specs() -> list:
-    """The registry's settings in display order (imported lazily to avoid a load-time cost)."""
+    """The settings of the registry, in display order.
+
+    The import is lazy, to avoid a cost at load time.
+    """
     from .device_config import DEVICE_SETTINGS
 
     return DEVICE_SETTINGS
 
 
 async def restore(store: SettingsStore, device: Device, snapshot: dict, keys: list[str]) -> int:
-    """Write remembered values for ``keys`` back onto the device, updating ``snapshot`` in place.
+    """Write the remembered values of ``keys`` to the device, and change ``snapshot`` in place.
 
-    Applies each setting through its registry spec — the same path the editor uses — so coupled
-    commands (radio, coordinates, tuning, telemetry) rebuild from the running snapshot and a
-    setting can be restored in isolation. Best-effort per key: a setter a given firmware lacks is
-    skipped rather than aborting the rest.
+    The function applies each setting through its registry spec, on the same path as the
+    editor. Thus the coupled commands (radio, coordinates, tuning, telemetry) are built again
+    from the running snapshot, and a setting can be restored alone. Each key is best-effort: if
+    a firmware does not have a setter, the function skips that key and does not stop the others.
 
     Args:
-        store: The store holding the remembered values.
+        store: The store that holds the remembered values.
         device: The connected device to write to.
-        snapshot: The device's current snapshot; mutated in place as values are applied so a
-            later coupled key is rebuilt from current values.
-        keys: The setting keys to restore (typically the drifted ones).
+        snapshot: The current snapshot of the device. The function changes it in place when
+            it applies the values, so that a later coupled key is built from the current
+            values.
+        keys: The setting keys to restore (usually the keys with drift).
 
     Returns:
-        The number of settings successfully written.
+        The number of settings that were written successfully.
     """
     pubkey = str(snapshot.get("public_key") or "")
     remembered = store.settings(pubkey)
@@ -255,16 +269,17 @@ async def restore(store: SettingsStore, device: Device, snapshot: dict, keys: li
 
 
 def adopt(store: SettingsStore, pubkey: str, snapshot: dict, keys: list[str]) -> None:
-    """Update the remembered copy of ``keys`` to the device's current values.
+    """Change the remembered copy of ``keys`` to the current values of the device.
 
-    The other side of a drift: rather than restore the saved values, take the device's current
-    ones as the new truth — so a change made outside MeshTerm is kept, not clobbered. A key the
-    device no longer reports is forgotten instead of stored.
+    This is the other answer to a drift. The function does not restore the saved values.
+    Instead, it takes the current values of the device as the new truth. Thus a change that was
+    made outside MeshTerm stays, and is not overwritten. If the device no longer reports a key,
+    the function forgets that key instead of storing it.
 
     Args:
-        store: The store to update.
-        pubkey: The device's own public key.
-        snapshot: The device's current snapshot to read values from.
+        store: The store to change.
+        pubkey: The public key of the device itself.
+        snapshot: The current snapshot of the device, from which to read the values.
         keys: The setting keys to adopt.
     """
     for key in keys:

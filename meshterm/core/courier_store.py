@@ -1,16 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Persistence for the Courier: the store-and-forward outbox.
+"""The store for the Courier: the store-and-forward outbox.
 
-The Courier (see :mod:`meshterm.services.courier`) queues direct messages for contacts
-that aren't reachable right now and delivers them when the contact is next heard — or at
-a scheduled time. This store is the outbox itself: queued messages with their schedule
-and attempt history, plus the finished ones (delivered or given-up) kept around, capped,
-so the morning after tells the story.
+The Courier (refer to :mod:`meshterm.services.courier`) queues direct messages for
+contacts that it cannot reach now. It delivers them when the contact is next heard, or at
+a scheduled time. This store is the outbox itself: the queued messages, with their
+schedule and attempt history. It also keeps the finished messages (delivered, or given
+up), up to a cap. Thus, on the next morning, the user can see what occurred.
 
-Like the remembered devices (:mod:`meshterm.core.device_store`), this is global machine
-state in a small JSON file (``<config_dir>/courier.json``) rather than the
-per-invocation SQLite database — a queued message must survive restarts, or the whole
-promise ("it'll go out when the contact shows up") is hollow.
+This store is global machine state in a small JSON file (``<config_dir>/courier.json``),
+the same as the remembered devices (:mod:`meshterm.core.device_store`). It is not in the
+SQLite database, which can be different for each run. A queued message must stay after a
+restart. Else the full promise ("it'll go out when the contact shows up") is empty.
 """
 
 from __future__ import annotations
@@ -24,34 +24,36 @@ from typing import ClassVar
 from .atomicwrite import write_atomically
 from .models import utcnow
 
-#: Message states: waiting in the outbox, landed, or abandoned after the retry budget.
+#: The message states: waiting in the outbox, delivered, or abandoned after the retry
+#: budget is spent.
 QUEUED = "queued"
 DELIVERED = "delivered"
 GAVE_UP = "gave-up"
 
-#: How many finished (delivered / given-up) entries are kept for the screen's history —
-#: *the* default behind the ``courier_history_kept`` preference, which the registry names
-#: rather than re-types (:data:`meshterm.core.preferences.PREFERENCES`).
+#: How many finished entries (delivered or given up) the store keeps for the history on
+#: the screen. This is the only default of the ``courier_history_kept`` preference. The
+#: registry refers to this name and does not type the value again
+#: (:data:`meshterm.core.preferences.PREFERENCES`).
 DONE_CAP = 100
 
 
 @dataclass(slots=True)
 class QueuedMessage:
-    """One outbox entry, from queueing through delivery (or defeat).
+    """One outbox entry, from the queue to the delivery (or until MeshTerm gives up).
 
     Attributes:
-        ident: Monotonic id (stable across restarts), used to address the entry.
-        node_key: The recipient's canonical 12-hex id (what observations carry),
-            matched against the contact list at send time and against overheard
-            packets for reachability.
-        node_name: The recipient's display name, snapshotted at queue time.
+        ident: A monotonic id (stable across restarts), to address the entry.
+        node_key: The canonical 12-hex key prefix of the recipient (the id that
+            observations carry). At send time, MeshTerm matches it against the contact
+            list. For reachability, MeshTerm matches it against overheard packets.
+        node_name: The name of the recipient to show, copied at queue time.
         text: The message body.
-        created: When it was queued.
-        not_before: Hold until this time (a scheduled send); ``None`` sends on the
-            next sign of life instead.
-        attempts: Delivery attempts made so far (each is one full chat send, with
-            the chat service's own soft-retry budget inside it).
-        last_attempt: When the latest attempt ran (drives the retry backoff).
+        created: When the message was queued.
+        not_before: Hold the message until this time (a scheduled send). ``None`` sends
+            at the next sign of life instead.
+        attempts: The delivery attempts so far. Each attempt is one full chat send, with
+            the soft-retry budget of the chat service inside it.
+        last_attempt: When the latest attempt ran (the retry backoff uses it).
         status: :data:`QUEUED`, :data:`DELIVERED`, or :data:`GAVE_UP`.
         finished: When the entry left the queue (delivered or given up).
     """
@@ -67,19 +69,20 @@ class QueuedMessage:
     status: str = QUEUED
     finished: datetime | None = None
 
-    #: Fields this record once held and must never hold again under another meaning (see
-    #: :data:`meshterm.core.preferences.RETIRED` for why a name is never reused).
+    #: The fields that this record held before. It must never hold them again with a
+    #: different meaning (refer to :data:`meshterm.core.preferences.RETIRED` for the
+    #: reason that a name is never used again).
     RETIRED: ClassVar[frozenset[str]] = frozenset()
 
 
 class CourierStore:
-    """Reads and writes the outbox, memory-first (loaded once, persisted on change)."""
+    """Reads and writes the outbox, in memory first (read one time, written at each change)."""
 
     def __init__(self, path: Path) -> None:
-        """Open the store against a JSON file location.
+        """Open the store on the location of a JSON file.
 
         Args:
-            path: Path to the JSON state file (created lazily on first write).
+            path: Path to the JSON state file (made only at the first write).
         """
         self._path = path
         self._messages: list[QueuedMessage] | None = None
@@ -88,7 +91,7 @@ class CourierStore:
     # --- state ---------------------------------------------------------------------
 
     def _load(self) -> list[QueuedMessage]:
-        """Parse the file, tolerating absence and corruption (an empty outbox)."""
+        """Parse the file. A missing or corrupt file gives an empty outbox."""
         if self._messages is not None:
             return self._messages
         try:
@@ -135,10 +138,11 @@ class CourierStore:
         """Add a message to the outbox.
 
         Args:
-            node_key: The recipient's canonical 12-hex id.
-            node_name: The recipient's display name.
+            node_key: The canonical 12-hex key prefix of the recipient.
+            node_name: The name of the recipient to show.
             text: The message body.
-            not_before: Hold until this time; ``None`` sends on next sign of life.
+            not_before: Hold the message until this time. ``None`` sends at the next sign
+                of life.
 
         Returns:
             The stored :class:`QueuedMessage`.
@@ -158,15 +162,15 @@ class CourierStore:
         return message
 
     def pending(self) -> list[QueuedMessage]:
-        """The waiting messages, oldest first (first queued, first delivered)."""
+        """The waiting messages, oldest first (the first queued is the first delivered)."""
         return [m for m in self._load() if m.status == QUEUED]
 
     def entries(self) -> list[QueuedMessage]:
-        """Every entry — waiting and finished — newest first (the screen's order)."""
+        """All the entries (waiting and finished), newest first (the order of the screen)."""
         return sorted(self._load(), key=lambda m: m.created, reverse=True)
 
     def get(self, ident: int) -> QueuedMessage | None:
-        """One entry by id, or ``None``."""
+        """One entry by its id, or ``None``."""
         return next((m for m in self._load() if m.ident == ident), None)
 
     def pending_count(self) -> int:
@@ -174,16 +178,16 @@ class CourierStore:
         return len(self.pending())
 
     def done_count(self) -> int:
-        """How many finished (delivered / given-up) entries the history holds."""
+        """How many finished entries (delivered or given up) the history holds."""
         return sum(1 for m in self._load() if m.status != QUEUED)
 
     # --- attempt bookkeeping -----------------------------------------------------------
 
     def note_attempt(self, ident: int, *, when: datetime | None = None) -> None:
-        """Record that a delivery attempt is being made.
+        """Store that a delivery attempt is in progress.
 
-        Written *before* the send, so a crash mid-transmission can never spend the
-        retry budget twice.
+        The store writes this before the send. Thus a crash during the transmission can
+        never spend the retry budget two times.
         """
         message = self.get(ident)
         if message is not None:
@@ -200,7 +204,7 @@ class CourierStore:
         self._finish(ident, GAVE_UP, when)
 
     def _finish(self, ident: int, status: str, when: datetime | None) -> None:
-        """Finish one entry and trim the done history to its cap."""
+        """Finish one entry, and cut the done history to its cap."""
         message = self.get(ident)
         if message is None:
             return
@@ -218,7 +222,7 @@ class CourierStore:
         self._save()
 
     def cancel(self, ident: int) -> bool:
-        """Remove a *waiting* entry outright (finished ones use :meth:`clear_done`).
+        """Remove a waiting entry completely (for finished entries, use :meth:`clear_done`).
 
         Returns:
             Whether an entry was removed.
@@ -232,17 +236,20 @@ class CourierStore:
         return True
 
     def clear_done(self) -> None:
-        """Drop every finished entry, leaving the waiting queue untouched."""
+        """Remove all the finished entries, and do not change the waiting queue."""
         messages = self._load()
         kept = [m for m in messages if m.status == QUEUED]
         if len(kept) != len(messages):
             self._messages = kept
             self._save()
 
-    # --- persistence -----------------------------------------------------------------
+    # --- write to disk ---------------------------------------------------------------
 
     def _save(self) -> None:
-        """Persist the whole outbox atomically (crash mid-write keeps the old file)."""
+        """Write the full outbox atomically.
+
+        If a crash occurs during the write, the old file stays.
+        """
         data = {
             "next_id": self._next_id,
             "messages": [
@@ -265,7 +272,7 @@ class CourierStore:
 
 
 def _as_int(value: object, default: int) -> int:
-    """Coerce a stored number to a non-negative int, falling back to ``default``."""
+    """Convert a stored number to a non-negative int, or return ``default`` if it fails."""
     try:
         number = int(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
@@ -274,10 +281,10 @@ def _as_int(value: object, default: int) -> int:
 
 
 def _as_time(value: object) -> datetime | None:
-    """Parse a stored ISO-8601 timestamp, or ``None`` if absent/corrupt.
+    """Parse a stored ISO-8601 timestamp, or return ``None`` if it is absent or corrupt.
 
-    A timestamp without a zone is treated as corrupt too: the store only ever writes
-    aware UTC stamps, and a naive one would poison the schedule arithmetic.
+    The function also reads a timestamp without a time zone as corrupt. The store only
+    writes aware UTC timestamps, and a naive timestamp makes the schedule arithmetic wrong.
     """
     if not isinstance(value, str):
         return None

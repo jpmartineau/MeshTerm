@@ -1,35 +1,40 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The regions MeshTerm knows by name, and the scope each channel is sent under.
+"""The regions that MeshTerm knows by name, and the scope under which each channel sends.
 
-A scoped flood carries no region name — only a transport code keyed on one (see
-:mod:`~meshterm.core.regions`) — so *which* region a packet was flooded into can only be
-answered by trying the names already known. This store is that list. A name arrives from
-wherever MeshTerm meets one:
+A scoped flood has no region name. It has only a transport code that comes from a region
+name (refer to :mod:`~meshterm.core.regions`). Thus, to find the region into which a
+packet was flooded, MeshTerm must try the names that it knows. This store is that list.
+MeshTerm learns a name from each place where it finds one:
 
-* ``default`` — the companion's own default flood scope, read or set on Device config;
-* ``channel`` — a scope given to a channel, so its messages stay in its region;
-* ``repeater`` — a repeater's answer to the regions request, or its ``region`` listing,
-  which also records *which* repeaters carry it (the node page lists them, and a scoped
-  send that nothing relayed can say whether anything in earshot was ever heard to carry
-  its region) — and, beside the regions, each repeater's last whole answer: whether it
-  relays unscoped floods too, and when it said so (:class:`CarriedAnswer`);
-* ``typed`` — a name the reader entered themselves.
+* ``default``: the default flood scope of the companion, read or set on Device config.
+* ``channel``: a scope that is given to a channel, so that its messages stay in its
+  region.
+* ``repeater``: the answer of a repeater to the regions request, or its ``region``
+  listing. The store also keeps which repeaters carry the region. The node page lists
+  them. Also, when nothing relayed a scoped send, MeshTerm can tell whether a node in
+  radio range was ever heard to carry its region. Next to the regions, the store keeps
+  the last full answer of each repeater: whether it also relays unscoped floods, and
+  when it said so (:class:`CarriedAnswer`).
+* ``typed``: a name that the user typed.
 
-The store also holds **channel scopes**: the region a channel's messages are sent under.
-The firmware has no per-channel scope (``// TODO: have per-channel send_scope``), so a
-client that wants one sets the companion's session scope just before each channel send,
-which is what every official app does. The scope is keyed by the channel's intrinsic
-identity (:func:`~meshterm.core.channels.channel_identity`), exactly like a mute, so it
-follows the channel across slots and two devices sharing the channel share its scope.
+The store also keeps the **channel scopes**. A channel scope is the region under which
+MeshTerm sends the messages of a channel. The firmware has no scope for each channel
+(``// TODO: have per-channel send_scope``). Thus a client that wants one sets the session
+scope of the companion immediately before each channel send. Each official app does
+this. The key of a channel scope is the intrinsic identity of the channel
+(:func:`~meshterm.core.channels.channel_identity`), the same as for a mute. Thus the
+scope follows the channel to a different slot, and two devices that share the channel
+also share its scope.
 
-Resolution is memoized here too (:meth:`RegionStore.scope_of`): a packet list repaints
-often and resolving a scoped frame costs an HMAC per known name, so an answer is kept per
-``(body, code)`` until the set of names changes.
+The store also caches the resolution (:meth:`RegionStore.scope_of`). A packet list paints
+often, and the resolution of a scoped packet costs one HMAC for each known name. Thus the
+store keeps an answer for each ``(body, code)`` until the set of names changes.
 
-Like the other operator state (mutes, watched nodes, admin passwords) this is global
-machine state in a small JSON file (``<config_dir>/regions.json``), read once and written
-atomically on each real change. It writes from its typed records, never from the document
-it read, so a field no record knows is gone at the next save.
+This store is global machine state in a small JSON file (``<config_dir>/regions.json``),
+the same as the other state of the user (mutes, watched nodes, admin passwords). The
+store reads the file one time, and writes it atomically at each real change. It writes
+from its typed records, never from the document that it read. Thus a field that no
+record knows is removed at the next save.
 """
 
 from __future__ import annotations
@@ -52,23 +57,26 @@ from .regions import (
     validate,
 )
 
-#: Where a region name was learned — the closed set :attr:`KnownRegion.sources` draws from.
+#: Where MeshTerm learned a region name. This is the closed set from which
+#: :attr:`KnownRegion.sources` takes its values.
 SOURCES = ("default", "channel", "repeater", "typed")
 
-#: Resolutions kept before the memo is cleared wholesale (a long capture meets many bodies;
-#: a repaint meets the same few hundred again and again).
+#: The maximum number of cached resolutions. At this number, the store clears the full
+#: cache. (A long capture finds many bodies. A paint finds the same few hundred bodies
+#: again and again.)
 _MEMO_CAP = 4096
 
 
 @dataclass(frozen=True)
 class KnownRegion:
-    """One region MeshTerm knows by name.
+    """One region that MeshTerm knows by name.
 
     Attributes:
         name: The bare region name (no ``#``).
-        sources: Where it was learned, members of :data:`SOURCES`, in first-learned order.
-        repeaters: The 12-hex node ids of repeaters that were heard to carry it.
-        learned_at: When it was first learned (UTC).
+        sources: Where MeshTerm learned it, as members of :data:`SOURCES`, in the order
+            in which they were first learned.
+        repeaters: The 12-hex node ids of the repeaters that were heard to carry it.
+        learned_at: When MeshTerm first learned it (UTC).
     """
 
     name: str
@@ -76,23 +84,25 @@ class KnownRegion:
     repeaters: tuple[str, ...] = ()
     learned_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
-    #: Fields this record once held and must never hold again under another meaning (see
-    #: :data:`meshterm.core.preferences.RETIRED` for why a name is never reused).
+    #: The fields that this record held before. It must never hold them again with a
+    #: different meaning (refer to :data:`meshterm.core.preferences.RETIRED` for the
+    #: reason that a name is never used again).
     RETIRED: ClassVar[frozenset[str]] = frozenset()
 
 
 @dataclass(frozen=True)
 class CarriedAnswer:
-    """The last whole answer one repeater gave about what it carries.
+    """The last full answer of one repeater about what it carries.
 
-    The regions themselves live on :class:`KnownRegion` (``repeaters``), where resolution
-    wants them; this keeps what does not belong to any one region — whether the repeater
-    also relays *unscoped* floods (the ``*`` a region list leads with, which names no
-    region), and when it said so. A repeater with no record here was never asked, which is
-    a different thing from a repeater that answered with nothing.
+    The regions themselves are on :class:`KnownRegion` (``repeaters``), where the
+    resolution uses them. This record keeps what does not belong to one region: whether
+    the repeater also relays unscoped floods (the ``*`` at the start of a region list,
+    which names no region), and when it said so. If a repeater has no record here,
+    MeshTerm never asked it. That is different from a repeater that answered with no
+    regions.
 
     Attributes:
-        node: The repeater's 12-hex node id.
+        node: The 12-hex node id of the repeater.
         unscoped: Whether its answer included the wildcard.
         answered_at: When it answered (UTC).
     """
@@ -101,25 +111,26 @@ class CarriedAnswer:
     unscoped: bool
     answered_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
-    #: Fields this record once held and must never hold again under another meaning.
+    #: The fields that this record held before. It must never hold them again with a
+    #: different meaning.
     RETIRED: ClassVar[frozenset[str]] = frozenset()
 
 
 class RegionStore:
-    """Reads and writes the known regions and the channel scopes, memory-first.
+    """Reads and writes the known regions and the channel scopes, in memory first.
 
-    Interact through :meth:`names`/:meth:`regions` (what is known), :meth:`learn` and
-    :meth:`forget` (changing it), :meth:`channel_scope`/:meth:`set_channel_scope` (a
-    channel's send scope), :meth:`carriers` (which repeaters carry a region), and
-    :meth:`scope_of` (what a received frame's scope is). :attr:`revision` bumps on every
-    change, for a screen that memoizes on it.
+    Use :meth:`names`/:meth:`regions` (what is known), :meth:`learn` and :meth:`forget`
+    (to change it), :meth:`channel_scope`/:meth:`set_channel_scope` (the send scope of a
+    channel), :meth:`carriers` (which repeaters carry a region), and :meth:`scope_of`
+    (the scope of a received packet). :attr:`revision` increases at each change, for a
+    screen that caches on it.
     """
 
     def __init__(self, path: Path) -> None:
-        """Open the store against a JSON file location.
+        """Open the store on the location of a JSON file.
 
         Args:
-            path: Path to the JSON state file (created lazily on the first change).
+            path: Path to the JSON state file (made only at the first change).
         """
         self._path = path
         self._regions: dict[str, KnownRegion] | None = None
@@ -128,11 +139,11 @@ class RegionStore:
         self._memo: dict[tuple[bytes, int], str | None] = {}
         self.revision = 0
 
-    # -- loading ---------------------------------------------------------------------
+    # -- read from disk ----------------------------------------------------------------
 
     @property
     def _state(self) -> dict[str, KnownRegion]:
-        """The name -> record map, loaded from disk on first access."""
+        """The map from name to record, read from disk at the first access."""
         if self._regions is None:
             self._regions, self._channels, self._answers = self._load()
         return self._regions
@@ -140,7 +151,7 @@ class RegionStore:
     def _load(
         self,
     ) -> tuple[dict[str, KnownRegion], dict[str, str], dict[str, CarriedAnswer]]:
-        """Parse the file, or start empty on a missing or corrupt one."""
+        """Parse the file, or start empty when the file is missing or corrupt."""
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -168,18 +179,19 @@ class RegionStore:
     # -- what is known ---------------------------------------------------------------
 
     def regions(self) -> list[KnownRegion]:
-        """Every known region, in the order names are tried when resolving a frame.
+        """All the known regions, in the order in which the names are tried for a packet.
 
-        Names the reader chose (a default scope, a channel scope, a typed name) lead, then
-        names only a repeater has mentioned — the ones this station most likely sends
-        under are the ones its own frames will carry. Ties keep the order learned.
+        The names that the user chose (a default scope, a channel scope, a typed name)
+        come first. Then come the names that only a repeater gave. The reason: the names
+        under which our node most probably sends are the names that its own packets will
+        carry. Names in the same group keep the order in which they were learned.
         """
         chosen = [r for r in self._state.values() if set(r.sources) - {"repeater"}]
         heard = [r for r in self._state.values() if not set(r.sources) - {"repeater"}]
         return chosen + heard
 
     def names(self) -> list[str]:
-        """The known region names, in resolution order (see :meth:`regions`)."""
+        """The known region names, in resolution order (refer to :meth:`regions`)."""
         return [r.name for r in self.regions()]
 
     def get(self, name: str) -> KnownRegion | None:
@@ -187,37 +199,40 @@ class RegionStore:
         return self._state.get(normalize(name))
 
     def carriers(self, name: str) -> tuple[str, ...]:
-        """The node ids of the repeaters heard to carry a region (empty when none)."""
+        """The node ids of the repeaters that were heard to carry a region (or empty)."""
         region = self.get(name)
         return region.repeaters if region else ()
 
     def carried_by(self, node: str) -> list[str]:
-        """The regions a repeater was heard to carry, by its node id (12-hex prefix)."""
+        """The regions that a repeater was heard to carry, by its node id (12-hex key prefix)."""
         node = node.lower()[:12]
         return [r.name for r in self.regions() if node in r.repeaters]
 
     def answer_of(self, node: str) -> CarriedAnswer | None:
-        """The last whole answer a repeater gave (unscoped too, and when), or ``None``.
+        """The last full answer of a repeater (its unscoped flag and its time), or ``None``.
 
-        ``None`` means it was never asked — or never answered — which the node page states
-        as such, rather than reading an empty :meth:`carried_by` as "carries nothing".
+        ``None`` means that MeshTerm never asked the repeater, or that it never answered.
+        The node page shows this case as it is. It does not read an empty
+        :meth:`carried_by` as "carries nothing".
         """
         self._state  # noqa: B018 - load on first access
         return self._answers.get(node.lower()[:12])
 
-    # -- changing it -----------------------------------------------------------------
+    # -- change it -------------------------------------------------------------------
 
     def learn(self, name: str, source: str, *, repeater: str | None = None) -> str | None:
-        """Record a region name and where it came from; persist only a real change.
+        """Store a region name and its source. Write the file only for a real change.
 
         Args:
-            name: The name, bare or ``#``-prefixed. The wildcard and names the firmware
-                would refuse are ignored (a repeater listing ``*`` teaches no region).
+            name: The name, bare or with a ``#`` prefix. The function ignores the wildcard
+                and the names that the firmware refuses (a repeater that lists ``*``
+                teaches no region).
             source: One of :data:`SOURCES`.
-            repeater: For ``source="repeater"``, the node id of the repeater that carries it.
+            repeater: For ``source="repeater"``, the node id of the repeater that carries
+                the region.
 
         Returns:
-            The bare name recorded, or ``None`` when nothing was learnable.
+            The bare name that was stored, or ``None`` when there was nothing to learn.
         """
         if source not in SOURCES:
             raise ValueError(f"unknown region source {source!r}")
@@ -239,19 +254,21 @@ class RegionStore:
         return bare
 
     def learn_carried(self, repeater: str, names: Iterable[str]) -> list[str]:
-        """Record what one repeater says it carries, replacing what it said before.
+        """Store what one repeater says that it carries, and replace what it said before.
 
-        A repeater's list is its whole answer, so a region it no longer names loses that
-        repeater (and, if nothing else taught it, the region itself). Whether it listed the
-        wildcard — relays unscoped floods — and when it answered are kept beside the
-        regions (:meth:`answer_of`).
+        The list of a repeater is its full answer. Thus a region that the repeater no
+        longer names loses that repeater. If nothing else taught the region, the store
+        also removes the region itself. Next to the regions, the store keeps whether the
+        repeater listed the wildcard (that is, it relays unscoped floods), and when it
+        answered (:meth:`answer_of`).
 
         Args:
-            repeater: The repeater's node id (12-hex prefix or full key).
-            names: The regions it listed (the wildcard is recorded as the unscoped flag).
+            repeater: The node id of the repeater (a 12-hex key prefix or the full key).
+            names: The regions that it listed (the store keeps the wildcard as the
+                unscoped flag).
 
         Returns:
-            The bare region names learned, in the order given.
+            The bare region names that were learned, in the given order.
         """
         node = repeater.lower()[:12]
         given = [normalize(x) for x in names]
@@ -278,7 +295,7 @@ class RegionStore:
         return learned
 
     def forget(self, name: str) -> None:
-        """Drop a region name entirely, and any channel scope that used it."""
+        """Remove a region name completely, and each channel scope that used it."""
         bare = normalize(name)
         if bare not in self._state and bare not in self._channels.values():
             return
@@ -289,24 +306,27 @@ class RegionStore:
     # -- channel scopes ----------------------------------------------------------------
 
     def channel_scope(self, channel_id: str | None) -> str | None:
-        """The region a channel's messages are sent under, or ``None`` for the default."""
+        """The send scope of a channel, or ``None`` for the default scope.
+
+        The send scope is the region under which MeshTerm sends the messages of the channel.
+        """
         self._state  # noqa: B018 - load on first access
         return self._channels.get(channel_id) if channel_id else None
 
     def channel_scopes(self) -> dict[str, str]:
-        """Every channel scope, channel identity -> region (a copy)."""
+        """All the channel scopes, as channel identity -> region (a copy)."""
         self._state  # noqa: B018 - load on first access
         return dict(self._channels)
 
     def set_channel_scope(self, channel_id: str, name: str | None) -> None:
-        """Give a channel a send scope, or clear it back to the device's default.
+        """Give a channel a send scope, or clear it to use the default of the device again.
 
         Args:
-            channel_id: The channel's intrinsic identity.
-            name: The region, or ``None``/empty to clear.
+            channel_id: The intrinsic identity of the channel.
+            name: The region, or ``None``/empty to clear the scope.
 
         Raises:
-            RegionNameError: If ``name`` is a name the firmware would refuse.
+            RegionNameError: If ``name`` is a name that the firmware refuses.
         """
         self._state  # noqa: B018 - load on first access
         if not name or not normalize(name):
@@ -322,14 +342,15 @@ class RegionStore:
     # -- resolution ------------------------------------------------------------------
 
     def scope_of(self, raw: dict | None) -> Scope | None:
-        """The scope of a received frame against every known name (memoized).
+        """The scope of a received packet, resolved against each known name (cached).
 
         Args:
-            raw: The frame's raw payload (live, or restored from history).
+            raw: The raw payload of the packet (live, or restored from the history).
 
         Returns:
-            As :func:`~meshterm.core.regions.frame_scope`: ``None`` where the frame has no
-            scope to state (direct, or a route type never kept).
+            The same as :func:`~meshterm.core.regions.frame_scope`: ``None`` where the
+            packet has no scope to show (a direct packet, or a route type that was never
+            kept).
         """
         if not isinstance(raw, dict):
             return None
@@ -337,7 +358,7 @@ class RegionStore:
         if route != "TC_FLOOD":
             return frame_scope(raw, ())
         body = raw_scope_body(raw)
-        scope = frame_scope(raw, ())  # parses the code; resolution happens below
+        scope = frame_scope(raw, ())  # parses the code only. The resolution comes below.
         if scope is None or scope.code is None or body is None:
             return scope
         memo_key = (body, int(scope.code, 16))
@@ -348,16 +369,19 @@ class RegionStore:
         region = self._memo[memo_key]
         return Scope("scoped", region, scope.code) if region else scope
 
-    # -- persistence -----------------------------------------------------------------
+    # -- write to disk ---------------------------------------------------------------
 
     def _changed(self) -> None:
-        """Bump the revision, drop the memo, and persist."""
+        """Increase the revision, clear the cache, and write the file."""
         self.revision += 1
         self._memo.clear()
         self._save()
 
     def _save(self) -> None:
-        """Persist the whole store atomically (a crash mid-write keeps the old file)."""
+        """Write the full store atomically.
+
+        If a crash occurs during the write, the old file stays.
+        """
         data = {
             "regions": [
                 {
@@ -382,7 +406,7 @@ class RegionStore:
 
 
 def _answer_from_json(entry: object) -> CarriedAnswer | None:
-    """Parse one stored repeater answer, or ``None`` if it is malformed."""
+    """Parse one stored answer of a repeater, or return ``None`` if it is malformed."""
     if not isinstance(entry, dict) or not entry.get("node"):
         return None
     try:
@@ -399,7 +423,7 @@ def _answer_from_json(entry: object) -> CarriedAnswer | None:
 
 
 def _region_from_json(entry: object) -> KnownRegion | None:
-    """Parse one stored region, or ``None`` if it is malformed."""
+    """Parse one stored region, or return ``None`` if it is malformed."""
     if not isinstance(entry, dict):
         return None
     try:

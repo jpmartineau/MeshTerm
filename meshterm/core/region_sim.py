@@ -1,20 +1,25 @@
 # SPDX-License-Identifier: Apache-2.0
-"""A repeater's region table and region CLI, as the simulator speaks them.
+"""The region table and the region CLI of a repeater, as the simulator gives them.
 
 The :class:`~meshterm.core.connection.MockDevice` answers ``region …`` commands and the
-anonymous regions request from one of these per simulated repeater, so the node page, the
-region editor and the ``regions`` command are all drivable under ``--mock``.
+anonymous regions request from one of these maps for each simulated repeater. Thus you can
+use the node page, the region editor, and the ``regions`` command under ``--mock``.
 
-It is a transcription of the firmware rather than an idea of it — ``RegionMap`` and
-``CommonCLI::handleRegionCmd`` as of MeshCore 1.15/1.16 — because the parser it feeds
-(:mod:`~meshterm.core.region_admin`) is meant for the real thing, and a simulator that
-answered more kindly than a repeater would let a parser bug through. So it keeps the
-firmware's awkward edges on purpose: the 160-byte reply buffer that cuts a long dump
-mid-name, the flat lists that *skip* a name that would not fit, prefix matching on
-``allowf``/``denyf``/``home``/``get``, ``put`` of an existing name moving it, ``remove``
-refusing a region with children, new regions flood-allowed, ``default`` creating a missing
-region and saving the table, and every other edit living in RAM until ``save``
-(:meth:`SimulatedRegionMap.reboot` puts the saved table back).
+This module is a copy of the firmware, not an idea of it: ``RegionMap`` and
+``CommonCLI::handleRegionCmd`` as of MeshCore 1.15/1.16. The parser that reads its replies
+(:mod:`~meshterm.core.region_admin`) is for the real firmware. If a simulator answers more
+kindly than a repeater, a bug in the parser can go through without detection. Thus this
+module keeps the difficult edge cases of the firmware on purpose:
+
+- the 160-byte reply buffer, which cuts a long dump in the middle of a name,
+- the flat lists, which skip a name that does not fit,
+- prefix matching on ``allowf``/``denyf``/``home``/``get``,
+- ``put`` of a name that exists, which moves that name,
+- ``remove``, which refuses a region with children,
+- new regions, which allow floods,
+- ``default``, which makes a missing region and saves the table,
+- all the other edits, which stay in RAM until ``save``
+  (:meth:`SimulatedRegionMap.reboot` puts the saved table back).
 """
 
 from __future__ import annotations
@@ -25,13 +30,13 @@ from dataclasses import dataclass
 from .region_admin import REPLY_CAP_BYTES
 from .regions import WILDCARD
 
-#: The firmware's table size (``MAX_REGION_ENTRIES``).
+#: The size of the table in the firmware (``MAX_REGION_ENTRIES``).
 MAX_REGIONS = 32
 
 
 @dataclass(slots=True)
 class _Entry:
-    """One ``RegionEntry``: an id, its parent's id, the deny-flood flag, and the name."""
+    """One ``RegionEntry``: an id, the id of its parent, the deny-flood flag, and the name."""
 
     id: int
     parent: int
@@ -40,14 +45,15 @@ class _Entry:
 
 
 class SimulatedRegionMap:
-    """One simulated repeater's region table and the CLI verbs that edit it."""
+    """The region table of one simulated repeater, and the CLI verbs that edit it."""
 
     def __init__(self, tree: list[tuple[str, str, bool]] | None = None) -> None:
-        """Build a table, already saved, from ``(name, parent, flood)`` triples in order.
+        """Make a table, already saved, from ``(name, parent, flood)`` triples in order.
 
         Args:
-            tree: The regions, each after its parent (``*`` for top level). ``None`` is an
-                empty table: a stock repeater relaying unscoped floods and nothing else.
+            tree: The regions, each after its parent (``*`` for the top level). ``None`` is
+                an empty table: a stock repeater that relays unscoped floods and nothing
+                else.
         """
         self._wild_deny = False
         self._entries: list[_Entry] = []
@@ -69,18 +75,18 @@ class SimulatedRegionMap:
         )
 
     def reboot(self) -> None:
-        """Drop every unsaved edit, as a power cycle does."""
+        """Remove all the unsaved edits, as a power cycle does."""
         (self._wild_deny, self._entries, self._next_id, self._home, self._default) = copy.deepcopy(
             self._saved
         )
 
     def _by_name(self, name: str) -> _Entry | None:
-        """``findByName``: an exact match (``*`` is the wildcard, reported as ``None`` here)."""
+        """``findByName``: an exact match (``None`` for the wildcard ``*``)."""
         name = name.removeprefix("#")
         return next((e for e in self._entries if e.name.removeprefix("#") == name), None)
 
     def _by_prefix(self, prefix: str) -> _Entry | str | None:
-        """``findByNamePrefix``: exact wins, else the *last* prefix match; ``*`` → ``"*"``."""
+        """``findByNamePrefix``: an exact match, else the last prefix match (``*`` → ``"*"``)."""
         if prefix == WILDCARD:
             return WILDCARD
         prefix = prefix.removeprefix("#")
@@ -94,7 +100,7 @@ class SimulatedRegionMap:
         return partial
 
     def _put(self, name: str, parent_id: int) -> _Entry | None:
-        """``putRegion``: refuse bad characters, move an existing name, else append."""
+        """``putRegion``: refuse bad characters, move a name that exists, else add at the end."""
         if not all(ch in "-$#" or ch.isdigit() or ord(ch) >= ord("A") for ch in name):
             return None
         entry = self._by_name(name)
@@ -111,7 +117,7 @@ class SimulatedRegionMap:
         return entry
 
     def _dump(self) -> str:
-        """``exportTo(reply, 160)``: the tree, cut where the buffer runs out."""
+        """``exportTo(reply, 160)``: the tree, cut where the buffer is full."""
         out: list[str] = []
 
         def visit(indent: int, entry_id: int, name: str, deny: bool) -> None:
@@ -127,7 +133,7 @@ class SimulatedRegionMap:
         return _capped("".join(out))
 
     def _names(self, *, allowed: bool) -> str:
-        """``exportNamesTo(reply, 160, …)``: comma-joined, skipping what will not fit."""
+        """``exportNamesTo(reply, 160, …)``: each name that fits, with commas between."""
         parts: list[str] = []
         length = 0
         if self._wild_deny != allowed:
@@ -144,7 +150,7 @@ class SimulatedRegionMap:
         return ",".join(parts)
 
     def allowed_names(self) -> str:
-        """What the anonymous regions request answers with (``*`` first when unscoped)."""
+        """The answer to the anonymous regions request (``*`` first if ``*`` allows floods)."""
         return self._names(allowed=True)
 
     # -- the CLI ------------------------------------------------------------------
@@ -239,6 +245,6 @@ class SimulatedRegionMap:
 
 
 def _capped(text: str) -> str:
-    """``BufStream``: bytes past the 159th are dropped, whatever they were in the middle of."""
+    """``BufStream``: remove the bytes after the 159th, whatever the cut divides."""
     raw = text.encode("utf-8")[: REPLY_CAP_BYTES - 1]
     return raw.decode("utf-8", errors="ignore")

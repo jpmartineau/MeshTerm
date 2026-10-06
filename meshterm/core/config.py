@@ -1,17 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 """Machine setup and named device profiles.
 
-Settings are read from a TOML file (default ``~/.meshterm/config.toml``) and may
-be overridden per-invocation by CLI flags. Profiles let you alias your hardware
-(``yagi`` repeater, ``local`` repeater, ``observer`` bot, ``s3`` serial companion) to a
-serial port and defaults so commands can target them by name.
+MeshTerm reads the config from a TOML file (by default ``~/.meshterm/config.toml``). CLI
+flags can override it for one run. Profiles let you give a name to your hardware (``yagi``
+repeater, ``local`` repeater, ``observer`` bot, ``s3`` serial companion), with a serial port
+and defaults. Thus commands can address the hardware by name.
 
-This file answers *where things are and which device to talk to* — nothing else. How
-MeshTerm itself behaves (cooldowns, retry budgets, how much history it keeps, whether it
-connects at launch) is a **preference**, lives in
-:mod:`meshterm.core.preferences`, and is edited on the Preferences page rather than in a
-text editor. The two were one thing until the page existed, which is why a few behaviour
-keys used to sit in this file with no screen behind them.
+This file tells only where things are and which device to talk to. How MeshTerm itself
+behaves (cooldowns, retry budgets, how much history it keeps, whether it connects at start)
+is a **preference**. The preferences are in :mod:`meshterm.core.preferences`, and the user
+edits them on the Preferences page, not in a text editor. The two were one thing until the
+page existed. This is why some behaviour keys were in this file before, with no screen for
+them.
 """
 
 from __future__ import annotations
@@ -29,38 +29,38 @@ else:  # pragma: no cover - exercised only on 3.10
     import tomli as tomllib
 
 
-#: Points MeshTerm's config and data somewhere other than the home directory. For trying a
-#: build without letting it near a real history, for a portable install on a stick, and for
-#: running two radios out of two directories. Read every time rather than cached, so a test
-#: can move it between cases.
+#: Points the config and the data of MeshTerm to a directory that is not the home
+#: directory. For example: to try a build away from a real history, for a portable install
+#: on a USB stick, and to run two devices from two directories. MeshTerm reads it each time
+#: and does not cache it, so a test can change it between cases.
 CONFIG_DIR_ENV = "MESHTERM_HOME"
 
-#: The history's filename inside the config directory, when ``config.toml`` and ``--db``
-#: both leave it alone.
+#: The file name of the history in the config directory, when ``config.toml`` and ``--db``
+#: do not change it.
 DB_FILENAME = "meshterm.db"
 
-#: The simulator's history, kept beside the real one and used by ``--mock`` runs that did
-#: not name a database themselves. ``--mock`` is a fake radio, not a fake MeshTerm: what
-#: the simulator adverts is recorded like anything a real companion said, so without a
-#: database of its own its four invented contacts turn up in the mesh walk, the dashboard
-#: and the map of the mesh you actually run.
+#: The history of the simulator. It is next to the real history, and ``--mock`` runs use it
+#: when they do not name a database themselves. ``--mock`` is a fake device, not a fake
+#: MeshTerm: MeshTerm stores what the simulator advertises, the same as all that a real
+#: companion says. Thus, without its own database, the four invented contacts of the
+#: simulator show in the mesh walk, the dashboard, and the map of your real mesh.
 MOCK_DB_FILENAME = "meshterm-mock.db"
 
 
 def default_config_dir() -> Path:
-    """Return the directory MeshTerm uses for config and data.
+    """Return the directory that MeshTerm uses for config and data.
 
-    ``$MESHTERM_HOME`` wins if it is set and not empty. Otherwise this resolves to
-    ``.meshterm`` under the OS-defined home directory (``%USERPROFILE%`` on Windows,
-    ``$HOME`` on Unix), as reported by :meth:`Path.home`.
+    ``$MESHTERM_HOME`` has priority if it is set and not empty. Else the directory is
+    ``.meshterm`` under the home directory of the OS (``%USERPROFILE%`` on Windows,
+    ``$HOME`` on Unix), as :meth:`Path.home` reports it.
 
-    The override exists because the database is the valuable part of an install — a
-    running record of everything the radio has overheard — and there was no way to point a
-    second copy of MeshTerm at a different one. A downloaded build would happily open the
-    same 34MB file as the checkout it was built from.
+    The override exists because the database is the valuable part of an install: the
+    history of all that the device has overheard. Before the override, there was no way to
+    point a second copy of MeshTerm to a different database. A downloaded build opened the
+    same 34MB file as the checkout from which it was built, with no warning.
 
     Returns:
-        The resolved configuration directory path (not guaranteed to exist).
+        The resolved path of the config directory (it does not always exist).
     """
     override = os.environ.get(CONFIG_DIR_ENV, "").strip()
     if override:
@@ -70,57 +70,63 @@ def default_config_dir() -> Path:
 
 @dataclass(frozen=True, slots=True)
 class SpiWiring:
-    """How a LoRa chip on the host's SPI bus is wired, for a ``transport = "spi"`` profile.
+    """How a LoRa chip on the SPI bus of the host is wired, for a ``transport = "spi"`` profile.
 
-    The defaults are the hackergadgets uConsole AIO v1's wiring, so that board needs no
-    ``[profiles.<name>.spi]`` table at all; any other board states only what differs. These
-    are facts about the *board*, which is why they live in ``config.toml`` with the profile
-    and not among the radio's settings: the frequency, bandwidth and power are the node's
-    own, saved by the node and edited on Device config like any companion's.
+    The defaults are the wiring of the hackergadgets uConsole AIO v1. Thus that board does
+    not need a ``[profiles.<name>.spi]`` table at all, and each other board gives only what
+    is different. These values are facts about the board. This is why they are in
+    ``config.toml`` with the profile, and not with the settings of the radio. The frequency,
+    the bandwidth, and the power belong to the node: the node saves them, and you edit them
+    on Device config, the same as for each companion.
 
     Attributes:
-        bus_id: SPI bus (``/dev/spidev<bus_id>.<cs_id>``).
-        cs_id: SPI chip-select device on that bus.
-        cs_pin: A GPIO driven as chip select by hand, or ``-1`` for the bus's own.
-        gpio_chip: Which ``/dev/gpiochip<n>`` the pins below are on, or ``-1`` (the default)
-            to find the Raspberry Pi header's controller by its label — ``pinctrl-bcm2711``
-            on a CM4, ``pinctrl-rp1`` on a CM5 — rather than trust a number that differs
-            between the two and has moved between kernel releases on the CM5 (see
-            :func:`~meshterm.core.spiradio.gpio_chip`). A number pins it.
+        bus_id: The SPI bus (``/dev/spidev<bus_id>.<cs_id>``).
+        cs_id: The SPI chip-select device on that bus.
+        cs_pin: A GPIO that MeshTerm drives by hand as the chip select, or ``-1`` for the
+            chip select of the bus.
+        gpio_chip: The ``/dev/gpiochip<n>`` of the pins below, or ``-1`` (the default) to
+            find the controller of the Raspberry Pi header by its label: ``pinctrl-bcm2711``
+            on a CM4, ``pinctrl-rp1`` on a CM5. MeshTerm does not trust a number, because
+            the number is different on the two modules, and it changed between kernel
+            releases on the CM5 (refer to :func:`~meshterm.core.spiradio.gpio_chip`). If you
+            give a number, MeshTerm uses that number.
         use_gpiod_backend: Drive the pins through ``gpiod`` instead of ``python-periphery``.
-        reset_pin: The chip's reset line.
-        busy_pin: The chip's busy line.
-        irq_pin: The chip's interrupt line (DIO1).
+        reset_pin: The reset line of the chip.
+        busy_pin: The busy line of the chip.
+        irq_pin: The interrupt line of the chip (DIO1).
         txen_pin: A transmit-enable line for an external RF switch, or ``-1``.
         rxen_pin: A receive-enable line for an external RF switch, or ``-1``.
-        en_pins: Power-enable lines raised before the chip is touched (the AIO v2 wants
-            ``[27]``); empty for none.
-        leds: Switches the kernel exposes as LEDs (``/sys/class/leds/<name>``), each
-            ``"name=brightness"``, set before the chip is touched and put back as they were
-            when the node ends. A board whose device tree hands its power and pin-routing
-            switches to ``gpio-leds`` is driven through them, because that driver holds the
-            lines and a GPIO request for them would be refused. The Cardputer Zero's Cap
-            LoRa-1262 needs two: ``ext_5v_out=1`` powers the header the Cap sits on, and
-            ``ext_usb_gpio_fun=0`` keeps two of that header's pins on GPIO rather than USB —
-            at ``1`` the Cap's reset line is cut and the chip sits in reset. Empty for none.
-        pi4io_bus: The I2C bus of a PI4IOE5V6408 expander the board switches its radio's
-            RF path with, or ``-1`` (the default) for none.
-        pi4io_address: That expander's address: ``0x43`` with its ADDR pin low, ``0x44``
-            with it high.
-        pi4io_high: The expander's pins (0–7) driven high before the chip is touched; every
-            other pin is left an input.
+        en_pins: The power-enable lines that MeshTerm raises before it touches the chip
+            (the AIO v2 must have ``[27]``). Empty for none.
+        leds: The switches that the kernel exposes as LEDs (``/sys/class/leds/<name>``),
+            each one ``"name=brightness"``. MeshTerm sets them before it touches the chip,
+            and puts them back as they were when the node ends. If the device tree of a
+            board gives its power and pin-routing switches to ``gpio-leds``, MeshTerm
+            drives the board through these switches. This is because that driver holds the
+            lines, and the kernel refuses a GPIO request for them. The Cap LoRa-1262 of the
+            Cardputer Zero uses two: ``ext_5v_out=1`` powers the header that the Cap is on,
+            and ``ext_usb_gpio_fun=0`` keeps two pins of that header on GPIO, not on USB.
+            At ``1``, the reset line of the Cap is cut, and the chip stays in reset. Empty
+            for none.
+        pi4io_bus: The I2C bus of a PI4IOE5V6408 expander with which the board switches the
+            RF path of its radio, or ``-1`` (the default) for none.
+        pi4io_address: The address of that expander: ``0x43`` when its ADDR pin is low,
+            ``0x44`` when it is high.
+        pi4io_high: The pins of the expander (0–7) that MeshTerm drives high before it
+            touches the chip. Each other pin stays an input.
         use_dio2_rf: Whether DIO2 drives the RF switch.
         use_dio3_tcxo: Whether DIO3 powers a TCXO.
-        is_waveshare: The Waveshare HAT's wiring quirks, which the radio library knows.
-        python: An interpreter to run the node under, when the one MeshTerm would find
-            is not the one you want. Empty to let MeshTerm look.
+        is_waveshare: The wiring quirks of the Waveshare HAT, which the radio library
+            knows.
+        python: An interpreter to run the node, when the interpreter that MeshTerm finds
+            is not the one that you want. Empty to let MeshTerm find one.
         gps_port: The serial port of a GPS receiver on the same board, or empty for none.
-            The node runs it the way MeshCore firmware runs a board's GPS — a ``gps``
-            switch and a ``gps_interval`` on Device config — and the port is the radio's,
-            so the device screen doesn't offer it as a companion. The Cardputer Zero's Cap
-            has one on ``/dev/serial0``.
-        gps_baud: The receiver's line speed. NMEA's own default is 9600; the Cap's runs at
-            115200.
+            The node runs it the same way that MeshCore firmware runs the GPS of a board:
+            a ``gps`` switch and a ``gps_interval`` on Device config. The port belongs to
+            the radio, so the device screen does not offer it as a companion. The Cap of
+            the Cardputer Zero has one on ``/dev/serial0``.
+        gps_baud: The line speed of the receiver. The NMEA default is 9600. The receiver
+            of the Cap runs at 115200.
     """
 
     bus_id: int = 1
@@ -145,22 +151,23 @@ class SpiWiring:
     gps_port: str = ""
     gps_baud: int = 9600
 
-    #: Keys this table once took and must never take again under another meaning (see
-    #: :data:`meshterm.core.preferences.RETIRED`). ``preamble_length`` was never wiring: it is
-    #: protocol, and a fixed 12 against a mesh sending 32 is what left the node deaf to
-    #: most traffic; the node now derives it from the spreading factor as MeshCore does.
+    #: The TOML keys that this table once accepted and must never accept again with a
+    #: different meaning (refer to :data:`meshterm.core.preferences.RETIRED`).
+    #: ``preamble_length`` was never wiring: it is protocol. A fixed 12, on a mesh that sends
+    #: 32, made the node deaf to most traffic. Now the node derives it from the spreading
+    #: factor, as MeshCore does.
     RETIRED: ClassVar[frozenset[str]] = frozenset({"preamble_length"})
 
     @classmethod
     def from_toml(cls, table: dict[str, Any]) -> SpiWiring:
-        """Build the wiring from a ``[profiles.<name>.spi]`` table, defaults for the rest.
+        """Build the wiring from a ``[profiles.<name>.spi]`` table, with defaults for the rest.
 
-        A key this dataclass doesn't know is refused rather than ignored: a misspelt
-        ``irq_pn = 22`` would otherwise leave the default in force and a deaf radio with
-        nothing to say why.
+        The function refuses a key that this dataclass does not know, and does not ignore
+        it. If the function ignored it, a misspelled ``irq_pn = 22`` leaves the default in
+        force, and the radio is deaf with no message that tells why.
 
         Raises:
-            ValueError: On an unknown key or a value of the wrong type.
+            ValueError: For an unknown key, or for a value of the wrong type.
         """
         known = {f.name: f for f in cls.__dataclass_fields__.values()}
         retired = sorted(set(table) & cls.RETIRED)
@@ -199,33 +206,38 @@ class SpiWiring:
 
     @property
     def spidev(self) -> str:
-        """The SPI device node this wiring opens."""
+        """The SPI device file that this wiring opens."""
         return f"/dev/spidev{self.bus_id}.{self.cs_id}"
 
 
 @dataclass(slots=True)
 class DeviceProfile:
-    """Connection defaults for one physical companion device.
+    """Connection defaults for one physical companion.
 
-    A profile addresses a serial companion (via ``port``), a Bluetooth one (via
-    ``transport = "ble"`` and ``address``), or a network one (via ``transport = "tcp"``,
-    ``host``, and ``tcp_port``). ``transport`` defaults to serial, so existing port-only
-    profiles are unchanged.
+    A profile addresses a serial companion (through ``port``), a Bluetooth companion
+    (through ``transport = "ble"`` and ``address``), or a network companion (through
+    ``transport = "tcp"``, ``host``, and ``tcp_port``). The default ``transport`` is serial,
+    so the existing profiles with only a port do not change.
 
     Attributes:
-        name: The profile alias (e.g. ``"yagi"``).
-        port: Serial port path (e.g. ``COM5`` or ``/dev/ttyUSB0``); serial profiles.
-        baudrate: Serial baud rate.
-        default_tx_power: TX power to assume/restore for this device, if known.
-        description: Free-text note about the hardware.
-        transport: ``"serial"`` (default), ``"ble"``, or ``"tcp"``.
-        address: Bluetooth address (e.g. ``AA:BB:CC:DD:EE:FF``); BLE profiles.
-        ble_pin: Optional BLE pairing PIN, if the Bluetooth companion requires one.
-        host: Hostname or IP of a network companion (e.g. ``"192.168.1.50"``); TCP profiles.
-        tcp_port: TCP port the network companion listens on; TCP profiles (defaults to
-            :data:`~meshterm.core.discovery.DEFAULT_TCP_PORT` when a host is given without one).
-        spi: How the radio is wired, for ``transport = "spi"`` — a LoRa chip on the host's
-            own SPI bus, run by a node MeshTerm starts itself (:mod:`meshterm.core.spiradio`).
+        name: The profile alias (for example, ``"yagi"``).
+        port: The serial port path (for example, ``COM5`` or ``/dev/ttyUSB0``). For serial
+            profiles.
+        baudrate: The serial baud rate.
+        default_tx_power: The TX power to assume or restore for this device, if known.
+        description: A free-text note about the hardware.
+        transport: ``"serial"`` (the default), ``"ble"``, or ``"tcp"``.
+        address: The Bluetooth address (for example, ``AA:BB:CC:DD:EE:FF``). For BLE
+            profiles.
+        ble_pin: An optional BLE pairing PIN, if the Bluetooth companion must have one.
+        host: The host name or IP of a network companion (for example,
+            ``"192.168.1.50"``). For TCP profiles.
+        tcp_port: The TCP port on which the network companion listens. For TCP profiles
+            (the default is :data:`~meshterm.core.discovery.DEFAULT_TCP_PORT` when a host
+            is given without a port).
+        spi: How the radio is wired, for ``transport = "spi"``: a LoRa chip on the SPI bus
+            of the host itself, run by a node that MeshTerm starts itself
+            (:mod:`meshterm.core.spiradio`).
     """
 
     name: str
@@ -242,7 +254,7 @@ class DeviceProfile:
 
     @property
     def is_spi(self) -> bool:
-        """Whether this profile addresses a radio on the host's own SPI bus."""
+        """Whether this profile addresses a radio on the SPI bus of the host itself."""
         return self.transport == "spi"
 
     @property
@@ -257,7 +269,7 @@ class DeviceProfile:
 
     @property
     def tcp_endpoint(self) -> str | None:
-        """The ``host:port`` string for a TCP profile, or ``None`` if it isn't one / has no host."""
+        """The ``host:port`` of a TCP profile, or ``None`` if it is not TCP or has no host."""
         if not self.is_tcp or not self.host:
             return None
         from .discovery import DEFAULT_TCP_PORT
@@ -267,21 +279,21 @@ class DeviceProfile:
 
 @dataclass(slots=True)
 class Settings:
-    """Where MeshTerm keeps its files, and which device to talk to.
+    """The place where MeshTerm keeps its files, and the device to talk to.
 
     Attributes:
-        config_dir: Directory holding the config file and database.
-        db_path: SQLite database location.
-        default_profile: Profile used when ``--profile`` is omitted.
-        profiles: Mapping of profile name to :class:`DeviceProfile`.
-        connect_on_start: Whether the interactive session opens the companion connection
-            (and starts always-on background listening) immediately at launch. When
-            ``False`` the connection is opened lazily — only once monitoring is turned on
-            or a tool first needs the radio — so launching the menu touches no serial
-            port. It sits here rather than among the preferences because it is about
-            *which device this machine talks to and when*, alongside the profile that
-            names it, and because it decides its own question before the session that
-            would show a preferences page exists.
+        config_dir: The directory that holds the config file and the database.
+        db_path: The location of the SQLite database.
+        default_profile: The profile to use when ``--profile`` is not given.
+        profiles: The map of profile names to :class:`DeviceProfile`.
+        connect_on_start: Whether the interactive session opens the connection to the
+            companion (and starts to listen all the time in the background) immediately
+            at start. When ``False``, the connection opens lazily: only when the user turns
+            on monitoring, or when a tool first needs the device. Thus the start of the
+            menu touches no serial port. This value is here, not with the preferences,
+            because it is about which device this machine talks to and when, next to the
+            profile that names that device. Also, it decides its own question before the
+            session that shows a Preferences page exists.
     """
 
     config_dir: Path = field(default_factory=default_config_dir)
@@ -291,19 +303,19 @@ class Settings:
     connect_on_start: bool = True
 
     def __post_init__(self) -> None:
-        """Derive dependent paths that were not explicitly provided."""
+        """Derive the dependent paths that the caller did not give."""
         if self.db_path is None:
             self.db_path = self.config_dir / DB_FILENAME
 
     def resolve_profile(self, name: str | None) -> DeviceProfile | None:
-        """Look up a profile by name, falling back to the default profile.
+        """Find a profile by name, or use the default profile.
 
         Args:
-            name: Requested profile name, or ``None`` to use the default.
+            name: The requested profile name, or ``None`` to use the default.
 
         Returns:
             The matching :class:`DeviceProfile`, or ``None`` if neither the requested
-            nor the default profile is defined.
+            profile nor the default profile is defined.
         """
         key = name or self.default_profile
         if key is None:
@@ -312,10 +324,10 @@ class Settings:
 
     @classmethod
     def load(cls, config_path: Path | None = None) -> Settings:
-        """Load settings from a TOML file, returning defaults if it is absent.
+        """Read the config from a TOML file, and return the defaults if the file is absent.
 
         Args:
-            config_path: Explicit path to a config file. Defaults to
+            config_path: An explicit path to a config file. The default is
                 ``<config_dir>/config.toml``.
 
         Returns:
@@ -330,10 +342,10 @@ class Settings:
 
         profiles: dict[str, DeviceProfile] = {}
         for pname, pdata in (data.get("profiles") or {}).items():
-            # Infer the transport from which endpoint the profile carries when it isn't stated
-            # outright: a ``host`` means TCP, an ``address`` means BLE, otherwise serial. This
-            # keeps port-only profiles working untouched while a bare ``host``/``address`` is
-            # enough to declare a network/Bluetooth one.
+            # If the profile does not state the transport, find it from the endpoint that the
+            # profile has: a ``host`` means TCP, an ``address`` means BLE, else serial. Thus the
+            # profiles with only a port work without a change, and a bare ``host`` or
+            # ``address`` is enough to declare a network or Bluetooth profile.
             transport = pdata.get("transport") or (
                 "spi"
                 if "spi" in pdata

@@ -1,16 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 """Pure geographic helpers for the terminal map: Web Mercator, tiles, and viewports.
 
-This module is deliberately I/O-free and rendering-free so it can be unit-tested without a
-radio, a terminal, or the network. It turns latitude/longitude into the Web Mercator "world
-pixel" space that slippy-map vector tiles live in, models the on-screen :class:`Viewport`
-(which braille dot maps to which coordinate), and measures great-circle distances.
+This module has no I/O and no rendering, on purpose, so that unit tests can run it without a
+device, a terminal, or the network. It changes latitude and longitude into the Web Mercator
+"world pixel" space of slippy-map vector tiles. It models the :class:`Viewport` on the screen
+(which braille dot shows which coordinate), and it measures great-circle distances.
 
-The map renders one braille **dot** per Web Mercator pixel at the viewport's zoom, so a
-viewport of ``dot_w`` × ``dot_h`` dots shows exactly that many mercator pixels — panning and
-zooming are then just moving and scaling this window over the world. Braille sub-cells are
-about square in a monospace font (2 dots wide, 4 tall, in a cell roughly twice as tall as
-wide), so mercator pixels land on screen without obvious distortion.
+The map renders one braille **dot** for each Web Mercator pixel at the zoom of the viewport.
+Thus a viewport of ``dot_w`` × ``dot_h`` dots shows exactly that many Mercator pixels. A pan
+or a zoom then only moves or scales this area over the world. In a monospace font, the
+sub-cells of a braille glyph (one for each dot) are approximately square: 2 dots wide and 4
+dots tall, in a cell that is approximately two times as tall as it is wide. Thus Mercator
+pixels show on the screen without visible distortion.
 """
 
 from __future__ import annotations
@@ -18,31 +19,33 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-#: Mean radius of the Earth in kilometres, used for haversine distances.
+#: The mean radius of the Earth in kilometres, for haversine distances.
 EARTH_RADIUS_KM = 6371.0088
 
-#: Web Mercator tile edge in pixels at its own zoom — the slippy-map convention. The world
-#: is ``TILE_PX * 2**zoom`` pixels square at a given zoom.
+#: The edge of a Web Mercator tile in pixels at its own zoom (the slippy-map convention). At
+#: a given zoom, the world is a square of ``TILE_PX * 2**zoom`` pixels.
 TILE_PX = 256
 
-#: Default fraction of nodes a map view frames: the densest half, so a few distant outliers
-#: don't zoom the whole mesh out to a continent. See :meth:`Viewport.fit`.
+#: The default fraction of nodes that a map viewport fits: the densest half. Thus a few
+#: distant outliers do not zoom the full mesh out to a continent. Refer to
+#: :meth:`Viewport.fit`.
 #:
-#: It lives here, beside the viewport maths it parameterises, rather than in the map screen
-#: that made it — the ``map`` subcommand needs it as a ``--fraction`` default at *CLI
-#: registration* time, which happens for every tool on every startup. Reaching into
-#: :mod:`meshterm.ui.map_screen` for it dragged the whole map stack (and, through the
-#: basemap's tile fetcher, ``urllib.request`` → ``http.client`` → ``ssl``) into every run,
-#: including runs that never open a map. This module is pure arithmetic and already on the
-#: boot path, so the constant is free here. It is also what the ``map_view_fraction``
-#: preference defaults to — the registry names this constant rather than re-typing the
-#: number, so the code default and the preference default are one value.
+#: It is in this module, next to the viewport mathematics that it is a parameter of, and not
+#: in the map screen that made it. The ``map`` subcommand must have it as a ``--fraction``
+#: default at CLI registration time, which occurs for each tool at each startup. When the
+#: constant was in :mod:`meshterm.ui.map_screen`, the import pulled the full map stack (and,
+#: through the tile downloader of the basemap, ``urllib.request`` → ``http.client`` →
+#: ``ssl``) into each run, also runs that never open a map. This module is pure arithmetic
+#: and is already on the boot path, so the constant costs nothing here. It is also the
+#: default of the ``map_view_fraction`` preference. The registry names this constant and
+#: does not type the number again, so the code default and the preference default are one
+#: value.
 DEFAULT_VIEW_FRACTION = 0.5
 
 
 @dataclass(frozen=True, slots=True)
 class BBox:
-    """An axis-aligned latitude/longitude bounding box (decimal degrees)."""
+    """An axis-aligned bounding box of latitude and longitude (decimal degrees)."""
 
     min_lat: float
     min_lon: float
@@ -51,13 +54,13 @@ class BBox:
 
     @classmethod
     def around(cls, points: list[tuple[float, float]]) -> BBox:
-        """Return the tightest box containing every ``(lat, lon)`` point.
+        """Return the smallest box that contains each ``(lat, lon)`` point.
 
         Args:
-            points: One or more latitude/longitude pairs (must be non-empty).
+            points: One or more latitude and longitude pairs (must not be empty).
 
         Returns:
-            The enclosing bounding box.
+            The bounding box that contains the points.
 
         Raises:
             ValueError: If ``points`` is empty.
@@ -70,46 +73,48 @@ class BBox:
 
     @property
     def center(self) -> tuple[float, float]:
-        """The box's centre as a ``(lat, lon)`` pair."""
+        """The centre of the box, as a ``(lat, lon)`` pair."""
         return ((self.min_lat + self.max_lat) / 2, (self.min_lon + self.max_lon) / 2)
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Return the great-circle distance between two points in kilometres.
+    """Return the great-circle distance between two points, in kilometres.
 
     Args:
-        lat1: First point's latitude (degrees).
-        lon1: First point's longitude (degrees).
-        lat2: Second point's latitude (degrees).
-        lon2: Second point's longitude (degrees).
+        lat1: The latitude of the first point (degrees).
+        lon1: The longitude of the first point (degrees).
+        lat2: The latitude of the second point (degrees).
+        lon2: The longitude of the second point (degrees).
 
     Returns:
-        The distance along the Earth's surface in kilometres.
+        The distance along the surface of the Earth, in kilometres.
     """
     p1, p2 = math.radians(lat1), math.radians(lat2)
     dphi = math.radians(lat2 - lat1)
     dlambda = math.radians(lon2 - lon1)
     a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlambda / 2) ** 2
-    # Clamped because rounding can push ``a`` a hair past 1 for near-antipodal points, and
-    # ``asin`` of that raises a domain error rather than returning half the planet.
+    # Clamped, because the rounding can push ``a`` a very small amount above 1 for points
+    # that are almost antipodal. Then ``asin`` raises a domain error, and does not return
+    # half the planet.
     return 2 * EARTH_RADIUS_KM * math.asin(min(1.0, math.sqrt(a)))
 
 
 def _central_points(
     points: list[tuple[float, float]], fraction: float
 ) -> list[tuple[float, float]]:
-    """Return the ``fraction`` of ``points`` nearest their median centre (the dense core).
+    """Return the ``fraction`` of ``points`` nearest to their median centre (the dense core).
 
-    The centre is the per-axis *median* so outliers don't drag it, and points are ranked by
-    great-circle distance from it. At least two points are always kept (so the result still
-    constrains a zoom), and the whole list is returned once the kept count reaches it.
+    The centre is the median on each axis, so that outliers do not pull it. The points are
+    sorted by their great-circle distance from the centre. The function always keeps a
+    minimum of two points (so that the result still limits a zoom). When the count to keep
+    reaches the length of the list, the function returns the full list.
 
     Args:
-        points: Latitude/longitude pairs (non-empty).
-        fraction: Portion to keep, ``0 < fraction <= 1``.
+        points: Latitude and longitude pairs (not empty).
+        fraction: The portion to keep, ``0 < fraction <= 1``.
 
     Returns:
-        The closest ``ceil(len(points) * fraction)`` points (min 2), or all of them.
+        The nearest ``ceil(len(points) * fraction)`` points (minimum 2), or all of them.
     """
     n = len(points)
     keep = max(2, math.ceil(n * fraction))
@@ -125,26 +130,29 @@ def _central_points(
 
 
 def clamp_lat(lat: float) -> float:
-    """Clamp latitude to the Web Mercator limit (~±85.051°) where the projection is finite."""
+    """Clamp a latitude to the Web Mercator limit (~±85.051°), where the projection is finite."""
     return max(-85.05112878, min(85.05112878, lat))
 
 
 def usable_fix(lat: float, lon: float) -> bool:
-    """Whether an advertised ``(lat, lon)`` is a real position worth plotting.
+    """Whether an advertised ``(lat, lon)`` is a real position that is worth a plot.
 
-    A node's advert location is only usable if it is a genuine fix. Two ways it isn't:
+    The location in the advert of a node is usable only if it is a true fix. It is not
+    usable in two cases:
 
-    * **out of range** — latitude must sit within ±90° and longitude within ±180°.
-      Some firmware/adverts report nonsense (a MeshCore companion has been seen
-      advertising ``lat -97, lon -1042``); projecting that flings the view off the
-      world, leaving the map a screen of empty/water fill that reads as solid black.
-    * **null island** — a companion with no GPS lock advertises latitude and
-      longitude both zero, which projects to the empty mid-Atlantic. Plotting a node
-      there is worse than useless: framing only it drops the whole view onto open
-      ocean (again, solid-water black).
+    * **out of range**: the latitude must be in ±90°, and the longitude in ±180°. Some
+      firmware and adverts report nonsense (MeshTerm heard a MeshCore companion with the
+      advert ``lat -97, lon -1042``). If MeshTerm projects that position, the viewport
+      goes off the world. Then the map is a screen of empty or water fill, which looks
+      solid black.
+    * **null island**: a companion with no GPS lock advertises a latitude and a
+      longitude of zero. This position projects to the empty middle of the Atlantic. A
+      node there is worse than useless: if the viewport fits only that node, the full
+      viewport goes onto open ocean (again, solid black water).
 
-    Either way the fix is treated as absent, so the node simply carries no location —
-    the shared guard the map markers and the Node-detail location preview both apply.
+    In both cases, MeshTerm treats the fix as absent, so the node has no location. This
+    is the shared guard that the map markers and the location preview of the Node detail
+    screen both use.
     """
     if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
         return False
@@ -155,13 +163,13 @@ def lonlat_to_world(lat: float, lon: float, zoom: float) -> tuple[float, float]:
     """Project ``(lat, lon)`` to Web Mercator world pixels at ``zoom``.
 
     Args:
-        lat: Latitude in degrees (clamped to the mercator limit).
-        lon: Longitude in degrees.
-        zoom: Zoom level (may be fractional).
+        lat: The latitude in degrees (clamped to the Mercator limit).
+        lon: The longitude in degrees.
+        zoom: The zoom level (it can be a fraction).
 
     Returns:
-        ``(x, y)`` in world pixels, where the world spans ``TILE_PX * 2**zoom`` on each axis
-        and ``y`` grows southward (north is up / smaller ``y``).
+        ``(x, y)`` in world pixels. The world is ``TILE_PX * 2**zoom`` on each axis, and
+        ``y`` increases to the south (north is up, at a smaller ``y``).
     """
     scale = TILE_PX * (2.0**zoom)
     x = (lon + 180.0) / 360.0 * scale
@@ -171,12 +179,12 @@ def lonlat_to_world(lat: float, lon: float, zoom: float) -> tuple[float, float]:
 
 
 def world_to_lonlat(x: float, y: float, zoom: float) -> tuple[float, float]:
-    """Invert :func:`lonlat_to_world`: world pixels at ``zoom`` back to ``(lat, lon)``.
+    """Invert :func:`lonlat_to_world`: change world pixels at ``zoom`` back to ``(lat, lon)``.
 
     Args:
-        x: World-pixel x.
-        y: World-pixel y.
-        zoom: The zoom the pixels were computed at.
+        x: The world-pixel x.
+        y: The world-pixel y.
+        zoom: The zoom at which the pixels were calculated.
 
     Returns:
         The ``(lat, lon)`` in degrees.
@@ -190,19 +198,20 @@ def world_to_lonlat(x: float, y: float, zoom: float) -> tuple[float, float]:
 
 @dataclass(frozen=True, slots=True)
 class Viewport:
-    """The on-screen window over the world: what each braille dot maps to.
+    """The visible area of the world on the screen: the position that each braille dot shows.
 
-    One dot equals one Web Mercator pixel at :attr:`zoom`, so the visible area is exactly
-    ``dot_w`` × ``dot_h`` mercator pixels centred on ``(center_lat, center_lon)``. Panning and
-    zooming return new viewports; nothing here mutates.
+    One dot is one Web Mercator pixel at :attr:`zoom`. Thus the visible area is exactly
+    ``dot_w`` × ``dot_h`` Mercator pixels, with its centre at ``(center_lat, center_lon)``.
+    A pan or a zoom returns a new viewport. Nothing in this class mutates.
 
     Attributes:
-        center_lat: Latitude at the centre of the view.
-        center_lon: Longitude at the centre of the view.
-        zoom: Display zoom (integer here; may exceed the tile source's max, in which case
-            lower-zoom tiles are magnified — see :meth:`tiles` / :meth:`feature_to_dot`).
-        dot_w: Viewport width in braille dots.
-        dot_h: Viewport height in braille dots.
+        center_lat: The latitude at the centre of the viewport.
+        center_lon: The longitude at the centre of the viewport.
+        zoom: The viewport zoom (an integer here). It can be more than the maximum of the
+            tile source. In that case, the map magnifies the tiles of a lower zoom (refer to
+            :meth:`tiles` and :meth:`feature_to_dot`).
+        dot_w: The width of the viewport in braille dots.
+        dot_h: The height of the viewport in braille dots.
     """
 
     center_lat: float
@@ -213,38 +222,39 @@ class Viewport:
 
     @property
     def origin_world(self) -> tuple[float, float]:
-        """Top-left corner of the view in world pixels at :attr:`zoom`."""
+        """The top-left corner of the viewport in world pixels at :attr:`zoom`."""
         cx, cy = lonlat_to_world(self.center_lat, self.center_lon, self.zoom)
         return cx - self.dot_w / 2, cy - self.dot_h / 2
 
     def lonlat_to_dot(self, lat: float, lon: float) -> tuple[float, float]:
-        """Project a coordinate to a (possibly off-screen) dot position in the view."""
+        """Project a coordinate to a dot position in the viewport (it can be off the screen)."""
         ox, oy = self.origin_world
         wx, wy = lonlat_to_world(lat, lon, self.zoom)
         return wx - ox, wy - oy
 
     def tile_zoom(self, max_tile_zoom: int) -> int:
-        """The tile zoom to fetch: the display zoom, capped at the source's max."""
+        """The tile zoom to download: the viewport zoom, limited to the maximum of the source."""
         return max(0, min(self.zoom, max_tile_zoom))
 
     def tiles(self, max_tile_zoom: int) -> list[tuple[int, int, int]]:
-        """Return the ``(z, x, y)`` tiles covering the view at the fetchable tile zoom.
+        """Return the ``(z, x, y)`` tiles that cover the viewport at the downloadable tile zoom.
 
-        When the display zoom exceeds ``max_tile_zoom`` the lower-zoom tiles that cover the
-        same ground are returned (the renderer magnifies them), so zooming in past the
-        source's limit still works.
+        When the viewport zoom is more than ``max_tile_zoom``, the function returns the tiles
+        of a lower zoom that cover the same ground (the renderer magnifies them). Thus a zoom
+        past the limit of the source still works.
 
         Args:
-            max_tile_zoom: The highest zoom the tile source actually serves.
+            max_tile_zoom: The highest zoom that the tile source serves.
 
         Returns:
-            Tile coordinates, clamped to the valid range, de-duplicated in row-major order.
+            Tile coordinates, clamped to the valid range, without duplicates, in row-major
+            order.
         """
         tz = self.tile_zoom(max_tile_zoom)
-        scale = 2.0 ** (self.zoom - tz)  # display px per tile-zoom px
+        scale = 2.0 ** (self.zoom - tz)  # viewport pixels for each tile-zoom pixel
         ox, oy = self.origin_world
         n = 2**tz
-        # Visible rect in tile-zoom world pixels, then in tile indices.
+        # The visible rectangle in tile-zoom world pixels, then in tile indices.
         tx0 = int((ox / scale) // TILE_PX)
         tx1 = int(((ox + self.dot_w) / scale) // TILE_PX)
         ty0 = int((oy / scale) // TILE_PX)
@@ -260,33 +270,33 @@ class Viewport:
     def tile_transform(
         self, tile_x: int, tile_y: int, tile_zoom: int, extent: int
     ) -> tuple[float, float, float]:
-        """Return ``(base_x, base_y, step)`` mapping this tile's local coords to dots.
+        """Return ``(base_x, base_y, step)``: the change from local tile coordinates to dots.
 
-        :meth:`feature_to_dot` is the readable form of the same projection, but it is a
-        *per-vertex* call, and a single map frame projects tens of thousands of vertices —
-        107k of them on a downtown view, each one redoing :attr:`origin_world` (a
-        ``sin``/``log`` pair) and a ``2**`` for a value that is constant across the whole
-        frame. That was over half the cost of drawing the map.
+        :meth:`feature_to_dot` is the readable form of the same projection, but it is a call
+        for each vertex. One frame of the map projects tens of thousands of vertices: 107k of
+        them on a map of a downtown area. Each call calculates :attr:`origin_world` again (a
+        ``sin`` and ``log`` pair), and a ``2**`` for a value that does not change in the full
+        frame. That was more than half the cost to draw the map.
 
-        The projection is affine in the tile's local coordinates, so all of that folds into
-        three numbers the caller can hoist out of its loop::
+        The projection is affine in the local coordinates of the tile. Thus all of that
+        becomes three numbers that the caller can move out of its loop::
 
             dot_x = base_x + lx * step
             dot_y = base_y + ly * step
 
-        leaving two multiplies and two adds per vertex, inline, with no call at all. The
-        caller is expected to spell that arithmetic out in its own comprehension rather
-        than take a closure back — a function call per vertex is itself most of what is
-        left once the trigonometry is gone.
+        Then each vertex costs two multiplications and two additions, inline, with no call
+        at all. The caller must write that arithmetic in its own comprehension, and not get
+        a closure back. After the trigonometry is gone, a function call for each vertex is
+        itself most of the remaining cost.
 
         Args:
-            tile_x: The tile's x index at ``tile_zoom``.
-            tile_y: The tile's y index at ``tile_zoom``.
-            tile_zoom: The zoom the tile was fetched at.
-            extent: The tile's internal coordinate extent (e.g. 4096).
+            tile_x: The x index of the tile at ``tile_zoom``.
+            tile_y: The y index of the tile at ``tile_zoom``.
+            tile_zoom: The zoom at which the tile was downloaded.
+            extent: The internal coordinate extent of the tile (for example, 4096).
 
         Returns:
-            The ``(base_x, base_y, step)`` coefficients described above.
+            The ``(base_x, base_y, step)`` coefficients that are described above.
         """
         span = TILE_PX * (2.0 ** (self.zoom - tile_zoom))
         ox, oy = self.origin_world
@@ -295,18 +305,19 @@ class Viewport:
     def feature_to_dot(
         self, tile_x: int, tile_y: int, tile_zoom: int, extent: int, lx: float, ly: float
     ) -> tuple[float, float]:
-        """Project a tile-local point to a dot position in this viewport.
+        """Project a point in local tile coordinates to a dot position in this viewport.
 
         Args:
-            tile_x: The tile's x index at ``tile_zoom``.
-            tile_y: The tile's y index at ``tile_zoom``.
-            tile_zoom: The zoom the tile was fetched at.
-            extent: The tile's internal coordinate extent (e.g. 4096).
-            lx: Local x within the tile, ``0..extent``.
-            ly: Local y within the tile, ``0..extent``.
+            tile_x: The x index of the tile at ``tile_zoom``.
+            tile_y: The y index of the tile at ``tile_zoom``.
+            tile_zoom: The zoom at which the tile was downloaded.
+            extent: The internal coordinate extent of the tile (for example, 4096).
+            lx: The local x in the tile, ``0..extent``.
+            ly: The local y in the tile, ``0..extent``.
 
         Returns:
-            The ``(x, y)`` dot position (may be outside the canvas; the caller clips).
+            The ``(x, y)`` dot position. It can be outside the canvas, and the caller clips
+            it.
         """
         scale = 2.0 ** (self.zoom - tile_zoom)
         wx = (tile_x + lx / extent) * TILE_PX * scale
@@ -315,14 +326,14 @@ class Viewport:
         return wx - ox, wy - oy
 
     def panned(self, frac_x: float, frac_y: float) -> Viewport:
-        """Return a viewport shifted by a fraction of its own width/height.
+        """Return a viewport moved by a fraction of its own width and height.
 
         Args:
-            frac_x: Eastward shift as a fraction of the view width (negative = west).
-            frac_y: Southward shift as a fraction of the view height (negative = north).
+            frac_x: The move east, as a fraction of the viewport width (negative = west).
+            frac_y: The move south, as a fraction of the viewport height (negative = north).
 
         Returns:
-            A new :class:`Viewport` at the shifted centre, same zoom and size.
+            A new :class:`Viewport` at the moved centre, with the same zoom and size.
         """
         cx, cy = lonlat_to_world(self.center_lat, self.center_lon, self.zoom)
         cx += frac_x * self.dot_w
@@ -331,12 +342,12 @@ class Viewport:
         return Viewport(clamp_lat(lat), lon, self.zoom, self.dot_w, self.dot_h)
 
     def zoomed(self, delta: int, *, min_zoom: int = 2, max_zoom: int = 19) -> Viewport:
-        """Return a viewport zoomed by ``delta`` levels about the same centre (clamped)."""
+        """Return a viewport zoomed by ``delta`` levels on the same centre (clamped)."""
         z = max(min_zoom, min(max_zoom, self.zoom + delta))
         return Viewport(self.center_lat, self.center_lon, z, self.dot_w, self.dot_h)
 
     def resized(self, dot_w: int, dot_h: int) -> Viewport:
-        """Return the same view centred as before but at a new canvas size."""
+        """Return the same viewport, with the same centre, but at a new canvas size."""
         return Viewport(self.center_lat, self.center_lon, self.zoom, dot_w, dot_h)
 
     @classmethod
@@ -352,24 +363,24 @@ class Viewport:
         default_zoom: int = 14,
         fraction: float = 1.0,
     ) -> Viewport:
-        """Build a viewport framing ``points`` — centred on them at the tightest fitting zoom.
+        """Build a viewport that fits ``points``: centred on them, at the highest zoom that fits.
 
         Args:
-            points: Latitude/longitude pairs to frame (may be empty).
-            dot_w: Canvas width in dots.
-            dot_h: Canvas height in dots.
-            pad: Fraction of the canvas kept as margin around the points.
-            min_zoom: Lowest zoom to consider.
-            max_zoom: Highest zoom to consider.
-            default_zoom: Zoom used when the points don't constrain it (0 or 1 point).
-            fraction: Fraction of the points to actually frame, ``0 < fraction <= 1``. Below
-                ``1`` only the densest core — the points nearest the median centre — is framed,
-                so a handful of distant outliers can't force the whole view to zoom out. The
-                remaining nodes simply fall off the edges.
+            points: The latitude and longitude pairs to fit (can be empty).
+            dot_w: The canvas width in dots.
+            dot_h: The canvas height in dots.
+            pad: The fraction of the canvas that is kept as a margin around the points.
+            min_zoom: The lowest zoom to consider.
+            max_zoom: The highest zoom to consider.
+            default_zoom: The zoom to use when the points do not limit it (0 or 1 point).
+            fraction: The fraction of the points to fit, ``0 < fraction <= 1``. Below ``1``,
+                the viewport fits only the densest core (the points nearest to the median
+                centre). Thus a few distant outliers cannot force the full viewport to zoom
+                out. The other nodes go off the edges.
 
         Returns:
-            A :class:`Viewport` centred on the framed points at a zoom where they fit with
-            margin. Empty input centres on the world at ``min_zoom``.
+            A :class:`Viewport` centred on the fitted points, at a zoom where they fit with
+            a margin. An empty input centres on the world at ``min_zoom``.
         """
         if not points:
             return cls(0.0, 0.0, min_zoom, dot_w, dot_h)

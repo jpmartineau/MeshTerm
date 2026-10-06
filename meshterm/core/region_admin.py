@@ -1,20 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
-"""A repeater's region table as its CLI shows it: the parser, the commands, the edits.
+"""The region table of a repeater as its CLI shows it: the parser, the commands, the edits.
 
-A MeshCore repeater keeps a small table of regions (at most 32) in a tree under the
-wildcard ``*``, and relays a *scoped* flood only when the flood's region is one it lists as
-flood-allowed (see :mod:`~meshterm.core.regions` for the maths that ties a flood to its
-region). The tree is **organisational only**: a repeater relays exactly the regions it
-lists as allowed, so allowing ``lakeside`` says nothing about ``lakeside-north`` beneath it.
-The wildcard's own flag is the unscoped case — whether it relays plain floods at all.
+A MeshCore repeater keeps a small table of regions (a maximum of 32) in a tree below the
+wildcard ``*``. It relays a scoped flood only when the region of the flood is a region that
+it lists as flood-allowed (refer to :mod:`~meshterm.core.regions` for the maths that
+connects a flood to its region). The tree is only for organization: a repeater relays only
+the regions that it lists as allowed. Thus, when ``lakeside`` is allowed, this tells
+nothing about ``lakeside-north`` below it. The flag of the wildcard itself is the unscoped
+case: it tells whether the repeater relays plain floods.
 
-The admin reads and edits that table over the remote CLI (firmware ``CommonCLI::
-handleRegionCmd``, ``RegionMap``), and this module is everything about it that is not a
-screen:
+The admin reads and edits this table through the remote CLI (firmware
+``CommonCLI::handleRegionCmd``, ``RegionMap``). This module holds all the parts of this
+work that are not a screen:
 
-* **The dump** (:func:`parse_region_dump`). ``region`` answers with the tree, one region per
-  line, each line indented one space per level below the wildcard, the name followed by
-  ``^`` on the home region and `` F`` where floods are allowed::
+* **The dump** (:func:`parse_region_dump`). The ``region`` command replies with the tree,
+  with one region on each line. Each line has an indent of one space for each level below
+  the wildcard. After the name, ``^`` marks the home region, and `` F`` marks a region
+  where floods are allowed::
 
       *^ F
        lakeside F
@@ -22,32 +24,36 @@ screen:
         lakeside-south
        harbour F
 
-* **The cut.** Every CLI reply is written into a 160-byte buffer (``exportTo(reply, 160)``),
-  and the dump simply stops where the buffer ends — mid-line, mid-name, with nothing to say
-  it did. A table of 32 regions with real names does not fit, so a dump near the cap is read
-  as *possibly cut* (:data:`REPLY_CAP_BYTES`, :func:`parse_region_dump`), its unfinished last
-  line is dropped rather than shown as a region with half a name, and the reader is told.
-  The flat lists (``region list allowed`` / ``region list denied``) are how the rest is
-  recovered (:func:`parse_name_list`, :func:`RegionTable.with_lists`) — they carry no parent,
-  so those regions are shown *beyond the cut*, placed nowhere. The lists have a cap of their
-  own and skip a name that would not fit rather than cutting it, so a list close enough to
-  the cap to have skipped one is flagged too (:func:`list_may_be_incomplete`). Nothing here
-  ever claims to hold the whole table when it cannot know.
+* **The cut.** The firmware writes each CLI reply into a 160-byte buffer
+  (``exportTo(reply, 160)``). The dump stops where the buffer ends: in the middle of a line
+  or of a name, and nothing tells that it stopped. A table of 32 regions with real names
+  does not fit. Thus MeshTerm reads a dump near the cap as possibly cut
+  (:data:`REPLY_CAP_BYTES`, :func:`parse_region_dump`). It removes the incomplete last
+  line, and does not show it as a region with half a name. Then it tells the user. The
+  flat lists (``region list allowed`` / ``region list denied``) let MeshTerm get the
+  remaining regions (:func:`parse_name_list`, :func:`RegionTable.with_lists`). These lists
+  give no parent, so MeshTerm shows these regions after the cut, with no position in the
+  tree. The lists also have a cap. A list skips a name that does not fit, and does not cut
+  it. Thus MeshTerm also flags a list that is so near the cap that it possibly skipped a
+  name (:func:`list_may_be_incomplete`). No part of this module claims to hold the full
+  table when it cannot know.
 
-* **The commands** (:func:`allow_command` and siblings). Every edit is one remote command,
-  and each is spelled here exactly once. ``allowf``/``denyf``/``home`` match a name by
-  *prefix* on the firmware, preferring an exact match — MeshTerm only ever sends names the
-  repeater itself listed, so the exact match always wins.
+* **The commands** (:func:`allow_command` and the related functions). Each edit is one
+  remote command, and this module spells each command only once. On the firmware,
+  ``allowf``/``denyf``/``home`` find a name by its prefix, and an exact match has priority.
+  MeshTerm sends only names that the repeater itself listed. Thus the exact match always
+  wins.
 
-* **The edits** (:meth:`RegionTable.after`). What a command the repeater accepted does to the
-  table, so the editor redraws from the reply rather than spending another round trip on a
-  re-read. ``region put`` of a name that already exists *moves* it on the firmware, which is
-  why the editor refuses a name it can see is taken.
+* **The edits** (:meth:`RegionTable.after`). This part applies the effect of a command that
+  the repeater accepted to the table. Thus the editor draws the table again from the reply,
+  and does not use one more round trip to read the table again. On the firmware,
+  ``region put`` with a name that exists already moves that region. For this reason, the
+  editor refuses a name that it can see is in use.
 
-* **Persistence.** Every edit lives in the repeater's RAM until ``region save``; a reboot
-  undoes whatever was not saved. The one exception is ``region default`` (firmware 1.15+),
-  which saves the whole table itself — its reply (``default scope is now …``) is how an edit
-  says it took the unsaved ones with it (:func:`saves_table`).
+* **The save.** Each edit stays in the RAM of the repeater until ``region save``. A reboot
+  cancels each edit that was not saved. The only exception is ``region default`` (firmware
+  1.15+), which saves the full table itself. Its reply (``default scope is now …``) shows
+  that the command also saved the unsaved edits (:func:`saves_table`).
 """
 
 from __future__ import annotations
@@ -57,30 +63,32 @@ from dataclasses import dataclass, replace
 
 from .regions import MAX_NAME_BYTES, WILDCARD, RegionNameError, validate
 
-#: The firmware's CLI reply buffer, in bytes. ``BufStream`` stops one short of it (the NUL),
-#: so a dump that ran out of room arrives 159 bytes long.
+#: The size of the CLI reply buffer of the firmware, in bytes. ``BufStream`` stops one
+#: byte before the end (for the NUL). Thus a dump that has no more space arrives with a
+#: length of 159 bytes.
 REPLY_CAP_BYTES = 160
 
-#: How close to the cap a dump must come to be read as possibly cut. A cut can land inside
-#: a multi-byte UTF-8 name, which the decode on the way here may shorten by a few bytes, and
-#: the transport may strip a trailing newline — so the test leaves room for both rather
-#: than asking for exactly 159.
+#: How near the cap a dump must be for MeshTerm to read it as possibly cut. A cut can
+#: occur in a multi-byte UTF-8 name, and the decode before the dump gets here can make it
+#: some bytes shorter. Also, the transport can remove a trailing newline. Thus the test has
+#: a margin for these two effects, and does not ask for exactly 159.
 _CUT_SLACK = 4
 
 #: The command that dumps the tree.
 DUMP_COMMAND = "region"
 #: The command that asks which region is the default scope (firmware 1.15+).
 DEFAULT_QUERY = "region default"
-#: The two flat lists — every flood-allowed and every flood-denied name, ``*`` included.
+#: The two flat lists: all the flood-allowed names and all the flood-denied names, ``*``
+#: included.
 LIST_ALLOWED = "region list allowed"
 LIST_DENIED = "region list denied"
-#: The command that writes the table to flash. Nothing else survives a reboot.
+#: The command that writes the table to flash. No other data stays after a reboot.
 SAVE_COMMAND = "region save"
 
-#: The token ``region default`` takes to clear the default scope.
+#: The token that ``region default`` takes to clear the default scope.
 NULL_DEFAULT = "<null>"
 
-#: What an empty flat list reads as on the repeater.
+#: The text that the repeater shows for an empty flat list.
 _EMPTY_LIST = "-none-"
 
 
@@ -89,18 +97,21 @@ _EMPTY_LIST = "-none-"
 
 @dataclass(frozen=True, slots=True)
 class RegionRow:
-    """One region in a repeater's table.
+    """One region in the table of a repeater.
 
     Attributes:
         name: The bare region name (``*`` for the wildcard).
-        parent: The parent's name — ``*`` for a top-level region, ``None`` for the wildcard
-            itself and for a region recovered from a flat list, whose place is unknown.
-        depth: Levels below the wildcard (0 for the wildcard, 1 for a top-level region).
-        flood: Whether the repeater relays floods scoped to it (``F``) — for the wildcard,
-            whether it relays unscoped floods.
-        home: Whether it is the repeater's home region (``^``).
-        placed: ``False`` for a region known only from a flat list: it is in the table,
-            but the dump was cut before it, so its parent and depth are not known.
+        parent: The name of the parent. It is ``*`` for a top-level region. It is ``None``
+            for the wildcard itself, and for a region that MeshTerm got from a flat list,
+            whose position is not known.
+        depth: The number of levels below the wildcard (0 for the wildcard, 1 for a
+            top-level region).
+        flood: Whether the repeater relays floods scoped to this region (``F``). For the
+            wildcard, whether it relays unscoped floods.
+        home: Whether it is the home region of the repeater (``^``).
+        placed: ``False`` for a region that MeshTerm knows only from a flat list. The
+            region is in the table, but the dump was cut before it. Thus its parent and
+            depth are not known.
     """
 
     name: str
@@ -112,27 +123,31 @@ class RegionRow:
 
     @property
     def wildcard(self) -> bool:
-        """Whether this row is the wildcard — the unscoped case, not a region."""
+        """Whether this row is the wildcard: the unscoped case, not a region."""
         return self.name == WILDCARD
 
 
 @dataclass(frozen=True, slots=True)
 class RegionTable:
-    """What MeshTerm knows of one repeater's region table.
+    """What MeshTerm knows about the region table of one repeater.
 
     Attributes:
-        rows: The wildcard first (when the dump reached it), then every region in dump order
-            (depth-first, as the firmware prints the tree), then any recovered from the flat
-            lists after a cut (``placed=False``).
-        cut: Whether the dump may have been cut at the reply cap — rows after ``cut_after``
-            may exist that the tree does not show.
-        cut_after: The last region the dump showed whole (``None`` when it showed none).
-        lists_read: Whether the flat lists were read to recover what the cut hid.
-        lists_partial: Whether either flat list came close enough to its own cap that a
-            name may have been skipped — the recovered set may still be short.
-        default: The default-scope region, ``None`` where there is none, and absent
-            knowledge is :attr:`default_known` ``False`` (older firmware has no such query).
-        default_known: Whether ``default`` was actually read.
+        rows: The wildcard first (when the dump got to it). Then each region in dump order
+            (depth-first, as the firmware prints the tree). Then the regions that MeshTerm
+            got from the flat lists after a cut (``placed=False``).
+        cut: Whether the dump was possibly cut at the reply cap. If so, there can be rows
+            after ``cut_after`` that the tree does not show.
+        cut_after: The last region that the dump showed complete (``None`` when it showed
+            no region).
+        lists_read: Whether MeshTerm read the flat lists to get the regions that the cut
+            hid.
+        lists_partial: Whether one of the flat lists came so near its own cap that it
+            possibly skipped a name. If so, the set that MeshTerm got can still be
+            incomplete.
+        default: The default-scope region, or ``None`` if there is none. If MeshTerm does
+            not know the default, :attr:`default_known` is ``False`` (older firmware does
+            not have this query).
+        default_known: Whether MeshTerm read ``default`` from the repeater.
     """
 
     rows: tuple[RegionRow, ...] = ()
@@ -143,65 +158,67 @@ class RegionTable:
     default: str | None = None
     default_known: bool = False
 
-    # -- reading it ---------------------------------------------------------------
+    # -- read the table -----------------------------------------------------------
 
     def get(self, name: str) -> RegionRow | None:
-        """The row for ``name``, or ``None`` when the table (as known) has no such region."""
+        """The row for ``name``, or ``None`` when the known table has no such region."""
         return next((row for row in self.rows if row.name == name), None)
 
     @property
     def wildcard(self) -> RegionRow | None:
-        """The wildcard's row, or ``None`` when the dump never reached it."""
+        """The row of the wildcard, or ``None`` when the dump did not get to it."""
         return self.get(WILDCARD)
 
     def regions(self) -> list[RegionRow]:
-        """Every region row, the wildcard left out."""
+        """All the region rows, without the wildcard."""
         return [row for row in self.rows if not row.wildcard]
 
     def children(self, name: str) -> list[RegionRow]:
-        """The regions directly under ``name`` (placed rows only — nothing else has a parent)."""
+        """The regions directly below ``name`` (only placed rows: no other row has a parent)."""
         return [row for row in self.rows if row.parent == name and not row.wildcard]
 
     @property
     def home(self) -> str | None:
-        """The home region's name (``*`` when none was set), or ``None`` when not seen."""
+        """The name of the home region (``*`` when none was set), or ``None`` when not shown."""
         return next((row.name for row in self.rows if row.home), None)
 
     @property
     def complete(self) -> bool:
-        """Whether every region the repeater holds is (to the best of our reading) here.
+        """Whether each region that the repeater holds is here (as far as MeshTerm can tell).
 
-        A clean dump is complete. A cut one is complete again once both flat lists were read
-        and neither came near its own cap — the tree is still partly unplaced, but no name
-        is missing.
+        A clean dump is complete. A cut dump is complete again after MeshTerm read the two
+        flat lists, if neither list came near its own cap. Then some parts of the tree are
+        still not placed, but no name is missing.
         """
         return not self.cut or (self.lists_read and not self.lists_partial)
 
     def carried(self) -> list[str]:
-        """What the repeater relays floods for, as the regions request would list it.
+        """The scopes for which the repeater relays floods, as the regions request lists them.
 
-        ``*`` first when it relays unscoped floods, then every flood-allowed region — the
-        exact shape :meth:`~meshterm.core.region_store.RegionStore.learn_carried` takes.
+        ``*`` comes first when the repeater relays unscoped floods. Then each flood-allowed
+        region follows. This is the exact shape that
+        :meth:`~meshterm.core.region_store.RegionStore.learn_carried` takes.
         """
         wild = self.wildcard
         head = [WILDCARD] if wild is not None and wild.flood else []
         return head + [row.name for row in self.regions() if row.flood]
 
-    # -- editing it ---------------------------------------------------------------
+    # -- edit the table -----------------------------------------------------------
 
     def after(self, command: str, reply: str) -> RegionTable:
-        """The table as it stands once the repeater accepted ``command``.
+        """The table after the repeater accepted ``command``.
 
-        Only the verbs this module spells are understood; anything else (or a refused
-        reply — see :func:`region_refused`) returns the table unchanged, so a caller may
-        fold every accepted reply through here without first asking what it was.
+        The method understands only the verbs that this module spells. For all other
+        commands, and for a refused reply (refer to :func:`region_refused`), it returns the
+        table with no change. Thus a caller can send each accepted reply through this
+        method, and does not have to find first what the reply was.
 
         Args:
-            command: The command sent, as built by this module.
-            reply: The repeater's reply to it.
+            command: The command that was sent, as this module built it.
+            reply: The reply of the repeater to the command.
 
         Returns:
-            The updated table (a new object; tables are immutable).
+            The updated table (a new object, because tables are immutable).
         """
         if region_refused(reply):
             return self
@@ -219,32 +236,32 @@ class RegionTable:
         if verb == "default" and args:
             if args[0] == NULL_DEFAULT:
                 return replace(self, default=None, default_known=True)
-            # The firmware forces flood on for the default region, and creates it at the top
-            # level if it did not exist.
+            # The firmware sets flood on for the default region. If the region does not
+            # exist, the firmware makes it at the top level.
             table = self if self.get(args[0]) else self._put(args[0], WILDCARD, flood=True)
             return replace(table._with(args[0], flood=True), default=args[0], default_known=True)
         if verb == "put" and args:
             parent = args[1] if len(args) > 1 else WILDCARD
-            # 1.15+ answers "OK - (flood allowed)"; older firmware created it denied.
+            # Firmware 1.15+ replies "OK - (flood allowed)". Older firmware made it denied.
             return self._put(args[0], parent, flood="flood allowed" in reply.lower())
         if verb == "remove" and args:
             if self.children(args[0]):
-                return self  # the firmware refuses this; a reply claiming otherwise is noise
+                return self  # the firmware refuses this, thus a reply that says otherwise is wrong
             rows = tuple(row for row in self.rows if row.name != args[0])
             default = None if self.default == args[0] else self.default
             return replace(self, rows=rows, default=default)
         return self
 
     def _with(self, name: str, **changes: object) -> RegionTable:
-        """The table with one row's fields changed (unchanged when the row is not here)."""
+        """The table with changed fields in one row (no change when the row is not here)."""
         rows = tuple(replace(row, **changes) if row.name == name else row for row in self.rows)
         return replace(self, rows=rows)
 
     def _put(self, name: str, parent: str, *, flood: bool) -> RegionTable:
         """The table with a new region placed as the last child of ``parent``.
 
-        Dump order is depth-first, so the new row goes after the parent's last descendant —
-        exactly where the next ``region`` dump would print it.
+        The dump order is depth-first. Thus the new row goes after the last descendant of
+        the parent. This is exactly where the next ``region`` dump will print it.
         """
         if self.get(name) is not None:
             return self
@@ -258,27 +275,30 @@ class RegionTable:
             while at < len(rows) and rows[at].placed and rows[at].depth > above.depth:
                 at += 1
         else:
-            # An unplaced parent has no subtree to append to: keep placed rows together and
-            # put the new one ahead of the unplaced tail.
+            # A parent that is not placed has no subtree for the new row. Keep the placed
+            # rows together, and put the new row before the rows that are not placed.
             at = next((i for i, r in enumerate(rows) if not r.placed), len(rows))
         rows.insert(at, row)
         return replace(self, rows=tuple(rows))
 
     def with_lists(self, allowed: str | None, denied: str | None) -> RegionTable:
-        """Fold the two flat lists into a cut table, recovering the regions the cut hid.
+        """Add the two flat lists to a cut table, to get back the regions that the cut hid.
 
-        A name in a list that the tree did not show joins it unplaced, flooded as its list
-        says. Names the tree already has keep their tree row — the tree has the parent the
-        list lacks — and the wildcard's flag is taken from the lists when the tree never
-        reached it (it always does, being the first line, unless the reply was empty).
+        If the tree did not show a name that is in a list, the name goes into the table as
+        not placed, with the flood flag that its list gives. A name that the tree has
+        already keeps its tree row, because the tree has the parent that the list does not
+        have. The flag of the wildcard comes from the lists when the tree did not get to the
+        wildcard. (The tree always gets to it, because it is the first line, unless the
+        reply was empty.)
 
         Args:
-            allowed: The reply to :data:`LIST_ALLOWED` (``None`` when it never came).
-            denied: The reply to :data:`LIST_DENIED` (``None`` when it never came).
+            allowed: The reply to :data:`LIST_ALLOWED` (``None`` when it did not come).
+            denied: The reply to :data:`LIST_DENIED` (``None`` when it did not come).
 
         Returns:
-            The table with the recovered rows appended; ``lists_read`` is set only when both
-            lists answered, and ``lists_partial`` when either may have skipped a name.
+            The table, with the rows that MeshTerm got back added at the end.
+            ``lists_read`` is set only when the two lists replied. ``lists_partial`` is set
+            when one of the lists possibly skipped a name.
         """
         rows = list(self.rows)
         partial = False
@@ -306,8 +326,9 @@ class RegionTable:
     def with_default(self, reply: str | None) -> RegionTable:
         """The table with the default scope read from a :data:`DEFAULT_QUERY` reply.
 
-        Unchanged (``default_known`` left ``False``) when there was no reply or the firmware
-        does not know the query — pre-1.15 answers it with its catch-all ``Err - ??``.
+        The table does not change (and ``default_known`` stays ``False``) when there was no
+        reply, or when the firmware does not know the query. Firmware before 1.15 replies to
+        it with its general error, ``Err - ??``.
         """
         parsed = parse_default_reply(reply)
         if parsed is None:
@@ -315,31 +336,32 @@ class RegionTable:
         return replace(self, default=parsed or None, default_known=True)
 
 
-# -- parsing ---------------------------------------------------------------------------
+# -- the parser ------------------------------------------------------------------------
 
 
 def dump_may_be_cut(text: str) -> bool:
-    """Whether a reply came close enough to the 160-byte cap to have been cut short."""
+    """Whether a reply came so near the 160-byte cap that it was possibly cut."""
     return len(text.encode("utf-8")) >= REPLY_CAP_BYTES - 1 - _CUT_SLACK
 
 
 def parse_region_dump(text: str | None) -> RegionTable:
-    """Parse a ``region`` dump into a table, dropping a line the reply cap cut in half.
+    """Parse a ``region`` dump into a table, and remove a line that the reply cap cut in half.
 
-    Each non-blank line is one region: its leading spaces are its depth, then the name, an
-    optional ``^`` (home), and an optional ``F`` (flood allowed) after a space. A line's
-    parent is the nearest line above it one level up; depth 0 is the wildcard. A line that
-    does not fit the grammar, or whose indentation skips a level, is not guessed at — it
-    ends the tree there and the table is marked cut, since a dump that stops making sense
-    has stopped being the dump.
+    Each line that is not blank is one region. Its leading spaces give its depth. Then come
+    the name, an optional ``^`` (home), and an optional ``F`` (flood allowed) after a space.
+    The parent of a line is the nearest line above it at one level up. Depth 0 is the
+    wildcard. If a line does not agree with the grammar, or if its indent skips a level,
+    the parser does not guess. The tree ends at that line, and the table is marked as cut,
+    because a dump that does not make sense from that point is no longer the dump.
 
     Args:
-        text: The reply text (``None`` or empty reads as an empty, uncut table).
+        text: The reply text (``None`` or an empty text gives an empty table that is not
+            cut).
 
     Returns:
-        The table. When the reply came within reach of the cap its last line is dropped
-        unless the reply ended on a newline (so the line is known whole), ``cut`` is set,
-        and ``cut_after`` names the last region shown.
+        The table. When the reply came near the cap, the parser removes its last line,
+        unless the reply ended with a newline (then the line is known to be complete).
+        Also, ``cut`` is set, and ``cut_after`` names the last region shown.
     """
     if not text:
         return RegionTable()
@@ -347,7 +369,7 @@ def parse_region_dump(text: str | None) -> RegionTable:
     cut = dump_may_be_cut(raw)
     lines = raw.split("\n")
     if cut and not raw.endswith("\n") and lines:
-        lines = lines[:-1]  # the line the buffer ran out inside — a name may be half a name
+        lines = lines[:-1]  # the buffer ended in this line, so a name can be half a name
     rows: list[RegionRow] = []
     stack: list[str] = []  # the open ancestor at each depth
     for line in lines:
@@ -366,7 +388,7 @@ def parse_region_dump(text: str | None) -> RegionTable:
 
 
 def _parse_line(body: str, depth: int, stack: list[str]) -> RegionRow | None:
-    """One dump line, or ``None`` when it breaks the grammar (see :func:`parse_region_dump`)."""
+    """One dump line, or ``None`` if it breaks the grammar (refer to :func:`parse_region_dump`)."""
     tokens = body.split()
     if not tokens or len(tokens) > 2 or (len(tokens) == 2 and tokens[1] != "F"):
         return None
@@ -384,7 +406,7 @@ def _parse_line(body: str, depth: int, stack: list[str]) -> RegionRow | None:
 
 
 def parse_name_list(text: str | None) -> list[str]:
-    """The names in a ``region list allowed|denied`` reply (``-none-`` reads as empty)."""
+    """The names in a ``region list allowed|denied`` reply (``-none-`` gives an empty list)."""
     if not text or text.strip() == _EMPTY_LIST:
         return []
     names: list[str] = []
@@ -396,23 +418,23 @@ def parse_name_list(text: str | None) -> list[str]:
 
 
 def list_may_be_incomplete(text: str) -> bool:
-    """Whether a flat list came near enough its cap that a name may have been skipped.
+    """Whether a flat list came so near its cap that it possibly skipped a name.
 
-    The firmware appends a name only while ``length + len(name) + 2 < 160`` and skips one
-    that would not fit — then carries on with the next, so a later short name can still get
-    in. A skip therefore needs the list to have reached at least ``158 - len(name)`` bytes
-    for some name of at most :data:`~meshterm.core.regions.MAX_NAME_BYTES`, and a list
-    shorter than that skipped nothing.
+    The firmware adds a name only while ``length + len(name) + 2 < 160``, and skips a name
+    that does not fit. Then it continues with the next name, so a short name that comes
+    later can still go in. Thus a skip occurs only when the list has a minimum length of
+    ``158 - len(name)`` bytes, for a name with a maximum length of
+    :data:`~meshterm.core.regions.MAX_NAME_BYTES`. A list shorter than that skipped no name.
     """
     return len(text.encode("utf-8")) >= REPLY_CAP_BYTES - 2 - MAX_NAME_BYTES
 
 
 def parse_default_reply(text: str | None) -> str | None:
-    """The default scope named by a ``region default`` reply.
+    """The default scope that a ``region default`` reply names.
 
     Returns:
-        The region name, ``""`` for none (``<null>``), or ``None`` when the reply is
-        missing, refused, or not a default-scope answer at all.
+        The region name, ``""`` for no scope (``<null>``), or ``None`` when the reply is
+        missing, refused, or not a reply about the default scope.
     """
     if not text or region_refused(text):
         return None
@@ -427,12 +449,12 @@ def parse_default_reply(text: str | None) -> str | None:
 
 
 def region_refused(reply: str | None) -> bool:
-    """Whether a reply to a region command is the repeater refusing it.
+    """Whether a reply to a region command shows that the repeater refused it.
 
-    The region verbs answer ``Err - …`` (``unknown region``, ``not empty``, ``unable to
-    put``, ``save failed``, and ``??`` for a verb the firmware lacks), which the settings
-    catalog's own error test does not recognise. Older firmware with no ``region`` command
-    at all answers its generic unknown-command text.
+    The region verbs reply ``Err - …`` (``unknown region``, ``not empty``,
+    ``unable to put``, ``save failed``, and ``??`` for a verb that the firmware does not
+    have). The error test of the settings catalog does not recognize these replies. Older
+    firmware that has no ``region`` command replies with its general unknown-command text.
     """
     if reply is None:
         return True
@@ -441,10 +463,11 @@ def region_refused(reply: str | None) -> bool:
 
 
 def saves_table(command: str, reply: str | None) -> bool:
-    """Whether an accepted command wrote the whole table to flash on its own.
+    """Whether an accepted command wrote the full table to flash by itself.
 
-    ``region save`` does, by definition; ``region default`` does too on firmware 1.15+,
-    which is the firmware that answers it with ``default scope is now …``.
+    ``region save`` does this, by definition. ``region default`` also does this on
+    firmware 1.15+, which is the firmware that replies to it with
+    ``default scope is now …``.
     """
     if reply is None or region_refused(reply):
         return False
@@ -462,52 +485,53 @@ def allow_command(name: str) -> str:
 
 
 def deny_command(name: str) -> str:
-    """Stop relaying floods scoped to ``name`` (``*``: stop relaying unscoped floods)."""
+    """Stop the relay of floods scoped to ``name`` (``*``: stop the relay of unscoped floods)."""
     return f"region denyf {name}"
 
 
 def home_command(name: str) -> str:
-    """Make ``name`` the repeater's home region (``*`` clears it back to none)."""
+    """Make ``name`` the home region of the repeater (``*`` clears it, back to none)."""
     return f"region home {name}"
 
 
 def default_command(name: str | None) -> str:
-    """Make ``name`` the default scope for the repeater's own floods, or clear it (``None``)."""
+    """Make ``name`` the default scope for the floods of the repeater, or clear it (``None``)."""
     return f"region default {name or NULL_DEFAULT}"
 
 
 def put_command(name: str, parent: str = WILDCARD) -> str:
-    """Add ``name`` under ``parent`` (top level for ``*``). New regions are flood-allowed."""
+    """Add ``name`` below ``parent`` (at the top level for ``*``). New regions are flood-allowed."""
     return f"region put {name}" if parent == WILDCARD else f"region put {name} {parent}"
 
 
 def remove_command(name: str) -> str:
-    """Remove ``name`` — refused by the firmware while it still has sub-regions."""
+    """Remove ``name``. The firmware refuses this while the region still has sub-regions."""
     return f"region remove {name}"
 
 
 def _is_name_char(ch: str) -> bool:
-    """Whether the firmware's ``RegionMap::is_name_char`` accepts ``ch`` in a region name."""
+    """Whether ``RegionMap::is_name_char`` in the firmware accepts ``ch`` in a region name."""
     return ch in "-$#" or ch.isdigit() or ord(ch) >= ord("A")
 
 
 def validate_new_name(name: str, taken: Iterable[str] = ()) -> str:
-    """Check a name for ``region put``, the firmware's own rules and one of MeshTerm's.
+    """Check a name for ``region put``: the rules of the firmware, and one rule of MeshTerm.
 
-    On top of :func:`~meshterm.core.regions.validate` (length, no wildcard, no private
-    ``$`` names), the firmware refuses a name with any punctuation but ``-`` — its
-    ``is_name_char`` — and ``region put`` of a name that exists *moves* that region rather
-    than adding one, so a name already in the table is refused here instead.
+    In addition to :func:`~meshterm.core.regions.validate` (length, no wildcard, no
+    private ``$`` names), the firmware refuses a name with punctuation other than ``-``
+    (its ``is_name_char``). Also, ``region put`` with a name that exists moves that region,
+    and does not add a region. Thus this function refuses a name that is already in the
+    table.
 
     Args:
-        name: The name as typed.
-        taken: Names already in the table.
+        name: The name as the user typed it.
+        taken: The names that are already in the table.
 
     Returns:
         The bare, valid name.
 
     Raises:
-        RegionNameError: With the reason, in words a reader can act on.
+        RegionNameError: With the reason, in words that tell the user what to do.
     """
     bare = validate(name)
     bad = sorted({ch for ch in bare if not _is_name_char(ch)})

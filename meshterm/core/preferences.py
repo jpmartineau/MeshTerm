@@ -1,41 +1,44 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Declarative registry of MeshTerm's own preferences, and the TOML file they live in.
+"""Declarative registry of MeshTerm's own preferences, and the TOML file that keeps them.
 
-The distinction this module draws is between the three kinds of "setting" the app already
-had and never named apart:
+This module separates three types of "setting". The app had all three before, but it did
+not give them different names:
 
-* :mod:`meshterm.core.device_config` describes the **radio's** settings — they live in
-  the companion's firmware, are read live each session, and are edited through the Device
-  config screen.
+* :mod:`meshterm.core.device_config` describes the settings of the **radio**. They are
+  in the firmware of the companion. MeshTerm reads them live in each session, and the
+  user edits them on the Device config screen.
 * :mod:`meshterm.core.config` (``config.toml``) describes **where things are and which
-  device to talk to** — the config directory, the database, the named device profiles.
-  It is machine setup, edited in a text editor, and has no place in a full-screen page.
-* This module describes **how MeshTerm itself behaves** — whether it opens the link at
-  launch, how long it waits between transmissions, how much history it keeps, how a map
-  frames itself. Those values were scattered through the code as module constants and a
-  handful of undocumented ``config.toml`` keys with no screen behind them; they are
-  gathered here, given one place to be changed (the Preferences page), and one file to be
-  remembered in.
+  device to talk to**: the config directory, the database, and the named device profiles.
+  It is machine setup. The user edits it in a text editor, and it has no place on a
+  full-screen page.
+* This module describes **how MeshTerm itself behaves**: whether it opens the link at
+  the start, how long it waits between transmissions, how much history it keeps, and how
+  the map chooses what to show. These values were once in many places in the code, as
+  module constants and as a small number of ``config.toml`` keys with no documentation
+  and no screen. Now they are in this module, with one place to change them (the
+  Preferences page) and one file to keep them in.
 
-Each :class:`PrefSpec` states a preference's group, type, bounds, and — the point of the
-whole exercise — its **default**. A preference is only written to disk once it is changed
-away from that default, so the file is a short list of your disagreements with the
-built-in behaviour rather than a snapshot that silently pins every value forever. Delete a
-key (or use *Reset to defaults*) and the code's default takes over again.
+Each :class:`PrefSpec` gives the group, the type, the bounds, and the **default** of a
+preference. The default is the main purpose of this design. MeshTerm writes a preference
+to disk only after it is changed from that default. Thus the file is a short list of the
+places where you do not agree with the built-in behaviour. It is not a snapshot that pins
+each value forever with no notice. If you delete a key (or use *Reset to defaults*), the
+default of the code applies again.
 
-The file is ``<config_dir>/preferences.toml``, written flat, grouped and commented so it
-reads the way the page does — TOML, like ``config.toml`` and the device-config backups,
-so every file a person edits by hand speaks one syntax. Reads are tolerant: an unknown
-key, a malformed value, or a line TOML refuses costs that one override, never the rest of
-the file and never the session.
+The file is ``<config_dir>/preferences.toml``. MeshTerm writes it flat, in groups, with
+comments, so that it reads the same as the page. It is TOML, the same as ``config.toml``
+and the device-config backups. Thus each file that a person edits by hand uses one
+syntax. Reads are tolerant: an unknown key, a malformed value, or a line that TOML
+refuses costs only that one override. It never costs the rest of the file, and never
+the session.
 
-Two access paths, deliberately:
+Two access paths, on purpose:
 
-* :attr:`~meshterm.context.AppContext.preferences` is the explicit one, and what every
-  tool, service, and screen should use.
-* :func:`current` is for the render and session layer, which has no context to reach
-  through — the same reason :func:`meshterm.platforms.get_platform` exists. The context
-  installs itself there as it is built.
+* :attr:`~meshterm.context.AppContext.preferences` is the explicit path. Each tool,
+  service, and screen must use it.
+* :func:`current` is for the render and session layer, which has no context to go
+  through. This is the same reason why :func:`meshterm.platforms.get_platform` exists.
+  The context installs itself there when it is built.
 """
 
 from __future__ import annotations
@@ -58,11 +61,11 @@ if sys.version_info >= (3, 11):
 else:  # pragma: no cover - exercised only on 3.10
     import tomli as tomllib
 
-#: Display groups, in the order the page and the file present them. The order is the
-#: order a session happens in — what MeshTerm does to the radio as the link opens, what
-#: it puts on the air, how loud, what it watches for, how it draws the world, what it
-#: keeps, and how it paints. Nothing sorts alphabetically: a reader looking for "how long
-#: before I give up on a message" should not have to know it starts with a D.
+#: The groups that the page and the file show, in their order. This order is the order of
+#: a session: what MeshTerm does to the radio when the link opens, what it transmits and
+#: at which power, what it watches for, how it draws the world, what it keeps, and how it
+#: paints. Nothing is in alphabetical order. A user who looks for "how long before I give
+#: up on a message" must not have to know that it starts with a D.
 GROUPS: tuple[str, ...] = (
     "Device",
     "Sending",
@@ -76,10 +79,10 @@ GROUPS: tuple[str, ...] = (
 
 
 class PreferenceError(ValueError):
-    """Raised when a preference value cannot be parsed or fails validation.
+    """Raised when MeshTerm cannot parse a preference value, or the value fails validation.
 
-    The message is user-facing — the CLI prints it, and the editor's typed prompt shows
-    it under the input as the reason the value was refused.
+    The message is for the user. The CLI prints it, and the typed prompt of the editor
+    shows it under the input as the reason for the refusal.
     """
 
 
@@ -88,29 +91,31 @@ class PrefSpec:
     """Specification for one preference.
 
     Attributes:
-        key: Canonical key — the attribute name on :class:`Preferences`, and the key in
-            the TOML file.
-        label: Human-friendly name, as the page's SETTING lane shows it.
-        help: One-line description, as the page's DESCRIPTION lane shows it.
+        key: The canonical key: the attribute name on :class:`Preferences`, and the key
+            in the TOML file.
+        label: The name for people, as the SETTING lane of the page shows it.
+        help: A description of one line, as the DESCRIPTION lane of the page shows it.
         group: One of :data:`GROUPS`.
         value_type: ``"str" | "int" | "float" | "bool" | "enum"``.
-        default: The built-in value, used whenever the file names no override.
-        choices: For ``enum``, a mapping of allowed value to label.
-        minimum: Inclusive lower bound for numeric types, if any.
-        maximum: Inclusive upper bound for numeric types, if any.
-        unit: Short suffix appended when the value is formatted (``"s"``, ``"dBm"``,
-            ``"days"``) so a bare number in the VALUE lane still says what it counts.
-        relaunch: Whether the new value only takes hold next launch. Woven into the
-            description rather than shown as its own mark — it is a caveat about one
-            preference, not a status the reader scans a column for.
-        platforms: Which :class:`~meshterm.platforms.Platform` names the preference is
-            *offered* on, or ``None`` (the default) for all of them. A preference about
-            hardware only one flavour has — the PicoCalc's console font — would be a row
-            answering a question the desktop cannot ask, so the page leaves it out there.
-            Only the page: the key stays in the registry on every platform, so a file
-            written on the handheld still parses, keeps its value and saves back out on a
-            desktop rather than being silently dropped by a machine that merely cannot
-            act on it.
+        default: The built-in value. MeshTerm uses it when the file has no override.
+        choices: For ``enum``: a mapping from each permitted value to its label.
+        minimum: The inclusive lower bound for numeric types, if any.
+        maximum: The inclusive upper bound for numeric types, if any.
+        unit: A short suffix that MeshTerm adds when it formats the value (``"s"``,
+            ``"dBm"``, ``"days"``). Thus a bare number in the VALUE lane still tells
+            what it counts.
+        relaunch: Whether the new value applies only at the next start. It is part of
+            the description, instead of a mark of its own, because it is a caveat about
+            one preference. It is not a status that the user looks for in a column.
+        platforms: The :class:`~meshterm.platforms.Platform` names on which the page
+            offers the preference, or ``None`` (the default) for all of them. Some
+            preferences are about hardware that only one flavour has (the console font
+            of the PicoCalc). On the desktop, such a row answers a question that the
+            desktop cannot ask, so the page does not show it there. This applies only to
+            the page. The key stays in the registry on each platform. Thus a file written
+            on the handheld still parses on a desktop, and the desktop keeps its value and
+            writes it back to the file. A machine that cannot act on the key does not
+            silently remove it.
     """
 
     key: str
@@ -128,7 +133,7 @@ class PrefSpec:
 
     @property
     def description(self) -> str:
-        """The DESCRIPTION lane's text: the help, plus the relaunch caveat where it applies."""
+        """The text of the DESCRIPTION lane: the help, and the relaunch caveat if it applies."""
         return f"{self.help} (next launch)" if self.relaunch else self.help
 
     def offered_on(self, platform: str) -> bool:
@@ -138,39 +143,42 @@ class PrefSpec:
             platform: A :attr:`~meshterm.platforms.Platform.name`.
 
         Returns:
-            ``True`` unless :attr:`platforms` names a set this platform is not in.
+            ``True``, unless :attr:`platforms` names a set that does not include this
+            platform.
         """
         return self.platforms is None or platform in self.platforms
 
 
-#: The two languages the plain CLI can print a time in. Named for what the reader sees
-#: rather than for the mechanism: an *age* is how long ago, a *timestamp* is when.
+#: The two forms in which the plain CLI can print a time. Their names tell what the user
+#: sees, not the mechanism: an age is how long ago, and a timestamp is when.
 _CLI_TIME_CHOICES: dict[str, str] = {"relative": "ages", "absolute": "timestamps"}
 
-#: The silence-rule choices, drawn from the Watchtower's own ring so the two never drift.
+#: The choices for the silence rule. They come from the ring of the Watchtower itself, so
+#: that the two lists always agree.
 _SILENCE_CHOICES: dict[int, str] = {
     **{h: f"{h} h" for h in SILENCE_CHOICES_H},
     OFF: "off",
 }
 
-#: How long the air must stay quiet before the weekly flood advert goes out, drawn from the
-#: scheduler's own choices so the two never drift.
+#: How long the air must stay quiet before the weekly flood advert goes out. The values
+#: come from the choices of the scheduler itself, so that the two lists always agree.
 _QUIET_CHOICES: dict[int, str] = {s: f"{s} s" for s in QUIET_CHOICES_S}
 
-#: How the terminal-width reclaim can be asked for: follow the terminal's own size probe, or
-#: overrule it in either direction. The row's description asks a yes/no question ("use the
-#: column ... ?"), so the values answer it in those words rather than naming the mechanism
-#: twice. See :func:`meshterm.ui.tui.session._reclaim_last_column` for which terminals hide
-#: a column, and what reclaiming one that isn't hidden costs.
+#: The ways to ask for the reclaim of the terminal width: follow the size probe of the
+#: terminal, or overrule it in either direction. The description of the row asks a yes/no
+#: question ("use the column ... ?"), so the values answer it in those words. They do not
+#: name the mechanism a second time. Refer to
+#: :func:`meshterm.ui.tui.session._reclaim_last_column` for the terminals that hide a
+#: column, and for the cost when MeshTerm reclaims a column that is not hidden.
 _WIDTH_CHOICES: dict[str, str] = {"auto": "auto", "yes": "yes", "no": "no"}
 
-#: How many colours to send the terminal. ``auto`` is the honest default and the only
-#: value that is not itself a depth: it means "take prompt_toolkit's verdict unless we can
-#: positively establish better", which is the difference between fixing a host and breaking
-#: one. The rest are named for the count a reader can see rather than for the bit depth,
-#: because "24-bit" is a fact about the wire and "16 million" is a fact about the screen.
-#: See :func:`meshterm.ui.tui.session._color_depth` for why auto is not simply "the most
-#: this terminal can do".
+#: How many colours to send to the terminal. ``auto`` is the honest default, and it is the
+#: only value that is not a depth. It means "take prompt_toolkit's verdict unless we can
+#: positively establish better". This rule is the difference between a repaired host and a
+#: broken one. The names of the other values tell the count that the user can see, not the
+#: bit depth, because "24-bit" is a fact about the wire and "16 million" is a fact about
+#: the screen. Refer to :func:`meshterm.ui.tui.session._color_depth` for the reason why
+#: auto is not only "the most this terminal can do".
 _COLOR_DEPTH_CHOICES: dict[str, str] = {
     "auto": "auto",
     "truecolor": "16 million",
@@ -178,26 +186,28 @@ _COLOR_DEPTH_CHOICES: dict[str, str] = {
     "16": "16",
 }
 
-#: What MeshTerm may offer when it lands in a console that cannot draw it. Only ever
-#: consulted on the classic Windows console, the one host with no font fallback of its own.
+#: What MeshTerm can offer when it starts in a console that cannot draw it. MeshTerm reads
+#: this value only on the classic Windows console. That console is the only host with no
+#: font fallback of its own.
 _CONSOLE_SETUP_CHOICES: dict[str, str] = {
     "auto": "Automatic",
     "off": "Leave it alone",
 }
 
-#: The two console fonts ``scripts/picocalc-lyra/calculinux-console-font-6x12.sh`` (and its 6x8
-#: companion) build for the PicoCalc's framebuffer panel. Each is named by its cell and by the
-#: screen that cell buys, because choosing a font here is choosing how much fits — not a bitmap.
-#: Plain ASCII ``x`` and not ``×``: the multiplication sign is not one of the 512 glyphs
-#: the console font carries, so it would draw as a tofu box on the one platform this
-#: preference is offered on. The value maps to a file in
-#: :data:`meshterm.services.consolefont.FONT_FILES`, which is where a filename belongs —
-#: a path on one device is not something a reader picks.
+#: The two console fonts that ``scripts/picocalc-lyra/calculinux-console-font-6x12.sh``
+#: (and the 6x8 script next to it) build for the framebuffer display of the PicoCalc. The
+#: name of each font tells its cell and the screen size that the cell gives. The reason:
+#: here, the choice of a font is a choice of how much text fits, not a choice of a bitmap.
+#: The names use plain ASCII ``x``, not ``×``. The multiplication sign is not one of the
+#: 512 glyphs of the console font. If a name uses it, it draws as a tofu box on the only
+#: platform that offers this preference. The value maps to a file in
+#: :data:`meshterm.services.consolefont.FONT_FILES`, which is the correct place for a file
+#: name. A path on one handheld is not a thing that a user chooses.
 _CONSOLE_FONT_CHOICES: dict[str, str] = {"6x12": "6x12 (53x26)", "6x8": "6x8 (53x40)"}
 
-#: What the log file keeps. The plain level names, which are what every other tool calls
-#: these — someone being talked through a problem is being told "set it to debug", not
-#: "set it to everything".
+#: What the log file keeps. The labels are the plain level names, the names that all other
+#: tools use. A person who gets help with a problem hears "set it to debug", not "set it
+#: to everything".
 _LOG_LEVEL_CHOICES: dict[str, str] = {
     "ERROR": "Error",
     "WARNING": "Warning",
@@ -206,11 +216,12 @@ _LOG_LEVEL_CHOICES: dict[str, str] = {
 }
 
 
-#: Every preference MeshTerm has, in page order. Adding one here gives it a row on the
-#: Preferences page, a key in the TOML file, a ``preferences get``/``set`` CLI face, and a
-#: default — nothing else has to follow. A default that a module already states as its
-#: code-level behaviour is named, never re-typed: one source, so changing it cannot leave
-#: the constant and the registry disagreeing about what MeshTerm does.
+#: All the preferences of MeshTerm, in page order. When you add one here, it gets a row on
+#: the Preferences page, a key in the TOML file, a ``preferences get``/``set`` CLI face,
+#: and a default. No other change is necessary. When a module already states a default as
+#: its behaviour in code, this registry uses the name of that constant, and never types the
+#: value again. Thus there is one source, and a change to it cannot make the constant and
+#: the registry disagree about what MeshTerm does.
 PREFERENCES: tuple[PrefSpec, ...] = (
     # --- Device ------------------------------------------------------------------
     PrefSpec(
@@ -219,9 +230,9 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         help="Set the device clock from this computer when it connects",
         group="Device",
         value_type="bool",
-        # Off: writing to a radio nobody asked to be written to is the owner's call. The
-        # set is silent (the log records it) and happens once per connection — see
-        # :mod:`meshterm.services.clock_sync`.
+        # Off: only the owner can decide to write to a device when nobody asked for it.
+        # The set is silent (the log shows it), and it occurs one time for each
+        # connection. Refer to :mod:`meshterm.services.clock_sync`.
         default=False,
     ),
     # --- Sending -----------------------------------------------------------------
@@ -232,7 +243,7 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         group="Sending",
         value_type="float",
         default=5.0,
-        minimum=0.1,  # a floor, not a switch: there is no "off" for duty-cycle courtesy
+        minimum=0.1,  # a floor, not a switch: duty-cycle courtesy has no "off"
         maximum=60.0,
         unit="s",
     ),
@@ -243,7 +254,7 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         group="Sending",
         value_type="float",
         default=60.0,
-        minimum=5.0,  # every repeater in range rebroadcasts one; five seconds is the floor
+        minimum=5.0,  # each repeater in range relays one. Five seconds is the floor
         maximum=3600.0,
         unit="s",
     ),
@@ -253,9 +264,10 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         help="Flood an advert after a week without one",
         group="Sending",
         value_type="bool",
-        # Off: a companion never advertises on its own, so this is the only advert MeshTerm
-        # would ever send unasked, and every repeater in range rebroadcasts it. Turning it
-        # on starts the week rather than sending — see meshterm.services.advert_scheduler.
+        # Off: a companion never advertises on its own. Thus this advert is the only one
+        # that MeshTerm can send without a request, and each repeater in range relays it.
+        # When the user sets it on, the week starts, and MeshTerm sends nothing at that
+        # time. Refer to meshterm.services.advert_scheduler.
         default=False,
     ),
     PrefSpec(
@@ -273,7 +285,7 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         help="Times to resend a message that gets no reply",
         group="Sending",
         value_type="int",
-        default=0,  # one shot: a re-send is a second transmission on a shared mesh
+        default=0,  # one try: a resend is a second transmission on a shared mesh
         minimum=0,
         maximum=2,
     ),
@@ -283,10 +295,11 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         help="Opening a room this quiet logs in again",
         group="Sending",
         value_type="int",
-        # A login is one exchange, and it is what restarts a room's catch-up: a room stops
-        # sending to a member after three posts go unacknowledged, and forgets every
-        # non-admin member when it restarts. A room heard from within this long is still
-        # sending, so opening it again sends nothing.
+        # A login is one exchange, and a login restarts the catch-up of a room. After
+        # three posts to a member get no acknowledgement, the room sends no more to that
+        # member. When a room restarts, it also forgets each member that is not an admin.
+        # A room that was heard in this time still sends, so when the user opens it
+        # again, MeshTerm sends nothing.
         default=30,
         minimum=1,
         maximum=1440,
@@ -405,10 +418,11 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         help="Whether the command line prints ages or timestamps",
         group="Display",
         value_type="enum",
-        # Relative, because a person at a prompt asking "heard recently?" should not have
-        # to subtract an ISO instant from `date` to find out. `--absolute` overrides this
-        # for one run, and the JSON face is UTC either way — it is read somewhere else and
-        # often later, where a relative age has nothing to be relative to.
+        # Relative, so that a person at a prompt who asks "heard recently?" does not have
+        # to subtract an ISO instant from `date` to find the answer. `--absolute`
+        # overrides this value for one run. The JSON face is in UTC in all cases, because
+        # a program reads it in a different place and often later, where a relative age
+        # has no reference point.
         default="relative",
         choices=_CLI_TIME_CHOICES,
     ),
@@ -436,10 +450,10 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         help="How many colours to send this terminal",
         group="Display",
         value_type="enum",
-        # Auto, because the count a terminal accepts is a fact about the terminal and the
-        # reader should not have to know it. It is only ever consulted to *raise* the
-        # verdict prompt_toolkit already reached, never to lower it — a terminal that
-        # cannot be shown to do better keeps exactly what it had.
+        # Auto, because the count that a terminal accepts is a fact about the terminal,
+        # and the user does not have to know it. MeshTerm reads this value only to raise
+        # the verdict that prompt_toolkit already reached, never to lower it. A terminal
+        # that MeshTerm cannot prove to do better keeps exactly what it had.
         default="auto",
         choices=_COLOR_DEPTH_CHOICES,
         relaunch=True,
@@ -450,11 +464,12 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         help="Move to a better terminal when this console can't draw MeshTerm",
         group="Display",
         value_type="enum",
-        # Reopening in Windows Terminal is done, not asked: the classic console cannot
-        # draw a single icon whatever font it is given, so there is only one sensible
-        # answer and the reader has not seen the app yet to judge it. Installing a *font*
-        # still asks, because that writes to their machine. Declining that twice writes
-        # "off" here, which turns both off for good.
+        # MeshTerm opens again in Windows Terminal without a question. The classic
+        # console cannot draw one icon, with any font. Thus there is only one sensible
+        # answer, and the user has not seen the app yet and cannot judge it. To install a
+        # font, MeshTerm still asks, because that writes to the machine of the user. If
+        # the user says no two times, MeshTerm writes "off" here, and that sets both off
+        # permanently.
         default="auto",
         choices=_CONSOLE_SETUP_CHOICES,
     ),
@@ -464,10 +479,11 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         help="Bigger text, or more rows on the handheld's panel",
         group="Display",
         value_type="enum",
-        # The 6x12 Terminus derivative, because it is the font the device boots with and
-        # the one every screen's row budget is designed to (Platform.readable_rows is 26).
-        # The 6x8 build is the same glyph inventory in a shorter cell — fourteen more rows
-        # for anyone who would rather see more of a list than read it comfortably.
+        # The 6x12 Terminus derivative, because the handheld boots with this font, and
+        # the row budget of each screen is designed for it (Platform.readable_rows is 26).
+        # The 6x8 build has the same glyph inventory in a shorter cell. It gives fourteen
+        # more rows. It is for a person who wants to see more of a list, and accepts text
+        # that is less comfortable to read.
         default="6x12",
         choices=_CONSOLE_FONT_CHOICES,
         platforms=frozenset({"picocalc-lyra"}),
@@ -479,9 +495,9 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         help="How much MeshTerm writes to its log file",
         group="Diagnostics",
         value_type="enum",
-        # Problems, not a narration of a working session. The file used to take
-        # everything, which buried the dozen interesting lines under twenty thousand
-        # dull ones and made it awkward to attach to a bug report.
+        # Problems, not a narration of a session that works. The file once kept all the
+        # lines. Thus the approximately twelve useful lines were under twenty thousand
+        # lines of no interest, and it was difficult to attach the file to a bug report.
         default="WARNING",
         choices=_LOG_LEVEL_CHOICES,
         relaunch=True,
@@ -490,31 +506,32 @@ PREFERENCES: tuple[PrefSpec, ...] = (
 
 _BY_KEY: dict[str, PrefSpec] = {spec.key: spec for spec in PREFERENCES}
 
-#: Every key that was once a preference and no longer is. A retired key is never reused:
-#: a value can outlive its key in a file nobody saved since, and if the name came back
-#: with a new meaning — seconds become minutes, a range moves — an old ``30`` that still
-#: passes the new spec would load cleanly and mean something else, which no validation
-#: can catch. So a preference that returns changed returns under a new name (a unit in the
-#: key makes that the natural move: ``_s`` to ``_min``), and ``tests/test_retired.py``
-#: fails any registry that takes one of these back. Loading refuses them outright.
+#: All the keys that were once preferences and are not now. MeshTerm never uses a retired
+#: key again. A value can stay in a file after its key is retired, if nobody saved the file
+#: after that time. If the name comes back with a new meaning (seconds become minutes, or
+#: a range moves), an old ``30`` that passes the new spec loads without an error and means
+#: a different thing. No validation can catch that. Thus a preference that comes back with
+#: a change comes back under a new name (a unit in the key makes this the natural step:
+#: ``_s`` to ``_min``). ``tests/test_retired.py`` fails each registry that takes one of
+#: these keys back. When MeshTerm loads the file, it refuses them completely.
 RETIRED: frozenset[str] = frozenset(
     {
-        # Per-device background advert cadences, moved to Device config and since replaced
-        # by the weekly flood advert (``weekly_flood_advert``).
+        # The background advert intervals for each device. They moved to Device config,
+        # and later the weekly flood advert (``weekly_flood_advert``) replaced them.
         "advert_direct_hours",
         "advert_flood_hours",
     }
 )
 
-#: The reason :attr:`Preferences.dropped` gives for a key found in :data:`RETIRED`.
+#: The reason that :attr:`Preferences.dropped` gives for a key in :data:`RETIRED`.
 DROPPED_RETIRED = "retired"
 
-#: The reason :attr:`Preferences.dropped` gives for a key the registry has never held.
+#: The reason that :attr:`Preferences.dropped` gives for a key that the registry never had.
 DROPPED_UNKNOWN = "unknown"
 
 
 def get_spec(key: str) -> PrefSpec:
-    """Look up one preference's spec.
+    """Find the spec of one preference.
 
     Args:
         key: The preference key.
@@ -534,17 +551,17 @@ def get_spec(key: str) -> PrefSpec:
 
 
 def by_group(platform: str | None = None) -> list[tuple[str, list[PrefSpec]]]:
-    """Every preference grouped for display, in :data:`GROUPS` order.
+    """All the preferences in groups for the page, in :data:`GROUPS` order.
 
     Args:
-        platform: A :attr:`~meshterm.platforms.Platform.name` to draw the page for, which
-            drops the preferences that platform is not offered (see
-            :meth:`PrefSpec.offered_on`). ``None`` — the default, and what the file writer
-            uses — keeps every preference, so an override made on one flavour survives
-            being loaded and saved on another.
+        platform: A :attr:`~meshterm.platforms.Platform.name` to draw the page for. It
+            removes the preferences that the page does not offer on that platform (refer
+            to :meth:`PrefSpec.offered_on`). ``None`` (the default, and the value that
+            the file writer uses) keeps all the preferences. Thus an override made on one
+            flavour stays when another flavour loads and saves the file.
 
     Returns:
-        ``(group, specs)`` pairs; a group holding no preferences is omitted.
+        ``(group, specs)`` pairs. A group with no preferences is not included.
     """
     kept = [s for s in PREFERENCES if platform is None or s.offered_on(platform)]
     grouped = [(g, [s for s in kept if s.group == g]) for g in GROUPS]
@@ -558,17 +575,18 @@ _FALSE = {"0", "false", "no", "off", "n"}
 
 
 def parse_value(spec: PrefSpec, raw: Any) -> Any:
-    """Parse and validate a raw value (a typed scalar, or text from the CLI/file/prompt).
+    """Parse and validate a raw value (a typed scalar, or text from the CLI, file, or prompt).
 
     Args:
         spec: The target preference.
         raw: The value to coerce.
 
     Returns:
-        The typed, range-checked value.
+        The typed value, with its range checked.
 
     Raises:
-        PreferenceError: If the value is the wrong type, out of range, or not a choice.
+        PreferenceError: If the value has the wrong type, is out of range, or is not a
+            choice.
     """
     text = str(raw).strip()
     if spec.value_type == "bool":
@@ -587,15 +605,17 @@ def parse_value(spec: PrefSpec, raw: Any) -> Any:
         if raw in choices and not isinstance(raw, bool):
             return raw
         if isinstance(raw, bool):
-            # A hand edit that answers a yes/no choice with a TOML boolean
-            # (``full_width = true``) hands us ``True`` where the choice is spelled "yes".
-            # We quote ours on the way out, but someone typing the obvious thing should
-            # still be understood: map the boolean back to whichever spelling this offers.
+            # A hand edit can answer a yes/no choice with a TOML boolean
+            # (``full_width = true``). Then we get ``True`` where the choice is spelled
+            # "yes". We put our own values in quotes when we write them, but MeshTerm must
+            # understand a person who types the obvious thing. Thus map the boolean back
+            # to the spelling that this choice offers.
             for choice in choices:
                 if str(choice).lower() in (_TRUE if raw else _FALSE):
                     return choice
-        # Text arriving from the CLI or a hand-edited file: match a choice by its own
-        # spelling, so `preferences set watch_silence_hours 6` and a TOML `6` land alike.
+        # Text from the CLI or from a file edited by hand: match a choice by its own
+        # spelling. Thus `preferences set watch_silence_hours 6` and a TOML `6` give the
+        # same result.
         for choice in choices:
             if text.lower() == str(choice).lower():
                 return choice
@@ -614,18 +634,18 @@ def parse_value(spec: PrefSpec, raw: Any) -> Any:
 
 
 def format_value(spec: PrefSpec, value: Any) -> str:
-    """Render one preference's value for display.
+    """Render the value of one preference for the screen.
 
-    Booleans read ``on``/``off`` (the words the editor's button pair offers), an enum
-    reads its own label, and a number carries its unit so a bare figure in the VALUE lane
-    still says what it counts.
+    A boolean shows as ``on`` or ``off`` (the words of the button pair in the editor). An
+    enum shows its own label. A number has its unit, so that a bare figure in the VALUE
+    lane still tells what it counts.
 
     Args:
-        spec: The preference the value belongs to.
+        spec: The preference of the value.
         value: The value to render.
 
     Returns:
-        The display string.
+        The string to show.
     """
     if spec.value_type == "bool":
         return "on" if value else "off"
@@ -638,7 +658,7 @@ def format_value(spec: PrefSpec, value: Any) -> str:
 
 
 def range_hint(spec: PrefSpec) -> str:
-    """A muted "allowed values" hint for a typed prompt, or ``""`` where nothing bounds it."""
+    """A muted "allowed values" hint for a typed prompt, or ``""`` when no bound applies."""
     unit = f" {spec.unit}" if spec.unit else ""
     if spec.minimum is not None and spec.maximum is not None:
         return f"Allowed: {spec.minimum:g} – {spec.maximum:g}{unit}"
@@ -651,13 +671,13 @@ def range_hint(spec: PrefSpec) -> str:
 
 # --- the store ----------------------------------------------------------------
 
-#: The file's name inside the config directory — one spelling for every place that opens it.
+#: The name of the file in the config directory: one spelling for each place that opens it.
 PREFERENCES_FILENAME = "preferences.toml"
 
-#: The file's opening comment. It says the one thing a reader hand-editing the file needs
-#: to know — that absence means "use the default", so deleting a line is how a preference
-#: is undone — and points at the two neighbouring kinds of setting so nobody looks for a
-#: device's radio parameters in here.
+#: The first comment in the file. It tells the one thing that a person who edits the file
+#: by hand must know: a missing key means "use the default", so when you delete a line,
+#: you undo a preference. It also refers to the two other types of setting, so that nobody
+#: looks for the radio parameters of a device in this file.
 _HEADER = """\
 # MeshTerm preferences -- how the app itself behaves.
 #
@@ -674,14 +694,15 @@ _HEADER = """\
 
 
 def _salvage(text: str) -> dict[str, Any]:
-    """Read a file TOML refused as a document, one ``key = value`` line at a time.
+    """Read a file that TOML refused as a document, one ``key = value`` line at a time.
 
-    MeshTerm writes the file flat — no tables, one entry to a line — so a line is a whole
-    entry and can be judged on its own. A line TOML accepts keeps its typed value. One it
-    refuses keeps its right-hand side as text, which is exactly what :func:`parse_value`
-    takes from the command line, so the likeliest hand edit of all — a word left unquoted,
-    ``log_level = DEBUG`` — is still understood. Whatever the spec then refuses is dropped
-    by :meth:`Preferences.update`, the same as any other bad value.
+    MeshTerm writes the file flat (no tables, and one entry on each line). Thus a line is
+    a full entry, and the function can examine it alone. A line that TOML accepts keeps
+    its typed value. A line that TOML refuses keeps its right side as text. That text is
+    exactly what :func:`parse_value` takes from the command line. Thus the most probable
+    hand edit (a word with no quotes, ``log_level = DEBUG``) is still understood. If the
+    spec then refuses the value, :meth:`Preferences.update` removes it, the same as any
+    other bad value.
     """
     data: dict[str, Any] = {}
     for line in text.splitlines():
@@ -697,26 +718,27 @@ def _salvage(text: str) -> dict[str, Any]:
 
 
 class Preferences:
-    """The effective preferences: the built-in defaults, with the file's overrides on top.
+    """The effective preferences: the built-in defaults, with the file overrides on top.
 
-    Read a preference as an attribute — ``preferences.trace_cooldown_s`` — which resolves
-    through the registry, so a typo raises :class:`AttributeError` at the call site
-    instead of quietly reading ``None``. :meth:`set` takes a raw value, validates it
-    through the key's spec, and records it only while it differs from the default;
-    :meth:`save` writes the result.
+    Read a preference as an attribute (``preferences.trace_cooldown_s``). The attribute
+    resolves through the registry. Thus a typing error raises :class:`AttributeError` at
+    the call site, and does not silently read ``None``. :meth:`set` takes a raw value,
+    validates it through the spec of the key, and stores it only while it is different
+    from the default. :meth:`save` writes the result.
 
-    Nothing here writes on its own: the Preferences page stages changes and saves them on
-    *Apply*, which — with the CLI — is the only path that reaches :meth:`save`.
+    Nothing in this class writes on its own. The Preferences page stages changes and saves
+    them on *Apply*. That path and the CLI are the only paths to :meth:`save`.
     """
 
     def __init__(self, path: Path | None = None, values: Mapping[str, Any] | None = None) -> None:
-        """Build a preferences view over an optional file and an optional set of overrides.
+        """Build the preferences from an optional file and an optional set of overrides.
 
         Args:
-            path: Where :meth:`save` writes. ``None`` for an in-memory set (tests, and
-                the fallback :func:`current` hands out before a context is built).
-            values: Overrides to start from; invalid ones are dropped, and a value equal
-                to its default is not recorded as an override at all.
+            path: Where :meth:`save` writes. ``None`` for a set in memory only (for
+                tests, and for the fallback that :func:`current` returns before a context
+                is built).
+            values: The overrides to start from. The invalid ones are removed. A value
+                that is equal to its default is not stored as an override.
         """
         self._path = path
         self._values: dict[str, Any] = {}
@@ -726,20 +748,22 @@ class Preferences:
 
     @classmethod
     def load(cls, path: Path) -> Preferences:
-        """Read ``path``, returning all-defaults for a missing, empty, or unreadable file.
+        """Read ``path``. Return all the defaults for a missing, empty, or unreadable file.
 
-        TOML refuses a whole document over one bad line, and a hand edit should cost the
-        line it is on, not the file: a document TOML refuses is read again a line at a
-        time (:func:`_salvage`), keeping every entry that still makes sense.
+        TOML refuses a full document because of one bad line. But a hand edit must cost
+        only its own line, not the file. Thus, when TOML refuses a document, this method
+        reads it again one line at a time (:func:`_salvage`), and keeps each entry that
+        still makes sense.
 
         Args:
             path: The TOML file to read.
 
-        Nothing the file holds that the registry cannot take survives the next
-        :meth:`save`, which writes only the overrides in force: a retired key, a key
-        never registered (a typo, most likely), and a value its spec refuses are all
-        left out, and :attr:`dropped` says which and why, for the caller to log once
-        logging is configured (see :func:`report_dropped`).
+        If the file has an entry that the registry cannot take, the next :meth:`save`
+        does not keep it, because it writes only the overrides that apply. A retired key,
+        a key that was never registered (most probably a typing error), and a value that
+        its spec refuses are all left out. :attr:`dropped` tells which entries and why,
+        so that the caller can log them after logging is configured (refer to
+        :func:`report_dropped`).
 
         Returns:
             The loaded preferences, bound to ``path`` for a later :meth:`save`.
@@ -755,7 +779,7 @@ class Preferences:
         return cls(path, data)
 
     def _absorb(self, values: Mapping[str, Any]) -> None:
-        """Take in a file's entries, recording in :attr:`dropped` each one refused."""
+        """Take in the entries of a file, and store in :attr:`dropped` each refused entry."""
         for raw_key, value in values.items():
             key = str(raw_key)
             if key in RETIRED:
@@ -768,32 +792,32 @@ class Preferences:
 
     @property
     def dropped(self) -> dict[str, str]:
-        """What loading refused, key by key (a copy).
+        """What the load refused, key by key (a copy).
 
-        The reason is :data:`DROPPED_RETIRED`, :data:`DROPPED_UNKNOWN`, or — for a key
-        that is registered but whose value its spec refused — the refusal itself.
+        The reason is :data:`DROPPED_RETIRED` or :data:`DROPPED_UNKNOWN`. For a key that
+        is registered but whose value its spec refused, the reason is the refusal itself.
         """
         return dict(self._dropped)
 
     @property
     def path(self) -> Path | None:
-        """Where :meth:`save` writes, or ``None`` for an in-memory set."""
+        """Where :meth:`save` writes, or ``None`` for a set in memory only."""
         return self._path
 
     def __getattr__(self, name: str) -> Any:
         """Resolve a registered preference key as an attribute.
 
         Raises:
-            AttributeError: For any name that is not a preference key, so a mistyped
-                ``preferences.trace_cooldwn_s`` fails where it is written rather than
-                quietly reading nothing.
+            AttributeError: For each name that is not a preference key. Thus
+                ``preferences.trace_cooldwn_s``, with a typing error, fails where it is
+                written, and does not silently read nothing.
         """
         if name.startswith("_") or name not in _BY_KEY:
             raise AttributeError(name)
         return self.get(name)
 
     def get(self, key: str) -> Any:
-        """The effective value for ``key``: the override where there is one, else the default.
+        """The effective value for ``key``: the override if there is one, else the default.
 
         Raises:
             PreferenceError: If ``key`` is not a registered preference.
@@ -802,26 +826,27 @@ class Preferences:
         return self._values.get(key, spec.default)
 
     def is_overridden(self, key: str) -> bool:
-        """Whether ``key`` currently differs from its built-in default."""
+        """Whether ``key`` is now different from its built-in default."""
         return key in self._values
 
     def overrides(self) -> dict[str, Any]:
-        """The values that differ from their defaults, in registry order (a copy)."""
+        """The values that are different from their defaults, in registry order (a copy)."""
         return {s.key: self._values[s.key] for s in PREFERENCES if s.key in self._values}
 
     def set(self, key: str, raw: Any) -> Any:
-        """Validate ``raw`` for ``key`` and record it, dropping it when it *is* the default.
+        """Validate ``raw`` for ``key`` and store it, or remove it when it is the default.
 
-        An override is only ever a disagreement with the default, so setting a value back
-        to its default clears the entry rather than pinning it. That is what lets a later
-        change to the code's default reach an install that never asked to be exempt.
+        An override is always a disagreement with the default. Thus, when you set a value
+        back to its default, the entry is cleared, not pinned. Because of this, a later
+        change to the default in the code gets to an install that never asked to be
+        exempt.
 
         Args:
             key: The preference key.
             raw: The new value, typed or as text.
 
         Returns:
-            The parsed value now in force.
+            The parsed value that now applies.
 
         Raises:
             PreferenceError: If ``key`` is unknown or ``raw`` fails its spec.
@@ -835,16 +860,16 @@ class Preferences:
         return value
 
     def update(self, values: Mapping[str, Any]) -> int:
-        """Apply several changes at once, skipping any the registry or a spec refuses.
+        """Apply several changes, and skip each one that the registry or a spec refuses.
 
-        Tolerant by design: this is the path a hand-edited file arrives through, and one
-        bad line should cost that line, not the file.
+        This method is tolerant on purpose. A file edited by hand comes in through this
+        path, and one bad line must cost only that line, not the file.
 
         Args:
             values: ``key -> value`` pairs.
 
         Returns:
-            How many were accepted.
+            The number of accepted changes.
         """
         applied = 0
         for key, value in values.items():
@@ -856,17 +881,17 @@ class Preferences:
         return applied
 
     def reset(self) -> int:
-        """Drop every override, returning how many there were."""
+        """Remove all the overrides, and return how many there were."""
         count = len(self._values)
         self._values.clear()
         return count
 
     def as_toml(self) -> str:
-        """Render the current overrides as the file's text: header, then grouped entries.
+        """Render the current overrides as the file text: the header, then grouped entries.
 
-        Each group holding an override gets its own comment heading, and each entry its
-        help line and its default above it, so the file reads the way the page does
-        rather than as a bare map someone has to look up elsewhere.
+        Each group that has an override gets its own comment heading. Each entry has its
+        help line and its default above it. Thus the file reads the same as the page, and
+        not as a bare map that a person must look up in a different place.
         """
         import tomli_w
 
@@ -888,32 +913,36 @@ class Preferences:
         return "\n".join(lines)
 
     def save(self) -> None:
-        """Write the overrides to :attr:`path` atomically (a crash mid-write keeps the old file).
+        """Write the overrides to :attr:`path` atomically.
+
+        If a crash occurs during the write, the old file stays.
 
         Raises:
-            RuntimeError: If this set was built without a path (an in-memory set).
+            RuntimeError: If this set was built without a path (a set in memory only).
         """
         if self._path is None:
             raise RuntimeError("these preferences have no file to save to")
         write_atomically(self._path, self.as_toml())
 
 
-#: The set installed for this process. Starts as a defaults-only, file-less instance so
-#: the render layer works before (and without) an :class:`~meshterm.context.AppContext` —
-#: a specimen render, a unit test, the CLI's early boot.
+#: The set installed for this process. At the start, it is an instance with only the
+#: defaults and no file. Thus the render layer works before (and without) an
+#: :class:`~meshterm.context.AppContext`: in a specimen render, in a unit test, and in the
+#: early boot of the CLI.
 _current: Preferences = Preferences()
 
 
 def report_dropped(preferences: Preferences, log: logging.Logger) -> None:
-    """Log what loading the file refused: the entries its next save will leave out.
+    """Log what the load of the file refused: the entries that its next save will leave out.
 
-    A retired key is expected — it was written by an older MeshTerm — so it is noted at
-    INFO. Anything else was probably typed by hand and is not doing what its author
-    meant, so it is a WARNING, and the line names it so the typo can be found.
+    A retired key is expected, because an older MeshTerm wrote it. Thus the function logs
+    it at INFO. Any other entry was probably typed by hand, and it does not do what its
+    author wanted. Thus it is a WARNING, and the line names the entry, so that the user
+    can find the typing error.
 
     Args:
         preferences: A set built by :meth:`Preferences.load`.
-        log: Where to report.
+        log: The logger to report to.
     """
     name = preferences.path.name if preferences.path else PREFERENCES_FILENAME
     for key, why in preferences.dropped.items():
@@ -926,11 +955,11 @@ def report_dropped(preferences: Preferences, log: logging.Logger) -> None:
 
 
 def current() -> Preferences:
-    """The preferences in force for this process.
+    """The preferences that apply for this process.
 
-    For the layers that have no context to reach through — the session's renderer, the
-    stores constructed without one — mirroring
-    :func:`meshterm.platforms.get_platform`. Anything holding an
+    This function is for the layers that have no context to go through: the renderer of
+    the session, and the stores constructed without a context. It works the same as
+    :func:`meshterm.platforms.get_platform`. Code that holds an
     :class:`~meshterm.context.AppContext` reads
     :attr:`~meshterm.context.AppContext.preferences` instead.
     """
@@ -938,7 +967,7 @@ def current() -> Preferences:
 
 
 def install(preferences: Preferences) -> None:
-    """Make ``preferences`` the set :func:`current` returns (the context does this at boot)."""
+    """Make ``preferences`` the set that :func:`current` returns (the context calls it at boot)."""
     global _current
     _current = preferences
 

@@ -1,19 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Persistence for remembered remote-node admin passwords.
+"""Storage for the admin passwords of remote nodes that MeshTerm remembers.
 
-The remote-admin optimizer logs in to a repeater to tune its TX power; storing the
-password means the user isn't prompted on every run. Like the remembered device
-(:mod:`meshterm.core.device_store`), this lives in a small JSON file in the config
-directory (``<config_dir>/admin.json``) rather than the per-invocation SQLite database,
-because admin credentials are global machine state.
+The remote-admin optimizer logs in to a repeater to adjust its TX power. When MeshTerm
+stores the password, the user does not get a prompt at each run. This store is a small
+JSON file in the config directory (``<config_dir>/admin.json``), the same as the
+remembered device (:mod:`meshterm.core.device_store`). It is not in the SQLite database
+of each invocation, because admin credentials are global state of the machine.
 
-The file is read into :class:`AdminCredential` records and written back out of them,
-never round-tripped as the raw JSON it was read as, so a field no record knows is gone
-after the next write (see :data:`AdminCredential.RETIRED`).
+The store reads the file into :class:`AdminCredential` records, and it writes the file
+from these records. It never writes back the raw JSON that it read. Thus a field that no
+record knows is gone after the next write (refer to :data:`AdminCredential.RETIRED`).
 
-Passwords are stored in plaintext, so the file is written with owner-only permissions
-where the platform supports it. This is a local operator tool tuning their own mesh, not
-a multi-user secret store; treat the file accordingly.
+The passwords are stored in plaintext. Thus the store writes the file with owner-only
+permissions where the platform supports them. This store is a local tool for a user who
+adjusts their own mesh. It is not a secret store for many users. Handle the file as a
+local file that contains plaintext passwords.
 """
 
 from __future__ import annotations
@@ -28,16 +29,17 @@ from .models import Contact, LoginResult, utcnow
 
 
 def admin_key(node: Contact) -> str:
-    """Return the lookup key for a node's stored password.
+    """Return the lookup key for the stored password of a node.
 
-    Prefers the full public key (stable and unambiguous); falls back to the key prefix
-    and finally the name so a contact without a key can still be remembered.
+    The function uses the full public key first, because it is stable and has only one
+    meaning. If there is no public key, it uses the key prefix, and then the name. Thus
+    MeshTerm can also remember a contact that has no key.
 
     Args:
-        node: The contact to key on.
+        node: The contact for the lookup key.
 
     Returns:
-        A normalized, lowercased identifier.
+        A normalized identifier in lower case.
     """
     key = node.public_key or node.key_prefix or node.name
     return key.lower().removeprefix("0x")
@@ -48,11 +50,11 @@ class AdminCredential:
     """A remembered admin password for one remote node.
 
     Attributes:
-        key: The :func:`admin_key` the password is stored under (the record's key in the
-            file, not one of its fields).
-        password: The node's admin password (plaintext).
-        label: A friendly node name for display.
-        last_used: ISO-8601 timestamp of the last successful login.
+        key: The :func:`admin_key` under which the password is stored. It is the key of
+            the record in the file, not one of its fields.
+        password: The admin password of the node (plaintext).
+        label: A node name to show to the user.
+        last_used: The ISO-8601 timestamp of the last successful login.
     """
 
     key: str
@@ -60,13 +62,14 @@ class AdminCredential:
     label: str
     last_used: str
 
-    #: Fields this record once held and must never hold again under another meaning (see
-    #: :data:`meshterm.core.preferences.RETIRED` for why a name is never reused).
+    #: The fields that this record held before. It must never hold them again with another
+    #: meaning (refer to :data:`meshterm.core.preferences.RETIRED` for the reason that a
+    #: name is never used again).
     RETIRED: ClassVar[frozenset[str]] = frozenset()
 
     @classmethod
     def read(cls, key: str, raw: object) -> AdminCredential | None:
-        """Build a record from one file entry, or ``None`` when it holds no password."""
+        """Make a record from one file entry, or ``None`` when the entry has no password."""
         if not isinstance(raw, dict) or raw.get("password") is None:
             return None
         return cls(
@@ -77,23 +80,27 @@ class AdminCredential:
         )
 
     def to_json(self) -> dict:
-        """The record as written: its own fields and nothing it happened to be read with."""
+        """The record as the store writes it: its own fields, and no other data read with it."""
         return {"password": self.password, "label": self.label, "last_used": self.last_used}
 
 
 class AdminStore:
-    """Reads and writes remembered remote-node admin passwords."""
+    """Reads and writes the admin passwords of remote nodes that MeshTerm remembers."""
 
     def __init__(self, path: Path) -> None:
-        """Open the store against a JSON file location.
+        """Open the store on the location of a JSON file.
 
         Args:
-            path: Path to the JSON state file (created lazily on first write).
+            path: The path to the JSON state file. The store makes the file at the first
+                write.
         """
         self._path = path
 
     def _load(self) -> dict[str, AdminCredential]:
-        """Read every credential, keyed by :func:`admin_key`; empty on a missing/corrupt file."""
+        """Read all the credentials, by :func:`admin_key`.
+
+        The result is empty if the file is missing or corrupt.
+        """
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -108,10 +115,10 @@ class AdminStore:
         return records
 
     def get(self, node: Contact) -> str | None:
-        """Return the remembered password for ``node``, or ``None`` if not stored.
+        """Return the remembered password for ``node``, or ``None`` if it is not stored.
 
         Args:
-            node: The contact to look up.
+            node: The contact to find.
 
         Returns:
             The stored password, or ``None``.
@@ -120,10 +127,10 @@ class AdminStore:
         return record.password if record is not None else None
 
     def remember(self, node: Contact, password: str) -> None:
-        """Store (or update) the admin password for ``node``.
+        """Store (or change) the admin password for ``node``.
 
         Args:
-            node: The contact the password belongs to.
+            node: The contact that the password is for.
             password: The admin password to remember.
         """
         records = self._load()
@@ -134,20 +141,22 @@ class AdminStore:
         self._write(records)
 
     def record(self, node: Contact, password: str, outcome: LoginResult) -> None:
-        """Update what we remember about ``node`` from how a login attempt ended.
+        """Change what MeshTerm remembers about ``node``, from the result of a login.
 
-        THE credential policy, in one place because it was wrong in five: a password is
-        remembered when the node accepts it and forgotten when the node *rejects* it — and
-        left exactly as it is when nothing came back. Silence is not a denial. Every caller
-        used to collapse "refused" and "no reply" into one ``False`` and forget on both, so
-        opening the admin flow on a repeater that happened to be down erased its password;
-        the node had said nothing at all, and we took the silence as a verdict.
+        This method is the only credential policy. It is in one place because it was wrong
+        in five places. The store remembers a password when the node accepts it, and it
+        forgets the password when the node rejects it. When no reply came back, the store
+        keeps the password exactly as it is. No reply is not a refusal. Before, each caller
+        changed "refused" and "no reply" into the same ``False``, and forgot the password
+        in both cases. Thus, when the user opened the admin flow on a repeater that was
+        down at that time, MeshTerm deleted its password. The node sent nothing at all, and
+        MeshTerm read that silence as a refusal.
 
-        Callers still phrase their own message (the sweep says "sweep again", the CLI says
-        "re-run"), but none of them decides this.
+        The callers still write their own messages (the sweep says "sweep again", the CLI
+        says "re-run"), but no caller makes this decision.
 
         Args:
-            node: The contact the attempt addressed.
+            node: The contact that the login was for.
             password: The password that was tried.
             outcome: What the device reported.
         """
@@ -157,7 +166,9 @@ class AdminStore:
             self.forget(node)
 
     def forget(self, node: Contact) -> None:
-        """Remove any remembered password for ``node`` (e.g. after it stops working).
+        """Delete the remembered password for ``node``, if there is one.
+
+        For example, use this method after the password stops working.
 
         Args:
             node: The contact to forget.
@@ -167,6 +178,6 @@ class AdminStore:
             self._write(records)
 
     def _write(self, records: dict[str, AdminCredential]) -> None:
-        """Persist ``records`` atomically with owner-only permissions where supported."""
+        """Store ``records`` atomically, with owner-only permissions where they are supported."""
         data = {key: record.to_json() for key, record in records.items()}
         write_atomically(self._path, json.dumps(data, indent=2), owner_only=True)

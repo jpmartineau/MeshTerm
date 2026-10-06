@@ -1,15 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Device connection abstraction.
+"""The abstraction of the connection to the device.
 
-Services and tools depend only on the :class:`Device` interface, never on the
-``meshcore`` library directly. This keeps the algorithms testable and lets the
-:class:`MockDevice` simulator stand in for real hardware during development.
+Services and tools use only the :class:`Device` interface. They never use the
+``meshcore`` library directly. Thus the algorithms are easy to test, and the
+:class:`MockDevice` simulator can replace real hardware during development.
 
-Two implementations are provided:
+There are two implementations:
 
-* :class:`MeshCoreDevice` - wraps the async ``meshcore`` companion-protocol client.
-* :class:`MockDevice` - a deterministic simulator with a physically plausible
-  SNR-vs-TX-power response, used by ``--mock`` and the test suite.
+* :class:`MeshCoreDevice`: a wrapper around the async ``meshcore`` client for the
+  companion protocol.
+* :class:`MockDevice`: a deterministic simulator. Its SNR changes with the TX power in a
+  physically plausible way. ``--mock`` and the test suite use it.
 """
 
 from __future__ import annotations
@@ -63,33 +64,35 @@ if TYPE_CHECKING:
     from .config import SpiWiring
     from .discovery import DiscoveredDevice
 
-#: Module logger; enable DEBUG on ``meshterm.core.connection`` to trace the message pump.
+#: The module logger. To trace the message pump, set DEBUG on ``meshterm.core.connection``.
 _log = logging.getLogger(__name__)
 
-#: Callback invoked with each :class:`~meshterm.core.events.MeshEvent` the device emits
-#: (an overheard packet, an inbound message, an acknowledgement).
+#: A callback that receives each :class:`~meshterm.core.events.MeshEvent` from the device
+#: (an overheard packet, a received message, an acknowledgement).
 EventCallback = Callable[[MeshEvent], None]
 
-#: Zero-argument callable returned by :meth:`Device.subscribe_events` that stops the
-#: subscription and releases its resources when invoked.
+#: A callable with no arguments that :meth:`Device.subscribe_events` returns. A call to it
+#: stops the subscription and releases its resources.
 Unsubscribe = Callable[[], None]
 
-#: How often the :class:`MockDevice` simulator emits a fresh burst of synthetic packets
-#: while a passive-monitor subscription is open (seconds).
+#: The interval at which the :class:`MockDevice` simulator makes a new burst of synthetic
+#: packets while a passive-monitor subscription is open (seconds).
 _MOCK_MONITOR_INTERVAL_S = 0.05
 
-#: How often the real device's inbound-message pump sweeps for queued messages, as a
-#: safety net for firmware that doesn't reliably push ``MESSAGES_WAITING`` (seconds).
+#: The interval at which the message pump of the real device looks for queued messages
+#: (seconds). This is a safety net for firmware that does not always push
+#: ``MESSAGES_WAITING``.
 _MESSAGE_POLL_INTERVAL_S = 3.0
 
-#: Standard Bluetooth GATT Battery Service and its Battery Level Status characteristic (GATT
-#: Specification Supplement, "Battery Level Status", 0x2BED — added in Battery Service 1.1).
-#: Where a companion exposes these, the status characteristic carries a *firmware-reported*
-#: charging flag — a ground truth the MeshCore companion protocol itself never provides (it
-#: reports only a battery voltage). MeshCore firmware does not implement them today: its BLE
-#: profile is just the Nordic UART pipe plus DFU, confirmed by dumping the GATT table. So this
-#: path lies dormant behind a fail-safe fallback and lights up automatically only if a future
-#: device ships the service. See :func:`charging_from_battery_level_status`.
+#: The standard Bluetooth GATT Battery Service and its Battery Level Status characteristic
+#: (GATT Specification Supplement, "Battery Level Status", 0x2BED, added in Battery Service
+#: 1.1). When a companion has them, the status characteristic has a charging flag that the
+#: firmware reports. This flag is a direct fact, and the MeshCore companion protocol itself
+#: never gives it (the protocol reports only a battery voltage). MeshCore firmware does not
+#: have this service now: its BLE profile is only the Nordic UART pipe and DFU. A dump of the
+#: GATT table confirmed this. Thus this path is not in use now. It has a fail-safe fallback,
+#: and it starts to operate automatically only if a future device has the service. Refer to
+#: :func:`charging_from_battery_level_status`.
 _BATTERY_SERVICE_UUID = "0000180f-0000-1000-8000-00805f9b34fb"
 _BATTERY_LEVEL_STATUS_UUID = "00002bed-0000-1000-8000-00805f9b34fb"
 
@@ -97,19 +100,20 @@ _BATTERY_LEVEL_STATUS_UUID = "00002bed-0000-1000-8000-00805f9b34fb"
 def charging_from_battery_level_status(data: bytes) -> bool | None:
     """Decode the charging state from a GATT *Battery Level Status* value (0x2BED).
 
-    Per the Bluetooth GATT Specification Supplement the characteristic opens with a 1-byte
-    flags field followed by a 16-bit little-endian *Power State* word; the two bits at offset
-    5 are the **Charge State** enum — 0 unknown, 1 charging, 2 discharging (active), 3
-    discharging (inactive). The fields after the word (identifier, battery level, additional
-    status) are optional and unread here, so only the first three bytes are required.
+    The Bluetooth GATT Specification Supplement gives this layout. The characteristic starts
+    with a 1-byte flags field. A 16-bit little-endian *Power State* word follows it. The two
+    bits at offset 5 of this word are the **Charge State** enum: 0 unknown, 1 charging, 2
+    discharging (active), 3 discharging (inactive). The fields after the word (identifier,
+    battery level, more status) are optional, and this function does not read them. Thus
+    only the first three bytes are necessary.
 
     Args:
-        data: The raw characteristic value as read over GATT.
+        data: The raw characteristic value, as read over GATT.
 
     Returns:
-        ``True`` when the pack reports it is charging, ``False`` when it reports discharging,
-        or ``None`` when the value is too short or the state is *unknown* — in which case the
-        caller should fall back to the voltage-trend inference.
+        ``True`` when the battery pack reports that it charges, ``False`` when it reports
+        that it discharges, or ``None`` when the value is too short or the state is unknown.
+        In the last case, the caller uses the inference from the voltage trend instead.
     """
     if len(data) < 3:
         return None
@@ -122,27 +126,29 @@ def charging_from_battery_level_status(data: bytes) -> bool | None:
     return None
 
 
-#: Per-``get_msg`` timeout in the message pump, so a missing device reply can't wedge the
-#: drain loop (seconds).
+#: The timeout for each ``get_msg`` in the message pump (seconds). Thus a device reply that
+#: does not come cannot block the drain loop.
 _MESSAGE_GET_TIMEOUT_S = 5.0
 
-#: MeshCore's ``TXT_TYPE_SIGNED_PLAIN``: the text type a room server pushes its posts in,
-#: the body led by the first four bytes of the author's key. (``0`` is plain text and ``1``
-#: a command-line exchange.)
+#: MeshCore's ``TXT_TYPE_SIGNED_PLAIN``: the text type that a room server uses to push its
+#: posts. The body starts with the first four bytes of the author's key. (``0`` is plain
+#: text, and ``1`` is a command-line exchange.)
 _TXT_TYPE_SIGNED_PLAIN = 2
 
 
 @dataclass(frozen=True, slots=True)
 class _LoginExchange:
-    """One login exchange as :meth:`MeshCoreDevice._login` saw it.
+    """One login exchange, as :meth:`MeshCoreDevice._login` saw it.
 
     Attributes:
-        result: How it ended.
-        payload: The accepting ``LOGIN_SUCCESS`` frame's payload; ``None`` unless accepted.
-        flood: How the radio confirmed sending it — ``True`` by flood, ``False`` along its
-            learned route — or ``None`` when it never confirmed sending it.
-        radio_error: The companion's reason for not sending it, when it never did and said
-            why; ``None`` otherwise.
+        result: How the exchange ended.
+        payload: The payload of the ``LOGIN_SUCCESS`` reply that accepted the login. It is
+            ``None`` if the login was not accepted.
+        flood: How the radio confirmed that it sent the login: ``True`` by flood, ``False``
+            along its learned route. It is ``None`` when the radio never confirmed that it
+            sent the login.
+        radio_error: The reason why the companion did not send the login, when it never
+            sent it and said why. It is ``None`` in other cases.
     """
 
     result: LoginResult
@@ -151,145 +157,159 @@ class _LoginExchange:
     radio_error: str | None = None
 
 
-#: How many uncorrelated frames one :meth:`MeshCoreDevice.admin_login` may quote in its log
-#: line. They are evidence for reading a failure afterwards, not a record to keep, and a busy
-#: mesh can push a great many through the window — a handful names the fault, and the rest
-#: would only bury the outcome they sit beside.
+#: The maximum number of uncorrelated frames that one :meth:`MeshCoreDevice.admin_login`
+#: can quote in its log line. These frames help a person who examines a failure later. They
+#: are not records to keep. A busy mesh can push very many of them during the window. A few
+#: frames are sufficient to identify the fault, and more frames only hide the result that
+#: is on the same line.
 _LOGIN_STRAY_LOG_CAP = 4
 
-#: How long a graceful ``meshcore`` client teardown may take before it is abandoned and the
-#: transport is force-closed instead (seconds). A healthy disconnect completes in well under a
-#: second; the bound exists because the library's dispatcher shutdown can deadlock — its
-#: ``queue.join()`` never returns when two or more events (a routine serial RX burst) are
-#: queued at the moment of stop, since the processor task exits after draining only one. Kept
-#: comfortably under the interactive session's 5-second exit watchdog so even the forced path
-#: finishes as a *clean* exit rather than an ``os._exit`` reap.
+#: The maximum time for a graceful teardown of the ``meshcore`` client (seconds). After this
+#: time, MeshTerm stops the teardown and force-closes the transport instead. A healthy
+#: disconnect takes much less than one second. The limit is necessary because the shutdown
+#: of the dispatcher of the library can deadlock. Its ``queue.join()`` never returns when two
+#: or more events (a usual serial RX burst) are in the queue at the time of the stop, because
+#: the processor task exits after it drains only one event. The value is well below the
+#: 5-second exit watchdog of the interactive session. Thus the forced path also ends as a
+#: clean exit, not as an ``os._exit`` reap.
 _DISCONNECT_TIMEOUT_S = 2.0
 
-#: How long :meth:`MeshcoreDevice.reboot` waits on the reboot write before treating it as
-#: gone out (seconds). Over Bluetooth every command is a write-with-response, and a board
-#: that restarts on the command may never send the link-layer acknowledgement — the write
-#: then hangs until the link supervision timeout drops it, a second or more in which the
-#: app looks like it ignored the keypress. A write that fails does so well inside this.
+#: The time that :meth:`MeshCoreDevice.reboot` waits for the reboot write before it
+#: considers the write as sent (seconds). Over Bluetooth, each command is a
+#: write-with-response. A board that restarts on the command may never send the link-layer
+#: acknowledgement. Then the write hangs until the link supervision timeout ends it. This
+#: takes one second or more, and during this time the app seems to ignore the key press. A
+#: write that fails does so well within this time.
 _REBOOT_WRITE_GRACE_S = 0.25
 
-#: Reboot writes still awaiting an acknowledgement that will likely never come, held so the
-#: loop keeps a reference until the teardown that follows the reboot ends them.
+#: The reboot writes that still wait for an acknowledgement, which probably never comes.
+#: This set keeps a reference to each write for the loop, until the teardown after the
+#: reboot ends it.
 _REBOOT_WRITES: set[asyncio.Future] = set()
 
 
 def _forget_reboot_write(write: asyncio.Future) -> None:
-    """Drop a finished reboot write, retrieving its outcome so none is logged as unhandled."""
+    """Remove a finished reboot write, and read its result so no error is logged as unhandled."""
     _REBOOT_WRITES.discard(write)
     if not write.cancelled() and write.exception() is not None:
         _log.debug("reboot write ended after the device went away: %s", write.exception())
 
 
-#: Bound on the forced transport close that follows an abandoned graceful teardown (seconds).
-#: ``_DISCONNECT_TIMEOUT_S + _FORCE_DISCONNECT_TIMEOUT_S`` stays under the exit watchdog.
+#: The time limit for the forced close of the transport after MeshTerm stops a graceful
+#: teardown (seconds). ``_DISCONNECT_TIMEOUT_S + _FORCE_DISCONNECT_TIMEOUT_S`` stays below
+#: the exit watchdog.
 _FORCE_DISCONNECT_TIMEOUT_S = 1.5
 
-#: Bound on the graceful half of closing a meshcore client whose own ``connect`` failed
-#: (seconds). Deliberately short: this runs on a failure path the user is waiting through —
-#: the startup probe that is about to raise "needs a PIN" — and a half-open client has no
-#: session state worth draining. The forced transport close follows regardless.
+#: The time limit for the graceful part of the close of a meshcore client whose own
+#: ``connect`` failed (seconds). It is short on purpose. This close runs on a failure path
+#: while the user waits: the startup probe that will raise "needs a PIN". Also, a half-open
+#: client has no session state that is worth a drain. The forced close of the transport
+#: always follows.
 _DISCARD_TIMEOUT_S = 2.0
 
-#: Total attempts at opening the BLE link before its failure is surfaced. Opening a BLE
-#: connection on Windows is intermittently flaky (a slow-advertising peripheral is missed by
-#: bleak's internal lookup, or the link-layer connect races the just-finished discovery scan);
-#: a single retry recovers the common case without meaningfully delaying a genuinely absent
-#: device. A link that opens and then drops during service discovery, which a Cardputer
-#: Zero's radio does now and then, is retried the same way. This retries only the *link
-#: open* — never a rejected PIN and never a mesh transmit.
+#: The total number of tries to open the BLE link before MeshTerm reports the failure. On
+#: Windows, the open of a BLE connection sometimes fails for no clear reason. For example,
+#: the internal lookup of bleak does not find a peripheral that advertises slowly, or the
+#: link-layer connect races the discovery scan that just finished. One retry recovers the
+#: usual case, and it adds only a short delay for a device that is not there. A link that
+#: opens and then is lost during service discovery gets a retry in the same way (the radio
+#: of a Cardputer Zero does this sometimes). This retry is only for the open of the link.
+#: It is never for a rejected PIN, and never for a mesh transmission.
 _BLE_CONNECT_ATTEMPTS = 2
 
-#: Pause between BLE link-open attempts (seconds), giving the OS radio a beat to settle.
+#: The pause between two tries to open the BLE link (seconds). It gives the OS radio a short
+#: time to become stable.
 _BLE_CONNECT_RETRY_DELAY_S = 1.0
 
-#: Attempts, and the wait between them, while macOS finishes a pairing it has just begun.
-#: An unbonded subscribe to the companion's authenticated characteristic is what *triggers*
-#: Passkey Entry there, so the very failure we catch is the signal that the OS has raised
-#: its dialog — and the person now has to read a 6-digit code off the device and type it.
-#: Giving up at once meant a correct PIN produced an error and only the *second* attempt
-#: worked, the first having quietly done the bonding. Sized to cover a human typing a code
-#: rather than a radio settling, and bounded so a cancelled dialog still fails in the end.
+#: The number of tries, and the wait between them, while macOS completes a pairing that it
+#: has just started. On macOS, a subscribe without a bond to the authenticated
+#: characteristic of the companion starts Passkey Entry. Thus the failure that we catch is
+#: the signal that the OS has opened its dialog. The user must now read a 6-digit code on
+#: the device and type it. When MeshTerm stopped at once, a correct PIN gave an error, and
+#: only the second try was successful, because the first try had silently made the bond.
+#: The values give a person sufficient time to type a code (they are not for a radio that
+#: becomes stable). They have a limit, so a cancelled dialog still fails at the end.
 _BLE_MACOS_PAIRING_ATTEMPTS = 5
 _BLE_MACOS_PAIRING_DELAY_S = 6.0
 
 TX_POWER_MIN = 1
 TX_POWER_MAX = 22
 
-#: Default range explored when tuning a *remote* repeater's transmit power. Remote nodes
-#: (e.g. high-gain repeaters) typically run hotter than the local companion, so this band
-#: differs from the local ``TX_POWER_MIN``/``TX_POWER_MAX`` clamp. Both bounds are
-#: user-configurable (see :class:`~meshterm.core.config.Settings`).
+#: The default range that MeshTerm explores when it tunes the transmit power of a remote
+#: repeater. Remote nodes (for example, high-gain repeaters) usually transmit at a higher
+#: power than our companion. Thus this range is different from the ``TX_POWER_MIN``/
+#: ``TX_POWER_MAX`` clamp of our companion. The user can change both limits (refer to
+#: :class:`~meshterm.core.config.Settings`).
 REMOTE_TX_MIN = 12
 REMOTE_TX_MAX = 28
 
 
 class DeviceCommandError(RuntimeError):
-    """A device command failed in a recoverable, user-facing way.
+    """A device command failed in a way that MeshTerm can recover from and show to the user.
 
-    Raised for conditions worth reporting cleanly (no traceback) — chiefly the
-    companion's intermittent failure to answer a query in time. Callers may retry.
+    MeshTerm raises it for conditions that it must report cleanly (with no traceback). The
+    main condition is that the companion sometimes does not answer a query in time. Callers
+    can try again.
     """
 
 
 class ContactNotOnDeviceError(DeviceCommandError):
-    """The companion has no contact matching the recipient, so it cannot address it.
+    """The companion has no contact that matches the recipient, so it cannot address it.
 
-    Firmware addresses a direct message by looking the recipient up in *its own* contact
-    table (by a prefix of the public key) and answers ``ERR_CODE_NOT_FOUND`` when nothing
-    matches — the one send rejection with an obvious fix: put the contact back on the
-    device. A distinct :class:`DeviceCommandError` subclass so the chat screen can offer
-    exactly that (see :func:`~meshterm.ui.chat.open_chat`) while every other caller keeps
-    treating it as an ordinary command failure.
+    To address a direct message, the firmware looks for the recipient in its own contact
+    table (by a key prefix). When nothing matches, it answers
+    ``ERR_CODE_NOT_FOUND``. This is the only send rejection with an obvious repair: put the
+    contact back on the device. This error is a separate :class:`DeviceCommandError`
+    subclass, so the chat screen can offer that repair (refer to
+    :func:`~meshterm.ui.chat.open_chat`). All other callers continue to treat it as a usual
+    command failure.
 
-    This is reachable for a contact MeshTerm itself listed, because the contact list a
-    screen sees is the union of the device's live table and the ones MeshTerm remembers
-    for it (see :mod:`meshterm.core.contact_store`): a contact the firmware has since
-    dropped still lists, and only the send finds out it is gone.
+    This error can occur for a contact that MeshTerm itself showed in a list. The reason is
+    that the contact list on a screen is the union of the live table of the device and the
+    contacts that MeshTerm remembers for it (refer to :mod:`meshterm.core.contact_store`).
+    A contact that the firmware removed after that time is still in the list, and only the
+    send finds that it is not there.
 
-    :meth:`Device.remove_contact` raises it for the same lookup against the same table,
-    where it means the opposite thing: nothing left to delete on the radio. A removal
-    therefore *reports* it and carries on dropping the contact from what MeshTerm
-    remembers, rather than failing and leaving a row the reader cannot get rid of.
+    :meth:`Device.remove_contact` raises it for the same lookup in the same table. There it
+    has the opposite meaning: there is nothing more to delete on the radio. Thus a removal
+    reports this error and continues to remove the contact from what MeshTerm remembers. It
+    does not fail, because a failure would leave a row that the user cannot remove.
 
     Attributes:
-        contact: The recipient the device could not find.
+        contact: The recipient that the device could not find.
     """
 
     def __init__(self, contact: Contact) -> None:
-        """Explain the rejection in terms of the contact the device could not find.
+        """Explain the rejection with the name of the contact that the device could not find.
 
         Args:
-            contact: The recipient the companion has no entry for.
+            contact: The recipient for which the companion has no entry.
         """
         super().__init__(f"{contact.name} isn't in this device's contacts — add it back to send.")
         self.contact = contact
 
 
 class ClockAheadError(DeviceCommandError):
-    """The radio's clock is ahead of the time being written, and firmware won't go back.
+    """The radio clock is ahead of the written time, and the firmware does not set it back.
 
-    MeshCore's companion firmware sets its clock only *forward*: ``CMD_SET_DEVICE_TIME``
-    with a time earlier than the one it holds is answered ``ERR_CODE_ILLEGAL_ARG``
-    (``examples/companion_radio/MyMesh.cpp``), which the error table reads as "malformed" —
-    true of the argument, and no help to anyone. A clock a GPS fix, another app, or plain
-    drift carried past this computer's stays there until the radio reboots, so a set that
-    meets one is not a failure to retry but a fact to state.
+    MeshCore's companion firmware sets its clock only forward. If ``CMD_SET_DEVICE_TIME``
+    has a time earlier than the time of the clock, the answer is ``ERR_CODE_ILLEGAL_ARG``
+    (``examples/companion_radio/MyMesh.cpp``). The error table translates this answer as
+    "malformed". That is true of the argument, but it does not help anyone. A GPS fix,
+    another app, or usual drift can move the clock past the clock of this computer. The
+    clock then stays there until the radio reboots. Thus when a set meets such a clock, it
+    is not a failure to try again. It is a fact to state.
 
     Attributes:
-        ahead_s: How far ahead the radio's clock was, in seconds, or ``None`` where it was
-            not read (the firmware's refusal says only *that* it is ahead).
+        ahead_s: How far ahead the radio clock was, in seconds. It is ``None`` when MeshTerm
+            did not read it (the refusal of the firmware says only that the clock is ahead).
     """
 
     def __init__(self, ahead_s: int | None) -> None:
-        """Say how far ahead the clock is, and what does and does not move it.
+        """Tell how far ahead the clock is, and what moves it and what does not.
 
         Args:
-            ahead_s: Seconds ahead of the time written, or ``None`` when unknown.
+            ahead_s: The seconds ahead of the written time, or ``None`` when not known.
         """
         by = f" {_span(ahead_s)}" if ahead_s is not None else ""
         super().__init__(
@@ -300,7 +320,7 @@ class ClockAheadError(DeviceCommandError):
 
 
 def _span(seconds: int) -> str:
-    """A duration as a person says it: ``3 s``, ``12 min``, ``5 h``, ``2 days``."""
+    """A duration in the form that a person says it: ``3 s``, ``12 min``, ``5 h``, ``2 days``."""
     seconds = abs(int(seconds))
     if seconds < 120:
         return f"{seconds} s"
@@ -312,97 +332,102 @@ def _span(seconds: int) -> str:
 
 
 class DeviceAuthenticationError(DeviceCommandError):
-    """A Bluetooth companion refused the connection because it needs a pairing PIN/bond.
+    """A Bluetooth companion refused the connection, because a pairing PIN or a bond is necessary.
 
-    A distinct :class:`DeviceCommandError` subclass so callers can tell "this device needs a
-    PIN" apart from an ordinary command failure and offer to collect one: the interactive
-    picker opens a PIN dialog and retries, while the scripted CLI (which catches the base
-    class) prints the message and bails, since it can't prompt. The message already names the
-    fix (``--ble-pin`` and OS pairing).
+    This error is a separate :class:`DeviceCommandError` subclass. Thus callers can tell
+    "this device needs a PIN" from a usual command failure, and they can offer to get a PIN.
+    The interactive picker opens a PIN dialog and tries again. The scripted CLI (which
+    catches the base class) prints the message and stops, because it cannot prompt. The
+    message already gives the repair (``--ble-pin`` and OS pairing).
 
-    The one exception covers several different failures — no PIN at all, a stale bond the OS
-    still believes in, a wrong PIN, a pairing the device itself refused — and each has its own
-    remedy, so the message names which one happened (see
-    :meth:`MeshCoreDevice._ble_auth_failure`) rather than one sentence covering all of them.
+    This one exception is for several different failures: no PIN, an old bond that the OS
+    still trusts, a wrong PIN, or a pairing that the device itself refused. Each failure has
+    its own repair. Thus the message tells which failure occurred (refer to
+    :meth:`MeshCoreDevice._ble_auth_failure`), instead of one sentence for all of them.
 
     Attributes:
-        hint: The same diagnosis cut to one line for the PIN dialog, which re-asks under it;
-            empty when there is nothing to say beyond the dialog's own question.
+        hint: The same diagnosis, made shorter to one line for the PIN dialog. The dialog
+            asks again below this line. It is empty when there is nothing to say in addition
+            to the question of the dialog.
     """
 
     def __init__(self, message: str, *, hint: str = "") -> None:
-        """Build the error.
+        """Make the error.
 
         Args:
-            message: The full, actionable sentence — what failed and what to do.
-            hint: The dialog-sized version of it (see the class attributes).
+            message: The full sentence that the user can act on: what failed and what to do.
+            hint: The version of the message that fits in the dialog (refer to the class
+                attributes).
         """
         super().__init__(message)
         self.hint = hint
 
 
 class UnrecognisedConnectError(DeviceCommandError):
-    """A connect failed in a way MeshTerm has no name for.
+    """A connect failed in a way for which MeshTerm has no name.
 
-    Every failure MeshTerm recognises has a sentence of its own, naming what happened and
-    what to do. This is the one it doesn't: rather than let a bare library error through —
-    which a dialog could only call "didn't answer", and which used to leave nothing in the
-    log — it says what was being opened, at which step, and the error's own words, and the
-    full traceback is logged beside it (see :func:`_unrecognised`), so a dialog can say where
-    to find that. Raised in place of the original, which stays its ``__cause__``.
+    Each failure that MeshTerm recognizes has its own sentence, which tells what occurred
+    and what to do. This error is for a failure that MeshTerm does not recognize. MeshTerm
+    does not let a bare library error through. A dialog could only call such an error
+    "didn't answer", and in the past it left nothing in the log. Instead, this error tells
+    what MeshTerm tried to open, at which step, and the words of the original error.
+    MeshTerm also logs the full traceback with it (refer to :func:`_unrecognised`), so a
+    dialog can tell where to find the traceback. MeshTerm raises this error instead of the
+    original error, which stays its ``__cause__``.
     """
 
 
 class FloodScopeError(DeviceCommandError):
-    """The companion could not send under the scope a channel send asked for — so it didn't.
+    """The companion could not send in the scope that a channel send asked for, so it did not send.
 
-    A scoped send is set-scope, send, restore (see :meth:`Device.send_channel_in_scope`),
-    and when the first step fails the message is **not** sent at all: going out unscoped
-    instead would reach every repeater the reader meant to keep it from, and going out
-    under the device's default scope would reach a region they never picked. Either would
-    be a silent substitute for what was asked. The message names the firmware each kind of
-    scope needs, since an old companion is by far the likeliest reason.
+    A scoped send has three steps: set the scope, send, and restore (refer to
+    :meth:`Device.send_channel_in_scope`). When the first step fails, MeshTerm does not
+    send the message at all. An unscoped send would reach each repeater that the user
+    wanted to keep the message from. A send in the default scope of the device would reach
+    a region that the user never selected. Each of the two is a silent replacement for the
+    request. The message gives the firmware that is necessary for each type of scope,
+    because an old companion is the most probable reason by far.
 
     Attributes:
-        scope: The scope that was asked for — a region name, or ``*`` for unscoped.
+        scope: The scope that the send asked for: a region name, or ``*`` for unscoped.
     """
 
     def __init__(self, scope: str, reason: str) -> None:
-        """Explain which scope could not be set and why.
+        """Explain which scope MeshTerm could not set, and why.
 
         Args:
             scope: The region name, or :data:`~meshterm.core.regions.WILDCARD`.
-            reason: The sentence to show (it already says nothing was sent).
+            reason: The sentence to show (it already says that nothing was sent).
         """
         super().__init__(reason)
         self.scope = scope
 
 
-#: The companion firmware that first takes a session scope (``CMD_SET_FLOOD_SCOPE``), and
-#: the one that first takes the explicit-unscoped override on it (``*``, sent as flag byte
-#: ``0x01``) — before that release the flag frame is not understood, so an "unscoped" send
-#: would fall back to the default scope instead.
+#: The first companion firmware that accepts a session scope (``CMD_SET_FLOOD_SCOPE``), and
+#: the first one that accepts the explicit unscoped override on it (``*``, sent as the flag
+#: byte ``0x01``). Firmware before that release does not understand the command with the
+#: flag. Thus an "unscoped" send would use the default scope instead.
 SCOPE_FIRMWARE = (1, 10)
 UNSCOPED_FIRMWARE = (1, 16)
 
-#: The firmware that first has a persisted default scope (``CMD_SET_DEFAULT_FLOOD_SCOPE``).
-#: On anything older a plain flood is unscoped by construction.
+#: The first firmware that has a stored default scope (``CMD_SET_DEFAULT_FLOOD_SCOPE``).
+#: On older firmware, a plain flood is always unscoped.
 DEFAULT_SCOPE_FIRMWARE = (1, 15)
 
 
 def firmware_version(info: dict | None) -> tuple[int, int, int] | None:
-    """The companion's release as a comparable tuple, read from its device-query ``ver``.
+    """The companion release as a tuple that can be compared, from its device-query ``ver``.
 
-    Firmware reports its build as a string — ``v1.15.0``, ``1.16.0-dev``, a vendor's own
-    suffix — and only the leading ``major.minor[.patch]`` means anything here.
+    The firmware reports its build as a string (``v1.15.0``, ``1.16.0-dev``, or a suffix of
+    a vendor). Only the leading ``major.minor[.patch]`` has a meaning here.
 
     Args:
         info: A :meth:`Device.get_device_info` payload.
 
     Returns:
-        ``(major, minor, patch)``, or ``None`` where nothing version-shaped was reported
-        (the simulator, or firmware predating the device query) — a caller then trusts the
-        command itself to say whether it is understood.
+        ``(major, minor, patch)``, or ``None`` when the report has nothing in the form of a
+        version (the simulator, or firmware older than the device query). In that case, the
+        caller trusts the command itself to tell whether the firmware understands it.
     """
     match = _VERSION.search(str((info or {}).get("ver") or ""))
     if match is None:
@@ -420,14 +445,16 @@ def _version_text(version: tuple[int, ...]) -> str:
 
 
 def _scope_refusal(scope: str, exc: BaseException) -> str:
-    """The sentence for a companion that refused to set a send scope.
+    """The sentence for a companion that refused to set a scope for a send.
 
     Args:
         scope: The region name, or ``*``.
-        exc: What the command raised, kept in the sentence for whoever is debugging it.
+        exc: The exception that the command raised. The sentence keeps it for a person who
+            debugs the problem.
 
     Returns:
-        A sentence naming the firmware the scope needs, and that nothing was sent.
+        A sentence that gives the firmware that is necessary for the scope, and tells that
+        nothing was sent.
     """
     if scope == REGION_WILDCARD:
         need = f"sending unscoped needs firmware {_version_text(UNSCOPED_FIRMWARE)} or newer"
@@ -436,61 +463,66 @@ def _scope_refusal(scope: str, exc: BaseException) -> str:
     return f"The radio refused scope {scope} ({exc}) — {need}. Nothing was sent."
 
 
-#: ``ERR_CODE_NOT_FOUND`` — the companion has no entry matching what a command addressed.
+#: ``ERR_CODE_NOT_FOUND``: the companion has no entry that matches what a command addressed.
 _ERR_NOT_FOUND = 2
 
-#: ``ERR_CODE_ILLEGAL_ARG`` — an argument the firmware refuses; for ``CMD_SET_DEVICE_TIME``
-#: specifically, a time earlier than the clock it already holds (see :class:`ClockAheadError`).
+#: ``ERR_CODE_ILLEGAL_ARG``: an argument that the firmware refuses. For
+#: ``CMD_SET_DEVICE_TIME``, it is a time earlier than the clock that the firmware already
+#: has (refer to :class:`ClockAheadError`).
 _ERR_ILLEGAL_ARG = 6
 
-#: ``CMD_SET_AUTOADD_CONFIG`` — the auto-add bitmask, and (as an optional second byte, which
-#: the ``meshcore`` library never sends) the hop limit.
+#: ``CMD_SET_AUTOADD_CONFIG``: the auto-add bitmask, and the hop limit (as an optional
+#: second byte, which the ``meshcore`` library never sends).
 _CMD_SET_AUTOADD_CONFIG = 58
 
-#: Companion command that persists the default flood scope (firmware 1.15+), framed by
-#: :meth:`MeshCoreDevice.set_default_flood_scope` itself rather than the library.
+#: The companion command that stores the default flood scope (firmware 1.15+).
+#: :meth:`MeshCoreDevice.set_default_flood_scope` itself builds the bytes of this command,
+#: not the library.
 _CMD_SET_DEFAULT_FLOOD_SCOPE = 63
 
-#: Companion command that sets (or clears, or forces off) the session flood scope
-#: (firmware 1.10+; the force-unscoped mode 1.16+), framed by
-#: :meth:`MeshCoreDevice.set_flood_scope` itself rather than the library.
+#: The companion command that sets, clears, or forces off the session flood scope (firmware
+#: 1.10+, and 1.16+ for the force-unscoped mode). :meth:`MeshCoreDevice.set_flood_scope`
+#: itself builds the bytes of this command, not the library.
 _CMD_SET_FLOOD_SCOPE_KEY = 54
 
-#: ``RESP_CODE_AUTOADD_CONFIG`` — the reply to a read of the auto-add configuration. Its
-#: second payload byte is the hop limit, which the library's parser drops (it keeps only the
-#: bitmask), so :meth:`MeshCoreDevice.get_autoadd_config` recognises the raw frame by this.
+#: ``RESP_CODE_AUTOADD_CONFIG``: the reply to a read of the auto-add settings. The second
+#: byte of its payload is the hop limit. The parser of the library removes this byte (it
+#: keeps only the bitmask). Thus :meth:`MeshCoreDevice.get_autoadd_config` uses this code to
+#: recognize the raw frame.
 _RESP_AUTOADD_CONFIG = 25
 
-#: Sentinel: no hop limit has been read alongside the last auto-add bitmask.
+#: A sentinel: MeshTerm has read no hop limit with the last auto-add bitmask.
 _UNREAD = object()
 
-#: The client-repeat frequencies (MHz) the companion firmware allows when a board defines
-#: none of its own (``repeat_freq_ranges`` in MeshCore's ``examples/companion_radio/MyMesh.cpp``).
+#: The client-repeat frequencies (MHz) that the companion firmware accepts when a board
+#: defines none of its own (``repeat_freq_ranges`` in MeshCore's
+#: ``examples/companion_radio/MyMesh.cpp``).
 _DEFAULT_REPEAT_FREQS: tuple[tuple[float, float], ...] = (
     (433.0, 433.0),
     (869.495, 869.495),
     (918.0, 918.0),
 )
 
-#: How far a radio frequency may sit from an allowed repeat range and still be inside it
-#: (MHz). Frequencies travel in kHz, so half of one is the whole rounding error.
+#: The maximum distance of a radio frequency from an accepted repeat range, where the
+#: frequency still counts as in the range (MHz). Frequencies go over the protocol in kHz,
+#: so half of one kHz is the full rounding error.
 _REPEAT_FREQ_TOLERANCE_MHZ = 0.0005
 
 
 def repeat_freq_allowed(freq: float, ranges: Iterable[tuple[float, float]]) -> bool:
-    """Whether ``freq`` (MHz) lies in one of the firmware's client-repeat ``ranges``.
+    """Whether ``freq`` (MHz) is in one of the client-repeat ``ranges`` of the firmware.
 
-    The firmware's own ``isValidClientRepeatFreq``, in MHz: it refuses to turn relaying on
-    anywhere else.
+    This is the firmware's own ``isValidClientRepeatFreq``, in MHz. The firmware does not
+    let the companion relay on any other frequency.
     """
     tol = _REPEAT_FREQ_TOLERANCE_MHZ
     return any(low - tol <= float(freq) <= high + tol for low, high in ranges)
 
 
-#: What each companion error code means, in a sentence that finishes "the device …".
-#: The wire carries only the number and the library's ``ERR_CODE_*`` spelling (see
-#: ``meshcore.events.ErrorMessages``), which is diagnostic text, not something to put in
-#: front of a user — :func:`reject_reason` turns it into the sentence below.
+#: The meaning of each companion error code, in a clause that ends a sentence, in the form
+#: "the device …". The protocol carries only the number and the ``ERR_CODE_*`` name of the
+#: library (refer to ``meshcore.events.ErrorMessages``). That is diagnostic text, and it is
+#: not for the user. :func:`reject_reason` changes it into the clause below.
 _ERROR_REASONS = {
     1: "the firmware doesn't support that command",
     2: "the device has no contact with that key",
@@ -502,17 +534,18 @@ _ERROR_REASONS = {
 
 
 def _clip_utf8(text: str, limit: int) -> str:
-    """Trim ``text`` to at most ``limit`` UTF-8 bytes, never splitting a character.
+    """Cut ``text`` to a maximum of ``limit`` UTF-8 bytes, and never cut a character in two.
 
-    Firmware fields are byte-sized, not character-sized, so a name with an accent in it can
-    overrun a field it looks short enough for.
+    The firmware fields have a size in bytes, not in characters. Thus a name with an accent
+    can be too long for a field, although it seems short enough.
 
     Args:
         text: The value to fit.
-        limit: The field's size in bytes.
+        limit: The size of the field, in bytes.
 
     Returns:
-        ``text`` itself when it fits, else its longest whole-character prefix that does.
+        ``text`` itself when it fits. If not, its longest prefix of whole characters that
+        fits.
     """
     encoded = text.encode("utf-8")
     if len(encoded) <= limit:
@@ -521,14 +554,14 @@ def _clip_utf8(text: str, limit: int) -> str:
 
 
 def error_code(result) -> int | None:  # noqa: ANN001
-    """Return the companion error code carried by a rejected command's event, if any.
+    """Return the companion error code in the event of a rejected command, if it has one.
 
     Args:
-        result: The :class:`meshcore.events.Event` a command returned (or ``None``).
+        result: The :class:`meshcore.events.Event` that a command returned (or ``None``).
 
     Returns:
-        The ``error_code`` from the event's payload, or ``None`` when the rejection carried
-        no code (an absent reply, or a payload shaped some other way).
+        The ``error_code`` from the payload of the event, or ``None`` when the rejection had
+        no code (no reply, or a payload with a different shape).
     """
     payload = getattr(result, "payload", {}) or {}
     if not isinstance(payload, dict):
@@ -540,18 +573,19 @@ def error_code(result) -> int | None:  # noqa: ANN001
 
 
 def reject_reason(result) -> str:  # noqa: ANN001
-    """Explain a rejected command in one clause, for the end of a user-facing sentence.
+    """Explain a rejected command in one clause, for the end of a sentence to the user.
 
-    A rejection reaches us as ``{'error_code': 2, 'code_string': 'ERR_CODE_NOT_FOUND'}``;
-    pasting that dict into a status line (which is what every raise site used to do) shows
-    the user a wire constant and leaves them no wiser. This maps the code to plain words,
-    falling back to the raw payload only for a rejection with no code we know.
+    A rejection arrives as ``{'error_code': 2, 'code_string': 'ERR_CODE_NOT_FOUND'}``. If
+    MeshTerm puts this dict into a status line (all the raise sites did this in the past),
+    the user sees a protocol constant and learns nothing. This function changes the code
+    to plain words. It uses the raw payload only for a rejection with a code that we do not
+    know.
 
     Args:
-        result: The :class:`meshcore.events.Event` a command returned (or ``None``).
+        result: The :class:`meshcore.events.Event` that a command returned (or ``None``).
 
     Returns:
-        A lowercase clause naming the cause, e.g. ``"the device's table is full"``.
+        A lowercase clause that tells the cause, for example ``"the device's table is full"``.
     """
     code = error_code(result)
     if code in _ERROR_REASONS:
@@ -562,14 +596,15 @@ def reject_reason(result) -> str:  # noqa: ANN001
     return f"the device rejected it ({payload})"
 
 
-#: Exception class names that signal the link to the companion has dropped — the device was
-#: unplugged, powered off, moved out of range, or its port/transport otherwise vanished — as
-#: opposed to an ordinary command-level failure. Matched by name in :func:`is_connection_lost`
-#: so the optional ``pyserial``/``bleak`` dependencies need not be imported here (neither is
-#: installed on the ``--mock`` path). ``SerialException`` covers pyserial's read/write failures
-#: (including the Windows ``ClearCommError``/``WriteFile`` variants); the ``Bleak*`` names cover
-#: a Bluetooth link that dropped or a peripheral that went out of range; the ``OSError``
-#: subclasses cover a link torn down at the OS layer.
+#: The names of the exception classes that show that the link to the companion is lost. For
+#: example, the device was unplugged, powered off, or moved out of range, or its port or
+#: transport is gone in some other way. This is different from a usual failure of a command.
+#: :func:`is_connection_lost` matches these names, so this module does not have to import
+#: the optional ``pyserial`` and ``bleak`` dependencies (the ``--mock`` path installs neither
+#: of them). ``SerialException`` is for the read and write failures of pyserial (also the
+#: Windows ``ClearCommError`` and ``WriteFile`` variants). The ``Bleak*`` names are for a
+#: Bluetooth link that was lost or a peripheral that went out of range. The ``OSError``
+#: subclasses are for a link that the OS closed.
 _CONNECTION_LOST_TYPES = frozenset(
     {
         "SerialException",
@@ -585,9 +620,9 @@ _CONNECTION_LOST_TYPES = frozenset(
     }
 )
 
-#: Lowercase message fragments that also indicate a dropped link, for exceptions raised as a
-#: plain ``OSError``/``RuntimeError`` (whose type name alone isn't conclusive). Kept specific
-#: enough not to fire on ordinary command timeouts.
+#: Lowercase message fragments that also show a lost link, for exceptions that are a plain
+#: ``OSError`` or ``RuntimeError`` (for these, the type name alone does not prove the loss).
+#: The fragments are specific, so that they do not match usual command timeouts.
 _CONNECTION_LOST_HINTS = (
     "device disconnected",
     "device not configured",
@@ -599,7 +634,8 @@ _CONNECTION_LOST_HINTS = (
     "port is closed",
     "no such device",
     "input/output error",
-    # BLE link-loss phrasings (bleak errors / meshcore BLE transport callback reasons).
+    # The texts for a lost BLE link (bleak errors, and the reasons that the meshcore BLE
+    # transport gives to its callback).
     "ble_transport_lost",
     "ble_write_failed",
     "ble_disconnect",
@@ -609,20 +645,22 @@ _CONNECTION_LOST_HINTS = (
 
 
 def is_connection_lost(exc: BaseException) -> bool:
-    """Return whether ``exc`` means the companion serial link has dropped.
+    """Return whether ``exc`` means that the serial link to the companion is lost.
 
-    Distinguishes a *lost connection* (the device was unplugged, powered off, or its serial
-    port vanished) from an ordinary command failure, so the interactive session can offer to
-    reconnect rather than merely report an error. The whole exception chain
-    (``__cause__``/``__context__``) is walked, matching by exception type name and message
-    text — see :data:`_CONNECTION_LOST_TYPES` / :data:`_CONNECTION_LOST_HINTS` — so the
-    optional ``pyserial`` dependency need not be imported here.
+    This function tells a *lost connection* (the device was unplugged, powered off, or its
+    serial port is gone) from a usual command failure. Thus the interactive session can
+    offer to reconnect, instead of only an error report. The function examines the full
+    exception chain (``__cause__``/``__context__``). It matches the name of the exception
+    type and the message text (refer to :data:`_CONNECTION_LOST_TYPES` and
+    :data:`_CONNECTION_LOST_HINTS`). Thus this module does not have to import the optional
+    ``pyserial`` dependency.
 
     Args:
-        exc: The exception raised by a device operation.
+        exc: The exception that a device operation raised.
 
     Returns:
-        ``True`` if the exception (or any it was raised from) looks like a dropped link.
+        ``True`` if the exception (or an exception that it was raised from) seems to be a
+        lost link.
     """
     seen: set[int] = set()
     current: BaseException | None = exc
@@ -637,48 +675,51 @@ def is_connection_lost(exc: BaseException) -> bool:
     return False
 
 
-#: Message fragments a BLE stack uses when a characteristic can't be accessed without a bond —
-#: i.e. the companion is PIN-protected and we're unpaired (or gave the wrong PIN). The GATT
-#: subscribe fails with one of these rather than a dropped link, so they're handled as a
-#: distinct, actionable "needs a PIN" case (see :func:`_is_ble_auth_error`) and never as
-#: connection loss. Matched by text so ``bleak`` need not be imported here.
+#: The message fragments that a BLE stack uses when it cannot access a characteristic
+#: without a bond. That is, the companion has a PIN, and we are not paired (or we gave the
+#: wrong PIN). The GATT subscribe fails with one of these messages, not with a lost link.
+#: Thus MeshTerm treats them as a separate "needs a PIN" case that the user can act on
+#: (refer to :func:`_is_ble_auth_error`), and never as a lost connection. MeshTerm matches
+#: them by text, so this module does not have to import ``bleak``.
 _BLE_AUTH_HINTS = (
     "insufficient authentication",
     "insufficient authorization",
     "insufficient encryption",
     "not paired",
-    # The pairing step itself failing, rather than the subscribe it guards: bleak's
-    # ``pair()`` ("Could not pair with device: …") and BlueZ's AuthenticationFailed. Without
-    # these a refused pairing fell through as an anonymous failure and was reported as a
-    # device that "didn't answer as a MeshCore device".
+    # A failure of the pairing step itself, not of the subscribe that it guards: bleak's
+    # ``pair()`` ("Could not pair with device: …") and BlueZ's AuthenticationFailed. Before
+    # we added these, a refused pairing went through as an unknown failure. MeshTerm then
+    # reported a device that "didn't answer as a MeshCore device".
     "could not pair",
     "authentication failed",
     "authenticationfailed",
-    # ATT 0x0E, "Unlikely Error": what a companion that has since been given a PIN answers
-    # the UART subscribe with over an *unauthenticated* bond left from when it was open —
-    # encryption succeeds on the old key, and the characteristic's MITM requirement is what
-    # refuses. Seen on a uConsole (BlueZ bond Authenticated=0). Only consulted while
-    # connecting, where it is the security layer talking; it routes the refusal to the
-    # stale-bond message and the PIN repair, which is exactly what heals it.
+    # ATT 0x0E, "Unlikely Error": the answer to the UART subscribe from a companion that got
+    # a PIN after the bond was made. The bond is unauthenticated, because it is from the
+    # time when the companion had no PIN. The encryption with the old key is successful,
+    # and the MITM requirement of the characteristic refuses the subscribe. We saw this on
+    # a uConsole (BlueZ bond Authenticated=0). MeshTerm uses this hint only during a
+    # connect, where this message comes from the security layer. The hint sends the refusal
+    # to the old-bond message and the PIN repair, and that repair corrects the problem.
     "unlikely error",
 )
 
 
 @dataclass(frozen=True)
 class _BlePairing:
-    """What the last Windows PIN-pairing attempt found, kept so a refusal can say why.
+    """The result of the last Windows PIN pairing, kept so that a refusal can tell why.
 
-    The pairing step is best-effort and returns a bool (see
-    :meth:`MeshCoreDevice._pair_ble_windows`), which is all the connect needs to decide
-    whether to retry — but a bool can't tell the reader whether the PIN was wrong, the device
-    refused, or Windows couldn't reach it, and those have different fixes.
+    The pairing step is best-effort and returns a bool (refer to
+    :meth:`MeshCoreDevice._pair_ble_windows`). The connect uses only this bool to find if
+    it must try again. But a bool cannot tell the user if the PIN was wrong, if the device
+    refused, or if Windows could not reach the device. These causes have different repairs.
 
     Attributes:
-        outcome: ``"reused"`` (an existing bond was trusted), ``"paired"``, ``"absent"``
-            (Windows couldn't reach the device), ``"failed"`` (the ceremony returned a
-            non-success status), or ``"error"`` (the WinRT call raised).
-        status: The ceremony's status name, lowercase with spaces (``"authentication
-            failure"``), or the exception text for ``"error"``; empty otherwise.
+        outcome: ``"reused"`` (Windows trusted a bond that exists), ``"paired"``,
+            ``"absent"`` (Windows could not reach the device), ``"failed"`` (the ceremony
+            returned a status that is not success), or ``"error"`` (the WinRT call raised).
+        status: The status name of the ceremony, in lowercase with spaces
+            (``"authentication failure"``), or the exception text for ``"error"``. It is
+            empty in other cases.
     """
 
     outcome: str
@@ -686,7 +727,10 @@ class _BlePairing:
 
 
 def _ble_host() -> str | None:
-    """The OS whose pairing MeshTerm runs itself, as a message names it; ``None`` elsewhere."""
+    """The name of the OS whose pairing MeshTerm itself runs, for a message.
+
+    It is ``None`` on other OSes.
+    """
     if sys.platform == "win32":
         return "Windows"
     if sys.platform.startswith("linux"):
@@ -695,20 +739,22 @@ def _ble_host() -> str | None:
 
 
 def _ble_forget(where: str) -> str:
-    """How to forget a device's bond on this OS, as a clause a remedy can carry."""
+    """How to remove the bond of a device on this OS, as a clause for a repair message."""
     if sys.platform.startswith("linux"):
         return f"remove it with `bluetoothctl remove {where}`"
     return "remove it in Settings > Bluetooth"
 
 
-#: Pairing statuses that mean the PIN itself was wrong: WinRT's names, then BlueZ's (whose
-#: AuthenticationFailed after the agent was asked for the PIN is a passkey mismatch).
+#: The pairing statuses that mean that the PIN itself was wrong: the WinRT names, then the
+#: BlueZ name. (In BlueZ, AuthenticationFailed after the agent was asked for the PIN is a
+#: passkey mismatch.)
 _PAIRING_WRONG_PIN = frozenset(
     {"authentication failure", "invalid ceremony data", "authentication failed"}
 )
 
-#: Pairing statuses that mean the device (not the PIN) turned the pairing down — busy with
-#: another host, holding an old bond, or simply not answering in time.
+#: The pairing statuses that mean that the device (not the PIN) refused the pairing. For
+#: example, the device is busy with another host, it has an old bond, or it does not answer
+#: in time.
 _PAIRING_REFUSED = frozenset(
     {
         "connection rejected",
@@ -718,7 +764,7 @@ _PAIRING_REFUSED = frozenset(
         "rejected by handler",
         "authentication timeout",
         "protection level could not be met",
-        # BlueZ's spellings of the same refusals.
+        # The BlueZ names of the same refusals.
         "authentication rejected",
         "authentication canceled",
         "connection attempt failed",
@@ -727,19 +773,20 @@ _PAIRING_REFUSED = frozenset(
 )
 
 
-#: What a link that opened and then dropped before the session was up reads as. BlueZ's
-#: bleak backend says "failed to discover services, device disconnected" when the peer is
-#: lost during service discovery — on a Cardputer Zero an HCI Connection Timeout (0x08)
-#: 1.7 s in, at any signal strength, with no security exchange begun; the next attempt
-#: connected. A radio hiccup, so it is retried like a link that never opened.
+#: The text of a link that opened and then was lost before the session started. The BlueZ
+#: backend of bleak says "failed to discover services, device disconnected" when it loses
+#: the peer during service discovery. On a Cardputer Zero, this was an HCI Connection
+#: Timeout (0x08) after 1.7 s, at all signal strengths, before a security exchange started.
+#: The next try connected. It is a short radio problem, so MeshTerm tries again, as for a
+#: link that never opened.
 _BLE_DROP_HINTS = ("device disconnected",)
 
 
 def _chain_says(exc: BaseException, hints: tuple[str, ...]) -> bool:
-    """Whether ``exc``, or anything it was raised from, mentions one of ``hints``.
+    """Whether ``exc``, or an exception that it was raised from, contains one of ``hints``.
 
-    Walks the whole ``__cause__``/``__context__`` chain, so a bleak error wrapped by the
-    meshcore transport is still recognized.
+    The function examines the full ``__cause__``/``__context__`` chain. Thus it also
+    recognizes a bleak error in a wrapper of the meshcore transport.
     """
     seen: set[int] = set()
     current: BaseException | None = exc
@@ -753,30 +800,31 @@ def _chain_says(exc: BaseException, hints: tuple[str, ...]) -> bool:
 
 
 def _is_ble_auth_error(exc: BaseException) -> bool:
-    """Return whether ``exc`` (or any it was raised from) is a BLE authentication rejection.
+    """Return whether ``exc``, or an exception in its chain, is a BLE authentication rejection.
 
-    Matches :data:`_BLE_AUTH_HINTS` along the exception chain, so a
-    ``BleakGATTProtocolError`` wrapped by the meshcore transport is still recognized.
+    It matches :data:`_BLE_AUTH_HINTS` along the exception chain. Thus it also recognizes
+    a ``BleakGATTProtocolError`` in a wrapper of the meshcore transport.
 
     Args:
-        exc: The exception raised while opening the Bluetooth connection.
+        exc: The exception that the open of the Bluetooth connection raised.
 
     Returns:
-        ``True`` if the failure is a missing/rejected pairing rather than a dropped link.
+        ``True`` if the failure is a pairing that is missing or rejected, not a lost link.
     """
     return _chain_says(exc, _BLE_AUTH_HINTS)
 
 
 def _is_ble_link_drop(exc: BaseException) -> bool:
-    """Whether opening the link failed because it dropped, not because security refused it.
+    """Whether the link open failed because the link was lost, not because security refused it.
 
-    An authentication refusal can end in a disconnect too, so anything that reads as one
-    is never a drop: a wrong or missing PIN must reach the PIN handling, never a retry.
+    An authentication refusal can also end in a disconnect. Thus a failure that seems to be
+    an authentication refusal is never a lost link. A wrong or missing PIN must go to the
+    code that handles the PIN, never to a retry.
     """
     return not _is_ble_auth_error(exc) and _chain_says(exc, _BLE_DROP_HINTS)
 
 
-#: ``errno`` values a serial open fails with, by what they mean for the reader.
+#: The ``errno`` values of a failed serial open, in groups by their meaning for the user.
 _ERRNO_DENIED = {1, 13}  # EPERM, EACCES
 _ERRNO_BUSY = {11, 16}  # EAGAIN (pyserial's exclusive lock), EBUSY
 _ERRNO_GONE = {2, 6, 19}  # ENOENT, ENXIO, ENODEV
@@ -785,19 +833,21 @@ _ERRNO_IN_TEXT = re.compile(r"\[Errno (\d+)\]")
 
 
 def _serial_open_message(port: str, exc: BaseException) -> str | None:
-    """Name why a serial port wouldn't open, or ``None`` if the failure isn't one of those.
+    """Tell why a serial port did not open, or ``None`` if the cause is not a known one.
 
-    pyserial folds the OS error into a ``SerialException`` whose ``errno`` is usually unset,
-    so the chain is walked for a real ``OSError`` first and the ``[Errno N]`` in the text
-    second. Windows says "Access is denied" for a port another program holds, which is a
-    busy port there, not a permission.
+    pyserial puts the OS error into a ``SerialException``, and it usually does not set the
+    ``errno`` of that exception. Thus the function first looks in the chain for a real
+    ``OSError``, and then for the ``[Errno N]`` in the text. Windows says "Access is
+    denied" for a port that another program holds. On Windows, this is a busy port, not a
+    permission problem.
 
     Args:
         port: The port, as the message names it.
-        exc: What opening it raised.
+        exc: The exception that the open raised.
 
     Returns:
-        The actionable sentence, or ``None`` to let the original error through.
+        The sentence that the user can act on, or ``None`` to let the original error
+        through.
     """
     code: int | None = None
     text = ""
@@ -834,25 +884,27 @@ def _serial_open_message(port: str, exc: BaseException) -> str | None:
     return None
 
 
-#: ``errno`` values a TCP connect fails with when no route leads to the host: POSIX's own
-#: constants, and Winsock's (WSAENETUNREACH, WSAEHOSTUNREACH), which Windows reports as-is.
+#: The ``errno`` values of a failed TCP connect when no route goes to the host: the POSIX
+#: constants, and the Winsock constants (WSAENETUNREACH, WSAEHOSTUNREACH), which Windows
+#: reports without a change.
 _ERRNO_UNREACHABLE = {errno.ENETUNREACH, errno.EHOSTUNREACH, 10051, 10065}
 
 
 def _tcp_open_message(host: str, port: int | None, exc: BaseException) -> str | None:
-    """Name why a TCP connection to a companion wouldn't open, or ``None`` if unrecognised.
+    """Tell why a TCP connection to a companion did not open, or ``None`` if not recognized.
 
-    Each of these used to be reported as "no response from a MeshCore companion", which
-    sent the reader to the companion when the fault was the address, the port, or the
-    network between them — and each has a different fix.
+    In the past, MeshTerm reported each of these causes as "no response from a MeshCore
+    companion". Thus the user examined the companion, but the fault was the address, the
+    port, or the network between them. Each of these causes has a different repair.
 
     Args:
         host: The host, as the message names it.
         port: The TCP port.
-        exc: What opening the socket raised.
+        exc: The exception that the open of the socket raised.
 
     Returns:
-        The actionable sentence, or ``None`` to report it as unrecognised.
+        The sentence that the user can act on, or ``None`` to report the error as not
+        recognized.
     """
     if isinstance(exc, socket.gaierror):
         return f"couldn't find a host named {host} — check the spelling, or use its IP address."
@@ -880,14 +932,14 @@ def _tcp_open_message(host: str, port: int | None, exc: BaseException) -> str | 
 
 
 def _ble_stalled_message(where: str, seconds: float | None = None) -> str:
-    """Say that a Bluetooth connect ran out of time, and what usually stalls one.
+    """Tell that a Bluetooth connect used all its time, and what usually blocks a connect.
 
     Args:
         where: The device, as the message names it.
-        seconds: The window it ran out of, when the caller set one.
+        seconds: The time window that the connect used, when the caller set one.
 
     Returns:
-        The actionable sentence.
+        The sentence that the user can act on.
     """
     took = f"took longer than {seconds:.0f}s" if seconds else "timed out"
     return (
@@ -897,26 +949,26 @@ def _ble_stalled_message(where: str, seconds: float | None = None) -> str:
 
 
 def _error_words(exc: BaseException) -> str:
-    """The error's own message, or its type's name where it has none (a bare ``TimeoutError``)."""
+    """The error message, or the type name if it has no message (a bare ``TimeoutError``)."""
     return str(exc).strip() or type(exc).__name__
 
 
-#: The unrecognised failures whose traceback is already in the log. The reconnect dialog
-#: retries every couple of seconds against whatever is refusing it, and one traceback says
-#: everything the next three hundred would.
+#: The failures that MeshTerm did not recognize and whose traceback is already in the log.
+#: The reconnect dialog tries again every few seconds while the cause still refuses it. One
+#: traceback gives all the information that the next three hundred would give.
 _TRACED: set[str] = set()
 
 
 def _unrecognised(what: str, exc: BaseException) -> UnrecognisedConnectError:
-    """Build the error for a connect failure MeshTerm has no sentence for, and log it whole.
+    """Make the error for a connect failure that has no MeshTerm sentence, and log all of it.
 
-    Logged at warning, with the traceback the first time it is met, because that is what
-    the dialog then points at: the sentence carries the error's own words, and the log
-    carries where they came from.
+    The function logs the failure at the warning level, with the traceback the first time
+    that it occurs, because the dialog then refers the user to the log. The sentence has the
+    words of the error, and the log has the location where they came from.
 
     Args:
-        what: What was being done, as the start of the sentence ("couldn't open COM5").
-        exc: The unrecognised error.
+        what: The action that failed, as the start of the sentence ("couldn't open COM5").
+        exc: The error that MeshTerm did not recognize.
 
     Returns:
         The error to raise, from ``exc``.
@@ -929,20 +981,20 @@ def _unrecognised(what: str, exc: BaseException) -> UnrecognisedConnectError:
 
 
 class _ConnectingClients(list):
-    """Every bleak client a connecting ``BLEConnection`` reported a disconnect for.
+    """Each bleak client for which a ``BLEConnection`` reported a disconnect during its connect.
 
     Attributes:
-        connecting: Whether ``connect()`` is still running; while it is, a disconnect is
-            recorded here and *not* passed on to meshcore (see
+        connecting: Whether ``connect()`` still runs. While it runs, this list stores a
+            disconnect, and does not pass it on to meshcore (refer to
             :func:`_hold_disconnects_while_connecting`).
-        hung_up: Set when the link dropped after BlueZ had asked for the PIN: the companion
-            refusing the pairing, which no retry inside bleak will undo.
+        hung_up: Set when the link was lost after BlueZ asked for the PIN. That is, the
+            companion refused the pairing, and no retry in bleak will undo this refusal.
     """
 
     connecting = True
 
     def __init__(self, clients: Iterable[object] = ()) -> None:
-        """Start from ``clients`` (none, normally) and no hang-up."""
+        """Start with ``clients`` (usually none) and no hang-up."""
         super().__init__(clients)
         self.hung_up = asyncio.Event()
 
@@ -950,41 +1002,45 @@ class _ConnectingClients(list):
 def _hold_disconnects_while_connecting(  # noqa: ANN001
     connection, pin_asked: Callable[[], bool] = lambda: False
 ) -> _ConnectingClients:
-    """Keep meshcore from dropping its bleak client while that client is still connecting.
+    """Prevent meshcore from removing its bleak client while that client still connects.
 
-    On Linux, BlueZ answers a link attempt that failed to synchronise
-    (``le-connection-abort-by-local``, HCI 0x3e) and bleak retries it inside its own
-    ``connect()`` — three to seven times per connect on a Raspberry Pi radio. Each failed
-    attempt fires the client's disconnect callback, and meshcore's
-    ``BLEConnection.handle_disconnect`` answers by resetting ``self.client`` to what the
-    caller passed in, which is ``None``. bleak's next retry then succeeds on a client
-    nobody holds: meshcore's ``start_notify`` hits ``None``, its connect gives up as "not
-    established", and the live link is stranded. The companion, connected to us, stops
-    advertising, so the retry cannot find it and the reader is told it is out of range.
-    Measured against a companion on a uConsole with btmon: three runs out of three.
+    On Linux, BlueZ answers a link try that did not synchronize
+    (``le-connection-abort-by-local``, HCI 0x3e), and bleak tries the link again inside its
+    own ``connect()``. On a Raspberry Pi radio, this occurs three to seven times for each
+    connect. Each failed try calls the disconnect callback of the client. meshcore's
+    ``BLEConnection.handle_disconnect`` then resets ``self.client`` to the value that the
+    caller gave, which is ``None``. The next retry of bleak is then successful on a client
+    that nothing holds. meshcore's ``start_notify`` gets ``None``, its connect stops as "not
+    established", and the live link has no owner.
 
-    So while ``connect()`` runs, a disconnect is only recorded. bleak raises on its own if
-    the link really cannot be made, and once ``connect()`` returns, disconnects reach
-    meshcore as before, because the client keeps calling this same wrapper.
+    The companion, which is connected to us, then stops advertising. Thus the retry cannot
+    find it, and MeshTerm tells the user that it is out of range. We measured this with a
+    companion on a uConsole and btmon: three runs of three.
 
-    The one drop that is not bleak's to retry is the companion hanging up on a pairing: a
-    PIN-protected companion (an ESP32 one, measured on a Cardputer Zero) answers the UART
-    subscribe by asking for the PIN, and on a refused or wrong one it disconnects rather
-    than refusing the subscribe. Held back, that left ``connect()`` waiting out its timeout
-    on a dead link and never asking for the PIN. A drop after BlueZ asked for the PIN is
-    therefore flagged on ``hung_up``, for the connect to give up on as a pairing failure.
+    Thus, while ``connect()`` runs, this function only stores a disconnect. bleak raises an
+    error itself if it cannot make the link. After ``connect()`` returns,
+    disconnects go to meshcore as before, because the client continues to call this same
+    wrapper.
+
+    The only lost link that bleak must not try again is a companion that hangs up on a
+    pairing. A companion with a PIN (an ESP32 companion, measured on a Cardputer Zero)
+    answers the UART subscribe with a request for the PIN. If the PIN is refused or wrong,
+    the companion disconnects, instead of a refusal of the subscribe. When this function
+    held back that disconnect, ``connect()`` waited until its timeout on a dead link, and it
+    never asked for the PIN. Thus a lost link after BlueZ asked for the PIN sets
+    ``hung_up``, and the connect stops on it as a pairing failure.
 
     Args:
-        connection: The ``meshcore.BLEConnection`` about to connect.
-        pin_asked: Whether BlueZ has asked this connect's agent for the PIN yet.
+        connection: The ``meshcore.BLEConnection`` that will connect.
+        pin_asked: Whether BlueZ has asked the agent of this connect for the PIN yet.
 
     Returns:
-        The record of clients seen, whose ``connecting`` flag the caller clears once
-        ``connect()`` has returned or raised.
+        The record of the clients that reported a disconnect. The caller clears its
+        ``connecting`` flag after ``connect()`` has returned or raised.
     """
     seen = _ConnectingClients()
     forward = getattr(connection, "handle_disconnect", None)
-    if forward is None:  # a transport with no drop handler has nothing to hold back
+    if forward is None:  # a transport without a disconnect handler has nothing to hold back
         return seen
 
     def _handle_disconnect(client) -> None:  # noqa: ANN001 - a bleak client
@@ -998,17 +1054,19 @@ def _hold_disconnects_while_connecting(  # noqa: ANN001
             return
         forward(client)
 
-    # BLEConnection hands ``self.handle_disconnect`` to each BleakClient it builds inside
-    # ``connect()``, so an instance attribute set now is the callback every client gets.
+    # BLEConnection gives ``self.handle_disconnect`` to each BleakClient that it makes in
+    # ``connect()``. Thus an instance attribute that we set now is the callback of each
+    # client.
     connection.handle_disconnect = _handle_disconnect
     return seen
 
 
 class _PairingHungUp(Exception):
-    """The companion disconnected after asking for the PIN: a refused or missing pairing.
+    """The companion disconnected after it asked for the PIN: a refused or missing pairing.
 
-    Worded to read as an authentication failure (:data:`_BLE_AUTH_HINTS`), because it is
-    one, so the connect's PIN handling takes it from here rather than the link retry.
+    Its message has the words of an authentication failure (:data:`_BLE_AUTH_HINTS`),
+    because it is one. Thus the part of the connect that handles the PIN continues from
+    here, not the link retry.
     """
 
 
@@ -1017,13 +1075,14 @@ async def _unless_hung_up(connect: Awaitable[Any], hung_up: asyncio.Event) -> An
 
     Args:
         connect: The meshcore ``connect()`` coroutine.
-        hung_up: Set by :func:`_hold_disconnects_while_connecting` on that hang-up.
+        hung_up: The event that :func:`_hold_disconnects_while_connecting` sets on that
+            hang-up.
 
     Returns:
-        What ``connect`` returned.
+        The value that ``connect`` returned.
 
     Raises:
-        _PairingHungUp: If the hang-up came first; ``connect`` is cancelled.
+        _PairingHungUp: If the hang-up came first. ``connect`` is then cancelled.
     """
     task = asyncio.ensure_future(connect)
     waiter = asyncio.ensure_future(hung_up.wait())
@@ -1041,41 +1100,44 @@ async def _unless_hung_up(connect: Awaitable[Any], hung_up: asyncio.Event) -> An
 
 
 class _WriteRefusals(list):
-    """Every exception a ``BLEConnection`` write raised, oldest first."""
+    """Each exception that a ``BLEConnection`` write raised, the oldest first."""
 
     def refusal(self) -> BaseException | None:
-        """The first write the peripheral refused for want of a bond, else ``None``."""
+        """The first exception for a write that was refused because of no bond, or ``None``."""
         return next((exc for exc in self if _is_ble_auth_error(exc)), None)
 
 
 def _record_write_refusals(connection) -> _WriteRefusals:  # noqa: ANN001
-    """Keep what a refused write said, which meshcore's ``send`` logs and then forgets.
+    """Keep the error of a refused write, which meshcore's ``send`` logs and then forgets.
 
-    Stock companion firmware guards *both* halves of its UART service with ENC+MITM, so an
-    unbonded host is refused at the notify subscribe — raised out of ``connect()``, where
-    :meth:`MeshCoreDevice._open_ble` turns it into a pairing. The standalone T-Deck firmwares
-    (MeshOS, wadamesh) guard only the **write** characteristic: the subscribe succeeds, and
-    the refusal ("Insufficient Encryption" unbonded, "Insufficient Authentication" over a
-    Just Works bond) arrives on the identity handshake's first write. ``BLEConnection.send``
-    catches that, logs "BLE write failed", and returns ``False``; the handshake then comes
-    back empty and the device read as "not a MeshCore companion" — with no PIN pairing, no
-    stale-bond repair, and no macOS Passkey wait, because nothing downstream ever saw an
-    authentication error. Verified against a T-Deck on MeshOS 1.3.0.
+    The stock companion firmware guards both halves of its UART service with ENC+MITM. Thus
+    the companion refuses a host without a bond at the notify subscribe. This error comes
+    out of ``connect()``, where :meth:`MeshCoreDevice._open_ble` changes it into a pairing.
+    The standalone T-Deck firmwares (MeshOS, wadamesh) guard only the **write**
+    characteristic. The subscribe is successful, and the refusal comes on the first write
+    of the identity handshake ("Insufficient Encryption" without a bond, "Insufficient
+    Authentication" over a Just Works bond).
 
-    So the write is wrapped to record the exception on its way through (it still propagates
-    to ``send``, which behaves as before), and :meth:`MeshCoreDevice._connect_owned_ble`
-    raises the recorded refusal when the handshake came back empty. Both firmwares then take
-    the same pairing path.
+    ``BLEConnection.send`` catches that error, logs "BLE write failed", and returns
+    ``False``. The handshake then returned empty, and MeshTerm read the device as "not a
+    MeshCore companion". There was no PIN pairing, no repair of the old bond, and no wait
+    for the macOS Passkey, because no later step got an authentication error. We checked
+    this with a T-Deck on MeshOS 1.3.0.
+
+    Thus a wrapper around the write stores the exception as it goes through (the exception
+    still goes on to ``send``, which operates as before). Then
+    :meth:`MeshCoreDevice._connect_owned_ble` raises the stored refusal when the handshake
+    returned empty. Both firmwares then use the same pairing path.
 
     Args:
-        connection: The ``meshcore.BLEConnection`` about to connect.
+        connection: The ``meshcore.BLEConnection`` that will connect.
 
     Returns:
-        The record of write failures, empty until one happens.
+        The record of the write failures. It is empty until a failure occurs.
     """
     seen = _WriteRefusals()
     write = getattr(connection, "_write_locked", None)
-    if write is None:  # a meshcore without the hook: the handshake reads as before
+    if write is None:  # a meshcore without the hook: the handshake operates as before
         return seen
 
     async def _write_locked(data) -> None:  # noqa: ANN001 - bytes-like, as meshcore sends
@@ -1090,7 +1152,10 @@ def _record_write_refusals(connection) -> _WriteRefusals:  # noqa: ANN001
 
 
 def _held_client(connection, seen: _ConnectingClients):  # noqa: ANN001, ANN202
-    """The bleak client to keep for teardown: the connection's, else the last one it lost."""
+    """The bleak client to keep for the teardown.
+
+    It is the client of the connection, or else the last client that the connection lost.
+    """
     client = getattr(connection, "client", None)
     if client is not None:
         return client
@@ -1098,39 +1163,41 @@ def _held_client(connection, seen: _ConnectingClients):  # noqa: ANN001, ANN202
 
 
 def serial_port_present(port: str) -> bool:
-    """Return whether a serial port named ``port`` is currently enumerated by the OS.
+    """Return whether the OS now lists a serial port with the name ``port``.
 
-    This is the primary liveness signal for a mid-session unplug: the ``meshcore`` client
-    keeps serving cached data after the cable is pulled and never raises (verified on
-    hardware — a command still "succeeds", merely returning ``None``), so a failed command
-    can't be relied on to notice. The OS port list, by contrast, drops the device the moment
-    it is removed. Enumerating ports only reads the OS device table; it never opens the port,
-    so it is safe to poll against a companion another handle already holds open.
+    This is the main liveness signal for an unplug during a session. After the cable is
+    pulled, the ``meshcore`` client continues to serve cached data and never raises an
+    error (we checked this on hardware: a command still "succeeds", and only returns
+    ``None``). Thus MeshTerm cannot use a failed command to find the unplug. But the OS
+    port list removes the device at the moment that it is removed. The list of ports only
+    reads the device table of the OS. It never opens the port, so it is safe to poll it
+    while another handle holds the companion open.
 
     Args:
-        port: The serial port name the device was opened on (e.g. ``COM11`` or
-            ``/dev/ttyUSB0``).
+        port: The name of the serial port on which the device was opened (for example
+            ``COM11`` or ``/dev/ttyUSB0``).
 
     Returns:
-        ``True`` if a port by that exact name is present (or if presence can't be
-        determined — pyserial missing or the query failed — so a mere lookup hiccup never
-        raises a false "disconnected" alarm).
+        ``True`` if a port with that exact name is present. Also ``True`` if MeshTerm
+        cannot find out (pyserial is missing, or the query failed), so that a short lookup
+        problem never gives a false "disconnected" alarm.
     """
     try:
         from serial.tools import list_ports
-    except Exception:  # noqa: BLE001 - pyserial absent (e.g. --mock env); can't tell, assume up
+    except Exception:  # noqa: BLE001 - no pyserial (for example --mock): unknown, assume it is up
         return True
     try:
         if any(info.device == port for info in list_ports.comports()):
             return True
     except Exception:  # noqa: BLE001 - an enumeration failure must not fake a disconnect
         return True
-    # A soldered platform-bus UART (e.g. an SoC port like ``/dev/ttyS1`` on the Luckfox Lyra)
-    # is never enumerated by pyserial's Linux ``comports()`` — yet its device node persists for
-    # exactly as long as the port exists. A USB serial node, by contrast, is removed from the
-    # filesystem the instant the cable is pulled. So an existing ``/dev`` character device is a
-    # sound presence signal that never masks a real unplug (and stays Windows-safe: COM names
-    # are not filesystem paths, so this branch is skipped there).
+    # pyserial's Linux ``comports()`` never lists a soldered platform-bus UART (for example,
+    # an SoC port such as ``/dev/ttyS1`` on the Luckfox Lyra). But its device file exists
+    # for exactly as long as the port exists. The device file of a USB serial port is
+    # removed from the filesystem at the moment that the cable is pulled. Thus a ``/dev``
+    # character device file that exists is a good presence signal, and it never hides a
+    # real unplug. It is also safe on Windows: COM names are not filesystem paths, so
+    # MeshTerm skips this branch there.
     try:
         import os
         import stat
@@ -1143,9 +1210,9 @@ def serial_port_present(port: str) -> bool:
 
 
 class Device(ABC):
-    """Abstract companion device exposing the operations MeshTerm needs.
+    """An abstract companion device, with the operations that MeshTerm uses.
 
-    Implementations manage their own connection lifecycle and translate raw protocol
+    Each implementation manages its own connection lifecycle. It changes the raw protocol
     events into the domain models in :mod:`meshterm.core.models`.
     """
 
@@ -1155,113 +1222,119 @@ class Device(ABC):
 
     @abstractmethod
     async def disconnect(self) -> None:
-        """Close the connection and release resources. Idempotent."""
+        """Close the connection and release the resources. Idempotent."""
 
     async def link_present(self) -> bool:
-        """Return whether the underlying transport link is still up (best-effort).
+        """Return whether the transport link below is still up (best-effort).
 
-        A cheap, *non-invasive* liveness probe — it never transmits and never opens a new
-        handle — so the interactive session can poll it while the device is in use to notice
-        a mid-session drop (a serial cable pulled, a companion powered off, a BLE peripheral
-        out of range). Each transport implements it against the signal that actually reflects
-        its link state (OS port enumeration for serial, the BLE client's connection flag for
-        Bluetooth). It returns ``True`` whenever presence can't be determined, so a lookup
-        hiccup never fakes a disconnect.
+        This is a fast liveness probe that has no side effects. It never transmits, and it
+        never opens a new handle. Thus the interactive session can poll it while the device
+        is in use, to find a lost link during the session (a serial cable pulled, a
+        companion powered off, a BLE peripheral out of range). Each transport uses the
+        signal that correctly shows its link state (the OS port list for serial, the
+        connection flag of the BLE client for Bluetooth). It returns ``True`` when it
+        cannot find the presence, so a short lookup problem never gives a false disconnect.
 
         Returns:
-            ``True`` if the link appears up (or can't be checked), ``False`` if it is gone.
+            ``True`` if the link seems up (or if it cannot be checked), ``False`` if it is
+            gone.
         """
         return True
 
     @abstractmethod
     async def get_self_info(self) -> dict:
-        """Return identity and radio configuration of the connected device.
+        """Return the identity and the radio settings of the connected device.
 
         Returns:
-            A dict with at least ``name`` and, when available, ``tx_power`` and radio
-            parameters (``freq``, ``bw``, ``sf``, ``cr``).
+            A dict with a minimum of ``name`` and, when available, ``tx_power`` and the
+            radio parameters (``freq``, ``bw``, ``sf``, ``cr``).
         """
 
     @abstractmethod
     async def get_device_info(self) -> dict:
-        """Return the firmware's hardware/build identity for the connected device.
+        """Return the hardware and build identity of the connected device, from the firmware.
 
-        This is a *different* protocol frame from :meth:`get_self_info`: where self-info
-        reports the node's identity and radio tuning, this reports what the box actually is —
-        a ``model`` string (e.g. ``"Seeed Tracker T1000-E"``, matching a MeshCore firmware
-        ``variant``), plus firmware ``ver``/``fw_build``. It is the *only* place the vendor and
-        model surface: BLE adverts carry no manufacturer data for these boards, most use a
-        randomized address with no IEEE OUI to look up, and no GATT Device Information Service
-        is exposed — so the model has to come from MeshCore's own application layer.
+        This is a different protocol query from :meth:`get_self_info`. Self-info reports the
+        identity of the node and its radio tuning. This method reports what the box itself
+        is: a ``model`` string (for example ``"Seeed Tracker T1000-E"``, which matches a
+        MeshCore firmware ``variant``), and the firmware ``ver``/``fw_build``. It is the
+        only place where the vendor and the model are available. BLE advertisements have
+        no manufacturer data for these boards. Most boards use a random address with
+        no IEEE OUI to look up, and they have no GATT Device Information Service. Thus the
+        model must come from MeshCore's own application layer.
 
-        Best-effort: firmware predating the device-query frame answers with an empty payload
-        rather than erroring, so callers must treat a missing ``model`` as simply unknown.
+        This method is best-effort. Firmware that is older than the device query answers
+        with an empty payload, not with an error. Thus callers must treat a missing
+        ``model`` as unknown.
 
         Returns:
-            A dict with, when available, ``model``, ``ver``, and ``fw_build``; possibly empty.
+            A dict with ``model``, ``ver``, and ``fw_build``, when available. It can be
+            empty.
         """
 
     @abstractmethod
     async def get_contacts(self) -> list[Contact]:
-        """Return the device's known contacts.
+        """Return the contacts that the device knows.
 
         Returns:
-            The list of :class:`Contact` records currently stored on the device.
+            The list of :class:`Contact` records that the device stores now.
         """
 
     @abstractmethod
     async def add_contact(self, node: Contact) -> None:
-        """Add (or update) a contact in the device's contact table.
+        """Add (or update) a contact in the contact table of the device.
 
-        The inverse of :meth:`remove_contact`, and the fix for a node MeshTerm knows but the
-        firmware has forgotten: a direct message is addressed by the *device's* own contact
-        entry, so a contact missing from its table can't be messaged at all
-        (:class:`ContactNotOnDeviceError`) until it is written back. Everything the entry
-        needs travels on the contact — its public key, name, type and last advertised
-        position — and it is added with no learned route, so the first message floods
-        exactly as it would for a freshly-heard node.
+        This is the inverse of :meth:`remove_contact`. It is also the repair for a node that
+        MeshTerm knows but that the firmware has forgotten. The address of a direct message
+        comes from the contact entry of the device itself. Thus MeshTerm cannot send a
+        message to a contact that is not in that table (:class:`ContactNotOnDeviceError`)
+        until it writes the contact back. The contact has all the data that the entry must
+        have: its public key, name, type, and last advertised position. The method adds it
+        with no learned route, so the first message floods exactly as for a node that the
+        device just heard.
 
         Args:
-            node: The contact to write; must carry a full public key.
+            node: The contact to write. It must have a full public key.
 
         Raises:
-            DeviceCommandError: If the contact carries no public key to address it by, or
-                the device rejected the write (a full contact table, most often).
+            DeviceCommandError: If the contact has no public key for the address, or the
+                device rejected the write (most often, because the contact table is full).
         """
 
     @abstractmethod
     async def remove_contact(self, node: Contact) -> None:
-        """Delete a contact from the device's contact table.
+        """Delete a contact from the contact table of the device.
 
-        Addresses the contact by its public key, so it must carry one (a contact heard
-        as an advert always does). The node stays a *node* — its reception history and any
-        overheard traffic are untouched — it is only dropped from the device's list of
-        added, messageable contacts.
+        The method addresses the contact by its public key, so the contact must have one (a
+        contact heard as an advert always has one). The node stays a node: its reception
+        history and its overheard traffic do not change. The method only removes it from
+        the list of the added contacts on the device, to which you can send messages.
 
         Args:
             node: The contact to remove.
 
         Raises:
-            ContactNotOnDeviceError: If the device holds no contact with that key — which
-                is not a failed removal but a removal with nothing left to do, so callers
-                drop it from what MeshTerm remembers and say so.
-            DeviceCommandError: If the contact carries no public key to address it by, or
-                the device rejected the removal for any other reason.
+            ContactNotOnDeviceError: If the device has no contact with that key. This is
+                not a failed removal, but a removal with nothing more to do. Thus callers
+                remove the contact from what MeshTerm remembers, and tell the user.
+            DeviceCommandError: If the contact has no public key for the address, or the
+                device rejected the removal for any other reason.
         """
 
     @abstractmethod
     async def get_tx_power(self) -> int | None:
-        """Return the current TX power level, or ``None`` if unknown."""
+        """Return the current TX power level, or ``None`` if it is not known."""
 
     @abstractmethod
     async def set_tx_power(self, value: int) -> None:
-        """Set the radio transmit power.
+        """Set the transmit power of the radio.
 
         Args:
-            value: TX power level, clamped by the caller to the device's valid range.
+            value: The TX power level. The caller clamps it to the valid range of the
+                device.
         """
 
-    # -- remote administration (tuning a node we have admin rights on) -----------
+    # -- remote administration (tune a node on which we have admin rights) -------
 
     @abstractmethod
     async def admin_login(self, node: Contact, password: str) -> LoginResult:
@@ -1269,56 +1342,58 @@ class Device(ABC):
 
         Args:
             node: The contact to log in to. Its ``public_key`` addresses the node.
-            password: The node's admin password.
+            password: The admin password of the node.
 
         Returns:
-            A :class:`LoginResult`. It is truthy only for
-            :attr:`~LoginResult.ACCEPTED`, so a caller that just needs "am I in?" can
-            still write ``if not await device.admin_login(...)``; one that acts on the
-            failure must tell :attr:`~LoginResult.REFUSED` (the node said no — the
-            password is wrong) from :attr:`~LoginResult.NO_REPLY` (nothing came back —
-            the password is unproven, not disproven).
+            A :class:`LoginResult`. It is truthy only for :attr:`~LoginResult.ACCEPTED`.
+            Thus a caller that only asks "am I in?" can still write
+            ``if not await device.admin_login(...)``. A caller that acts on the failure
+            must tell :attr:`~LoginResult.REFUSED` (the node said no: the password is
+            wrong) from :attr:`~LoginResult.NO_REPLY` (nothing came back: the password is
+            not proved correct, and not proved wrong).
         """
 
     @abstractmethod
     async def room_login(self, room: Contact, password: str) -> RoomLogin:
-        """Log in to a room server, as a member or as its admin, and say what it allowed.
+        """Log in to a room server, as a member or as its admin, and tell the access it gave.
 
-        The same exchange as :meth:`admin_login` — a room server has one login, and the
-        password picks the role — with the one more thing a room's answer carries: the
-        access it granted (:class:`~meshterm.core.models.RoomAccess`). The companion adds
-        the time of the last post it already holds from this room, so the room answers by
-        sending each post since, one at a time, as ordinary inbound messages.
+        This is the same exchange as :meth:`admin_login`. A room server has one login, and
+        the password selects the role. The answer of a room has one more item: the access
+        that the room gave (:class:`~meshterm.core.models.RoomAccess`). The companion adds
+        the time of the last post that it already has from this room. Thus the room
+        answers with each post after that time, one at a time, as usual received messages.
 
-        A room never says *no*: a wrong password gets no reply at all (unless its owner
-        lets anyone in read-only), so a refusal is :attr:`~LoginResult.NO_REPLY` here and
-        a caller must not read that as "unreachable" alone. A blank password asks the room
-        whether it already knows us — it does for its admins, and for anyone who has
-        logged in since it last restarted.
+        A room never says no. A wrong password gets no reply at all (unless the owner of
+        the room lets all users in as read-only). Thus a refusal is
+        :attr:`~LoginResult.NO_REPLY` here, and a caller must not read that result as only
+        "unreachable". A blank password asks the room if it already knows us. It knows its
+        admins, and all users who logged in after it last restarted.
 
         Args:
             room: The room server to log in to. Its ``public_key`` addresses it.
             password: The room password, the admin password, or ``""``.
 
         Returns:
-            How the login ended, and the access granted when it was accepted.
+            How the login ended, and the access that the room gave when it accepted the
+            login.
         """
 
     @abstractmethod
     async def reset_route(self, node: Contact) -> None:
-        """Forget the route the radio learned to ``node``, so its next message floods.
+        """Forget the route that the radio learned to ``node``, so its next message floods.
 
-        A route is learned from the path a flood took to arrive, and it goes stale as the
-        mesh changes — a repeater moved, switched off, or out-heard — after which every
-        message sent along it vanishes without a word. Forgetting it is local (nothing is
-        transmitted); the next message to the node floods the whole mesh, and the radio
-        learns a fresh route from the answer. MeshCore's own apps call this *reset path*.
+        The radio learns a route from the path on which a flood arrived. The route becomes
+        old when the mesh changes (a repeater moved, was switched off, or another repeater
+        is now heard better). After that, each message sent along the route is lost with no
+        error. The action to forget the route is local (nothing is transmitted). The next
+        message to the node floods the full mesh, and the radio learns a new route from the
+        answer. MeshCore's own apps call this *reset path*.
 
         Args:
             node: The contact whose route to forget.
 
         Raises:
-            ContactNotOnDeviceError: If the radio holds no contact for the node.
+            ContactNotOnDeviceError: If the radio has no contact for the node.
             DeviceCommandError: If the radio refused for any other reason.
         """
 
@@ -1326,44 +1401,44 @@ class Device(ABC):
     async def send_remote_command(
         self, node: Contact, command: str, *, timeout: float = 8.0
     ) -> str | None:
-        """Send one CLI command to a logged-in remote node and await its text reply.
+        """Send one CLI command to a remote node where we are logged in, and wait for its reply.
 
-        The generic remote-administration primitive: repeaters and room servers are
-        configured through their text CLI (``get``/``set``/``advert``/…) carried as
-        admin messages, and every higher-level remote operation is a spelling of this.
-        Requires an authenticated session (:meth:`admin_login` first) — firmware
-        silently ignores commands from strangers, which surfaces as a ``None`` reply.
+        This is the generic primitive of remote administration. Repeaters and room servers
+        are set up through their text CLI (``get``/``set``/``advert``/…), in admin
+        messages. Each remote operation at a higher level is a form of this method. An
+        authenticated session is necessary (call :meth:`admin_login` first). The firmware
+        silently ignores commands from unknown nodes, and this shows as a ``None`` reply.
 
         Args:
-            node: The remote contact (must already be logged in).
-            command: The CLI command text, e.g. ``"set txdelay 5"``.
-            timeout: Seconds to wait for the node's reply.
+            node: The remote contact (it must already be logged in).
+            command: The CLI command text, for example ``"set txdelay 5"``.
+            timeout: The seconds to wait for the reply of the node.
 
         Returns:
             The reply text, or ``None`` if the node did not answer in time.
 
         Raises:
-            DeviceCommandError: If the companion rejected the send outright.
+            DeviceCommandError: If the companion rejected the send command itself.
         """
 
     @abstractmethod
     async def get_remote_tx_power(self, node: Contact) -> int | None:
-        """Read a remote (admin) node's current transmit power.
+        """Read the current transmit power of a remote (admin) node.
 
         Args:
-            node: The contact to query (must already be logged in).
+            node: The contact to query (it must already be logged in).
 
         Returns:
-            The node's TX power in dBm, or ``None`` if it could not be read.
+            The TX power of the node in dBm, or ``None`` if MeshTerm could not read it.
         """
 
     @abstractmethod
     async def set_remote_tx_power(self, node: Contact, value: int) -> None:
-        """Set a remote (admin) node's transmit power.
+        """Set the transmit power of a remote (admin) node.
 
         Args:
-            node: The contact to adjust (must already be logged in).
-            value: TX power in dBm.
+            node: The contact to change (it must already be logged in).
+            value: The TX power in dBm.
 
         Raises:
             DeviceCommandError: If the node rejected the command.
@@ -1371,21 +1446,21 @@ class Device(ABC):
 
     @abstractmethod
     async def fetch_neighbours(self, node: Contact) -> list[NeighbourInfo]:
-        """Ask a remote node for its neighbour table: who it hears directly, and how well.
+        """Ask a remote node for its neighbour table: the nodes it hears directly, and how well.
 
-        A second vantage point for the topology graph: every entry is a link
-        ``node ↔ neighbour`` with SNR measured *at the remote node*, including nodes we
-        have never received anything from ourselves. Requires an authenticated session
-        (:meth:`admin_login` first) — firmware silently ignores the request from guests,
-        which surfaces here as a timeout.
+        This is a second point of view for the topology graph. Each entry is a link
+        ``node ↔ neighbour``, with the SNR measured at the remote node. This includes nodes
+        from which we have never received anything ourselves. An authenticated session is
+        necessary (call :meth:`admin_login` first). The firmware silently ignores the
+        request from guests, and here this shows as a timeout.
 
         Args:
-            node: The contact to query (must already be logged in).
+            node: The contact to query (it must already be logged in).
 
         Returns:
-            The reported neighbour entries; empty when the node's table is empty (a
-            normal answer — repeaters forget neighbours across reboots and only relearn
-            them as adverts arrive).
+            The reported neighbour entries. The list is empty when the table of the node is
+            empty. This is a usual answer: repeaters forget their neighbours at a reboot,
+            and learn them again only when adverts arrive.
 
         Raises:
             DeviceCommandError: If the node never answered (not logged in, out of
@@ -1394,21 +1469,22 @@ class Device(ABC):
 
     @abstractmethod
     async def request_regions(self, node: Contact) -> list[str]:
-        """Ask a repeater which regions it relays floods for (firmware 1.12+).
+        """Ask a repeater for which regions it relays floods (firmware 1.12+).
 
-        An anonymous request — no login — that a repeater answers only when it arrives
-        *direct or zero-hop*: a flooded copy is dropped (firmware gates ``REGIONS`` behind
-        ``isRouteDirect()``), so the library pins a routeless contact to zero hops for the
-        exchange. In practice that means a neighbour, or a contact with a learned route.
-        It is also rate-limited on the repeater, so this is a one-shot question, never a
-        poll.
+        This is an anonymous request (with no login). A repeater answers it only when it
+        arrives direct or zero-hop. The repeater ignores a flooded copy (the firmware lets
+        ``REGIONS`` through only if ``isRouteDirect()``). Thus, for the exchange, the
+        library sets a contact with no route to zero hops. In practice, that means a
+        neighbour, or a contact with a learned route. The repeater also has a rate limit
+        for this request. Thus this is a one-time question, never a poll.
 
         Args:
             node: The repeater to ask.
 
         Returns:
-            The region names it listed, bare, in its order — ``*`` first when it also
-            relays unscoped floods (see :func:`~meshterm.core.regions.parse_region_list`).
+            The region names that it gave, bare, in its order. ``*`` is first when it also
+            relays unscoped floods (refer to
+            :func:`~meshterm.core.regions.parse_region_list`).
 
         Raises:
             DeviceCommandError: If the repeater never answered (out of direct reach, too
@@ -1423,69 +1499,72 @@ class Device(ABC):
         path: str | None = None,
         timeout: float | None = None,
     ) -> TraceResult:
-        """Run a single path trace to ``target`` and return per-hop SNR.
+        """Run one path trace to ``target`` and return the SNR of each hop.
 
         Args:
-            target: Name or key prefix of the destination node.
-            path: Optional explicit path to force, as a comma-separated string of
-                single-byte hex key prefixes (e.g. ``"3d,f2,3d"``). When ``None``
-                the connection resolves one from the contact's learned route (the
-                firmware itself never routes a trace — an explicit path is all it
-                walks), falling back to path-less only for unknown targets.
-            timeout: Seconds to wait for the trace reply. ``None`` (the default) sizes the
-                wait to the route: a trace has to travel the whole path out and back, so a
-                long walk is given proportionally longer to come home
+            target: The name or the key prefix of the destination node.
+            path: An optional explicit path to force, as a comma-separated string of
+                single-byte hex hashes (for example ``"3d,f2,3d"``). When ``None``, the
+                connection finds a path from the learned route of the contact. (The
+                firmware itself never routes a trace: it walks only an explicit path.) Only
+                for unknown targets, it uses no path.
+            timeout: The seconds to wait for the trace reply. ``None`` (the default) sets
+                the wait from the route. A trace must go along the full path out and back,
+                so a long walk gets proportionally more time to come back
                 (:func:`~meshterm.core.tracing.trace_timeout`).
 
         Returns:
-            A :class:`TraceResult`; ``success`` is ``False`` on timeout.
+            A :class:`TraceResult`. Its ``success`` is ``False`` on a timeout.
         """
 
     # -- passive event stream ----------------------------------------------------
 
     @abstractmethod
     async def subscribe_events(self, on_event: EventCallback) -> Unsubscribe:
-        """Begin streaming the device's unsolicited inbound events, without blocking.
+        """Start a stream of the unsolicited received events of the device, without blocking.
 
-        Subscribes to everything the companion surfaces on its own: overheard adverts and
-        telemetry (as :attr:`~meshterm.core.events.EventKind.OBSERVATION` events), inbound
-        direct/channel text messages (:attr:`~meshterm.core.events.EventKind.MESSAGE`),
-        and delivery acknowledgements (:attr:`~meshterm.core.events.EventKind.ACK`). Each
-        is delivered to ``on_event`` as a :class:`~meshterm.core.events.MeshEvent` as it
-        arrives. Delivery continues in the background until the returned callable is
-        invoked to stop it; the radio is never asked to transmit, it only listens. This is
-        the primitive the always-on :class:`~meshterm.services.event_hub.EventHub` is
-        built on.
+        The subscription is for all the events that the companion gives on its own:
+        overheard adverts and telemetry (as
+        :attr:`~meshterm.core.events.EventKind.OBSERVATION` events), received direct and
+        channel text messages (:attr:`~meshterm.core.events.EventKind.MESSAGE`), and
+        delivery acknowledgements (:attr:`~meshterm.core.events.EventKind.ACK`). Each event
+        goes to ``on_event`` as a :class:`~meshterm.core.events.MeshEvent` when it arrives.
+        The delivery continues in the background until a call to the returned callable
+        stops it. The radio never gets a request to transmit. It only listens. The
+        always-on :class:`~meshterm.services.event_hub.EventHub` is built on this
+        primitive.
 
         Note:
-            This carries only *unsolicited* events. Replies correlated to a request we
-            sent (a trace's ``TRACE_DATA``, a login result) are awaited by the issuing
-            command instead, so those flows work with or without a live subscription.
+            This stream has only unsolicited events. The command that sent a request
+            waits for the replies that correlate to that request (the ``TRACE_DATA`` of a
+            trace, a login result). Thus those flows operate with or without a live
+            subscription.
 
         Args:
-            on_event: Callback invoked with each :class:`MeshEvent` as it is heard.
+            on_event: The callback that receives each :class:`MeshEvent` when it is heard.
 
         Returns:
-            A zero-argument callable that stops the stream and releases the subscription.
+            A callable with no arguments that stops the stream and releases the
+            subscription.
         """
 
     # -- messaging ---------------------------------------------------------------
 
     @abstractmethod
     async def send_direct_message(self, contact: Contact, text: str) -> Delivery:
-        """Send a direct text message to a contact, and wait a while for its ack.
+        """Send a direct text message to a contact, and wait some time for its ack.
 
         Args:
-            contact: The recipient; its ``public_key`` addresses the message.
+            contact: The recipient. Its ``public_key`` addresses the message.
             text: The message body.
 
         Returns:
-            The :class:`~meshterm.core.models.Delivery`: the ack code the radio expects
-            back, and the ack itself if it arrived within the wait. One that comes later is
-            still pushed by the radio, as an ``ACK`` event carrying the same code.
+            The :class:`~meshterm.core.models.Delivery`: the ack code that the radio
+            expects, and the ack itself if it arrived during the wait. The radio still
+            pushes an ack that comes later, as an ``ACK`` event with the same code.
 
         Raises:
-            DeviceCommandError: If the companion rejected the send outright.
+            DeviceCommandError: If the companion rejected the send command itself.
         """
 
     @abstractmethod
@@ -1493,23 +1572,24 @@ class Device(ABC):
         """Broadcast a text message on a channel slot.
 
         Args:
-            index: Zero-based channel slot to transmit on.
+            index: The zero-based channel slot on which to transmit.
             text: The message body.
 
         Raises:
             DeviceCommandError: If the companion rejected the send.
         """
 
-    # -- transmitting under a scope -----------------------------------------------------
+    # -- transmission in a scope --------------------------------------------------------
 
     @property
     def transmit_lock(self) -> TransmitLock:
-        """The lock every transmission holds while it hands its frame to the companion.
+        """The lock that each transmission holds while it gives its command to the companion.
 
-        Created on first use rather than in ``__init__`` so an implementation need not
-        remember to chain up for it. See :mod:`~meshterm.core.transmit_lock` for why it
-        exists: a channel scope is a window on the companion's one session scope, and
-        nothing else may be sent through that window.
+        MeshTerm makes the lock at the first use, not in ``__init__``, so an implementation
+        does not have to remember to call the parent class for it. Refer to
+        :mod:`~meshterm.core.transmit_lock` for the reason why it exists: a channel scope
+        is a window on the one session scope of the companion, and nothing else can go
+        through that window.
         """
         lock = getattr(self, "_transmit_lock", None)
         if lock is None:
@@ -1519,18 +1599,20 @@ class Device(ABC):
 
     @asynccontextmanager
     async def transmitting(self) -> AsyncIterator[None]:
-        """Hold the transmit lock for one hand-over, repairing a scope a failed restore left.
+        """Hold the transmit lock for one hand-over, and repair a scope left by a failed restore.
 
-        Every send an implementation makes that could go out as a flood takes this around
-        the command that transmits — only that command: an ack or reply *wait* afterwards
-        is not a transmission and must not hold a scoped channel send up behind it.
+        Each send of an implementation that can go out as a flood holds this lock around
+        the command that transmits, and only around that command. A wait for an ack or a
+        reply after the command is not a transmission. It must not block a scoped channel
+        send.
 
-        A scoped send whose restore failed (see :meth:`send_channel_in_scope`) leaves the
-        companion's session scope pointing at a channel's region, where every later flood
-        would follow it. The first transmission to come through here afterwards puts it
-        back before it sends anything — and if the companion still won't take the reset,
-        the send goes ahead under the scope it had rather than not at all, logged, since
-        refusing every transmission from then on would be the worse failure.
+        A scoped send whose restore failed (refer to :meth:`send_channel_in_scope`) leaves
+        the session scope of the companion on the region of a channel, and each later
+        flood would use it. The first transmission that comes through here after that puts
+        the scope back before it sends anything. If the companion still does not accept
+        the reset, the send goes out in the scope that it had, with a log entry, instead
+        of no send at all. This is because a refusal of each transmission after that time
+        would be the worse failure.
         """
         async with self.transmit_lock.held():
             leaked = getattr(self, "_scope_leaked", None)
@@ -1544,35 +1626,38 @@ class Device(ABC):
             yield
 
     async def send_channel_in_scope(self, index: int, text: str, scope: str | None) -> None:
-        """Broadcast on a channel under a given scope, and leave the session scope as found.
+        """Broadcast on a channel in a given scope, and leave the session scope as it was.
 
-        The one way MeshTerm sends a channel message. ``None`` is the plain send, going out
-        under whatever the companion's default scope is; a region name or ``*`` is the
-        three-step window the firmware makes a per-channel scope out of — set the session
-        scope, send, restore it (``None``, back to the default) — all under
-        :attr:`transmit_lock`, so no other flood can go out between the steps.
+        This is the only way that MeshTerm sends a channel message. ``None`` is the plain
+        send, which goes out in the default scope of the companion, whatever it is. A
+        region name or ``*`` uses the three-step window from which the firmware makes a
+        per-channel scope: set the session scope, send, and restore it (``None``, back to
+        the default). All three steps are under :attr:`transmit_lock`, so no other flood
+        can go out between the steps.
 
-        What is refused is refused *before* anything is sent (:class:`FloodScopeError`):
-        a scoped message never quietly goes out unscoped, or under the default scope.
+        A refusal occurs before MeshTerm sends anything (:class:`FloodScopeError`). A
+        scoped message never goes out silently unscoped, or in the default scope.
 
-        * A region name needs firmware :data:`SCOPE_FIRMWARE`; older firmware answers the
-          command with an error, which is taken as the refusal it is.
-        * ``*`` needs firmware :data:`UNSCOPED_FIRMWARE` to override a default scope.
-          Older firmware can still send unscoped when there is no default to override —
-          anything before :data:`DEFAULT_SCOPE_FIRMWARE` has none at all, and later ones
-          may have none set — so then the plain send *is* the unscoped one and goes out;
-          only a default that is actually set is refused.
+        * For a region name, firmware :data:`SCOPE_FIRMWARE` is necessary. Older firmware
+          answers the command with an error, and MeshTerm takes the error as a refusal
+          (which it is).
+        * For ``*``, firmware :data:`UNSCOPED_FIRMWARE` is necessary to override a default
+          scope. Older firmware can still send unscoped when there is no default to
+          override. Firmware before :data:`DEFAULT_SCOPE_FIRMWARE` has no default scope,
+          and later firmware can have no default set. In that case, the plain send is the
+          unscoped send, and it goes out. MeshTerm refuses only when a default is in fact
+          set.
 
         Args:
-            index: Zero-based channel slot to transmit on.
+            index: The zero-based channel slot on which to transmit.
             text: The message body.
             scope: A region name, :data:`~meshterm.core.regions.WILDCARD` for unscoped, or
-                ``None`` for the device's default.
+                ``None`` for the default of the device.
 
         Raises:
-            FloodScopeError: If the companion can't send under ``scope``; nothing was sent.
-            ~meshterm.core.regions.RegionNameError: If ``scope`` is not a region name the
-                firmware could hold.
+            FloodScopeError: If the companion cannot send in ``scope``. Nothing was sent.
+            ~meshterm.core.regions.RegionNameError: If ``scope`` is not a region name that
+                the firmware can hold.
             DeviceCommandError: If the send itself was rejected.
         """
         bare = normalize_region(scope) if scope else ""
@@ -1596,19 +1681,20 @@ class Device(ABC):
                 self._scope_active = False
                 try:
                     await self.set_flood_scope(None)
-                except Exception as exc:  # noqa: BLE001 - the message went; repair next time
+                except Exception as exc:  # noqa: BLE001 - the message went out. Repair later.
                     _log.warning("couldn't clear send scope %r after a channel send: %s", bare, exc)
                     self._scope_leaked = bare
 
     async def _unscoped_is_plain(self) -> bool:
-        """Whether a plain flood is already unscoped, so ``*`` needs no override — or refuse.
+        """Whether a plain flood is already unscoped, so that ``*`` is possible with no override.
 
-        Only firmware too old to take the override is asked anything; firmware that reports
-        no version is trusted to answer the override command itself.
+        If ``*`` is not possible at all, this method refuses (it raises the error below).
+        MeshTerm asks only firmware that is too old to accept the override. It trusts
+        firmware that reports no version to answer the override command itself.
 
         Returns:
-            ``True`` when the plain send is unscoped; ``False`` when the override is
-            available and should be used.
+            ``True`` when the plain send is unscoped. ``False`` when the override is
+            available and MeshTerm must use it.
 
         Raises:
             FloodScopeError: When a default scope is set and the firmware cannot override it.
@@ -1623,7 +1709,7 @@ class Device(ABC):
             return True
         try:
             default = await self.get_default_flood_scope()
-        except Exception:  # noqa: BLE001 - can't see the default: can't promise unscoped
+        except Exception:  # noqa: BLE001 - the default is unknown, so unscoped is not certain
             default = "?"
         if not normalize_region(default or ""):
             return True
@@ -1634,88 +1720,94 @@ class Device(ABC):
             "unscoped over it. Nothing was sent.",
         )
 
-    # -- configuration: extra reads ---------------------------------------------
+    # -- settings: more reads ---------------------------------------------------
 
     @abstractmethod
     async def get_tuning(self) -> dict:
-        """Return radio tuning parameters, in their real units.
+        """Return the radio tuning parameters, in their real units.
 
         Returns:
             A dict with ``rx_delay`` (float seconds) and ``airtime_factor`` (float).
-            The firmware stores both as floats and moves them over the wire scaled
-            ×1000; implementations undo that scaling so callers only ever see the
-            real values.
+            The firmware stores both as floats, and sends them over the protocol scaled
+            ×1000. The implementations remove that scaling, so callers see only the real
+            values.
         """
 
     @abstractmethod
     async def get_autoadd_config(self) -> int | None:
-        """Return the contact auto-add bitmask, or ``None`` if the firmware predates it.
+        """Return the contact auto-add bitmask, or ``None`` if the firmware is older than it.
 
-        The finer-grained sibling of :meth:`set_manual_add_contacts`: a bitmask of which
-        advert types the firmware adds to contacts automatically.
+        This is a more detailed relative of :meth:`set_manual_add_contacts`: a bitmask of
+        the advert types that the firmware adds to the contacts automatically.
         """
 
     async def get_autoadd_max_hops(self) -> int | None:
-        """Return the auto-add hop limit, or ``None`` where the firmware doesn't report one.
+        """Return the auto-add hop limit, or ``None`` when the firmware does not report one.
 
-        The second byte of the firmware's auto-add configuration (``autoadd_max_hops``,
-        capped at 64). Not abstract: a device without the field has nothing to say, and the
-        snapshot leaves its row unread rather than failing.
+        It is the second byte of the auto-add settings of the firmware
+        (``autoadd_max_hops``, with a maximum of 64). It is not abstract: a device without
+        the field has nothing to say, and the snapshot leaves its row unread instead of a
+        failure.
         """
         return None
 
     async def get_allowed_repeat_freqs(self) -> list[tuple[float, float]]:
-        """Return the frequency ranges (MHz, inclusive) client repeat may be enabled on.
+        """Return the frequency ranges (MHz, inclusive) on which client repeat can be on.
 
-        The firmware refuses to relay outside them (``isValidClientRepeatFreq``), so the
-        editor can check before staging instead of after a refusal. Empty where the firmware
-        doesn't say — which means *unknown*, not *nowhere*.
+        The firmware does not relay out of these ranges (``isValidClientRepeatFreq``). Thus
+        the editor can check before it stages a change, instead of after a refusal. The
+        list is empty when the firmware does not tell. This means unknown, not nowhere.
         """
         return []
 
     @abstractmethod
     async def get_default_flood_scope(self) -> str | None:
-        """Return the persisted default flood scope's name (``""`` when unset).
+        """Return the name of the stored default flood scope (``""`` when it is not set).
 
         Returns:
-            The ``#scope`` name limiting flood routing, an empty string when no scope is
-            configured, or ``None`` if the firmware predates flood scopes.
+            The ``#scope`` name that limits flood routing, an empty string when no scope
+            is set, or ``None`` if the firmware is older than flood scopes.
         """
 
     @abstractmethod
     async def get_time(self) -> int | None:
-        """Return the device clock as a UNIX epoch timestamp, or ``None`` if unknown."""
+        """Return the device clock as a UNIX epoch timestamp, or ``None`` if not known."""
 
     @abstractmethod
     async def get_battery(self) -> dict:
-        """Return battery (and, when reported, storage) status.
+        """Return the battery status (and the storage status, when the firmware reports it).
 
         Returns:
             A dict with ``level`` (millivolts) and, on firmware that reports storage,
-            ``used_kb``/``total_kb``. Empty when the read is unsupported.
+            ``used_kb``/``total_kb``. It is empty when the firmware does not support the
+            read.
         """
 
     async def get_hw_charging(self) -> bool | None:
-        """Return a firmware-reported charging flag, or ``None`` when the device has none.
+        """Return a charging flag that the firmware reports, or ``None`` if the device has none.
 
-        The companion protocol carries only a battery voltage, so almost every device answers
-        ``None`` and callers fall back to inferring charge from the voltage trend (see
-        :meth:`~meshterm.services.battery_service.BatteryService._charging`). A transport that
-        can read a real charging flag — a BLE device exposing the standard Battery Level Status
-        characteristic (0x2BED) — overrides this to return it. Best-effort by contract: it
-        never raises and never meaningfully blocks, so a caller may await it every poll.
+        The companion protocol has only a battery voltage. Thus almost all devices answer
+        ``None``, and callers use an inference of the charge from the voltage trend instead
+        (refer to :meth:`~meshterm.services.battery_service.BatteryService._charging`). A
+        transport that can read a real charging flag overrides this method to return it (a
+        BLE device with the standard Battery Level Status characteristic, 0x2BED). This
+        method is best-effort by contract: it never raises, and it never blocks for a
+        significant time. Thus a caller can await it at each poll.
         """
         return None
 
     @abstractmethod
     async def get_stats(self) -> dict:
-        """Return the firmware's core/radio/packet statistics, merged into one dict.
+        """Return the core, radio, and packet statistics of the firmware, in one dict.
 
-        Each of the three stats frames is fetched best-effort — firmware predating one
-        simply contributes nothing — so callers get whatever subset exists: ``battery_mv``,
-        ``uptime_secs``, ``errors``, ``queue_len`` (core); ``noise_floor``, ``last_rssi``,
-        ``last_snr``, ``tx_air_secs``, ``rx_air_secs`` (radio); ``recv``, ``sent``,
-        ``flood_tx``, ``direct_tx``, ``flood_rx``, ``direct_rx``, ``recv_errors`` (packets).
+        MeshTerm reads each of the three types of statistics best-effort. Firmware that is
+        older than one type gives nothing for it. Thus callers get the subset that exists:
+
+        * core: ``battery_mv``, ``uptime_secs``, ``errors``, ``queue_len``.
+        * radio: ``noise_floor``, ``last_rssi``, ``last_snr``, ``tx_air_secs``,
+          ``rx_air_secs``.
+        * packets: ``recv``, ``sent``, ``flood_tx``, ``direct_tx``, ``flood_rx``,
+          ``direct_rx``, ``recv_errors``.
         """
 
     @abstractmethod
@@ -1724,34 +1816,35 @@ class Device(ABC):
 
     @abstractmethod
     async def get_custom_vars(self) -> dict[str, str]:
-        """Return the device's experimental custom key/value variables."""
+        """Return the experimental custom key/value variables of the device."""
 
     @abstractmethod
     async def get_channel(self, index: int) -> dict | None:
-        """Return one channel's configuration, or ``None`` if unset.
+        """Return the settings of one channel, or ``None`` if the slot is not set.
 
         Args:
-            index: Zero-based channel slot.
+            index: The zero-based channel slot.
 
         Returns:
-            A dict with ``channel_idx``, ``channel_name`` and ``channel_secret``
+            A dict with ``channel_idx``, ``channel_name``, and ``channel_secret``
             (16 raw bytes), or ``None`` when the slot is empty.
         """
 
     async def channel_capacity(self) -> int:
-        """Discover how many channel slots this device exposes (read-only, non-destructive).
+        """Find how many channel slots this device has (read-only, non-destructive).
 
-        Reads slots from 0 upward until the firmware rejects an index. An *empty* slot is a
-        valid index and returns ``None`` without stopping the scan; only an out-of-range index
-        makes the firmware answer with an error, which surfaces here as an exception. The scan
-        is bounded by :data:`CHANNEL_SLOT_PROBE_CAP` so a device that never rejects an index
-        can't loop forever — in that case the cap itself is reported.
+        The method reads slots from 0 upward until the firmware rejects an index. An empty
+        slot is a valid index. It returns ``None``, and the scan does not stop. Only an
+        index out of range causes an error answer from the firmware, which comes here as an
+        exception. :data:`CHANNEL_SLOT_PROBE_CAP` limits the scan, so a device that never
+        rejects an index cannot cause an endless loop. In that case, the method reports the
+        cap itself.
 
-        This only ever *reads* channel configuration, so it is safe to call against a live
-        device without disturbing its state.
+        This method only reads the channel settings. Thus it is safe to call it on a live
+        device: it does not change the state of the device.
 
         Returns:
-            The number of addressable channel slots the firmware was built with.
+            The number of channel slots that the firmware was built with.
         """
         count = 0
         for idx in range(CHANNEL_SLOT_PROBE_CAP):
@@ -1762,19 +1855,19 @@ class Device(ABC):
             count = idx + 1
         return count
 
-    # -- configuration: settable values -----------------------------------------
+    # -- settings: values to set -------------------------------------------------
 
     @abstractmethod
     async def set_name(self, name: str) -> None:
-        """Set the node's advertised name."""
+        """Set the advertised name of the node."""
 
     @abstractmethod
     async def set_coords(self, lat: float, lon: float) -> None:
-        """Set the node's advertised latitude/longitude (decimal degrees)."""
+        """Set the advertised latitude and longitude of the node (decimal degrees)."""
 
     @abstractmethod
     async def set_device_pin(self, pin: int) -> None:
-        """Set the device's BLE pairing PIN."""
+        """Set the BLE pairing PIN of the device."""
 
     @abstractmethod
     async def set_radio(
@@ -1783,40 +1876,42 @@ class Device(ABC):
         """Set the core radio parameters.
 
         Args:
-            freq: Frequency in MHz.
-            bw: Bandwidth in kHz.
-            sf: Spreading factor.
-            cr: Coding rate denominator (``5``-``8`` for 4/5-4/8).
+            freq: The frequency in MHz.
+            bw: The bandwidth in kHz.
+            sf: The spreading factor.
+            cr: The denominator of the coding rate (``5``-``8`` for 4/5-4/8).
             repeat: Whether the companion relays mesh traffic (client repeat, firmware v9+).
-                The firmware takes it as an optional trailing byte of this same command and
-                reads the byte's *absence* as off — so a caller changing any radio field on
-                firmware that reports it must restate it, or the change quietly stops the
-                relaying. ``None`` omits the byte, for firmware that predates it.
+                The firmware reads it as an optional last byte of this same command. If the
+                byte is absent, the firmware sets the relay to off. Thus a caller that
+                changes a radio field on firmware that reports it must state it again. If
+                not, the change silently turns off the relay. ``None`` omits the byte, for
+                firmware that is older than this byte.
         """
 
     @abstractmethod
     async def set_tuning(self, rx_delay: float, airtime_factor: float) -> None:
-        """Set radio tuning parameters, in their real units.
+        """Set the radio tuning parameters, in their real units.
 
-        The firmware takes both fields in one command, so a caller changing one must
-        resend the other. Values are the real ones (``rx_delay`` in seconds, 0–20;
-        ``airtime_factor`` a duty-cycle factor, 0–9); implementations apply the
-        protocol's ×1000 wire scaling. (The repeater-side TX delay factors are *not*
-        part of this command — companion firmware reads exactly these two fields and
-        ignores anything after them; those knobs are remote-CLI settings on repeaters.)
+        The firmware takes both fields in one command, so a caller that changes one field
+        must send the other again. The values are the real values (``rx_delay`` in
+        seconds, 0–20, and ``airtime_factor``, a duty-cycle factor, 0–9). The
+        implementations apply the ×1000 scaling of the protocol. (The TX delay factors of
+        a repeater are not part of this command. Companion firmware reads exactly these
+        two fields and ignores all data after them. On repeaters, those values are
+        remote-CLI settings.)
         """
 
     @abstractmethod
     async def set_manual_add_contacts(self, enabled: bool) -> None:
-        """Set whether contacts must be added manually rather than automatically."""
+        """Set whether contacts must be added manually instead of automatically."""
 
     @abstractmethod
     async def set_adv_loc_policy(self, policy: int) -> None:
-        """Set the advert location-sharing policy."""
+        """Set the policy that controls whether adverts share the location."""
 
     @abstractmethod
     async def set_multi_acks(self, value: int) -> None:
-        """Set the multi-ack behavior flag."""
+        """Set the multi-ack behaviour flag."""
 
     @abstractmethod
     async def set_telemetry_modes(self, base: int, loc: int, env: int) -> None:
@@ -1824,34 +1919,37 @@ class Device(ABC):
 
     @abstractmethod
     async def set_autoadd_config(self, flags: int, max_hops: int | None = None) -> None:
-        """Set the contact auto-add bitmask (see :meth:`get_autoadd_config`), and its hop limit.
+        """Set the contact auto-add bitmask (:meth:`get_autoadd_config`) and its hop limit.
 
-        The firmware reads the hop limit as an optional second byte and leaves it where it
-        was when that byte is absent, so ``None`` changes the bitmask alone.
+        The firmware reads the hop limit as an optional second byte. When that byte is
+        absent, the firmware does not change the hop limit. Thus ``None`` changes only the
+        bitmask.
         """
 
     @abstractmethod
     async def set_default_flood_scope(self, scope: str) -> None:
-        """Persist the default flood scope by name (empty string clears it).
+        """Store the default flood scope by name (an empty string clears it).
 
-        The name is stored bare, as the firmware and the official apps store it; the
-        ``#`` belongs only to deriving its 16-byte key (see :mod:`~meshterm.core.regions`).
+        The name is stored bare, as the firmware and the official apps store it. The ``#``
+        is only for the derivation of its 16-byte key (refer to
+        :mod:`~meshterm.core.regions`).
         """
 
     @abstractmethod
     async def set_flood_scope(self, region: str | None) -> None:
-        """Set the session send scope — what the next floods go out under, until changed.
+        """Set the session send scope: the scope of the next floods, until it changes.
 
-        The firmware's session override (``CMD_SET_FLOOD_SCOPE_KEY``): not persisted, reset
-        at boot, and applied to *every* flood the companion sends — channel messages, flood
-        DMs, acks, path returns, requests — ahead of the persisted default. There is no
-        per-channel scope in firmware, so a channel scope is this call made just before the
-        channel send (and undone after it).
+        This is the session override of the firmware (``CMD_SET_FLOOD_SCOPE_KEY``). It is
+        not stored, a boot resets it, and it applies to each flood that the companion sends
+        (channel messages, flood DMs, acks, path returns, requests). It has priority over
+        the stored default. The firmware has no per-channel scope. Thus a channel scope is
+        this call immediately before the channel send (and a reset after it).
 
         Args:
-            region: A region name to scope to; :data:`~meshterm.core.regions.WILDCARD`
-                (``*``) to force unscoped even over a default scope (firmware 1.16+); or
-                ``None`` to drop the override and fall back to the default scope.
+            region: A region name for the scope.
+                :data:`~meshterm.core.regions.WILDCARD` (``*``) to force unscoped, also
+                over a default scope (firmware 1.16+). Or ``None`` to remove the override
+                and use the default scope again.
         """
 
     @abstractmethod
@@ -1864,28 +1962,28 @@ class Device(ABC):
 
     @abstractmethod
     async def set_channel(self, index: int, name: str, secret: bytes | None) -> None:
-        """Configure a channel slot.
+        """Set up a channel slot.
 
         Args:
-            index: Zero-based channel slot.
-            name: Channel name (a leading ``#`` derives the secret from the name).
-            secret: 16-byte shared secret, or ``None`` to derive it from ``name``.
+            index: The zero-based channel slot.
+            name: The channel name (a leading ``#`` derives the secret from the name).
+            secret: The 16-byte shared secret, or ``None`` to derive it from ``name``.
         """
 
-    # -- configuration: actions -------------------------------------------------
+    # -- settings: actions ------------------------------------------------------
 
     @abstractmethod
     async def set_time(self, epoch: int) -> None:
         """Set the device clock to a UNIX epoch timestamp.
 
         Raises:
-            ClockAheadError: If the device's clock is already later than ``epoch`` —
-                MeshCore firmware only moves its clock forward.
+            ClockAheadError: If the device clock is already later than ``epoch``. MeshCore
+                firmware moves its clock only forward.
         """
 
     @abstractmethod
     async def send_advert(self, flood: bool = False) -> None:
-        """Broadcast an advertisement (``flood`` propagates it across the mesh)."""
+        """Broadcast an advert (``flood`` sends it across the full mesh)."""
 
     @abstractmethod
     async def reboot(self) -> None:
@@ -1897,35 +1995,41 @@ class Device(ABC):
 
     @abstractmethod
     async def import_private_key(self, key_hex: str) -> None:
-        """Import a private key from a hex string (overwrites the device identity)."""
+        """Import a private key from a hex string (this replaces the device identity)."""
 
     @abstractmethod
     async def factory_reset(self) -> None:
-        """Erase all device data and restore factory defaults (destructive)."""
+        """Erase all the device data and restore the factory defaults (destructive)."""
 
     async def __aenter__(self) -> Device:
-        """Enter the async context manager, connecting the device."""
+        """Enter the async context manager, and connect the device."""
         await self.connect()
         return self
 
     async def __aexit__(self, *exc: object) -> None:
-        """Exit the async context manager, disconnecting the device."""
+        """Exit the async context manager, and disconnect the device."""
         await self.disconnect()
 
 
 class MeshCoreDevice(Device):
-    """A :class:`Device` backed by the ``meshcore`` companion client (serial, BLE, or TCP).
+    """A :class:`Device` on the ``meshcore`` companion client (serial, BLE, or TCP).
 
-    The same wrapper serves every transport: which one it opens is chosen by ``transport``
-    (``"serial"`` opens ``port``; ``"ble"`` opens ``address``; ``"tcp"`` opens
-    ``host``:``tcp_port``). Everything above the connection — commands, event mapping, trace
-    parsing — is transport-agnostic, so only :meth:`connect` and :meth:`link_present` differ
-    between them.
+    The same wrapper serves all transports. ``transport`` selects the transport that it
+    opens:
+
+    * ``"serial"`` opens ``port``.
+    * ``"ble"`` opens ``address``.
+    * ``"tcp"`` opens ``host``:``tcp_port``.
+
+    All the parts above the connection (commands, event mapping, trace parsing) are the
+    same for all transports. Thus only :meth:`connect` and :meth:`link_present` are
+    different between them.
 
     Note:
         The trace mapping here follows the documented companion protocol (trace replies
-        carry per-hop SNR encoded as ``SNR * 4``) but should be validated against your
-        firmware version, as event payload field names vary between releases.
+        have the SNR of each hop, encoded as ``SNR * 4``). But you must check it with your
+        firmware version, because the field names of the event payload can change between
+        releases.
     """
 
     def __init__(
@@ -1944,24 +2048,29 @@ class MeshCoreDevice(Device):
         """Initialize the device wrapper.
 
         Args:
-            port: Serial port path (e.g. ``COM5`` or ``/dev/ttyUSB0``); serial transport only.
-            baudrate: Serial baud rate.
-            connect_timeout: Handshake timeout (seconds) for the initial connection, passed
-                to the client as its default command timeout. ``None`` uses the ``meshcore``
-                library default (~15s). The startup smoke test sets a short value so a
-                non-responsive port is rejected quickly instead of blocking on the full
-                default handshake window.
+            port: The serial port path (for example ``COM5`` or ``/dev/ttyUSB0``). Only for
+                the serial transport.
+            baudrate: The serial baud rate.
+            connect_timeout: The handshake timeout (seconds) for the first connection. The
+                client gets it as its default command timeout. ``None`` uses the default of
+                the ``meshcore`` library (approximately 15 s). The startup smoke test sets a
+                short value, so that MeshTerm rejects a port that does not respond quickly,
+                and does not wait for the full default handshake window.
             transport: ``"serial"`` (default), ``"ble"``, or ``"tcp"``.
-            address: Bluetooth address (e.g. ``AA:BB:CC:DD:EE:FF``); BLE transport only.
-            pin: Optional BLE pairing PIN, when the peripheral requires one (BLE only).
-            ble_device: The ``bleak.BLEDevice`` the discovery scan already found at
-                ``address``, when available (BLE only). Passing it lets the connect open the
-                peripheral directly instead of re-discovering it by address — on Windows a
-                bare-address connect runs a fresh internal scan that intermittently misses a
-                slow-advertising companion, which is the main source of flaky BLE startups.
-                Typed ``object`` so ``bleak`` need not be imported on non-BLE paths.
-            host: Hostname or IP of a network companion; TCP transport only.
-            tcp_port: TCP port the network companion listens on; TCP transport only.
+            address: The Bluetooth address (for example ``AA:BB:CC:DD:EE:FF``). Only for
+                the BLE transport.
+            pin: An optional BLE pairing PIN, when the peripheral must have one (BLE only).
+            ble_device: The ``bleak.BLEDevice`` that the discovery scan already found at
+                ``address``, when available (BLE only). With it, the connect opens the
+                peripheral directly, and does not discover it again by address. On Windows,
+                a connect with only the address runs a new internal scan. That scan
+                sometimes does not find a companion that advertises slowly, and this is the
+                main cause of BLE startups that fail at random. The type is ``object``, so
+                the paths without BLE do not have to import ``bleak``.
+            host: The host name or IP address of a network companion. Only for the TCP
+                transport.
+            tcp_port: The TCP port on which the network companion listens. Only for the
+                TCP transport.
         """
         self._port = port
         self._baudrate = baudrate
@@ -1969,38 +2078,41 @@ class MeshCoreDevice(Device):
         self._transport = transport
         self._address = address
         self._pin = pin
-        #: What the last Windows PIN-pairing attempt found (``None`` when none ran), so an
-        #: authentication refusal can name the failure rather than guess at it.
+        #: The result of the last Windows PIN pairing (``None`` when no pairing ran). With
+        #: it, an authentication refusal can name the failure, instead of a guess.
         self._ble_pairing: _BlePairing | None = None
         self._ble_device = ble_device
         self._host = host
         self._tcp_port = tcp_port
         self._mc = None  # type: ignore[var-annotated]  # meshcore.MeshCore
-        #: The ``bleak.BleakClient`` behind a BLE link, kept because ``meshcore`` lets go of
-        #: its own reference the moment the peripheral vanishes — see :meth:`_release_ble_client`
-        #: for why nothing else can close it, and what that costs when it stays open.
+        #: The ``bleak.BleakClient`` of a BLE link. MeshTerm keeps it because ``meshcore``
+        #: releases its own reference at the moment the peripheral disappears. Refer to
+        #: :meth:`_release_ble_client` for why nothing else can close it, and for the cost
+        #: when it stays open.
         self._ble_client = None  # type: ignore[var-annotated]  # bleak.BleakClient
-        #: The BlueZ agent answering this device's pairing while a connect runs (Linux; see
-        #: :meth:`_ble_pairing_agent`), so the connect can tell a pairing refusal from a drop.
+        #: The BlueZ agent that answers the pairing of this device while a connect runs
+        #: (Linux, refer to :meth:`_ble_pairing_agent`). With it, the connect can tell a
+        #: pairing refusal from a lost link.
         self._ble_agent: object | None = None
-        # Serializes channel reads. The meshcore library's get_channel waits for "the next
-        # CHANNEL_INFO event" with no correlation to the index it asked for, and the dispatcher
-        # fans that event to *every* in-flight waiter — so two concurrent reads both resolve on
-        # the first response and one caller silently gets the other's channel. Holding this lock
-        # keeps at most one channel read outstanding, so the response is unambiguously ours.
+        # This lock serializes the channel reads. The get_channel of the meshcore library
+        # waits for "the next CHANNEL_INFO event", with no correlation to the index that it
+        # asked for. The dispatcher sends that event to each waiter that is in progress.
+        # Thus two concurrent reads both complete on the first response, and one caller
+        # silently gets the channel of the other caller. This lock keeps a maximum of one
+        # channel read in progress, so the response is certainly ours.
         self._channel_read_lock = asyncio.Lock()
-        #: Set once we've noted a device exposing the standard BLE Battery Service, so the
-        #: "using its charging flag" log fires a single time per session rather than each poll.
+        #: Set after we log a device that has the standard BLE Battery Service. Thus the
+        #: "using its charging flag" log occurs one time in each session, not at each poll.
         self._logged_bas = False
 
     @property
     def transport(self) -> str:
-        """Which transport this device connects over (``"serial"``, ``"ble"``, or ``"tcp"``)."""
+        """The transport of this device (``"serial"``, ``"ble"``, or ``"tcp"``)."""
         return self._transport
 
     @property
     def endpoint(self) -> str | None:
-        """The connection endpoint: ``host:port`` for TCP, the BLE address, else the port."""
+        """The connection endpoint: ``host:port`` for TCP, the BLE address, or else the port."""
         if self._transport == "tcp":
             return f"{self._host}:{self._tcp_port}"
         return self._address if self._transport == "ble" else self._port
@@ -2009,7 +2121,7 @@ class MeshCoreDevice(Device):
         if self._mc is not None:
             return
         try:
-            from meshcore import MeshCore  # lazy import so --mock needs no hardware deps
+            from meshcore import MeshCore  # lazy import: --mock has no hardware dependencies
         except ImportError as exc:  # pragma: no cover - environment-dependent
             raise RuntimeError(
                 "The 'meshcore' library is required to talk to real hardware but is not "
@@ -2017,11 +2129,12 @@ class MeshCoreDevice(Device):
                 "--mock for the simulator."
             ) from exc
 
-        # Every transport leaves here with a sentence: a failure it recognises is named with
-        # its remedy, and one it doesn't is still said in words, as what was being opened and
-        # the error's own message, with the traceback logged (see _unrecognised). A bare
-        # library error used to escape instead, and a dialog could only call it "didn't
-        # answer". The original stays the cause, so is_connection_lost still sees it.
+        # Each transport leaves here with a sentence. A failure that it recognizes gets a name
+        # and its repair. A failure that it does not recognize still gets words: what MeshTerm
+        # tried to open, and the message of the error, with the traceback in the log (refer
+        # to _unrecognised). In the past, a bare library error went out instead, and a dialog
+        # could only call it "didn't answer". The original error stays the cause, so
+        # is_connection_lost still finds it.
         if self._transport == "ble":
             where = self._address or "the selected Bluetooth device"
             try:
@@ -2039,9 +2152,10 @@ class MeshCoreDevice(Device):
                     self._host, self._tcp_port, default_timeout=self._connect_timeout
                 )
             except Exception as exc:  # noqa: BLE001 - named when recognised, else said in words
-                # The socket couldn't be opened, which is not a MeshCore-level failure: the
-                # name didn't resolve, nothing listens on the port, no route reaches the host,
-                # or the connect timed out — four faults with four different fixes.
+                # The socket did not open. This is not a failure at the MeshCore level. The
+                # name did not resolve, nothing listens on the port, no route goes to the
+                # host, or the connect timed out. These are four faults with four different
+                # repairs.
                 message = _tcp_open_message(self._host or "the host", self._tcp_port, exc)
                 if message is None:
                     raise _unrecognised(f"couldn't connect to {self.endpoint}", exc) from exc
@@ -2053,23 +2167,24 @@ class MeshCoreDevice(Device):
                     self._port, self._baudrate, default_timeout=self._connect_timeout
                 )
             except Exception as exc:  # noqa: BLE001 - named when recognised, else said in words
-                # The port refused to open at all — which says nothing about whether a
-                # companion is on it, and used to be reported as if it had said exactly that.
+                # The port did not open at all. This tells nothing about whether a companion
+                # is on it, but in the past MeshTerm reported it as if it told exactly that.
                 port = self._port or "the serial port"
                 message = _serial_open_message(port, exc)
                 if message is None:
                     raise _unrecognised(f"couldn't connect to the device on {port}", exc) from exc
                 _log.warning("couldn't open %s: %s", self._port, exc)
                 raise DeviceCommandError(message) from exc
-        # ``create_*`` returns ``None`` (after cleaning up its own connection) when the node
-        # never answers the identity handshake — i.e. the endpoint isn't a MeshCore companion.
-        # Surface that as a clean, recoverable error rather than leaving a half-open device
-        # whose next command fails with a confusing "not connected".
+        # ``create_*`` returns ``None`` (after it cleans up its own connection) when the node
+        # never answers the identity handshake. That is, the endpoint is not a MeshCore
+        # companion. Show that as a clean error that MeshTerm can recover from. Do not leave
+        # a half-open device, whose next command fails with a confusing "not connected".
         if self._mc is None:
             raise DeviceCommandError(self._no_response_message())
-        # A short ``connect_timeout`` is only meant to bound the initial identity handshake
-        # (so a dead endpoint is rejected quickly). Now that we're connected, restore the
-        # library's normal per-command timeout so the rest of the session isn't rushed.
+        # A short ``connect_timeout`` is only a limit for the first identity handshake (so
+        # that MeshTerm rejects a dead endpoint quickly). Now we are connected, so restore
+        # the usual command timeout of the library. Then the rest of the session has the
+        # usual time for each command.
         if self._connect_timeout is not None:
             commands = getattr(self._mc, "commands", None)
             default = getattr(commands, "DEFAULT_TIMEOUT", None)
@@ -2077,21 +2192,26 @@ class MeshCoreDevice(Device):
                 commands.default_timeout = default
 
     async def _create_ble(self, mesh_core):  # type: ignore[no-untyped-def]
-        """Open the BLE companion connection, pairing with a PIN first on Windows.
+        """Open the BLE companion connection, and on Windows, pair with a PIN first.
 
-        ``auto_reconnect`` is deliberately left off: MeshTerm drives reconnection itself (the
-        same reconnect dialog the serial path uses), so the meshcore client should surface a
-        dropped link promptly via ``is_connected`` rather than silently retrying underneath us.
+        MeshTerm does not set ``auto_reconnect``, on purpose. MeshTerm controls the
+        reconnect itself (with the same reconnect dialog that the serial path uses). Thus
+        the meshcore client must report a lost link quickly through ``is_connected``, and
+        must not silently try again below us.
 
-        Before opening the link we establish an *authenticated* pairing ourselves when a PIN is
-        supplied (see :meth:`_pair_ble_windows`). This is essential on Windows: bleak's
-        ``pair()`` only performs the "Just Works" ceremony (``CONFIRM_ONLY``) and never enters a
-        passkey, so a PIN-protected companion bonds *without authentication* and then rejects
-        the GATT subscribe on its authenticated UART characteristic — a correct PIN is reported
-        as "rejected" and the device can never connect. Running the WinRT ProvidePin ceremony
-        ourselves creates the authenticated bond the characteristic requires; once bonded, the
-        OS keeps the bond and later reconnects need no PIN at all. The step is a harmless no-op
-        on other platforms, when no PIN is set, or when the device is already bonded.
+        Before MeshTerm opens the link, it makes an *authenticated* pairing itself when the
+        user gives a PIN (refer to :meth:`_pair_ble_windows`). This is essential on Windows.
+        bleak's ``pair()`` does only the "Just Works" ceremony (``CONFIRM_ONLY``), and it
+        never enters a passkey. Thus a companion with a PIN makes a bond without
+        authentication, and then rejects the GATT subscribe on its authenticated UART
+        characteristic. MeshTerm then reports a correct PIN as "rejected", and the device
+        can never connect.
+
+        When MeshTerm runs the WinRT ProvidePin ceremony itself, it makes the authenticated
+        bond that is necessary for the characteristic. After the bond, the OS keeps it, and
+        later reconnects do not ask for a PIN. This step does nothing (and causes no
+        problem) on other platforms, when no PIN is set, or when the device already has a
+        bond.
 
         Args:
             mesh_core: The imported ``meshcore.MeshCore`` class.
@@ -2108,15 +2228,18 @@ class MeshCoreDevice(Device):
                 self._ble_agent = None
 
     def _pin_was_asked(self) -> bool:
-        """Whether BlueZ asked this connect's agent for the PIN (see :class:`bluez.PinAgent`)."""
+        """Whether BlueZ asked the agent of this connect for the PIN.
+
+        Refer to :class:`bluez.PinAgent`.
+        """
         return bool(getattr(self._ble_agent, "asked", False))
 
     def _ble_pairing_agent(self) -> AbstractAsyncContextManager[object]:
-        """Answer BlueZ's own pairing requests for this device while connecting (Linux only).
+        """Answer the BlueZ pairing requests for this device during a connect (Linux only).
 
-        See :func:`meshterm.core.bluez.answering` for why: BlueZ starts a pairing of its own
-        when the subscribe is refused, and with nobody to answer it the connect stalls 30 s.
-        An instance hook, so tests can keep the system bus out of it.
+        Refer to :func:`meshterm.core.bluez.answering` for the reason. BlueZ starts its own
+        pairing when the subscribe is refused. If nothing answers it, the connect stops for
+        30 s. This is an instance hook, so tests can keep the system bus out of it.
         """
         from . import bluez
 
@@ -2125,21 +2248,21 @@ class MeshCoreDevice(Device):
         return nullcontext()
 
     async def _open_ble(self, mesh_core, *, allow_repair: bool):  # type: ignore[no-untyped-def]
-        """Open the meshcore BLE client, translating auth failures and healing stale bonds.
+        """Open the meshcore BLE client, translate auth failures, and repair old bonds.
 
         Args:
             mesh_core: The imported ``meshcore.MeshCore`` class.
-            allow_repair: Whether a GATT authentication failure may trigger one unpair-and-
-                re-pair-with-PIN retry (Windows only). Set ``False`` on that retry so a genuine
-                wrong-PIN can't loop.
+            allow_repair: Whether a GATT authentication failure can start one retry that
+                unpairs and then pairs again with the PIN (Windows only). It is ``False`` on
+                that retry, so that a PIN that is in fact wrong cannot cause a loop.
 
         Returns:
             The connected ``MeshCore`` client, or ``None`` if the peripheral never answered.
 
         Raises:
-            DeviceCommandError: If ``bleak`` is missing (with install guidance).
-            DeviceAuthenticationError: If the companion needs a pairing PIN we don't have or
-                that was rejected.
+            DeviceCommandError: If ``bleak`` is missing (with install instructions).
+            DeviceAuthenticationError: If the companion must have a pairing PIN that we do
+                not have, or that it rejected.
         """
         try:
             return await self._create_ble_with_retry(mesh_core)
@@ -2149,56 +2272,60 @@ class MeshCoreDevice(Device):
                 "Run `pip install -e .` (or `pip install bleak`), use a USB device, or "
                 "run with --mock."
             ) from exc
-        except Exception as exc:  # noqa: BLE001 - translate auth failures; re-raise the rest
-            # A PIN-protected companion accepts the link-layer connection but rejects the
-            # GATT subscribe with an authentication error ("Insufficient Authentication" /
-            # "Insufficient Encryption" / "not paired"). That's not a dropped link — it's a
-            # missing bond — so surface a clean, actionable message instead of a raw traceback
-            # (which is what a bare BleakGATTProtocolError would produce). Anything else
-            # propagates unchanged so genuine link-loss still flows to is_connection_lost.
+        except Exception as exc:  # noqa: BLE001 - translate auth failures. Raise the others again.
+            # A companion with a PIN accepts the link-layer connection, but rejects the GATT
+            # subscribe with an authentication error ("Insufficient Authentication",
+            # "Insufficient Encryption", or "not paired"). That is not a lost link. It is a
+            # missing bond. Thus show a clean message that the user can act on, instead of a
+            # raw traceback (a bare BleakGATTProtocolError would give a raw traceback). All
+            # other errors go up with no change, so a real link loss still goes to
+            # is_connection_lost.
             if not _is_ble_auth_error(exc):
                 raise
-            # On Windows this can also happen with the *right* PIN when a stale, unauthenticated
-            # "Just Works" bond from an older attempt is in the way: is_paired is true so the
-            # ProvidePin step above was skipped, yet the bond can't unlock the characteristic.
-            # Clear it, pair with the PIN, and retry the connect exactly once before giving up.
+            # On Windows, this can also occur with the right PIN, when an old unauthenticated
+            # "Just Works" bond from an earlier try is in the way. is_paired is true, so
+            # MeshTerm skipped the ProvidePin step above, but the bond cannot unlock the
+            # characteristic. Clear the bond, pair with the PIN, and try the connect one more
+            # time before a failure.
             if allow_repair and await self._pair_ble(force=True):
                 return await self._open_ble(mesh_core, allow_repair=False)
-            # On macOS the same rejection means the opposite thing: it is not the end of a
-            # pairing attempt but the *start* of one, because touching the authenticated
-            # characteristic is the only way to make CoreBluetooth pair at all. The OS is
-            # putting its Passkey dialog up as we unwind. Wait for the person to answer it.
+            # On macOS, the same rejection has the opposite meaning. It is not the end of a
+            # pairing try, but the start of one, because an access to the authenticated
+            # characteristic is the only way to make CoreBluetooth pair. The OS opens its
+            # Passkey dialog while we unwind. Wait for the user to answer it.
             if allow_repair and sys.platform == "darwin":
                 return await self._open_ble_after_macos_pairing(mesh_core, exc)
             raise await self._ble_auth_failure() from exc
 
     async def _open_ble_after_macos_pairing(self, mesh_core, cause: BaseException):  # type: ignore[no-untyped-def]
-        """Re-open the link while macOS is running the Passkey dialog it just raised.
+        """Open the link again while macOS runs the Passkey dialog that it just opened.
 
-        CoreBluetooth exposes no pairing API — Apple's model is that a peripheral pairs
-        *implicitly* when something touches a characteristic that requires encryption. The
-        companion firmware puts its UART characteristic at ENC+MITM precisely so that
-        happens (``SECMODE_ENC_WITH_MITM`` on nRF52, ``ESP_GATT_PERM_*_ENC_MITM`` on
-        ESP32), so the subscribe fails with "Insufficient Authentication" *and* that
-        failure is what makes macOS ask for the code. The GATT operation is already dead by
-        then; the bond it started arrives seconds later, once a human has typed six digits.
+        CoreBluetooth has no pairing API. In Apple's model, a peripheral pairs *implicitly*
+        when something accesses a characteristic that demands encryption. The companion
+        firmware sets its UART characteristic to ENC+MITM to cause exactly this
+        (``SECMODE_ENC_WITH_MITM`` on nRF52, ``ESP_GATT_PERM_*_ENC_MITM`` on ESP32). Thus
+        the subscribe fails with "Insufficient Authentication", and that failure is what
+        makes macOS ask for the code. The GATT operation has already failed at that time.
+        The bond that it started arrives some seconds later, after a person has typed six
+        digits.
 
-        Failing there reported an error for a pairing that was in fact succeeding, and the
-        device connected on the next attempt — the first having silently done the work. So
-        retry rather than give up, for long enough to cover the typing.
+        When MeshTerm failed at that point, it reported an error for a pairing that was in
+        fact successful. The device then connected on the next try, because the first try
+        had silently done the work. Thus try again instead of a failure, for a time that is
+        sufficient for the typing.
 
         Args:
             mesh_core: The imported ``meshcore.MeshCore`` class.
-            cause: The authentication failure that opened the dialog, chained onto the
-                final error if the pairing never completes.
+            cause: The authentication failure that opened the dialog. It is chained onto
+                the final error if the pairing never completes.
 
         Returns:
-            The connected ``MeshCore`` client, or ``None`` if a later attempt opened the
+            The connected ``MeshCore`` client, or ``None`` if a later try opened the
             transport but the peripheral never answered the identity handshake.
 
         Raises:
-            DeviceAuthenticationError: If every attempt was still refused — the dialog was
-                dismissed, or the code entered was wrong.
+            DeviceAuthenticationError: If the companion still refused each try: the user
+                closed the dialog, or typed a wrong code.
         """
         for attempt in range(_BLE_MACOS_PAIRING_ATTEMPTS):
             await asyncio.sleep(_BLE_MACOS_PAIRING_DELAY_S)
@@ -2214,25 +2341,28 @@ class MeshCoreDevice(Device):
         raise await self._ble_auth_failure() from cause
 
     async def _create_ble_with_retry(self, mesh_core):  # type: ignore[no-untyped-def]
-        """Open the owned BLE client, retrying the transport-level failures that are transient.
+        """Open the owned BLE client, and retry the transport failures that are temporary.
 
-        The meshcore client raises a bare ``ConnectionError`` when the *link itself* could
-        not be opened — the peripheral wasn't found during bleak's internal lookup, or the
-        link-layer connect timed out. On Windows both are routinely transient: a companion
-        advertising on a slow interval is easily missed by a single scan window, and a
-        connect attempted right after the discovery scan can race the radio. Users learned
-        to work around it by re-selecting the device, which is nothing but a manual retry —
-        so retry here, briefly, before surfacing the failure. The already-discovered
-        ``BLEDevice`` (when the picker's scan produced one) is passed through so the client
-        connects to it directly instead of re-discovering the address.
+        The meshcore client raises a bare ``ConnectionError`` when it could not open the
+        *link itself*. For example, bleak's internal lookup did not find the peripheral, or
+        the link-layer connect timed out. On Windows, both failures are usually temporary.
+        One scan window easily misses a companion that advertises at a slow interval, and a
+        connect immediately after the discovery scan can race the radio. Users learned to
+        select the device again, which is only a manual retry. Thus MeshTerm tries again
+        here, for a short time, before it reports the failure.
 
-        A link that opened and then dropped before the session was up (see
-        :func:`_is_ble_link_drop`) is retried the same way: it is the radio, not the device
-        refusing. Nothing else is: a PIN/bond rejection or any other GATT failure propagates
-        unchanged on the first attempt so the auth handling in :meth:`_open_ble` (and a
-        genuine wrong-PIN) is never looped. Each attempt builds its own client through
-        :meth:`_connect_owned_ble`, which closes it before letting any failure out — a
-        retried attempt therefore starts from a released link, never a leaked one.
+        The ``BLEDevice`` that the scan of the picker already found (if it found one) goes
+        to the client. Thus the client connects to it directly, and does not discover the
+        address again.
+
+        A link that opened and then was lost before the session started (refer to
+        :func:`_is_ble_link_drop`) gets a retry in the same way: the cause is the radio, not
+        a refusal of the device. No other failure gets a retry. A PIN or bond rejection, or
+        any other GATT failure, goes up with no change on the first try. Thus the
+        authentication code in :meth:`_open_ble` (and a PIN that is in fact wrong) never makes a
+        loop. Each try makes its own client through :meth:`_connect_owned_ble`, which
+        closes the client before it lets a failure out. Thus a retry always starts from a
+        released link, never from a leaked link.
 
         Args:
             mesh_core: The imported ``meshcore.MeshCore`` class.
@@ -2242,9 +2372,10 @@ class MeshCoreDevice(Device):
             the peripheral never answered the identity handshake.
 
         Raises:
-            DeviceCommandError: If every attempt failed to open the link — said as such,
-                because this is the one failure where the device was never reached at all,
-                and "didn't answer as a MeshCore device" sent people looking at the firmware.
+            DeviceCommandError: If no try could open the link. The message says this,
+                because this is the only failure where MeshTerm never reached the device at
+                all. The message "didn't answer as a MeshCore device" sent users to examine
+                the firmware.
         """
         last_exc: Exception | None = None
         for attempt in range(_BLE_CONNECT_ATTEMPTS):
@@ -2263,7 +2394,7 @@ class MeshCoreDevice(Device):
                     exc,
                 )
                 last_exc = exc
-        assert last_exc is not None  # the loop always runs; only a link failure falls through
+        assert last_exc is not None  # the loop always runs, and only a link failure gets here
         where = self._address or "the selected Bluetooth device"
         _log.warning("BLE link to %s never opened: %s", where, last_exc)
         raise DeviceCommandError(
@@ -2274,24 +2405,27 @@ class MeshCoreDevice(Device):
         ) from last_exc
 
     async def _connect_owned_ble(self, mesh_core):  # type: ignore[no-untyped-def]
-        """Build the meshcore BLE client here and connect it, so we own its teardown.
+        """Make the meshcore BLE client here and connect it, so that we own its teardown.
 
-        ``MeshCore.create_ble`` assembles a client, calls ``connect()`` on it, and hands it
-        back *only on success* — so a connect that **raises** leaves that client, and the
-        bleak link it has already opened, orphaned inside the library with no reference we
-        could close. That is not a hypothetical: a PIN-protected companion answers the
-        unbonded notify-subscribe with a GATT authentication error, which is raised from
-        deep inside ``connect()`` after bleak has brought the link up. Our own
-        :meth:`disconnect` then does nothing (``_mc`` was never assigned), Windows holds the
-        ACL link for the life of the process, and the peripheral — still believing it has a
-        peer — **stops advertising**. The PIN dialog that opens next therefore asks for a
-        code it can no longer deliver: the retry can't find the device, and the user reads a
-        correct PIN being refused. Assembling the same two objects here costs three lines and
-        keeps the handle, so every exit puts the link back down.
+        ``MeshCore.create_ble`` makes a client, calls ``connect()`` on it, and returns it
+        *only on success*. Thus a connect that **raises** leaves that client, and the bleak
+        link that it has already opened, inside the library with no owner and with no
+        reference that we can close. This is not only a theory. A companion with a PIN
+        answers the notify subscribe without a bond with a GATT authentication error.
+        ``connect()`` raises this error from deep inside, after bleak has opened the link.
 
-        Both public failure shapes are covered, matching what ``create_ble`` does on the one
-        it bothers to handle: a raise (closed, then re-raised) and a ``None`` from the
-        identity handshake (closed, then reported as "not a companion").
+        Our own :meth:`disconnect` then does nothing (``_mc`` was never set), Windows keeps
+        the ACL link for the life of the process, and the peripheral (which still thinks
+        that it has a peer) **stops advertising**. Thus the PIN dialog that opens next asks
+        for a code that it can no longer deliver. The retry cannot find the device, and the
+        user sees that the companion refuses a correct PIN. When we make the same two
+        objects here, it costs three lines and keeps the handle. Thus each exit closes the
+        link.
+
+        This method covers both public failure forms. For the one form that ``create_ble``
+        handles, this method does the same as ``create_ble``. The two forms are: a raise
+        (closed, then raised again), and a ``None`` from the identity handshake (closed,
+        then reported as "not a companion").
 
         Args:
             mesh_core: The imported ``meshcore.MeshCore`` class.
@@ -2301,32 +2435,40 @@ class MeshCoreDevice(Device):
             peripheral never answered the identity handshake.
 
         Raises:
-            Exception: Whatever ``connect`` raised — but not before the link is closed.
+            Exception: The exception that ``connect`` raised, but only after the link is
+                closed.
         """
         from meshcore import BLEConnection
 
-        # bleak never gets the PIN, on any platform. On macOS: handed one,
-        # ``BLEConnection.connect`` calls bleak's ``client.pair()``, and CoreBluetooth has
-        # no pairing API at all — the macOS backend raises ``NotImplementedError`` outright
-        # — whereupon the library disconnects and re-raises, so supplying a *correct* PIN is
-        # what breaks the connection. Apple's model is that pairing is the OS's to run, not
-        # ours: the companion firmware puts its UART characteristic at ENC+MITM
-        # (``SECMODE_ENC_WITH_MITM`` on nRF52, ``ESP_GATT_PERM_*_ENC_MITM`` on ESP32), so
-        # the unbonded subscribe below is answered with "Insufficient Authentication", and
-        # macOS reacts by running Passkey Entry and prompting for the code itself. Saying
-        # nothing here is therefore what *lets* a PIN-protected companion bond; the OS keeps
-        # the bond, and later connections need no PIN (a firmware that guards only the write
-        # gets there too, via :func:`_record_write_refusals`). Linux is the same story from
-        # the other side: bleak's BlueZ ``pair()`` ignores the PIN and pairs through
-        # whatever system agent there is (a desktop dialog, or nothing at all), so MeshTerm
-        # pairs there itself beforehand (see :meth:`_pair_ble_bluez`). Handing bleak the PIN
-        # would only start a second pairing we can't answer. And Windows: bleak's WinRT
-        # ``pair()`` is hardcoded to CONFIRM_ONLY ("Just Works") and never sends a PIN, so
-        # after a PIN pairing of our own that failed (a mistyped PIN), handing bleak the PIN
-        # made it bond *without* one — and Windows kept that unauthenticated bond. The next
-        # attempt, with the right PIN, then reused it and was refused, until the bond was
-        # removed by hand. Pairing is ours to run on every platform that has an API for it
-        # (see :meth:`_pair_ble`).
+        # bleak never gets the PIN, on any platform.
+        #
+        # macOS: if bleak gets a PIN, ``BLEConnection.connect`` calls bleak's
+        # ``client.pair()``. CoreBluetooth has no pairing API at all, so the macOS backend
+        # raises ``NotImplementedError`` immediately. The library then disconnects and
+        # raises the error again. Thus a *correct* PIN is what breaks the connection. In
+        # Apple's model, the OS runs the pairing, not the app. The companion firmware sets
+        # its UART characteristic to ENC+MITM (``SECMODE_ENC_WITH_MITM`` on nRF52,
+        # ``ESP_GATT_PERM_*_ENC_MITM`` on ESP32). Thus the companion answers the subscribe
+        # below (without a bond) with "Insufficient Authentication", and macOS then runs
+        # Passkey Entry and asks for the code itself. Thus, when we give no PIN here, a
+        # companion with a PIN can make a bond. The OS keeps the bond, and later
+        # connections do not ask for a PIN. (A firmware that guards only the write also
+        # gets there, through :func:`_record_write_refusals`.)
+        #
+        # Linux: the same result from the other side. bleak's BlueZ ``pair()`` ignores the
+        # PIN, and pairs through the system agent that is available (a desktop dialog, or
+        # nothing at all). Thus MeshTerm pairs there itself before the connect (refer to
+        # :meth:`_pair_ble_bluez`). If bleak got the PIN, it would only start a second
+        # pairing that we cannot answer.
+        #
+        # Windows: bleak's WinRT ``pair()`` always uses CONFIRM_ONLY ("Just Works"), and it
+        # never sends a PIN. After a failed PIN pairing of our own (a PIN with a typing
+        # error), we gave bleak the PIN, and bleak made a bond *without* a PIN. Windows kept
+        # that unauthenticated bond. The next try, with the right PIN, then used that bond
+        # again and was refused, until a person removed the bond manually.
+        #
+        # We run the pairing on each platform that has an API for it (refer to
+        # :meth:`_pair_ble`).
         connection = BLEConnection(address=self._address, device=self._ble_device, pin=None)
         seen = _hold_disconnects_while_connecting(connection, self._pin_was_asked)
         refused = _record_write_refusals(connection)
@@ -2344,15 +2486,17 @@ class MeshCoreDevice(Device):
             raise
         finally:
             seen.connecting = False
-        # Take our own reference to the bleak client now, while ``BLEConnection`` still holds
-        # one. It drops it the instant the peripheral goes away, and by then nothing else can
-        # reach the object that needs closing (see :meth:`_release_ble_client`).
+        # Take our own reference to the bleak client now, while ``BLEConnection`` still has
+        # one. ``BLEConnection`` releases its reference at the moment the peripheral goes
+        # away. After that, nothing else can reach the object that MeshTerm must close
+        # (refer to :meth:`_release_ble_client`).
         self._ble_client = _held_client(connection, seen)
         if started is None:
             await MeshCoreDevice._discard_meshcore(mc)
             await self._release_ble_client()
-            # An empty handshake whose write was refused for want of a bond is a pairing
-            # problem, not a stranger on the air (see :func:`_record_write_refusals`).
+            # An empty handshake with a write that was refused because there was no bond is
+            # a pairing problem, not an unknown device on the air (refer to
+            # :func:`_record_write_refusals`).
             refusal = refused.refusal()
             if refusal is not None:
                 raise refusal
@@ -2361,28 +2505,29 @@ class MeshCoreDevice(Device):
 
     @staticmethod
     async def _discard_meshcore(mc) -> None:  # type: ignore[no-untyped-def]
-        """Close a client whose ``connect`` didn't complete. Bounded, and never raises.
+        """Close a client whose ``connect`` did not complete, with a time limit, and never raise.
 
-        The graceful ``mc.disconnect()`` is **not sufficient on its own here**, and that is
-        the whole subtlety of this path. ``ConnectionManager.disconnect`` closes the
-        transport only ``if self._is_connected`` — a flag it sets *after*
-        ``connection.connect()`` returns. A connect that raised (the GATT authentication
-        error, thrown from ``start_notify`` well after bleak brought the link up) never got
-        that far, so the manager is certain there is nothing to close while ``BLEConnection``
-        is still holding a live, connected ``BleakClient``. Calling only the graceful path
-        therefore looks like a teardown and leaks the link anyway — which is exactly how the
-        first attempt at this fix still left the peripheral off the air.
+        The graceful ``mc.disconnect()`` is **not sufficient alone here**, and that is the
+        main difficulty of this path. ``ConnectionManager.disconnect`` closes the transport
+        only ``if self._is_connected``. It sets this flag *after* ``connection.connect()``
+        returns. A connect that raised (the GATT authentication error, raised from
+        ``start_notify`` well after bleak opened the link) never got that far. Thus the
+        manager is certain that there is nothing to close, while ``BLEConnection`` still
+        holds a live, connected ``BleakClient``. A call to only the graceful path seems to
+        be a teardown, but the link leaks. That is exactly why the first try at this repair
+        still left the peripheral off the air.
 
-        So both halves run: the graceful call first (it stops the dispatcher and cancels any
-        reconnect task), then the transport closed directly, which is what actually drops the
-        link. ``BLEConnection.disconnect`` re-checks ``client.is_connected``, so the second
-        close is a no-op whenever the first one did the job.
+        Thus both parts run. First the graceful call (it stops the dispatcher and cancels
+        any reconnect task), then a direct close of the transport, which is what in fact
+        closes the link. ``BLEConnection.disconnect`` checks ``client.is_connected`` again,
+        so the second close does nothing when the first one did the work.
 
-        Shielded on purpose. The other way into this method is a probe whose ``wait_for``
-        expired and cancelled the handshake mid-flight; a plain ``await`` would then be
-        cancelled itself the moment it suspended, abandoning the very teardown it was called
-        to perform and leaking exactly the link this exists to close. Shielding lets the
-        close finish on its own while the cancellation continues to propagate to our caller.
+        The close is shielded on purpose. The other way into this method is a probe whose
+        ``wait_for`` expired and cancelled the handshake while it ran. A plain ``await``
+        would then be cancelled itself at the moment it suspended. It would stop the
+        teardown that it was called to do, and leak exactly the link that this method must
+        close. The shield lets the close complete on its own, while the cancellation
+        continues to go up to our caller.
 
         Args:
             mc: A half-open ``meshcore.MeshCore`` client.
@@ -2399,18 +2544,19 @@ class MeshCoreDevice(Device):
         try:
             await asyncio.shield(closing)
         except BaseException as exc:  # noqa: BLE001 - teardown of a doomed client
-            # Includes CancelledError: swallowed here only so the caller's own exception
-            # (or cancellation) is the one that propagates. ``closing`` runs on regardless.
+            # This includes CancelledError. MeshTerm ignores it here only so that the
+            # exception (or the cancellation) of the caller is the one that goes up.
+            # ``closing`` continues to run in all cases.
             _log.debug("discarding a half-open BLE client: %s", exc)
 
     @staticmethod
     async def _force_close_transport(mc) -> None:  # type: ignore[no-untyped-def]
         """Cancel the dispatcher and close the raw transport directly. Best-effort, silent.
 
-        The escape hatch from both library traps: a dispatcher stop that deadlocks on its own
-        ``queue.join()``, and a connection manager that refuses to close a transport it never
-        recorded as connected. Reaching past both is what actually releases the serial port or
-        the BLE link.
+        This is the way out of both library traps: a dispatcher stop that deadlocks on its
+        own ``queue.join()``, and a connection manager that does not close a transport that
+        it never marked as connected. This method goes past both, and that is what in fact
+        releases the serial port or the BLE link.
 
         Args:
             mc: The ``meshcore.MeshCore`` client to tear down.
@@ -2429,17 +2575,19 @@ class MeshCoreDevice(Device):
             _log.debug("forced transport close failed: %s", exc)
 
     async def _pair_ble(self, *, force: bool) -> bool:
-        """Pair with the PIN through the OS, where MeshTerm has to (Windows, Linux).
+        """Pair with the PIN through the OS, where MeshTerm must do it (Windows, Linux).
 
-        One door for :meth:`_create_ble` and its stale-bond repair, so the connect path is the
-        same everywhere and only the ceremony differs. macOS has no pairing API and pairs on
-        its own (see :meth:`_open_ble_after_macos_pairing`).
+        This is the one entry for :meth:`_create_ble` and its repair of an old bond. Thus
+        the connect path is the same on all platforms, and only the ceremony is different.
+        macOS has no pairing API, and pairs on its own (refer to
+        :meth:`_open_ble_after_macos_pairing`).
 
         Args:
-            force: Tear down an existing bond and pair afresh (see :meth:`_pair_ble_windows`).
+            force: Remove a bond that exists, and pair again from the start (refer to
+                :meth:`_pair_ble_windows`).
 
         Returns:
-            ``True`` if an authenticated bond exists afterward.
+            ``True`` if an authenticated bond exists after the call.
         """
         if not self._pin:
             return False
@@ -2450,17 +2598,19 @@ class MeshCoreDevice(Device):
         return False
 
     async def _pair_ble_bluez(self, *, force: bool) -> bool:
-        """Pair through BlueZ with our own agent answering the PIN (Linux only).
+        """Pair through BlueZ, with our own agent that answers the PIN (Linux only).
 
-        See :mod:`meshterm.core.bluez` for why bleak can't: BlueZ asks a pairing *agent* for
-        the passkey, and bleak registers none. Records what it found in ``_ble_pairing``, as
-        the Windows ceremony does, so a refusal can say which step failed.
+        Refer to :mod:`meshterm.core.bluez` for why bleak cannot do it: BlueZ asks a pairing
+        *agent* for the passkey, and bleak registers no agent. This method stores its result
+        in ``_ble_pairing``, as the Windows ceremony does, so a refusal can tell which step
+        failed.
 
         Args:
-            force: Remove an existing bond first — the heal for one the device has lost.
+            force: Remove a bond that exists first. This repairs a bond that the device has
+                lost.
 
         Returns:
-            ``True`` if an authenticated bond exists afterward.
+            ``True`` if an authenticated bond exists after the call.
         """
         from . import bluez
 
@@ -2475,32 +2625,34 @@ class MeshCoreDevice(Device):
         return outcome in ("paired", "reused")
 
     async def _pair_ble_windows(self, *, force: bool) -> bool:
-        """Establish an authenticated BLE bond via the WinRT ProvidePin ceremony (Windows only).
+        """Make an authenticated BLE bond through the WinRT ProvidePin ceremony (Windows only).
 
-        This is the one place a Bluetooth passkey is actually delivered to the peripheral.
-        bleak's own ``pair()`` on Windows is hardcoded to the ``CONFIRM_ONLY`` ("Just Works")
-        ceremony and never sends a PIN, so a companion that demands passkey pairing can't be
-        bonded through bleak at all — its authenticated UART characteristic keeps rejecting the
-        notify subscribe with *Insufficient Authentication*. We instead run the ``PROVIDE_PIN``
-        ceremony directly against WinRT (the same one the Windows "Add device" dialog uses),
-        handing it :attr:`_pin`, which yields the ``ENCRYPTION_AND_AUTHENTICATION`` bond the
-        characteristic needs. Windows persists the bond, so subsequent sessions reconnect with
-        no PIN required.
+        This is the only place where MeshTerm in fact gives a Bluetooth passkey to the
+        peripheral. bleak's own ``pair()`` on Windows always uses the ``CONFIRM_ONLY``
+        ("Just Works") ceremony, and never sends a PIN. Thus bleak cannot make a bond with a
+        companion that demands passkey pairing. The authenticated UART characteristic of
+        that companion continues to reject the notify subscribe with *Insufficient
+        Authentication*. Instead, we run the ``PROVIDE_PIN`` ceremony directly on WinRT (the
+        same ceremony that the Windows "Add device" dialog uses), and give it :attr:`_pin`.
+        This gives the ``ENCRYPTION_AND_AUTHENTICATION`` bond that is necessary for the
+        characteristic. Windows stores the bond, so later sessions reconnect with no PIN.
 
-        Best-effort and self-contained: it returns a bool rather than raising, and swallows any
-        error (winrt projection absent, device out of range, API quirk) so the caller simply
-        falls through to the normal connect — whose auth-error translation still yields the
-        right message. A no-op (returns ``False``) off Windows, when no PIN is set, or when the
-        address isn't a parseable MAC.
+        This method is best-effort and self-contained. It returns a bool and does not
+        raise. It catches all errors (winrt projection absent, device out of range, an API
+        problem), so the caller continues to the usual connect. The auth-error translation
+        of that connect still gives the right message. The method does nothing (and returns
+        ``False``) on other OSes than Windows, when no PIN is set, or when the address is
+        not a MAC that it can parse.
 
         Args:
-            force: When ``False``, an existing bond is trusted and reused (the fast path). When
-                ``True``, any existing bond is torn down first and re-created with the PIN — used
-                to heal a stale, unauthenticated "Just Works" bond that a plain reconnect can't.
+            force: When ``False``, the method trusts a bond that exists and uses it again
+                (the fast path). When ``True``, it first removes any bond that exists, and
+                makes the bond again with the PIN. This repairs an old, unauthenticated
+                "Just Works" bond that a plain reconnect cannot repair.
 
         Returns:
-            ``True`` if an authenticated bond exists afterward (freshly paired or already
-            bonded), ``False`` otherwise.
+            ``True`` if an authenticated bond exists after the call (a new bond, or a bond
+            that was already there), ``False`` in other cases.
         """
         if sys.platform != "win32" or not self._pin:
             return False
@@ -2514,25 +2666,26 @@ class MeshCoreDevice(Device):
                 DevicePairingProtectionLevel,
                 DevicePairingResultStatus,
             )
-        except Exception as exc:  # noqa: BLE001 - winrt projection unavailable; fall through
+        except Exception as exc:  # noqa: BLE001 - no winrt projection. Continue without it.
             _log.debug("BLE PIN pairing unavailable (winrt import failed): %s", exc)
             return False
 
-        # Every exit records what it found in ``_ble_pairing``, so a refusal further on can
-        # say which of these it was — the bool alone is only enough to decide on a retry.
+        # Each exit stores its result in ``_ble_pairing``, so a later refusal can tell which
+        # of these it was. The bool alone is sufficient only to decide about a retry.
         device = None
         try:
             device = await BluetoothLEDevice.from_bluetooth_address_async(address)
             if device is None:
                 self._ble_pairing = _BlePairing("absent")
-                return False  # out of range / not connectable right now
+                return False  # out of range, or it cannot connect now
             pairing = device.device_information.pairing
             if pairing.is_paired:
                 if not force:
                     self._ble_pairing = _BlePairing("reused")
-                    return True  # trust the existing (authenticated) bond — fast path
-                # Tear the stale bond down, then re-fetch: the pairing object is a snapshot and
-                # won't reflect the unpair, so a fresh device_information is needed to re-pair.
+                    return True  # trust the (authenticated) bond that exists: the fast path
+                # Remove the old bond, then get the device again. The pairing object is a
+                # snapshot and does not show the unpair, so a new device_information is
+                # necessary to pair again.
                 await pairing.unpair_async()
                 MeshCoreDevice._close_ble_device(device)  # release the pre-unpair handle
                 device = await BluetoothLEDevice.from_bluetooth_address_async(address)
@@ -2544,7 +2697,7 @@ class MeshCoreDevice(Device):
             pin = self._pin
 
             def _provide_pin(_sender, args) -> None:  # noqa: ANN001 - winrt callback
-                # The peripheral asked for a passkey; hand it the one we were given.
+                # The peripheral asked for a passkey. Give it the passkey that we got.
                 args.accept_with_pin(pin)
 
             token = custom.add_pairing_requested(_provide_pin)
@@ -2565,12 +2718,12 @@ class MeshCoreDevice(Device):
                 self._ble_pairing = _BlePairing("paired")
                 _log.debug("BLE ProvidePin pairing for %s: %s", self._address, name)
             else:
-                # A warning, not debug: this is the line that tells a wrong PIN from a device
-                # that refused to pair, and the default log level would otherwise hide it.
+                # A warning, not debug: this line tells a wrong PIN from a device that refused
+                # to pair, and the default log level would hide a debug line.
                 self._ble_pairing = _BlePairing("failed", name)
                 _log.warning("BLE PIN pairing with %s failed: %s", self._address, name)
             return ok
-        except Exception as exc:  # noqa: BLE001 - best-effort; caller falls through on False
+        except Exception as exc:  # noqa: BLE001 - best-effort. The caller continues on False.
             self._ble_pairing = _BlePairing("error", str(exc))
             _log.warning("BLE PIN pairing with %s raised: %s", self._address, exc)
             return False
@@ -2579,14 +2732,15 @@ class MeshCoreDevice(Device):
 
     @staticmethod
     def _ble_address_int(address: str) -> int | None:
-        """Parse a ``AA:BB:CC:DD:EE:FF`` (or dash-separated) MAC into the ulong WinRT wants.
+        """Parse an ``AA:BB:CC:DD:EE:FF`` MAC (or one with dashes) into the ulong that WinRT uses.
 
         Args:
-            address: The Bluetooth address string bleak reported for the device.
+            address: The Bluetooth address string that bleak reported for the device.
 
         Returns:
-            The 48-bit address as an int, or ``None`` if it isn't a 12-hex-digit MAC (e.g. a
-            CoreBluetooth UUID on macOS, where this pairing path doesn't apply anyway).
+            The 48-bit address as an int, or ``None`` if it is not a MAC of 12 hex digits
+            (for example, a CoreBluetooth UUID on macOS, where this pairing path does not
+            apply in any case).
         """
         cleaned = address.replace(":", "").replace("-", "").strip()
         if len(cleaned) != 12:
@@ -2598,18 +2752,18 @@ class MeshCoreDevice(Device):
 
     @staticmethod
     def _close_ble_device(device) -> None:  # noqa: ANN001 - winrt BluetoothLEDevice
-        """Release a WinRT ``BluetoothLEDevice`` handle, dropping the OS's link to the peripheral.
+        """Release a WinRT ``BluetoothLEDevice`` handle, and close the OS link to the peripheral.
 
-        Every ``BluetoothLEDevice.from_bluetooth_address_async`` hands back an ``IClosable`` that
-        pins the operating system's ACL connection to the radio open for as long as the object is
-        alive. Unpairing removes the *bond* but never tears down that *link* — the link only goes
-        away when the last handle to it closes. If we leak the handle, Windows reports the device
-        as still "connected" (just unpaired), the peripheral never sees a clean disconnect, and it
-        refuses to re-pair until it is power-cycled. So every helper that opens one of these must
-        close it, even on the error paths.
+        Each ``BluetoothLEDevice.from_bluetooth_address_async`` returns an ``IClosable``.
+        While this object exists, it keeps the ACL connection of the operating system to the
+        radio open. An unpair removes the *bond*, but it never closes that *link*. The link
+        closes only when the last handle to it closes. If we leak the handle, Windows reports
+        the device as still "connected" (but unpaired), and the peripheral never gets a clean
+        disconnect. The peripheral then refuses to pair again until a power cycle. Thus each
+        helper that opens one of these handles must close it, also on the error paths.
 
-        Best-effort and silent: a missing ``close`` projection or a double-close is not worth
-        surfacing during teardown.
+        This method is best-effort and silent: a missing ``close`` projection or a second
+        close is not important enough to report during the teardown.
         """
         try:
             if device is not None:
@@ -2619,21 +2773,22 @@ class MeshCoreDevice(Device):
 
     @staticmethod
     async def is_ble_paired(address: str) -> bool:
-        """Whether the OS holds a bond for the BLE peripheral at ``address`` (Windows, Linux).
+        """Whether the OS has a bond for the BLE peripheral at ``address`` (Windows, Linux).
 
-        The read-only companion to :meth:`_pair_ble_windows` / :meth:`unpair_ble`: it asks
-        WinRT whether an OS-level pairing exists, so the UI can decide whether an "unpair"
-        affordance is meaningful (a device bonded with a PIN) or moot (an open companion that
-        never bonded, or a serial link). It reflects the *OS bond*, not MeshTerm's remembered
-        record — the two are independent — and holds true across sessions even when this run
-        supplied no PIN, because Windows persists the bond.
+        This is the read-only partner of :meth:`_pair_ble_windows` and :meth:`unpair_ble`.
+        It asks WinRT if an OS-level pairing exists. Thus the UI can decide if an "unpair"
+        action has a use (a device with a bond and a PIN) or not (an open companion that
+        never made a bond, or a serial link). It shows the *OS bond*, not the record that
+        MeshTerm remembers (the two are independent). It stays true across sessions, also
+        when this run gave no PIN, because Windows stores the bond.
 
-        Best-effort and self-contained: returns ``False`` (rather than raising) off Windows,
-        when the winrt projection is unavailable, when the address isn't a parseable MAC, or on
-        any WinRT hiccup — so a caller can treat it as a plain "is there anything to unpair?".
+        This method is best-effort and self-contained. It returns ``False`` (and does not
+        raise) on other OSes than Windows, when the winrt projection is not available, when
+        the address is not a MAC that it can parse, or on any WinRT problem. Thus a caller
+        can treat it as a plain "is there anything to unpair?".
 
         Args:
-            address: The Bluetooth MAC (``AA:BB:CC:DD:EE:FF`` or dash-separated) to query.
+            address: The Bluetooth MAC (``AA:BB:CC:DD:EE:FF``, or with dashes) to query.
 
         Returns:
             ``True`` only when Windows reports a live bond for the device.
@@ -2649,7 +2804,7 @@ class MeshCoreDevice(Device):
             return False
         try:
             from winrt.windows.devices.bluetooth import BluetoothLEDevice
-        except Exception as exc:  # noqa: BLE001 - winrt projection unavailable; nothing to unpair
+        except Exception as exc:  # noqa: BLE001 - no winrt projection, so nothing to unpair
             _log.debug("BLE pairing query unavailable (winrt import failed): %s", exc)
             return False
         device = None
@@ -2666,26 +2821,28 @@ class MeshCoreDevice(Device):
 
     @staticmethod
     async def unpair_ble(address: str) -> bool:
-        """Drop the OS-level bond for the BLE peripheral at ``address`` (Windows and Linux).
+        """Remove the OS-level bond for the BLE peripheral at ``address`` (Windows and Linux).
 
-        The inverse of :meth:`_pair_ble_windows`: it removes the persisted
-        ``ENCRYPTION_AND_AUTHENTICATION`` bond so the next connection has to re-run the PIN
-        ceremony from scratch — the "forget this pairing" primitive behind the quit dialog's
-        *Unpair & quit*. It touches only the OS bond, never MeshTerm's remembered-device record,
-        which is deliberately left intact (the device keeps its friendly name and stays in the
-        picker; it just asks for its PIN again next time).
+        This is the inverse of :meth:`_pair_ble_windows`. It removes the stored
+        ``ENCRYPTION_AND_AUTHENTICATION`` bond, so the next connection must run the PIN
+        ceremony again from the start. It is the "forget this pairing" primitive of
+        *Unpair & quit* in the quit dialog. It changes only the OS bond, never the device
+        record that MeshTerm remembers. MeshTerm keeps that record on purpose (the device
+        keeps its friendly name and stays in the picker, and it only asks for its PIN again
+        next time).
 
-        Call it only *after* the companion link is torn down — you can't cleanly drop a bond that
-        an open connection is still using. Best-effort and self-contained: returns a bool rather
-        than raising, and no-ops (returns ``False``) off Windows, when winrt is unavailable, when
-        the address isn't a MAC, or when there is no bond to remove.
+        Call it only *after* the teardown of the companion link, because you cannot cleanly
+        remove a bond that an open connection still uses. This method is best-effort and
+        self-contained. It returns a bool and does not raise. It does nothing (and returns
+        ``False``) on other OSes than Windows, when winrt is not available, when the address
+        is not a MAC, or when there is no bond to remove.
 
         Args:
-            address: The Bluetooth MAC (``AA:BB:CC:DD:EE:FF`` or dash-separated) to unpair.
+            address: The Bluetooth MAC (``AA:BB:CC:DD:EE:FF``, or with dashes) to unpair.
 
         Returns:
-            ``True`` if a bond was removed, ``False`` if there was nothing to unpair or the
-            attempt failed.
+            ``True`` if a bond was removed. ``False`` if there was nothing to unpair, or if
+            the try failed.
         """
         if sys.platform.startswith("linux"):
             from . import bluez
@@ -2699,7 +2856,7 @@ class MeshCoreDevice(Device):
         try:
             from winrt.windows.devices.bluetooth import BluetoothLEDevice
             from winrt.windows.devices.enumeration import DeviceUnpairingResultStatus
-        except Exception as exc:  # noqa: BLE001 - winrt projection unavailable; fall through
+        except Exception as exc:  # noqa: BLE001 - no winrt projection. Continue without it.
             _log.debug("BLE unpair unavailable (winrt import failed): %s", exc)
             return False
         device = None
@@ -2709,74 +2866,79 @@ class MeshCoreDevice(Device):
                 return False
             pairing = device.device_information.pairing
             if not pairing.is_paired:
-                return False  # nothing bonded — treat as a no-op success-of-intent
+                return False  # no bond: treat this as a no-op that reached its goal
             result = await pairing.unpair_async()
             status = int(result.status)
             ok = status == int(DeviceUnpairingResultStatus.UNPAIRED)
             _log.debug("BLE unpair for %s: status=%d ok=%s", address, status, ok)
             return ok
-        except Exception as exc:  # noqa: BLE001 - best-effort teardown; never crash exit
+        except Exception as exc:  # noqa: BLE001 - best-effort teardown. Never crash the exit.
             _log.debug("BLE unpair attempt failed for %s: %s", address, exc)
             return False
         finally:
-            # Closing the handle is what actually drops the OS's link to the peripheral; without
-            # it the device stays "connected" after the unpair and won't re-pair until rebooted.
+            # The close of the handle is what in fact closes the OS link to the peripheral.
+            # Without it, the device stays "connected" after the unpair, and it does not pair
+            # again until it reboots.
             MeshCoreDevice._close_ble_device(device)
 
     async def _ble_os_bonded(self) -> bool:
-        """Whether the OS holds a bond for this device — asked only to explain a refusal.
+        """Whether the OS has a bond for this device (asked only to explain a refusal).
 
-        An instance hook over :meth:`is_ble_paired` so tests can answer it without the OS.
+        This is an instance hook over :meth:`is_ble_paired`, so tests can answer it without
+        the OS.
         """
         return await MeshCoreDevice.is_ble_paired(self._address or "")
 
     async def _ble_auth_failure(self) -> DeviceAuthenticationError:
-        """Name *which* authentication failure this was, and what fixes it.
+        """Tell *which* authentication failure this was, and what repairs it.
 
-        The GATT refusal looks the same on the wire whatever caused it, but the causes don't
-        share a remedy, and one sentence covering all of them sent people to the wrong one — a
-        stale Windows bond, say, was reported as "requires a PIN" to someone whose device
-        Windows plainly showed as paired. So the error is built from what is actually known:
+        The GATT refusal is the same on the link for all causes, but the causes do not have
+        the same repair. One sentence for all of them sent users to the wrong repair. For
+        example, MeshTerm reported an old Windows bond as "requires a PIN" to a user whose
+        device Windows clearly showed as paired. Thus MeshTerm makes the error from the facts
+        that it knows:
 
-        * macOS — the OS runs the pairing in its own dialog; say so.
-        * No PIN, and the OS holds a bond — the bond is stale (the device was reflashed,
-          reset, or given a new PIN since), and re-pairing is the fix.
-        * No PIN, no bond — the device needs its PIN.
+        * macOS: the OS runs the pairing in its own dialog. Say this.
+        * No PIN, and the OS has a bond: the bond is old (after the bond was made, the
+          device was flashed again, reset, or got a new PIN), and a new pairing is the
+          repair.
+        * No PIN, no bond: the user must give the PIN of the device.
         * A PIN, and MeshTerm's own pairing (WinRT on Windows, a BlueZ agent on Linux)
-          reported a status — a wrong PIN, a device that refused to pair, or some other
-          status, each named.
-        * A PIN, the pairing succeeded, and the device still refused — it is holding an old
-          bond for this computer.
-        * A PIN and nothing more known — the PIN was rejected.
+          reported a status: a wrong PIN, a device that refused to pair, or some other
+          status. The message names each one.
+        * A PIN, the pairing was successful, and the device still refused: the device has
+          an old bond for this computer.
+        * A PIN, and nothing more is known: the PIN was rejected.
 
-        The OS is named in the message (Windows, Linux) because each has its own place to
-        forget a bond, and that is half of most of these remedies. Every case is also logged,
-        so a log sent in from another machine says which it was.
+        The message names the OS (Windows, Linux), because each OS has its own place to
+        remove a bond, and that is half of most of these repairs. MeshTerm also logs each
+        case, so a log from another machine tells which case it was.
 
         Returns:
-            The error to raise, carrying a one-line :attr:`~DeviceAuthenticationError.hint`
+            The error to raise. It has a one-line :attr:`~DeviceAuthenticationError.hint`
             for the PIN dialog.
         """
         where = self._address or "the selected Bluetooth device"
-        # The OS bond changes the message in exactly one case, so it is asked only there.
+        # The OS bond changes the message in only one case, so MeshTerm asks for it only there.
         bonded = _ble_host() is not None and not self._pin and await self._ble_os_bonded()
         message, hint = self._ble_auth_diagnosis(where, bonded)
         _log.warning("BLE connect to %s refused: %s", where, message)
         return DeviceAuthenticationError(message, hint=hint)
 
     def _ble_auth_diagnosis(self, where: str, os_bonded: bool) -> tuple[str, str]:
-        """The message and dialog hint for :meth:`_ble_auth_failure` (see there for the cases).
+        """The message and the dialog hint for :meth:`_ble_auth_failure` (it lists the cases).
 
         Args:
             where: The device, as the message names it.
-            os_bonded: Whether the OS holds a bond (asked only when no PIN was given).
+            os_bonded: Whether the OS has a bond (asked only when no PIN was given).
 
         Returns:
             ``(message, hint)``.
         """
         if sys.platform == "darwin":
-            # macOS collects the code itself, in its own dialog, so --ble-pin is not the
-            # remedy here and naming it would send the reader somewhere that cannot help.
+            # macOS gets the code itself, in its own dialog. Thus --ble-pin is not the repair
+            # here, and if the message named it, it would send the user to a place that
+            # cannot help.
             return (
                 f"{where} was not paired. macOS asks for the pairing code in its own dialog "
                 "rather than through MeshTerm — enter the 6-digit code shown on the device "
@@ -2849,10 +3011,10 @@ class MeshCoreDevice(Device):
         )
 
     def _no_response_message(self) -> str:
-        """A clean, recoverable error for an endpoint that didn't answer as a companion."""
+        """A clean, recoverable error for an endpoint that did not answer as a companion."""
         if self._transport == "ble":
-            # The link opened (a link that didn't has its own message), so range and power
-            # are not the question here — what answered is.
+            # The link opened (a link that did not open has its own message). Thus range and
+            # power are not the problem here. The problem is what answered.
             where = self._address or "the selected Bluetooth device"
             return (
                 f"connected to {where} over Bluetooth, but it never answered as a MeshCore "
@@ -2860,16 +3022,18 @@ class MeshCoreDevice(Device):
                 "with another app."
             )
         if self._transport == "tcp":
-            # The socket opened (one that didn't has its own message), so the address and
-            # the network are not the question here — what is listening on the port is.
+            # The socket opened (a socket that did not open has its own message). Thus the
+            # address and the network are not the problem here. The problem is what listens
+            # on the port.
             where = self.endpoint or "the selected network device"
             return (
                 f"the connection to {where} opened, but nothing answered as a MeshCore "
                 "companion — the port may belong to another service, or the companion may "
                 "be busy with another client."
             )
-        # ModemManager opens without locking, so the port opens fine and the handshake is
-        # what it spoils — which makes this, not the open error, where it has to be named.
+        # ModemManager opens the port without a lock. Thus the port opens correctly, and
+        # ModemManager breaks the handshake instead. That is why this message must name it,
+        # not the error message of the open.
         modem = (
             " On Linux, ModemManager may be probing it: `sudo systemctl stop ModemManager` "
             "and try again."
@@ -2883,43 +3047,47 @@ class MeshCoreDevice(Device):
 
     async def link_present(self) -> bool:  # noqa: D102 - inherited docstring
         if self._mc is None:
-            return True  # not connected yet / already torn down — nothing to declare lost
+            return True  # not connected yet, or torn down already: nothing to declare lost
         if self._transport in ("ble", "tcp"):
-            # The meshcore client flips ``is_connected`` to False the moment the transport
-            # drops — bleak's disconnect callback for BLE, a broken socket for TCP — so this is
-            # the network/Bluetooth analogue of the serial port-enumeration check: a cheap,
-            # non-transmitting liveness read.
+            # The meshcore client sets ``is_connected`` to False at the moment the transport
+            # is lost (bleak's disconnect callback for BLE, a broken socket for TCP). Thus
+            # this is the network and Bluetooth equivalent of the check of the serial port
+            # list: a fast liveness read that does not transmit.
             try:
                 return bool(self._mc.is_connected)
             except Exception:  # noqa: BLE001 - a status hiccup must not fake a disconnect
                 return True
         if not self._port:
-            return True  # no port recorded (shouldn't happen once connected) — can't tell
-        # Off the event loop, like every other caller of the port walk. It is ~30 ms of
-        # sysfs reads on the PicoCalc when nothing else is running, but each of its hundreds
-        # of small reads hands the GIL back and has to wait its turn to take it again — and
-        # with a map frame being drawn on a worker thread that turn is up to 5 ms away. On
-        # the loop, this check every two seconds froze the screen for up to 1.2 s a time.
+            return True  # no port stored (it should not occur after a connect): cannot tell
+        # Run this off the event loop, as all the other callers of the port walk do. On the
+        # PicoCalc, it is approximately 30 ms of sysfs reads when nothing else runs. But each
+        # of its hundreds of small reads releases the GIL, and must wait its turn to get it
+        # again. While a worker thread draws a map frame, that turn can come up to 5 ms
+        # later. On the loop, this check every two seconds froze the screen for up to 1.2 s
+        # each time.
         return await asyncio.to_thread(serial_port_present, self._port)
 
     async def disconnect(self) -> None:
-        """Close the connection and release resources. Idempotent, and bounded in time.
+        """Close the connection and release the resources. Idempotent, with a time limit.
 
-        The graceful ``meshcore`` teardown is given :data:`_DISCONNECT_TIMEOUT_S` to finish.
-        That bound matters: the library's dispatcher stop awaits ``queue.join()``, but its
-        processor task exits after handling at most one event once stopped — so with two or
-        more events queued at that instant (a routine advert/RX-log burst on a live mesh)
-        the join deadlocks and a quit would hang until the exit watchdog force-kills the
-        process. When the graceful path doesn't return in time it is cancelled and the
-        teardown is forced instead: the dispatcher task is cancelled synchronously and the
-        raw transport is closed directly (also bounded), so the port/link is still released.
+        The graceful ``meshcore`` teardown gets :data:`_DISCONNECT_TIMEOUT_S` to complete.
+        That limit is important. The dispatcher stop of the library awaits ``queue.join()``,
+        but after the stop, its processor task exits after it handles a maximum of one
+        event. Thus, with two or more events in the queue at that time (a usual burst of
+        adverts and RX log entries on a live mesh), the join deadlocks. A quit would then
+        hang until the exit watchdog kills the process.
 
-        Over Bluetooth the ``bleak`` client is then closed directly as well, because none of
-        the above reaches it once the peripheral is the thing that went away — see
+        When the graceful path does not return in time, MeshTerm cancels it and forces the
+        teardown instead. It cancels the dispatcher task synchronously, and closes the raw
+        transport directly (also with a time limit). Thus the port or the link is still
+        released.
+
+        Over Bluetooth, MeshTerm then also closes the ``bleak`` client directly, because
+        none of the steps above reaches it when the peripheral is what went away. Refer to
         :meth:`_release_ble_client`.
         """
         if self._mc is None:
-            await self._release_ble_client()  # a link that dropped before we ever tore it down
+            await self._release_ble_client()  # a link that was lost before we tore it down
             return
         mc, self._mc = self._mc, None
         disconnect = getattr(mc, "disconnect", None)
@@ -2930,45 +3098,49 @@ class MeshCoreDevice(Device):
             await asyncio.wait_for(disconnect(), timeout=_DISCONNECT_TIMEOUT_S)
         except asyncio.TimeoutError:
             _log.debug("graceful disconnect timed out; forcing transport teardown")
-            # Forced teardown: cancel the (possibly wedged) dispatcher task without awaiting
-            # the deadlocked join, then close the underlying transport so the serial port /
-            # BLE link is actually released. Best-effort — nothing here may block the exit.
+            # Forced teardown: cancel the dispatcher task (which can be blocked), and do not
+            # await the deadlocked join. Then close the transport below, so that the serial
+            # port or the BLE link is in fact released. Best-effort: no step here must block
+            # the exit.
             await MeshCoreDevice._force_close_transport(mc)
-        except Exception as exc:  # noqa: BLE001 - teardown must not raise; fall to forced path
+        except Exception as exc:  # noqa: BLE001 - a teardown must not raise. Use the forced path.
             _log.debug("graceful disconnect failed (%s); forcing transport teardown", exc)
             await MeshCoreDevice._force_close_transport(mc)
         await self._release_ble_client()
 
     async def _release_ble_client(self) -> None:
-        """Close the ``bleak`` client itself, whatever the library believes about its state.
+        """Close the ``bleak`` client itself, whatever the library thinks about its state.
 
-        The one teardown step that cannot be delegated, and the reason a Bluetooth session
-        could not be rebuilt after the companion was switched off. Every layer above declines
-        to act once the *peripheral* is what went away, each for its own locally-sensible
-        reason:
+        This is the only teardown step that MeshTerm cannot delegate. It is also the reason
+        why a Bluetooth session could not be built again after the companion was switched
+        off. When the *peripheral* is what went away, no layer above acts, each for its own
+        reason that is sensible locally:
 
-        * ``BLEConnection.handle_disconnect`` — bleak's own dropped-link callback — restores
-          the connection's fields to what the caller originally passed, which sets
-          ``self.client`` back to ``None``. The live client object is simply let go of.
-        * ``BLEConnection.disconnect`` then guards on ``self.client and
+        * ``BLEConnection.handle_disconnect`` (bleak's own callback for a lost link)
+          restores the fields of the connection to the values that the caller first gave.
+          This sets ``self.client`` back to ``None``. Nothing holds the live client object
+          after that.
+        * ``BLEConnection.disconnect`` then checks ``self.client and
           self.client.is_connected``, so it has nothing to close and does nothing.
-        * ``ConnectionManager.disconnect`` guards on ``self._is_connected``, which its own
-          drop handler already cleared, so it does nothing either.
-        * :meth:`_force_close_transport` reaches past both — but only as far as that same
+        * ``ConnectionManager.disconnect`` checks ``self._is_connected``, which its own
+          handler for a lost link already cleared. Thus it does nothing too.
+        * :meth:`_force_close_transport` goes past both, but only as far as that same
           ``BLEConnection``, whose ``disconnect`` is the no-op above.
 
-        So on a drop nobody ever calls ``BleakClient.disconnect()``, and on Windows the WinRT
-        ``BluetoothLEDevice`` and its GATT session stay open for the life of the process. The
-        next connect to that address is then served a broken service table: the link comes up,
-        and subscribing to the UART characteristic fails with *"Characteristic
-        6E400003-… was not found!"* — a device that is advertising, healthy, and unreachable
-        for as long as the app keeps running. A fresh process connects to it perfectly.
+        Thus, on a lost link, nothing ever calls ``BleakClient.disconnect()``. On Windows,
+        the WinRT ``BluetoothLEDevice`` and its GATT session stay open for the life of the
+        process. The next connect to that address then gets a broken service table. The
+        link opens, and the subscribe to the UART characteristic fails with
+        *"Characteristic 6E400003-… was not found!"*. The device advertises and is healthy,
+        but MeshTerm cannot reach it while the app runs. A new process connects to it with
+        no problem.
 
-        Hence our own reference, taken at connect (see :meth:`_connect_owned_ble`) while the
-        library still has one to give, and closed here **unconditionally** — never guarded on
-        ``is_connected``, since the case that matters is precisely the one where it is already
-        ``False``. Bounded and silent: the link is already gone, and a teardown may not raise
-        or hang. Idempotent, and a no-op on serial and TCP, which have no client to hold.
+        This is why we keep our own reference. We take it during the connect (refer to
+        :meth:`_connect_owned_ble`), while the library still has one to give, and we close
+        it here **always**. The close never checks ``is_connected``, because the important
+        case is exactly the case where it is already ``False``. The close has a time limit
+        and is silent: the link is already gone, and a teardown must not raise or hang. It
+        is idempotent, and it does nothing on serial and TCP, which have no client to hold.
         """
         client, self._ble_client = self._ble_client, None
         if client is None:
@@ -2978,11 +3150,11 @@ class MeshCoreDevice(Device):
             return
         try:
             await asyncio.wait_for(disconnect(), timeout=_FORCE_DISCONNECT_TIMEOUT_S)
-        except Exception as exc:  # noqa: BLE001 - the link is already gone; best-effort
+        except Exception as exc:  # noqa: BLE001 - the link is already gone. Best-effort.
             _log.debug("releasing the bleak client failed: %s", exc)
 
     def _require(self):  # type: ignore[no-untyped-def]
-        """Return the live client or raise if not connected."""
+        """Return the live client, or raise an error if it is not connected."""
         if self._mc is None:
             raise RuntimeError("Device is not connected; call connect() first.")
         return self._mc
@@ -2991,8 +3163,8 @@ class MeshCoreDevice(Device):
         mc = self._require()
         result = await mc.commands.send_appstart()
         info = dict(getattr(result, "payload", {}) or {})
-        # The firmware sends TX power as a signed byte (it accepts down to -9 dBm) and the
-        # library reads it unsigned, so a negative power would arrive as 247 and up.
+        # The firmware sends the TX power as a signed byte (it accepts down to -9 dBm), and
+        # the library reads it as unsigned. Thus a negative power would arrive as 247 or more.
         power = info.get("tx_power")
         if isinstance(power, int) and power > 127:
             info["tx_power"] = power - 256
@@ -3002,39 +3174,40 @@ class MeshCoreDevice(Device):
         mc = self._require()
         try:
             result = await mc.commands.send_device_query()
-        except Exception:  # noqa: BLE001 - older firmware lacks the query; unknown, not fatal
+        except Exception:  # noqa: BLE001 - older firmware has no query: unknown, not fatal
             return {}
         return dict(getattr(result, "payload", {}) or {})
 
-    #: How long the contacts stream may go quiet before a read is called failed (seconds).
-    #: The library's own ``get_contacts`` arms one future for the *whole* dump and never
-    #: re-arms it, so a table that takes longer than its five seconds to stream fails with
-    #: "no event received" however healthy the radio is — which is what a node holding four
-    #: hundred contacts does over Bluetooth. What actually means "the companion stopped
-    #: answering" is a gap *between* records, so that is what this times: the dump may take
-    #: as long as it takes, for as long as it keeps arriving.
+    #: The maximum silence of the contacts stream before MeshTerm considers a read as
+    #: failed (seconds). The library's own ``get_contacts`` arms one future for the *full*
+    #: dump, and never arms it again. Thus a table that takes more than its five seconds to
+    #: stream fails with "no event received", also when the radio is healthy. A node with
+    #: four hundred contacts does this over Bluetooth. What in fact means "the companion
+    #: stopped answering" is a gap *between* records, so this value times that gap. The
+    #: dump can take as long as necessary, while it continues to arrive.
     _CONTACTS_IDLE_S = 6.0
 
     async def _contacts_payload(
         self, mc, *, retries: int = 3, delay: float = 0.5, idle: float | None = None
     ) -> dict:  # noqa: ANN001
-        """Fetch the raw contacts map, retrying a read that stalls or is refused.
+        """Read the raw contacts map, and try again after a read that stops or is refused.
 
-        The companion intermittently refuses or drops a contacts request — a recoverable
-        timing hiccup — so the read is attempted a few times with a short backoff before a
-        clean, actionable error is raised. One attempt is :meth:`_stream_contacts`.
+        The companion sometimes refuses or loses a contacts request. This is a timing
+        problem that MeshTerm can recover from. Thus MeshTerm tries the read a few times,
+        with a short backoff, before it raises a clean error that the user can act on. One
+        try is :meth:`_stream_contacts`.
 
         Args:
             mc: The connected ``MeshCore`` client.
-            retries: Number of extra attempts after the first.
-            delay: Seconds to wait between attempts.
-            idle: Seconds of silence that end an attempt (default :data:`_CONTACTS_IDLE_S`).
+            retries: The number of more tries after the first.
+            delay: The seconds to wait between tries.
+            idle: The seconds of silence that end a try (default :data:`_CONTACTS_IDLE_S`).
 
         Returns:
-            The contacts payload mapping (possibly empty).
+            The contacts payload mapping (it can be empty).
 
         Raises:
-            DeviceCommandError: If every attempt fails to retrieve contacts.
+            DeviceCommandError: If each try fails to get the contacts.
         """
         gap = self._CONTACTS_IDLE_S if idle is None else idle
         reason = ""
@@ -3051,22 +3224,22 @@ class MeshCoreDevice(Device):
         )
 
     async def _stream_contacts(self, mc, idle: float) -> tuple[dict | None, str]:  # noqa: ANN001
-        """Run one contacts read, ending it on *silence* rather than on a deadline.
+        """Run one contacts read, and end it on *silence*, not on a deadline.
 
-        The contacts table arrives as one ``NEXT_CONTACT`` frame per record and a closing
-        ``CONTACTS`` frame holding the whole map. A dump is therefore not one answer that is
-        either late or on time, it is a stream, and the only thing that distinguishes a slow
-        big table from a radio that has stopped talking is how long it has been since the
-        last record. So each record restarts the clock and only ``idle`` seconds of quiet
-        end the attempt — which is the whole of the fix for a four-hundred-contact node,
-        whose dump simply takes longer than any fixed deadline the library would allow it.
+        The contacts table arrives as one ``NEXT_CONTACT`` frame for each record, and a last
+        ``CONTACTS`` frame that holds the full map. Thus a dump is not one answer that is
+        late or on time. It is a stream. The only difference between a slow big table and
+        a radio that has stopped is the time since the last record. Thus each record starts
+        the clock again, and only ``idle`` seconds of silence end the try. This is the full
+        repair for a node with four hundred contacts, whose dump takes more time than any
+        fixed deadline that the library would give it.
 
         Args:
             mc: The connected ``MeshCore`` client.
-            idle: Seconds of silence that end the attempt.
+            idle: The seconds of silence that end the try.
 
         Returns:
-            ``(payload, "")`` on success, or ``(None, reason)`` describing how it ended.
+            ``(payload, "")`` on success, or ``(None, reason)``, which tells how it ended.
         """
         from meshcore import EventType
 
@@ -3086,11 +3259,11 @@ class MeshCoreDevice(Device):
                 finished.set_result(event)
 
         def on_error(event) -> None:  # noqa: ANN001 - meshcore Event
-            # An ERROR frame carries no request id, so it is only ours while nothing else
-            # can have earned it: before the first record it is this request being refused
-            # (a companion too busy to serve a dump answers ERR_CODE_BAD_STATE), and after
-            # one it belongs to whatever else is on the link — a battery poll, a courier
-            # send — where treating it as ours is how a read that was working stopped.
+            # An ERROR frame has no request id, so it is ours only while nothing else can
+            # have caused it. Before the first record, it is the refusal of this request (a
+            # companion that is too busy to serve a dump answers ERR_CODE_BAD_STATE). After
+            # the first record, it is for something else on the link (a battery poll, a
+            # courier send). When MeshTerm treated it as ours, a read that worked stopped.
             nonlocal refusal
             payload = getattr(event, "payload", {}) or {}
             refusal = str(payload.get("reason", payload))
@@ -3150,7 +3323,7 @@ class MeshCoreDevice(Device):
             )
         return contacts
 
-    #: How many bytes of a name the firmware's contact record holds (a 32-byte field).
+    #: The number of bytes of a name in the contact record of the firmware (a 32-byte field).
     _CONTACT_NAME_BYTES = 32
 
     async def add_contact(self, node: Contact) -> None:  # noqa: D102 - inherited docstring
@@ -3161,10 +3334,10 @@ class MeshCoreDevice(Device):
                 f"{node.name} is known only by a key prefix, so it can't be added to the "
                 "device — receive an advert from it first."
             )
-        # The library writes contacts through one add-or-update frame, from a record shaped
-        # exactly like the one a contacts read yields; a flood route (``out_path_len`` -1) is
-        # what a freshly-heard contact carries, and the device relearns a path from received
-        # traffic as usual.
+        # The library writes contacts through one add-or-update command, from a record with
+        # exactly the shape that a contacts read gives. A flood route (``out_path_len`` -1)
+        # is what a contact that the device just heard has, and the device learns a path
+        # again from received traffic, as usual.
         record = {
             "public_key": pub,
             "type": int(node.node_type if node.node_type is not None else NODE_TYPE_CHAT),
@@ -3188,11 +3361,11 @@ class MeshCoreDevice(Device):
         pub = self._node_pubkey(node)  # raises DeviceCommandError if it has no key
         result = await mc.commands.remove_contact(pub)
         if result is not None and getattr(result, "is_error", lambda: False)():
-            # A contact the firmware doesn't hold is the one rejection that isn't a
-            # failure: the list a screen removes from is the union of this table and the
-            # contacts MeshTerm remembers for the device, so the entry the reader is
-            # deleting may only ever have existed on our side. Same class the send path
-            # raises, for the same reason — the caller can finish the job.
+            # A contact that the firmware does not have is the only rejection that is not
+            # a failure. The list from which a screen removes is the union of this table and
+            # the contacts that MeshTerm remembers for the device. Thus the entry that the
+            # user deletes may have existed only on our side. This is the same class that
+            # the send path raises, for the same reason: the caller can complete the job.
             if error_code(result) == _ERR_NOT_FOUND:
                 raise ContactNotOnDeviceError(node)
             raise DeviceCommandError(
@@ -3206,23 +3379,24 @@ class MeshCoreDevice(Device):
 
     async def set_tx_power(self, value: int) -> None:  # noqa: D102 - inherited docstring
         mc = self._require()
-        # The firmware reads a signed byte; the library packs an unsigned int, which refuses a
-        # negative one. Two's complement is the same low byte, so -9 dBm survives the trip.
+        # The firmware reads a signed byte. The library packs an unsigned int, which refuses
+        # a negative value. The two's complement has the same low byte, so -9 dBm arrives
+        # correctly.
         await mc.commands.set_tx_power(int(value) & 0xFFFFFFFF)
 
     @staticmethod
     def _node_pubkey(node: Contact) -> str:
-        """Return a contact's full public key for remote addressing.
+        """Return the full public key of a contact, for remote addressing.
 
         Args:
             node: The contact to address.
 
         Returns:
-            The lowercased hex public key (``0x`` stripped).
+            The lowercase hex public key (with no ``0x``).
 
         Raises:
-            DeviceCommandError: If the contact carries no public key, so it cannot be
-                addressed for login/admin commands.
+            DeviceCommandError: If the contact has no public key, so MeshTerm cannot
+                address it for login or admin commands.
         """
         pub = (node.public_key or "").lower().removeprefix("0x")
         if not pub:
@@ -3256,71 +3430,76 @@ class MeshCoreDevice(Device):
             )
 
     async def _login(self, node: Contact, password: str, *, what: str) -> _LoginExchange:
-        """Run one login exchange with a remote node and report how it ended.
+        """Run one login exchange with a remote node, and report how it ended.
 
-        The one login a remote node has, whichever role the password earns:
-        :meth:`admin_login` and :meth:`room_login` are each a reading of its answer.
+        A remote node has one login, whatever role the password gets. :meth:`admin_login`
+        and :meth:`room_login` each read its answer in their own way.
 
         Args:
             node: The node to log in to.
-            password: The password to offer.
-            what: How the debug log names the exchange.
+            password: The password to give.
+            what: The name of the exchange in the debug log.
 
         Returns:
-            The outcome, the accepting ``LOGIN_SUCCESS`` frame's payload, and how the radio
-            sent the request (see :class:`_LoginExchange`).
+            The result, the payload of the ``LOGIN_SUCCESS`` reply that accepted the login,
+            and how the radio sent the request (refer to :class:`_LoginExchange`).
         """
         from meshcore import EventType
 
         mc = self._require()
         pub = self._node_pubkey(node)
         loop = asyncio.get_running_loop()
-        # Listen for the node's answer *before* transmitting, and keep listening across the
-        # whole exchange — the rule :meth:`run_trace` follows, for the same two reasons, and
-        # ``send_login_sync`` breaks both of them.
+        # Listen for the answer of the node *before* the transmission, and continue to listen
+        # during the full exchange. :meth:`run_trace` follows this rule, for the same two
+        # reasons, and ``send_login_sync`` breaks both of them.
         #
-        # It waits for LOGIN_SUCCESS and *only* LOGIN_SUCCESS, and it does not start waiting
-        # until its own send has returned. So:
+        # ``send_login_sync`` waits for LOGIN_SUCCESS and *only* LOGIN_SUCCESS, and it does
+        # not start to wait until its own send has returned. Thus:
         #
-        # * A refusal — which firmware does send, as a LOGIN_FAILED frame the library parses
-        #   and dispatches like any other event — is never waited for, and times out exactly
-        #   like an unreachable node. Both halves of failure came back as the same ``None``.
-        # * Worse, for a node that is perfectly reachable: the send itself blocks until a
-        #   MSG_SENT arrives, and the library correlates that acknowledgement by nothing but
-        #   its event type — so a scheduled advert, a telemetry poll or the courier can
-        #   consume ours and leave the send sitting on its own 15-second default. Every
-        #   answer that lands during that stall is dispatched to no listener and dropped, and
-        #   a login the repeater *accepted* is recorded as no reply. The mirror case is as
-        #   bad: catching some other command's MSG_SENT takes its ``suggested_timeout`` with
-        #   it, which for a neighbour is a second or two — nowhere near a multi-hop
-        #   repeater's round trip. This is the reported bug: a healthy node, the right
-        #   password, and a no-reply popup.
+        # * It never waits for a refusal. (The firmware does send a refusal, as a
+        #   LOGIN_FAILED frame that the library parses and dispatches like any other
+        #   event.) The refusal times out exactly like a node that MeshTerm cannot reach.
+        #   Both types of failure came back as the same ``None``.
+        # * A worse case, for a node that MeshTerm can reach with no problem: the send
+        #   itself blocks until a MSG_SENT arrives. The library correlates that
+        #   acknowledgement only by its event type. Thus a scheduled advert, a telemetry
+        #   poll, or the courier can take our MSG_SENT, and leave the send on its own
+        #   15-second default. Each answer that arrives during that block goes to no
+        #   listener and is lost. Thus MeshTerm stores a login that the repeater *accepted*
+        #   as no reply. The opposite case is as bad: when the send catches the MSG_SENT of
+        #   another command, it takes the ``suggested_timeout`` of that command. For a
+        #   neighbour, this is one or two seconds, which is much less than the round trip
+        #   of a multi-hop repeater. This is the reported bug: a healthy node, the right
+        #   password, and a no-reply dialog.
         #
-        # Both go away by owning the wait. ``send_login_sync`` is still what transmits (it is
-        # the library's supported path, and its own listener is harmless — the dispatcher
-        # delivers to every matching subscription), but ours is armed first and outlives it:
-        # when it gives up early, the node still gets a full budget of its own, sized to the
-        # route the way a trace to the same node would be, and counted from the send rather
-        # than from the queuing — see the wait below for why that distinction is the fix.
+        # When we own the wait, both problems go away. ``send_login_sync`` still transmits
+        # (it is the supported path of the library, and its own listener causes no problem,
+        # because the dispatcher delivers to each matching subscription). But our listener
+        # is armed first, and it lives longer. When the listener of the library stops
+        # early, the node still gets a full budget of its own. The budget is sized to the
+        # route, as for a trace to the same node, and it is counted from the send, not from
+        # the queuing. Refer to the wait below for why that difference is the repair.
         #
-        # What ``send_login_sync`` returns is the library's own wait for the *answer* (it
-        # gives the node ``suggested_timeout / 800`` seconds), never whether the request
-        # went out — so the radio's confirmation is heard here, on its own listener. On
-        # hardware it lands within a tenth of a second while the library's wait runs on for
-        # six; this log used to call every such login "unacknowledged" (verified against a
-        # room 2026-10-05, whose acceptance then arrived ten seconds after the send). The
-        # confirmation also says how the radio sent it, a flood or along the route it had
-        # learned — what tells a stale route from a silent node.
+        # The return value of ``send_login_sync`` comes from the library's own wait for the
+        # *answer* (it gives the node ``suggested_timeout / 800`` seconds). It never tells
+        # if the request went out. Thus MeshTerm hears the confirmation of the radio here,
+        # on its own listener. On hardware, the confirmation arrives within a tenth of a
+        # second, while the library's wait continues for six seconds. In the past, this
+        # log called each such login "unacknowledged" (checked with a room on 2026-10-05,
+        # whose acceptance then arrived ten seconds after the send). The confirmation also
+        # tells how the radio sent the request: as a flood, or along the route that it had
+        # learned. This tells an old route from a silent node.
         answer: asyncio.Future = loop.create_future()
-        # The radio's confirmation of *this* request: a login's ``expected_ack`` is the first
-        # four bytes of the addressed key (MeshCore's ``pending_login``), which tells it from
-        # the MSG_SENT of any other command in flight.
+        # The confirmation of *this* request from the radio. The ``expected_ack`` of a login
+        # is the first four bytes of the addressed key (MeshCore's ``pending_login``). This
+        # value tells it from the MSG_SENT of any other command that is in progress.
         confirm: asyncio.Future = loop.create_future()
         ours = bytes.fromhex(pub[:8])
         errors: list[object] = []
-        # Frames that landed during the exchange but are not our verdict. Kept only to be
-        # logged beside the outcome: a "no reply" with one of these next to it is a
-        # different fault from a node that stayed silent, and nothing else would show it.
+        # Frames that arrived during the exchange but are not our result. MeshTerm keeps
+        # them only to log them with the result. A "no reply" with one of these frames next
+        # to it is a different fault from a node that stayed silent, and nothing else would
+        # show it.
         stray: list[str] = []
 
         def note(what: str, event) -> None:  # noqa: ANN001 - meshcore Event
@@ -3333,18 +3512,20 @@ class MeshCoreDevice(Device):
             if self._refers_to(event, pub):
                 answer.set_result(event)
             else:
-                # An answer naming some other node — two admin flows can overlap. Not ours
-                # to act on, but worth saying we heard it: a login that reports silence with
-                # one of these logged is a key prefix that did not match, not a quiet node.
+                # An answer that names another node (two admin flows can overlap). We must
+                # not act on it, but it is useful to log that we heard it. A login that
+                # reports silence, with one of these in the log, is a key prefix that did
+                # not match, not a silent node.
                 note("login frame for another node:", event)
 
         def on_local_error(event) -> None:  # noqa: ANN001 - meshcore Event
-            # The one failure that never reaches the mesh: the companion refusing to send.
-            # ``send_login_sync`` erases it — it turns its own ERROR into a bare ``None``,
-            # indistinguishable from an acknowledgement that was merely slow — so the reason
-            # is only recoverable by listening for the frame. Uncorrelated (an ERROR carries
-            # no request id and may belong to another command in flight), so it becomes the
-            # reason only when this request was never confirmed sent at all.
+            # The only failure that never reaches the mesh: the companion refuses to send.
+            # ``send_login_sync`` removes it. It changes its own ERROR into a bare ``None``,
+            # which looks the same as an acknowledgement that was only slow. Thus the only
+            # way to get the reason is to listen for the frame. The frame is uncorrelated (an
+            # ERROR has no request id, and can be for another command that is in progress).
+            # Thus it becomes the reason only when the radio never confirmed that it sent
+            # this request.
             note("companion error:", event)
             errors.append(event)
 
@@ -3359,29 +3540,30 @@ class MeshCoreDevice(Device):
             mc.subscribe(EventType.ERROR, on_local_error),
             mc.subscribe(EventType.MSG_SENT, on_sent),
         ]
-        # A login is a round trip along the contact's route and back, which is the shape a
-        # trace budget already describes; the stored route is one-way, so the wire carries
-        # twice its hops. Knowing the route only ever buys *more* patience, never less: an
-        # admin exchange is heavier than a trace's single small packet, so a contact we hold
-        # a short route for must not be given a narrower window than the routeless one
-        # beside it — which is exactly what ``trace_timeout(0)``, the flood budget, is.
+        # A login is a round trip along the route of the contact and back. A trace budget
+        # already describes this shape. The stored route is one-way, so the full exchange
+        # has twice its hops. A known route can only give *more* time, never less. An
+        # admin exchange is heavier than the one small packet of a trace. Thus a contact for
+        # which we have a short route must not get a shorter window than a contact without
+        # a route. ``trace_timeout(0)``, the flood budget, is exactly that window.
         hops = 2 * len(node.route_hops or ())
         budget = max(trace_timeout(hops), trace_timeout(0))
         started = loop.time()
         try:
             async with self.transmitting():
                 library = await mc.commands.send_login_sync(pub, password)
-            # The budget is spent *after* ``send_login_sync`` returns, never from the moment
-            # we began queuing. Everything before that belongs to the companion and the
-            # library, and it can be most of a minute: it waits its turn on the library's
-            # mesh-request lock, which every telemetry poll and courier retry holds for a
-            # whole round trip, then for the radio's confirmation, then — the part this log
-            # long mistook for the send — for the node's answer, ``suggested_timeout / 800``
-            # seconds. So a node gets that library wait *and* the budget: about six seconds
-            # and ten for a flood, which is what a room five hops out needed (its answers
-            # landed ten seconds after the confirmation, on hardware). Timing from the
-            # queuing is what made an earlier fix a longer way of failing at the same ten
-            # seconds: the wait was widened, then handed a window something else had spent.
+            # The budget starts *after* ``send_login_sync`` returns, never at the moment when
+            # we started to queue. All the time before that is for the companion and the
+            # library, and it can be most of a minute. The library waits its turn on its
+            # mesh-request lock (each telemetry poll and courier retry holds this lock for a
+            # full round trip). Then it waits for the confirmation of the radio. Then it
+            # waits for the answer of the node, ``suggested_timeout / 800`` seconds (for a
+            # long time, this log thought that this part was the send). Thus a node gets that
+            # library wait *and* the budget: approximately six seconds, and ten for a flood.
+            # A room five hops away needed this (its answers arrived ten seconds after the
+            # confirmation, on hardware). An earlier repair counted the time from the
+            # queuing. That repair made the wait longer, but the login still failed at the
+            # same ten seconds, because something else had already used the window.
             if not answer.done():
                 # Shielded: a timeout here must leave the future readable, not cancel it.
                 try:
@@ -3394,19 +3576,21 @@ class MeshCoreDevice(Device):
 
         event = answer.result() if answer.done() else None
         if event is None and getattr(library, "type", None) is EventType.LOGIN_SUCCESS:
-            # Cannot normally happen — our subscription was registered first, so anything the
-            # library's own wait saw, ours saw too. Deferring to it anyway costs nothing and
-            # can only ever turn a false no-reply into the acceptance it really was, which is
-            # the direction this whole method is trying to fail in.
+            # This usually cannot occur: our subscription was registered first, so our
+            # listener saw all that the library's own wait saw. But to use the library
+            # result costs nothing. It can only change a false no-reply into the acceptance
+            # that it was in fact, and this method prefers to fail in that direction.
             event = library
         etype = getattr(event, "type", None)
         confirmed_at, confirmation = confirm.result() if confirm.done() else (None, {})
         flood = None if confirmed_at is None else confirmation.get("type") == 1
-        # Where the time went, because a no-reply has three different causes and they are
-        # told apart by it: a confirmation that took seconds means the request sat behind
-        # another command, no confirmation at all means the companion never put it on the
-        # air (and the error it raised, if any, is logged beside it), and a full wait after
-        # a prompt confirmation means the node really did stay silent.
+        # Log where the time went, because a no-reply has three different causes, and the
+        # time tells them apart:
+        # * A confirmation that took seconds means that the request waited behind another
+        #   command.
+        # * No confirmation at all means that the companion never transmitted the request
+        #   (and the log shows the error that it raised, if any).
+        # * A full wait after a fast confirmation means that the node in fact stayed silent.
         answered = loop.time()
         _log.debug(
             "%s to %s: %s, budget=%.1fs -> %s %.0fms after %s%s",
@@ -3435,50 +3619,52 @@ class MeshCoreDevice(Device):
             )
         if etype is EventType.LOGIN_FAILED:
             return _LoginExchange(LoginResult.REFUSED, None, flood)
-        # Nothing came back — including the local-ERROR case, where the companion would not
-        # even send the request. Either way we never heard the node, so the password stands
-        # unproven rather than disproven and the caller must keep it.
+        # Nothing came back. This includes the local-ERROR case, where the companion did not
+        # even send the request. In both cases, we never heard the node. Thus the password
+        # is not proved correct and not proved wrong, and the caller must keep it.
         return _LoginExchange(LoginResult.NO_REPLY, None, flood, radio_error)
 
     @staticmethod
     def _refers_to(event: object, pubkey: str) -> bool:
-        """Is this login frame about the node we addressed?
+        """Is this login frame about the node that we addressed?
 
-        The firmware stamps a login reply with the *answering node's* 6-byte key prefix when
-        the frame is long enough to carry one; older/terser frames arrive bare. So this
-        matches when there is something to match on and accepts the frame otherwise — the
-        alternative, demanding a prefix, would silently downgrade every answer from terse
-        firmware into a no-reply, which is the failure this whole path exists to stop.
+        The firmware puts the 6-byte key prefix of the *answering node* on a login reply,
+        when the frame is long enough for it. Older or shorter frames arrive without it.
+        Thus this method matches when there is something to match, and accepts the frame
+        in other cases. If it demanded a key prefix, it would silently change each answer
+        from short firmware into a no-reply. That is the failure that this full path must
+        prevent.
         """
         payload = getattr(event, "payload", None) or {}
         prefix = str(payload.get("pubkey_prefix") or "").lower().removeprefix("0x")
         return not prefix or pubkey.lower().startswith(prefix)
 
     async def _send_admin_cmd(self, node: Contact, cmd: str, *, timeout: float = 8.0):
-        """Send a CLI command to a logged-in remote node and await its reply.
+        """Send a CLI command to a remote node where we are logged in, and wait for its reply.
 
-        The companion acknowledges the send immediately (``MSG_SENT``); the node's
-        textual reply arrives later as a ``CONTACT_MSG_RECV`` event. We return that
-        reply text (or ``None`` if none arrived before ``timeout``).
+        The companion acknowledges the send immediately (``MSG_SENT``). The text reply of
+        the node arrives later as a ``CONTACT_MSG_RECV`` event. We return that reply text
+        (or ``None`` if no reply arrived before ``timeout``).
 
-        The reply is the first message *from this node* that is not a room post. Any
-        direct message used to count, so a companion's message landing during the wait
-        was taken for the repeater's answer — and a room server pushes its members'
-        posts down the very same channel, one after another as each is acknowledged, so
-        administering a room you are a member of would read a stranger's post as the
-        result of ``get``. The listener is armed before the command goes out, like the
-        login's, so a reply quicker than the send's own return is not missed either.
+        The reply is the first message *from this node* that is not a room post. In the
+        past, any direct message counted. Thus a message from a companion that arrived
+        during the wait was taken as the answer of the repeater. Also, a room server pushes
+        the posts of its members down the same channel, one after another as each is
+        acknowledged. Thus, when you administered a room where you are a member, MeshTerm
+        read the post of another user as the result of ``get``. The listener is armed
+        before the command goes out, as for the login. Thus MeshTerm also does not miss a
+        reply that is faster than the return of the send.
 
         Args:
-            node: The remote contact (must already be logged in).
-            cmd: The repeater CLI command, e.g. ``"set tx 20"``.
-            timeout: Seconds to wait for the node's reply.
+            node: The remote contact (it must already be logged in).
+            cmd: The repeater CLI command, for example ``"set tx 20"``.
+            timeout: The seconds to wait for the reply of the node.
 
         Returns:
             The reply text, or ``None`` if the node did not answer in time.
 
         Raises:
-            DeviceCommandError: If the companion rejected the send outright.
+            DeviceCommandError: If the companion rejected the send command itself.
         """
         from meshcore import EventType
 
@@ -3492,8 +3678,8 @@ class MeshCoreDevice(Device):
                 return
             answer.set_result(payload)
 
-        # The firmware stamps a received direct message with its sender's six-byte prefix,
-        # which the library files as the event's ``pubkey_prefix`` attribute.
+        # The firmware puts the six-byte key prefix of the sender on a received direct
+        # message. The library stores it as the ``pubkey_prefix`` attribute of the event.
         subscription = mc.subscribe(
             EventType.CONTACT_MSG_RECV, on_message, {"pubkey_prefix": pub[:12]}
         )
@@ -3523,16 +3709,17 @@ class MeshCoreDevice(Device):
         return _parse_tx_reply(reply)
 
     async def set_remote_tx_power(self, node: Contact, value: int) -> None:  # noqa: D102
-        # The reply ("ok"/echoed value) is best-effort confirmation; absence isn't fatal
-        # since some firmware answers tersely or drops the ack under duty-cycle limits.
+        # The reply ("ok", or the value again) is a best-effort confirmation. If it is
+        # absent, that is not fatal, because some firmware answers briefly, or loses the
+        # ack under duty-cycle limits.
         await self._send_admin_cmd(node, f"set tx {value}")
 
     async def fetch_neighbours(self, node: Contact) -> list[NeighbourInfo]:  # noqa: D102
         mc = self._require()
         pub = self._node_pubkey(node)
-        # The library pages through the table (one binary request per ~25 entries) and
-        # concatenates; ``min_timeout`` keeps slow multi-hop replies from being cut off
-        # at the companion's optimistic suggested timeout.
+        # The library reads the table in pages (one binary request for each approximately
+        # 25 entries), and joins them. ``min_timeout`` prevents a cut of slow multi-hop
+        # replies at the optimistic suggested timeout of the companion.
         async with self.transmitting():
             result = await mc.commands.fetch_all_neighbours(pub, min_timeout=20)
         if result is None:
@@ -3565,8 +3752,8 @@ class MeshCoreDevice(Device):
         mc = self._require()
         pub = self._node_pubkey(node)
         transmit_gate.mark()
-        # ``min_timeout`` for the reason the neighbour request carries one: the companion's
-        # suggested timeout is optimistic for anything but an adjacent node.
+        # ``min_timeout`` for the same reason as in the neighbour request: the suggested
+        # timeout of the companion is optimistic for all nodes except a neighbour.
         async with self.transmitting():
             text = await mc.commands.req_regions_sync(pub, min_timeout=10)
         if text is None:
@@ -3585,16 +3772,16 @@ class MeshCoreDevice(Device):
         timeout: float | None = None,
     ) -> TraceResult:
         transmit_gate.mark()
-        from meshcore import EventType  # local import keeps mock path dependency-free
+        from meshcore import EventType  # local import: the mock path runs without meshcore
 
         mc = self._require()
         tag = random.randint(0, 0xFFFFFFFF)
         loop = asyncio.get_running_loop()
         started = loop.time()
 
-        # A trace packet has no destination field — it walks an explicit path of
-        # repeater hops. Send the path as raw bytes so any uniform hash width
-        # transmits; ``flags`` carries the path-hash mode (size - 1).
+        # A trace packet has no destination field. It walks an explicit path of repeater
+        # hops. Send the path as raw bytes, so that the radio can transmit any uniform hash
+        # width. ``flags`` has the path-hash mode (size - 1).
         path_bytes: bytes | None = None
         flags = 0
         if path:
@@ -3602,33 +3789,35 @@ class MeshCoreDevice(Device):
             path_bytes = bytes.fromhex("".join(hops))
             flags = path_hash_flags(len(bytes.fromhex(hops[0]))) or 0
         else:
-            # No forced path: build a path that ends at the target's own hash
-            # (prepending any learned ``out_path`` repeaters), since a trace only
-            # replies when its destination is the final hop. ``None`` only when the
-            # contact is unknown, leaving the trace to run path-less.
+            # No forced path: build a path that ends at the own hash of the target (with
+            # any learned ``out_path`` repeaters before it), because a trace replies only
+            # when its destination is the last hop. It is ``None`` only when the contact
+            # is unknown, and then the trace runs without a path.
             resolved = await self._trace_path_to_contact(mc, target)
             if resolved is not None:
                 path_bytes, flags = resolved
 
-        # Size the reply-wait to the route unless the caller pinned it. ``path_bytes`` is
-        # the whole walk — out plus the mirrored return leg — so its entry count (each
-        # ``1 << flags`` bytes wide) is the number of relay transmissions the packet makes
-        # before the reply reaches us. A path-less flood leaves the count unknown (0).
+        # Size the wait for the reply to the route, unless the caller set it. ``path_bytes``
+        # is the full walk (out, and the mirrored return leg). Thus its number of entries
+        # (each ``1 << flags`` bytes wide) is the number of relay transmissions of the
+        # packet before the reply reaches us. A flood without a path leaves the count
+        # unknown (0).
         if timeout is None:
             hops_walked = len(path_bytes) // (1 << flags) if path_bytes else 0
             timeout = trace_timeout(hops_walked)
 
-        # Listen for our tag *before* transmitting, and keep listening for the whole
-        # trace. ``send_trace`` doesn't return until the companion's ``MSG_SENT``
-        # arrives, and the library correlates that acknowledgement by nothing but its
-        # event type — so any other command in flight (a scheduled advert, a telemetry
-        # poll, the courier) can consume ours and leave the send blocked on its own
-        # 15-second default. Subscribing afterwards would mean every reply that landed
-        # during that stall was dispatched to no listener and dropped, and the trace
-        # recorded as "no reply" though the mesh answered it — which is why a burst of
-        # background traffic used to fail *every* trace for as long as it lasted, not
-        # just the one it collided with. The reply's own arrival time is stamped in the
-        # handler so a stalled send inflates no round trip.
+        # Listen for our tag *before* the transmission, and continue to listen during the
+        # full trace. ``send_trace`` does not return until the ``MSG_SENT`` of the
+        # companion arrives, and the library correlates that acknowledgement only by its
+        # event type. Thus any other command that is in progress (a scheduled advert, a
+        # telemetry poll, the courier) can take our acknowledgement, and leave the send
+        # blocked on its own 15-second default. If we subscribed after the send, each
+        # reply that arrived during that block would go to no listener and be lost. The
+        # trace would then be stored as "no reply", although the mesh answered it. That is
+        # why a burst of background traffic made *each* trace fail while the burst
+        # continued, not only the trace that it collided with. The handler stores the
+        # arrival time of the reply itself, so a blocked send does not make a round trip
+        # longer.
         reply: asyncio.Future = loop.create_future()
         landed = started
 
@@ -3642,9 +3831,9 @@ class MeshCoreDevice(Device):
         try:
             sent = await mc.commands.send_trace(auth_code=0, tag=tag, flags=flags, path=path_bytes)
             if getattr(sent, "is_error", None) is not None and sent.is_error():
-                # Uncorrelated acknowledgements make this ambiguous — the error may
-                # belong to another command entirely — so it is evidence, not a verdict:
-                # the trace is still on the air and its reply may yet arrive.
+                # Uncorrelated acknowledgements make this ambiguous (the error can be for
+                # a completely different command). Thus it is evidence, not a result: the
+                # trace is still on the air, and its reply can still arrive.
                 _log.debug("trace %08x: send reported %s", tag, sent.payload)
             try:
                 event = await asyncio.wait_for(reply, timeout)
@@ -3661,8 +3850,8 @@ class MeshCoreDevice(Device):
             timeout,
             f"{elapsed_ms:.0f}ms" if event is not None else "no reply",
         )
-        # The firmware addresses each hop by a hash of ``1 << flags`` bytes; record it
-        # so the summary can show node hashes at the width the command actually used.
+        # The firmware addresses each hop by a hash of ``1 << flags`` bytes. Store this
+        # width, so the summary can show node hashes at the width that the command used.
         hash_bytes = 1 << flags
         if event is None:
             return TraceResult(
@@ -3682,35 +3871,35 @@ class MeshCoreDevice(Device):
         )
 
     async def _trace_path_to_contact(self, mc, target: str) -> tuple[bytes, int] | None:  # noqa: ANN001
-        """Resolve a target contact into a trace ``(path_bytes, flags)``.
+        """Find the trace ``(path_bytes, flags)`` for a target contact.
 
-        A trace reply only comes back when the *destination's own hash* is the final
-        hop in the path — an empty/destination-less path is silently dropped (verified
-        on hardware: a direct neighbor answers a single-hop trace to its own hash but
-        not a path-less one). So we always end the outbound leg at the contact's key
-        prefix, prepending any learned repeater hops (``out_path``) ahead of it — and,
-        since the trace protocol has no separate return-path field, mirror those same
-        repeaters back afterwards (see :func:`~meshterm.services.topology.render_forced_spec`,
-        which does the same for a composed/adopted path): without an explicit return
-        leg the repeaters have nothing to relay the reply through, so it never comes
-        home.
+        A trace reply comes back only when the *own hash of the destination* is the last
+        hop in the path. The firmware silently ignores an empty path, or a path without the
+        destination. (We checked this on hardware: a direct neighbour answers a single-hop
+        trace to its own hash, but not a trace without a path.) Thus we always end the
+        outbound leg at the hash of the contact, with any learned repeater hops
+        (``out_path``) before it. The trace protocol has no separate field for the return
+        path. Thus we also mirror those same repeaters back after it (refer to
+        :func:`~meshterm.services.topology.render_forced_spec`, which does the same for a
+        composed or adopted path). Without an explicit return leg, the repeaters have
+        nothing through which to relay the reply, so it never comes back.
 
-        * direct neighbor / no learned route → just ``[destination]`` (no repeaters
-          to mirror, so the outbound leg is the whole path);
+        * direct neighbour, or no learned route → only ``[destination]`` (there are no
+          repeaters to mirror, so the outbound leg is the full path).
         * learned multi-hop route → ``[repeater…, destination, repeater… (reversed)]``.
 
-        Each hash is re-encoded at the trace's own width (``1 << flags``, only 1/2/4/8
-        bytes), collapsing a region's routing width (e.g. 3) to the widest representable
-        value (2). The firmware matches by hash prefix, so a narrower prefix still
-        addresses the same node.
+        Each hash is encoded again at the own width of the trace (``1 << flags``, only
+        1/2/4/8 bytes). This changes the routing width of a region (for example 3) to the
+        widest value that the trace can represent (2). The firmware matches by hash
+        prefix, so a narrower prefix still addresses the same node.
 
         Args:
             mc: The connected ``MeshCore`` client.
-            target: Contact name (case-insensitive) or public-key prefix.
+            target: The contact name (not case-sensitive), or a key prefix.
 
         Returns:
             ``(path_bytes, flags)`` to walk, or ``None`` only when the contact is
-            unknown or carries no public key to address.
+            unknown or has no public key to address.
         """
         payload = await self._contacts_payload(mc)
         needle = target.casefold()
@@ -3721,10 +3910,10 @@ class MeshCoreDevice(Device):
             if adv.casefold() != needle and not pub.startswith(needle):
                 continue
             if not pub:
-                return None  # no key to address the trace's destination hop
+                return None  # no key to address the destination hop of the trace
 
-            # Routing hash width (bytes): the contact's stored mode, or — when it has
-            # no learned route (mode == -1) — our region's mode.
+            # The routing hash width (bytes): the stored mode of the contact, or the mode
+            # of our region when the contact has no learned route (mode == -1).
             mode = int(info.get("out_path_hash_mode", -1))
             if mode < 0:
                 try:
@@ -3738,13 +3927,13 @@ class MeshCoreDevice(Device):
             out_path = (info.get("out_path") or "").strip().lower().removeprefix("0x")
             out_path_len = int(info.get("out_path_len", -1))
             if 1 <= out_path_len <= 254 and out_path:
-                # Learned multi-hop route: walk each repeater, collapsed to trace width.
+                # Learned multi-hop route: walk each repeater, cut to the trace width.
                 route = bytes.fromhex(out_path)[: out_path_len * size]
                 repeaters = [route[i * size : i * size + trace_size] for i in range(out_path_len)]
             dest = bytes.fromhex(pub)[:trace_size]
-            # The outbound leg always finishes at the destination's own hash so it
-            # recognizes the trace and replies; the return leg mirrors the same
-            # repeaters back to us, since nothing reflects the packet automatically.
+            # The outbound leg always ends at the own hash of the destination, so the
+            # destination recognizes the trace and replies. The return leg mirrors the same
+            # repeaters back to us, because nothing sends the packet back automatically.
             path_bytes = b"".join(repeaters) + dest + b"".join(reversed(repeaters))
             return path_bytes, path_hash_flags(trace_size) or 0
         return None
@@ -3783,9 +3972,9 @@ class MeshCoreDevice(Device):
             if obs is not None:
                 on_event(MeshEvent.observation_event(obs))
 
-        # Subscribe to whichever event types this firmware/library build exposes. The
-        # event payload field names the mappers read are best-effort and, like the trace
-        # mapping, should be validated against your firmware's event schema.
+        # Subscribe to the event types that this firmware and library build has. The field
+        # names of the event payload that the mappers read are best-effort. As for the
+        # trace mapping, check them with the event schema of your firmware.
         subs = []
         for attr, kind in (
             ("ADVERTISEMENT", "advert"),
@@ -3796,10 +3985,11 @@ class MeshCoreDevice(Device):
             etype = getattr(EventType, attr, None)
             if etype is not None:
                 subs.append(subscribe(etype, observation_handler(kind)))
-        # The companion's RX packet log, when its firmware has packet logging enabled:
-        # every overheard frame arrives with the relay path it traversed — the passive
-        # topology evidence the trace path composer suggests hops from. Firmware without
-        # RX logging simply never pushes these; subscribing is free either way.
+        # The RX packet log of the companion, when its firmware has packet logging on. Each
+        # overheard packet arrives with the relay path that it went through. This is the
+        # passive topology evidence from which the trace path composer suggests hops.
+        # Firmware without RX logging never pushes these events. The subscription costs
+        # nothing in both cases.
         etype = getattr(EventType, "RX_LOG_DATA", None)
         if etype is not None:
             subs.append(subscribe(etype, packet_handler))
@@ -3810,10 +4000,11 @@ class MeshCoreDevice(Device):
         etype = getattr(EventType, "ACK", None)
         if etype is not None:
             subs.append(subscribe(etype, ack_handler))
-        # Trace replies aren't observations — the issuing ``run_trace`` consumes them by
-        # tag — but logging every one that lands is what makes a "no reply" diagnosable:
-        # a reply logged here with no matching ``trace <tag>`` line means the walk came
-        # home and we weren't listening, which is a different fault from silence on air.
+        # Trace replies are not observations (the ``run_trace`` that sent the trace takes
+        # them by tag). But a log line for each reply that arrives lets us diagnose a "no
+        # reply". A reply logged here with no matching ``trace <tag>`` line means that the
+        # walk came back and we did not listen. That is a different fault from silence on
+        # the air.
         etype = getattr(EventType, "TRACE_DATA", None)
         if etype is not None:
             subs.append(
@@ -3826,8 +4017,9 @@ class MeshCoreDevice(Device):
                 )
             )
 
-        # Drive the inbound-message pull ourselves (see ``_message_pump``): MeshCore never
-        # pushes message bodies, so without this sending works but nothing is received.
+        # Do the pull of received messages ourselves (refer to ``_message_pump``). MeshCore
+        # never pushes message bodies, so without this pull, a send works but nothing is
+        # received.
         stop_pump = self._message_pump(mc, subs, subscribe)
 
         def unsubscribe() -> None:
@@ -3843,27 +4035,33 @@ class MeshCoreDevice(Device):
         return unsubscribe
 
     def _message_pump(self, mc, subs: list, subscribe) -> Unsubscribe:  # type: ignore[no-untyped-def]
-        """Continuously pull inbound messages from the companion (the RX pull model).
+        """Pull the received messages from the companion continuously (the RX pull model).
 
-        MeshCore doesn't push message bodies unsolicited: the device raises a
-        ``MESSAGES_WAITING`` notification and the client must call ``get_msg()`` to retrieve
-        each queued message, which the library's reader then dispatches as
-        ``CONTACT_MSG_RECV`` / ``CHANNEL_MSG_RECV`` to the handler registered above (a
-        command's own temporary listener does not consume the event — every subscriber
-        still sees it). We drive that pull three ways so it is robust across firmware
-        builds: an immediate drain (delivers anything already queued), a drain on each
-        ``MESSAGES_WAITING`` push (low latency), and a slow timer (a safety net for builds
-        whose pushes are unreliable — the failure this fixes). Drains are serialized by a
-        lock so the overlapping triggers never issue concurrent ``get_msg`` commands.
+        MeshCore does not push message bodies unsolicited. The device sends a
+        ``MESSAGES_WAITING`` notification, and the client must call ``get_msg()`` to get
+        each queued message. The reader of the library then dispatches it as
+        ``CONTACT_MSG_RECV`` or ``CHANNEL_MSG_RECV`` to the handler registered above. (The
+        temporary listener of a command does not take the event: each subscriber still
+        gets it.)
+
+        We do that pull in three ways, so that it is robust across firmware builds:
+
+        * An immediate drain (it delivers all that is already in the queue).
+        * A drain on each ``MESSAGES_WAITING`` push (low latency).
+        * A slow timer (a safety net for builds whose pushes are not reliable: the failure
+          that this repairs).
+
+        A lock serializes the drains, so the triggers that overlap never send concurrent
+        ``get_msg`` commands.
 
         Args:
             mc: The connected ``MeshCore`` client.
-            subs: The subscription list to append the ``MESSAGES_WAITING`` sub to (so it is
-                torn down with the others).
-            subscribe: The client's ``subscribe`` callable.
+            subs: The subscription list to which this method adds the ``MESSAGES_WAITING``
+                subscription (so it is torn down with the others).
+            subscribe: The ``subscribe`` callable of the client.
 
         Returns:
-            A zero-argument callable that stops the pump (its poll task and drains).
+            A callable with no arguments that stops the pump (its poll task and drains).
         """
         from meshcore import EventType
 
@@ -3871,14 +4069,14 @@ class MeshCoreDevice(Device):
         draining = asyncio.Lock()
 
         async def drain() -> None:
-            # Pull until the device reports the queue is empty; each retrieved message is
-            # delivered to our handler by the reader's dispatch, so there's nothing to do
-            # with the returned event but check whether to keep going.
+            # Pull until the device reports that the queue is empty. The dispatch of the
+            # reader delivers each message to our handler. Thus the only thing to do with
+            # the returned event is to check whether to continue.
             async with draining:
                 while not stop.is_set():
                     try:
                         event = await mc.commands.get_msg(timeout=_MESSAGE_GET_TIMEOUT_S)
-                    except Exception as exc:  # noqa: BLE001 - transient; the poll retries
+                    except Exception as exc:  # noqa: BLE001 - temporary. The poll tries again.
                         _log.debug("message pump: get_msg failed: %s", exc)
                         return
                     etype = getattr(event, "type", None)
@@ -3893,16 +4091,16 @@ class MeshCoreDevice(Device):
                 try:
                     await asyncio.wait_for(stop.wait(), _MESSAGE_POLL_INTERVAL_S)
                 except asyncio.TimeoutError:
-                    await drain()  # interval elapsed; sweep for anything the push missed
+                    await drain()  # the interval ended: look for all that the push missed
 
         waiting = getattr(EventType, "MESSAGES_WAITING", None)
         if waiting is not None:
             subs.append(subscribe(waiting, schedule_drain))
-        schedule_drain()  # immediate initial drain of anything already queued
+        schedule_drain()  # a first, immediate drain of all that is already in the queue
         poll_task = asyncio.ensure_future(poll_loop())
 
         def stop_pump() -> None:
-            stop.set()  # ends the poll loop and any in-flight drain at the next check
+            stop.set()  # ends the poll loop and any drain in progress at the next check
             poll_task.cancel()
 
         return stop_pump
@@ -3916,9 +4114,10 @@ class MeshCoreDevice(Device):
         mc = self._require()
         pub = self._node_pubkey(contact)
         loop = asyncio.get_running_loop()
-        # Listen before sending, and to every ack: the code to match is only known once the
-        # send returns, and an ack quicker than that return (a neighbour's) used to land
-        # before anything was listening for it. Kept by code until the code is known.
+        # Listen before the send, and to each ack. MeshTerm knows the code to match only
+        # after the send returns. In the past, an ack faster than that return (from a
+        # neighbour) arrived before anything listened for it. MeshTerm keeps each ack by
+        # its code until it knows the code.
         heard: dict[str, object] = {}
         wanted: asyncio.Future = loop.create_future()
         code: list[str] = []
@@ -3934,21 +4133,21 @@ class MeshCoreDevice(Device):
         subscription = mc.subscribe(EventType.ACK, on_ack)
         started = loop.time()
         try:
-            # Only the hand-over holds the transmit lock; the ack wait below is not a send.
+            # Only the hand-over holds the transmit lock. The ack wait below is not a send.
             async with self.transmitting():
                 result = await mc.commands.send_msg(pub, text)
             if result is None or getattr(result, "is_error", lambda: False)():
-                # A recipient the firmware has no entry for is the one rejection with an
-                # obvious fix, so it gets its own class for the chat screen to offer that
-                # fix on; see :class:`ContactNotOnDeviceError` for how a listed contact can
-                # be missing here.
+                # A recipient for which the firmware has no entry is the only rejection with
+                # an obvious repair. Thus it gets its own class, so the chat screen can offer
+                # that repair. Refer to :class:`ContactNotOnDeviceError` for how a contact in
+                # the list can be missing here.
                 if error_code(result) == _ERR_NOT_FOUND:
                     raise ContactNotOnDeviceError(contact)
                 raise DeviceCommandError(
                     f"couldn't send to {contact.name}: {reject_reason(result)}"
                 )
-            # The companion accepts the send at once with the ``expected_ack`` code and how
-            # it sent it; the recipient's ack arrives later, carrying the code.
+            # The companion accepts the send immediately, with the ``expected_ack`` code and
+            # how it sent the message. The ack of the recipient arrives later, with the code.
             payload = getattr(result, "payload", {}) or {}
             expected = payload.get("expected_ack")
             expected_hex = expected.hex() if isinstance(expected, (bytes, bytearray)) else expected
@@ -3958,13 +4157,14 @@ class MeshCoreDevice(Device):
             if code[0] in heard:
                 wanted.set_result(heard[code[0]])
             flood = payload.get("type") == 1
-            # As patient as a login, whose answer travels exactly as an ack does: the
-            # radio's own estimate (``suggested_timeout``, which the library stretches by a
-            # quarter), then a round trip sized to the route. The estimate alone (what this
-            # waited until 2026-10-05) is ``500 ms + 16 x airtime`` for a flood, about five
-            # seconds, where a flood's answer from five hops out took ten on hardware. So
-            # most acks from beyond a neighbour landed after the wait had given up, and four
-            # messages in five read as failed that had been delivered.
+            # Wait as long as for a login, whose answer travels exactly as an ack does: the
+            # own estimate of the radio (``suggested_timeout``, which the library makes a
+            # quarter longer), then a round trip sized to the route. The estimate alone (this
+            # code waited only that long until 2026-10-05) is ``500 ms + 16 x airtime`` for
+            # a flood, approximately five seconds. But on hardware, the answer to a flood
+            # from five hops away took ten seconds. Thus most acks from farther than a
+            # neighbour arrived after the wait had stopped, and four messages of five that
+            # had arrived showed as failed.
             hops = 0 if flood else 2 * len(contact.route_hops or ())
             suggested = float(payload.get("suggested_timeout") or 0) / 1000.0
             budget = suggested * 1.25 + max(trace_timeout(hops), trace_timeout(0))
@@ -3999,13 +4199,13 @@ class MeshCoreDevice(Device):
 
     @staticmethod
     def _ok(event):  # type: ignore[no-untyped-def]
-        """Return ``event`` if it succeeded, else raise its error payload.
+        """Return ``event`` if it succeeded, or else raise its error payload.
 
         Args:
-            event: The :class:`meshcore.events.Event` returned by a command.
+            event: The :class:`meshcore.events.Event` that a command returned.
 
         Returns:
-            The same event, for convenient chaining.
+            The same event, so that calls can be chained.
 
         Raises:
             RuntimeError: If the device reported an error.
@@ -4018,21 +4218,22 @@ class MeshCoreDevice(Device):
         event = self._ok(await self._require().commands.get_tuning())
         payload = getattr(event, "payload", {}) or {}
         # The firmware stores floats and reports them ×1000 (rx_delay_base * 1000,
-        # airtime_factor * 1000); undo that so callers see the real values.
+        # airtime_factor * 1000). Undo that scaling, so callers see the real values.
         return {
             "rx_delay": int(payload.get("rx_delay", 0)) / 1000.0,
             "airtime_factor": int(payload.get("airtime_factor", 0)) / 1000.0,
         }
 
-    #: The hop limit that arrived in the same frame as the last bitmask, until it is taken.
+    #: The hop limit that arrived in the same frame as the last bitmask, until a caller takes it.
     _autoadd_hops: object = _UNREAD
 
     async def get_autoadd_config(self) -> int | None:  # noqa: D102 - inherited docstring
         mc = self._require()
-        # One reply carries the bitmask *and* the hop limit, but the library's parser keeps
-        # only the first. So the reader is tapped for the length of this one read — every
-        # transport hands frames to ``reader.handle_rx`` by attribute lookup, so an instance
-        # attribute sees them first — and the raw frame's second byte is kept.
+        # One reply has the bitmask *and* the hop limit, but the parser of the library keeps
+        # only the first. Thus MeshTerm taps the reader for the time of this one read. Each
+        # transport gives frames to ``reader.handle_rx`` through an attribute lookup, so an
+        # instance attribute gets them first. MeshTerm keeps the second byte of the raw
+        # frame.
         reader = getattr(mc, "_reader", None)
         frames: list[bytes] = []
         tapped = reader is not None and "handle_rx" not in vars(reader)
@@ -4057,8 +4258,9 @@ class MeshCoreDevice(Device):
         return None if config is None else int(config)
 
     async def get_autoadd_max_hops(self) -> int | None:  # noqa: D102 - inherited docstring
-        # build_snapshot asks for the bitmask and then for this. The frame that answered the
-        # first question already carried the second, so it is taken rather than asked again.
+        # build_snapshot asks for the bitmask, and then for this value. The frame that
+        # answered the first question already had the second, so MeshTerm takes it from
+        # there, and does not ask again.
         if self._autoadd_hops is _UNREAD:
             await self.get_autoadd_config()
         hops, self._autoadd_hops = self._autoadd_hops, _UNREAD
@@ -4067,7 +4269,7 @@ class MeshCoreDevice(Device):
     async def get_allowed_repeat_freqs(self) -> list[tuple[float, float]]:  # noqa: D102
         event = self._ok(await self._require().commands.get_allowed_repeat_freq())
         payload = getattr(event, "payload", {}) or {}
-        # Ranges travel in kHz, like every other frequency on this protocol.
+        # Ranges go in kHz, as all the other frequencies on this protocol do.
         return [
             (int(r["min"]) / 1000.0, int(r["max"]) / 1000.0) for r in payload.get("freqs") or []
         ]
@@ -4076,8 +4278,9 @@ class MeshCoreDevice(Device):
         event = self._ok(await self._require().commands.get_default_flood_scope())
         payload = getattr(event, "payload", {}) or {}
         name = payload.get("scope_name")
-        # Bare, whichever client wrote it: MeshTerm before its own framing, and the library
-        # still, stored a ``#`` the firmware and the apps leave off.
+        # Return the name bare, whatever client wrote it. MeshTerm (before it built its own
+        # frames) and the library (still now) stored a ``#`` that the firmware and the apps
+        # do not use.
         return None if name is None else normalize_region(str(name))
 
     async def get_time(self) -> int | None:  # noqa: D102 - inherited docstring
@@ -4091,13 +4294,13 @@ class MeshCoreDevice(Device):
         return dict(getattr(event, "payload", {}) or {})
 
     async def get_hw_charging(self) -> bool | None:  # noqa: D102 - inherited docstring
-        # BLE only, and only when a device exposes the standard Battery Level Status
-        # characteristic — no MeshCore firmware does today, so this returns None on every
-        # current device and the battery poller falls back to its voltage-trend inference. It
-        # reaches the raw bleak client the way the forced-teardown path does (through
-        # ``connection_manager.connection``) and is wrapped whole: any failure — attribute
-        # path moved, service absent, read refused, short value — is a quiet None, never a
-        # disrupted poll.
+        # Only for BLE, and only when a device has the standard Battery Level Status
+        # characteristic. No MeshCore firmware has it now. Thus this returns None on all
+        # current devices, and the battery poller uses its voltage-trend inference instead.
+        # It reaches the raw bleak client in the same way as the forced-teardown path
+        # (through ``connection_manager.connection``), and all of it is in one try block.
+        # Any failure (a changed attribute path, no service, a refused read, a short value)
+        # gives a silent None, and never interrupts the poll.
         if self._transport != "ble" or self._mc is None:
             return None
         try:
@@ -4123,8 +4326,9 @@ class MeshCoreDevice(Device):
     async def get_stats(self) -> dict:  # noqa: D102 - inherited docstring
         mc = self._require()
         stats: dict = {}
-        # Each frame independently best-effort: firmware predating one stats type answers
-        # with an error, which must not cost us the frames it does support.
+        # Each frame is best-effort on its own. Firmware that is older than one statistics
+        # type answers it with an error, and that error must not cost us the frames that
+        # the firmware supports.
         for read in (
             mc.commands.get_stats_core,
             mc.commands.get_stats_radio,
@@ -4132,7 +4336,7 @@ class MeshCoreDevice(Device):
         ):
             try:
                 event = self._ok(await read())
-            except Exception:  # noqa: BLE001 - optional read; absence is acceptable
+            except Exception:  # noqa: BLE001 - an optional read. Its absence is acceptable.
                 continue
             stats.update(getattr(event, "payload", {}) or {})
         return stats
@@ -4145,11 +4349,12 @@ class MeshCoreDevice(Device):
         return dict(getattr(event, "payload", {}) or {})
 
     async def get_channel(self, index: int) -> dict | None:  # noqa: D102
-        # The read is serialized (see self._channel_read_lock) so the uncorrelated
-        # CHANNEL_INFO response can't be stolen by a concurrent read. We still verify the
-        # response is for the slot we asked about: a stray CHANNEL_INFO (from another source,
-        # or a slow response arriving after a timeout) would otherwise misidentify the slot and
-        # misfile a channel's messages. On mismatch we raise rather than return foreign data.
+        # The read is serialized (refer to self._channel_read_lock), so a concurrent read
+        # cannot take the uncorrelated CHANNEL_INFO response. We still check that the
+        # response is for the slot that we asked for. If not, a stray CHANNEL_INFO (from
+        # another source, or a slow response that arrives after a timeout) would identify
+        # the wrong slot, and the messages of a channel would go to the wrong place. On a
+        # mismatch, we raise an error, and do not return the data of another slot.
         async with self._channel_read_lock:
             event = await self._channel_event(index)
         payload = getattr(event, "payload", {}) or {}
@@ -4161,22 +4366,24 @@ class MeshCoreDevice(Device):
         return payload
 
     async def _channel_event(self, index: int):  # noqa: ANN202 - a meshcore Event
-        """Read one slot, telling the firmware's "no such slot" apart from any other error.
+        """Read one slot, and tell the "no such slot" of the firmware from any other error.
 
-        The slot probe ends on a *rejection* and keeps the list it has as the device's whole
-        layout, so what counts as one matters. The firmware answers an index past its last
-        slot with ``ERR_CODE_NOT_FOUND`` and nothing else. But the library does not
-        serialize commands, and every one that waits for "OK or ERROR" takes the first
-        ERROR that arrives — so a read racing another command can be handed *that*
-        command's refusal. At connect the channel prewarm runs beside the clock sync, and a
-        clock the firmware refuses as malformed ended the probe at whatever slot it had
-        reached, which cached a list missing every channel after it for the session.
+        The slot probe ends on a *rejection*, and keeps the list that it has as the full
+        layout of the device. Thus it is important what counts as a rejection. The firmware
+        answers an index after its last slot with ``ERR_CODE_NOT_FOUND`` and nothing else.
+        But the library does not serialize commands, and each command that waits for "OK
+        or ERROR" takes the first ERROR that arrives. Thus a read that races another
+        command can get the refusal of *that* command. At the connect, the channel prewarm
+        runs at the same time as the clock sync. A clock that the firmware refused as
+        malformed ended the probe at the slot that it had reached. That cached a list for
+        the session without all the channels after that slot.
 
-        So only ``NOT_FOUND`` (or a code-less refusal from firmware too old to send one) is
-        a rejection. Any other refusal is asked again once, since a borrowed error is
-        someone else's and the next answer is this read's own; a second one, or no answer
-        at all, is a failed read (:class:`DeviceCommandError`), which the probe reports as
-        unfinished rather than caching.
+        Thus only ``NOT_FOUND`` (or a refusal without a code, from firmware that is too old
+        to send a code) is a rejection. After any other refusal, MeshTerm asks again one
+        time, because a borrowed error belongs to another command, and the next answer is
+        the answer of this read. A second refusal, or no answer at all, is a failed read
+        (:class:`DeviceCommandError`). The probe reports it as not finished, and does not
+        cache it.
         """
         commands = self._require().commands
         for attempt in (1, 2):
@@ -4214,8 +4421,8 @@ class MeshCoreDevice(Device):
         )
 
     async def set_tuning(self, rx_delay: float, airtime_factor: float) -> None:  # noqa: D102
-        # CMD_SET_TUNING_PARAMS carries both floats ×1000; the firmware divides them
-        # back out (prefs.rx_delay_base = rx / 1000, prefs.airtime_factor = af / 1000).
+        # CMD_SET_TUNING_PARAMS has both floats ×1000. The firmware divides them again
+        # (prefs.rx_delay_base = rx / 1000, prefs.airtime_factor = af / 1000).
         self._ok(
             await self._require().commands.set_tuning(
                 round(float(rx_delay) * 1000), round(float(airtime_factor) * 1000)
@@ -4231,7 +4438,7 @@ class MeshCoreDevice(Device):
         if max_hops is None:
             self._ok(await mc.commands.set_autoadd_config(int(flags)))
         else:
-            # The library sends the bitmask alone; the hop limit is the byte after it.
+            # The library sends only the bitmask. The hop limit is the byte after it.
             frame = bytes([_CMD_SET_AUTOADD_CONFIG, int(flags) & 0xFF, min(int(max_hops), 64)])
             self._ok(await mc.commands.send(frame, [EventType.OK, EventType.ERROR]))
         self._autoadd_hops = _UNREAD
@@ -4239,12 +4446,13 @@ class MeshCoreDevice(Device):
     async def set_default_flood_scope(self, scope: str) -> None:  # noqa: D102
         from meshcore import EventType
 
-        # Framed here rather than by the library's ``set_default_flood_scope``, which stores
-        # the name *with* a ``#`` (the firmware and the apps store it bare, so ours read
-        # back differently from theirs, and a 30-byte name became a 31-byte one the
-        # firmware refuses) and pads by characters rather than UTF-8 bytes (so a name with
-        # an accent put the key at the wrong offset). ``[63][name, 31 bytes NUL-padded]
-        # [key16]``; a frame shorter than that clears the default.
+        # MeshTerm builds the frame here, not through the library's
+        # ``set_default_flood_scope``. That function stores the name *with* a ``#``. (The
+        # firmware and the apps store it bare. Thus our name read back differently from
+        # theirs, and a 30-byte name became a 31-byte name that the firmware refuses.) It
+        # also pads by characters, not by UTF-8 bytes. (Thus a name with an accent put the
+        # key at the wrong offset.) The frame is ``[63][name, 31 bytes NUL-padded]
+        # [key16]``. A frame shorter than that clears the default.
         bare = normalize_region(scope)
         if not bare or bare == REGION_WILDCARD:
             frame = bytes([_CMD_SET_DEFAULT_FLOOD_SCOPE])
@@ -4263,12 +4471,13 @@ class MeshCoreDevice(Device):
     async def set_flood_scope(self, region: str | None) -> None:  # noqa: D102
         from meshcore import EventType
 
-        # Framed here, like the default scope, rather than through the library's helpers:
-        # ``reset_flood_scope`` and ``force_unscoped`` arrived late in meshcore 2.3.x, and
-        # an install that satisfies ``meshcore>=2.3`` without them (the uConsole's 2.3.7)
-        # crashed every scoped channel send on the restore. The frame is the firmware's
-        # own ``CMD_SET_FLOOD_SCOPE_KEY``: ``[54][0][key16]`` sets the session scope,
-        # ``[54][0]`` alone clears it back to the default, ``[54][1]`` forces unscoped.
+        # MeshTerm builds the frame here, as for the default scope, not through the helpers
+        # of the library. ``reset_flood_scope`` and ``force_unscoped`` came late in
+        # meshcore 2.3.x. An install that satisfies ``meshcore>=2.3`` without them (2.3.7
+        # on the uConsole) crashed each scoped channel send on the restore. The frame is
+        # the firmware's own ``CMD_SET_FLOOD_SCOPE_KEY``. ``[54][0][key16]`` sets the
+        # session scope, ``[54][0]`` alone clears it back to the default, and ``[54][1]``
+        # forces unscoped.
         bare = normalize_region(region) if region else ""
         if not bare:
             frame = bytes([_CMD_SET_FLOOD_SCOPE_KEY, 0])
@@ -4309,8 +4518,8 @@ class MeshCoreDevice(Device):
     async def set_time(self, epoch: int) -> None:  # noqa: D102 - inherited docstring
         event = await self._require().commands.set_time(epoch)
         if getattr(event, "is_error", lambda: False)() and error_code(event) == _ERR_ILLEGAL_ARG:
-            # The one argument the set-time handler refuses: a time behind the radio's own
-            # clock, which firmware never winds back (see ClockAheadError).
+            # The only argument that the set-time handler refuses: a time before the radio's
+            # own clock, which the firmware never sets back (refer to ClockAheadError).
             raise ClockAheadError(None)
         self._ok(event)
 
@@ -4320,18 +4529,19 @@ class MeshCoreDevice(Device):
             self._ok(await self._require().commands.send_advert(flood))
 
     async def reboot(self) -> None:
-        """Reboot the device, returning once the command is out rather than acknowledged.
+        """Reboot the device, and return when the command is sent, not when it is acknowledged.
 
-        The device sends no reply to a reboot, and over Bluetooth it may not even acknowledge
-        the write before restarting (see :data:`_REBOOT_WRITE_GRACE_S`), so waiting for the
-        write to complete only delays the reconnect flow by the link supervision timeout. A
-        write that fails fast still raises; one still pending after the grace is left to
-        finish or die with the link, which the caller is about to tear down anyway.
+        The device sends no reply to a reboot. Over Bluetooth, it may not even acknowledge
+        the write before it restarts (refer to :data:`_REBOOT_WRITE_GRACE_S`). Thus a wait
+        for the write to complete only delays the reconnect flow by the link supervision
+        timeout. A write that fails fast still raises. A write that is still pending after
+        the grace time can complete, or end with the link, which the caller will tear down
+        soon in any case.
         """
         write = asyncio.ensure_future(self._require().commands.reboot())
         done, _ = await asyncio.wait({write}, timeout=_REBOOT_WRITE_GRACE_S)
         if done:
-            write.result()  # raise a write that failed outright
+            write.result()  # raise the error of a write that failed immediately
             return
         _REBOOT_WRITES.add(write)
         write.add_done_callback(_forget_reboot_write)
@@ -4354,14 +4564,15 @@ class MeshCoreDevice(Device):
 
 
 class MockDevice(Device):
-    """A deterministic simulator implementing the full :class:`Device` interface.
+    """A deterministic simulator that implements the full :class:`Device` interface.
 
-    The simulated SNR follows an inverted-U response to TX power: too low and the signal
-    sits in the noise floor, too high and the receiver saturates. This gives the TX
-    optimizer a realistic, unimodal-with-noise curve to converge on without hardware.
+    The simulated SNR follows an inverted-U response to the TX power. If the power is too
+    low, the signal is in the noise floor. If it is too high, the receiver saturates. Thus
+    the TX optimizer gets a realistic curve, with one peak and noise, on which it can
+    converge without hardware.
 
     Attributes:
-        optimal_tx: The TX power at which the simulated link peaks.
+        optimal_tx: The TX power at which the simulated link has its peak.
     """
 
     def __init__(
@@ -4374,11 +4585,14 @@ class MockDevice(Device):
         """Initialize the simulator.
 
         Args:
-            seed: RNG seed for reproducible measurement noise.
-            optimal_tx: Local TX power at which the simulated *bottleneck* SNR peaks.
-            optimal_remote_tx: Remote-node TX power at which the simulated SNR *at the
-                target* peaks (what the remote-admin optimizer converges on).
-            admin_password: Password the simulated remote nodes accept for admin login.
+            seed: The RNG seed, for measurement noise that can be reproduced.
+            optimal_tx: The TX power of our node at which the simulated *bottleneck* SNR
+                has its peak.
+            optimal_remote_tx: The TX power of a remote node at which the simulated SNR
+                *at the target* has its peak (the value on which the remote-admin optimizer
+                converges).
+            admin_password: The password that the simulated remote nodes accept for the
+                admin login.
         """
         self.optimal_tx = optimal_tx
         self.optimal_remote_tx = optimal_remote_tx
@@ -4386,9 +4600,10 @@ class MockDevice(Device):
         self._rng = random.Random(seed)
         self._tx_power = 20
         self._connected = False
-        # Routes mirror what real firmware learns from received floods: the repeaters are
-        # direct neighbours, the leaf nodes sit one hop behind one of them — so the trace
-        # path composer and its topology suggestions are fully exercisable without radio.
+        # The routes are the same as what real firmware learns from received floods. The
+        # repeaters are direct neighbours, and the leaf nodes are one hop behind one of
+        # them. Thus you can fully exercise the trace path composer and its topology
+        # suggestions without a radio.
         self._contacts = [
             Contact(
                 name="Yagi-Repeater",
@@ -4424,8 +4639,8 @@ class MockDevice(Device):
                 node_type=NODE_TYPE_CHAT,
                 route_hops=("a1b2c3d4",),
             ),
-            # Last, so every rotation over the first four (the synthetic traffic, the
-            # tests that count on it) is the one it always was.
+            # Last, so that each rotation over the first four (the synthetic traffic, and
+            # the tests that depend on it) stays the same as before.
             Contact(
                 name="Lakeside BBS",
                 public_key=_mock_pub("f6a7b8c9"),
@@ -4434,12 +4649,13 @@ class MockDevice(Device):
                 route_hops=("a1b2c3d4",),
             ),
         ]
-        # The simulated room server's board, oldest first, as (author key prefix, posted at,
-        # text): what Lakeside BBS holds when the simulator starts. Its authors are the three
-        # a room view has to draw — a contact (Alice, Observer-Bot), a node never befriended
-        # (``e5f6a7b8``, a neighbour no contact names, so no name places it), and the room
-        # itself, which is how a notice its admin posts with ``room.post`` arrives — and it
-        # spans two days, so the transcript has a day to divide.
+        # The board of the simulated room server, oldest first, as (author key prefix,
+        # posted at, text): the posts that Lakeside BBS has when the simulator starts. Its
+        # authors are the three types that a room screen must draw: a contact (Alice,
+        # Observer-Bot), a node that was never added (``e5f6a7b8``, a neighbour that no
+        # contact names, so no name identifies it), and the room itself (a notice that its
+        # admin posts with ``room.post`` arrives in this way). The board covers two days,
+        # so the transcript has a day to divide.
         now = utcnow()
         self._room_board: list[tuple[str, datetime, str]] = [
             ("d4e5f6a7", now - timedelta(hours=26), "Anyone driving to the swap meet Saturday?"),
@@ -4456,44 +4672,49 @@ class MockDevice(Device):
             ),
             ("d4e5f6a7", now - timedelta(minutes=12), "Heard it an hour ago. Probably the solar."),
         ]
-        #: Our access in each room we have logged in to, keyed by the room's mock key — the
-        #: room's own access list, as far as it concerns us. A room forgets its members when
-        #: it restarts; the simulator never restarts one.
+        #: Our access in each room where we have logged in, keyed by the mock key of the
+        #: room. This is the access list of the room itself, for the part that concerns us.
+        #: A room forgets its members when it restarts. The simulator never restarts a room.
         self._room_access: dict[str, RoomAccess] = {}
-        #: The time of the newest post we hold from each room: the companion's "sync since",
-        #: which a login carries so the room sends only what is newer.
+        #: The time of the newest post that we have from each room: the "sync since" of the
+        #: companion. A login sends it, so that the room sends only newer posts.
         self._room_synced: dict[str, datetime] = {}
-        #: Whoever is subscribed to the event stream right now, so a room can push its posts
-        #: to them after a login the way a real room's catch-up arrives — unsolicited.
+        #: The subscribers of the event stream now. Thus a room can push its posts to them
+        #: after a login, in the same way as the catch-up of a real room arrives: unsolicited.
         self._listeners: list[EventCallback] = []
-        #: Contacts whose acks arrive only after the send has stopped waiting, the common
-        #: case beyond a neighbour on a real mesh. Empty by default; name one to walk the
-        #: late-ack path.
+        #: Contacts whose acks arrive only after the send has stopped its wait. On a real
+        #: mesh, this is the usual case for nodes farther than a neighbour. It is empty by
+        #: default. Put a name in it to walk the late-ack path.
         self._late_acks: set[str] = set()
-        #: Direct messages handed over so far, which numbers each one's ack code.
+        #: The number of direct messages given to the device until now. Each message gets
+        #: its ack code from this number.
         self._sent_codes = 0
-        #: Nodes whose learned route has gone stale: a message sent along it meets silence,
-        #: and a flood gets through and learns a fresh one. Empty by default; name a contact
-        #: here to walk the "try by flood" path a stale route leaves a reader on.
+        #: Nodes whose learned route has become old: a message sent along it gets no
+        #: answer, and a flood gets through and learns a new route. It is empty by default.
+        #: Put the name of a contact here to walk the "try by flood" path, which an old
+        #: route gives to the user.
         self._stale_routes: set[str] = set()
-        # Remote-admin simulation: which nodes we're "logged in" to, and each tuned
-        # node's transmit power keyed by full public key. ``_default_remote_tx`` is the
-        # assumed power before the optimizer first writes one.
+        # Remote-admin simulation: the nodes where we are "logged in", and the transmit
+        # power of each tuned node, keyed by its full public key. ``_default_remote_tx`` is
+        # the assumed power before the optimizer writes a power for the first time.
         self._admin_sessions: set[str] = set()
-        # Nodes the simulator answers *nothing* for — the one failure a password cannot
-        # explain. Empty by default, so the simulated mesh is fully reachable as before;
-        # put a contact's name in here to walk the down-repeater path, where a login comes
-        # back NO_REPLY and the remembered credential has to survive it.
+        # Nodes for which the simulator answers *nothing*: the only failure that a password
+        # cannot explain. It is empty by default, so the full simulated mesh can be reached
+        # as before. Put the name of a contact here to walk the path of a repeater that is
+        # down. There, a login comes back NO_REPLY, and the remembered credential must
+        # survive it.
         self._unreachable: set[str] = set()
         self._remote_tx: dict[str, int] = {}
         self._default_remote_tx = 20
-        # Each simulated repeater's CLI-visible configuration, populated with the
-        # defaults below on first touch (keyed by full public key, like the TX map).
+        # The settings of each simulated repeater, as its CLI shows them. MeshTerm fills
+        # them with the defaults below at the first access (keyed by the full public key,
+        # as for the TX map).
         self._remote_cfg: dict[str, dict[str, str]] = {}
-        # Simulated neighbour tables, keyed by the repeater's key prefix: what each
-        # repeater "hears directly" as ``(neighbour_prefix, snr_db, secs_ago)``. The
-        # ``e5f6a7b8`` entry is deliberately absent from the contact list, so the
-        # fetched-evidence flow exercises discovering a node we never received from.
+        # Simulated neighbour tables, keyed by the key prefix of the repeater: what each
+        # repeater "hears directly", as ``(neighbour_prefix, snr_db, secs_ago)``. The
+        # ``e5f6a7b8`` entry is not in the contact list, on purpose. Thus the
+        # fetched-evidence flow exercises the discovery of a node from which we never
+        # received anything.
         self._neighbour_tables: dict[str, list[tuple[str, float, int]]] = {
             "a1b2c3d4": [
                 ("d4e5f6a7", 6.5, 300),
@@ -4505,10 +4726,11 @@ class MockDevice(Device):
                 ("a1b2c3d4", -3.25, 900),
             ],
         }
-        # Simulated region tables, keyed like the neighbour tables: one per repeater, what
-        # its ``region`` CLI edits and the anonymous regions request reads. Yagi's fits in
-        # one reply; Local's is deliberately too big for the 160-byte reply buffer, so the
-        # region editor's cut-and-recover path is drivable without hardware.
+        # Simulated region tables, keyed as the neighbour tables are: one for each
+        # repeater, which its ``region`` CLI edits and the anonymous regions request reads.
+        # The table of Yagi fits in one reply. The table of Local is too big for the
+        # 160-byte reply buffer on purpose, so you can drive the cut-and-recover path of
+        # the region editor without hardware.
         self._region_maps: dict[str, SimulatedRegionMap] = {
             "a1b2c3d4": SimulatedRegionMap(
                 [
@@ -4535,8 +4757,8 @@ class MockDevice(Device):
                 ]
             ),
         }
-        # Mutable configuration state, keyed exactly like the real SELF_INFO payload so the
-        # settings registry behaves identically on the simulator and on hardware.
+        # The settings state that can change, keyed exactly as the real SELF_INFO payload
+        # is, so the settings registry operates the same on the simulator and on hardware.
         self._info: dict = {
             "name": "MockCompanion",
             "adv_type": 1,
@@ -4551,9 +4773,9 @@ class MockDevice(Device):
             "telemetry_mode_env": 0,
             "manual_add_contacts": False,
             # The firmware's own build defaults (MeshCore's platformio.ini: LORA_FREQ
-            # 869.618, BW 62.5, SF8; CR falls back to 5), so the simulator boots on the
-            # settings a freshly flashed companion does rather than on the 250 kHz /
-            # SF11 modulation the EU mesh left behind.
+            # 869.618, BW 62.5, SF8, and CR 5 by default). Thus the simulator boots with
+            # the settings of a newly flashed companion, not with the 250 kHz / SF11
+            # modulation that the EU mesh stopped using.
             "radio_freq": 869.618,
             "radio_bw": 62.5,
             "radio_sf": 8,
@@ -4563,26 +4785,28 @@ class MockDevice(Device):
         self._tuning: dict = {"rx_delay": 0.0, "airtime_factor": 0.0}
         self._autoadd_config = 0
         self._autoadd_max_hops = 0
-        # Client repeat (firmware v9+): off, as a freshly flashed companion ships.
+        # Client repeat (firmware v9+): off, as on a newly flashed companion.
         self._client_repeat = False
         self._flood_scope = ""
         #: The session send scope (``""`` follows the default, ``"*"`` is forced unscoped).
         self._send_scope = ""
-        #: Every channel message handed over: ``(slot, text, session scope at the time)``.
+        #: Each channel message given to the device: ``(slot, text, session scope at the time)``.
         self.sent_channel: list[tuple[int, str, str]] = []
         # Simulated clock skew (seconds behind the host), so the sync-clock flow has a
-        # visible drift to correct until set_time is called.
+        # visible drift to correct until a call to set_time.
         self._clock_offset: int | None = -125
         self._path_hash_mode = 0
         self._custom_vars: dict[str, str] = {}
         self._channels: dict[int, dict] = {}
-        # Model the firmware's fixed slot count: reads past it are rejected, exactly as a
-        # real device signals its ceiling (so ``channel_capacity`` discovers 8 on the mock).
+        # Model the fixed slot count of the firmware: the simulator rejects reads after the
+        # last slot, exactly as a real device shows its limit (so ``channel_capacity``
+        # finds 8 on the mock).
         self._max_channels = 8
         self._device_pin = 0
         self._private_key = "11" * 32
-        # Background emitter tasks spawned by ``subscribe_events``; tracked so they
-        # can be cancelled on disconnect and are never garbage-collected while pending.
+        # The background tasks that ``subscribe_events`` starts to make events. This set
+        # keeps them, so they can be cancelled at the disconnect, and so they are never
+        # garbage-collected while they are pending.
         self._bg_tasks: set[asyncio.Task] = set()
 
     async def connect(self) -> None:  # noqa: D102 - inherited docstring
@@ -4599,9 +4823,9 @@ class MockDevice(Device):
         return {**self._info, "tx_power": self._tx_power}
 
     async def get_device_info(self) -> dict:  # noqa: D102 - inherited docstring
-        # The simulator reports a stable, obviously-synthetic model so the hardware column
-        # renders identically to a real board without pretending to be one. ``ble_pin``
-        # rides here rather than in SELF_INFO because that is where real firmware puts it.
+        # The simulator reports a stable model that is clearly synthetic. Thus the hardware
+        # column renders the same as for a real board, but it does not claim to be one.
+        # ``ble_pin`` is here, not in SELF_INFO, because real firmware puts it here.
         return {
             "model": "MeshCore Simulator",
             "ver": "mock",
@@ -4617,16 +4841,17 @@ class MockDevice(Device):
         await asyncio.sleep(0)
         key = self._mock_key(node)
         self._contacts = [c for c in self._contacts if self._mock_key(c) != key]
-        # Added with no learned route, exactly as the firmware stores a contact it was
-        # handed rather than heard from.
+        # Added with no learned route, exactly as the firmware stores a contact that it
+        # got from the app, and did not hear.
         self._contacts.append(replace(node, route_hops=None))
 
     async def remove_contact(self, node: Contact) -> None:  # noqa: D102 - inherited docstring
         await asyncio.sleep(0)
         key = self._mock_key(node)
-        # Firmware can only delete a contact it holds, and answers ERR_CODE_NOT_FOUND for
-        # one it doesn't; the simulator refuses the same way so the "wasn't on the device,
-        # removed here anyway" path is walkable without a radio.
+        # Firmware can delete only a contact that it has, and answers ERR_CODE_NOT_FOUND
+        # for a contact that it does not have. The simulator refuses in the same way, so
+        # you can walk the "not on the device, removed here in any case" path without a
+        # radio.
         if key not in {self._mock_key(c) for c in self._contacts}:
             raise ContactNotOnDeviceError(node)
         self._contacts = [c for c in self._contacts if self._mock_key(c) != key]
@@ -4643,9 +4868,10 @@ class MockDevice(Device):
         transmit_gate.mark()
         async with self.transmitting():
             await asyncio.sleep(0)
-        # Firmware can only address a contact it holds, so a recipient this simulated device
-        # doesn't have is refused exactly as hardware refuses one — which is what makes the
-        # chat screen's "add it back and send" offer walkable on the simulator.
+        # Firmware can address only a contact that it has. Thus the simulator refuses a
+        # recipient that this simulated device does not have, exactly as hardware refuses
+        # it. With this, you can walk the "add it back and send" offer of the chat screen
+        # on the simulator.
         if self._mock_key(contact) not in {self._mock_key(c) for c in self._contacts}:
             raise ContactNotOnDeviceError(contact)
         self._sent_codes += 1
@@ -4653,24 +4879,24 @@ class MockDevice(Device):
         held = next(c for c in self._contacts if self._mock_key(c) == self._mock_key(contact))
         flood = held.route_hops is None
         if contact.is_room:
-            # A post. The room keeps it — and acknowledges — only from a member it knows
-            # who may post; anyone else's is dropped with no reply, which is all a read-only
-            # member ever learns about why a post went nowhere.
+            # A post. The room keeps it (and acknowledges it) only from a known member who
+            # can post. The room ignores the posts of all other users, with no reply. That is
+            # all that a read-only member learns about why a post went nowhere.
             access = self._room_access.get(self._mock_key(contact))
             if access is None or not access.can_post:
                 return Delivery(code, None, flood)
             self._room_board.append((self._self_prefix(), utcnow(), text))
         if contact.name in self._late_acks:
-            # Delivered, but the ack takes the long way home: it arrives after the wait,
-            # pushed the way the radio pushes one whenever it lands.
+            # Delivered, but the ack comes back slowly. It arrives after the wait, and the
+            # simulator pushes it as the radio pushes an ack when it arrives.
             self._push_ack_later(code)
             return Delivery(code, None, flood)
-        # Otherwise the simulator "delivers" instantly and always acknowledges, so outbound
-        # direct messages show as acked without a radio.
+        # In other cases, the simulator "delivers" immediately and always acknowledges, so
+        # sent direct messages show as acked without a radio.
         return Delivery(code, Ack(code=code), flood)
 
     def _push_ack_later(self, code: str) -> None:
-        """Push an ack to whoever listens, a beat after the send returned without one."""
+        """Push an ack to all listeners, a short time after the send returned without one."""
 
         async def push() -> None:
             await asyncio.sleep(_MOCK_MONITOR_INTERVAL_S)
@@ -4687,16 +4913,16 @@ class MockDevice(Device):
         transmit_gate.mark()
         async with self.transmitting():
             await asyncio.sleep(0)
-            #: What each channel message went out under — the session scope at the moment
-            #: it was handed over (``""`` the default, ``"*"`` forced unscoped).
+            #: The scope of each channel message: the session scope at the moment when it
+            #: was given to the device (``""`` the default, ``"*"`` forced unscoped).
             self.sent_channel.append((index, text, self._send_scope))
 
     async def admin_login(self, node: Contact, password: str) -> LoginResult:  # noqa: D102
         await asyncio.sleep(0)
         if node.is_room:
-            # One login, whichever screen sends it: an admin login to a room makes us a
-            # member it pushes posts to, and the room's rules decide the answer — including
-            # its silence for a wrong password — exactly as the firmware's do.
+            # One login, whatever screen sends it. An admin login to a room makes us a member
+            # to which the room pushes posts. The rules of the room decide the answer (also
+            # its silence for a wrong password), exactly as the rules of the firmware do.
             return (await self.room_login(node, password)).result
         if node.name in self._unreachable:
             return LoginResult.NO_REPLY  # simulates a node that is down or out of range
@@ -4715,25 +4941,25 @@ class MockDevice(Device):
                 flood=None,
                 radio_error="this node isn't in the radio's contacts",
             )
-        # How the radio sends it: along the route it learned, or by flood once that is gone.
+        # How the radio sends it: along its learned route, or by flood when the route is gone.
         flood = held.route_hops is None
         if room.name in self._unreachable or (room.name in self._stale_routes and not flood):
             return RoomLogin(LoginResult.NO_REPLY, flood=flood)
         if flood:
-            # The answer to a flood brings a fresh route back with it, as on hardware.
+            # The answer to a flood brings a new route back with it, as on hardware.
             self._stale_routes.discard(room.name)
             self._set_route(key, self._LEARNED_ROUTE)
         cfg = self._remote_config(room)
         if password == self._admin_password:
             access = RoomAccess.ADMIN
         elif not password and key in self._room_access:
-            access = self._room_access[key]  # "do you know me?" — it does
+            access = self._room_access[key]  # "do you know me?": it does
         elif password == cfg["guest.password"]:
             access = RoomAccess.MEMBER
         elif cfg["allow.read.only"] == "on":
             access = RoomAccess.READ_ONLY
         else:
-            # A room never says no: a wrong password is met with silence.
+            # A room never says no: a wrong password gets silence.
             return RoomLogin(LoginResult.NO_REPLY, flood=flood)
         self._room_access[key] = access
         if access is RoomAccess.ADMIN:
@@ -4748,21 +4974,22 @@ class MockDevice(Device):
             raise ContactNotOnDeviceError(node)
         self._set_route(key, None)
 
-    #: The route the simulator "learns" back from a flood's answer: one hop, via Yagi.
+    #: The route that the simulator "learns" from the answer to a flood: one hop, through Yagi.
     _LEARNED_ROUTE = ("a1b2c3d4",)
 
     def _set_route(self, key: str, hops: tuple[str, ...] | None) -> None:
-        """Give the contact under ``key`` a learned route, or forget it (``None``)."""
+        """Give the contact with ``key`` a learned route, or forget its route (``None``)."""
         self._contacts = [
             replace(c, route_hops=hops) if self._mock_key(c) == key else c for c in self._contacts
         ]
 
     def _push_room(self, room: Contact) -> None:
-        """Start a room's catch-up: each post newer than the last one we hold, oldest first.
+        """Start the catch-up of a room: the posts after our newest post, oldest first.
 
-        A real room sends one post, waits for the companion's acknowledgement, then sends
-        the next; the simulator spaces them by its event cadence so a room view fills
-        visibly rather than all at once. Our own posts are never sent back to us.
+        A real room sends one post, waits for the acknowledgement of the companion, and then
+        sends the next post. The simulator spaces the posts by its event interval, so a room
+        screen fills visibly, and not all at the same time. The room never sends our own
+        posts back to us.
         """
         key = self._mock_key(room)
         since = self._room_synced.get(key)
@@ -4794,15 +5021,15 @@ class MockDevice(Device):
         task.add_done_callback(self._bg_tasks.discard)
 
     def _self_prefix(self) -> str:
-        """Our own node's four-byte key prefix — how a room signs a post we wrote."""
+        """The four-byte key prefix of our node: the way a room signs a post that we wrote."""
         return str(self._info.get("public_key") or "")[:8].lower()
 
     def _remote_config(self, node: Contact) -> dict[str, str]:
-        """A simulated node's CLI-visible configuration, seeded with the defaults on first touch.
+        """The settings of a simulated node, as its CLI shows them, with defaults at first access.
 
-        A room server starts with the stock room password its build sets (MeshCore's
-        ``ROOM_PASSWORD``, ``hello``) and with forwarding off, as a room ships; the rest is
-        the repeater defaults, which the two firmwares share.
+        A room server starts with the stock room password that its build sets (MeshCore's
+        ``ROOM_PASSWORD``, ``hello``), and with forwarding off, as a new room has. The
+        other values are the repeater defaults, which the two firmwares share.
         """
         key = self._mock_key(node)
         cfg = self._remote_cfg.get(key)
@@ -4813,13 +5040,13 @@ class MockDevice(Device):
             self._remote_cfg[key] = cfg
         return cfg
 
-    #: The stock room password a MeshCore room server is built with.
+    #: The stock room password with which a MeshCore room server is built.
     _ROOM_PASSWORD = "hello"
 
-    #: The simulated repeater CLI's configuration, keyed and answered the way MeshCore's
-    #: ``CommonCLI.cpp`` does (see send_remote_command). What is absent is absent on purpose:
-    #: a board with no front-end module and a build with no bridge, so a read of those
-    #: answers ``??:`` exactly as that hardware would.
+    #: The settings of the simulated repeater CLI, keyed and answered as MeshCore's
+    #: ``CommonCLI.cpp`` does (refer to send_remote_command). The values that are absent
+    #: are absent on purpose: a board with no front-end module, and a build with no
+    #: bridge. Thus a read of those values answers ``??:``, exactly as that hardware would.
     _REMOTE_CFG_DEFAULTS = {
         "owner.info": "",
         "lat": "0",
@@ -4853,7 +5080,7 @@ class MockDevice(Device):
         "bridge.type": "none",
     }
 
-    #: The ``get radio`` fields, in the order the reply joins them.
+    #: The ``get radio`` fields, in the order in which the reply joins them.
     _REMOTE_RADIO = ("freq", "bw", "sf", "cr")
 
     async def send_remote_command(  # noqa: D102 - inherited docstring
@@ -4863,14 +5090,14 @@ class MockDevice(Device):
         await asyncio.sleep(0)
         key = self._mock_key(node)
         if key not in self._admin_sessions:
-            return None  # firmware ignores strangers — reads as a timeout, like hardware
+            return None  # firmware ignores unknown nodes: a timeout, as on hardware
         cfg = self._remote_config(node)
         parts = command.strip().split()
         verb = parts[0].lower() if parts else ""
         if verb == "ver":
             return "MeshCore v1.15.0 (simulator)"
         if verb == "room.post" and node.is_room:
-            # A notice the admin posts in the room's own name (MeshCore's ``addSystemPost``).
+            # A notice that the admin posts in the name of the room (MeshCore's ``addSystemPost``).
             text = command.strip()[len("room.post") :].strip()
             if not text:
                 return "ERR empty message"
@@ -4884,7 +5111,7 @@ class MockDevice(Device):
         if verb == "region" and regions is not None:
             return regions.command(command.strip())
         if verb == "reboot" and regions is not None:
-            regions.reboot()  # a power cycle drops every region edit not saved
+            regions.reboot()  # a power cycle loses each region edit that was not saved
         if verb in ("reboot", "password", "time", "start"):
             return "OK"
         if verb == "neighbors":
@@ -4934,7 +5161,7 @@ class MockDevice(Device):
                     return "ERROR: dutycycle must be 1-100"
                 cfg["af"] = f"{100.0 / duty - 1.0:g}"
                 return f"OK - {duty:.1f}%"
-            # freq alone is serial-only; the rest of the radio goes through "set radio".
+            # freq alone is serial-only. The other radio values go through "set radio".
             read_only = (*self._REMOTE_RADIO, "bridge.type", "gps advert", "powersaving")
             if param in cfg and param not in read_only:
                 cfg[param] = value
@@ -4957,8 +5184,8 @@ class MockDevice(Device):
     async def fetch_neighbours(self, node: Contact) -> list[NeighbourInfo]:  # noqa: D102
         await asyncio.sleep(0)
         key = self._mock_key(node)
-        # Mirrors real firmware (verified on v1.15): without a login the request is
-        # silently dropped, which the caller experiences as a timeout.
+        # The same as real firmware (checked on v1.15): without a login, the firmware
+        # silently ignores the request, and the caller gets a timeout.
         if key not in self._admin_sessions:
             raise DeviceCommandError(
                 f"{node.name!r} did not answer the neighbour request. Firmware ignores "
@@ -4993,21 +5220,21 @@ class MockDevice(Device):
 
     @staticmethod
     def _mock_key(node: Contact) -> str:
-        """Return the lookup key for a remote node (its public key, else key prefix)."""
+        """Return the lookup key for a remote node (its public key, or else its key prefix)."""
         return (node.public_key or node.key_prefix or node.name).lower().removeprefix("0x")
 
     def _remote_tx_for(self, hop_hex: str) -> int | None:
-        """Resolve the simulated remote TX power set on a forced-path hop, if any.
+        """Find the simulated remote TX power set on a forced-path hop, if there is one.
 
-        The optimizer stores a node's power under its full public key; a trace addresses
-        it by a shorter hash prefix, so match in either direction.
+        The optimizer stores the power of a node under its full public key. A trace
+        addresses the node by a shorter hash prefix, so match in both directions.
 
         Args:
-            hop_hex: The forced-path hop hash (hex).
+            hop_hex: The hash of the forced-path hop (hex).
 
         Returns:
-            The node's simulated TX power, or ``None`` if we never set one (i.e. this
-            hop isn't a node the optimizer is tuning).
+            The simulated TX power of the node, or ``None`` if we never set one (that is,
+            this hop is not a node that the optimizer tunes).
         """
         h = hop_hex.lower()
         for key, tx in self._remote_tx.items():
@@ -5084,17 +5311,17 @@ class MockDevice(Device):
     async def set_radio(  # noqa: D102 - inherited docstring
         self, freq: float, bw: float, sf: int, cr: int, repeat: bool | None = None
     ) -> None:
-        # Modelled on the firmware: relaying is refused off the allowed frequencies, and a
-        # command that leaves the repeat byte off turns relaying *off* — the trap a radio
-        # change has to restate its way around.
+        # Modelled on the firmware: the relay is refused on frequencies that are not
+        # accepted, and a command without the repeat byte turns the relay *off*. A radio
+        # change must state the value again to avoid this trap.
         if repeat and not repeat_freq_allowed(freq, _DEFAULT_REPEAT_FREQS):
             raise DeviceCommandError("device rejected the command: illegal argument")
         self._info.update(radio_freq=freq, radio_bw=bw, radio_sf=sf, radio_cr=cr)
         self._client_repeat = bool(repeat)
 
     async def set_tuning(self, rx_delay: float, airtime_factor: float) -> None:  # noqa: D102
-        # Round-trip through the wire's ×1000 integer scaling so the simulator loses
-        # precision exactly where real firmware would.
+        # Do a round trip through the ×1000 integer scaling of the protocol, so the
+        # simulator loses precision exactly where real firmware would.
         self._tuning = {
             "rx_delay": round(float(rx_delay) * 1000) / 1000.0,
             "airtime_factor": round(float(airtime_factor) * 1000) / 1000.0,
@@ -5104,11 +5331,11 @@ class MockDevice(Device):
         self, flags: int, max_hops: int | None = None
     ) -> None:
         self._autoadd_config = int(flags)
-        if max_hops is not None:  # the firmware leaves the limit alone when it isn't sent
+        if max_hops is not None:  # the firmware does not change the limit when it is not sent
             self._autoadd_max_hops = min(int(max_hops), 64)
 
     async def set_default_flood_scope(self, scope: str) -> None:  # noqa: D102
-        # Mirror the firmware: empty (or the wildcard) clears, a name is stored bare.
+        # Do as the firmware does: empty (or the wildcard) clears, and a name is stored bare.
         bare = normalize_region(scope)
         self._flood_scope = "" if bare in ("", REGION_WILDCARD) else validate_region(bare)
 
@@ -5144,7 +5371,7 @@ class MockDevice(Device):
     async def set_time(self, epoch: int) -> None:  # noqa: D102 - inherited docstring
         import time as _time
 
-        # Like the firmware, the simulated clock only ever moves forward.
+        # As in the firmware, the simulated clock moves only forward.
         current = await self.get_time()
         if current is not None and epoch < current:
             raise ClockAheadError(None)
@@ -5164,7 +5391,7 @@ class MockDevice(Device):
         return self._private_key
 
     async def import_private_key(self, key_hex: str) -> None:  # noqa: D102
-        self._private_key = bytes.fromhex(key_hex).hex()  # validates hex, normalizes
+        self._private_key = bytes.fromhex(key_hex).hex()  # checks the hex, and normalizes it
 
     async def factory_reset(self) -> None:  # noqa: D102 - inherited docstring
         self._custom_vars.clear()
@@ -5173,11 +5400,12 @@ class MockDevice(Device):
     async def subscribe_events(  # noqa: D102 - inherited docstring
         self, on_event: EventCallback
     ) -> Unsubscribe:
-        # Simulate a live event stream. Emit a burst of synthetic adverts/telemetry from
-        # the known contacts *synchronously* here, then keep emitting at a steady cadence
-        # from a background task until unsubscribed. The immediate first burst means even
-        # a zero-length window always sees every contact (two of which carry a location)
-        # and one inbound message, keeping capture tests deterministic.
+        # Simulate a live event stream. Make a burst of synthetic adverts and telemetry from
+        # the known contacts *synchronously* here. Then continue to make bursts at a steady
+        # interval from a background task, until the unsubscribe. Because of the immediate
+        # first burst, also a time window of zero length always gets each contact (two of
+        # them have a location) and one received message. This keeps capture tests
+        # deterministic.
         stop = asyncio.Event()
         seq = 0
         burst = 0
@@ -5187,15 +5415,15 @@ class MockDevice(Device):
             for contact in self._contacts:
                 on_event(MeshEvent.observation_event(self._synth_observation(contact, seq)))
                 seq += 1
-            # Simulate the companion's RX packet log: overheard packets from the routed
-            # leaf nodes, each carrying the relay path it crossed — so topology capture
-            # accumulates passive path evidence on the simulator exactly as on hardware
-            # with packet logging enabled. The first burst always includes one.
+            # Simulate the RX packet log of the companion: overheard packets from the leaf
+            # nodes that have a route, each with the relay path that it went through. Thus
+            # the topology capture collects passive path evidence on the simulator, exactly
+            # as on hardware with packet logging on. The first burst always has one.
             if burst % 4 == 0:
                 on_event(MeshEvent.observation_event(self._synth_packet(burst // 4)))
-            # Periodically simulate an inbound direct message so message-driven features
-            # (and their tests) have traffic to react to; the first burst always includes
-            # one so a subscriber sees a message without waiting.
+            # At intervals, simulate a received direct message, so the features that react
+            # to messages (and their tests) have traffic. The first burst always has one,
+            # so a subscriber gets a message without a wait.
             if burst % 8 == 0:
                 on_event(MeshEvent.message_event(self._synth_message(burst // 8)))
             burst += 1
@@ -5207,7 +5435,7 @@ class MockDevice(Device):
                 try:
                     await asyncio.wait_for(stop.wait(), _MOCK_MONITOR_INTERVAL_S)
                 except asyncio.TimeoutError:
-                    pass  # cadence tick elapsed; emit the next burst
+                    pass  # the interval ended: make the next burst
                 if not stop.is_set():
                     emit_burst()
 
@@ -5217,14 +5445,14 @@ class MockDevice(Device):
         self._listeners.append(on_event)
 
         def unsubscribe() -> None:
-            stop.set()  # wakes the loop's wait immediately; it exits on the next check
+            stop.set()  # wakes the loop at once, and it exits at the next check
             if on_event in self._listeners:
                 self._listeners.remove(on_event)
 
         return unsubscribe
 
-    #: Fixed locations advertised by the two simulated repeaters, so location-aware
-    #: features (e.g. the coverage map) always have coordinates to work with.
+    #: The fixed locations that the two simulated repeaters advertise. Thus the features
+    #: that use locations (for example, the coverage map) always have coordinates.
     _MOCK_LOCATIONS = {
         "Yagi-Repeater": (45.5019, -73.5674),
         "Local-Repeater": (45.4768, -73.5990),
@@ -5234,16 +5462,17 @@ class MockDevice(Device):
         """Build one plausible synthetic observation for ``contact`` (simulator only).
 
         Args:
-            contact: The contact to synthesize a reception from.
-            seq: Monotonic emission counter, used to vary the packet kind.
+            contact: The contact from which to synthesize a reception.
+            seq: A monotonic counter of the events, used to change the packet kind.
 
         Returns:
-            A noisy :class:`Observation` tagged ``telemetry`` on every fourth packet and
-            ``advert`` otherwise, carrying a location for the simulated repeaters.
+            A noisy :class:`Observation`, tagged ``telemetry`` on each fourth packet and
+            ``advert`` on the others, with a location for the simulated repeaters.
         """
         lat_lon = self._MOCK_LOCATIONS.get(contact.name)
-        # Each node advertises the type its contact holds — the two located repeaters, the
-        # companions, the room server — so the map and the lists have every class to draw.
+        # Each node advertises the type that its contact has (the two repeaters with a
+        # location, the companions, the room server). Thus the map and the lists have each
+        # class to draw.
         node_type = contact.node_type or NODE_TYPE_CHAT
         return Observation(
             node=contact.key_prefix or contact.public_key[:12],
@@ -5258,17 +5487,17 @@ class MockDevice(Device):
         )
 
     def _synth_packet(self, seq: int) -> Observation:
-        """Build one plausible RX-logged packet observation (simulator only).
+        """Build one plausible packet observation from the RX log (simulator only).
 
-        Rotates over the leaf contacts that sit behind a repeater, emitting the packet
-        with the relay path its route implies — matching how a real companion reports an
-        overheard relayed frame.
+        It rotates over the leaf contacts that are behind a repeater, and makes the packet
+        with the relay path that its route implies. This is the same as how a real
+        companion reports an overheard relayed packet.
 
         Args:
-            seq: Monotonic emission counter, used to rotate the originating contact.
+            seq: A monotonic counter of the events, used to rotate the contact of origin.
 
         Returns:
-            A ``packet``-kind :class:`Observation` carrying a one-hop relay path.
+            A ``packet``-kind :class:`Observation` with a one-hop relay path.
         """
         routed = [c for c in self._contacts if c.route_hops]
         contact = routed[seq % len(routed)]
@@ -5282,15 +5511,15 @@ class MockDevice(Device):
         )
 
     def _synth_message(self, seq: int) -> Message:
-        """Build one plausible synthetic inbound direct message (simulator only).
+        """Build one plausible synthetic received direct message (simulator only).
 
         Args:
-            seq: Monotonic burst counter, used to rotate the sending contact and body.
+            seq: A monotonic counter of the bursts, used to rotate the sender and the body.
 
         Returns:
             A :class:`Message` from one of the known contacts.
         """
-        # A room server sends posts, never a message of its own (see _push_room).
+        # A room server sends posts, never a message of its own (refer to _push_room).
         senders = [c for c in self._contacts if not c.is_room]
         contact = senders[seq % len(senders)]
         return Message(
@@ -5301,37 +5530,39 @@ class MockDevice(Device):
         )
 
     def _expected_snr(self, hop_index: int) -> float:
-        """Model SNR for a hop as an inverted-U in TX power plus distance falloff.
+        """Model the SNR for a hop as an inverted-U in TX power, with a decrease over distance.
 
         Args:
-            hop_index: Zero-based hop position; deeper hops are weaker.
+            hop_index: The zero-based position of the hop. Deeper hops are weaker.
 
         Returns:
-            The noise-free expected SNR in dB for the current TX power.
+            The expected SNR in dB without noise, for the current TX power.
         """
-        # Inverted parabola peaking at ``optimal_tx``; ~10 dB swing across the range.
+        # An inverted parabola with its peak at ``optimal_tx``. The SNR changes by
+        # approximately 10 dB across the range.
         span = (TX_POWER_MAX - TX_POWER_MIN) / 2
         offset = (self._tx_power - self.optimal_tx) / span
         peak = 8.0 - 10.0 * (offset**2)
         return peak - 2.5 * hop_index
 
     def _expected_remote_snr(self, remote_tx: int) -> float:
-        """Model the SNR the target receives from the admin node it sits behind.
+        """Model the SNR that the target receives from the admin node that it is behind.
 
-        An inverted-U in the admin node's TX power: too low and the target barely hears
-        it, too high and the target's front end saturates. The peak sits at
-        ``optimal_remote_tx`` so the remote-admin optimizer has a unimodal-with-noise
-        curve to converge on.
+        The model is an inverted-U in the TX power of the admin node. If the power is too
+        low, the target only just hears it. If it is too high, the front end of the target
+        saturates. The peak is at ``optimal_remote_tx``, so the remote-admin optimizer has
+        a curve with one peak and noise, on which it can converge.
 
         Args:
-            remote_tx: The admin node's transmit power.
+            remote_tx: The transmit power of the admin node.
 
         Returns:
-            The noise-free expected SNR in dB at the target.
+            The expected SNR in dB at the target, without noise.
         """
-        # Curvature is steep enough that the band edges fall below the ~-12 dB drop
-        # threshold, so traces start failing there — giving the optimizer a real
-        # reliability gradient (not just an SNR one) to honor reliability-first.
+        # The curve is steep enough that the band edges go below the drop threshold of
+        # approximately -12 dB. Thus traces start to fail there. This gives the optimizer a
+        # real reliability gradient (not only an SNR gradient), so it can put reliability
+        # first.
         span = (REMOTE_TX_MAX - REMOTE_TX_MIN) / 2
         offset = (remote_tx - self.optimal_remote_tx) / span
         return 9.0 - 24.0 * (offset**2)
@@ -5344,18 +5575,18 @@ class MockDevice(Device):
         timeout: float | None = None,
     ) -> TraceResult:
         transmit_gate.mark()
-        await asyncio.sleep(0.05)  # mimic radio latency so progress bars are visible
+        await asyncio.sleep(0.05)  # simulate the radio latency, so progress bars are visible
         forced = [h for h in path.split(",") if h.strip()] if path else None
-        # Mirror the real device: the path-hash width is the byte length of a forced hop.
+        # As on the real device: the path-hash width is the byte length of a forced hop.
         hash_bytes = len(bytes.fromhex(forced[0])) if forced else None
         depth = len(forced) if forced else self._rng.randint(1, 3)
         hops: list[Hop] = []
         for i in range(depth):
-            # Each hop's SNR reflects the node that transmitted *into* it (hop i-1). If
-            # that node is one the optimizer has tuned a remote TX on, model the link from
-            # its power — so the hop arriving at the target tracks the admin node we're
-            # tuning, wherever the target sits in a there-and-back path. Otherwise fall
-            # back to the local TX-power model.
+            # The SNR of each hop shows the node that transmitted *into* it (hop i-1). If
+            # the optimizer has tuned a remote TX on that node, model the link from its
+            # power. Thus the hop that arrives at the target follows the admin node that we
+            # tune, wherever the target is in an out-and-back path. If not, use the
+            # TX-power model of our node.
             prev_tx = self._remote_tx_for(forced[i - 1]) if forced is not None and i >= 1 else None
             if prev_tx is not None:
                 expected = self._expected_remote_snr(prev_tx)
@@ -5365,14 +5596,14 @@ class MockDevice(Device):
             node = forced[i] if forced else f"hop{i}"
             hops.append(Hop(index=i, node=node, snr=round(snr, 1)))
 
-        # Very weak links occasionally drop the whole trace, judged on the bottleneck hop.
+        # Very weak links sometimes lose the full trace, as judged on the bottleneck hop.
         bottleneck = min((h.snr for h in hops), default=-99)
         success = bottleneck > -12 or self._rng.random() > 0.1
 
-        # The trace reply returns to us: firmware appends the local device as a final
-        # hash-less hop (``node=None``). Mirror that so the origin/destination framing
-        # naturally has our device at both ends of the path. The return link is modeled
-        # as symmetric to the first outbound hop, so it never alters the bottleneck SNR.
+        # The trace reply comes back to us: the firmware adds our device as a last hop
+        # without a hash (``node=None``). Do the same, so that our device is the origin
+        # and the destination, at both ends of the path. The return link is modelled as
+        # symmetric to the first outbound hop, so it never changes the bottleneck SNR.
         if hops:
             hops.append(Hop(index=depth, node=None, snr=hops[0].snr))
         return TraceResult(
@@ -5386,17 +5617,17 @@ class MockDevice(Device):
 
 
 def parse_trace_hops(payload: dict) -> list[Hop]:
-    """Extract per-hop SNR from a ``TRACE_DATA`` event payload.
+    """Get the SNR of each hop from a ``TRACE_DATA`` event payload.
 
-    meshcore parses a trace reply into ``payload["path"]`` — a list of nodes, each a
-    dict with a repeater ``"hash"`` and its ``"snr"`` (already in dB, signed-byte / 4).
-    The final node is the local device and carries an ``"snr"`` but no ``"hash"``.
+    meshcore parses a trace reply into ``payload["path"]``: a list of nodes. Each node is
+    a dict with a repeater ``"hash"`` and its ``"snr"`` (already in dB: the signed byte /
+    4). The last node is our device, and it has an ``"snr"`` but no ``"hash"``.
 
     Args:
         payload: The ``TRACE_DATA`` event payload.
 
     Returns:
-        The hops in path order; nodes without an SNR reading are skipped.
+        The hops in path order. The function skips nodes without an SNR reading.
     """
     hops: list[Hop] = []
     for node in payload.get("path") or []:
@@ -5407,19 +5638,21 @@ def parse_trace_hops(payload: dict) -> list[Hop]:
 
 
 def observation_from_event(event, kind: str) -> Observation | None:  # noqa: ANN001
-    """Map a meshcore advert/telemetry event into an :class:`Observation`.
+    """Map a meshcore advert or telemetry event into an :class:`Observation`.
 
-    The companion reports a node identifier, optionally a name and shared location, and
-    the SNR/RSSI of the reception. Field names vary across firmware and library versions,
-    so several common spellings are tried for each value. Like the trace mapping this is
-    best-effort and should be validated against your firmware's event schema.
+    The companion reports a node identifier, optionally a name and a shared location, and
+    the SNR and RSSI of the reception. The field names change across firmware and library
+    versions, so the function tries several usual names for each value. As for the trace
+    mapping, this is best-effort, and you must check it with the event schema of your
+    firmware.
 
     Args:
-        event: A meshcore event (anything exposing a ``payload`` mapping).
-        kind: The observation class to tag the record with (e.g. ``advert``).
+        event: A meshcore event (anything that has a ``payload`` mapping).
+        kind: The observation class with which to tag the record (for example
+            ``advert``).
 
     Returns:
-        The parsed :class:`Observation`, or ``None`` if the payload carried no node id.
+        The parsed :class:`Observation`, or ``None`` if the payload had no node id.
     """
     payload = dict(getattr(event, "payload", {}) or {})
     ident = (
@@ -5431,9 +5664,10 @@ def observation_from_event(event, kind: str) -> Observation | None:  # noqa: ANN
     if not ident:
         return None
     ident = str(ident).lower().removeprefix("0x")
-    node = ident[:12]  # the stored 12-hex canonical id (what everything groups/joins on)
-    # Keep the whole key when the advert carried one (public_key/pubkey), so a hash lane can
-    # later show more than the twelve stored digits; a short-hash-only advert leaves it None.
+    node = ident[:12]  # the stored canonical id of 12 hex digits (all groups and joins use it)
+    # Keep the full key when the advert had one (public_key or pubkey), so a key lane can
+    # show more than the twelve stored digits later. An advert with only a key prefix
+    # leaves it None.
     public_key = ident if len(ident) > len(node) else None
     lat = payload.get("adv_lat", payload.get("lat"))
     lon = payload.get("adv_lon", payload.get("lon"))
@@ -5454,79 +5688,83 @@ def observation_from_event(event, kind: str) -> Observation | None:  # noqa: ANN
 def packet_observation_from_event(event) -> Observation | None:  # noqa: ANN001
     """Map a meshcore ``RX_LOG_DATA`` event into a ``packet``-kind :class:`Observation`.
 
-    The companion's RX packet log reports every frame it overhears together with the
-    header's relay path — the repeaters the packet crossed before reaching us, nearest
-    the originator first. That path is the passive topology evidence the trace path
-    composer runs on, so it is preserved verbatim (as comma-separated per-hop hex).
+    The RX packet log of the companion reports each packet that it overhears, with the
+    relay path of the header: the repeaters that the packet went through before it
+    reached us, the one nearest to the originator first. That path is the passive topology
+    evidence that the trace path composer uses, so the function keeps it exactly (as
+    comma-separated hex for each hop).
 
-    The originating node is only knowable when the payload class reveals it: the library
-    decodes adverts inline (``adv_key``/``adv_name``), so those carry an origin; other
-    packet classes are recorded origin-less — their path (plus our reception of its last
-    relay) is still adjacency evidence.
+    The originating node can be known only when the payload class shows it. The library
+    decodes adverts inline (``adv_key``/``adv_name``), so adverts have an origin. Other
+    packet classes are stored without an origin. Their path (and our reception of its
+    last relay) is still adjacency evidence.
 
-    A frame that crossed no relays at all is kept too, with an empty path. Far from
-    teaching us nothing, it is the strongest adjacency evidence there is — we heard the
-    transmitter directly — and it is the whole of what an adjacent device puts on the air,
-    so discarding it made a neighbour's traffic invisible. Only a frame the library could
-    not even assign a payload class to is dropped.
+    A packet that went through no relays at all is also kept, with an empty path. It is
+    not without information: it is the strongest adjacency evidence that there is,
+    because we heard the transmitter directly. It is also all that a nearby device
+    transmits. Thus, when MeshTerm discarded it, the traffic of a neighbour was not
+    visible. Only a packet to which the library could not even give a payload class is
+    removed.
 
-    One class needs its header read differently from the rest: a ``TRACE``'s ``path``
-    field carries per-hop SNR readings rather than relay hashes (see
-    :func:`~meshterm.core.frames.trace_link_snrs`), so it yields no hops and its readings
-    are merged in as ``trace_snrs`` instead.
+    One class must have a different read of its header: the ``path`` field of a ``TRACE`` has
+    the SNR readings of each hop, not relay hashes (refer to
+    :func:`~meshterm.core.frames.trace_link_snrs`). Thus it gives no hops, and its
+    readings are merged in as ``trace_snrs`` instead.
 
-    Origin-less does not mean featureless, though: what the frame *addresses* is decoded
-    out of its undecoded body (:func:`~meshterm.core.frames.frame_addressing`) and merged
-    into the raw payload — the recipient and sender hashes of a direct message or request,
-    an anonymous request's whole sender key, a channel datagram's envelope, an ack's
-    checksum, a trace's tag — so every class has something to say about itself downstream.
+    But a packet without an origin is not a packet without features. The function decodes
+    what the packet *addresses* from its undecoded body
+    (:func:`~meshterm.core.frames.frame_addressing`), and merges it into the raw payload:
+    the recipient and sender hashes of a direct message or a request, the full sender key
+    of an anonymous request, the envelope of a channel datagram, the checksum of an ack,
+    the tag of a trace. Thus each class has something to say about itself to later code.
 
     Args:
-        event: A meshcore ``RX_LOG_DATA`` event (anything exposing a ``payload`` mapping).
+        event: A meshcore ``RX_LOG_DATA`` event (anything that has a ``payload`` mapping).
 
     Returns:
-        The parsed :class:`Observation` (``kind="packet"``), or ``None`` for a frame with
-        no decodable payload class or an unparsable path.
+        The parsed :class:`Observation` (``kind="packet"``), or ``None`` for a packet with
+        no payload class that can be decoded, or with a path that cannot be parsed.
     """
     payload = dict(getattr(event, "payload", {}) or {})
     typename = payload.get("payload_typename")
     if not typename or typename == "UNK":
-        return None  # the library's sentinel for a frame too short to have a class at all
+        return None  # the sentinel of the library for a packet too short to have a class
     path_len = _as_int(payload.get("path_len")) or 0
     hash_size = _as_int(payload.get("path_hash_size")) or 1
     path_hex = str(payload.get("path") or "").lower().removeprefix("0x")
     hops: list[str] = []
-    # A trace's path field is SNR readings, not relay hashes (see
-    # :func:`~meshterm.core.frames.trace_link_snrs`), so it contributes no hops — its
-    # readings are recovered below and kept beside the frame instead.
+    # The path field of a trace has SNR readings, not relay hashes (refer to
+    # :func:`~meshterm.core.frames.trace_link_snrs`). Thus it gives no hops. The code
+    # below gets its readings back, and keeps them with the packet instead.
     if path_len > 0 and typename != "TRACE":
         width = hash_size * 2
         hops = [path_hex[i * width : (i + 1) * width] for i in range(path_len)]
         if any(len(h) != width for h in hops):
-            return None  # a truncated path would fabricate adjacency between wrong nodes
+            return None  # a truncated path would make a false adjacency between wrong nodes
 
     origin = payload.get("adv_key")
-    # A frame with no origin and no relays is not featureless — it is the strongest
-    # adjacency evidence the mesh produces: we heard the transmitter *directly*, with
-    # nothing in between. Dropping it made every non-advert frame from an adjacent node
-    # invisible, which is why a companion device sitting beside this one could trace all
-    # day and never appear in the feed. What it carries — its class, what it addresses,
-    # how well it was heard — is recorded exactly as a relayed frame's is, with an empty
-    # path standing for the zero hops it crossed.
+    # A packet with no origin and no relays is not without features. It is the strongest
+    # adjacency evidence that the mesh gives: we heard the transmitter *directly*, with
+    # nothing between. When MeshTerm removed such packets, each packet that was not an
+    # advert from a nearby node was not visible. That is why a companion next to this one
+    # could trace all day and never appear in the feed. The data of the packet (its
+    # class, what it addresses, how well it was heard) is stored exactly as for a relayed
+    # packet, with an empty path for the zero hops that it went through.
     #
-    # What the frame addresses — the recipient, the sender, the channel, the token it
-    # carries — read out of the body the library leaves undecoded for every class but
-    # advert and channel text (see :mod:`~meshterm.core.frames`). Merged in under its own
-    # keys so a class that names no origin node still says what it is *about*.
+    # What the packet addresses (the recipient, the sender, the channel, the token that
+    # it has) is read from the body. The library does not decode the body for any class
+    # except advert and channel text (refer to :mod:`~meshterm.core.frames`). These values
+    # are merged in under their own keys. Thus a class that names no origin node still
+    # tells what it is *about*.
     payload.update(frame_addressing(payload))
     readings = trace_link_snrs(payload)
     if readings is not None:
-        # Kept beside the frame, not in ``path``: a trace's hop readings say how well each
-        # leg was heard, and nothing at all about who relayed it.
+        # Kept with the packet, not in ``path``: the hop readings of a trace tell how well
+        # each leg was heard, and nothing at all about which node relayed it.
         payload["trace_snrs"] = readings
     ident = str(origin).lower().removeprefix("0x") if origin else None
     node = ident[:12] if ident else None
-    public_key = ident if ident and len(ident) > 12 else None  # keep the whole adv_key
+    public_key = ident if ident and len(ident) > 12 else None  # keep the full adv_key
     lat = payload.get("adv_lat")
     lon = payload.get("adv_lon")
     return Observation(
@@ -5545,23 +5783,23 @@ def packet_observation_from_event(event) -> Observation | None:  # noqa: ANN001
 
 
 def message_from_event(event) -> Message | None:  # noqa: ANN001
-    """Map a meshcore ``CONTACT_MSG_RECV`` / ``CHANNEL_MSG_RECV`` event into a message.
+    """Map a meshcore ``CONTACT_MSG_RECV`` or ``CHANNEL_MSG_RECV`` event into a message.
 
-    Direct messages carry a ``pubkey_prefix`` sender; channel messages carry a
-    ``channel_idx`` instead (``type`` is ``"PRIV"`` or ``"CHAN"``). Field names are
-    best-effort and should be validated against your firmware's event schema.
+    Direct messages have a ``pubkey_prefix`` sender. Channel messages have a
+    ``channel_idx`` instead (``type`` is ``"PRIV"`` or ``"CHAN"``). The field names are
+    best-effort, and you must check them with the event schema of your firmware.
 
-    A room post is a direct message from the room server of the *signed* text type
-    (:data:`_TXT_TYPE_SIGNED_PLAIN`), and the library hands the four bytes the room signs it
-    with over as ``signature``: not a cryptographic signature but the first four bytes of
-    the author's public key (MeshCore's ``pushPostToClient``), which become
-    :attr:`~meshterm.core.models.Message.author`.
+    A room post is a direct message from the room server, of the *signed* text type
+    (:data:`_TXT_TYPE_SIGNED_PLAIN`). The library gives the four bytes with which the room
+    signs it as ``signature``. This is not a cryptographic signature, but the first four
+    bytes of the public key of the author (MeshCore's ``pushPostToClient``). These bytes
+    become :attr:`~meshterm.core.models.Message.author`.
 
     Args:
-        event: A meshcore message event (anything exposing a ``payload`` mapping).
+        event: A meshcore message event (anything that has a ``payload`` mapping).
 
     Returns:
-        The parsed :class:`Message`, or ``None`` if the payload carried no text body.
+        The parsed :class:`Message`, or ``None`` if the payload had no text body.
     """
     payload = dict(getattr(event, "payload", {}) or {})
     text = payload.get("text")
@@ -5594,7 +5832,7 @@ def ack_from_event(event) -> Ack:  # noqa: ANN001
 
 
 def _as_float(value: object) -> float | None:
-    """Best-effort float conversion, returning ``None`` on missing/garbage values."""
+    """Best-effort float conversion. It returns ``None`` for missing or bad values."""
     if value is None:
         return None
     try:
@@ -5604,7 +5842,7 @@ def _as_float(value: object) -> float | None:
 
 
 def _as_int(value: object) -> int | None:
-    """Best-effort int conversion, returning ``None`` on missing/garbage values."""
+    """Best-effort int conversion. It returns ``None`` for missing or bad values."""
     if value is None:
         return None
     try:
@@ -5614,24 +5852,25 @@ def _as_int(value: object) -> int | None:
 
 
 def _contact_route(info: dict) -> tuple[str, ...] | None:
-    """Extract a contact's device-learned outbound route as per-hop hex hashes.
+    """Get the outbound route of a contact as the device learned it, one hex hash per hop.
 
-    The firmware distills the paths of received flood packets into each contact's
-    ``out_path``: the repeater chain to send through, one path-hash per hop, from us
-    outward. The wire reports the hop count and hash width packed into one byte
-    (``0xFF`` = no learned route, i.e. flood) and the path itself as a fixed 64-byte
-    field, so the real route is the leading ``out_path_len × size`` bytes.
+    The firmware reduces the paths of received flood packets into the ``out_path`` of
+    each contact: the repeater chain to send through, one path hash for each hop, from us
+    outward. The protocol reports the hop count and the hash width packed into one byte
+    (``0xFF`` = no learned route, that is, flood), and the path itself as a fixed 64-byte
+    field. Thus the real route is the leading ``out_path_len × size`` bytes.
 
     Args:
-        info: One contact's raw info mapping from the companion's contacts payload.
+        info: The raw info mapping of one contact, from the contacts payload of the
+            companion.
 
     Returns:
-        The route as a tuple of per-hop hex hashes (empty = a learned *direct* route),
-        or ``None`` when no route is learned or the report is unparsable.
+        The route as a tuple of hex hashes, one for each hop (empty = a learned *direct*
+        route), or ``None`` when no route is learned or the report cannot be parsed.
     """
     out_path_len = _as_int(info.get("out_path_len"))
     if out_path_len is None or out_path_len < 0:
-        return None  # 0xFF on the wire: flood routing, no learned path
+        return None  # 0xFF in the protocol: flood routing, no learned path
     if out_path_len == 0:
         return ()
     mode = _as_int(info.get("out_path_hash_mode"))
@@ -5643,19 +5882,20 @@ def _contact_route(info: dict) -> tuple[str, ...] | None:
         return None
     hops = tuple(route[i * size : (i + 1) * size].hex() for i in range(out_path_len))
     if any(len(h) != size * 2 for h in hops):
-        return None  # the field was shorter than the declared route; don't guess
+        return None  # the field was shorter than the declared route: do not guess
     return hops
 
 
 def _contact_location(info: dict) -> tuple[float | None, float | None]:
-    """Extract a contact's advertised ``(lat, lon)``, or ``(None, None)`` if it has none.
+    """Get the advertised ``(lat, lon)`` of a contact, or ``(None, None)`` if it has none.
 
-    A node that has never set coordinates advertises ``0.0/0.0`` (null island), which the
-    firmware reports verbatim; we treat that as "no location" rather than plotting the
-    Gulf of Guinea.
+    A node that has never set coordinates advertises ``0.0/0.0`` (null island), and the
+    firmware reports this value without a change. We treat that as "no location", instead
+    of a point in the Gulf of Guinea on the map.
 
     Args:
-        info: One contact's raw info mapping from the companion's contacts payload.
+        info: The raw info mapping of one contact, from the contacts payload of the
+            companion.
 
     Returns:
         The advertised latitude and longitude in decimal degrees, or ``(None, None)``.
@@ -5671,26 +5911,26 @@ def _mock_pub(prefix: str) -> str:
     """Build a 32-byte mock public key from a short hex prefix (simulator only).
 
     Args:
-        prefix: Leading hex digits identifying the node.
+        prefix: The leading hex digits that identify the node.
 
     Returns:
-        A 64-hex-character (32-byte) key beginning with ``prefix``.
+        A key of 64 hex characters (32 bytes) that starts with ``prefix``.
     """
     return prefix + "0" * (64 - len(prefix))
 
 
 def _parse_tx_reply(reply: str | None) -> int | None:
-    """Extract a TX-power integer from a repeater's ``get tx`` reply text.
+    """Get a TX-power integer from the ``get tx`` reply text of a repeater.
 
-    Repeater firmware answers tersely and inconsistently across versions (e.g.
-    ``"tx: 20"``, ``"TX power = 20 dBm"``, or just ``"20"``), so pull the first signed
-    integer out of the reply rather than matching a fixed format.
+    Repeater firmware answers briefly, and differently across versions (for example
+    ``"tx: 20"``, ``"TX power = 20 dBm"``, or only ``"20"``). Thus get the first signed
+    integer from the reply, and do not try to match a fixed format.
 
     Args:
-        reply: The node's reply text, or ``None`` if it did not answer.
+        reply: The reply text of the node, or ``None`` if it did not answer.
 
     Returns:
-        The parsed TX power, or ``None`` if the reply was empty or carried no number.
+        The parsed TX power, or ``None`` if the reply was empty or had no number.
     """
     if not reply:
         return None
@@ -5704,10 +5944,10 @@ def clamp_tx_power(value: int) -> int:
     """Clamp a TX power value to the supported range.
 
     Args:
-        value: Requested TX power level.
+        value: The requested TX power level.
 
     Returns:
-        ``value`` constrained to ``[TX_POWER_MIN, TX_POWER_MAX]``.
+        ``value``, limited to ``[TX_POWER_MIN, TX_POWER_MAX]``.
     """
     return max(TX_POWER_MIN, min(TX_POWER_MAX, value))
 
@@ -5727,31 +5967,37 @@ def make_device(
     spi: SpiWiring | None = None,
     state: Path | None = None,
 ) -> Device:
-    """Construct the appropriate :class:`Device` for the current invocation.
+    """Make the correct :class:`Device` for the current run.
 
     Args:
-        mock: When ``True`` return a :class:`MockDevice` simulator.
-        port: Serial port for a real serial device. Required for the serial transport
-            unless ``mock`` is set.
-        baudrate: Serial baud rate for a real serial device.
-        mock_optimal_tx: Peak TX power for the simulator.
+        mock: When ``True``, return a :class:`MockDevice` simulator.
+        port: The serial port for a real serial device. It is necessary for the serial
+            transport, unless ``mock`` is set.
+        baudrate: The serial baud rate for a real serial device.
+        mock_optimal_tx: The peak TX power for the simulator.
         transport: ``"serial"`` (default), ``"ble"``, ``"tcp"``, or ``"spi"``.
-        address: Bluetooth address for the BLE transport. Required when ``transport="ble"``.
-        pin: Optional BLE pairing PIN (BLE only).
-        ble_device: The scanned ``bleak.BLEDevice`` for ``address``, when this session's
-            discovery produced one (BLE only) — lets the connect skip re-discovering the
-            peripheral by address (see :class:`MeshCoreDevice`).
-        host: Hostname/IP for the TCP transport. Required when ``transport="tcp"``.
-        tcp_port: TCP port for the TCP transport. Required when ``transport="tcp"``.
-        spi: How the radio is wired, for the SPI transport. Required when ``transport="spi"``.
-        state: The SPI radio's state directory (see :func:`meshterm.core.spiradio.state_dir`).
-            Required when ``transport="spi"``.
+        address: The Bluetooth address for the BLE transport. It is necessary when
+            ``transport="ble"``.
+        pin: An optional BLE pairing PIN (BLE only).
+        ble_device: The scanned ``bleak.BLEDevice`` for ``address``, when the discovery of
+            this session found one (BLE only). With it, the connect does not discover the
+            peripheral again by address (refer to :class:`MeshCoreDevice`).
+        host: The host name or IP address for the TCP transport. It is necessary when
+            ``transport="tcp"``.
+        tcp_port: The TCP port for the TCP transport. It is necessary when
+            ``transport="tcp"``.
+        spi: How the radio is wired, for the SPI transport. It is necessary when
+            ``transport="spi"``.
+        state: The state directory of the SPI radio (refer to
+            :func:`meshterm.core.spiradio.state_dir`). It is necessary when
+            ``transport="spi"``.
 
     Returns:
-        A connected-on-enter :class:`Device` instance.
+        A :class:`Device` instance that connects when you enter it.
 
     Raises:
-        ValueError: If a real device is requested without a usable endpoint for its transport.
+        ValueError: If a real device is requested without an endpoint that its transport
+            can use.
     """
     if mock:
         return MockDevice(optimal_tx=mock_optimal_tx)
@@ -5782,17 +6028,19 @@ def make_device(
     return MeshCoreDevice(port=port, baudrate=baudrate)
 
 
-#: Handshake window (seconds) for probing a serial companion. A genuine board answers in well
-#: under a second; a non-MeshCore port is rejected within this bound.
+#: The handshake window (seconds) for a probe of a serial companion. A real board answers in
+#: much less than one second. MeshTerm rejects a port that is not MeshCore within this limit.
 _PROBE_TIMEOUT_SERIAL_S = 6.0
 
-#: Handshake window (seconds) for probing a BLE companion. Longer than serial: a BLE connect
-#: involves a link-layer connection and GATT service discovery before the identity reply.
+#: The handshake window (seconds) for a probe of a BLE companion. It is longer than for serial,
+#: because a BLE connect has a link-layer connection and a GATT service discovery before the
+#: identity reply.
 _PROBE_TIMEOUT_BLE_S = 20.0
 
-#: Handshake window (seconds) for probing a TCP companion. Between serial and BLE: a TCP
-#: connect is a quick socket open, but an unreachable host can sit in the OS connect backoff,
-#: so the window allows for that before the endpoint is written off as absent.
+#: The handshake window (seconds) for a probe of a TCP companion. It is between serial and
+#: BLE. A TCP connect is a fast socket open, but a host that cannot be reached can wait in
+#: the connect backoff of the OS. The window gives time for that, before MeshTerm considers
+#: the endpoint as absent.
 _PROBE_TIMEOUT_TCP_S = 10.0
 
 
@@ -5803,36 +6051,38 @@ async def probe_device(
     pin: str | None = None,
     spi_state: Path | None = None,
 ) -> tuple[MeshCoreDevice, dict] | None:
-    """Open a discovered device, confirm a MeshCore companion answers, and keep it connected.
+    """Open a discovered device, confirm that a MeshCore companion answers, and keep it connected.
 
-    Transport-agnostic front door for the startup smoke test: it opens the right connection
-    for ``device`` (serial port or BLE address) and issues an identity query (the APPSTART
-    that backs :meth:`MeshCoreDevice.get_self_info`). A genuine companion replies with a
-    self-info payload; anything else — a non-MeshCore gadget, an unresponsive port, a BLE
-    device out of range — never answers and is rejected within the transport's timeout.
+    This is the entry for the startup smoke test, and it is the same for all transports. It
+    opens the correct connection for ``device`` (serial port or BLE address), and sends an
+    identity query (the APPSTART that :meth:`MeshCoreDevice.get_self_info` uses). A real
+    companion replies with a self-info payload. Anything else (a device that is not
+    MeshCore, a port that does not respond, a BLE device out of range) never answers, and
+    MeshTerm rejects it within the timeout of the transport.
 
-    On success the connection is **left open** and returned to the caller, which reuses it as
-    the session device. This is deliberate: many companion boards reset on each serial open
-    (and a BLE reconnect re-runs service discovery), so a probe-then-reopen cycle is slow and
-    flaky — opening the radio exactly once is both faster and far more reliable. On any
-    failure the probe connection is closed.
+    On success, the probe **does not close** the connection, and returns it to the caller,
+    which uses it again as the session device. This is on purpose. Many companion boards
+    reset at each serial open (and a BLE reconnect runs the service discovery again). Thus a
+    cycle of probe and open again is slow and not reliable. When MeshTerm opens the radio
+    exactly one time, it is faster and much more reliable. On any failure, the probe closes
+    the connection.
 
     Args:
         device: The discovered device to probe (serial or BLE).
-        baudrate: Serial baud rate (serial transport only).
-        pin: Optional BLE pairing PIN (BLE transport only).
-        spi_state: The radio's state directory (SPI transport only) — probing an SPI radio
-            starts its node, and the node needs somewhere to keep its identity.
+        baudrate: The serial baud rate (serial transport only).
+        pin: An optional BLE pairing PIN (BLE transport only).
+        spi_state: The state directory of the radio (SPI transport only). A probe of an SPI
+            radio starts its node, and the node must have a place to keep its identity.
 
     Returns:
         ``(device, self_info)`` with a connected :class:`MeshCoreDevice` on success (the
-        caller owns and must eventually close it), or ``None`` if it is not a reachable
-        MeshCore companion.
+        caller owns it, and must close it at some time), or ``None`` if it is not a
+        MeshCore companion that MeshTerm can reach.
 
     Raises:
-        DeviceCommandError: On an actionable failure the user can fix — e.g. a Bluetooth
-            companion that requires a pairing PIN — so the caller can show the remedy rather
-            than an unhelpful "didn't answer".
+        DeviceCommandError: On a failure that the user can repair (for example, a Bluetooth
+            companion that must have a pairing PIN). Thus the caller can show the repair,
+            instead of an unhelpful "didn't answer".
     """
     if device.is_ble:
         timeout = _PROBE_TIMEOUT_BLE_S
@@ -5841,8 +6091,9 @@ async def probe_device(
             address=device.address,
             pin=pin,
             connect_timeout=timeout,
-            # The scan that discovered the device already holds its BLEDevice; connecting
-            # through it skips the by-address re-discovery that makes BLE startups flaky.
+            # The scan that discovered the device already has its BLEDevice. A connect
+            # through it skips the discovery again by address, which makes BLE startups
+            # unreliable.
             ble_device=device.ble_device,
         )
     elif device.is_tcp:
@@ -5859,8 +6110,9 @@ async def probe_device(
 
         if spi_state is None:
             raise ValueError("probing an SPI radio needs its state directory")
-        # The window covers starting the node, not just the handshake: the radio library's
-        # import and the chip's bring-up come first, and a board this small is slow at both.
+        # The window covers the start of the node, not only the handshake. The import of
+        # the radio library and the bring-up of the chip come first, and a board this small
+        # is slow at both.
         timeout = READY_TIMEOUT_S
         probe = SpiRadioDevice(device.spi or SpiWiring(), spi_state)  # type: ignore[arg-type]
     else:
@@ -5872,18 +6124,19 @@ async def probe_device(
 async def probe_meshcore(
     port: str, baudrate: int = 115200, *, timeout: float = _PROBE_TIMEOUT_SERIAL_S
 ) -> tuple[MeshCoreDevice, dict] | None:
-    """Probe a serial ``port`` for a MeshCore companion (see :func:`probe_device`).
+    """Probe a serial ``port`` for a MeshCore companion (refer to :func:`probe_device`).
 
-    Thin serial-only convenience wrapper retained for callers that hold a bare port string.
+    This is a thin wrapper, only for serial, kept for callers that have a bare port string.
 
     Args:
-        port: Serial port to probe (e.g. ``COM5`` or ``/dev/ttyUSB0``).
-        baudrate: Serial baud rate.
-        timeout: Seconds to bound the connection handshake and the identity reply.
+        port: The serial port to probe (for example ``COM5`` or ``/dev/ttyUSB0``).
+        baudrate: The serial baud rate.
+        timeout: The time limit in seconds for the connection handshake and the identity
+            reply.
 
     Returns:
-        ``(device, self_info)`` on success, or ``None`` if the port is not a reachable
-        MeshCore companion.
+        ``(device, self_info)`` on success, or ``None`` if the port is not a MeshCore
+        companion that MeshTerm can reach.
     """
     return await _probe(
         MeshCoreDevice(port=port, baudrate=baudrate, connect_timeout=timeout), timeout
@@ -5891,28 +6144,29 @@ async def probe_meshcore(
 
 
 async def _probe(device: MeshCoreDevice, timeout: float) -> tuple[MeshCoreDevice, dict] | None:
-    """Connect ``device`` and read its identity, returning it live or closing it on failure.
+    """Connect ``device`` and read its identity. Return it live, or close it on a failure.
 
     Args:
-        device: An unconnected :class:`MeshCoreDevice` configured for its transport.
-        timeout: Handshake window bounding both the connect and the identity read.
+        device: A :class:`MeshCoreDevice` that is not connected, set up for its transport.
+        timeout: The handshake window, which limits both the connect and the identity read.
 
     Returns:
-        ``(device, self_info)`` with the connection left open, or ``None`` if the endpoint
-        simply isn't a reachable MeshCore companion.
+        ``(device, self_info)`` with the connection open, or ``None`` if the endpoint is
+        not a MeshCore companion that MeshTerm can reach.
 
     Raises:
-        DeviceCommandError: On an *actionable* failure the user can fix — e.g. a Bluetooth
-            companion that needs a pairing PIN. This is deliberately distinct from ``None``
-            (an unremarkable "not a companion" miss) so the caller can show the real remedy
-            instead of a generic "didn't answer". A failure with no name of its own comes
-            as :class:`UnrecognisedConnectError`, in the error's own words.
+        DeviceCommandError: On a failure that the user can repair (for example, a Bluetooth
+            companion that must have a pairing PIN). This is different from ``None`` on purpose
+            (a usual "not a companion" miss), so the caller can show the real repair instead
+            of a generic "didn't answer". A failure with no name of its own comes as
+            :class:`UnrecognisedConnectError`, in the words of the original error.
     """
-    # ``timeout`` is the handshake window handed to the client, so a non-MeshCore endpoint is
-    # rejected in ~``timeout`` seconds and the client cleans up its own connection. The outer
-    # ``wait_for`` is only a safety net a few seconds beyond that, so we never cancel the
-    # client mid-handshake (which would leak the open connection). A real companion answers in
-    # well under a second (serial) or a few seconds (BLE), so this never delays a good device.
+    # ``timeout`` is the handshake window that the client gets. Thus the client rejects an
+    # endpoint that is not MeshCore in approximately ``timeout`` seconds, and cleans up its
+    # own connection. The outer ``wait_for`` is only a safety net, a few seconds after that.
+    # Thus we never cancel the client during the handshake (that would leak the open
+    # connection). A real companion answers in much less than one second (serial) or in a
+    # few seconds (BLE), so this never delays a good device.
     stage = "connect"
     try:
         await asyncio.wait_for(device.connect(), timeout + 4.0)
@@ -5922,17 +6176,18 @@ async def _probe(device: MeshCoreDevice, timeout: float) -> tuple[MeshCoreDevice
         await _safe_disconnect(device)
         transport = getattr(device, "transport", None)
         if transport == "tcp" and stage == "connect":
-            # The OS gives a silent host twenty seconds or more before it gives up, so it is
-            # this window that runs out first, and it means the same thing the OS's would.
+            # The OS gives a silent host twenty seconds or more before it stops. Thus this
+            # window ends first, and it has the same meaning as the timeout of the OS.
             where = getattr(device, "_host", None) or "the host"
             _log.warning("TCP probe of %s timed out connecting", device.endpoint)
             message = _tcp_open_message(where, getattr(device, "_tcp_port", None), exc)
             raise DeviceCommandError(message or str(exc)) from exc
         if transport != "ble":
             return None
-        # A Bluetooth connect has more stages than a serial one (link, pairing, service
-        # discovery, the identity reply), so saying which one ran out of time is what
-        # tells a device out of range apart from one that connected and then went quiet.
+        # A Bluetooth connect has more stages than a serial connect (link, pairing, service
+        # discovery, the identity reply). When the message tells which stage used all its
+        # time, the user can tell a device out of range from a device that connected and
+        # then went silent.
         where = device.endpoint or "the selected Bluetooth device"
         if stage == "connect":
             message = _ble_stalled_message(where, timeout + 4.0)
@@ -5945,15 +6200,17 @@ async def _probe(device: MeshCoreDevice, timeout: float) -> tuple[MeshCoreDevice
         _log.warning("BLE probe of %s timed out at the %s stage", where, stage)
         raise DeviceCommandError(message) from exc
     except DeviceCommandError:
-        # A clean, actionable failure (the device needs a PIN, say): close the probe and let it
-        # through so the picker surfaces the remedy rather than hiding it behind "didn't answer".
+        # A clean failure that the user can act on (for example, a PIN is necessary).
+        # Close the probe and let the error through, so the picker shows the repair, and
+        # does not hide it behind "didn't answer".
         await _safe_disconnect(device)
         raise
     except Exception as exc:  # noqa: BLE001 - said in words, logged whole
-        # A failure nothing above recognised. It used to come back as "not confirmed", and
-        # the picker called the device one that "didn't answer as a MeshCore device" — a
-        # claim the probe never had grounds for, with the one clue left in the log. Now it
-        # is said in the error's own words, and the log holds the traceback.
+        # A failure that no step above recognized. In the past, it came back as "not
+        # confirmed", and the picker said that the device
+        # "didn't answer as a MeshCore device". The probe had no evidence for this claim,
+        # and the only clue stayed in the log. Now the message has the words of the error
+        # itself, and the log has the traceback.
         await _safe_disconnect(device)
         where = getattr(device, "endpoint", None) or "the device"
         what = (
@@ -5965,20 +6222,20 @@ async def _probe(device: MeshCoreDevice, timeout: float) -> tuple[MeshCoreDevice
     if not info:
         await _safe_disconnect(device)
         return None
-    # The connection is already open, so learn the hardware model now (its own protocol frame)
-    # and fold it into the identity dict — this is the one moment the model is obtainable, and
-    # it lets the caller remember "Seeed Tracker T1000-E" without a second connect. It's purely
-    # additive: self-info fields win on the (currently non-overlapping) keys, and a firmware
-    # that can't answer the query simply contributes nothing.
+    # The connection is already open, so get the hardware model now (with its own protocol
+    # query), and merge it into the identity dict. This is the only time when the model is
+    # available, and it lets the caller remember "Seeed Tracker T1000-E" without a second
+    # connect. It only adds data: the self-info fields win on the keys (which do not overlap
+    # now), and a firmware that cannot answer the query gives nothing.
     try:
         device_info = await asyncio.wait_for(device.get_device_info(), timeout)
-    except Exception:  # noqa: BLE001 - model is a nicety; never fail a good probe over it
+    except Exception:  # noqa: BLE001 - the model is optional. A good probe never fails for it.
         device_info = {}
     return device, {**device_info, **info}
 
 
 async def _safe_disconnect(device: Device) -> None:
-    """Best-effort disconnect that never raises (used to discard a failed probe)."""
+    """A best-effort disconnect that never raises (used to discard a failed probe)."""
     try:
         await device.disconnect()
     except Exception:  # noqa: BLE001 - best-effort cleanup of the probe connection

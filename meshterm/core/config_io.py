@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TOML backup and restore for device configuration.
+"""TOML backup and restore for the device configuration.
 
-A backup captures every registry setting's current value plus experimental custom
-variables and configured channels, so a device's configuration can be archived, diffed,
-or cloned onto another node. Restore turns a backup into the same operation list the
-``config`` tool executes for live edits, and supports a dry-run diff against the device's
-current state.
+A backup keeps the current value of each setting in the registry, the experimental custom
+variables, and the configured channels. Thus you can archive the configuration of a
+device, compare it with a diff, or copy it onto another node. The restore changes a
+backup into the same list of operations that the ``config`` tool runs for live edits. The
+restore can also show a dry-run diff against the current state of the device.
 """
 
 from __future__ import annotations
@@ -32,7 +32,8 @@ class Backup:
     Attributes:
         settings: Registry setting key -> raw value.
         custom: Experimental custom variable name -> value.
-        channels: One dict per channel with ``index``, ``name`` and hex ``secret``.
+        channels: One dict for each channel, with ``index``, ``name``, and a hex
+            ``secret``.
     """
 
     settings: dict[str, Any] = field(default_factory=dict)
@@ -49,14 +50,15 @@ def backup_config(
     """Write the current configuration to a TOML file.
 
     Args:
-        path: Destination file path (parent directories are created).
-        snapshot: A device snapshot (see ``device_config.build_snapshot``).
-        custom_vars: Experimental custom variables.
-        channels: Channel dicts (``channel_idx``, ``channel_name``, ``channel_secret``
-            as raw bytes).
+        path: The path of the destination file. The function makes the parent
+            directories.
+        snapshot: A device snapshot (refer to ``device_config.build_snapshot``).
+        custom_vars: The experimental custom variables.
+        channels: Channel dicts (``channel_idx``, ``channel_name``, and
+            ``channel_secret`` as raw bytes).
 
     Returns:
-        The path written.
+        The path that the function wrote.
     """
     settings: dict[str, Any] = {}
     for spec in DEVICE_SETTINGS:
@@ -111,25 +113,25 @@ def plan_restore(
 ) -> list[tuple]:
     """Diff a backup against the current state and return the operations to apply.
 
-    Only values that differ from the device's current configuration are emitted, so a
-    restore (or its dry-run preview) shows exactly what would change.
+    The function returns only the values that are different from the current configuration
+    of the device. Thus a restore (or its dry-run preview) shows exactly what will change.
 
     Args:
         backup: The parsed backup.
-        snapshot: The device's current snapshot.
-        current_custom: The device's current custom variables.
+        snapshot: The current snapshot of the device.
+        current_custom: The current custom variables of the device.
 
     Returns:
-        A list of operation tuples compatible with the ``config`` tool:
+        A list of operation tuples that the ``config`` tool accepts:
         ``("set", key, value)``, ``("set_custom", key, value)``, and
         ``("set_channel", index, name, secret_bytes)``.
 
     Raises:
-        DeviceConfigError: If a backed-up setting key or value is invalid.
+        DeviceConfigError: If a setting key or value in the backup is not valid.
     """
     ops: list[tuple] = []
     for key, raw in backup.settings.items():
-        spec = get_spec(key)  # raises on unknown key
+        spec = get_spec(key)  # raises an error for an unknown key
         value = parse_value(spec, raw, snapshot)
         if value != spec.getter(snapshot):
             ops.append(("set", key, value))
@@ -147,7 +149,7 @@ def plan_restore(
 
 
 def _to_hex(secret: Any) -> str:
-    """Render a channel secret as a hex string, accepting bytes or str."""
+    """Render a channel secret (bytes or str) as a hex string."""
     if isinstance(secret, (bytes, bytearray)):
         return secret.hex()
     return str(secret or "")

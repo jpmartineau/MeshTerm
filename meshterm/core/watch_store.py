@@ -1,19 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Persistence for the Watchtower: watched nodes, their rules, and the alert log.
+"""The store for the Watchtower: the watched nodes, their rules, and the alert log.
 
-The Watchtower (see :mod:`meshterm.services.watchtower`) is a passive sentinel: the user
-stars the nodes they care about — the repeater on the roof, the gateway across town —
-and rules watch what the always-on event hub already hears. This store remembers, per
-watched node (keyed by the 12-hex canonical id observations use), the rule settings and
-the last-heard mark the silence rule counts from, plus the rolling alert log and its
-acknowledged state, so an alarm raised overnight is still waiting in the morning even
-across a restart.
+The Watchtower (refer to :mod:`meshterm.services.watchtower`) is a passive monitor. The
+user stars the nodes that are important to the user: for example, the repeater on the
+roof, or the gateway on the other side of the town. Then rules watch what the event hub
+already hears (the event hub is always on).
 
-Like the remembered devices (:mod:`meshterm.core.device_store`), this is global machine
-state in a small JSON file (``<config_dir>/watchtower.json``) rather than the
-per-invocation SQLite database. Reads are served from memory after the first load — the
-header badge reads the unacked count on every repaint — and the packet-driven
-``note_heard`` writes are throttled so a busy mesh doesn't grind the disk.
+For each watched node, this store keeps the rule settings and the last-heard mark from
+which the silence rule counts. The key of a watched node is the canonical 12-hex key
+prefix that the observations use. The store also keeps the rolling alert log and its
+acknowledged state. Thus an alarm that MeshTerm raised in the night is still there in the
+morning, also after a restart.
+
+This store is global machine state in a small JSON file (``<config_dir>/watchtower.json``),
+the same as the remembered devices (:mod:`meshterm.core.device_store`). It is not in the
+SQLite database, which can be different for each run. After the first read, the store
+gives all reads from memory, because the header badge reads the unacked count at each
+paint. Packets cause the ``note_heard`` writes, so the store throttles them. Thus a busy
+mesh does not cause continuous disk writes.
 """
 
 from __future__ import annotations
@@ -27,43 +31,50 @@ from typing import ClassVar
 
 from .models import utcnow
 
-#: Silence-rule choices offered in the editor, in hours (:data:`OFF` disables it).
+#: The silence-rule choices that the editor offers, in hours (:data:`OFF` turns the rule
+#: off).
 SILENCE_CHOICES_H = (1, 3, 6, 12, 24, 48)
 
-#: Default silence threshold: half a day covers nodes that only advertise daily-ish
-#: without crying wolf over a quiet afternoon. It is the *code's* default; what a newly
-#: starred node actually gets is the ``watch_silence_hours`` preference, which defaults
-#: to this (see :mod:`meshterm.core.preferences`).
+#: The default silence threshold. Half a day is sufficient for nodes that advertise only
+#: approximately one time each day, and it gives no false alarm for a quiet afternoon.
+#: This is the default of the code. A node that the user stars gets the value of the
+#: ``watch_silence_hours`` preference, and the default of that preference is this value
+#: (refer to :mod:`meshterm.core.preferences`).
 DEFAULT_SILENCE_HOURS = 12
 
-#: The stored value meaning "this rule is off".
+#: The stored value that means "this rule is off".
 OFF = 0
 
-#: How many alerts the log retains (oldest dropped first) — *the* default behind the
-#: ``watch_alerts_kept`` preference, which the registry names rather than re-types
-#: (:data:`meshterm.core.preferences.PREFERENCES`), so the two can never disagree.
+#: How many alerts the log keeps (the store removes the oldest alert first). This is the
+#: only default of the ``watch_alerts_kept`` preference. The registry refers to this name
+#: and does not type the value again (:data:`meshterm.core.preferences.PREFERENCES`).
+#: Thus the two values can never be different.
 ALERT_CAP = 200
 
-#: Minimum seconds between disk flushes for the packet-driven last-heard updates.
+#: The minimum time between two disk flushes for the last-heard changes that packets
+#: cause, in seconds.
 _FLUSH_EVERY_S = 60.0
 
 
 @dataclass(slots=True)
 class WatchedNode:
-    """One starred node: its rules and the marks the rules count from.
+    """One starred node: its rules, and the marks from which the rules count.
 
     Attributes:
-        key: The node's canonical 12-hex id (what observations carry).
-        name: Display label, refreshed whenever the node is heard with a name.
-        silence_hours: Hours of silence before the alarm (:data:`OFF` disables it).
-        snr_watch: Whether the SNR-sag rule watches this node's receptions.
-        last_heard: When the node was last heard (seeded at watch time so the
-            silence countdown is armed immediately).
-        silent_since: Set while a silence alarm is active, so it fires once and
-            re-arms only after the node is heard again.
-        node_type: The node's advertised type at star time (a ``NODE_TYPE_*``
-            constant), for the watchlist's type glyph; ``None`` for entries starred
-            before the field existed (the screen falls back to the contact table).
+        key: The canonical 12-hex key prefix of the node (the id that observations
+            carry).
+        name: The label to show. It changes each time the node is heard with a name.
+        silence_hours: The hours of silence before the alarm (:data:`OFF` turns the
+            alarm off).
+        snr_watch: Whether the SNR-sag rule watches the receptions of this node.
+        last_heard: When the node was last heard. The store sets it when the user stars
+            the node, so that the silence countdown starts immediately.
+        silent_since: Set while a silence alarm is active. Thus MeshTerm raises the
+            alarm one time, and arms it again only after the node is heard again.
+        node_type: The advertised type of the node when the user starred it (a
+            ``NODE_TYPE_*`` constant), for the type glyph of the watchlist. ``None`` for
+            entries that were starred before this field existed (the screen then uses
+            the contact table).
     """
 
     key: str
@@ -74,22 +85,23 @@ class WatchedNode:
     silent_since: datetime | None = None
     node_type: int | None = None
 
-    #: Fields this record once held and must never hold again under another meaning (see
-    #: :data:`meshterm.core.preferences.RETIRED` for why a name is never reused).
+    #: The fields that this record held before. It must never hold them again with a
+    #: different meaning (refer to :data:`meshterm.core.preferences.RETIRED` for the
+    #: reason that a name is never used again).
     RETIRED: ClassVar[frozenset[str]] = frozenset()
 
 
 @dataclass(slots=True)
 class Alert:
-    """One raised alert, kept until it scrolls off the capped log.
+    """One raised alert. The log keeps it until it goes off the end of the capped log.
 
     Attributes:
-        ident: Monotonic id (stable across restarts) used to acknowledge it.
-        when: When the rule tripped.
+        ident: A monotonic id (stable across restarts) to acknowledge the alert.
+        when: When the rule raised the alert.
         kind: ``silence`` / ``recovered`` / ``snr`` / ``new-node``.
-        label: The node's display label at the time.
-        message: The human-readable one-liner.
-        acked: Whether the user has acknowledged it (feeds the header badge).
+        label: The label of the node at that time.
+        message: The one-line text for the user.
+        acked: Whether the user acknowledged the alert (the header badge uses it).
     """
 
     ident: int
@@ -99,14 +111,15 @@ class Alert:
     message: str
     acked: bool = False
 
-    #: Fields this record once held and must never hold again under another meaning (see
-    #: :data:`meshterm.core.preferences.RETIRED` for why a name is never reused).
+    #: The fields that this record held before. It must never hold them again with a
+    #: different meaning (refer to :data:`meshterm.core.preferences.RETIRED` for the
+    #: reason that a name is never used again).
     RETIRED: ClassVar[frozenset[str]] = frozenset()
 
 
 @dataclass(slots=True)
 class _State:
-    """The store's in-memory shape (mirrors the JSON file)."""
+    """The in-memory shape of the store (the same shape as the JSON file)."""
 
     watched: dict[str, WatchedNode] = field(default_factory=dict)
     alerts: list[Alert] = field(default_factory=list)
@@ -114,19 +127,20 @@ class _State:
     new_node_alerts: bool = True
     next_id: int = 1
 
-    #: Fields this record once held and must never hold again under another meaning (see
-    #: :data:`meshterm.core.preferences.RETIRED` for why a name is never reused).
+    #: The fields that this record held before. It must never hold them again with a
+    #: different meaning (refer to :data:`meshterm.core.preferences.RETIRED` for the
+    #: reason that a name is never used again).
     RETIRED: ClassVar[frozenset[str]] = frozenset()
 
 
 class WatchStore:
-    """Reads and writes the Watchtower's state, memory-first."""
+    """Reads and writes the state of the Watchtower, in memory first."""
 
     def __init__(self, path: Path) -> None:
-        """Open the store against a JSON file location.
+        """Open the store on the location of a JSON file.
 
         Args:
-            path: Path to the JSON state file (created lazily on first write).
+            path: Path to the JSON state file (made only at the first write).
         """
         self._path = path
         self._state: _State | None = None
@@ -137,13 +151,13 @@ class WatchStore:
 
     @property
     def state(self) -> _State:
-        """The in-memory state, loaded from disk on first access."""
+        """The in-memory state, read from disk at the first access."""
         if self._state is None:
             self._state = self._load()
         return self._state
 
     def _load(self) -> _State:
-        """Parse the file into a :class:`_State`, or a fresh default on any trouble."""
+        """Parse the file into a :class:`_State`, or return a new default at any problem."""
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -191,7 +205,7 @@ class WatchStore:
     # --- watched nodes ---------------------------------------------------------------
 
     def watched(self) -> dict[str, WatchedNode]:
-        """The watched nodes by canonical id (the live mapping — treat as read-mostly)."""
+        """The watched nodes by canonical id (the live mapping: use it mostly to read)."""
         return self.state.watched
 
     def is_watched(self, key: str) -> bool:
@@ -206,18 +220,19 @@ class WatchStore:
         last_seen: datetime | None = None,
         node_type: int | None = None,
     ) -> None:
-        """Star a node with default rules.
+        """Star a node with the default rules.
 
-        The silence countdown arms immediately: it counts from the contact's known
-        ``last_seen`` when there is one (so a node that has already been quiet for a
-        day alarms on the next sweep, which is exactly why it was starred), else from
-        now.
+        The silence countdown starts immediately. It counts from the known ``last_seen``
+        of the contact when there is one, else from now. Thus a node that was already
+        quiet for a day causes an alarm at the next sweep. That is exactly why the user
+        starred it.
 
         Args:
-            key: The node's canonical 12-hex id.
-            name: Display label.
+            key: The canonical 12-hex key prefix of the node.
+            name: The label to show.
             last_seen: When the node was last heard, if known.
-            node_type: The node's advertised type, if known (for the watchlist glyph).
+            node_type: The advertised type of the node, if known (for the glyph in the
+                watchlist).
         """
         from .preferences import current as current_preferences
 
@@ -231,19 +246,19 @@ class WatchStore:
         self._save()
 
     def unwatch(self, key: str) -> None:
-        """Drop a node from the watchlist (its past alerts stay in the log)."""
+        """Remove a node from the watchlist (its past alerts stay in the log)."""
         if self.state.watched.pop(key, None) is not None:
             self._save()
 
     def set_silence(self, key: str, hours: int) -> None:
-        """Set a watched node's silence threshold (:data:`OFF` disables the rule)."""
+        """Set the silence threshold of a watched node (:data:`OFF` turns the rule off)."""
         entry = self.state.watched.get(key)
         if entry is not None:
             entry.silence_hours = int(hours)
             self._save()
 
     def set_snr_watch(self, key: str, on: bool) -> None:
-        """Enable/disable the SNR-sag rule for a watched node."""
+        """Turn the SNR-sag rule on or off for a watched node."""
         entry = self.state.watched.get(key)
         if entry is not None:
             entry.snr_watch = bool(on)
@@ -252,12 +267,16 @@ class WatchStore:
     def note_heard(
         self, key: str, *, when: datetime | None = None, name: str | None = None
     ) -> None:
-        """Record that a watched node was heard (packet-driven; writes throttled).
+        """Store that a watched node was heard.
+
+        Packets cause this call, so the writes are throttled.
 
         Args:
-            key: The node's canonical id.
-            when: Reception time (defaults to now); older-than-known stamps are kept.
-            name: A freshly advertised name, adopted as the display label when given.
+            key: The canonical id of the node.
+            when: The reception time (the default is now). If this time is older than
+                the known time, the known time stays.
+            name: A name that was advertised recently. When it is given, it becomes the
+                label to show.
         """
         entry = self.state.watched.get(key)
         if entry is None:
@@ -271,11 +290,11 @@ class WatchStore:
         self.flush(only_if_due=True)
 
     def mark_silent(self, key: str, when: datetime | None = None) -> None:
-        """Latch a node's active silence alarm so it fires once per quiet spell.
+        """Latch the active silence alarm of a node: one alarm for each quiet period.
 
-        Packet/sweep-driven (like :meth:`note_heard`), so the write is throttled — the
-        full-state save is synchronous on the event loop, and the sentinel flushes any
-        pending change on stop.
+        Packets and sweeps cause this call (the same as :meth:`note_heard`), so the write
+        is throttled. The save of the full state is synchronous on the event loop. The
+        Watchtower service flushes each pending change when it stops.
         """
         entry = self.state.watched.get(key)
         if entry is not None:
@@ -284,10 +303,11 @@ class WatchStore:
             self.flush(only_if_due=True)
 
     def clear_silent(self, key: str) -> None:
-        """Re-arm a node's silence alarm after it has been heard again.
+        """Arm the silence alarm of a node again, after the node was heard again.
 
-        Packet-driven, so throttled like :meth:`mark_silent` — a recovery burst after an
-        outage must not land one full-state disk write per packet.
+        Packets cause this call, so it is throttled the same as :meth:`mark_silent`. After
+        an outage, a burst of recovery packets must not cause one full-state disk write
+        for each packet.
         """
         entry = self.state.watched.get(key)
         if entry is not None and entry.silent_since is not None:
@@ -299,20 +319,20 @@ class WatchStore:
 
     @property
     def new_node_alerts(self) -> bool:
-        """Whether hearing a never-before-seen node raises an alert."""
+        """Whether a node that was never heard before raises an alert when it is heard."""
         return self.state.new_node_alerts
 
     def set_new_node_alerts(self, on: bool) -> None:
-        """Toggle the new-node rule."""
+        """Turn the new-node rule on or off."""
         self.state.new_node_alerts = bool(on)
         self._save()
 
     def known_contains(self, node: str) -> bool:
-        """Whether ``node`` has already been recorded (never re-announced)."""
+        """Whether ``node`` is already stored (it is never announced again)."""
         return node in self.state.known
 
     def remember_known(self, node: str) -> None:
-        """Record ``node`` as seen so it is announced as new at most once, ever."""
+        """Store ``node`` as heard, so that it is never announced as new more than one time."""
         if node not in self.state.known:
             self.state.known.add(node)
             self._dirty = True
@@ -323,19 +343,21 @@ class WatchStore:
     def add_alert(
         self, kind: str, label: str, message: str, *, when: datetime | None = None
     ) -> Alert:
-        """Append an alert to the log (capped) and persist, throttled.
+        """Add an alert to the end of the log (capped), and write it with the throttle.
 
-        Alerts fire from the packet path (a new mesh region can announce a never-seen
-        node per packet for a while), and the save serializes the whole state
-        synchronously on the event loop — so this batches through the same throttled
-        flush as :meth:`note_heard`. The in-memory log (and the header badge it feeds)
-        updates immediately either way; the sentinel flushes any pending write on stop.
+        Alerts come from the packet path. (In a new area of the mesh, MeshTerm can
+        announce a node that it never heard before for each packet, for some time.) The
+        save serializes the full state synchronously on the event loop. Thus this
+        function uses the same throttled flush as :meth:`note_heard`. The in-memory log
+        (and the header badge that uses it) changes immediately in all cases. The
+        Watchtower service flushes each pending write when it stops.
 
         Args:
-            kind: The rule that tripped (``silence``/``recovered``/``snr``/``new-node``).
-            label: The node's display label.
-            message: The human-readable one-liner.
-            when: When it tripped (defaults to now).
+            kind: The rule that raised the alert
+                (``silence``/``recovered``/``snr``/``new-node``).
+            label: The label of the node to show.
+            message: The one-line text for the user.
+            when: When the rule raised the alert (the default is now).
 
         Returns:
             The stored :class:`Alert`.
@@ -360,11 +382,11 @@ class WatchStore:
         return alert
 
     def alerts(self) -> list[Alert]:
-        """The alert log, newest first (a copy, safe to slice)."""
+        """The alert log, newest first (a copy, which is safe to slice)."""
         return list(reversed(self.state.alerts))
 
     def ack(self, ident: int) -> None:
-        """Acknowledge one alert by id."""
+        """Acknowledge one alert by its id."""
         for alert in self.state.alerts:
             if alert.ident == ident and not alert.acked:
                 alert.acked = True
@@ -372,7 +394,7 @@ class WatchStore:
                 return
 
     def ack_all(self) -> None:
-        """Acknowledge every alert."""
+        """Acknowledge all the alerts."""
         changed = False
         for alert in self.state.alerts:
             if not alert.acked:
@@ -382,7 +404,7 @@ class WatchStore:
             self._save()
 
     def clear_acked(self) -> None:
-        """Drop acknowledged alerts from the log, keeping the live ones."""
+        """Remove the acknowledged alerts from the log, and keep the live alerts."""
         state = self.state
         kept = [a for a in state.alerts if not a.acked]
         if len(kept) != len(state.alerts):
@@ -390,17 +412,17 @@ class WatchStore:
             self._save()
 
     def unacked_count(self) -> int:
-        """How many alerts are waiting — the header badge's number."""
+        """How many alerts wait for the user: the number on the header badge."""
         return sum(1 for a in self.state.alerts if not a.acked)
 
-    # --- persistence -----------------------------------------------------------------
+    # --- write to disk ---------------------------------------------------------------
 
     def flush(self, *, only_if_due: bool = False) -> None:
-        """Write pending throttled changes to disk.
+        """Write the pending throttled changes to disk.
 
         Args:
-            only_if_due: Skip when the last flush was recent (the packet-driven
-                path); a plain ``flush()`` writes any pending change immediately.
+            only_if_due: Do nothing when the last flush was recent (the path that packets
+                use). A plain ``flush()`` writes each pending change immediately.
         """
         if not self._dirty:
             return
@@ -409,7 +431,10 @@ class WatchStore:
         self._save()
 
     def _save(self) -> None:
-        """Persist the whole state atomically (crash mid-write keeps the old file)."""
+        """Write the full state atomically.
+
+        If a crash occurs during the write, the old file stays.
+        """
         state = self.state
         data = {
             "new_node_alerts": state.new_node_alerts,
@@ -447,7 +472,7 @@ class WatchStore:
 
 
 def _as_int(value: object, default: int) -> int:
-    """Coerce a stored number to a non-negative int, falling back to ``default``."""
+    """Convert a stored number to a non-negative int, or return ``default`` if it fails."""
     try:
         number = int(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
@@ -456,10 +481,10 @@ def _as_int(value: object, default: int) -> int:
 
 
 def _as_time(value: object) -> datetime | None:
-    """Parse a stored ISO-8601 timestamp, or ``None`` if absent/corrupt.
+    """Parse a stored ISO-8601 timestamp, or return ``None`` if it is absent or corrupt.
 
-    A timestamp without a zone is treated as corrupt too: the store only ever writes
-    aware UTC stamps, and a naive one would poison the silence arithmetic.
+    The function also reads a timestamp without a time zone as corrupt. The store only
+    writes aware UTC timestamps, and a naive timestamp makes the silence arithmetic wrong.
     """
     if not isinstance(value, str):
         return None

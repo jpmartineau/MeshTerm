@@ -1,23 +1,25 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Persistence for the rooms this machine has joined: each room's password and our access.
+"""The store for the rooms that this machine joined: the password of each room, and our access.
 
-A room server has two passwords. The *admin* password is the one Repeater admin already
-remembers (:mod:`meshterm.core.admin_store`), and it gets you into a room as its admin; the
-*room* password is the one its owner hands out to members, and it is what this store keeps.
-Joining a room is logging in with one of them, so a room is "joined" here exactly when
-MeshTerm holds a password it can log in with — and opening the room again logs in with it
-silently instead of asking.
+A room server has two passwords. The *admin password* is the password that Repeater admin
+already remembers (:mod:`meshterm.core.admin_store`), and it lets you into a room as its
+admin. The *room password* is the password that the owner gives to the members, and this
+store keeps it. To join a room is to log in with one of the two passwords. Thus a room is
+"joined" here exactly when MeshTerm has a password with which it can log in. When the user
+opens the room again, MeshTerm logs in with that password silently, and does not ask.
 
-An admin login's password is never written here, only the access it earned: the admin
-password lives in one place, where Repeater admin can change it, so a room never logs in
-with a copy that has gone stale. A room whose owner cleared the room password is open to
-anyone, and its remembered password is the empty string — a real answer, not an absence,
-which is why :meth:`RoomStore.password` returns ``None`` for "nothing remembered".
+This store never writes the password of an admin login, only the access that the login
+got. The admin password is in one place, where Repeater admin can change it. Thus MeshTerm
+never logs in to a room with an old copy of it. If the owner of a room cleared the room
+password, the room is open to all, and its remembered password is the empty string. That
+is a real answer, not an absence. Thus :meth:`RoomStore.password` returns ``None`` for
+"nothing remembered".
 
-Like the admin passwords, this is global machine state in a small JSON file
-(``<config_dir>/rooms.json``), written owner-only because it holds passwords in plaintext.
-The file is read into :class:`RoomMembership` records and written back out of them, so a
-field no record knows is gone after the next write (see :data:`RoomMembership.RETIRED`).
+This store is global machine state in a small JSON file (``<config_dir>/rooms.json``), the
+same as the admin passwords. MeshTerm writes the file with owner-only permissions, because
+it holds passwords in plaintext. The file is read into :class:`RoomMembership` records and
+written back from them. Thus a field that no record knows is removed after the next write
+(refer to :data:`RoomMembership.RETIRED`).
 """
 
 from __future__ import annotations
@@ -34,19 +36,21 @@ from .models import Contact, LoginResult, RoomAccess, RoomLogin, utcnow
 
 @dataclass(slots=True)
 class RoomMembership:
-    """What we remember about one room we have joined.
+    """What MeshTerm remembers about one room that it joined.
 
     Attributes:
-        key: The :func:`~meshterm.core.admin_store.admin_key` the room is stored under —
-            the same key its admin password has, so the two stores agree on which room is
-            which (the record's key in the file, not one of its fields).
-        password: The room password that got us in, ``""`` for a blank login the room
-            accepted (an open room, or one that knew us), or ``None`` when no room password
-            is known — we got in as its admin, whose password lives in the admin store.
-        access: The access the room granted at our last login: a
+        key: The :func:`~meshterm.core.admin_store.admin_key` under which the room is
+            stored. It is the same key as for its admin password, so that the two stores
+            agree about which room is which. (It is the key of the record in the file, not
+            one of its fields.)
+        password: The room password with which MeshTerm got in. ``""`` for a blank login
+            that the room accepted (an open room, or a room that knew our node). ``None``
+            when no room password is known: MeshTerm got in as the admin of the room, and
+            the admin password is in the admin store.
+        access: The access that the room gave at our last login: a
             :class:`~meshterm.core.models.RoomAccess` value.
-        label: The room's name, for display.
-        last_login: ISO-8601 timestamp of the last accepted login.
+        label: The name of the room, to show.
+        last_login: The ISO-8601 timestamp of the last accepted login.
     """
 
     key: str
@@ -55,13 +59,14 @@ class RoomMembership:
     label: str
     last_login: str
 
-    #: Fields this record once held and must never hold again under another meaning (see
-    #: :data:`meshterm.core.preferences.RETIRED` for why a name is never reused).
+    #: The fields that this record held before. It must never hold them again with a
+    #: different meaning (refer to :data:`meshterm.core.preferences.RETIRED` for the
+    #: reason that a name is never used again).
     RETIRED: ClassVar[frozenset[str]] = frozenset()
 
     @classmethod
     def read(cls, key: str, raw: object) -> RoomMembership | None:
-        """Build a record from one file entry, or ``None`` when it is not one we can use."""
+        """Build a record from one file entry, or ``None`` when MeshTerm cannot use it."""
         if not isinstance(raw, dict):
             return None
         password = raw.get("password")
@@ -77,7 +82,7 @@ class RoomMembership:
         )
 
     def to_json(self) -> dict:
-        """The record as written: its own fields and nothing it happened to be read with."""
+        """The record as written: its own fields only, not the other fields of the read entry."""
         return {
             "password": self.password,
             "access": self.access,
@@ -87,18 +92,18 @@ class RoomMembership:
 
 
 class RoomStore:
-    """Reads and writes the rooms this machine has joined."""
+    """Reads and writes the rooms that this machine joined."""
 
     def __init__(self, path: Path) -> None:
-        """Open the store against a JSON file location.
+        """Open the store on the location of a JSON file.
 
         Args:
-            path: Path to the JSON state file (created lazily on the first join).
+            path: Path to the JSON state file (made only at the first join).
         """
         self._path = path
 
     def _load(self) -> dict[str, RoomMembership]:
-        """Read every membership, keyed by room; empty on a missing or corrupt file."""
+        """Read all the memberships by room (empty if the file is missing or corrupt)."""
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -113,47 +118,49 @@ class RoomStore:
         return records
 
     def membership(self, room: Contact) -> RoomMembership | None:
-        """What we remember about ``room``, or ``None`` if we never joined it."""
+        """What MeshTerm remembers about ``room``, or ``None`` if it never joined the room."""
         return self._load().get(admin_key(room))
 
     def password(self, room: Contact) -> str | None:
-        """The room password to log in to ``room`` with, or ``None`` when none is remembered.
+        """The room password for a login to ``room``, or ``None`` when none is remembered.
 
-        ``""`` is a remembered password — the room is open — and an admin membership
-        remembers none here (its password is the admin store's).
+        ``""`` is a remembered password: the room is open. An admin membership remembers
+        no password here (its password is in the admin store).
         """
         record = self.membership(room)
         return record.password if record is not None else None
 
     def access(self, room: Contact) -> RoomAccess | None:
-        """The access ``room`` granted at our last login, or ``None`` if we never joined it."""
+        """The access from the last login to ``room``, or ``None`` if it was never joined."""
         record = self.membership(room)
         return RoomAccess(record.access) if record is not None else None
 
     def record(self, room: Contact, password: str, login: RoomLogin) -> None:
-        """Update what we remember about ``room`` from how a login to it ended.
+        """Change what MeshTerm remembers about ``room``, from the result of a login to it.
 
-        The admin store's credential policy (:meth:`~meshterm.core.admin_store.AdminStore.
-        record`), for the room password: kept when the room accepts it, forgotten when the
-        node *refuses* it, and left as it is when nothing came back — silence is not a
-        verdict, and from a room it is also how a wrong password sounds, so a password that
-        never once worked is simply never written.
+        For the room password, the function uses the credential policy of the admin store
+        (:meth:`~meshterm.core.admin_store.AdminStore.record`). The password is kept when
+        the room accepts it. It is forgotten when the node refuses it. It stays as it is
+        when no answer came back, because no answer is not a verdict. A room also gives no
+        answer to a wrong password. Thus a password that never worked is never written.
 
-        "Accepted" is not one proof, though, and a password is only kept for what it proved:
+        But "accepted" is not one single proof. A password is kept only for what it proved:
 
-        * **Admin** with a password typed in: the password is the admin store's to keep
-          (it is the room's admin password); here, only the access, beside whatever room
-          password was already remembered.
-        * **Member** with a password typed in: that password is the room password.
-        * **Read-only** proves nothing about the password at all — a room that lets
-          readers in lets *any* password in — so it never replaces one already
-          remembered, which may be a member's; it is kept only where nothing was.
-        * **Blank** asks "do you know me?" and proves only that the room does. It never
-          replaces a remembered password either: a member the room forgets on its next
-          restart would otherwise have swapped a password that works for one that can't.
+        * **Admin** with a typed password: the admin store keeps the password (it is the
+          admin password of the room). This store keeps only the access, next to the room
+          password that it already remembered.
+        * **Member** with a typed password: that password is the room password.
+        * **Read-only** proves nothing about the password. A room that lets read-only
+          users in lets any password in. Thus it never replaces a password that is
+          already remembered, which can be the password of a member. It is kept only
+          where no password was remembered.
+        * **Blank** asks "do you know me?" and proves only that the room knows our node.
+          It also never replaces a remembered password. Else, if the room forgets a
+          member at its next restart, the member loses a password that works, and keeps
+          only a password that cannot work.
 
         Args:
-            room: The room the login addressed.
+            room: The room to which the login went.
             password: The password that was tried.
             login: How the login ended.
         """
@@ -177,13 +184,13 @@ class RoomStore:
             )
             self._write(records)
         elif login.result is LoginResult.REFUSED and known is not None:
-            # Only the password the node turned down is forgotten.
+            # Forget only the password that the node refused.
             if known.password == password:
                 records.pop(key)
                 self._write(records)
 
     def forget(self, room: Contact) -> None:
-        """Remove everything remembered about ``room``.
+        """Remove all that MeshTerm remembers about ``room``.
 
         Args:
             room: The room to forget.
@@ -193,6 +200,6 @@ class RoomStore:
             self._write(records)
 
     def _write(self, records: dict[str, RoomMembership]) -> None:
-        """Persist ``records`` atomically with owner-only permissions where supported."""
+        """Write ``records`` atomically, with owner-only permissions where the OS has them."""
         data = {key: record.to_json() for key, record in records.items()}
         write_atomically(self._path, json.dumps(data, indent=2), owner_only=True)
