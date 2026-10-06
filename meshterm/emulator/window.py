@@ -18,7 +18,8 @@ Shift it saw, so the window sends the shifted key itself (:func:`lane_press`). T
 keys wear the lane's own fill, and take its Shift fill while Shift is down, as the chips
 above them do (:func:`lane_fills`). Closing the window leaves MeshTerm at once, as ^Q
 twice would. Ctrl+Shift+S saves the panel at its true size as a PNG in the working
-directory.
+directory. On a device whose launcher quits an app on a held Esc (the Cardputer Zero), Esc
+held in the window does the same (:mod:`~meshterm.services.hold_to_quit`).
 
 Tk runs on a thread of its own, the TUI on the main thread; the two meet only through the
 terminal's lock, a flag saying a frame is ready, and the function that types.
@@ -32,7 +33,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from ..services import modifier_watch
+from ..services import hold_to_quit, modifier_watch
 from ..ui.theme import MESH_THEME, MESH_THEME_16
 from ..ui.tui.fkeys import LaneDeck
 from .devices import EmulatedDevice
@@ -63,6 +64,11 @@ _NAMED = {
 }
 
 _SHIFTS = ("Shift_L", "Shift_R")
+
+#: How long a released Esc waits to be sure it was let go. An X server repeats a held key
+#: as a release and a press back to back, and the press arrives within this; a desktop
+#: that repeats with presses alone never sends the release until the key is up.
+_REPEAT_GAP_MS = 30
 
 #: A drawn lane key's cap, and the ink of the digit printed on it.
 _KEY_BODY = "#1d2025"
@@ -184,6 +190,9 @@ class EmulatorWindow:
         self._fills = lane_fills(device)
         self._shifted = False
         self._pressed: int | None = None
+        self._esc = hold_to_quit.EscKey(type_text)
+        self._esc_down = False
+        self._esc_letting_go: str | None = None
         self._ready = threading.Event()
         self._ready.set()
         self._closing = False
@@ -229,8 +238,9 @@ class EmulatorWindow:
         root.bind("<KeyPress>", self._on_press)
         root.bind("<KeyRelease>", self._on_release)
         # A Shift let go in another window never reaches this one; leaving it held here
-        # would keep the lane and the drawn keys in the Shift bank.
-        root.bind("<FocusOut>", lambda _: self._set_shift(False))
+        # would keep the lane and the drawn keys in the Shift bank — and an Esc left held
+        # would quit three seconds later.
+        root.bind("<FocusOut>", self._on_focus_out)
         root.protocol("WM_DELETE_WINDOW", self._on_close)
         root.focus_force()
         self._started.set()
@@ -302,6 +312,7 @@ class EmulatorWindow:
     def _press_lane(self, slot: int, state: int) -> None:
         data = lane_press(self._device, slot, shift=bool(state & _SHIFT_BIT))
         if data:
+            self._esc.before()
             self._type(data)
 
     def _set_shift(self, down: bool) -> None:
@@ -334,6 +345,9 @@ class EmulatorWindow:
         if event.keysym in _SHIFTS:
             self._set_shift(True)
             return
+        if event.keysym == "Escape" and self._device.hold_to_quit:
+            self._esc_pressed()
+            return
         if event.keysym in ("S", "s") and event.state & _CTRL_BIT and event.state & _SHIFT_BIT:
             self._save()
             return
@@ -341,11 +355,37 @@ class EmulatorWindow:
         if key is not None:
             data = encode(self._device.translate(key))
             if data:
+                self._esc.before()
                 self._type(data)
 
     def _on_release(self, event) -> None:
         if event.keysym in _SHIFTS:
             self._set_shift(False)
+        elif event.keysym == "Escape" and self._esc_down:
+            root = self._tk[0]
+            self._esc_letting_go = root.after(_REPEAT_GAP_MS, self._esc_released)
+
+    def _on_focus_out(self, _event) -> None:
+        self._set_shift(False)
+        if self._esc_down:
+            self._esc_released()
+
+    def _esc_pressed(self) -> None:
+        """Esc went down — or, straight after its release, the X server repeated it."""
+        if self._esc_letting_go is not None:
+            self._tk[0].after_cancel(self._esc_letting_go)
+            self._esc_letting_go = None
+            return
+        self._esc_down = True
+        self._esc.down()
+
+    def _esc_released(self) -> None:
+        """Esc is up, and no repeat followed: the hold is over."""
+        if self._esc_letting_go is not None:
+            self._tk[0].after_cancel(self._esc_letting_go)
+            self._esc_letting_go = None
+        self._esc_down = False
+        self._esc.up()
 
     def _on_close(self) -> None:
         # ^Q asks; a second ^Q while it asks leaves at once.

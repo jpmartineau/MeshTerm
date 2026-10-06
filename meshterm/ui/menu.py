@@ -421,6 +421,8 @@ async def run_menu(ctx: AppContext) -> None:
     ctx.ui = TuiUi(session)
     # The one quit confirm, asked by the menu's Quit row and by the quit chord from anywhere.
     session.set_quit_confirm(lambda: _confirm_quit(ctx, session))
+    # What a held Esc engages while its box is up, and the app keeps on its way out.
+    session.set_quiesce(lambda: _off_the_air(ctx))
 
     async def main() -> None:
         try:
@@ -448,6 +450,29 @@ async def run_menu(ctx: AppContext) -> None:
     with _silence_console_logging():
         await session.run(main())
     ctx.console.print("[muted]bye 73![/muted]")
+
+
+@asynccontextmanager
+async def _off_the_air(ctx: AppContext) -> AsyncIterator[None]:
+    """Hold the connected device's transmit lock: nothing new starts going on the air.
+
+    The app's quiesce (:meth:`~meshterm.ui.tui.session.TuiSession.set_quiesce`), held while
+    a held Esc's box is up and kept on the way out. The lock is what every transmission
+    takes (:mod:`~meshterm.core.transmit_lock`), so taking it waits for one under way —
+    a scoped channel send closes its window and puts the session scope back first — and
+    then holds the rest up: a courier retry, a scheduled advert. Letting go of Esc gives it
+    back and they go ahead. With no device connected there is nothing to hold, and it never
+    connects one just to hold it.
+
+    Args:
+        ctx: The shared application context.
+    """
+    lock = getattr(ctx._device, "transmit_lock", None)
+    if lock is None:
+        yield
+        return
+    async with lock.held():
+        yield
 
 
 async def _can_unpair(ctx: AppContext) -> bool:

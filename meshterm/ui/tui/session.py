@@ -16,7 +16,7 @@ import asyncio
 import os
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
-from contextlib import asynccontextmanager, nullcontext, suppress
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext, suppress
 from typing import Any
 
 from prompt_toolkit.application import Application
@@ -32,10 +32,12 @@ from rich.console import RenderableType
 from rich.text import Text
 
 from ...core import win32dll
+from ...persistence.logging import get_logger
 from ...platforms import get_platform
-from ...services import modifier_watch
+from ...services import hold_to_quit, modifier_watch
 from . import colsnap, fastrender, fkeys, frame
 from .emoji_width import ClusterTextControl
+from .holdquit import EscHoldWatch, Quiet
 from .overlay import BusyOverlay
 from .progress import TuiProgress
 from .prompt import (
@@ -354,6 +356,15 @@ def _color_depth() -> ColorDepth | None:
 #: real nesting — a tool's list, an item's detail popup, and a confirm over that is only three.
 _MAX_DIALOG_LAYERS = 8
 
+#: How long :meth:`TuiSession.leave` waits for the app's quiesce to take hold — for a
+#: transmission under way to finish — before it leaves anyway. On the Cardputer Zero the
+#: whole exit has to fit the launcher's three seconds between SIGTERM and SIGKILL
+#: (:data:`~meshterm.services.hold_to_quit.GRACE_S`), and the rest of it was measured at
+#: about one second there (2026-10-06).
+QUIESCE_WAIT_S = 1.0
+
+_log = get_logger()
+
 
 def _changed_rows(before: str, after: str) -> list[int] | None:
     """Which lines of a full-screen frame differ, or ``None`` when they can't be compared.
@@ -551,6 +562,12 @@ class TuiSession:
         # what turns the next ^Q into the leaving itself.
         self._quit_confirm: Callable[[], Awaitable[bool]] | None = None
         self._quit_asking = False
+        # What the app does to stop starting things before it may have to leave (see
+        # :meth:`set_quiesce`), the quiesce while it is held, and whether the app is on its
+        # way out — the one-way flag :meth:`leave` raises.
+        self._quiesce: Callable[[], AbstractAsyncContextManager[Any]] | None = None
+        self._quiet: Quiet | None = None
+        self._leaving = False
 
     # --- stack ---------------------------------------------------------------
 
@@ -699,6 +716,65 @@ class TuiSession:
         """Exit the running application, from under whatever flow is driving it."""
         if self._app is not None and self._app.is_running:
             self._app.exit()
+
+    def set_quiesce(self, enter: Callable[[], AbstractAsyncContextManager[Any]] | None) -> None:
+        """Declare how the app stops *starting* things, for when it may be about to leave.
+
+        Entered when a held Esc raises its box and left again if the reader lets go (see
+        :mod:`~meshterm.services.hold_to_quit`); entered on the way out by :meth:`leave`,
+        and then kept until the process ends. It must take nothing apart, since letting go
+        has to undo it: the app's own is to hold the device's transmit lock, so nothing new
+        goes on the air and a scoped channel send in flight closes its window first. The
+        app declares it, as it declares the quit confirm, because only the app has a
+        device.
+
+        Args:
+            enter: Makes the async context manager to hold, or ``None`` for nothing.
+        """
+        self._quiesce = enter
+
+    @property
+    def leaving(self) -> bool:
+        """Whether the app is on its way out (:meth:`leave`), which nothing calls back."""
+        return self._leaving
+
+    def quiet(self) -> Quiet:
+        """Engage the app's quiesce (:meth:`set_quiesce`), or return the one already held."""
+        if self._quiet is None:
+            self._quiet = Quiet(self._quiesce)
+        return self._quiet
+
+    def unquiet(self) -> None:
+        """Give the quiesce back — never once the app is leaving, which keeps it to the end."""
+        if self._quiet is not None and not self._leaving:
+            self._quiet.release()
+            self._quiet = None
+
+    def leave(self) -> None:
+        """Leave the app now, without asking — once nothing is mid-transmission.
+
+        The end of a held Esc, and the launcher's SIGTERM: a decision already made, so
+        there is no confirm. It is the same exit as Quit (:meth:`run` unwinds the flow and
+        the app tears down) with one step first: the app's quiesce is engaged, so a scoped
+        channel send under way closes its window before the device goes. That wait is
+        bounded by :data:`QUIESCE_WAIT_S`, because on the Cardputer Zero the launcher's
+        SIGKILL follows its SIGTERM by three seconds whatever the app is doing.
+
+        Idempotent and one-way: a SIGTERM landing on a hold that just ran out is the same
+        exit, not a second one.
+        """
+        if self._leaving:
+            return
+        self._leaving = True
+        hold_to_quit.leaving()
+        quiet = self.quiet()
+
+        async def go() -> None:
+            if not await quiet.engaged(QUIESCE_WAIT_S):
+                _log.warning("leaving with a transmission still under way")
+            self._exit_app()
+
+        self.run_detached(go())
 
     def request_pop_all(self) -> bool:
         """Arm the unwind to the navigation root (the ^W key). Returns whether it fired.
@@ -1702,13 +1778,26 @@ class TuiSession:
         def pre_run() -> None:
             task["driver"] = asyncio.ensure_future(driver())
 
-        # Don't let prompt_toolkit install its own loop exception handler: on any stray
-        # background-task error it prints a traceback and a "Press ENTER to continue..."
-        # prompt straight over the full-screen UI. With it disabled, asyncio's default
-        # handler logs such errors to the ``asyncio`` logger instead, which is routed to the
-        # file log (see :func:`meshterm.persistence.logging.configure_logging`) and never
-        # touches the screen. Errors from ``main`` still propagate via ``driver``/``box``.
-        await self._app.run_async(pre_run=pre_run, set_exception_handler=False)
+        # A held Esc, where a front end can tell one (the emulator's), raises the quit box,
+        # and the launcher's SIGTERM leaves through here too: see services.hold_to_quit.
+        # Listening costs nothing where nobody reports a key going down.
+        watch = EscHoldWatch(self, asyncio.get_running_loop())
+        hold_to_quit.listen(watch)
+        try:
+            # Don't let prompt_toolkit install its own loop exception handler: on any stray
+            # background-task error it prints a traceback and a "Press ENTER to continue..."
+            # prompt straight over the full-screen UI. With it disabled, asyncio's default
+            # handler logs such errors to the ``asyncio`` logger instead, which is routed to
+            # the file log (see :func:`meshterm.persistence.logging.configure_logging`) and
+            # never touches the screen. Errors from ``main`` still propagate via
+            # ``driver``/``box``.
+            await self._app.run_async(pre_run=pre_run, set_exception_handler=False)
+        finally:
+            # Whichever door it left by, the app is tearing down from here on, and a
+            # SIGTERM arriving now must join that rather than interrupt it.
+            self._leaving = True
+            hold_to_quit.leaving()
+            hold_to_quit.unlisten(watch)
         # The app can also exit from *under* the driver: the quit chords (^Q/^C) call
         # ``Application.exit`` from their detached confirm, or straight from the key handler
         # on the second press (see request_quit), so ``run_async`` returns while

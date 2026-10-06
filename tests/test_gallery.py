@@ -1614,6 +1614,14 @@ def _diagnostics_source() -> str:
     return markdown_source(report, when=datetime(2026, 9, 19, 17, 0))
 
 
+def _quit_hold(cols: int, rows: int) -> Screen:
+    """The box a held Esc raises, its bar half full: a second from the quit."""
+    from meshterm.services.hold_to_quit import DIALOG_S, QUIT_S
+    from meshterm.ui.tui.holdquit import HoldQuitDialog
+
+    return HoldQuitDialog(0.0, clock=lambda: (DIALOG_S + QUIT_S) / 2)
+
+
 def _share_qr(cols: int, rows: int) -> Screen:
     """The share screen: a contact card's code and link on a bare frame (the widest QR)."""
     from meshterm.ui.qr import QrScreen
@@ -1689,6 +1697,7 @@ _ENTRIES: list[_Entry] = [
     _Entry("preferences-weekly-advert", _preferences_weekly_advert),
     _Entry("cooldown_countdown", _cooldown_countdown),
     _Entry("reconnect_reason", _reconnect_reason),
+    _Entry("quit_hold", _quit_hold),
     _Entry("about_meshterm", _about_meshterm),
     _Entry("about_author", _about_author),
     _Entry("join_discord", _join_discord),

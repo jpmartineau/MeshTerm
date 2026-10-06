@@ -823,8 +823,32 @@ async def _serve(  # noqa: PLR0913 - the library modules run_node imported, hand
             except Exception as exc:  # noqa: BLE001 - keep going: the radio still needs freeing
                 log.warning("shutdown step failed: %s", exc)
         node.contacts.save_snapshot()
+        _forget_edge_threads(radio)
         radio.cleanup()
     return 0
+
+
+def _forget_edge_threads(radio: Any) -> None:
+    """Spare the radio's cleanup two seconds spent waiting on a thread that can't hear it.
+
+    The library watches the IRQ pin from a daemon thread parked in a 30-second ``poll``,
+    which its stop event cannot cut short, and ``cleanup()`` joins that thread for up to
+    two seconds before it closes the pins — so every shutdown waited the full two seconds
+    for nothing. On the Cardputer Zero that was 2.2 s of a 3.4 s exit, against the three
+    seconds the launcher allows between its SIGTERM and its SIGKILL (measured 2026-10-06).
+    The thread is a daemon and its line is the kernel's to release when the process ends,
+    so it is told to stop and then dropped from the manager's books, and cleanup closes the
+    pins without waiting on it. A library that keeps its threads somewhere else is left
+    alone: the cleanup is slower, not wrong.
+    """
+    manager = getattr(radio, "_gpio_manager", None)
+    stops = getattr(manager, "_edge_stop_events", None)
+    threads = getattr(manager, "_edge_threads", None)
+    if not isinstance(stops, dict) or not isinstance(threads, dict):
+        return
+    for stop in stops.values():
+        stop.set()
+    threads.clear()
 
 
 def apply_preamble(radio: Any, symbols: int) -> None:

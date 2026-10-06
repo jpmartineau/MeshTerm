@@ -5,7 +5,10 @@ The launcher starts an app with the screen to itself and tells it where things a
 ``APPLAUNCH_LINUX_FBDEV_DEVICE`` names the panel's framebuffer and
 ``APPLAUNCH_LINUX_KEYBOARD_DEVICE`` its keyboard, which it shares rather than grabs — so the
 app reads key events itself, while the launcher watches the same stream for a held Esc
-(3 s, then SIGTERM to the app's process group). This front end follows that contract.
+(3 s, then SIGTERM to the app's process group, and SIGKILL 3 s after that). This front end
+follows that contract: Esc goes through :mod:`~meshterm.services.hold_to_quit`, which shows
+the hold on the panel the launcher has stopped drawing, and the SIGTERM is taken as the
+quit it is (:func:`_leave_on_sigterm`).
 
 **Written ahead of the hardware** (2026-09-30), from M5's published sources: the
 framebuffer and keyboard paths and the Esc policy from the launcher, the key codes from the
@@ -32,7 +35,7 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 
-from ..services import modifier_watch
+from ..services import hold_to_quit, modifier_watch
 from .font import Font
 from .keys import Key, encode
 from .raster import Raster, rgb565
@@ -47,6 +50,9 @@ DEFAULT_KEYBOARD = "/dev/input/by-path/platform-3f804000.i2c-event"
 #: ``struct input_event`` on a 64-bit kernel: timeval, then type, code, value.
 _EVENT = struct.Struct("llHHi")
 _EV_KEY = 0x01
+
+#: ``KEY_ESC``: held, the launcher's way out (see :mod:`~meshterm.services.hold_to_quit`).
+_ESC = 1
 
 # Modifier key codes (linux/input-event-codes.h).
 _SHIFT = {42, 54}
@@ -228,6 +234,7 @@ class Device:
 
     def _read_keys(self) -> None:
         state = KeyState()
+        esc = hold_to_quit.EscKey(self._type)
         with open(self._keyboard, "rb", buffering=0) as stream:
             while not self._closing:
                 data = stream.read(_EVENT.size)
@@ -236,6 +243,13 @@ class Device:
                 _, _, kind, code, value = _EVENT.unpack(data)
                 if kind != _EV_KEY:
                     continue
+                if code == _ESC:
+                    # Down and its repeats are one hold; a tap is typed as it comes up.
+                    if value:
+                        esc.down()
+                    else:
+                        esc.up()
+                    continue
                 was_shifted = state.shift
                 key = state.event(code, value)
                 if state.shift != was_shifted:
@@ -243,12 +257,26 @@ class Device:
                 if key is not None:
                     sequence = encode(key)
                     if sequence:
+                        esc.before()
                         self._type(sequence)
 
 
 def _leave_on_sigterm() -> None:
-    """Treat the launcher's SIGTERM (a held Esc) as an interrupt, so MeshTerm cleans up."""
-    signal.signal(signal.SIGTERM, signal.default_int_handler)
+    """Take the launcher's SIGTERM — the end of a held Esc — as a quit, not an interrupt.
+
+    With the TUI running, MeshTerm leaves the way a held Esc does when its bar runs out
+    (:func:`~meshterm.services.hold_to_quit.terminate`): from its own event loop, between
+    two keys, once nothing is mid-transmission. One that lands on an exit already under way
+    — the bar ran out a moment before — joins it, where an interrupt raised wherever the
+    main thread happened to be used to cut the teardown short. Before the TUI starts there
+    is nothing to put away, and it stops as an interrupt would.
+    """
+
+    def on_term(signum: int, frame: object) -> None:
+        if not hold_to_quit.terminate():
+            raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, on_term)
 
 
 def front_end():

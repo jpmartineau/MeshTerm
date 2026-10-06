@@ -755,6 +755,16 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   `fontset.CARDPUTER_ZERO_CODEPOINTS`, named by `Platform.font` as the PicoCalc's is; the fold
   derives everything from the platform's font (accents, emoji, the `?` net) and quantizes
   colour only where `truecolor` is off.
+- **A held Esc is the Cardputer's way out** (`services/hold_to_quit.py`, from the
+  launcher's own source): Esc down 3 s and the launcher SIGTERMs the app's process group,
+  SIGKILL 3 s later, letting go or not. So on that device (`EmulatedDevice.hold_to_quit`,
+  the window included) Esc is typed on its *release*; a 1 s hold floats
+  `holdquit.HoldQuitDialog`, whose bar runs out at 3 s, and engages the app's quiesce
+  (`TuiSession.set_quiesce`: the menu holds the transmit lock), given back if the reader
+  lets go. `TuiSession.leave` is the one exit that asks nothing — the hold running out and
+  the SIGTERM both take it, and a second one joins it. The whole exit must fit the
+  launcher's 3 s grace: 1.3 s measured with the Cap (2026-10-06), so don't add a slow step
+  to teardown.
 - `meshterm specimen` prints the whole visual language through the real funnels — the
   acceptance card on-device, a preview under `--platform picocalc-lyra` on the desktop.
 - Dev loop: `meshterm --mock --platform picocalc-lyra` in a 53×40 window, or

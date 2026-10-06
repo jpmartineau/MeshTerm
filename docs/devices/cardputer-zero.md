@@ -51,8 +51,12 @@ character on the screen itself and reads the keys directly.
 - The row of function-key labels along the bottom of the screen, driven by **Fn+4** to
   **Fn+8**, the keys that sit right under the display. **Shift** with them is a second set.
 - M5Stack's Cap LoRa-1262 radio add-on (see [Radios](#radios)).
-- Holding **Esc** for three seconds, which is how the launcher closes any app, closes
-  MeshTerm properly.
+- Holding **Esc** to quit, which is how the launcher closes any app. After a second,
+  MeshTerm shows a box saying so, with a bar that fills over the next two seconds, and it
+  stops sending anything new over the radio while the box is up. Let go before the bar
+  fills and you're back where you were. Hold on, and MeshTerm saves everything and closes
+  in good time, before the launcher would force it. A quick press of **Esc** still goes
+  back a screen, as it does everywhere else.
 
 **Not done:**
 
@@ -136,7 +140,8 @@ In the window, your keyboard's **F4** to **F8** stand in for **Fn+4** to **Fn+8*
 holding **Shift** shows the second set. You can click the keys instead, either the ones
 drawn under the screen or the coloured keys along its bottom row; hold **Shift** while you
 click for the second set. **Ctrl+Shift+S** saves a screenshot at the screen's
-real size. Closing the window quits MeshTerm.
+real size. Closing the window quits MeshTerm, and so does holding **Esc** for three
+seconds, as it does on the device.
 
 ## Radios
 
