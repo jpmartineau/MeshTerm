@@ -26,7 +26,7 @@ from ..core.discovery import (
     discover_devices,
 )
 from ..core.selection import DeviceSelectionError
-from ..core.spiradio import spi_radios
+from ..core.spiradio import spi_radios, without_radio_ports
 from .base import Tool, ToolResult, register
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -77,7 +77,9 @@ class DevicesTool(Tool):
             scan_ble = params.get("ble", True)
             devices = await discover_all(ble=scan_ble) if scan_ble else discover_devices()
             # A radio on the SPI bus is attached the way a serial port is, but nothing
-            # enumerates it: it is listed from its device node, as the device screen lists it.
+            # enumerates it: it is listed from its device node, as the device screen lists it
+            # — and the port its board's GPS answers on is listed as part of it, not beside it.
+            devices = without_radio_ports(devices, ctx.settings.profiles)
             devices += spi_radios(ctx.settings.profiles, devices)
         known = ctx.device_store.load_all()
         remembered = ctx.device_store.load()

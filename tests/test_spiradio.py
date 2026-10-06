@@ -23,7 +23,7 @@ from meshterm.core import spiradio
 from meshterm.core.admin_store import AdminStore
 from meshterm.core.config import DeviceProfile, Settings, SpiWiring
 from meshterm.core.device_store import DeviceStore
-from meshterm.core.discovery import TRANSPORT_SPI, spi_device
+from meshterm.core.discovery import TRANSPORT_SPI, DiscoveredDevice, spi_device
 from meshterm.persistence.repository import Repository
 
 # --- wiring --------------------------------------------------------------------------------
@@ -304,6 +304,47 @@ def test_the_cardputer_cap_wiring_is_the_one_the_hardware_answered_on() -> None:
     assert cap.leds == ("ext_5v_out=1", "ext_usb_gpio_fun=0")
     assert (cap.pi4io_bus, cap.pi4io_address, cap.pi4io_high) == (1, 0x43, (0,))
     assert cap.use_dio2_rf and cap.use_dio3_tcxo
+    # Its GPS, read at 115200 on the header's UART while the Cap was powered.
+    assert (cap.gps_port, cap.gps_baud) == ("/dev/serial0", 115200)
+
+
+def test_a_board_s_gps_comes_from_the_table() -> None:
+    """A GPS beside the radio is wiring too: a port and the speed it talks at."""
+    wiring = SpiWiring.from_toml({"gps_port": "/dev/ttyAMA0", "gps_baud": 38400})
+    assert (wiring.gps_port, wiring.gps_baud) == ("/dev/ttyAMA0", 38400)
+    assert (SpiWiring().gps_port, SpiWiring().gps_baud) == ("", 9600)  # none, NMEA's speed
+    with pytest.raises(ValueError, match="gps_baud = 'fast' is not a int"):
+        SpiWiring.from_toml({"gps_baud": "fast"})
+
+
+@pytest.fixture()
+def serial0(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``/dev/serial0`` as Raspberry Pi OS makes it: a link to the UART the scan reports."""
+    links = {"/dev/serial0": "/dev/ttyS0"}
+    monkeypatch.setattr(spiradio.os.path, "realpath", lambda p: links.get(p, p))
+
+
+#: The Cap's GPS as pyserial reports it: a header UART with no USB identity, so "n/a".
+_GPS_PORT = DiscoveredDevice(port="/dev/ttyS0", description="n/a", hwid="n/a")
+_USB_BOARD = DiscoveredDevice(port="/dev/ttyACM0", description="T1000-E", vid=0x239A)
+
+
+def test_the_cap_s_gps_is_part_of_the_radio_not_a_companion(cardputer: Path, serial0) -> None:  # noqa: ANN001
+    """The port the Cap's GPS answers on is left out wherever the Cap is listed."""
+    assert spiradio.without_radio_ports([_GPS_PORT, _USB_BOARD], {}) == [_USB_BOARD]
+
+
+def test_the_same_port_on_another_pi_is_left_listed(cardputer: Path, serial0) -> None:  # noqa: ANN001
+    """No Cardputer, no Cap: whatever answers on that UART is somebody else's to choose."""
+    cardputer.rmdir()
+    assert spiradio.without_radio_ports([_GPS_PORT, _USB_BOARD], {}) == [_GPS_PORT, _USB_BOARD]
+
+
+def test_a_profile_s_gps_port_is_its_radio_s(cardputer: Path, serial0) -> None:  # noqa: ANN001
+    """A profile naming its own GPS claims that port, and the shipped Cap's is not assumed."""
+    mine = replace(spiradio.CARDPUTER_ZERO_CAP, gps_port="/dev/ttyACM0")
+    profiles = {"cap": DeviceProfile(name="cap", transport="spi", spi=mine)}
+    assert spiradio.without_radio_ports([_GPS_PORT, _USB_BOARD], profiles) == [_GPS_PORT]
 
 
 # --- finding a Python for the node ---------------------------------------------------------

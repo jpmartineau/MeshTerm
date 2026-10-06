@@ -288,6 +288,7 @@ en_pins = [27]   # the AIO v2 needs this
 | `use_dio2_rf`, `use_dio3_tcxo` | `true`, `true` | Whether DIO2 drives the RF switch and DIO3 a TCXO (both on for the AIO). |
 | `is_waveshare` | `false` | The Waveshare HAT's wiring quirks, which the radio library knows about. |
 | `python` | `""` (empty) | An interpreter to run the node under, when the one MeshTerm would find on its own isn't the one you want. Empty lets MeshTerm look. |
+| `gps_port`, `gps_baud` | `""`, `9600` | A GPS receiver on the same board: its serial port (empty for none) and its speed. The node runs it the way MeshCore firmware runs a board's GPS, switched on from Device config's **GPS** row, and the device screen stops listing the port as a companion. The Cardputer Zero's Cap needs no profile, but this is what one would say: `"/dev/serial0"`, `115200`. |
 
 An unknown key, or one of the wrong type, stops MeshTerm at startup with the profile
 named — a misspelt pin is never silently ignored.

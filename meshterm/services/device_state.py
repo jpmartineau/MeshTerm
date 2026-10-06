@@ -14,7 +14,9 @@ screens feel like it stalled.
 
 None of that data actually changes mid-navigation:
 
-* **self-info** and **path-hash mode** change only when the config editor writes them;
+* **self-info** changes when the config editor writes it, and otherwise only in its
+  position, which a node with a GPS running moves by itself as it travels;
+* **path-hash mode** changes only when the config editor writes it;
 * **channel slots** change only when the channel editor saves one;
 * **channel-slot capacity** is a fixed firmware build constant — it never changes at all
   within a connection, so it is simply held for the session and only dropped on a reconnect;
@@ -27,6 +29,8 @@ copy instantly. The two rules that keep the cache honest:
 * **Contacts** use *stale-while-revalidate*: a read past :data:`_CONTACTS_TTL_S` returns the
   cached list immediately and refreshes it in the background, so navigation is never blocked
   on the slow call, yet newly-heard contacts still appear within a TTL of the next screen.
+  **Self-info** does the same past :data:`_SELF_INFO_TTL_S`, so a screen opened after the
+  node has moved shows where it is now.
 * Everything else is held until an in-app write **invalidates** it (see
   :meth:`invalidate_self_info`, :meth:`invalidate_channels`, …); the writer is the only thing
   that can change it, so it is also the only thing that needs to drop the cache.
@@ -57,6 +61,12 @@ if TYPE_CHECKING:
 #: nothing, while re-reading the (slow) table on every screen open cost seconds. A read past
 #: this age still returns instantly from cache; the refresh happens behind it.
 _CONTACTS_TTL_S = 90.0
+
+#: How long the node's own self-info is served before a read also refreshes it behind the
+#: answer (seconds). Only the position moves without the app writing it — a GPS updating
+#: it as the node travels — and one small frame a minute keeps every screen opened after a
+#: move honest about where the node is, at no cost to navigation.
+_SELF_INFO_TTL_S = 60.0
 
 
 def _aware(when: datetime | None) -> datetime | None:
@@ -95,6 +105,7 @@ class DeviceState:
         self._contacts: list[Contact] | None = None
         self._contacts_at: float = 0.0
         self._self_info: dict | None = None
+        self._self_info_at: float = 0.0
         self._path_hash_mode: int | None = None
         self._channels: list[ChannelSlot] | None = None
         self._channels_epoch = 0
@@ -250,22 +261,45 @@ class DeviceState:
         except Exception as exc:  # noqa: BLE001 - a stale list is fine; never surface here
             self._ctx.log.debug("devstate: background contacts refresh failed: %s", exc)
 
-    # -- self-info (held until an in-app write invalidates it) ------------------
+    # -- self-info (stale-while-revalidate; an in-app write invalidates it) -------
 
     async def self_info(self) -> dict:
-        """Return the node's own self-info, cached until the config editor invalidates it.
+        """Return the node's own self-info, cached and refreshed lazily like the contacts.
+
+        The first call reads it from the radio; later calls return the cached copy at once,
+        and past :data:`_SELF_INFO_TTL_S` also re-read it in the background, for the position
+        a GPS moves. The config editor still invalidates it outright when it writes.
 
         Returns:
             The self-info payload (identity, radio tuning, coordinates, tx power). Raises like
-            :meth:`~meshterm.core.connection.Device.get_self_info` if the fetch fails; the
-            failure is not cached, so the next call retries.
+            :meth:`~meshterm.core.connection.Device.get_self_info` if the first fetch fails;
+            the failure is not cached, so the next call retries.
         """
         if self._self_info is None:
-            async with self._self_info_lock:
-                if self._self_info is None:
-                    device = await self._ctx.device()
-                    self._self_info = dict(await device.get_self_info())
+            return await self._fetch_self_info()
+        if time.monotonic() - self._self_info_at > _SELF_INFO_TTL_S:
+            self._spawn(self._refresh_self_info_quietly())
         return self._self_info
+
+    async def _fetch_self_info(self) -> dict:
+        """Read the self-info from the device and cache it (blocking, deduplicated)."""
+        async with self._self_info_lock:
+            if (
+                self._self_info is not None
+                and time.monotonic() - self._self_info_at <= _SELF_INFO_TTL_S
+            ):
+                return self._self_info
+            device = await self._ctx.device()
+            self._self_info = dict(await device.get_self_info())
+            self._self_info_at = time.monotonic()
+            return self._self_info
+
+    async def _refresh_self_info_quietly(self) -> None:
+        """Background self-info refresh: a failure keeps the copy already held."""
+        try:
+            await self._fetch_self_info()
+        except Exception as exc:  # noqa: BLE001 - a stale copy is fine; never surface here
+            self._ctx.log.debug("devstate: background self-info refresh failed: %s", exc)
 
     def peek_self_info(self) -> dict | None:
         """The self-info already in hand, or ``None`` — never a radio read.

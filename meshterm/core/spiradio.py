@@ -45,7 +45,7 @@ from pathlib import Path
 
 from .config import DeviceProfile, SpiWiring
 from .connection import DeviceCommandError, MeshCoreDevice
-from .discovery import DiscoveredDevice, spi_device
+from .discovery import TRANSPORT_SERIAL, DiscoveredDevice, spi_device
 
 _log = logging.getLogger(__name__)
 
@@ -211,7 +211,9 @@ def gpio_chip(wiring: SpiWiring) -> int:
 #: pins (reset, interrupt) reach the chip only while ``ext_usb_gpio_fun`` routes them to GPIO
 #: rather than to USB. Its PI4IOE5V6408 at 0x43 on I2C 1 enables the RF path from pin P0,
 #: which Meshtastic's Cardputer variant drives the same way. DIO2 switches the antenna and
-#: DIO3 feeds a 1.8 V TCXO, as on the AIO.
+#: DIO3 feeds a 1.8 V TCXO, as on the AIO. Its GPS talks NMEA at 115200 on the header's
+#: UART, which is the Pi's ``serial0`` (``/dev/ttyS0`` on the Zero) — powered, like the
+#: radio, by ``ext_5v_out``, so it speaks only while the node runs.
 CARDPUTER_ZERO_CAP = SpiWiring(
     bus_id=0,
     cs_id=1,
@@ -222,6 +224,8 @@ CARDPUTER_ZERO_CAP = SpiWiring(
     pi4io_bus=1,
     pi4io_address=0x43,
     pi4io_high=(0,),
+    gps_port="/dev/serial0",
+    gps_baud=115200,
 )
 
 
@@ -283,6 +287,20 @@ def spi_radios(
         One SPI :class:`~meshterm.core.discovery.DiscoveredDevice` per radio not in ``listed``.
     """
     seen = {d.stable_id for d in listed}
+    radios: list[DiscoveredDevice] = []
+    for wiring, name in _present_wirings(profiles):
+        device = spi_device(wiring, name=name)
+        if device.stable_id in seen:
+            continue
+        seen.add(device.stable_id)
+        radios.append(device)
+    return radios
+
+
+def _present_wirings(
+    profiles: Mapping[str, DeviceProfile] | None,
+) -> list[tuple[SpiWiring, str]]:
+    """Each radio on this machine's SPI bus as ``(wiring, name)``: profiles first, then boards."""
     wirings = [(p.spi or SpiWiring(), p.name) for p in (profiles or {}).values() if p.is_spi]
     wirings = [(w, name) for w, name in wirings if spi_present(w)]
     covered = {wiring.spidev for wiring, _name in wirings}
@@ -290,14 +308,32 @@ def spi_radios(
         if builtin.wiring.spidev not in covered and builtin.present():
             wirings.append((builtin.wiring, builtin.name))
             covered.add(builtin.wiring.spidev)
-    radios: list[DiscoveredDevice] = []
-    for wiring, name in wirings:
-        device = spi_device(wiring, name=name)
-        if device.stable_id in seen:
-            continue
-        seen.add(device.stable_id)
-        radios.append(device)
-    return radios
+    return wirings
+
+
+def without_radio_ports(
+    devices: Iterable[DiscoveredDevice], profiles: Mapping[str, DeviceProfile] | None
+) -> list[DiscoveredDevice]:
+    """``devices`` less the serial ports a radio on the SPI bus owns — its board's GPS.
+
+    A board's GPS answers a port scan like any serial device, and with nothing to name it
+    (no USB identity, so pyserial calls it ``n/a``) it was listed beside the radio as a
+    companion to connect to: on a Cardputer Zero with its Cap, a row of its own above or
+    below the Cap, and with nothing remembered, the one port a command-line connect would
+    pick. It is the radio's node that reads it, so wherever that radio is listed, the port
+    is not. Matched by the port's real path, since a wiring names the stable alias
+    (``/dev/serial0``) and the scan the device it points at (``/dev/ttyS0``).
+    """
+    owned = {
+        os.path.realpath(wiring.gps_port)
+        for wiring, _name in _present_wirings(profiles)
+        if wiring.gps_port
+    }
+    return [
+        d
+        for d in devices
+        if not (d.transport == TRANSPORT_SERIAL and d.port and os.path.realpath(d.port) in owned)
+    ]
 
 
 # --- finding a Python with the radio library -----------------------------------------------
@@ -652,6 +688,8 @@ async def start_node(wiring: SpiWiring, state: Path, *, node_name: str) -> NodeP
             "use_dio2_rf": wiring.use_dio2_rf,
             "use_dio3_tcxo": wiring.use_dio3_tcxo,
             "is_waveshare": wiring.is_waveshare,
+            "gps_port": wiring.gps_port,
+            "gps_baud": wiring.gps_baud,
         },
         "seed": {"node_name": node_name, **DEFAULT_SEED},
     }

@@ -114,6 +114,13 @@ class SpiWiring:
         is_waveshare: The Waveshare HAT's wiring quirks, which the radio library knows.
         python: An interpreter to run the node under, when the one MeshTerm would find
             is not the one you want. Empty to let MeshTerm look.
+        gps_port: The serial port of a GPS receiver on the same board, or empty for none.
+            The node runs it the way MeshCore firmware runs a board's GPS — a ``gps``
+            switch and a ``gps_interval`` on Device config — and the port is the radio's,
+            so the device screen doesn't offer it as a companion. The Cardputer Zero's Cap
+            has one on ``/dev/serial0``.
+        gps_baud: The receiver's line speed. NMEA's own default is 9600; the Cap's runs at
+            115200.
     """
 
     bus_id: int = 1
@@ -135,6 +142,8 @@ class SpiWiring:
     use_dio3_tcxo: bool = True
     is_waveshare: bool = False
     python: str = ""
+    gps_port: str = ""
+    gps_baud: int = 9600
 
     #: Keys this table once took and must never take again under another meaning (see
     #: :data:`meshterm.core.preferences.RETIRED`). ``preamble_length`` was never wiring: it is

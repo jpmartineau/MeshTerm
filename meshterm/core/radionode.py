@@ -22,10 +22,18 @@ state directory the parent names instead:
 
 =================  =============================================================
 ``identity.key``   the node's private seed — its identity on the mesh
-``prefs.json``     name, radio settings, TX power, position, the other prefs
+``prefs.json``     name, radio settings, TX power, position, the other prefs —
+                   and, on a board with a GPS, its switch and interval
 ``channels.json``  the channel table, slot by slot
 ``contacts.json``  the contact list
 =================  =============================================================
+
+**What firmware would do with a GPS, this does.** A board whose wiring names a GPS port
+(the Cardputer Zero's Cap) gets the two settings MeshCore's companion firmware gives a
+board with a receiver — ``gps`` to run it and ``gps_interval`` to pace it — reported and
+set as custom variables, which is where MeshTerm's Device config already looks for them.
+While it runs, a valid fix becomes the node's position: the one its self-info reports
+and, when the node shares its location, its adverts carry (:class:`Gps`).
 
 **Talking to the parent.** The parent reads exactly one JSON line from this process's
 stdout: ``{"event": "ready", "port": …, "public_key": …}`` once the frame server is
@@ -46,12 +54,15 @@ from __future__ import annotations
 import argparse
 import asyncio
 import dataclasses
+import functools
 import json
 import logging
+import operator
 import os
 import signal
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -362,8 +373,6 @@ def prepare_board(wiring: dict) -> list[tuple[Path, str]]:
     """
     previous = set_leds(list(wiring.get("leds") or ()), root=LEDS)
     if previous:
-        import time
-
         time.sleep(POWER_SETTLE_S)
     try:
         if int(wiring.get("pi4io_bus", -1)) >= 0:
@@ -376,6 +385,227 @@ def prepare_board(wiring: dict) -> list[tuple[Path, str]]:
         restore_leds(previous)
         raise
     return previous
+
+
+# --- the GPS beside the chip ---------------------------------------------------------------
+
+#: The custom variables a board with a GPS answers to, by MeshCore firmware's own names.
+GPS_VARS = ("gps", "gps_interval")
+
+#: The firmware's ceiling on ``gps_interval`` (``constrain(…, 0, 86400)``): one day.
+GPS_INTERVAL_MAX_S = 86400
+
+#: NMEA allows a sentence 82 characters; a partial line well past that is noise on the wire,
+#: not a sentence still arriving, and is dropped rather than grown.
+_NMEA_MAX = 512
+
+
+def nmea_fix(line: str) -> tuple[float, float] | None:
+    """The position one NMEA sentence reports as a valid fix, as ``(lat, lon)``, or ``None``.
+
+    Two sentences carry a fix, from any constellation's talker (``GP``, ``GN``, ``GL``,
+    ``GA``, ``GB``…): RMC, valid when its status is ``A``, and GGA, valid when its fix
+    quality isn't ``0``. Everything else is ``None`` — another sentence, a sentence whose
+    checksum doesn't match (a byte lost on the wire), a field that isn't a coordinate, and
+    the no-fix sentences a receiver sends until it has one.
+    """
+    line = line.strip()
+    body, star, given = line.removeprefix("$").partition("*")
+    if not line.startswith("$") or not star or len(given) < 2:
+        return None
+    try:
+        if int(given[:2], 16) != functools.reduce(operator.xor, body.encode("ascii", "replace"), 0):
+            return None
+    except ValueError:
+        return None
+    fields = body.split(",")
+    kind = fields[0][-3:]
+    if kind == "RMC" and len(fields) > 6 and fields[2] == "A":
+        coords = fields[3:7]
+    elif kind == "GGA" and len(fields) > 6 and fields[6] not in ("", "0"):
+        coords = fields[2:6]
+    else:
+        return None
+    try:
+        return _degrees(coords[0], coords[1], "NS", 2), _degrees(coords[2], coords[3], "EW", 3)
+    except ValueError:
+        return None
+
+
+def _degrees(value: str, hemisphere: str, hemispheres: str, degree_digits: int) -> float:
+    """NMEA's ``ddmm.mmmm`` (``dddmm.mmmm`` east–west) and its hemisphere, as signed degrees."""
+    if len(hemisphere) != 1 or hemisphere not in hemispheres or len(value) <= degree_digits:
+        raise ValueError(value)
+    minutes = float(value[degree_digits:])
+    unsigned = int(value[:degree_digits]) + minutes / 60
+    if not 0 <= minutes < 60 or unsigned > (90 if degree_digits == 2 else 180):
+        raise ValueError(value)
+    return -unsigned if hemisphere == hemispheres[1] else unsigned
+
+
+def _saved_int(saved: dict, key: str, default: int) -> int:
+    """``saved[key]`` as an int, or ``default`` where it is missing or isn't one."""
+    try:
+        return int(saved.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
+class Gps:
+    """The board's GPS receiver, run the way MeshCore companion firmware runs one.
+
+    Two settings, under the firmware's names and with its defaults: ``gps``, off until it is
+    switched on and remembered across restarts, and ``gps_interval``, the seconds between
+    position updates — ``0``, the default, takes every fix, which is the firmware's one a
+    second. The receiver's NMEA is read on the node's own event loop (a few sentences a
+    second is nothing beside the radio), and a valid fix is written into the node's
+    preferences, which is where its self-info frame and its adverts both read the position
+    from. Firmware keeps a fix in RAM only; here the position is saved with the node's other
+    preferences whenever they are, and once more as the node shuts down, so a restart
+    indoors begins from the last fix rather than from a position set by hand long ago.
+
+    Attributes:
+        port: The receiver's serial port.
+        baud: Its line speed.
+        enabled: Whether ``gps`` is on.
+        interval_s: ``gps_interval``.
+        node: The companion whose position a fix moves; set once it exists.
+        moved: Whether a fix has moved the position since the preferences were last saved.
+    """
+
+    def __init__(self, port: str, baud: int, saved: Any = None) -> None:
+        """Take the port and speed from the wiring, and the two settings from ``prefs.json``."""
+        saved = saved if isinstance(saved, dict) else {}
+        self.port = port
+        self.baud = baud
+        self.enabled = _saved_int(saved, "gps_enabled", 0) == 1
+        self.interval_s = min(max(_saved_int(saved, "gps_interval", 0), 0), GPS_INTERVAL_MAX_S)
+        self.node: Any = None
+        self.moved = False
+        self._fd: int | None = None
+        self._pending = b""
+        self._next_at = 0.0
+        self._fixed = False
+
+    @property
+    def running(self) -> bool:
+        """Whether the receiver's port is open and being read."""
+        return self._fd is not None
+
+    def custom_vars(self) -> dict[str, str]:
+        """The two settings as the firmware reports them: ``gps`` says whether it *runs*."""
+        return {"gps": "1" if self.running else "0", "gps_interval": str(self.interval_s)}
+
+    def saved(self) -> dict[str, int]:
+        """The two settings as ``prefs.json`` keeps them, under the firmware's field names."""
+        return {"gps_enabled": int(self.enabled), "gps_interval": self.interval_s}
+
+    def set_var(self, name: str, value: str) -> bool:
+        """Set ``gps`` or ``gps_interval``; ``False`` refuses the value, changing nothing."""
+        value = value.strip()
+        if name == "gps" and value in ("0", "1"):
+            if value == "1":
+                try:
+                    self.start()
+                except OSError as exc:
+                    log.warning("GPS on %s did not open: %s", self.port, exc)
+                    return False
+            else:
+                self.stop()
+            self.enabled = value == "1"
+            return True
+        if name == "gps_interval":
+            try:
+                seconds = int(value)
+            except ValueError:
+                return False
+            self.interval_s = min(max(seconds, 0), GPS_INTERVAL_MAX_S)
+            self._next_at = 0.0  # the new pace counts from the next fix
+            return True
+        return False
+
+    def start(self) -> None:
+        """Open the port raw at the receiver's speed and read it on the running loop.
+
+        Raises:
+            OSError: The port can't be opened or set up (missing, not ours, not a tty).
+        """
+        if self._fd is not None:
+            return
+        import termios
+        import tty
+
+        speed = getattr(termios, f"B{self.baud}", None)
+        if speed is None:
+            raise OSError(f"{self.baud} is not a line speed this system has")
+        fd = os.open(self.port, os.O_RDONLY | os.O_NOCTTY | os.O_NONBLOCK)
+        try:
+            tty.setraw(fd)
+            attrs = termios.tcgetattr(fd)
+            attrs[4] = attrs[5] = speed  # input and output speed
+            attrs[2] |= termios.CLOCAL | termios.CREAD
+            termios.tcsetattr(fd, termios.TCSANOW, attrs)
+            termios.tcflush(fd, termios.TCIFLUSH)
+            asyncio.get_running_loop().add_reader(fd, self._readable)
+        except termios.error as exc:
+            os.close(fd)
+            raise OSError(f"{self.port} is not a serial port ({exc})") from None
+        except BaseException:
+            os.close(fd)
+            raise
+        self._fd, self._pending, self._next_at, self._fixed = fd, b"", 0.0, False
+        log.info("GPS on %s at %d baud", self.port, self.baud)
+
+    def stop(self) -> None:
+        """Stop reading and close the port; the position keeps the last fix."""
+        fd, self._fd = self._fd, None
+        if fd is None:
+            return
+        try:
+            asyncio.get_running_loop().remove_reader(fd)
+        except RuntimeError:  # no loop left to remove it from: closing is enough
+            pass
+        os.close(fd)
+        log.info("GPS on %s stopped", self.port)
+
+    def _readable(self) -> None:
+        """Read what the port has; a port that hangs up or fails is stopped, not retried."""
+        try:
+            chunk = os.read(self._fd, 4096)  # type: ignore[arg-type]
+        except BlockingIOError:
+            return
+        except OSError as exc:
+            log.warning("GPS on %s failed: %s", self.port, exc)
+            self.stop()
+            return
+        if not chunk:  # hung up: it would read as ready forever
+            log.warning("GPS on %s hung up", self.port)
+            self.stop()
+            return
+        self.feed(chunk)
+
+    def feed(self, chunk: bytes, now: float | None = None) -> None:
+        """Take bytes as they arrive and act on each whole sentence among them."""
+        *lines, self._pending = (self._pending + chunk).split(b"\n")
+        if len(self._pending) > _NMEA_MAX:
+            self._pending = b""
+        for raw in lines:
+            fix = nmea_fix(raw.decode("ascii", "replace"))
+            if fix is not None:
+                self._take(fix, time.monotonic() if now is None else now)
+
+    def _take(self, fix: tuple[float, float], now: float) -> None:
+        """Make ``fix`` the node's position, once per interval."""
+        if self.node is None or now < self._next_at:
+            return
+        if not self._fixed:  # once a start, and never where: a log is pasted into issues
+            log.info("GPS has a fix")
+            self._fixed = True
+        prefs = self.node.prefs
+        if (prefs.latitude, prefs.longitude) != fix:
+            prefs.latitude, prefs.longitude = fix
+            self.moved = True
+        self._next_at = now + max(self.interval_s, 1)
 
 
 def _persist_contacts(store: Any, path: Path) -> None:
@@ -475,7 +705,13 @@ async def _serve(  # noqa: PLR0913 - the library modules run_node imported, hand
         spreading_factor=seed.get("spreading_factor", 7),
         coding_rate=seed.get("coding_rate", 5),
     )
-    apply_saved_prefs(prefs, _read_json(state / "prefs.json"))
+    saved_prefs = _read_json(state / "prefs.json")
+    apply_saved_prefs(prefs, saved_prefs)
+    gps = (
+        Gps(str(wiring["gps_port"]), int(wiring.get("gps_baud") or 9600), saved_prefs)
+        if wiring.get("gps_port")
+        else None
+    )
 
     SX1262Radio = sx1262.SX1262Radio
     kwargs = radio_kwargs(inspect.signature(SX1262Radio.__init__).parameters, wiring, prefs)
@@ -511,7 +747,7 @@ async def _serve(  # noqa: PLR0913 - the library modules run_node imported, hand
             state, lambda: identity_mod.LocalIdentity().get_signing_key_bytes()
         )
         identity = identity_mod.LocalIdentity(seed_bytes)
-        node = _persistent_companion(companion_mod.CompanionRadio, state)(
+        node = _persistent_companion(companion_mod.CompanionRadio, state, gps)(
             radio,
             identity,
             node_name=prefs.node_name,
@@ -540,6 +776,13 @@ async def _serve(  # noqa: PLR0913 - the library modules run_node imported, hand
         )
 
         await node.start()
+        if gps is not None:
+            gps.node = node
+            if gps.enabled:
+                try:
+                    gps.start()
+                except OSError as exc:  # the radio still works; `gps` reads 0 until it opens
+                    log.warning("GPS on %s did not open: %s", gps.port, exc)
         public_key = node.get_public_key()
         server = companion_mod.CompanionFrameServer(
             bridge=node,
@@ -566,6 +809,10 @@ async def _serve(  # noqa: PLR0913 - the library modules run_node imported, hand
         await _until_told_to_stop()
     finally:
         log.info("shutting down")
+        if gps is not None:
+            gps.stop()
+            if gps.moved:
+                node._save_prefs()  # the last fix, so a restart begins where the node was
         for step in (server.stop, node.stop):
             try:
                 await step()
@@ -598,11 +845,13 @@ def apply_preamble(radio: Any, symbols: int) -> None:
         log.warning("could not apply the new preamble while listening: %s", exc)
 
 
-def _persistent_companion(base: type, state: Path) -> type:
+def _persistent_companion(base: type, state: Path, gps: Gps | None = None) -> type:
     """``CompanionRadio`` with its preferences written to ``prefs.json`` on every change.
 
     ``_save_prefs`` is the library's own hook for exactly this ("subclasses that need
     persistence … should override this method"), called after every preference setter.
+    With a ``gps``, the board's two GPS settings are among its custom variables, as the
+    firmware lists them, and are saved beside the preferences the library knows.
     """
 
     class PersistentCompanion(base):  # type: ignore[misc, valid-type]
@@ -617,9 +866,30 @@ def _persistent_companion(base: type, state: Path) -> type:
                 apply_preamble(self._radio, preamble_for_sf(sf))
             return ok
 
+        def get_custom_vars(self) -> dict[str, str]:
+            """The library's variables, and a GPS board's two as firmware reports them."""
+            found = super().get_custom_vars()
+            if gps is not None:
+                found.update(gps.custom_vars())
+            return found
+
+        def set_custom_var(self, name: str, value: str) -> bool:
+            """Set a variable; ``gps`` and ``gps_interval`` run the receiver and are saved."""
+            if gps is None or name not in GPS_VARS:
+                return super().set_custom_var(name, value)
+            if not gps.set_var(name, value):
+                return False
+            self._save_prefs()
+            return True
+
         def _save_prefs(self) -> None:
             try:
-                _write_json(state / "prefs.json", prefs_to_json(self.prefs))
+                saved = prefs_to_json(self.prefs)
+                if gps is not None:
+                    saved.update(gps.saved())
+                _write_json(state / "prefs.json", saved)
+                if gps is not None:
+                    gps.moved = False
             except Exception as exc:  # noqa: BLE001 - a failed save must not fail the setter
                 log.warning("could not save prefs: %s", exc)
 

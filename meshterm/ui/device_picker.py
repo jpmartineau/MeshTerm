@@ -54,7 +54,7 @@ from ..core.discovery import (
     serial_device,
     tcp_device,
 )
-from ..core.spiradio import spi_radios
+from ..core.spiradio import spi_radios, without_radio_ports
 from ..persistence.logging import log_file_for
 from .logo import load_logo
 from .menus import Lane, align_icons, column_header
@@ -402,7 +402,8 @@ async def prompt_device(
         Built in one place because two callers need it now -- the loop below, and the
         rescan that redraws the rows under the reader while the splash is open.
         """
-        scanned = wired + wireless
+        # A port a radio on the SPI bus owns (the Cap's GPS) is that radio's, not a companion.
+        scanned = without_radio_ports(wired, profiles) + wireless
         remembered = store.load()
         # The full registry (not just the single last device) so *every* confirmed companion
         # can be named, highlighted, and sorted to the top — keyed by stable_id. Reloaded each

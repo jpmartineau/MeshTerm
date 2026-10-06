@@ -156,3 +156,53 @@ def test_offer_stays_quiet_when_nothing_is_remembered(tmp_path: Path, monkeypatc
     shown = _run(_ctx(store, device), monkeypatch)
 
     assert shown == [] and device.coords_writes == []
+
+
+class _GpsDevice(_ScriptedDevice):
+    """A companion with a GPS, reporting its ``gps`` switch as the firmware does."""
+
+    def __init__(self, *, gps: str, **kwargs) -> None:  # noqa: ANN003
+        super().__init__(**kwargs)
+        self._gps = gps
+
+    async def get_custom_vars(self) -> dict[str, str]:
+        return {"gps": self._gps, "gps_interval": "0"}
+
+
+def test_offer_leaves_a_position_the_gps_moved_alone(tmp_path: Path, monkeypatch) -> None:
+    """With its GPS running, a node somewhere else is a reading: no prompt and no write."""
+    store = SettingsStore(tmp_path / "settings.json")
+    store.remember(_PUB, "adv_lat", _LAT)
+    store.remember(_PUB, "adv_lon", _LON)
+    device = _GpsDevice(gps="1", adv_lat=46.813878, adv_lon=-71.207981)
+
+    shown = _run(_ctx(store, device), monkeypatch)
+
+    assert shown == [] and device.coords_writes == []
+    assert store.settings(_PUB) == {"adv_lat": _LAT, "adv_lon": _LON}
+
+
+def test_offer_still_asks_about_a_moved_position_with_the_gps_off(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A GPS that isn't running moved nothing, so a different position is a real conflict."""
+    store = SettingsStore(tmp_path / "settings.json")
+    store.remember(_PUB, "adv_lat", _LAT)
+    store.remember(_PUB, "adv_lon", _LON)
+    device = _GpsDevice(gps="0", adv_lat=46.813878, adv_lon=-71.207981)
+
+    shown = _run(_ctx(store, device), monkeypatch)
+
+    assert len(shown) == 1 and {d.key for d in shown[0]} == {"adv_lat", "adv_lon"}
+
+
+def test_a_gps_with_no_fix_yet_still_gets_the_saved_position(tmp_path: Path, monkeypatch) -> None:
+    """Before its first fix the node reports none, and the saved one holds until it comes."""
+    store = SettingsStore(tmp_path / "settings.json")
+    store.remember(_PUB, "adv_lat", _LAT)
+    store.remember(_PUB, "adv_lon", _LON)
+    device = _GpsDevice(gps="1", adv_lat=0.0, adv_lon=0.0)
+
+    shown = _run(_ctx(store, device), monkeypatch)
+
+    assert shown == [] and device.coords_writes[-1] == (_LAT, _LON)

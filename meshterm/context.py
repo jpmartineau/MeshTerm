@@ -666,8 +666,12 @@ class AppContext:
             await self._settle_connection()
             return self._device
 
+        from .core.spiradio import without_radio_ports
+
         resolution = resolve_device(
-            discover_devices(),
+            # Never the radio's own GPS port: on a Cardputer Zero with nothing remembered it
+            # was the lone port, and a lone port is connected to without asking.
+            without_radio_ports(discover_devices(), self.settings.profiles),
             self.device_store.load(),
             explicit_port=self.port_override,
             profile=self.profile,

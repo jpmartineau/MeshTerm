@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from meshterm.core.models import Contact
-from meshterm.services.device_state import _CONTACTS_TTL_S, DeviceState
+from meshterm.services.device_state import _CONTACTS_TTL_S, _SELF_INFO_TTL_S, DeviceState
 
 
 class FakeDevice:
@@ -148,6 +148,27 @@ def test_contacts_refresh_in_background_past_ttl() -> None:
         await asyncio.gather(*list(ds._tasks))
         assert dev.contacts_calls == 2  # refreshed behind the read
         assert (await ds.contacts())[0].name == "contact-2"  # now serving the fresh list
+
+    asyncio.run(run())
+
+
+def test_self_info_refreshes_in_background_past_ttl() -> None:
+    """A node with a GPS moves itself, so past its TTL our own self-info is read again.
+
+    The read past the TTL still answers at once with the copy in hand; the next screen gets
+    the position the node reports now.
+    """
+    dev = FakeDevice()
+    ds = _devstate(dev)
+
+    async def run() -> None:
+        first = await ds.self_info()
+        assert await ds.self_info() is first and dev.self_info_calls == 1  # within the TTL
+        ds._self_info_at = time.monotonic() - _SELF_INFO_TTL_S - 1
+        assert await ds.self_info() is first  # served at once, not blocked on the re-read
+        await asyncio.gather(*list(ds._tasks))
+        assert dev.self_info_calls == 2
+        assert await ds.self_info() is not first  # the fresh copy from here on
 
     asyncio.run(run())
 

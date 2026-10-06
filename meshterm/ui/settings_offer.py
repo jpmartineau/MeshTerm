@@ -20,6 +20,8 @@ remembered for it — so a firmware radio you don't manage through MeshTerm is n
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from rich.text import Text
 
 from ..context import AppContext
@@ -28,6 +30,9 @@ from ..core.geo import usable_fix
 from ..core.settings_store import SettingDrift, adopt, restore, settings_drift
 from .menus import menu_rows
 from .tui import Separator
+
+if TYPE_CHECKING:
+    from ..core.connection import Device
 
 # The offer's actions, returned by the startup select.
 _RESTORE = "restore"
@@ -52,6 +57,19 @@ def _position_undefined(snapshot: dict) -> bool:
     except (TypeError, ValueError):
         return True
     return not usable_fix(lat, lon)
+
+
+async def _gps_running(device: Device) -> bool:
+    """Whether the device reports its GPS running (the firmware's ``gps`` variable is ``1``).
+
+    Asked only when a position has drifted, and best-effort: firmware without the variables,
+    or a failed read, is a device with no GPS to weigh.
+    """
+    try:
+        found = await device.get_custom_vars()
+    except Exception:  # noqa: BLE001 - optional read; absence means no GPS
+        return False
+    return str(found.get("gps", "")).strip() == "1"
 
 
 async def offer_remembered_settings(ctx: AppContext) -> None:
@@ -103,6 +121,15 @@ async def offer_remembered_settings(ctx: AppContext) -> None:
             drifted = [d for d in drifted if d.key not in _POSITION_KEYS]
             if not drifted:
                 return
+
+    # A device whose GPS is running moves its own position as it travels, so a fix unlike
+    # the saved one is a reading, not a setting that drifted: neither restored nor asked
+    # about, or every connect away from home would offer to put the node back there. (One
+    # with no fix yet was handled above: the saved position holds until the first fix.)
+    if any(d.key in _POSITION_KEYS for d in drifted) and await _gps_running(device):
+        drifted = [d for d in drifted if d.key not in _POSITION_KEYS]
+        if not drifted:
+            return
 
     choice = await _prompt(ctx, drifted)
     keys = [d.key for d in drifted]

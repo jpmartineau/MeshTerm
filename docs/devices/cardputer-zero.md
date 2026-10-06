@@ -172,4 +172,29 @@ A new node starts on MeshCore's US/Canada settings (910.525 MHz). Anywhere else,
 them on **Device config** before you send anything. The node's key, contacts, and channels
 are kept in `~/.meshterm/radio/spidev0.1/`.
 
-The Cap also carries a GPS. MeshTerm doesn't read it yet.
+#### The Cap's GPS
+
+The Cap also carries a GPS, and MeshTerm can keep your node's position up to date from it.
+It's off until you switch it on, the same as on MeshCore firmware. To switch it on:
+
+1. Open **Device config**.
+2. Under **Custom variables**, set **GPS** to on.
+3. Apply.
+
+Once the GPS has a fix, it becomes your node's position. Out in the open, the first fix
+usually takes about a minute. Indoors, it may never come.
+
+Two things don't change:
+
+- **Whether your adverts include your position is still up to you.** That's the **Share
+  location** setting on Device config. With it off, the GPS still moves your node on
+  MeshTerm's own map, but nobody else sees where you are.
+- **Moving your node on the map by hand doesn't stick while the GPS is on.** The next fix
+  puts it back where the GPS says you are. Switch the GPS off first.
+
+**GPS interval** sets how often the position is updated, in seconds. It's 0 to start with,
+which means every fix, about once a second. MeshTerm remembers your last fix when it quits,
+so the next start begins where you were.
+
+The GPS talks to the Cardputer over a serial port, the way a companion on a USB cable
+does. It isn't a companion, though, so the device screen doesn't list it.
