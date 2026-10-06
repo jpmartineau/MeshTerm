@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Repository: the single gateway between the app and the database.
+"""Repository: the only gateway between the app and the database.
 
-Tools and services never issue SQL directly; they call typed methods here. This keeps
-persistence concerns in one place and makes the storage backend swappable.
+Tools and services never run SQL directly. They call the typed methods here. Thus all the
+persistence code is in one place, and a different storage backend can replace this one.
 """
 
 from __future__ import annotations
@@ -36,58 +36,68 @@ if TYPE_CHECKING:
     from ..core.contact_score import ContactSignals
 
 
-#: The trailing window the dashboard's live observation stats prune to — "what's
-#: happening right now" territory, labelled "reception over 2 h" on the RF health card.
-#: Distinct from the deeper channel-activity window below: this bounds a live view, that
-#: one only feeds a scaling peak. The Live feed screen once shared it and no longer does:
-#: its depth is a packet count, not a duration (see
-#: :data:`~meshterm.ui.livefeed_screen._FEED_SEED_FLOOR`), so this number means the
-#: dashboard's two hours and nothing else.
+#: The trailing time window to which MeshTerm prunes the live observation statistics of
+#: the dashboard. It is for what happens now, and the RF health card labels it
+#: "reception over 2 h". It is different from the longer channel-activity window below:
+#: this window limits what a live screen shows, and that window only supplies a scaling
+#: peak. The Live feed screen used this window before, but it does not now. Its depth is a
+#: number of packets, not a duration (refer to
+#: :data:`~meshterm.ui.livefeed_screen._FEED_SEED_FLOOR`). Thus this number means the two
+#: hours of the dashboard and nothing else.
 OBSERVATION_WINDOW = timedelta(hours=2)
 
-#: The trailing window a channel's activity histogram is computed over. Six hours is
-#: deeper than the sparkline draws (see :data:`ACTIVITY_DRAWN_BUCKETS`) on purpose: the
-#: extra history deepens the pool the shared scaling peak takes its percentile over, so
-#: the ceiling glides rather than snaps as a busy stretch ages out of the drawn window
-#: (see :func:`~meshterm.ui.braillechart.activity_peak`).
-#: All-time volume still lives in the MSGS lane; this stays a live-pulse window.
+#: The trailing time window over which MeshTerm computes the activity histogram of a
+#: channel. Six hours is longer than the sparkline draws (refer to
+#: :data:`ACTIVITY_DRAWN_BUCKETS`), on purpose. The extra history makes the pool larger
+#: from which the shared scaling peak takes its percentile. Thus, when a busy period moves
+#: out of the drawn window, the ceiling changes gradually, not suddenly (refer to
+#: :func:`~meshterm.ui.braillechart.activity_peak`).
+#: The MSGS lane still shows the volume of all time. This window stays a window of recent
+#: activity.
 ACTIVITY_WINDOW = timedelta(hours=6)
 
-#: How many equal time buckets the window is split into — at six hours, five minutes each
-#: (matching the drawn cadence). The histogram carries all of them for the scaling peak;
-#: only the newest :data:`ACTIVITY_DRAWN_BUCKETS` are actually charted.
+#: The number of equal time buckets in the window. At six hours, each bucket is five
+#: minutes (the same as the drawn cadence). The histogram has all of them for the scaling
+#: peak. The chart draws only the newest :data:`ACTIVITY_DRAWN_BUCKETS`.
 ACTIVITY_BUCKETS = 72
 
-#: How many of the histogram's newest buckets the channel sparkline draws — two hours at
-#: five minutes each, two columns per braille cell, so 24 buckets fill its twelve
-#: characters. The rest of :data:`ACTIVITY_BUCKETS` feeds the scaling peak but isn't shown.
+#: The number of the newest buckets of the histogram that the channel sparkline draws: two
+#: hours at five minutes each. A braille cell has two dot columns, so 24 buckets fill its
+#: twelve characters. The rest of :data:`ACTIVITY_BUCKETS` supplies the scaling peak, but
+#: the sparkline does not show them.
 ACTIVITY_DRAWN_BUCKETS = 24
 
-#: How many recent packet frames the contact-scoring hop median is drawn from (see
-#: :meth:`Repository.contact_signals`). The same order of magnitude as
-#: :meth:`Repository.packet_paths`' own cap, and for the same reasons: it is the one scan
-#: there that materialises a row per packet, and old hops describe a topology that has since
-#: moved. Deep enough that every contact heard at all in the recent past gets several
-#: readings to take a median over.
+#: The number of recent packets from which the contact score takes its hop median (refer
+#: to :meth:`Repository.contact_signals`). It is of the same order of magnitude as the
+#: limit of :meth:`Repository.packet_paths`, for the same reasons. It is the only scan
+#: there that builds one row in memory for each packet, and old hops describe a topology
+#: that changed since then. The limit is large enough that each contact heard in the
+#: recent past gets several readings for a median.
 HOP_EVIDENCE_LIMIT = 20000
 
 
 def _packet_raw(row: sqlite3.Row) -> dict | None:
-    """Rebuild the minimal raw payload a stored ``packet`` observation is read back with.
+    """Rebuild the minimum raw payload with which MeshTerm reads a stored ``packet`` row.
 
-    What a live RX-log event carried in its raw payload is kept per row, under the very
-    keys the event used, so a replayed frame and a fresh one read identically all the way
-    up: the frame's payload class (``payload_typename``), so a list can name what the
-    packet is; an overheard channel frame's three crypto fields (fingerprint, MAC,
-    ciphertext), so a channel we hold the key for stays readable straight from history;
-    and what the frame addressed (:mod:`~meshterm.core.frames`) — the recipient, the
-    sender, the token — restored to the key each was decoded under. The stored sender is
-    a hash or a whole public key, and the stored token an ack's checksum or a trace's tag;
-    the value's own width and the frame's class say which, so neither needed a second
-    column to be told apart. A trace's per-hop link readings are the one thing that did
-    need a column of its own — they arrive where every other class keeps its relay hashes,
-    so ``path`` was exactly the wrong place for them. A row that stored none of it carries
-    no raw (``None``).
+    Each row keeps what a live RX-log event had in its raw payload, under the same keys
+    that the event used. Thus a replayed packet and a new packet read the same in all the
+    layers above. The row keeps:
+
+    * the payload class of the packet (``payload_typename``), so that a list can name
+      what the packet is.
+    * the three crypto fields of an overheard channel packet (fingerprint, MAC,
+      ciphertext), so that a channel for which we have the key stays readable directly
+      from history.
+    * the addresses of the packet (:mod:`~meshterm.core.frames`): the recipient, the
+      sender, and the token. Each value goes back under the key with which it was decoded.
+
+    The stored sender is a hash or a full public key. The stored token is the checksum of
+    an ack or the tag of a trace. The width of the value and the class of the packet tell
+    which, so a second column was not necessary to tell them apart. The link readings of a
+    trace (one for each hop) are the only values for which a separate column was
+    necessary. They arrive in the place where each other class keeps its relay hashes, so
+    ``path`` was the wrong place for them. A row that stored none of these values has no raw payload
+    (``None``).
     """
     typename = _row_value(row, "payload_typename")
     chan_hash = row["chan_hash"]
@@ -110,13 +120,13 @@ def _packet_raw(row: sqlite3.Row) -> dict | None:
         raw["cipher_mac"] = row["cipher_mac"]
         raw["crypted"] = row["crypted"]
     if cipher_mac and not chan_hash:
-        # An addressed frame keeps only its MAC (no channel envelope), so it is restored
-        # here rather than in the chan_hash branch above.
+        # An addressed packet keeps only its MAC (no channel envelope). Thus this branch
+        # restores the MAC, instead of the chan_hash branch above.
         raw["cipher_mac"] = cipher_mac
     if dest:
         raw["dest_hash"] = dest
     if src:
-        # A hash is one byte; anything longer is the whole key an anonymous request carries.
+        # A hash is one byte. A longer value is the full key that an anonymous request has.
         raw["src_key" if len(src) > 2 * ENDPOINT_HASH_BYTES else "src_hash"] = src
     if tag:
         raw["trace_tag" if typename == "TRACE" else "ack_crc"] = tag
@@ -125,8 +135,9 @@ def _packet_raw(row: sqlite3.Row) -> dict | None:
     if route:
         raw["route_typename"] = route
     if transport_code:
-        # A scoped frame's code and the bytes it was computed over, so its region resolves
-        # against names learned after it was heard (see meshterm.core.regions).
+        # The code of a scoped packet and the bytes from which it was computed. Thus its
+        # region can resolve against names that MeshTerm learns after it heard the packet
+        # (refer to meshterm.core.regions).
         raw["transport_code"] = transport_code
     if scope_body:
         raw["scope_body"] = scope_body
@@ -134,7 +145,7 @@ def _packet_raw(row: sqlite3.Row) -> dict | None:
 
 
 def _as_when(iso: Any) -> datetime | None:
-    """Parse a stored ISO timestamp, or ``None`` when absent/unparseable."""
+    """Parse a stored ISO timestamp, or return ``None`` when it is absent or not valid."""
     if not iso:
         return None
     try:
@@ -144,7 +155,7 @@ def _as_when(iso: Any) -> datetime | None:
 
 
 def _row_value(row: sqlite3.Row, key: str) -> Any:
-    """Read ``key`` from a row, tolerating a query that didn't select it (returns ``None``)."""
+    """Read ``key`` from a row. If the query did not select ``key``, return ``None``."""
     try:
         return row[key]
     except (IndexError, KeyError):
@@ -152,20 +163,23 @@ def _row_value(row: sqlite3.Row, key: str) -> Any:
 
 
 def _hops_hash_bytes(hops: list[Hop]) -> int | None:
-    """Recover a stored trace's per-hop path-hash width from its hop hashes.
+    """Recover the path-hash width (for each hop) of a stored trace from its hop hashes.
 
-    The ``traces`` table predates :attr:`~meshterm.core.models.TraceResult.
-    path_hash_bytes`, so the width isn't a column — but it doesn't need to be: a trace
-    reply names every hop at exactly the command's width, so the (uniform) length of
-    the stored hashes *is* the width. Without it, rehydrated traces would render node
-    hashes — and our own device's full public key — at absurd lengths.
+    The ``traces`` table is older than
+    :attr:`~meshterm.core.models.TraceResult.path_hash_bytes`, so the width is not a
+    column. But it does not have to be a column. A trace reply names each hop at exactly
+    the width of the command. Thus the length of the stored hashes (the same for all) is
+    the width. Without this function, traces read back from the database render node
+    hashes (and the full public key of our node) at lengths that make no sense.
 
     Args:
-        hops: The rehydrated hops (the final hash-less hop, our own device, is skipped).
+        hops: The hops read back from the database. The function skips the final hop,
+            which has no hash (our node).
 
     Returns:
-        The width in bytes, or ``None`` when there are no hashes or they disagree
-        (which stored trace replies never do; ``None`` falls back to full-width display).
+        The width in bytes, or ``None`` when there are no hashes or their widths are not
+        the same. (Stored trace replies always have the same widths. With ``None``, the
+        hashes show at full width.)
     """
     widths = {len(h.node) for h in hops if h.node}
     if len(widths) != 1:
@@ -176,20 +190,20 @@ def _hops_hash_bytes(hops: list[Hop]) -> int | None:
 
 @dataclass(slots=True)
 class ChannelStats:
-    """Aggregated message history for one channel conversation.
+    """The aggregated message history of one channel conversation.
 
     Attributes:
-        total: Messages ever stored for the channel, sent and received alike.
-        recent: Messages within the trailing :data:`ACTIVITY_WINDOW` window.
-        last_at: When the channel's most recent message was stored, or ``None`` if the
-            stored timestamp can't be parsed.
-        histogram: The window's messages split into :data:`ACTIVITY_BUCKETS` equal time
-            buckets, *newest first* — bucket 0 is the current five minutes, the order
-            :func:`~meshterm.ui.braillechart.activity_sparkline` expects (it flips the
-            window so "now" draws at the right edge). ``recent`` is always its sum. The
-            sparkline charts only the newest :data:`ACTIVITY_DRAWN_BUCKETS`; the deeper
-            tail feeds the shared scaling peak (see
-            :func:`~meshterm.ui.braillechart.activity_peak`).
+        total: All the messages stored for the channel, sent and received.
+        recent: The messages in the trailing :data:`ACTIVITY_WINDOW` window.
+        last_at: The time at which MeshTerm stored the most recent message of the channel,
+            or ``None`` if MeshTerm cannot parse the stored timestamp.
+        histogram: The messages of the window in :data:`ACTIVITY_BUCKETS` equal time
+            buckets, newest first. Bucket 0 is the current five minutes. This is the order
+            that :func:`~meshterm.ui.braillechart.activity_sparkline` expects (it reverses
+            the window, so that "now" is drawn at the right edge). ``recent`` is always the
+            sum of the histogram. The sparkline draws only the newest
+            :data:`ACTIVITY_DRAWN_BUCKETS`. The older buckets supply the shared scaling
+            peak (refer to :func:`~meshterm.ui.braillechart.activity_peak`).
     """
 
     total: int
@@ -200,14 +214,15 @@ class ChannelStats:
 
 @dataclass(slots=True)
 class TracedPath:
-    """One successful trace's walked path, as evidence for the topology graph.
+    """The walked path of one successful trace, as evidence for the topology graph.
 
     Attributes:
-        when: When the trace completed.
-        hops: The per-hop readings in path order, each ``(node, snr)`` — ``node`` is the
-            hop's raw hex hash (``None`` for the final hash-less hop, our own device) and
-            ``snr`` the reception measured *arriving at* that hop. Because trace replies
-            retrace the path, the sequence covers the outbound and return legs alike.
+        when: The time at which the trace completed.
+        hops: The readings for each hop in path order, each ``(node, snr)``. ``node`` is
+            the raw hex hash of the hop (``None`` for the final hop, which has no hash:
+            our node). ``snr`` is the reception measured at that hop, when the packet
+            arrived at it. Because a trace reply goes back along the path, the sequence
+            has both the outbound leg and the return leg.
     """
 
     when: datetime
@@ -216,16 +231,16 @@ class TracedPath:
 
 @dataclass(slots=True)
 class PacketPath:
-    """One RX-logged packet's relay path, as evidence for the topology graph.
+    """The relay path of one packet from the RX log, as evidence for the topology graph.
 
     Attributes:
-        when: When the packet was overheard.
-        origin: The originating node's hex hash, when the packet class reveals it
-            (adverts do); ``None`` otherwise.
-        snr: Our reception SNR (dB) — a reading on the link from the *last relay*
-            (or, with no relays, the origin) to us.
-        hops: The relay hashes in propagation order, nearest the origin first and the
-            repeater we actually heard last; empty for a direct (zero-hop) packet.
+        when: The time at which MeshTerm overheard the packet.
+        origin: The hex hash of the origin node, when the packet class shows it (adverts
+            do). Otherwise ``None``.
+        snr: The SNR (dB) of our reception: a reading on the link from the last relay to
+            us (or from the origin, when there are no relays).
+        hops: The relay hashes in propagation order: the hop nearest the origin first,
+            and the repeater that we heard last. Empty for a direct (zero-hop) packet.
     """
 
     when: datetime
@@ -236,19 +251,20 @@ class PacketPath:
 
 @dataclass(slots=True)
 class NeighbourLink:
-    """One repeater-reported direct link, as evidence for the topology graph.
+    """One direct link that a repeater reported, as evidence for the topology graph.
 
-    The fetched counterpart of :class:`TracedPath`/:class:`PacketPath`: instead of being
-    inferred from what *we* received, this link was asserted by a remote repeater about
-    its own reception (see :meth:`Repository.neighbour_links`).
+    This is the counterpart of :class:`TracedPath` and :class:`PacketPath` that MeshTerm
+    gets from a repeater. MeshTerm does not infer this link from what we received. A
+    remote repeater stated it about its own reception (refer to
+    :meth:`Repository.neighbour_links`).
 
     Attributes:
-        when: The link's recency — when the repeater last heard the neighbour, falling
-            back to when we fetched the table.
-        repeater: Canonical id of the repeater that reported the link.
-        neighbour: The neighbour's hex hash as the repeater replied it (any width; the
-            topology layer canonicalizes).
-        snr: SNR (dB) measured at the repeater, if reported.
+        when: The recency of the link: the time at which the repeater last heard the
+            neighbour. If that time is not known, the time at which we got the table.
+        repeater: The canonical id of the repeater that reported the link.
+        neighbour: The hex hash of the neighbour, as the repeater sent it in its reply
+            (any width: the topology layer makes it canonical).
+        snr: The SNR (dB) measured at the repeater, if the repeater reported it.
     """
 
     when: datetime
@@ -259,23 +275,27 @@ class NeighbourLink:
 
 @dataclass(slots=True)
 class DiscoveredPath:
-    """One record-holding walk in the trophy case (a discipline's leaderboard).
+    """One walk that holds a record in the trophy case (the leaderboard of a discipline).
 
-    Records are kept per ``(category, width_bytes)`` — the per-hop hash width bounds
-    both a walk's maximum length (the transmitted path field is 64 bytes) and its
-    collision odds, so boards at different widths measure different games.
+    MeshTerm keeps records for each ``(category, width_bytes)``. The hash width of each hop
+    limits the maximum length of a walk (the transmitted path field is 64 bytes) and its
+    chance of a collision. Thus boards at different widths measure different contests.
 
     Attributes:
-        id: Primary key (the handle deletion takes).
-        category: The category id the record was set in (``grand_tour``, …).
-        width_bytes: The per-hop path-hash width the walk was transmitted at.
-        spec: The transmitted spec — comma-separated hex hashes, in walk order.
-        route: Canonical node ids aligned with the spec's hops, for stable display
-            resolution (a 1-byte spec hop is too ambiguous to re-resolve later).
-        score: The category score (its unit is the category's: km, nodes, dB, km²).
-        stats: The walk's measured statistics (hop count, distinct nodes, km, …).
-        app_version: The MeshTerm version that discovered it, for future migrations.
-        discovered_at: When the record-setting walk came home (UTC).
+        id: The primary key (the handle that a delete takes).
+        category: The id of the category in which the walk set the record
+            (``grand_tour``, …).
+        width_bytes: The path-hash width for each hop, at which the walk was transmitted.
+        spec: The transmitted spec: comma-separated hex hashes, in walk order.
+        route: The canonical node ids, aligned with the hops of the spec, so that the
+            names that MeshTerm shows stay stable (a 1-byte hop in the spec is too
+            ambiguous to resolve again later).
+        score: The score in the category (the category sets its unit: km, nodes, dB,
+            km²).
+        stats: The measured statistics of the walk (hop count, distinct nodes, km, …).
+        app_version: The MeshTerm version that discovered the walk, for future
+            migrations.
+        discovered_at: The time at which the walk that set the record came home (UTC).
     """
 
     id: int
@@ -294,13 +314,14 @@ class RunRecord:
     """A summary row from the ``runs`` table.
 
     Attributes:
-        id: Primary key of the run.
-        tool: Name of the tool that executed.
-        profile: Device profile used, if any.
+        id: The primary key of the run.
+        tool: The name of the tool that ran.
+        profile: The device profile that the run used, if any.
         status: ``running``, ``ok``, or ``error``.
-        started_at: ISO-8601 start timestamp.
-        finished_at: ISO-8601 finish timestamp, or ``None`` if still running.
-        summary: Decoded JSON summary, or ``None``.
+        started_at: The ISO-8601 timestamp of the start.
+        finished_at: The ISO-8601 timestamp of the end, or ``None`` if the run has not
+            finished.
+        summary: The decoded JSON summary, or ``None``.
     """
 
     id: int
@@ -313,32 +334,33 @@ class RunRecord:
 
 
 class Repository:
-    """Typed data-access layer over the SQLite database."""
+    """The typed data-access layer on the SQLite database."""
 
     def __init__(self, db_path: Path) -> None:
-        """Open the repository against a database file.
+        """Open the repository on a database file.
 
         Args:
-            db_path: Location of the SQLite database (created if absent).
+            db_path: The location of the SQLite database (created if it does not exist).
         """
         self._conn = db.connect(db_path)
 
     def close(self) -> None:
-        """Close the underlying database connection."""
+        """Close the database connection that the repository uses."""
         self._conn.close()
 
     # -- runs -------------------------------------------------------------------
 
     def start_run(self, tool: str, args: dict[str, Any], profile: str | None = None) -> int:
-        """Record the start of a tool execution.
+        """Store the start of a tool run.
 
         Args:
-            tool: Tool name.
-            args: Arguments the tool was invoked with (must be JSON-serializable).
-            profile: Active device profile name, if any.
+            tool: The name of the tool.
+            args: The arguments with which the tool was called (they must be
+                JSON-serializable).
+            profile: The name of the active device profile, if any.
 
         Returns:
-            The new run's primary key.
+            The primary key of the new run.
         """
         cur = self._conn.execute(
             "INSERT INTO runs (tool, profile, args_json, status, started_at) "
@@ -353,8 +375,8 @@ class Repository:
 
         Args:
             run_id: The run to update.
-            status: Terminal status (``ok`` or ``error``).
-            summary: Optional JSON-serializable result summary.
+            status: The final status (``ok`` or ``error``).
+            summary: An optional JSON-serializable summary of the result.
         """
         self._conn.execute(
             "UPDATE runs SET status = ?, summary_json = ?, finished_at = ? WHERE id = ?",
@@ -371,7 +393,7 @@ class Repository:
         """Return the most recent runs, newest first.
 
         Args:
-            limit: Maximum number of rows to return.
+            limit: The maximum number of rows to return.
 
         Returns:
             A list of :class:`RunRecord`.
@@ -397,14 +419,14 @@ class Repository:
     # -- traces -----------------------------------------------------------------
 
     def record_trace(self, run_id: int, trace: TraceResult) -> int:
-        """Persist a single trace and its per-hop SNR readings.
+        """Store one trace and its SNR readings for each hop.
 
         Args:
-            run_id: The owning run.
+            run_id: The run that owns the trace.
             trace: The trace result to store.
 
         Returns:
-            The new trace's primary key.
+            The primary key of the new trace.
         """
         cur = self._conn.execute(
             "INSERT INTO traces "
@@ -436,18 +458,19 @@ class Repository:
         exclude_run_id: int | None = None,
         success_only: bool = True,
     ) -> TraceResult | None:
-        """Return the most recently recorded trace to ``target``, rehydrated with hops.
+        """Return the most recently stored trace to ``target``, rebuilt with its hops.
 
-        Used to show the previous run's result before a new trace starts.
+        MeshTerm uses it to show the result of the previous run before a new trace starts.
 
         Args:
-            target: The trace destination to look up.
-            exclude_run_id: A run to skip (typically the in-progress one) so we surface
-                a genuinely prior result.
+            target: The trace destination to find.
+            exclude_run_id: A run to skip (usually the run in progress), so that the
+                result comes from an earlier run.
             success_only: When ``True``, ignore traces that timed out.
 
         Returns:
-            The latest matching :class:`TraceResult`, or ``None`` if none is stored.
+            The latest :class:`TraceResult` that matches, or ``None`` if no trace is
+            stored.
         """
         sql = "SELECT * FROM traces WHERE target = ?"
         params: list[Any] = [target]
@@ -477,17 +500,18 @@ class Repository:
         )
 
     def recent_traces(self, target: str, *, limit: int = 200) -> list[TraceResult]:
-        """Return recent traces to ``target``, newest first, rehydrated with hops.
+        """Return recent traces to ``target``, newest first, rebuilt with their hops.
 
-        This is the history the link-quality baseline is computed over, so both timed-out
-        and successful traces are included (a rise in failures is itself a regression).
+        MeshTerm computes the link-quality baseline over this history. Thus the result
+        includes the traces that timed out and the traces that succeeded (an increase in
+        failures is also a regression).
 
         Args:
-            target: The trace destination to load.
-            limit: Maximum number of traces to return.
+            target: The trace destination to read.
+            limit: The maximum number of traces to return.
 
         Returns:
-            The matching :class:`TraceResult` objects, newest first.
+            The :class:`TraceResult` objects that match, newest first.
         """
         rows = self._conn.execute(
             "SELECT * FROM traces WHERE target = ? ORDER BY id DESC LIMIT ?",
@@ -499,10 +523,10 @@ class Repository:
         """Rebuild a :class:`TraceResult` (with hops) from a ``traces`` row.
 
         Args:
-            row: A ``traces`` table row.
+            row: A row of the ``traces`` table.
 
         Returns:
-            The rehydrated trace.
+            The rebuilt trace.
         """
         hop_rows = self._conn.execute(
             "SELECT hop_index, node, snr FROM trace_hops WHERE trace_id = ? ORDER BY hop_index",
@@ -522,15 +546,15 @@ class Repository:
     def traced_targets(self, *, limit: int = 5) -> list[str]:
         """Return recent trace destinations, most recently traced first.
 
-        This feeds the target picker's *Recently traced* section, so the list is
-        deliberately short and recency-ordered: an all-time tally only ever grows,
-        burying current work under stale names (``--mock`` targets included).
-        Target-less walks — the hand-composed ones recorded under
-        :data:`~meshterm.core.models.PATH_TRACE_TARGET` — are excluded: they aren't
-        destinations one can pick.
+        This list supplies the "Recently traced" section of the target picker. Thus the
+        list is short on purpose, and in order of recency. A count of all time only grows,
+        and it puts the current work under old names (also the ``--mock`` targets). Walks
+        without a target are not included (the walks composed by hand and stored under
+        :data:`~meshterm.core.models.PATH_TRACE_TARGET`), because they are not
+        destinations that the user can select.
 
         Args:
-            limit: Maximum number of distinct targets to return.
+            limit: The maximum number of distinct targets to return.
 
         Returns:
             Distinct target names, most recently traced first.
@@ -543,19 +567,21 @@ class Repository:
         return [row["target"] for row in rows]
 
     def target_last_traced(self) -> dict[str, datetime]:
-        """Per trace target, when it was most recently traced (any outcome).
+        """For each trace target, the time of its most recent trace (with any result).
 
-        Feeds the Trace-target picker's ``TRACED`` column and its default sort — how long
-        ago each node was last aimed at, so the picker opens with the most-recently-traced
-        node on top. Keyed by the raw target string the trace was filed under (a contact
-        name or a hex hash), exactly like :meth:`target_trace_counts`; the caller matches
-        its node against those keys. Timed-out attempts count — you *traced* the node
-        whether or not it answered — and the hand-composed path walks filed under
-        :data:`~meshterm.core.models.PATH_TRACE_TARGET` are excluded (they name no target).
+        This value supplies the ``TRACED`` column of the Trace-target picker and its
+        default sort: how long ago each node was last the target of a trace. Thus the
+        picker opens with the most recently traced node at the top. The keys are the raw
+        target strings under which the traces were stored (a contact name or a hex hash),
+        the same as in :meth:`target_trace_counts`. The caller matches its node against
+        these keys. Attempts that timed out count, because you traced the node, also if
+        it did not answer. The path walks composed by hand and stored under
+        :data:`~meshterm.core.models.PATH_TRACE_TARGET` are not included (they name no
+        target).
 
         Returns:
-            ``target → last-traced timestamp`` (aware UTC) for every distinct non-path-walk
-            target.
+            ``target → last-traced timestamp`` (aware UTC) for each distinct target that
+            is not a path walk.
         """
         rows = self._conn.execute(
             "SELECT target, MAX(created_at) AS latest FROM traces "
@@ -569,18 +595,20 @@ class Repository:
         return out
 
     def target_trace_counts(self) -> dict[str, tuple[int, int]]:
-        """Per trace target, its ``(successes, total)`` across every stored trace.
+        """For each trace target, its ``(successes, total)`` over all the stored traces.
 
-        The substrate for a route's observed reliability: unlike a walk's route, a target
-        is on every trace row — timed-out attempts included — so a target's success rate is
-        the one delivery figure the history can honestly answer (a failed trace records no
-        path, only the target it was aimed at). Keyed by the raw target string the trace
-        was filed under (a contact name or a hex hash); the caller matches its node against
-        those keys. The hand-composed path walks filed under
-        :data:`~meshterm.core.models.PATH_TRACE_TARGET` are excluded — they name no target.
+        This is the base for the observed reliability of a route. The route of a walk is
+        not on each trace row, but a target is (also on the attempts that timed out). Thus
+        the success rate of a target is the only delivery value that the history can give
+        correctly. (A failed trace stores no path, only the target of the trace.) The keys
+        are the raw target strings under which the traces were stored (a contact name or a
+        hex hash). The caller matches its node against these keys. The path walks
+        composed by hand and stored under :data:`~meshterm.core.models.PATH_TRACE_TARGET`
+        are not included, because they name no target.
 
         Returns:
-            ``target → (successes, total)`` for every distinct non-path-walk target.
+            ``target → (successes, total)`` for each distinct target that is not a path
+            walk.
         """
         rows = self._conn.execute(
             "SELECT target, SUM(success) AS ok, COUNT(*) AS n FROM traces "
@@ -592,16 +620,16 @@ class Repository:
     def trace_paths(self, *, limit: int = 2000) -> list[TracedPath]:
         """Return the walked paths of recent successful traces, newest first.
 
-        This is the trace side of the topology evidence: every successful trace is a
-        packet that demonstrably crossed each link in its path (out and back), with an
-        SNR reading at every hop. Hops are returned raw — hex hashes at whatever width
-        the original command addressed them — for the topology layer to canonicalize.
+        This is the trace side of the topology evidence. Each successful trace is a packet
+        that is known to have crossed each link in its path (out and back), with an SNR
+        reading at each hop. The function returns the hops raw: hex hashes at the width
+        that the original command used for them. The topology layer makes them canonical.
 
         Args:
-            limit: Maximum number of traces to load.
+            limit: The maximum number of traces to read.
 
         Returns:
-            One :class:`TracedPath` per successful trace that recorded hops.
+            One :class:`TracedPath` for each successful trace that stored hops.
         """
         rows = self._conn.execute(
             "SELECT t.id, t.created_at FROM traces t "
@@ -619,24 +647,25 @@ class Repository:
             try:
                 when = datetime.fromisoformat(row["created_at"])
             except (TypeError, ValueError):
-                continue  # a malformed stray contributes no evidence
+                continue  # a malformed row gives no evidence
             paths.append(TracedPath(when=when, hops=[(h["node"], h["snr"]) for h in hop_rows]))
         return paths
 
     def packet_paths(self, *, limit: int = 5000) -> list[PacketPath]:
-        """Return the relay paths of recent RX-logged packets, newest first.
+        """Return the relay paths of recent packets from the RX log, newest first.
 
-        The passive side of the topology evidence: each row is a packet the companion
-        overheard whose header carried the repeater path it had traversed so far. Only
-        ``packet``-kind observations carry one (see :meth:`record_observation`); rows
-        whose path is NULL are skipped, and an empty path (a direct packet) is returned
-        with no hops so a known origin still yields a direct-link reading.
+        This is the passive side of the topology evidence. Each row is a packet that the
+        companion overheard, with a header that had the repeater path that the packet
+        went through until then. Only observations of the ``packet`` kind have a path
+        (refer to :meth:`record_observation`). The function skips rows with a NULL path.
+        It returns an empty path (a direct packet) with no hops, so that a known origin
+        still gives a direct-link reading.
 
         Args:
-            limit: Maximum number of packet observations to load.
+            limit: The maximum number of packet observations to read.
 
         Returns:
-            One :class:`PacketPath` per stored packet observation.
+            One :class:`PacketPath` for each stored packet observation.
         """
         rows = self._conn.execute(
             "SELECT node, snr, path, observed_at FROM observations "
@@ -648,7 +677,7 @@ class Repository:
             try:
                 when = datetime.fromisoformat(row["observed_at"])
             except (TypeError, ValueError):
-                continue  # a malformed stray contributes no evidence
+                continue  # a malformed row gives no evidence
             hops = [h for h in (row["path"] or "").split(",") if h]
             paths.append(PacketPath(when=when, origin=row["node"], snr=row["snr"], hops=hops))
         return paths
@@ -656,18 +685,20 @@ class Repository:
     def record_neighbours(
         self, run_id: int, repeater: str, neighbours: list[NeighbourInfo]
     ) -> None:
-        """Persist one fetched neighbour-table snapshot from a remote repeater.
+        """Store one snapshot of the neighbour table that MeshTerm got from a remote repeater.
 
-        Every entry becomes a row; refetching the same repeater later appends a fresh
-        snapshot rather than overwriting, and :meth:`neighbour_links` reads back only
-        the latest row per ``(repeater, neighbour)`` pair — a neighbour table is the
-        repeater's *current* state, so a new snapshot supersedes the old one instead
-        of stacking as extra evidence.
+        Each entry becomes a row. When MeshTerm gets the table of the same repeater again
+        later, it appends a new snapshot and does not overwrite the old one.
+        :meth:`neighbour_links` reads back only the latest row for each
+        ``(repeater, neighbour)`` pair. A neighbour table is the current state of the
+        repeater, so a new snapshot replaces the old one, and the two do not add up as
+        more evidence.
 
         Args:
-            run_id: The owning run.
-            repeater: Canonical id of the repeater the table came from.
-            neighbours: The fetched entries (may be empty — recorded as no rows).
+            run_id: The run that owns the snapshot.
+            repeater: The canonical id of the repeater that sent the table.
+            neighbours: The entries that MeshTerm got (this list can be empty: then no
+                rows are stored).
         """
         fetched_at = utcnow().isoformat()
         self._conn.executemany(
@@ -689,17 +720,18 @@ class Repository:
         self._conn.commit()
 
     def neighbour_links(self, *, limit: int = 2000) -> list[NeighbourLink]:
-        """Return the current repeater-reported links, newest report first.
+        """Return the current links that repeaters reported, newest report first.
 
-        The fetched side of the topology evidence. Only the most recent row per
-        ``(repeater, neighbour)`` pair is returned (see :meth:`record_neighbours`), so
-        repeatedly refreshing a table never inflates a link's sample count.
+        This is the side of the topology evidence that MeshTerm gets from repeaters. The
+        function returns only the most recent row for each ``(repeater, neighbour)`` pair
+        (refer to :meth:`record_neighbours`). Thus, when MeshTerm gets a table again and
+        again, the sample count of a link does not increase.
 
         Args:
-            limit: Maximum number of links to load.
+            limit: The maximum number of links to read.
 
         Returns:
-            One :class:`NeighbourLink` per currently-reported link.
+            One :class:`NeighbourLink` for each link that is reported now.
         """
         rows = self._conn.execute(
             "SELECT r.repeater, r.neighbour, r.snr, r.heard_at, r.fetched_at "
@@ -719,7 +751,7 @@ class Repository:
                 except (TypeError, ValueError):
                     continue
             if when is None:
-                continue  # a malformed stray contributes no evidence
+                continue  # a malformed row gives no evidence
             links.append(
                 NeighbourLink(
                     when=when,
@@ -731,14 +763,14 @@ class Repository:
         return links
 
     def record_tx_sample(self, run_id: int, level: TxLevelResult) -> None:
-        """Persist one robust TX-power level from an optimization sweep.
+        """Store one robust TX-power level from an optimization sweep.
 
-        The ``median_min_snr`` column stores this optimizer's headline metric — the
-        median SNR measured *at the target* — rather than a path bottleneck.
+        The ``median_min_snr`` column stores the main metric of this optimizer: the
+        median SNR measured at the target, instead of a path bottleneck.
 
         Args:
-            run_id: The owning run.
-            level: Aggregated result for a single TX power level.
+            run_id: The run that owns the sample.
+            level: The aggregated result for one TX power level.
         """
         self._conn.execute(
             "INSERT INTO tx_samples "
@@ -766,16 +798,17 @@ class Repository:
         success_rate: float,
         median_rtt_ms: float | None,
     ) -> None:
-        """Persist one measured candidate path from a path-probe sweep.
+        """Store one measured candidate path from a path-probe sweep.
 
         Args:
-            run_id: The owning probe run.
-            target: The node the candidate paths lead to.
-            path: The forced outbound path measured (comma-separated hex hashes).
-            bottleneck_snr: Median of the candidate's per-trace bottleneck SNRs (dB),
-                or ``None`` when no trace over it succeeded.
-            success_rate: Fraction of traces over this path that replied, ``[0, 1]``.
-            median_rtt_ms: Median round-trip time over this path, if measured.
+            run_id: The probe run that owns the candidate.
+            target: The node to which the candidate paths go.
+            path: The forced outbound path that was measured (comma-separated hex
+                hashes).
+            bottleneck_snr: The median of the bottleneck SNRs (dB) of the traces on the
+                candidate, or ``None`` when no trace on it succeeded.
+            success_rate: The fraction of traces on this path that replied, ``[0, 1]``.
+            median_rtt_ms: The median round-trip time on this path, if it was measured.
         """
         self._conn.execute(
             "INSERT INTO path_candidates "
@@ -808,29 +841,31 @@ class Repository:
         keep: int = 5,
         ascending: bool = False,
     ) -> int | None:
-        """Offer one walk to a category leaderboard; store it only if it places.
+        """Offer one walk to a category leaderboard. Store it only if it gets a place.
 
-        The leaderboard invariant lives here so every caller shares it: a walk enters
-        the ``(category, width_bytes)`` board when it beats the standing entries (or
-        the board isn't full), an identical spec only ever keeps its *best* score
-        (re-walking a known route never duplicates a row), and the board is pruned
-        back to ``keep`` rows on the way out.
+        The leaderboard invariant is here, so that all the callers share it:
+
+        * A walk goes on the ``(category, width_bytes)`` board when it beats the current
+          entries (or when the board is not full).
+        * An identical spec keeps only its best score (a new walk on a known route never
+          makes a second row).
+        * Before the function returns, it prunes the board to ``keep`` rows.
 
         Args:
-            category: The category id the walk is offered to.
-            width_bytes: The per-hop hash width the walk was transmitted at.
+            category: The id of the category to which the walk is offered.
+            width_bytes: The hash width for each hop, at which the walk was transmitted.
             spec: The transmitted spec (comma-separated hex hashes).
-            route: Canonical node ids aligned with the spec's hops.
-            score: The category score of this walk.
-            stats: JSON-serializable walk statistics.
-            app_version: The running MeshTerm version, stamped on the row.
-            keep: Board size (rows kept per category and width).
-            ascending: ``True`` for categories where *lower* scores win
-                (Thin thread hunts the weakest surviving link).
+            route: The canonical node ids, aligned with the hops of the spec.
+            score: The score of this walk in the category.
+            stats: The JSON-serializable statistics of the walk.
+            app_version: The MeshTerm version that runs now, stamped on the row.
+            keep: The board size (the rows kept for each category and width).
+            ascending: ``True`` for categories in which lower scores win
+                (Thin thread looks for the weakest link that survives).
 
         Returns:
-            The stored row's id when the walk placed (a fresh row or an improved
-            re-walk), or ``None`` when it didn't make the board.
+            The id of the stored row when the walk got a place (a new row, or a better
+            score on a known route), or ``None`` when the walk did not get on the board.
         """
 
         def beats(challenger: float, standing: float) -> bool:
@@ -842,8 +877,8 @@ class Repository:
             (category, width_bytes, spec),
         ).fetchone()
         if existing is not None:
-            # A known route: keep the row (and its discovery date) unless this walk
-            # genuinely bettered its own record.
+            # A known route: keep the row (and its discovery date), unless this walk beat
+            # the record of the route.
             if not beats(score, float(existing["score"])):
                 return None
             self._conn.execute(
@@ -875,8 +910,9 @@ class Repository:
             ),
         )
         new_id = int(cursor.lastrowid)
-        # Prune the board back to ``keep``: worst scores go, oldest first among ties,
-        # so the walk that set a mark holds it against an equal latecomer.
+        # Prune the board to ``keep`` rows. The worst scores go. Among equal scores, the
+        # oldest row stays, so the walk that set a mark keeps it against a later walk with
+        # the same score.
         order = "ASC" if not ascending else "DESC"  # worst-first for deletion
         overflow = self._conn.execute(
             "SELECT id FROM discovered_paths WHERE category = ? AND width_bytes = ? "
@@ -894,17 +930,18 @@ class Repository:
     def discoveries(
         self, category: str | None = None, *, width_bytes: int | None = None
     ) -> list[DiscoveredPath]:
-        """Return stored trophy-case records, optionally narrowed.
+        """Return the stored records of the trophy case, with optional filters.
 
-        Rows come back unranked (grouped by category, newest first within one) — the
-        service layer owns each category's score direction and sorts for display.
+        The rows are not ranked (they are grouped by category, newest first in each
+        category). The service layer owns the score direction of each category, and it
+        sorts the rows before they are shown.
 
         Args:
-            category: Only this category's records, or ``None`` for all.
-            width_bytes: Only records at this hash width, or ``None`` for all.
+            category: Only the records of this category, or ``None`` for all.
+            width_bytes: Only the records at this hash width, or ``None`` for all.
 
         Returns:
-            The matching :class:`DiscoveredPath` rows.
+            The :class:`DiscoveredPath` rows that match.
         """
         clauses, params = ["1=1"], []
         if category is not None:
@@ -949,7 +986,7 @@ class Repository:
         return out
 
     def delete_discovery(self, discovery_id: int) -> bool:
-        """Delete one trophy-case record by id; ``True`` when a row actually went."""
+        """Delete one record of the trophy case by id. Return ``True`` when a row was deleted."""
         cursor = self._conn.execute("DELETE FROM discovered_paths WHERE id = ?", (discovery_id,))
         self._conn.commit()
         return cursor.rowcount > 0
@@ -957,14 +994,14 @@ class Repository:
     def delete_discoveries(
         self, category: str | None = None, *, width_bytes: int | None = None
     ) -> int:
-        """Delete trophy-case records wholesale, optionally narrowed; returns the count.
+        """Delete records of the trophy case in bulk, with optional filters. Return the count.
 
         Args:
-            category: Only this category's records, or ``None`` for every category.
-            width_bytes: Only records at this hash width, or ``None`` for all widths.
+            category: Only the records of this category, or ``None`` for all categories.
+            width_bytes: Only the records at this hash width, or ``None`` for all widths.
 
         Returns:
-            How many records were deleted.
+            The number of deleted records.
         """
         clauses, params = ["1=1"], []
         if category is not None:
@@ -982,60 +1019,66 @@ class Repository:
     # -- observations (passive monitoring) --------------------------------------
 
     def record_observation(self, run_id: int, obs: Observation) -> None:
-        """Persist one overheard packet from a monitoring run.
+        """Store one overheard packet from a monitor run.
 
-        ``packet``-kind observations (the companion's RX packet log) also carry the relay
-        path the packet traversed — the raw material of the topology graph (see
-        :meth:`packet_paths`).
+        Observations of the ``packet`` kind (the RX packet log of the companion) also have
+        the relay path that the packet went through. These paths are the raw material of
+        the topology graph (refer to :meth:`packet_paths`).
 
-        An overheard channel frame also keeps the three fields the packet viewer decrypts
-        from — the channel-hash fingerprint, the 2-byte MAC, and the ciphertext — lifted
-        out of the raw payload so a channel we hold the key for is still readable when the
-        feed is later seeded from stored history, and so a channel *datagram*, which the
-        library never breaks out at all, can still be named by the key its MAC confirms.
+        An overheard channel packet also keeps the three fields from which the packet
+        viewer decrypts: the channel-hash fingerprint, the 2-byte MAC, and the ciphertext.
+        The function takes them out of the raw payload for two reasons. A channel for
+        which we have the key stays readable when the feed later gets its first rows from
+        stored history. Also, MeshTerm can still name a channel datagram (which the library
+        never parses) by the key that its MAC confirms.
 
-        What the frame addressed is kept the same way, and for the same reason: the
-        recipient's key hash, the sender's (a hash, or the whole key an anonymous request
-        carries), and a tokened class's own token — an ack's checksum, a trace's tag. All
-        three are decoded from the frame body (:mod:`~meshterm.core.frames`) that only a
-        live event carries, so a replayed row would otherwise lose everything it had to
-        say about itself.
+        The addresses of the packet are kept in the same way, for the same reason: the
+        hash of the recipient's key, the sender's hash (or the full key that an anonymous
+        request carries), and the token of a class that has one (the checksum of an ack,
+        the tag of a trace). MeshTerm decodes all three from the packet body
+        (:mod:`~meshterm.core.frames`), and only a live event has the body. Without these
+        columns, a replayed row loses all that it can tell about itself.
 
         Args:
-            run_id: The owning run.
+            run_id: The run that owns the observation.
             obs: The observation to store.
         """
         chan_hash = cipher_mac = crypted = None
         raw = obs.raw if isinstance(obs.raw, dict) else {}
-        # The payload class identifies a relayed 'packet' that names no origin node — kept
-        # for every packet, not only the classed ones the fields below apply to.
+        # The payload class identifies a relayed 'packet' that names no origin node. Keep
+        # it for each packet, not only for the classes to which the fields below apply.
         typename = raw.get("payload_typename") if obs.kind == "packet" else None
         if typename in CHANNEL_CLASSES:
             chan_hash = raw.get("chan_hash")
             cipher_mac = raw.get("cipher_mac")
             crypted = raw.get("crypted")
         elif typename in ADDRESSED_CLASSES:
-            # An addressed frame's MAC, in the same column its channel sibling uses: a tag
-            # over the encrypted body, so copies of one message share it and the next
-            # message's do not. The ciphertext itself is *not* kept — we could never read
-            # it, and only the fingerprint is needed to tell one message's frames apart
-            # from another's (see :mod:`~meshterm.services.message_paths`).
+            # The MAC of an addressed packet, in the same column that a channel packet
+            # uses. It is a tag on the encrypted body, so copies of one message have the
+            # same MAC, and the next message has a different MAC. The ciphertext is not
+            # kept, because we can never read it. Only the fingerprint is necessary to tell
+            # the packets of one message from the packets of another message (refer to
+            # :mod:`~meshterm.services.message_paths`).
             cipher_mac = raw.get("cipher_mac")
-        # One column each for the three shapes of addressing: the sender is a hash or a
-        # whole key (its length says which), the token an ack's checksum or a trace's tag
-        # (the payload class says which) — so neither needs a column of its own.
+        # One column for each of the three forms of address. The sender is a hash or a
+        # full key (its length tells which). The token is the checksum of an ack or the
+        # tag of a trace (the payload class tells which). Thus no second column is
+        # necessary for either value.
         dest = raw.get("dest_hash") if typename else None
         src = (raw.get("src_key") or raw.get("src_hash")) if typename else None
         tag = (raw.get("ack_crc") or raw.get("trace_tag")) if typename else None
-        # A trace's per-hop readings, which live in its header path field where every other
-        # class keeps relay hashes — so they get their own column rather than `path`.
+        # The readings of a trace for each hop. They are in the path field of its header,
+        # where each other class keeps relay hashes. Thus they get their own column,
+        # instead of `path`.
         readings = raw.get("trace_snrs") if typename == "TRACE" else None
         trace_snrs = ",".join(f"{v:g}" for v in readings) if readings else None
-        # What the frame's `path` means — see the v15 migration. Only a packet row has one.
+        # What the `path` of the packet means (refer to the v15 migration). Only a packet
+        # row has one.
         route = raw.get("route_typename") if obs.kind == "packet" else None
-        # A scoped frame's transport code, and — for a scoped flood — the bytes it was
-        # computed over, so its region can be resolved against a name learned later (see
-        # the v16 migration). Nothing is kept for a frame that carries no code.
+        # The transport code of a scoped packet and, for a scoped flood, the bytes from
+        # which it was computed. Thus its region can resolve against a name that MeshTerm
+        # learns later (refer to the v16 migration). Nothing is kept for a packet that has
+        # no code.
         transport_code = raw.get("transport_code") if route in SCOPED_ROUTES else None
         body = raw_scope_body(raw) if route == "TC_FLOOD" and transport_code else None
         scope_body = body.hex() if body is not None else None
@@ -1074,10 +1117,10 @@ class Repository:
         self._conn.commit()
 
     def observation_count(self) -> int:
-        """Return the total number of overheard packets stored across every run.
+        """Return the total number of overheard packets stored in all the runs.
 
-        Backs the monitor's "total" counter, so it counts all observations ever logged,
-        not just the current session's.
+        The "total" counter of the monitor uses this value. Thus the counter counts all
+        the observations ever stored, not only those of the current session.
 
         Returns:
             The row count of the ``observations`` table.
@@ -1086,21 +1129,22 @@ class Repository:
         return int(row["n"]) if row else 0
 
     def table_counts(self) -> dict[str, int]:
-        """Return a row count for every table in the database, by name.
+        """Return a row count for each table in the database, by name.
 
-        Read off ``sqlite_master`` rather than a list written out here, which is the whole
-        point: a table added to the schema starts being reported the day it lands, and a
-        table removed stops, with nothing to keep in step. The one thing this must never
-        become is a curated set of the counts somebody thought were interesting — the
-        shape of a database is the aggregate, and the interesting one is always the table
-        nobody expected to be full.
+        The table names come from ``sqlite_master``, not from a list written here. This is
+        the purpose of the function: a table added to the schema is in the report from the
+        day that it is added, and a removed table goes out of the report. Nothing must be
+        kept in step by hand. This function must never become a selected set of the counts
+        that somebody thought interesting. The shape of a database is the aggregate, and
+        the interesting table is always the table that nobody expected to be full.
 
-        Every value is a *count*. Nothing here reads a row, so the result says how much
-        history a report's author has without saying a word about who they talk to.
+        Each value is a count. Nothing here reads a row. Thus the result tells how much
+        history the author of a report has, but it tells nothing about the persons with
+        whom the author communicates.
 
         Returns:
-            Table name to row count, alphabetically, SQLite's own internal tables
-            excluded (they describe the file format, not this app's data).
+            Table name to row count, in alphabetical order. The internal tables of SQLite
+            are not included (they describe the file format, not the data of this app).
         """
         names = [
             str(row["name"])
@@ -1111,35 +1155,37 @@ class Repository:
         ]
         counts: dict[str, int] = {}
         for name in names:
-            # The names come from sqlite_master, so they are this database's own tables
-            # and not caller input; quoted anyway, because an identifier cannot be bound.
+            # The names come from sqlite_master, so they are the tables of this database
+            # and not input from the caller. The query quotes them all the same, because
+            # an identifier cannot be bound.
             row = self._conn.execute(f'SELECT COUNT(*) AS n FROM "{name}"').fetchone()
             counts[name] = int(row["n"]) if row else 0
         return counts
 
     def failed_run_count(self) -> int:
-        """Return how many recorded tool runs ended in an error.
+        """Return the number of stored tool runs that ended with an error.
 
-        The single most useful number a reporter can hand over: it says whether this
-        install has been failing quietly for weeks or broke for the first time today,
-        and it costs one query rather than an interview.
+        This is the most useful number that a person who reports a problem can give. It
+        tells if this installation has failed silently for weeks, or failed for the first
+        time today. It costs one query, instead of many questions to the person.
 
         Returns:
-            The number of ``runs`` rows whose status is ``error``.
+            The number of ``runs`` rows with the status ``error``.
         """
         row = self._conn.execute("SELECT COUNT(*) AS n FROM runs WHERE status = 'error'").fetchone()
         return int(row["n"]) if row else 0
 
     def observation_span(self) -> tuple[datetime | None, datetime | None]:
-        """Return the first and last times anything was overheard.
+        """Return the first and the last time that something was overheard.
 
-        How much mesh this database has actually seen. A report whose span is an hour and
-        a report whose span is a year describe different installs, and the difference
-        explains a class of "it works here" before anyone else has to ask for it.
+        This span tells how much of the mesh this database heard. A report with a span of
+        one hour and a report with a span of one year describe different installations.
+        The difference explains a class of "it works here" problems before somebody must
+        ask for it.
 
         Returns:
-            ``(first, last)`` as aware UTC times, or ``(None, None)`` when nothing has
-            ever been heard.
+            ``(first, last)`` as aware UTC times, or ``(None, None)`` when nothing was
+            ever heard.
         """
         row = self._conn.execute(
             "SELECT MIN(observed_at) AS first, MAX(observed_at) AS last FROM observations"
@@ -1149,21 +1195,23 @@ class Repository:
         return _as_when(row["first"]), _as_when(row["last"])
 
     def recent_observations(self, *, since: datetime, limit: int = 4000) -> list[Observation]:
-        """Return raw stored observations in a recent window, oldest first.
+        """Return the raw stored observations in a recent time window, oldest first.
 
-        The dashboard's seed: everything overheard in the window — adverts, telemetry,
-        and ``packet`` RX-log rows alike — hydrated back into
-        :class:`~meshterm.core.models.Observation` values so the live screen can treat
-        stored history and fresh hub events identically. Timestamps compare as strings
-        (every ``observed_at`` is written by ``datetime.isoformat`` in UTC), the same
-        trick :meth:`channel_stats` relies on.
+        This is the initial data of the dashboard: all that MeshTerm overheard in the
+        window (adverts, telemetry, and ``packet`` rows from the RX log). The function
+        rebuilds them as :class:`~meshterm.core.models.Observation` values. Thus the live
+        screen can use stored history and new hub events in the same way. The timestamps
+        compare as strings, because ``datetime.isoformat`` writes each ``observed_at`` in
+        UTC. :meth:`channel_stats` uses the same method.
 
         Args:
-            since: Only observations at or after this time.
-            limit: Hard cap on rows (newest kept), so a very busy window stays cheap.
+            since: Only the observations at or after this time.
+            limit: A fixed maximum of rows (the newest stay), so that a very busy window
+                stays fast.
 
         Returns:
-            The window's observations, oldest first (ready to append live events to).
+            The observations of the window, oldest first (ready for the caller to append
+            live events).
         """
         rows = self._conn.execute(
             "SELECT node, name, kind, node_type, snr, rssi, lat, lon, path, observed_at, "
@@ -1177,20 +1225,22 @@ class Repository:
     def packet_frames_between(
         self, start: datetime, end: datetime, *, limit: int = 2000
     ) -> list[Observation]:
-        """RX-logged ``packet`` frames inside a closed time window, oldest first.
+        """The ``packet`` rows from the RX log in a closed time window, oldest first.
 
-        The message-paths view's feed: every relayed frame the radio reported in the
-        window around a chat message, raw crypto fields included, so a channel frame
-        can be decrypted and matched to the message and a direct frame correlated by
-        time. Timestamps compare as ISO strings, like every observation query.
+        This is the data for the message paths dialog: each relayed packet that the radio
+        reported in the window around a chat message, with the raw crypto fields. Thus
+        MeshTerm can decrypt a channel packet and match it to the message, and it can
+        correlate a direct packet by time. The timestamps compare as ISO strings, as in
+        each observation query.
 
         Args:
-            start: The window's inclusive start.
-            end: The window's inclusive end.
-            limit: Hard cap on rows (oldest kept — the window centres on the message).
+            start: The inclusive start of the window.
+            end: The inclusive end of the window.
+            limit: A fixed maximum of rows (the oldest stay, because the window is
+                centred on the message).
 
         Returns:
-            The window's ``packet`` observations, oldest first.
+            The ``packet`` observations of the window, oldest first.
         """
         rows = self._conn.execute(
             "SELECT node, name, kind, node_type, snr, rssi, lat, lon, path, observed_at, "
@@ -1209,7 +1259,7 @@ class Repository:
             try:
                 observed_at = datetime.fromisoformat(row["observed_at"])
             except (TypeError, ValueError):
-                continue  # a malformed stray simply doesn't make the window
+                continue  # a malformed row does not go into the window
             observations.append(
                 Observation(
                     node=row["node"],
@@ -1230,19 +1280,22 @@ class Repository:
     def node_observations(
         self, node: str, *, since: datetime | None = None, limit: int = 50000
     ) -> list[Observation]:
-        """Every stored reception of one node, oldest first — its longitudinal record.
+        """All the stored receptions of one node, oldest first: its record over time.
 
-        The Time Machine's per-node feed. ``packet``-kind rows are excluded for the
-        same reason :meth:`heard_nodes` drops them: their SNR describes the last relay,
-        not the node itself, so they would poison a reception timeline.
+        This is the data of the Time Machine for one node. Rows of the ``packet`` kind
+        are not included, for the same reason that :meth:`heard_nodes` removes them:
+        their SNR describes the last relay, not the node. Thus they make a reception
+        timeline wrong.
 
         Args:
-            node: The node's stored id (the 12-hex key prefix observations carry).
-            since: Only observations at or after this time, if given.
-            limit: Hard cap on rows (newest kept) so an ancient, chatty node stays cheap.
+            node: The stored id of the node (the key prefix of 12 hex digits that
+                observations have).
+            since: Only the observations at or after this time, if given.
+            limit: A fixed maximum of rows (the newest stay), so that a very old node
+                with much traffic stays fast.
 
         Returns:
-            The node's observations, oldest first.
+            The observations of the node, oldest first.
         """
         sql = (
             "SELECT node, name, kind, node_type, snr, rssi, lat, lon, path, observed_at "
@@ -1260,7 +1313,7 @@ class Repository:
             try:
                 observed_at = datetime.fromisoformat(row["observed_at"])
             except (TypeError, ValueError):
-                continue  # a malformed stray simply doesn't make the record
+                continue  # a malformed row does not go into the record
             observations.append(
                 Observation(
                     node=row["node"],
@@ -1278,19 +1331,21 @@ class Repository:
         return observations
 
     def daily_activity(self) -> list[tuple[str, int, int]]:
-        """Per-day activity totals across the whole stored history, oldest first.
+        """The activity totals for each day in all the stored history, oldest first.
 
-        Days are **local** calendar days: ``observed_at`` is stored as UTC ISO-8601,
-        but SQLite's ``datetime(…, 'localtime')`` rotates each timestamp into the
-        machine's zone (per-instant, so DST-correct) before the day prefix is sliced,
-        so a bar breaks at local midnight — not at the UTC-offset hour. Read the same
-        database in another zone and the days re-bucket to wherever you are, which is
-        the point: history is shown in the viewer's local time.
+        The days are **local** calendar days. ``observed_at`` is stored as UTC ISO-8601,
+        but the SQLite ``datetime(…, 'localtime')`` converts each timestamp into the time
+        zone of the machine before the day prefix is sliced. (It converts each instant
+        separately, so DST is correct.) Thus a bar breaks at local midnight, not at the
+        hour of the UTC offset. If you read the same database in a different time zone,
+        the days go into new buckets for your zone. This is the purpose: MeshTerm shows
+        history in the local time of the user.
 
         Returns:
-            ``(day, packets, nodes)`` per day with any activity: the day as a local
-            ``YYYY-MM-DD``, every stored observation counted, and the distinct
-            identified nodes heard (``packet`` rows excluded — no reliable identity).
+            ``(day, packets, nodes)`` for each day that has activity: the day as a local
+            ``YYYY-MM-DD``, the count of all the stored observations, and the count of
+            the distinct identified nodes heard. (The ``packet`` rows are not included,
+            because they have no reliable identity.)
         """
         rows = self._conn.execute(
             "SELECT substr(datetime(observed_at, 'localtime'), 1, 10) AS day, "
@@ -1301,27 +1356,28 @@ class Repository:
         return [(row["day"], int(row["pkts"]), int(row["nodes"])) for row in rows]
 
     def hourly_series(self, since: datetime) -> list[tuple[str, int, int]]:
-        """Per-clock-hour activity totals since a time, oldest first (the 24 h window feed).
+        """Activity totals for each clock hour since a time, oldest first (for the 24 h window).
 
-        The hour-resolution sibling of :meth:`daily_activity`: the same packet and
-        distinct-node counts, grouped down to the hour. ``observed_at`` is stored as
-        UTC, so SQLite's ``datetime(…, 'localtime')`` rotates each timestamp into the
-        machine's zone before the ``YYYY-MM-DDTHH`` key is sliced — the buckets break
-        on local hour boundaries in every zone, half-hour offsets included, not on UTC
-        edges. A day of history folds into ~24 rows however dense it is. Only hours
-        with traffic come back; the caller fills the quiet ones (see
-        :func:`~meshterm.ui.timemachine_screen._fill_hours`) so the axis is real
-        clock time. The ``since`` filter stays on the raw UTC column — the window is
-        an absolute span; only the labelling is local.
+        This is the version of :meth:`daily_activity` with a resolution of one hour: the
+        same counts of packets and distinct nodes, grouped by hour. ``observed_at`` is
+        stored as UTC. Thus the SQLite ``datetime(…, 'localtime')`` converts each
+        timestamp into the time zone of the machine before the ``YYYY-MM-DDTHH`` key is
+        sliced. The buckets break at local hour boundaries in each time zone (also in
+        zones with a half-hour offset), not at UTC boundaries. One day of history becomes
+        approximately 24 rows, however much traffic it has. Only the hours with traffic
+        are returned. The caller fills in the quiet hours (refer to
+        :func:`~meshterm.ui.timemachine_screen._fill_hours`), so that the axis is real
+        clock time. The ``since`` filter stays on the raw UTC column, because the window
+        is an absolute span. Only the labels are local.
 
         Args:
-            since: Only observations at or after this time.
+            since: Only the observations at or after this time.
 
         Returns:
-            ``(hour, packets, nodes)`` per active hour: ``hour`` as a local
-            ``YYYY-MM-DDTHH``, every observation counted, and the distinct identified
-            nodes heard (``packet`` rows excluded from the node count — no reliable
-            identity), oldest first.
+            ``(hour, packets, nodes)`` for each active hour, oldest first: ``hour`` as a
+            local ``YYYY-MM-DDTHH``, the count of all the observations, and the count of
+            the distinct identified nodes heard. (The node count does not include the
+            ``packet`` rows, because they have no reliable identity.)
         """
         rows = self._conn.execute(
             "SELECT replace(substr(datetime(observed_at, 'localtime'), 1, 13), ' ', 'T') "
@@ -1333,17 +1389,18 @@ class Repository:
         return [(row["hour"], int(row["pkts"]), int(row["nodes"])) for row in rows]
 
     def hourly_activity(self, *, since: datetime | None = None) -> list[int]:
-        """Observation counts by local hour of day (0–23) across the stored history.
+        """The observation counts by local hour of the day (0 to 23) in the stored history.
 
-        The whole-mesh Rhythm chart's feed: every stored observation counted into
-        the hour-of-day it arrived. ``observed_at`` is stored as UTC, so SQLite's
-        ``datetime(…, 'localtime')`` rotates each timestamp into the machine's zone
-        (per-instant, so DST-correct) before the ``HH`` slice, giving a histogram
-        already in local hours — no caller rotation needed. The cost stays 24 rows
-        however deep the history grows.
+        This is the data of the Rhythm chart for the whole mesh: each stored observation,
+        counted in the hour of the day in which it arrived. ``observed_at`` is stored as
+        UTC. Thus the SQLite ``datetime(…, 'localtime')`` converts each timestamp into the
+        time zone of the machine before the ``HH`` slice. (It converts each instant
+        separately, so DST is correct.) The result is a histogram that is already in local
+        hours, and the caller does not have to convert it. The cost stays at 24 rows,
+        however long the history becomes.
 
         Args:
-            since: Only observations at or after this time, if given.
+            since: Only the observations at or after this time, if given.
 
         Returns:
             24 counts, index = local hour.
@@ -1362,23 +1419,24 @@ class Repository:
             try:
                 counts[int(row["hh"])] += int(row["n"])
             except (TypeError, ValueError, IndexError):
-                continue  # a malformed stray timestamp simply isn't counted
+                continue  # a malformed timestamp is not counted
         return counts
 
     def rhythm_activity(self, *, since: datetime | None = None) -> list[int]:
-        """Observation counts by local minute of day (0–1439) across the history.
+        """The observation counts by local minute of the day (0 to 1439) in the history.
 
-        The base grid behind the whole-mesh Rhythm chart: a minute divides every slice
-        width the chart may settle on (1/5/10/15/20/30/60 minutes — see the Time
-        Machine's slice ladder), so one scan here folds client-side into any of them
-        without re-querying. The slot index is ``HH * 60 + MM``, computed in SQL off the
-        ``HH``/``MM`` substrings of ``datetime(…, 'localtime')`` (``observed_at`` is
-        stored as UTC, rotated per-instant into the machine's zone before slicing, so
-        DST-correct), so the histogram lands in local time with no caller rotation. The
-        cost stays at most 1440 rows however deep the history grows.
+        This is the base grid of the Rhythm chart for the whole mesh. A minute divides each
+        slice width that the chart can use (1, 5, 10, 15, 20, 30, or 60 minutes: refer to
+        the slice ladder of the Time Machine). Thus the client can fold one scan here into
+        any of these widths, and it does not have to query again. The slot index is
+        ``HH * 60 + MM``. SQL computes it from the ``HH`` and ``MM`` substrings of
+        ``datetime(…, 'localtime')``. (``observed_at`` is stored as UTC, and each instant is
+        converted into the time zone of the machine before the slice, so DST is correct.)
+        Thus the histogram is in local time, and the caller does not have to convert it.
+        The cost stays at a maximum of 1440 rows, however long the history becomes.
 
         Args:
-            since: Only observations at or after this time, if given.
+            since: Only the observations at or after this time, if given.
 
         Returns:
             1440 counts, index = local minute of the day.
@@ -1398,24 +1456,26 @@ class Repository:
             try:
                 counts[int(row["slot"])] += int(row["n"])
             except (TypeError, ValueError, IndexError):
-                continue  # a malformed stray timestamp simply isn't counted
+                continue  # a malformed timestamp is not counted
         return counts
 
     def flood_frames(self, *, since: datetime | None = None) -> list[tuple[datetime, dict]]:
-        """Every stored flood frame, oldest first, with what its scope is read from.
+        """All the stored flood packets, oldest first, with the data that gives their scope.
 
-        The Time Machine's scope views: a scoped frame's region is named by recomputing its
-        transport code under each known region's key, which no SQL can do, so the frames
-        come back as the raw mapping :meth:`~meshterm.core.region_store.RegionStore.scope_of`
-        reads (route, transport code, the bytes the code was computed over) for the caller
-        to resolve. Only floods: a direct frame has no scope, and a frame stored before its
-        route was kept cannot say which it was.
+        This is the data for the scope filters of the Time Machine. To name the region of a
+        scoped packet, MeshTerm computes its transport code again with the key of each
+        known region. SQL cannot do this. Thus the function returns the packets as the raw
+        mapping that :meth:`~meshterm.core.region_store.RegionStore.scope_of` reads (the
+        route, the transport code, and the bytes from which the code was computed), and
+        the caller resolves them. Only floods are returned: a direct packet has no scope,
+        and a packet that was stored before MeshTerm kept its route cannot tell which type
+        it was.
 
         Args:
-            since: Only frames at or after this time, if given.
+            since: Only the packets at or after this time, if given.
 
         Returns:
-            ``(observed_at, raw)`` per flood frame, oldest first.
+            ``(observed_at, raw)`` for each flood packet, oldest first.
         """
         sql = (
             "SELECT observed_at, route, transport_code, scope_body FROM observations "
@@ -1430,7 +1490,7 @@ class Repository:
         for row in self._conn.execute(sql, params):
             when = _as_when(row["observed_at"])
             if when is None:
-                continue  # a malformed stray simply isn't counted
+                continue  # a malformed row is not counted
             raw = {"route_typename": row["route"]}
             if row["transport_code"]:
                 raw["transport_code"] = row["transport_code"]
@@ -1440,20 +1500,21 @@ class Repository:
         return frames
 
     def self_transmissions(self, *, since: datetime | None = None) -> list[datetime]:
-        """Timestamps of everything this station put on the air, oldest first.
+        """The timestamps of all that our node transmitted, oldest first.
 
-        The own-node counterpart of :meth:`node_observations`: our node is never in the
-        reception history — we don't overhear ourselves — so its Time Machine volume and
-        rhythm are drawn from what we *sent* instead. Every trace we launched and every
-        message we sent unions into one transmission timeline. Both tables stamp their
-        rows in UTC ISO-8601 (``created_at``), the same form observations carry, so the
-        timeline drops straight into the bucketing the node page's charts already use.
+        This is the counterpart of :meth:`node_observations` for our node. Our node is
+        never in the reception history, because we do not overhear ourselves. Thus its
+        volume and rhythm in the Time Machine come from what we sent. Each trace that we
+        started and each message that we sent go into one transmission timeline (a SQL
+        union). Both tables stamp their rows in UTC ISO-8601 (``created_at``), the same
+        form as the observations. Thus the timeline goes directly into the bucketing that
+        the charts of the node page use.
 
         Args:
-            since: Only transmissions at or after this time, if given.
+            since: Only the transmissions at or after this time, if given.
 
         Returns:
-            Transmission timestamps (trace launches + sent messages), oldest first.
+            The transmission timestamps (trace starts and sent messages), oldest first.
         """
         sql = "SELECT created_at FROM traces"
         params: list[Any] = []
@@ -1469,26 +1530,27 @@ class Repository:
             try:
                 stamps.append(datetime.fromisoformat(row["created_at"]))
             except (TypeError, ValueError):
-                continue  # a malformed stray timestamp simply isn't charted
+                continue  # a malformed timestamp is not charted
         stamps.sort()
         return stamps
 
     def self_trace_reach(
         self, *, since: datetime | None = None
     ) -> list[tuple[datetime, bool, float | None, int | None]]:
-        """Per-trace reach outcomes, oldest first: ``(when, came_home, min_snr, hop_count)``.
+        """The reach of each trace, oldest first: ``(when, came_home, min_snr, hop_count)``.
 
-        The measurement behind the own-node page's Reach section. Every trace row is one
-        probe of how far we get out: whether it came home, the bottleneck SNR of the path
-        it walked (``min_snr`` — the reach's weakest link), and how many hops it crossed.
-        Timed-out attempts are kept — a run of failures is itself a reach story — but carry
-        no SNR (nothing came back to measure), so the SNR band draws only the ones that did.
+        This is the measurement for the Reach section of the page of our node. Each trace
+        row is one probe of how far we get out: if the trace came home, the bottleneck SNR
+        of the path that it walked (``min_snr``: the weakest link of the reach), and how
+        many hops it crossed. The attempts that timed out are kept, because a series of
+        failures also tells about the reach. But they have no SNR (nothing came back to
+        measure). Thus the SNR band draws only the attempts that came home.
 
         Args:
-            since: Only traces at or after this time, if given.
+            since: Only the traces at or after this time, if given.
 
         Returns:
-            ``(created_at, success, min_snr, hop_count)`` per trace, oldest first.
+            ``(created_at, success, min_snr, hop_count)`` for each trace, oldest first.
         """
         sql = "SELECT created_at, success, min_snr, hop_count FROM traces"
         params: list[Any] = []
@@ -1501,20 +1563,21 @@ class Repository:
             try:
                 when = datetime.fromisoformat(row["created_at"])
             except (TypeError, ValueError):
-                continue  # a malformed stray timestamp simply isn't charted
+                continue  # a malformed timestamp is not charted
             out.append((when, bool(row["success"]), row["min_snr"], row["hop_count"]))
         return out
 
     def self_activity_ledger(self, *, since: datetime | None = None) -> SelfActivity:
-        """Roll-up tallies of this station's outbound life (see :class:`SelfActivity`).
+        """The totals of the outbound activity of our node (refer to :class:`SelfActivity`).
 
-        One aggregate pass each over the traces, messages, and tx-sample tables — every
-        count the own-node page's Ledger line prints, filtered to the window. Hand-composed
-        path walks (filed under :data:`PATH_TRACE_TARGET`) still count among the traces we
-        launched, but are excluded from the distinct-target tally: they aim at no target.
+        The function does one aggregate pass on each of the traces, messages, and
+        tx-sample tables. The result is each count that the Ledger line of the page of our
+        node shows, filtered to the window. The path walks composed by hand (stored under
+        :data:`PATH_TRACE_TARGET`) still count in the traces that we started. But they are
+        not in the count of distinct targets, because they have no target.
 
         Args:
-            since: Only activity at or after this time, if given.
+            since: Only the activity at or after this time, if given.
 
         Returns:
             The populated :class:`SelfActivity`.
@@ -1563,23 +1626,24 @@ class Repository:
     def first_seen(
         self, *, since: datetime | None = None
     ) -> list[tuple[str, str | None, datetime]]:
-        """When each node first ever appeared in the history, newest arrivals first.
+        """The time at which each node first appeared in the history, newest arrivals first.
 
-        The Time Machine's "new arrivals" feed: one grouped scan yields each node's
-        earliest observation, labelled by its most recent advertised name (via
-        :meth:`node_names`; ``packet`` rows excluded — no reliable identity).
+        This is the data for the "new arrivals" list of the Time Machine. One grouped scan
+        gives the earliest observation of each node, with the most recent name that the
+        node advertised as its label (through :meth:`node_names`). The ``packet`` rows are
+        not included, because they have no reliable identity.
 
         Args:
-            since: Only nodes whose *first* appearance is at or after this time.
+            since: Only the nodes whose first appearance is at or after this time.
 
         Returns:
             ``(node, latest_name, first_heard)`` triples, most recent arrival first.
         """
-        # One streaming pass, unsorted: ``observed_at`` is UTC ISO-8601 and compares
-        # correctly as a string, so each node's earliest stamp and latest name are
-        # tracked by string comparison, and only the ~one winning stamp per node is
-        # parsed — instead of ordering the whole history and walking it row-object by
-        # row-object as this used to.
+        # One streaming pass, not sorted. ``observed_at`` is UTC ISO-8601 and compares
+        # correctly as a string. Thus a string comparison finds the earliest stamp and the
+        # latest name of each node, and the function parses only approximately one stamp
+        # (the stamp that wins) for each node. Before, this function sorted all the
+        # history and walked it one row object at a time.
         firsts: dict[str, str] = {}
         names: dict[str, tuple[str, str]] = {}
         for row in self._conn.execute(
@@ -1607,21 +1671,22 @@ class Repository:
         return arrivals
 
     def kind_counts(self, *, since: datetime | None = None) -> dict[str, int]:
-        """Stored observation tallies by packet class, optionally windowed.
+        """The counts of the stored observations by packet class, with an optional window.
 
-        The persistent seed of the dashboard's traffic panel: what the recorder has
-        heard across sessions, by kind, so the panel opens populated instead of
-        counting from zero every launch. A raw ``packet`` frame carrying a parsed
-        payload class buckets as ``packet:<TYPENAME>`` (``packet:GRP_TXT``,
-        ``packet:TRACE``, …) so the panel can name what the frames were; only a
-        class-less frame stays a bare ``packet``. Messages and acks are separate
-        event families (not observations) and are counted live on top of this.
+        This is the stored initial data of the traffic panel of the dashboard: what the
+        recorder heard in all sessions, by kind. Thus the panel opens with data, and does
+        not count from zero at each start. A raw ``packet`` row that has a parsed payload
+        class goes into the bucket ``packet:<TYPENAME>`` (``packet:GRP_TXT``,
+        ``packet:TRACE``, …), so that the panel can name what the packets were. Only a
+        packet without a class stays a bare ``packet``. Messages and acks are different
+        event families (not observations), and the panel counts them live in addition to
+        these counts.
 
         Args:
-            since: Only observations at or after this time, if given.
+            since: Only the observations at or after this time, if given.
 
         Returns:
-            ``bucket → count`` for every packet class ever stored (in the window).
+            ``bucket → count`` for each packet class ever stored (in the window).
         """
         sql = (
             "SELECT CASE WHEN kind = 'packet' AND payload_typename IS NOT NULL "
@@ -1637,18 +1702,19 @@ class Repository:
         return {row["bucket"]: row["n"] for row in rows}
 
     def prune_observations(self, older_than: datetime) -> int:
-        """Delete observations that aged past the retention window (housekeeping).
+        """Delete the observations that are older than the retention window (housekeeping).
 
-        The once-per-session sweep that keeps a permanently-recording database
-        bounded: everything the dashboard and Time Machine read lives inside the
-        retention window, so rows beyond it are pure weight. Timestamps compare as
-        strings, like every other ``observed_at`` filter here.
+        This sweep runs one time in each session. It keeps a limit on the size of a
+        database that stores data all the time. All the data that the dashboard and the
+        Time Machine read is in the retention window, so the rows outside it have no use.
+        The timestamps compare as strings, as in each other ``observed_at`` filter here.
 
         Args:
-            older_than: Observations strictly before this time are deleted.
+            older_than: The observations before this time (not at this time) are
+                deleted.
 
         Returns:
-            How many rows were removed (0 when the window has no stale rows).
+            The number of deleted rows (0 when no rows are older than the window).
         """
         cur = self._conn.execute(
             "DELETE FROM observations WHERE observed_at < ?", (older_than.isoformat(),)
@@ -1657,21 +1723,23 @@ class Repository:
         return cur.rowcount if cur.rowcount is not None and cur.rowcount > 0 else 0
 
     def node_names(self) -> dict[str, str]:
-        """The most recent advertised name per node, across everything ever recorded.
+        """The most recent advertised name of each node, in all that was ever stored.
 
-        The fill-in-the-blanks source for screens that meet a node id without a name
-        (a telemetry-only node in the Time Machine, a relay hash in the dashboard
-        feed): whatever name that node *ever* put on the air. One indexed scan;
-        ``packet`` rows are excluded because they carry no reliable identity.
+        Screens that find a node id without a name use this source to fill in the name
+        (a node with only telemetry in the Time Machine, a relay hash in the dashboard
+        feed). It gives any name that the node ever transmitted. It is one aggregate scan.
+        The ``packet`` rows are not included, because they have no reliable identity.
 
         Returns:
-            Latest non-empty name keyed by stored node id (the 12-hex key prefix).
+            The latest name that is not empty, keyed by the stored node id (the key
+            prefix of 12 hex digits).
         """
-        # SQLite's bare-column-with-MAX guarantee: grouped with ``MAX(observed_at)``, the
-        # ungrouped ``name`` is taken from the row that supplied the maximum — the latest
-        # name per node in one aggregate scan, no Python walk over the whole history.
-        # ``NOT INDEXED``, because the planner otherwise walks ``idx_observations_node``
-        # row by row (a random-access fetch per entry — measurably slower than the scan).
+        # The SQLite bare-column-with-MAX guarantee: in a group with ``MAX(observed_at)``,
+        # the ungrouped ``name`` comes from the row that has the maximum. Thus one
+        # aggregate scan gives the latest name of each node, and Python does not walk all
+        # the history. ``NOT INDEXED``, because without it the planner walks
+        # ``idx_observations_node`` row by row (one random-access read for each entry,
+        # which is measurably slower than the scan).
         rows = self._conn.execute(
             "SELECT node, name, MAX(observed_at) FROM observations NOT INDEXED "
             "WHERE node IS NOT NULL AND name IS NOT NULL AND name != '' "
@@ -1680,28 +1748,30 @@ class Repository:
         return {row["node"]: row["name"] for row in rows}
 
     def last_heard_by_node(self) -> dict[str, datetime]:
-        """The most recent reception per node, stamped by *our* clock.
+        """The most recent reception of each node, with the time from our clock.
 
-        The evidence half of a contact's heard time. The device's contact table reports
-        ``last_advert``, which the advertising node stamped with its own clock — hearsay a
-        wrong RTC can hold days in the past forever — whereas every row here was written
-        when *we* received something (see
+        This is the evidence part of the heard time of a contact. The contact table of the
+        device reports ``last_advert``, which the node that sent the advert stamped with
+        its own clock. That value is only a claim: a wrong RTC can keep it days in the past, for
+        all time. But MeshTerm wrote each row here when we received something (refer to
         :meth:`~meshterm.services.device_state.DeviceState.contacts`, which takes the later
-        of the two). ``packet`` rows are excluded for the same reason
-        :meth:`heard_nodes` excludes them: a relayed frame tells us we heard its last
-        *relay*, not its originator.
+        of the two). The ``packet`` rows are not included, for the same reason that
+        :meth:`heard_nodes` does not include them: a relayed packet tells us that we heard
+        its last relay, not its origin node.
 
-        This is :meth:`heard_nodes` reduced to the one column that answers "when last?" —
-        the aggregate happens in SQLite and yields one row per node, rather than streaming
-        the whole history into Python to build per-node stat objects. That matters because
-        every contacts fetch calls this, and the row-building is the expensive half.
+        This method is :meth:`heard_nodes` with only the one column that answers "when
+        last?". SQLite does the aggregate and gives one row for each node. The method does
+        not stream all the history into Python to build statistics objects for each node.
+        This is important, because each read of the contacts calls this method, and the
+        row building is the expensive part.
 
         Returns:
-            Latest reception time keyed by stored node id (the 12-hex key prefix), aware UTC.
+            The latest reception time, keyed by the stored node id (the key prefix of 12
+            hex digits), in aware UTC.
         """
-        # ``NOT INDEXED`` for the same reason as :meth:`node_names`: the planner otherwise
-        # walks ``idx_observations_node`` with a random-access fetch per row, slower than
-        # the plain scan this aggregate wants.
+        # ``NOT INDEXED`` for the same reason as in :meth:`node_names`: without it, the
+        # planner walks ``idx_observations_node`` with one random-access read for each
+        # row. That is slower than the plain scan that this aggregate must have.
         rows = self._conn.execute(
             "SELECT node, MAX(observed_at) AS last FROM observations NOT INDEXED "
             "WHERE node IS NOT NULL AND kind != 'packet' GROUP BY node"
@@ -1709,20 +1779,21 @@ class Repository:
         return {row["node"]: datetime.fromisoformat(row["last"]) for row in rows}
 
     def heard_nodes(self, *, since: datetime | None = None) -> list[HeardNode]:
-        """Aggregate stored observations into per-node reception statistics.
+        """Aggregate the stored observations into reception statistics for each node.
 
-        Spans every monitoring run (optionally limited to recent history), so the result
-        is a longitudinal view of which nodes have been heard, how strongly, and where —
-        the substrate for the monitor summary and the coverage map. ``packet``-kind rows
-        are excluded: their SNR describes our link to the packet's *last relay*, not to
-        the originating node, so folding them in would misattribute reception quality
-        (they feed the topology graph instead — see :meth:`packet_paths`).
+        The result includes all the monitor runs (with an optional limit to recent
+        history). Thus it is a record over time of which nodes were heard, how strongly,
+        and where. It is the base for the monitor summary and the coverage map. The rows
+        of the ``packet`` kind are not included. Their SNR describes our link to the last
+        relay of the packet, not to the origin node. Thus they put the reception quality on
+        the wrong node. (They supply the topology graph instead: refer to
+        :meth:`packet_paths`.)
 
         Args:
-            since: Only include observations at or after this time, if given.
+            since: Include only the observations at or after this time, if given.
 
         Returns:
-            One :class:`HeardNode` per distinct node, ordered by most-recently heard.
+            One :class:`HeardNode` for each distinct node, most recently heard first.
         """
         sql = (
             "SELECT node, public_key, name, node_type, snr, rssi, lat, lon, observed_at "
@@ -1733,13 +1804,14 @@ class Repository:
             sql += " AND observed_at >= ?"
             params.append(since.isoformat())
 
-        # One streaming pass, aggregating in place. This is a whole-history scan on the
-        # open path of half the screens (Contacts, the map, a trace's target list), so it
-        # never materializes per-row Observation objects or parses per-row timestamps —
-        # ``observed_at`` is UTC ISO-8601, which compares correctly as a *string*, so each
-        # "most recent X" is tracked by string comparison and only the one winning stamp
-        # per node is parsed at the end. ``>=`` on every comparison keeps the old
-        # sort-then-walk-backwards tie behaviour: among equal stamps, the later row wins.
+        # One streaming pass, which aggregates in place. This scan of all the history is on
+        # the open path of half the screens (Contacts, the map, the target list of a
+        # trace). Thus it never builds an Observation object for each row, and it never
+        # parses the timestamp of each row. ``observed_at`` is UTC ISO-8601, which compares
+        # correctly as a string. Thus a string comparison finds each "most recent X", and
+        # the function parses only the one stamp that wins for each node, at the end. ``>=``
+        # in each comparison keeps the tie behaviour of the old method (sort, then walk
+        # backwards): among equal stamps, the later row wins.
         stats: dict[str | None, list] = {}
         for row in self._conn.execute(sql, params):
             iso = row["observed_at"]
@@ -1796,43 +1868,44 @@ class Repository:
         return sorted(nodes, key=lambda n: n.last_seen, reverse=True)
 
     def contact_signals(self, nodes: Sequence[str]) -> dict[str, ContactSignals]:
-        """Gather every scoring signal for a set of nodes, in a fixed number of scans.
+        """Get all the scoring signals for a set of nodes, in a fixed number of scans.
 
-        The evidence behind the Contacts sweep (see
-        :mod:`~meshterm.core.contact_score`). Deliberately *set-based*: a table of several
-        hundred contacts is answered by five grouped passes over the history rather than by
-        five queries per contact, so the sweep's cost tracks the size of the database and
-        not the size of the table being swept.
+        This is the evidence for the Contacts sweep (refer to
+        :mod:`~meshterm.core.contact_score`). The method is set-based on purpose. For a
+        table of several hundred contacts, it does five grouped passes over the history,
+        instead of five queries for each contact. Thus the cost of the sweep follows the
+        size of the database, not the size of the table that the sweep examines.
 
         Each pass fills one part of :class:`~meshterm.core.contact_score.ContactSignals`:
 
-        * **Reception** — first heard, last heard, and the transmission tally, from
-          ``observations``. ``packet`` rows are excluded exactly as :meth:`heard_nodes`
-          excludes them, so the tally means "heard *from* this node" and stays the same
-          number the contact list's ``PKTS`` lane shows.
-        * **Hops** — the median relay count of packets seen originating from the node, from
-          the ``packet`` rows this time, since those are the only ones carrying a path (see
-          :meth:`packet_paths`). Median rather than minimum: one lucky direct reception
-          shouldn't make a four-hop node read as a neighbour.
-        * **Direct messages** — totals, our own outbound share, and the age of the latest,
-          matched by *prefix*: ``messages.peer`` holds whatever width the wire addressed,
-          which is not always the 12 hex an observation keys on (see
-          :meth:`last_message_by_peer`).
-        * **Channel posts** — attributed by the ``Name: `` prefix a channel message
-          carries, because the wire gives a channel frame no sender key at all. A name held
-          by two contacts attributes to *neither*: the caller marks those unattributed so
-          the score reads them as unknown rather than as silence.
+        * **Reception**: first heard, last heard, and the transmission count, from
+          ``observations``. The ``packet`` rows are not included, the same as in
+          :meth:`heard_nodes`. Thus the count means "heard from this node", and it stays
+          the same number that the ``PKTS`` lane of the contact list shows.
+        * **Hops**: the median relay count of the packets that came from the node as their
+          origin. This time the data comes from the ``packet`` rows, because only these
+          rows have a path (refer to :meth:`packet_paths`). The median, not the minimum:
+          one direct reception by chance must not make a node at four hops look like a
+          neighbour.
+        * **Direct messages**: the totals, our own outbound share, and the age of the
+          latest message, matched by prefix. ``messages.peer`` has the width that the
+          packet used for the address. This is not always the 12 hex digits that are the
+          key of an observation (refer to :meth:`last_message_by_peer`).
+        * **Channel messages**: attributed by the ``Name: `` prefix of a channel message,
+          because a channel packet has no sender key. A name that two contacts have is
+          attributed to neither contact. The caller marks these messages as not
+          attributed, so that the score reads them as unknown, not as silence.
 
         Args:
-            nodes: The 12-hex canonical node ids to gather for. Anything absent from the
-                history simply comes back with an empty record, which the score protects
-                rather than punishes.
+            nodes: The canonical node ids (12 hex digits) to get signals for. A node that
+                is not in the history comes back with an empty record. The score protects
+                such a record, and does not punish it.
 
         Returns:
-            One :class:`~meshterm.core.contact_score.ContactSignals` per requested node,
-            keyed by that id. Name-keyed channel attribution is *not* filled in here (the
-            repository knows nothing about which name belongs to which contact) — see
-            :meth:`channel_post_counts`.
+            One :class:`~meshterm.core.contact_score.ContactSignals` for each requested
+            node, keyed by its id. This method does not fill in the channel attribution by
+            name, because the repository does not know which name belongs to which contact
+            (refer to :meth:`channel_post_counts`).
         """
         from ..core.contact_score import ContactSignals
 
@@ -1842,7 +1915,7 @@ class Repository:
         now = utcnow()
 
         def age_days(iso: str | None) -> float | None:
-            """Days from a stored ISO stamp to now, or ``None`` for an unparseable one."""
+            """The days from a stored ISO stamp to now, or ``None`` for a stamp not valid."""
             if not iso:
                 return None
             try:
@@ -1861,11 +1934,12 @@ class Repository:
             if row["node"] in wanted:
                 heard[row["node"]] = (row["first"], row["last"], int(row["n"] or 0))
 
-        # -- hops: the median relay count of packets originating from each node -------
-        # Bounded to the most recent frames, like :meth:`packet_paths`, and for the same
-        # two reasons: this is the one pass that builds a row object per packet rather than
-        # aggregating in SQL, and a year-old hop count is evidence about a topology that no
-        # longer exists. Newest first, so the cap keeps the readings worth having.
+        # -- hops: the median relay count of the packets from each origin node --------
+        # Limited to the most recent packets, as in :meth:`packet_paths`, for the same two
+        # reasons. This is the only pass that builds a row object for each packet, instead
+        # of an aggregate in SQL. Also, a hop count from one year ago is evidence about a
+        # topology that does not exist now. Newest first, so that the limit keeps the
+        # useful readings.
         hop_counts: dict[str, list[int]] = {}
         for row in self._conn.execute(
             "SELECT node, path FROM observations "
@@ -1893,9 +1967,9 @@ class Repository:
             latest: str | None = None
             for row in dm_rows:
                 peer = (row["peer"] or "").lower()
-                # Either side may be the shorter: the wire addresses at whatever width it
-                # likes, so a stored 6-hex peer and a 12-hex node id are the same node when
-                # one is a prefix of the other.
+                # Either side can be the shorter one. A packet can use any width for an
+                # address. Thus a stored peer of 6 hex digits and a node id of 12 hex digits
+                # are the same node when one is a prefix of the other.
                 if not peer or not (peer.startswith(node) or node.startswith(peer)):
                     continue
                 total += int(row["total"] or 0)
@@ -1915,19 +1989,20 @@ class Repository:
         return signals
 
     def channel_post_counts(self) -> dict[str, int]:
-        """How many channel messages each *name* has posted, lowercased.
+        """The number of channel messages that each name sent, by lowercase name.
 
-        A channel frame carries no sender key — senders identify themselves by prefixing
-        the text with ``Name: `` (see
-        :func:`~meshterm.core.channels.split_channel_sender`), so this is the only
-        attribution available and it is by display name alone. The caller is responsible
-        for refusing to trust a name two contacts share; this method only counts.
+        A channel packet has no sender key. A sender identifies itself with the prefix
+        ``Name: `` before the text (refer to
+        :func:`~meshterm.core.channels.split_channel_sender`). Thus this is the only
+        attribution that is available, and it uses only the display name. The caller must
+        not trust a name that two contacts share. This method only counts.
 
-        Our own outbound posts are excluded: they say nothing about anyone else.
+        Our own outbound messages are not included, because they tell nothing about other
+        nodes.
 
         Returns:
-            Post counts keyed by lowercased sender name. Messages whose text carries no
-            usable name prefix contribute nothing.
+            Message counts keyed by the lowercase sender name. A message without a usable
+            name prefix in its text is not counted.
         """
         from ..core.channels import split_channel_sender
 
@@ -1944,16 +2019,16 @@ class Repository:
     # -- chat messages ----------------------------------------------------------
 
     def record_chat_message(self, msg: ChatMessage, *, run_id: int | None = None) -> int:
-        """Persist one chat message (sent or received).
+        """Store one chat message (sent or received).
 
         Args:
-            msg: The message to store. Its ``peer`` is normalized to lowercase so a
-                direct conversation queries back consistently.
-            run_id: The owning background ``chat`` run, if any (inbound messages log to
-                one; outbound sends may not).
+            msg: The message to store. Its ``peer`` is normalized to lowercase, so that
+                the queries for a direct conversation get consistent results.
+            run_id: The background ``chat`` run that owns the message, if any. (Inbound
+                messages are logged to one. Outbound sends can have no run.)
 
         Returns:
-            The new message's primary key.
+            The primary key of the new message.
         """
         peer = msg.peer.lower() if msg.peer else None
         cur = self._conn.execute(
@@ -1981,20 +2056,21 @@ class Repository:
         return int(cur.lastrowid)
 
     def has_room_post(self, msg: ChatMessage) -> bool:
-        """Whether this room post is already in the room's history.
+        """Whether this room post is already in the history of the room.
 
-        A room re-sends a post it never heard us acknowledge — the acknowledgement lost
-        on the way back looks, from the room's side, exactly like the post being lost —
-        and a login asks for every post newer than the last one the *companion* recorded,
-        which can lag the last one *we* stored. Either way the same post arrives twice,
-        and history should hold it once. A room stamps each post with a unique time by
-        its own clock, so the room, the author, the time and the text together name it.
+        A room sends a post again when it did not hear our acknowledgement. For the room,
+        an acknowledgement lost on the way back looks the same as a lost post. Also, a
+        login asks for each post newer than the last post that the companion stored, and
+        that post can be older than the last post that we stored. In both cases, the same
+        post arrives two times, and the history must keep it one time. A room stamps each
+        post with a unique time from its own clock. Thus the room, the author, the time,
+        and the text together identify the post.
 
         Args:
             msg: An inbound room post (:attr:`~ChatMessage.is_post`).
 
         Returns:
-            ``True`` when a row with the same room, author, time and text exists.
+            ``True`` when a row with the same room, author, time, and text exists.
         """
         row = self._conn.execute(
             "SELECT 1 FROM messages WHERE is_channel = 0 AND peer = ? AND author = ? "
@@ -2009,27 +2085,29 @@ class Repository:
         return row is not None
 
     def update_chat_ack(self, message_id: int, acked: bool) -> None:
-        """Update one outbound message's delivery acknowledgement (used on retry).
+        """Change the delivery acknowledgement of one outbound message (used at a retry).
 
         Args:
             message_id: The ``messages`` row to update.
-            acked: The new delivery state — ``True`` acknowledged, ``False`` not.
+            acked: The new delivery state: ``True`` for acknowledged, ``False`` for not
+                acknowledged.
         """
         self._conn.execute("UPDATE messages SET acked = ? WHERE id = ?", (int(acked), message_id))
         self._conn.commit()
 
     def delete_chat_history(self, peer: str | None) -> int:
-        """Delete every stored message of one direct conversation.
+        """Delete all the stored messages of one direct conversation.
 
-        The chat picker's per-contact history delete: removes only that peer's direct
-        messages — channel history and every other conversation stay untouched. The
-        peer matches how :meth:`record_chat_message` stores it (lowercased key prefix).
+        This is the history delete for one contact in the chat picker. It deletes only the
+        direct messages of that peer. The channel history and all the other conversations
+        do not change. The peer matches the form in which :meth:`record_chat_message`
+        stores it (the key prefix in lowercase).
 
         Args:
-            peer: The contact's key prefix (the direct conversation's identity).
+            peer: The key prefix of the contact (the identity of the direct conversation).
 
         Returns:
-            How many messages were deleted.
+            The number of deleted messages.
         """
         cur = self._conn.execute(
             "DELETE FROM messages WHERE is_channel = 0 AND peer = ?",
@@ -2047,17 +2125,19 @@ class Repository:
         limit: int = 200,
         posts_only: bool = False,
     ) -> list[ChatMessage]:
-        """Return a conversation's most recent messages, oldest-first.
+        """Return the most recent messages of a conversation, oldest first.
 
         Args:
-            is_channel: Whether to load a channel conversation.
-            channel_id: The channel's slot-independent identity (channel conversations).
-            peer: The contact key prefix (direct conversations), or a room's.
-            limit: Maximum number of messages to return.
-            posts_only: Load a room's *board*: the posts it relayed to us and the ones we
-                posted to it, leaving out what else arrives from a room under the same key
-                — its replies to an admin's commands, and any post stored before posts
-                carried their author (see :attr:`ChatMessage.is_post`).
+            is_channel: Whether to read a channel conversation.
+            channel_id: The identity of the channel, which does not depend on the slot
+                (for channel conversations).
+            peer: The key prefix of the contact (for direct conversations), or of a room.
+            limit: The maximum number of messages to return.
+            posts_only: Read the board of a room: the posts that it relayed to us and the
+                posts that we posted to it. Leave out the other messages that arrive from a
+                room under the same key: its replies to the commands of an admin, and each
+                post stored before posts had their author (refer to
+                :attr:`ChatMessage.is_post`).
 
         Returns:
             The messages in chronological order (ready to render as a transcript).
@@ -2075,16 +2155,17 @@ class Repository:
         return [self._row_to_chat(row) for row in reversed(rows)]
 
     def last_chat_messages(self, rooms: Iterable[str] = ()) -> dict[str, ChatMessage]:
-        """Return the latest message per conversation, keyed by conversation key.
+        """Return the latest message of each conversation, keyed by conversation key.
 
-        Backs the conversation picker's preview snippets. One row per distinct
-        conversation, taken as the highest-id (most recent) message in each.
+        The preview snippets of the conversation picker use this result. There is one row
+        for each distinct conversation: the message with the highest id (the most recent)
+        in that conversation.
 
         Args:
-            rooms: The key prefixes of the room servers among the conversations, lowercase
-                as stored. A room's latest message is its latest *post* — what
-                :meth:`recent_chat_messages` loads with ``posts_only`` — so an admin's
-                command reply never stands in as the last thing said on the board.
+            rooms: The key prefixes of the room servers in the conversations, in lowercase
+                as stored. The latest message of a room is its latest post (what
+                :meth:`recent_chat_messages` reads with ``posts_only``). Thus the reply to
+                a command of an admin never shows as the last message on the board.
 
         Returns:
             A mapping of :func:`~meshterm.core.models.conversation_key` to its latest
@@ -2093,8 +2174,9 @@ class Repository:
         peers = sorted({room.lower() for room in rooms if room})
         replies = ""
         if peers:
-            # Leave out a room's inbound rows that are not posts. A peer is matched exactly:
-            # a room's rows are stored under the prefix its own contact entry carries.
+            # Leave out the inbound rows of a room that are not posts. A peer must match
+            # exactly, because the rows of a room are stored under the prefix that its own
+            # contact entry has.
             marks = ", ".join("?" * len(peers))
             replies = (
                 f" WHERE NOT (is_channel = 0 AND outbound = 0 AND author IS NULL "
@@ -2110,22 +2192,24 @@ class Repository:
         return {msg.key: msg for msg in (self._row_to_chat(r) for r in rows)}
 
     def last_message_by_peer(self) -> dict[str, datetime]:
-        """The most recent *inbound* direct message per peer, stamped by our clock.
+        """The most recent inbound direct message of each peer, with the time from our clock.
 
-        The other half of the heard-time evidence (see :meth:`last_heard_by_node`). A direct
-        message received from a node is, in the app's own lexicon, hearing that node — but
-        it arrives as a ``CONTACT_MSG_RECV`` event and is stored here, never as an
-        observation, so nothing in the reception history knows about it. It is deliberately
-        *not* recorded as an observation instead: a routed message's SNR describes the link
-        to its last relay, which is exactly why :meth:`heard_nodes` excludes ``packet``
-        rows, and counting it would inflate a lane that means overheard traffic.
+        This is the other part of the heard-time evidence (refer to
+        :meth:`last_heard_by_node`). In the lexicon of the app, a direct message received
+        from a node means that we heard that node. But the message arrives as a
+        ``CONTACT_MSG_RECV`` event and is stored here, never as an observation. Thus
+        nothing in the reception history knows about it. We do not store it as an
+        observation, on purpose. The SNR of a routed message describes the link to its last
+        relay, which is the reason that :meth:`heard_nodes` does not include ``packet``
+        rows. Also, a count of it makes a lane larger whose meaning is overheard traffic.
 
-        Outbound messages are excluded — sending to a node is not hearing from it.
+        Outbound messages are not included: to send to a node is not to hear from it.
 
         Returns:
-            Latest inbound-message time keyed by stored peer prefix (lowercased, as
-            :meth:`record_chat_message` writes it), aware UTC. The prefix width is whatever
-            the wire addressed, so callers match it as a prefix, not by equality.
+            The latest time of an inbound message, keyed by the stored peer prefix (in
+            lowercase, as :meth:`record_chat_message` writes it), in aware UTC. The prefix
+            width is the width that the packet used for the address. Thus the callers
+            match it as a prefix, not by equality.
         """
         rows = self._conn.execute(
             "SELECT peer, MAX(created_at) AS last FROM messages "
@@ -2136,37 +2220,38 @@ class Repository:
     def direct_message_bounds(
         self, peer: str | None, when: datetime, *, outbound: bool
     ) -> tuple[datetime | None, datetime | None]:
-        """The times of the direct messages either side of ``when`` in one conversation.
+        """The times of the direct messages on each side of ``when`` in one conversation.
 
-        What bounds the message-paths search for a direct message (see
-        :mod:`~meshterm.services.message_paths`). A direct frame is encrypted, so the log
-        cannot say which message it carried; a fixed window around the message is therefore
-        the only bound available — and at conversational pace it is far too wide. Nine
-        messages of one real exchange fell inside a single ±90 s window, so every one of
-        them listed all nine messages' frames as its own.
+        These times limit the message-paths search for a direct message (refer to
+        :mod:`~meshterm.services.message_paths`). A direct packet is encrypted, so the log
+        cannot tell which message it carried. Thus a fixed window around the message is
+        the only limit that is available, and at the speed of a conversation it is much
+        too wide. Nine messages of one real exchange were in a single ±90 s window. Thus
+        each of them showed the packets of all nine messages as its own.
 
-        The messages around it are the natural edges: a frame logged after the *next*
-        message was composed belongs to that one, not this one. The caller clamps its window
-        to the midpoint of each gap, so the bound tightens exactly as the conversation
-        speeds up.
+        The messages around it are the natural edges: a packet logged after the user
+        composed the next message belongs to that next message, not to this one. The
+        caller clamps its window to the midpoint of each gap. Thus the limit becomes
+        narrower exactly as the conversation becomes faster.
 
-        Only messages travelling the **same way** count as neighbours, because the two
-        directions are stamped by two different clocks: our own sends carry ours, taken as
-        they leave, while a received message carries the *sender's*, which may drift from
-        ours by minutes. Ordering an inbound message against an outbound one therefore
-        compares two clocks and can bound a message by an edge that, in its own clock,
-        hasn't happened yet — which is exactly how the first cut of this clamp gave a
-        received message an empty window. Within one direction the stamps are consistent,
-        so the neighbours mean what they say.
+        Only the messages that go in the **same direction** count as neighbours, because
+        two different clocks stamp the two directions. Our own sends have our clock, read
+        when they leave. A received message has the clock of the sender, which can be
+        minutes away from ours. Thus, if MeshTerm puts an inbound message in order against
+        an outbound message, it compares two clocks. It can then limit a message with an
+        edge that, in the clock of that message, did not occur yet. That is how the first
+        version of this clamp gave a received message an empty window. In one direction,
+        the stamps are consistent, so the neighbours mean what they say.
 
         Args:
-            peer: The contact's key prefix, as :meth:`record_chat_message` stores it.
-            when: The message's own time.
-            outbound: The direction to look along — the message's own.
+            peer: The key prefix of the contact, as :meth:`record_chat_message` stores it.
+            when: The time of the message.
+            outbound: The direction in which to look: the direction of the message.
 
         Returns:
-            ``(previous, next)`` same-direction message times, either of which is ``None``
-            when this message is the first or last of its side of the conversation.
+            ``(previous, next)``: the times of the messages in the same direction. Each of
+            them is ``None`` when this message is the first or the last on its side of the
+            conversation.
         """
         key = (peer or "").lower()
         args = (key, int(outbound), when.isoformat())
@@ -2184,26 +2269,29 @@ class Repository:
         return prev, _as_when(row["edge"] if row else None)
 
     def channel_stats(self) -> dict[str, ChannelStats]:
-        """Aggregate stored channel messages into per-channel statistics.
+        """Aggregate the stored channel messages into statistics for each channel.
 
-        Backs the channel manager's list lanes: each configured channel's row shows its
-        total message count, the age of its last message, and an activity sparkline over
-        the trailing :data:`ACTIVITY_WINDOW` — whose :data:`ACTIVITY_BUCKETS`-column
-        histogram is built here (the sparkline draws its newest
-        :data:`ACTIVITY_DRAWN_BUCKETS`; the rest feeds the shared scaling peak). Two
-        passes, each grouped/filtered in SQL so the cost tracks message volume, not
-        channel count: an aggregate for the all-time totals, then the window's individual
-        timestamps, bucketed in Python (a few hours of chatter, so the row set stays small).
+        The list lanes of the channel manager use this result. The row of each configured
+        channel shows its total message count, the age of its last message, and an
+        activity sparkline over the trailing :data:`ACTIVITY_WINDOW`. This method builds
+        the histogram of the sparkline, with :data:`ACTIVITY_BUCKETS` columns. (The
+        sparkline draws its newest :data:`ACTIVITY_DRAWN_BUCKETS`. The rest supplies the
+        shared scaling peak.) There are two passes, each grouped and filtered in SQL, so
+        that the cost follows the message volume, not the channel count. The first pass is
+        an aggregate for the totals of all time. The second pass gets the individual
+        timestamps of the window, and Python puts them in buckets (a few hours of
+        messages, so the row set stays small).
 
-        Timestamps are compared as strings: every ``created_at`` is written by
-        ``utcnow().isoformat()`` (a fixed-width UTC ISO-8601 form), so lexicographic order
-        *is* chronological order and the window cutoff needs no per-row parsing.
-        Messages predating identity-keyed history (a ``NULL`` ``channel_id``; see
-        :meth:`backfill_channel_ids`) have no channel to be counted under and are skipped.
+        The timestamps are compared as strings. ``utcnow().isoformat()`` writes each
+        ``created_at`` (a fixed-width UTC ISO-8601 form). Thus the lexicographic order is
+        the chronological order, and the window cutoff does not have to parse each row.
+        Messages from before the history had identity keys (a ``NULL`` ``channel_id``:
+        refer to :meth:`backfill_channel_ids`) have no channel to count under, and the
+        method skips them.
 
         Returns:
             A mapping of channel identity to its :class:`ChannelStats`. Channels with no
-            stored messages simply have no entry.
+            stored messages have no entry.
         """
         now = utcnow()
         cutoff = now - ACTIVITY_WINDOW
@@ -2223,11 +2311,12 @@ class Repository:
         for row in recent_rows:
             try:
                 created_at = datetime.fromisoformat(row["created_at"])
-                # Bucket by *age* so the histogram comes out newest-first (bucket 0 holds
-                # the current five minutes) — the order the sparkline widget expects.
+                # Bucket by age, so that the histogram comes out newest first (bucket 0 has
+                # the current five minutes). This is the order that the sparkline widget
+                # expects.
                 idx = min(ACTIVITY_BUCKETS - 1, int((now - created_at) / bucket_span))
             except (TypeError, ValueError):
-                continue  # a malformed/naive stray simply doesn't land in a bucket
+                continue  # a malformed or naive timestamp does not go in a bucket
             histogram = histograms.setdefault(row["channel_id"], [0] * ACTIVITY_BUCKETS)
             histogram[max(0, idx)] += 1
 
@@ -2236,7 +2325,7 @@ class Repository:
             try:
                 last_at = datetime.fromisoformat(row["last_at"])
             except (TypeError, ValueError):
-                last_at = None  # a malformed stray must not hide the channel's counts
+                last_at = None  # a malformed value must not hide the counts of the channel
             histogram = tuple(histograms.get(row["channel_id"], [0] * ACTIVITY_BUCKETS))
             stats[row["channel_id"]] = ChannelStats(
                 total=int(row["total"]),
@@ -2247,19 +2336,20 @@ class Repository:
         return stats
 
     def backfill_channel_ids(self, mapping: dict[int, str]) -> int:
-        """Give legacy channel messages an identity, keyed by the slot they were stored on.
+        """Give old channel messages an identity, keyed by the slot on which they were stored.
 
-        Messages written before channel history was keyed by identity have a ``NULL``
-        ``channel_id``. There is no record of which channel occupied each slot back then, so
-        the best available guess is the channel *currently* at that slot. ``mapping`` maps a
-        slot index to the identity of the channel now there; only rows still missing an
-        identity are touched, so this is safe to run on every startup.
+        Messages written before the channel history had identity keys have a ``NULL``
+        ``channel_id``. No record tells which channel was in each slot at that time. Thus
+        the best available guess is the channel that is in that slot now. ``mapping`` maps
+        a slot index to the identity of the channel that is there now. The method changes
+        only the rows that do not have an identity yet, so it is safe to run at each
+        start.
 
         Args:
-            mapping: Slot index to the current channel identity at that slot.
+            mapping: The slot index to the identity of the current channel at that slot.
 
         Returns:
-            The number of legacy rows given an identity.
+            The number of old rows that got an identity.
         """
         changed = 0
         for idx, channel_id in mapping.items():
@@ -2273,14 +2363,15 @@ class Repository:
             self._conn.commit()
         return changed
 
-    # -- persisted UI state -----------------------------------------------------
+    # -- stored UI state --------------------------------------------------------
 
     def get_map_view(self) -> tuple[float, float, int] | None:
-        """Return the last saved map viewport as ``(center_lat, center_lon, zoom)``.
+        """Return the last stored map viewport as ``(center_lat, center_lon, zoom)``.
 
-        Lets the interactive map reopen exactly where the user left it. Returns ``None``
-        when no view has been saved yet, or a stored value can't be parsed (treated as
-        absent rather than an error, so a corrupt row just refits to the nodes).
+        With it, the interactive map opens again exactly where the user left it. The
+        function returns ``None`` when no viewport is stored yet, or when it cannot parse
+        a stored value. (It treats such a value as absent, not as an error. Thus a corrupt
+        row only fits the map to the nodes again.)
         """
         row = self._conn.execute("SELECT value FROM app_state WHERE key = 'map_view'").fetchone()
         if row is None:
@@ -2292,12 +2383,12 @@ class Repository:
             return None
 
     def set_map_view(self, lat: float, lon: float, zoom: int) -> None:
-        """Persist the map viewport so the next session reopens on the same spot.
+        """Store the map viewport, so that the next session opens the map at the same place.
 
         Args:
-            lat: Latitude at the centre of the view.
-            lon: Longitude at the centre of the view.
-            zoom: Display zoom level.
+            lat: The latitude at the centre of the viewport.
+            lon: The longitude at the centre of the viewport.
+            zoom: The zoom level of the map.
         """
         self._conn.execute(
             "INSERT OR REPLACE INTO app_state(key, value) VALUES ('map_view', ?)",

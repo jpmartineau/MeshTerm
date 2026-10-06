@@ -1,2 +1,2 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Persistence layer: SQLite schema, repository, and structured logging."""
+"""The persistence layer: the SQLite schema, the repository, and the log setup."""
