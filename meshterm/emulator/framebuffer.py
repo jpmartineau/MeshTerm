@@ -8,7 +8,7 @@ app reads key events itself, while the launcher watches the same stream for a he
 (3 s, then SIGTERM to the app's process group, and SIGKILL 3 s after that). This front end
 follows that contract: Esc goes through :mod:`~meshterm.services.hold_to_quit`, which shows
 the hold on the panel the launcher has stopped drawing, and the SIGTERM is taken as the
-quit it is (:func:`_leave_on_sigterm`).
+quit it is (:func:`~meshterm.services.hold_to_quit.leave_on_sigterm`).
 
 **Written ahead of the hardware** (2026-09-30), from M5's published sources: the
 framebuffer and keyboard paths and the Esc policy from the launcher, the key codes from the
@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import mmap
 import os
-import signal
 import struct
 import threading
 from collections.abc import Callable
@@ -261,24 +260,6 @@ class Device:
                         self._type(sequence)
 
 
-def _leave_on_sigterm() -> None:
-    """Take the launcher's SIGTERM — the end of a held Esc — as a quit, not an interrupt.
-
-    With the TUI running, MeshTerm leaves the way a held Esc does when its bar runs out
-    (:func:`~meshterm.services.hold_to_quit.terminate`): from its own event loop, between
-    two keys, once nothing is mid-transmission. One that lands on an exit already under way
-    — the bar ran out a moment before — joins it, where an interrupt raised wherever the
-    main thread happened to be used to cut the teardown short. Before the TUI starts there
-    is nothing to put away, and it stops as an interrupt would.
-    """
-
-    def on_term(signum: int, frame: object) -> None:
-        if not hold_to_quit.terminate():
-            raise KeyboardInterrupt
-
-    signal.signal(signal.SIGTERM, on_term)
-
-
 def front_end():
     """The device as a :data:`~.run.FrontEndFactory`, from the launcher's environment."""
     from .font import find_font
@@ -286,7 +267,9 @@ def front_end():
     font = find_font()
     framebuffer = os.environ.get(FB_ENV) or "/dev/fb0"
     keyboard = os.environ.get(KEYBOARD_ENV) or DEFAULT_KEYBOARD
-    _leave_on_sigterm()
+    # From here, not only from the CLI: the launcher's SIGTERM can land while MeshTerm is
+    # still importing, and there it should stop as an interrupt rather than unhandled.
+    hold_to_quit.leave_on_sigterm()
 
     def build(terminal: Terminal, lock: threading.Lock, type_text: Callable[[str], None]):
         return Device(

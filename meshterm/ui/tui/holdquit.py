@@ -4,16 +4,21 @@
 :mod:`~meshterm.services.hold_to_quit` says what the gesture is and why; this is what the
 session does with it. :class:`EscHoldWatch` is the session's listener: told that Esc went
 down, it waits out :data:`~meshterm.services.hold_to_quit.DIALOG_S`, claims the hold, floats
-a :class:`HoldQuitDialog` over whatever is up — detached, the way the quit confirm floats,
-so nothing under it stops — and engages the app's :class:`Quiet`; told that Esc came up, it
-takes the box down and gives the quiet back. Held to
-:data:`~meshterm.services.hold_to_quit.QUIT_S`, it leaves
+a :class:`HoldQuitDialog` over whatever is up, so nothing under it stops, and engages the
+app's :class:`Quiet`; told that Esc came up, it takes the box down and gives the quiet
+back. Held to :data:`~meshterm.services.hold_to_quit.QUIT_S`, it leaves
 (:meth:`~meshterm.ui.tui.session.TuiSession.leave`).
+
+Who says Esc went down and up depends on who has the keys. A front end that reads them
+itself (the emulator's) says so directly. Where a terminal delivers them, :class:`WatchedEsc`
+asks the keyboard whether an arriving Esc is still down, and if it is, holds it back and
+watches it until it comes up.
 """
 
 from __future__ import annotations
 
 import asyncio
+import sys
 import time
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
@@ -234,4 +239,86 @@ class EscHoldWatch:
             self._backdrop = None
 
 
-__all__ = ["BAR_TICK_S", "EscHoldWatch", "HoldQuitDialog", "Quiet"]
+#: Whether a terminal's keys arrive as a VT byte stream, whose last Esc can be parsed after
+#: the key is up: everywhere but Windows, where prompt_toolkit reads the console's events.
+VT_INPUT = sys.platform != "win32"
+
+#: Seconds between looks at the keyboard while a terminal's Esc is held. A tap is let go
+#: well within a tenth of a second of this, and the probes cost next to nothing to ask.
+POLL_S = 0.03
+
+
+class WatchedEsc:
+    """A terminal's Esc, with the keyboard asked whether it is still held.
+
+    Where no front end owns the keys, Esc arrives through the terminal like any other key,
+    and the terminal never says when it comes up. The keyboard does
+    (:func:`~meshterm.services.hold_to_quit.esc_probe`). So an Esc that arrives while the
+    key is still down is held back, and the hold reported and watched, the same hold an
+    owning front end reports: let go at once and it is delivered, a second's hold raises
+    the box, and the keyboard's repeats are part of the hold.
+
+    Through a VT stream a lone Esc byte reaches the screen only once prompt_toolkit has
+    waited to be sure it starts no sequence (``ttimeoutlen``), so a tap is usually let go
+    before it arrives and is never held back at all; and the last repeat of a hold can
+    arrive *after* the key is up. Repeats arriving that late are swallowed for as long as
+    that wait lasts, rather than going back a screen behind a box the reader just let go of.
+    """
+
+    def __init__(self, session: TuiSession, down: Callable[[], bool]) -> None:
+        """Hold back ``session``'s Esc while ``down()`` says the key is still held."""
+        self._session = session
+        self._down = down
+        self._watching: asyncio.Future | None = None
+        self._repeats = 0
+        self._late_until = 0.0
+        self._delivering = False
+
+    def take(self) -> bool:
+        """An Esc arrived. Returns whether it is held back as part of a hold."""
+        if self._delivering:
+            return False
+        if self._watching is not None:
+            self._repeats += 1
+            return True  # the keyboard repeating a held key
+        if time.monotonic() < self._late_until:
+            return True  # a repeat of the hold just let go, parsed late
+        if not self._down() or not hold_to_quit.press():
+            return False  # let go already, or nothing listening
+        self._repeats = 0
+        self._watching = asyncio.ensure_future(self._until_let_go())
+        return True
+
+    def ahead(self) -> None:
+        """Another key arrived: deliver an Esc still held back first, so keys keep order."""
+        if self._watching is not None and hold_to_quit.interrupt():
+            self._deliver()
+
+    async def _until_let_go(self) -> None:
+        while self._down():
+            await asyncio.sleep(POLL_S)
+        self._watching = None
+        tap = hold_to_quit.release()
+        if self._repeats and VT_INPUT:
+            app = getattr(self._session, "_app", None)
+            self._late_until = time.monotonic() + getattr(app, "ttimeoutlen", 0.5) + POLL_S
+        if tap:
+            self._deliver()
+
+    def _deliver(self) -> None:
+        self._delivering = True
+        try:
+            self._session._dispatch("escape")
+        finally:
+            self._delivering = False
+
+
+__all__ = [
+    "BAR_TICK_S",
+    "POLL_S",
+    "VT_INPUT",
+    "EscHoldWatch",
+    "HoldQuitDialog",
+    "Quiet",
+    "WatchedEsc",
+]

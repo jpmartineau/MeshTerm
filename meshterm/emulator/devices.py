@@ -41,10 +41,6 @@ class EmulatedDevice:
         shifted: The desktop's Shift+F-key as the key the device's keyboard sends instead.
             The PicoCalc's keyboard sends F6–F10 for Shift+F1–F5; the Cardputer Zero's sends
             a shifted F4–F8, which needs no translating.
-        hold_to_quit: Whether holding Esc quits, as the Cardputer Zero's launcher has it
-            (:mod:`~meshterm.services.hold_to_quit`): a tap is Esc on its release, a hold
-            raises the quit box. The PicoCalc's console has no such rule, and its Esc is
-            typed the moment it goes down.
     """
 
     platform: Platform
@@ -53,7 +49,6 @@ class EmulatedDevice:
     console: bool = False
     lane_keys: tuple[tuple[str, int], ...] = ()
     shifted: dict[str, str] = field(default_factory=dict)
-    hold_to_quit: bool = False
 
     @property
     def id(self) -> str:
@@ -80,14 +75,12 @@ class EmulatedDevice:
 
 
 #: M5Stack's Cardputer Zero: a 320×170 panel MeshTerm draws itself, its lane on Fn+4…8 —
-#: the five keys right under the panel, at the positions M5's drawing gives them — and
-#: Esc held for three seconds its launcher's way out of any app.
+#: the five keys right under the panel, at the positions M5's drawing gives them.
 CARDPUTER_ZERO_DEVICE = EmulatedDevice(
     platform=CARDPUTER_ZERO,
     name="Cardputer Zero",
     panel=(320, 170),
     lane_keys=(("4", 48), ("5", 104), ("6", 160), ("7", 216), ("8", 272)),
-    hold_to_quit=True,
 )
 
 #: ClockworkPi's PicoCalc with a Luckfox Lyra core: a 320×320 panel the Linux console draws

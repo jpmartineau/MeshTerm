@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Hold Esc to quit: the Cardputer Zero launcher's way out, and MeshTerm's half of it.
+"""Hold Esc to quit, wherever MeshTerm can tell a key is held.
 
 The gesture's rules (:mod:`meshterm.services.hold_to_quit`), the session's box and its
-quiesce (:mod:`meshterm.ui.tui.holdquit`), the two front ends that see a key go up, the
-launcher's SIGTERM, and the radio node's exit fitting inside the launcher's grace.
+quiesce (:mod:`meshterm.ui.tui.holdquit`), the two front ends that see a key go up, a
+terminal's Esc watched through the keyboard, SIGTERM, and the radio node's exit fitting
+inside the Cardputer launcher's grace.
 """
 
 from __future__ import annotations
@@ -11,8 +12,10 @@ from __future__ import annotations
 import asyncio
 import signal
 import struct
+import sys
 import threading
 import time
+import types
 from contextlib import asynccontextmanager
 
 import pytest
@@ -25,7 +28,8 @@ from meshterm.emulator import framebuffer
 from meshterm.emulator.devices import CARDPUTER_ZERO_DEVICE, PICOCALC_LYRA_DEVICE
 from meshterm.emulator.window import EmulatorWindow
 from meshterm.services import hold_to_quit
-from meshterm.ui.tui import holdquit, session as session_mod
+from meshterm.ui.tui import holdquit
+from meshterm.ui.tui import session as session_mod
 from meshterm.ui.tui.holdquit import HoldQuitDialog
 from meshterm.ui.tui.screen import ScrollScreen
 from meshterm.ui.tui.session import TuiSession
@@ -83,6 +87,7 @@ def test_with_nobody_listening_esc_is_typed_as_it_goes_down() -> None:
 
 
 def test_a_tap_is_typed_on_its_release_and_a_repeat_is_part_of_the_hold() -> None:
+    """A tap is owed until it comes up, and the keyboard's repeats are one hold."""
     heard = _Heard()
     hold_to_quit.listen(heard)
     typed: list[str] = []
@@ -120,6 +125,7 @@ def test_a_claimed_hold_types_nothing_when_let_go() -> None:
 
 
 def test_a_release_and_the_box_settle_on_exactly_one() -> None:
+    """A release and the box asking for the same hold: exactly one of them wins."""
     hold_to_quit.listen(_Heard())
     hold_to_quit.press(now=1.0)
     assert hold_to_quit.release() is True
@@ -129,6 +135,7 @@ def test_a_release_and_the_box_settle_on_exactly_one() -> None:
 
 
 def test_sigterm_asks_the_listener_once_and_joins_an_exit_under_way() -> None:
+    """SIGTERM asks a running session to leave, and joins an exit already under way."""
     assert hold_to_quit.terminate() is False, "nothing to ask: the caller stops its own way"
     heard = _Heard()
     hold_to_quit.listen(heard)
@@ -177,6 +184,7 @@ async def _until(condition, timeout: float = 2.0) -> None:
 
 
 async def test_a_tap_reaches_the_screen_as_esc(quick) -> None:
+    """A tap reaches the screen as the Esc it was."""
     with create_pipe_input() as inp:
         session = _running(inp)
         esc = hold_to_quit.EscKey(inp.send_text)
@@ -197,6 +205,7 @@ async def test_a_tap_reaches_the_screen_as_esc(quick) -> None:
 
 
 async def test_a_hold_raises_the_box_and_letting_go_undoes_it(quick) -> None:
+    """A second's hold raises the box and quiets the air; letting go undoes both."""
     with create_pipe_input() as inp:
         air = _Air()
         session = _running(inp, air)
@@ -237,6 +246,7 @@ async def test_a_box_over_an_empty_stack_takes_its_backdrop_away_with_it(quick) 
 
 
 async def test_a_hold_to_the_end_leaves_and_keeps_the_air_quiet(quick) -> None:
+    """Held to the end, the app leaves with nothing able to transmit."""
     with create_pipe_input() as inp:
         air = _Air()
         session = _running(inp, air)
@@ -284,6 +294,7 @@ async def test_sigterm_waits_for_a_transmission_under_way(quick) -> None:
 
 
 async def test_a_quiesce_that_never_takes_hold_does_not_keep_the_app(quick, monkeypatch) -> None:
+    """A transmission that never ends cannot keep the app from leaving."""
     monkeypatch.setattr(session_mod, "QUIESCE_WAIT_S", 0.1)
     with create_pipe_input() as inp:
         air = _Air()
@@ -304,6 +315,7 @@ async def test_a_quiesce_that_never_takes_hold_does_not_keep_the_app(quick, monk
 
 
 def test_the_box_s_bar_runs_from_its_appearance_to_the_quit() -> None:
+    """The bar is empty as the box appears and full when the app leaves."""
     now = [100.0]
     dialog = HoldQuitDialog(100.0, clock=lambda: now[0])
     assert dialog.fraction == 0.0
@@ -315,6 +327,171 @@ def test_the_box_s_bar_runs_from_its_appearance_to_the_quit() -> None:
     assert dialog.fraction == 1.0
     assert dialog.fkey_lane is not None
     dialog.handle("enter")  # no key does anything to it
+
+
+# --- a terminal's Esc, watched through the keyboard -------------------------------------
+
+
+class _Keyboard:
+    """Esc's physical state, as a probe reports it."""
+
+    def __init__(self) -> None:
+        self.esc = False
+
+    def down(self) -> bool:
+        return self.esc
+
+
+def _watched(inp, keyboard: _Keyboard, air: _Air | None = None) -> TuiSession:
+    session = _running(inp, air)
+    session.set_esc_probe(keyboard.down)
+    return session
+
+
+class _Keys(ScrollScreen):
+    """A page that writes down every key it is handed."""
+
+    def __init__(self) -> None:
+        super().__init__("a page")
+        self.got: list[str] = []
+
+    def handle(self, action: str, data: str = "") -> None:
+        self.got.append(data or action)
+
+
+async def test_a_terminal_s_esc_already_let_go_is_an_esc_at_once(quick) -> None:
+    """A terminal's Esc whose key is already up is an ordinary Esc."""
+    with create_pipe_input() as inp:
+        keyboard = _Keyboard()
+        session = _watched(inp, keyboard)
+        page = _Keys()
+
+        async def main() -> None:
+            session.push(page)
+            session._dispatch("escape")
+            assert page.got == ["escape"]
+            session.pop(page)
+
+        await asyncio.wait_for(session.run(main()), timeout=5)
+
+
+async def test_a_terminal_s_esc_still_down_is_held_until_it_comes_up(quick) -> None:
+    """A terminal's Esc still down is held back and delivered once it comes up."""
+    with create_pipe_input() as inp:
+        keyboard = _Keyboard()
+        session = _watched(inp, keyboard)
+        page = _Keys()
+
+        async def main() -> None:
+            session.push(page)
+            keyboard.esc = True
+            session._dispatch("escape")
+            session._dispatch("escape")  # the keyboard's repeat
+            assert page.got == []
+            keyboard.esc = False
+            await _until(lambda: page.got == ["escape"])
+            await asyncio.sleep(0.05)
+            assert page.got == ["escape"], "one press, however often it repeated"
+            session.pop(page)
+
+        await asyncio.wait_for(session.run(main()), timeout=5)
+
+
+async def test_a_key_typed_during_a_terminal_s_hold_follows_the_esc(quick) -> None:
+    """A key typed while a terminal's Esc is held goes in behind the Esc."""
+    with create_pipe_input() as inp:
+        keyboard = _Keyboard()
+        session = _watched(inp, keyboard)
+        page = _Keys()
+
+        async def main() -> None:
+            session.push(page)
+            keyboard.esc = True
+            session._dispatch("escape")
+            session._dispatch("text", "a")
+            assert page.got == ["escape", "a"]
+            keyboard.esc = False
+            await asyncio.sleep(0.1)
+            assert page.got == ["escape", "a"]
+            session.pop(page)
+
+        await asyncio.wait_for(session.run(main()), timeout=5)
+
+
+@pytest.mark.parametrize(("vt", "late"), [(True, []), (False, ["escape"])])
+async def test_a_terminal_s_held_esc_raises_the_box_and_a_late_repeat_is_dropped(
+    quick, monkeypatch, vt: bool, late: list[str]
+) -> None:
+    """A VT stream's last repeat can be parsed after the key is up; Windows' never is."""
+    monkeypatch.setattr(holdquit, "VT_INPUT", vt)
+    with create_pipe_input() as inp:
+        keyboard = _Keyboard()
+        air = _Air()
+        session = _watched(inp, keyboard, air)
+        page = _Keys()
+
+        async def main() -> None:
+            session.push(page)
+            keyboard.esc = True
+            session._dispatch("escape")
+            await _until(lambda: isinstance(session.top, HoldQuitDialog))
+            await _until(lambda: air.held)
+            session._dispatch("escape")  # a repeat, under the box
+            keyboard.esc = False
+            await _until(lambda: session.top is page)
+            await _until(lambda: not air.held)
+            session._dispatch("escape")  # a VT stream's last repeat, or a fresh press
+            assert page.got == late, "letting go of a hold goes back nowhere"
+            session.pop(page)
+
+        await asyncio.wait_for(session.run(main()), timeout=5)
+
+
+async def test_a_terminal_s_esc_held_to_the_end_leaves(quick) -> None:
+    """A terminal's Esc held to the end leaves, as an owned one does."""
+    with create_pipe_input() as inp:
+        keyboard = _Keyboard()
+        session = _watched(inp, keyboard)
+
+        async def main() -> None:
+            keyboard.esc = True
+            session._dispatch("escape")
+            await session.run_screen(ScrollScreen("deep"))
+
+        await asyncio.wait_for(session.run(main()), timeout=5)
+    assert session.leaving
+
+
+def test_an_evdev_probe_asks_every_keyboard_with_an_esc_key(tmp_path, monkeypatch) -> None:
+    """Only devices whose key bitmap has KEY_ESC are opened; the state comes from EVIOCGKEY."""
+    sysfs, dev = tmp_path / "sys", tmp_path / "dev"
+    dev.mkdir()
+    for name, words in (("event0", "0"), ("event1", "e 0 0 fffffffffffffffe"), ("event2", "10")):
+        caps = sysfs / name / "device" / "capabilities"
+        caps.mkdir(parents=True)
+        (caps / "key").write_text(words + "\n")
+        (dev / name).write_bytes(b"")
+    asked: list[int] = []
+    held = {"esc": False}
+
+    def ioctl(fd: int, request: int, state: bytearray) -> None:
+        assert request == hold_to_quit._EVIOCGKEY
+        asked.append(fd)
+        state[0] = 0b10 if held["esc"] else 0
+
+    monkeypatch.setitem(sys.modules, "fcntl", types.SimpleNamespace(ioctl=ioctl))
+    down = hold_to_quit._evdev_probe(sysfs, dev)
+    assert down is not None
+    assert down() is False
+    assert len(asked) == 1, "event0 and event2 have no Esc key and were never opened"
+    held["esc"] = True
+    assert down() is True
+
+
+def test_no_keyboard_that_opens_means_no_probe(tmp_path, monkeypatch) -> None:
+    """With no keyboard to open there is no probe, and Esc is ordinary."""
+    monkeypatch.setitem(sys.modules, "fcntl", types.SimpleNamespace(ioctl=None))
+    assert hold_to_quit._evdev_probe(tmp_path / "sys", tmp_path / "dev") is None
 
 
 # --- the front ends ---------------------------------------------------------------------
@@ -334,6 +511,7 @@ def _reader(path, typed: list[str]):
 
 
 def test_the_device_types_a_tap_on_its_release_and_keys_after_it(tmp_path) -> None:
+    """The device's key reader types a tap on release, ahead of a key pressed during it."""
     hold_to_quit.listen(_Heard())
     path = tmp_path / "keyboard"
     # Esc down, its repeat, A down while Esc is held, A up, Esc up.
@@ -344,6 +522,7 @@ def test_the_device_types_a_tap_on_its_release_and_keys_after_it(tmp_path) -> No
 
 
 def test_the_device_types_esc_at_once_with_nobody_listening(tmp_path) -> None:
+    """With nothing listening the device's Esc and its repeats are typed at once."""
     path = tmp_path / "keyboard"
     _events(path, (1, 1), (1, 2), (1, 0))
     typed: list[str] = []
@@ -351,10 +530,11 @@ def test_the_device_types_esc_at_once_with_nobody_listening(tmp_path) -> None:
     assert typed == [ESC, ESC]
 
 
-def test_the_launcher_s_sigterm_is_a_quit_or_an_interrupt() -> None:
+def test_sigterm_is_a_quit_or_an_interrupt() -> None:
+    """SIGTERM is a quit while the TUI runs, and an interrupt before it does."""
     before = signal.getsignal(signal.SIGTERM)
     try:
-        framebuffer._leave_on_sigterm()
+        hold_to_quit.leave_on_sigterm()
         handler = signal.getsignal(signal.SIGTERM)
         with pytest.raises(KeyboardInterrupt):
             handler(signal.SIGTERM, None)  # nothing running to leave
@@ -425,11 +605,15 @@ def test_the_window_reads_an_x_server_s_repeat_as_one_hold(monkeypatch) -> None:
     assert typed == [ESC, ESC], "an Esc still down as the window loses focus is let go"
 
 
-def test_the_picocalc_window_types_esc_as_it_goes_down(monkeypatch) -> None:
+def test_the_picocalc_window_holds_esc_too() -> None:
+    """The gesture is MeshTerm's, not one launcher's: every emulated device takes it."""
     hold_to_quit.listen(_Heard())
     typed: list[str] = []
-    window, _ = _window(PICOCALC_LYRA_DEVICE, typed)
+    window, root = _window(PICOCALC_LYRA_DEVICE, typed)
     window._on_press(_Event("Escape"))
+    assert typed == [], "held, not yet a press"
+    window._on_release(_Event("Escape"))
+    root.run()
     assert typed == [ESC]
 
 

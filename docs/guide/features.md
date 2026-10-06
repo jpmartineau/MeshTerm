@@ -71,3 +71,25 @@ pages close it.
 | **👤 About the author** | The person behind MeshTerm, on the mesh and off it. | `meshterm about-author` |
 | **🔗 Join Discord** | The community server: one invite link, and a QR of it for a phone to read. | `meshterm discord` |
 | **💰 Support MeshTerm** | What keeps MeshTerm going, and the ways — paid and unpaid — to help it along. | `meshterm support` |
+
+## Leaving MeshTerm
+
+**Quit** at the bottom of the main menu leaves, after asking. **Ctrl+Q** asks the same
+question from any screen, and pressing it again while the question is up leaves at once.
+
+You can also hold **Esc**. After a second, a box says *Hold Esc to quit*, with a bar that
+fills over the next two seconds. When it's full, MeshTerm closes, the same way Quit closes
+it. Let go before then and you're back where you were. While the box is up, MeshTerm
+doesn't start sending anything new over the radio, so a message that's going out finishes
+first. A quick press of **Esc** still goes back a screen, as always.
+
+Holding Esc only works where MeshTerm can tell that a key is being held down, and a
+terminal never says when a key comes back up. These can tell:
+
+- Windows.
+- Linux, where you can read your keyboard's input device. That includes the PicoCalc, and
+  a uConsole or any other Linux computer where your user is in the `input` group.
+- The Cardputer Zero, and the [emulator](../devices/cardputer-zero.md#trying-it-in-the-emulator)
+  window for either handheld.
+
+On a Mac, or over SSH, Esc works as it always did.

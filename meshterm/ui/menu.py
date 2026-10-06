@@ -28,6 +28,7 @@ from .. import __version__
 from ..context import AppContext
 from ..persistence.logging import get_logger
 from ..platforms import get_platform
+from ..services import hold_to_quit
 from ..tools import all_tools
 from .braillechart import activity_peak, activity_sparkline
 from .menus import (
@@ -423,6 +424,11 @@ async def run_menu(ctx: AppContext) -> None:
     session.set_quit_confirm(lambda: _confirm_quit(ctx, session))
     # What a held Esc engages while its box is up, and the app keeps on its way out.
     session.set_quiesce(lambda: _off_the_air(ctx))
+    # Where a terminal delivers the keys, the keyboard is asked whether an Esc is still
+    # held, so holding it quits there too. The emulator reads its keys itself, and its
+    # machine's keyboard is not the device's.
+    if not get_platform().own_display:
+        session.set_esc_probe(hold_to_quit.esc_probe())
 
     async def main() -> None:
         try:

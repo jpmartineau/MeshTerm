@@ -363,6 +363,11 @@ def main_callback(
         # them whole, so it is the one that claims the directory. One-shot subcommands are
         # brief and mostly read; blocking `meshterm contacts` because a menu is open in
         # another window would be an obstacle rather than a guard.
+        # A SIGTERM (the Cardputer launcher's end of a held Esc, a system shutting down)
+        # leaves the menu the way Quit does, instead of stopping it wherever it stood.
+        from .services import hold_to_quit
+
+        hold_to_quit.leave_on_sigterm()
         try:
             with hold_instance_lock(settings.config_dir):
                 asyncio.run(_drive(run_menu(app_ctx), app_ctx))

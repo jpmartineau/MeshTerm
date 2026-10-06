@@ -37,7 +37,7 @@ from ...platforms import get_platform
 from ...services import hold_to_quit, modifier_watch
 from . import colsnap, fastrender, fkeys, frame
 from .emoji_width import ClusterTextControl
-from .holdquit import EscHoldWatch, Quiet
+from .holdquit import EscHoldWatch, Quiet, WatchedEsc
 from .overlay import BusyOverlay
 from .progress import TuiProgress
 from .prompt import (
@@ -568,6 +568,9 @@ class TuiSession:
         self._quiesce: Callable[[], AbstractAsyncContextManager[Any]] | None = None
         self._quiet: Quiet | None = None
         self._leaving = False
+        # A terminal's Esc, held back while the keyboard says it is still down — where
+        # something can say so (see :meth:`set_esc_probe`).
+        self._watched_esc: WatchedEsc | None = None
 
     # --- stack ---------------------------------------------------------------
 
@@ -732,6 +735,21 @@ class TuiSession:
             enter: Makes the async context manager to hold, or ``None`` for nothing.
         """
         self._quiesce = enter
+
+    def set_esc_probe(self, down: Callable[[], bool] | None) -> None:
+        """Declare how to ask whether Esc is physically down, for a terminal's Esc.
+
+        With one, an Esc that arrives while its key is still down is held back and watched
+        as a hold (:class:`~meshterm.ui.tui.holdquit.WatchedEsc`): the hold-to-quit gesture
+        where a terminal, which never reports a key coming up, delivers the keys. The app
+        declares it, because only the app knows the keys are this machine's own — not a
+        front end's that reads them itself (the emulator's), not another machine's over SSH.
+
+        Args:
+            down: Answers whether Esc is down right now
+                (:func:`~meshterm.services.hold_to_quit.esc_probe`), or ``None``.
+        """
+        self._watched_esc = None if down is None else WatchedEsc(self, down)
 
     @property
     def leaving(self) -> bool:
@@ -2230,6 +2248,16 @@ class TuiSession:
             action = _CTRL_CHORDS[action]
         elif action == "text" and data.lower() in _CTRL_LETTER_CHORDS and _right_ctrl_down():
             action, data = _CTRL_LETTER_CHORDS[data.lower()], ""
+        # A terminal's Esc still held down is a hold, not yet a press; any other key goes
+        # behind an Esc held back, so keys keep their order (see set_esc_probe).
+        watched = self._watched_esc
+        if watched is not None:
+            if action == "escape":
+                if watched.take():
+                    self.invalidate()
+                    return
+            else:
+                watched.ahead()
         if action == "to_menu":
             # Pop every frame at once (^W). Refused over a dialog or work in flight; see
             # request_pop_all. The repaint below is still wanted either way — a refusal

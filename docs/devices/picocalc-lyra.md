@@ -533,8 +533,9 @@ radio behind it, drawing braille charts and node glyphs cleanly — no empty tof
 the bottom you should see the **F-key lane**: five labelled chips instead of the footer hint
 line a desktop terminal shows.
 
-Have a look around. **Esc** backs out of any screen, and **Quit** on the main menu leaves
-the app.
+Have a look around. **Esc** backs out of any screen. To leave the app, choose **Quit** on
+the main menu, or hold **Esc** for three seconds from any screen. After a second a box
+shows a bar filling up, and letting go before it fills keeps you where you were.
 
 Then look at the whole visual language on one card:
 

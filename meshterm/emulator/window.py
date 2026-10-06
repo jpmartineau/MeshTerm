@@ -18,8 +18,9 @@ Shift it saw, so the window sends the shifted key itself (:func:`lane_press`). T
 keys wear the lane's own fill, and take its Shift fill while Shift is down, as the chips
 above them do (:func:`lane_fills`). Closing the window leaves MeshTerm at once, as ^Q
 twice would. Ctrl+Shift+S saves the panel at its true size as a PNG in the working
-directory. On a device whose launcher quits an app on a held Esc (the Cardputer Zero), Esc
-held in the window does the same (:mod:`~meshterm.services.hold_to_quit`).
+directory. Esc held in the window quits, as it does on either device
+(:mod:`~meshterm.services.hold_to_quit`): the window sees a key come up, as a terminal
+never does.
 
 Tk runs on a thread of its own, the TUI on the main thread; the two meet only through the
 terminal's lock, a flag saying a frame is ready, and the function that types.
@@ -345,7 +346,7 @@ class EmulatorWindow:
         if event.keysym in _SHIFTS:
             self._set_shift(True)
             return
-        if event.keysym == "Escape" and self._device.hold_to_quit:
+        if event.keysym == "Escape":
             self._esc_pressed()
             return
         if event.keysym in ("S", "s") and event.state & _CTRL_BIT and event.state & _SHIFT_BIT:
