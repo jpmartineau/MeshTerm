@@ -80,7 +80,8 @@ It needs Linux and the radio library; [the uConsole manual](../devices/uconsole.
 shows how to install that.
 
 **Two boards need no configuration.** An AIO v1's wiring is MeshTerm's default, so
-whenever `/dev/spidev1.0` exists the device screen lists it as **SPI radio**. M5Stack's
+whenever `/dev/spidev1.0` exists the device screen lists it: as **uConsole AIO** on a
+uConsole, and as **SPI radio** on any other machine. M5Stack's
 Cap LoRa-1262 on a Cardputer Zero ships with MeshTerm too, and is listed as **Cap
 LoRa-1262** on a Cardputer Zero (see [the Cardputer Zero page](../devices/cardputer-zero.md#the-cap-lora-1262)).
 Either way, `meshterm --spi` reaches it. Any other board is added with a profile that

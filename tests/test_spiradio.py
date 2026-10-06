@@ -292,6 +292,44 @@ def test_the_cap_reports_itself_by_name(cardputer: Path) -> None:
     assert spiradio.board_name(spiradio.CARDPUTER_ZERO_CAP) == ""  # some other Pi
 
 
+@pytest.fixture()
+def uconsole(monkeypatch: pytest.MonkeyPatch) -> set[str]:
+    """A machine with the AIO's SPI node; add the uConsole's panel to make it a uConsole."""
+    tree: set[str] = {"raspberrypi,5-compute-module", "brcm,bcm2712"}
+    monkeypatch.setattr(spiradio, "spi_present", lambda w: w.spidev == "/dev/spidev1.0")
+    monkeypatch.setattr(spiradio, "device_tree_compatibles", lambda: frozenset(tree))
+    return tree
+
+
+def test_the_aio_is_named_on_a_uconsole(uconsole: set[str]) -> None:
+    """The uConsole's own screen in the device tree is what makes the AIO the uConsole AIO."""
+    uconsole.add(spiradio.UCONSOLE_PANEL)
+    radios = spiradio.spi_radios({})
+    assert [(d.port, d.name) for d in radios] == [("/dev/spidev1.0", "uConsole AIO")]
+    assert spiradio.board_name(SpiWiring()) == "uConsole AIO"
+
+
+def test_the_aio_s_node_elsewhere_stays_unnamed(uconsole: set[str]) -> None:
+    """Any other Pi with spidev1.0 is listed on the AIO's wiring, but never called one."""
+    radios = spiradio.spi_radios({})
+    assert [(d.port, d.name) for d in radios] == [("/dev/spidev1.0", None)]
+    assert spiradio.board_name(SpiWiring()) == ""
+
+
+def test_the_device_tree_is_read_whole(tmp_path: Path) -> None:
+    """Every compatible, at any depth, each of a node's NUL-separated strings."""
+    panel = tmp_path / "axi" / "dsi@128000" / "panel@0"
+    panel.mkdir(parents=True)
+    (panel / "compatible").write_bytes(b"cw,cwu50\0")
+    (tmp_path / "compatible").write_bytes(b"raspberrypi,5-compute-module\0brcm,bcm2712\0")
+    assert spiradio.device_tree_compatibles(tmp_path) == {
+        "cw,cwu50",
+        "raspberrypi,5-compute-module",
+        "brcm,bcm2712",
+    }
+    assert spiradio.device_tree_compatibles(tmp_path / "nowhere") == frozenset()
+
+
 def test_a_profile_on_the_cap_s_node_wins(cardputer: Path) -> None:
     """A profile on the same node is the owner's word about it, and replaces the shipped one."""
     mine = replace(spiradio.CARDPUTER_ZERO_CAP, use_dio3_tcxo=False)

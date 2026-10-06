@@ -33,6 +33,7 @@ with it its place in everyone else's contact list.
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import os
@@ -229,30 +230,72 @@ CARDPUTER_ZERO_CAP = SpiWiring(
 )
 
 
+#: Where Linux exposes the device tree the machine booted with.
+DEVICE_TREE = Path("/sys/firmware/devicetree/base")
+
+
+@functools.cache
+def device_tree_compatibles(root: Path = DEVICE_TREE) -> frozenset[str]:
+    """Every ``compatible`` string in the booted device tree; empty where there is none.
+
+    Read once a run: the tree is fixed at boot, and the device screen asks on every pass.
+    """
+    found: set[str] = set()
+    try:
+        for path in root.rglob("compatible"):
+            try:
+                found.update(
+                    v.decode("ascii", "replace") for v in path.read_bytes().split(b"\0") if v
+                )
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return frozenset(found)
+
+
 @dataclass(frozen=True)
 class BuiltinRadio:
     """A radio whose wiring ships with MeshTerm, listed with no profile where its board is.
 
     Attributes:
-        name: What the device screen calls it; empty for the plain "SPI radio".
+        name: What the device screen calls it, and what its node reports as its model;
+            empty for the plain "SPI radio".
         wiring: How it is wired.
         marker: A path only its board has, for a radio whose ``/dev/spidev*`` node alone
-            would claim every Raspberry Pi with SPI switched on. Empty when the node is
-            telling enough on its own (the AIO's ``spidev1.0``).
+            would claim every Raspberry Pi with SPI switched on. Empty for none.
+        compatible: A device-tree ``compatible`` only its board's tree carries, for a board
+            that marks itself there rather than with a path of its own. Empty for none.
     """
 
     name: str
     wiring: SpiWiring
     marker: str = ""
+    compatible: str = ""
 
     def present(self) -> bool:
-        """Whether this machine is its board: the SPI node exists, and the marker if any."""
-        return spi_present(self.wiring) and (not self.marker or os.path.exists(self.marker))
+        """Whether this machine is its board: the SPI node exists, and every marker it has."""
+        return (
+            spi_present(self.wiring)
+            and (not self.marker or os.path.exists(self.marker))
+            and (not self.compatible or self.compatible in device_tree_compatibles())
+        )
 
 
-#: The radios MeshTerm knows the wiring of, in the order they are listed. A profile on the
-#: same SPI node wins over any of them.
+#: The uConsole's own 5-inch screen, as ClockworkPi's uConsole overlay declares it. A
+#: uConsole runs a stock Compute Module, whose model string says only that, and its power
+#: chip and backlight are the DevTerm's too; the panel is the one part no other machine
+#: has (the DevTerm's is ``cw,cwd686``). Seen on JP's uConsole, a CM5, at
+#: ``/axi/pcie@1000120000/rp1/dsi@128000/panel@0``: matched by compatible, not by path,
+#: since the path moves with the Compute Module.
+UCONSOLE_PANEL = "cw,cwu50"
+
+#: The radios MeshTerm knows the wiring of, in the order they are listed; the first that is
+#: present on a node is the one used there. A profile on the same node wins over any of them.
+#: The AIO is named only where the machine is certainly a uConsole, and listed unnamed on
+#: any other board with ``spidev1.0``, where its default wiring is still the best guess.
 BUILTIN_RADIOS = (
+    BuiltinRadio("uConsole AIO", SpiWiring(), compatible=UCONSOLE_PANEL),
     BuiltinRadio("", SpiWiring()),
     BuiltinRadio("Cap LoRa-1262", CARDPUTER_ZERO_CAP, marker="/sys/class/leds/ext_5v_out"),
 )
@@ -261,9 +304,10 @@ BUILTIN_RADIOS = (
 def board_name(wiring: SpiWiring) -> str:
     """The name of the shipped board ``wiring``'s radio is on, or ``""`` for none.
 
-    What the node reports as its model, so the Cap reads as "Cap LoRa-1262" wherever a
-    device's model is shown. Matched by the SPI node on this machine's board rather than
-    by the whole wiring, so a profile that adjusts the Cap's pins is still the Cap.
+    What the node reports as its model, so the Cap reads as "Cap LoRa-1262" and the AIO
+    as "uConsole AIO" wherever a device's model is shown. Matched by the SPI node on this
+    machine's board rather than by the whole wiring, so a profile that adjusts the Cap's
+    pins is still the Cap.
     """
     for radio in BUILTIN_RADIOS:
         if radio.name and radio.wiring.spidev == wiring.spidev and radio.present():
