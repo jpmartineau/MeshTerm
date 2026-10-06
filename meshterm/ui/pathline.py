@@ -14,7 +14,9 @@ drawn*, so every surface the survey found can eventually route through it:
   chip ahead as its background — so a route reads as a ribbon whose segments meet on a
   chevron: the oh-my-posh look, at one cell a seam. The chip fill is the node's
   hash-derived hue (:func:`~meshterm.ui.theme.node_style`), our own node the map's yellow
-  ``★`` on a neutral dark grey, a faded hop dark slate, a keyless hop grey. Two chips that
+  ``★`` on a neutral dark grey, a faded hop dark slate, a keyless hop grey. (On the
+  16-colour console of the PicoCalc, a node's chip is the dim twin of its hue, and the
+  label is in the hue itself. Refer to :func:`_slot_colours`.) Two chips that
   land on the *same* fill — a mirrored return leg, a stretch of keyless greys — or on two
   fills too close to tell apart (under :data:`SEAM_BLUR` apart in OKLab, the perceptual
   distance :mod:`~meshterm.ui.oklab` measures) take the one exception the interlock can't
@@ -82,6 +84,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import NamedTuple
 
 from rich.cells import cell_len
 from rich.console import Console, ConsoleOptions, RenderResult
@@ -89,10 +92,11 @@ from rich.measure import Measurement
 from rich.text import Text
 
 from ..core.models import LOCAL_DEVICE_LABEL
+from ..platforms import Platform, on_platform
 from . import oklab
 from .marks import SELF_MARK
 from .termfont import powerline_enabled, powerline_full
-from .theme import active_theme, node_style
+from .theme import DIM_TWIN, active_theme, node_style, slot_hex
 
 #: The powerline solid right-pointing triangle (U+E0B0) — the glyph the widget draws
 #: at every seam and closing edge, deliberately from the *core* set so every recommended
@@ -151,6 +155,35 @@ _YOU_BG = "#3f3f46"
 #: A dimmed hop's chip: dark slate fill with muted ink, receding like ``faint`` text.
 _DIM_BG = "#334155"
 _DIM_FG = "#94a3b8"
+
+#: On the 16-colour console, the page: slot 0, black. It is the fill of a chip that the
+#: console cannot fill, because the VT has no dark grey background. That chip is our
+#: ``★``, a faded hop, or the composer's slot. Its text then sits on the page, and the
+#: chips on each side close on a point and open on a notch.
+_SLOT_PAGE = slot_hex(0)
+#: On the console, the text of a faded hop: slot 8, the dark grey.
+_SLOT_FAINT = slot_hex(8)
+#: On the console, white: slot 15. It is the text of a keyless chip and of the
+#: composer's slot.
+_SLOT_WHITE = slot_hex(15)
+#: Each dim console slot and its bright twin: the reverse of
+#: :data:`~meshterm.ui.theme.DIM_TWIN`.
+_BRIGHT_TWIN = {dim: bright for bright, dim in DIM_TWIN.items()}
+
+
+class _ChipColours(NamedTuple):
+    """The colours of one chip.
+
+    Attributes:
+        fill: The background of the chip.
+        ink: The colour of the label.
+        soft: The colour of an annotation, and of a hash label after its lit bytes.
+    """
+
+    fill: str
+    ink: str
+    soft: str
+
 
 #: The mark standing in for elided hops (see :meth:`PathLine.ellipsized`) — rendered as
 #: a dim pseudo-hop so it recedes in both modes.
@@ -365,7 +398,7 @@ def cut_mark(line: Text, at: int, side: str) -> Text:
     fill = next((fills[i] for i in steps if fills[i]), None)
     if fill is None:
         return Text(_ELLIPSIS, style="muted")
-    return Text(CRACK_HEAD if side == ELIDE_HEAD else CRACK_TAIL, style=fill)
+    return Text(CRACK_HEAD if side == ELIDE_HEAD else CRACK_TAIL, style=f"{_FLAT}{fill}")
 
 
 def with_action_mark(line: Text, width: int) -> Text:
@@ -690,7 +723,7 @@ class PathLine:
             foot = 0 if self._to_destination else cell_len(self._separator.rstrip())
             return plain_cells, cell_len(self._separator), 0, 0, head, foot
         widths = [
-            cell_len(hop.label) if hop.gap else self._chip(hop, self._chip_fill(hop)).cell_len
+            cell_len(hop.label) if hop.gap else self._chip(hop, _colours_of(hop)).cell_len
             for hop in hops
         ]
         sep = cell_len(POWERLINE_SEP)
@@ -971,7 +1004,8 @@ class PathLine:
             carry_in: This line continues a wrapped path (it does not open one).
             carry_on: The path continues past this line (it does not end here).
         """
-        fills = [self._chip_fill(hop) for hop in hops]
+        colours = [_colours_of(hop) for hop in hops]
+        fills = [colour.fill for colour in colours]
         rounded = powerline_full()
         # A fold and a half-drawn route are two reasons for the same mark; either is
         # enough. An elision already breaks the ribbon on that side, and a mark cut out
@@ -981,29 +1015,29 @@ class PathLine:
         if opens_mid:
             text.append_text(self._notch(fills[0]))  # the break's other half
         elif rounded and not hops[0].gap:
-            text.append(POWERLINE_ROUND_OPEN, style=fills[0])
+            text.append(POWERLINE_ROUND_OPEN, style=f"{_FLAT}{fills[0]}")
         for i, hop in enumerate(hops):
             if i:
                 if hops[i - 1].gap:
                     text.append_text(self._notch(fills[i]))  # the ribbon picks up again
                 elif hop.gap:
-                    text.append(POWERLINE_SEP, style=fills[i - 1])  # …and stops here
+                    text.append(POWERLINE_SEP, style=f"{_FLAT}{fills[i - 1]}")  # …and stops
                 else:
-                    text.append_text(self._seam(fills[i - 1], fills[i]))
+                    text.append_text(self._seam(colours[i - 1], colours[i]))
             if hop.gap:
                 text.append(hop.label, style="faint" if hop.dim else "muted")
             else:
-                text.append_text(self._chip(hop, fills[i]))
+                text.append_text(self._chip(hop, colours[i]))
         if hops[-1].gap:
             return text  # the line ended on the page; there is no chip left to close
         if carry_on or not self._to_destination:
-            text.append(POWERLINE_SEP, style=fills[-1])  # the point: the path goes on
+            text.append(POWERLINE_SEP, style=f"{_FLAT}{fills[-1]}")  # the point: it goes on
         elif rounded:
-            text.append(POWERLINE_ROUND_CLOSE, style=fills[-1])  # the lozenge's far end
+            text.append(POWERLINE_ROUND_CLOSE, style=f"{_FLAT}{fills[-1]}")  # the far end
         return text
 
     @staticmethod
-    def _seam(before: str, after: str) -> Text:
+    def _seam(before: _ChipColours, after: _ChipColours) -> Text:
         """The one cell between two chips: the previous fill's point, laid on the next.
 
         The classic interlock — foreground the chip behind, background the chip ahead —
@@ -1031,16 +1065,20 @@ class PathLine:
         and a chevron in the dark chip ink read as a mark laid on the route rather than a
         seam in it. One cell either way.
 
+        On the 16-colour console, the thin chevron is the bright twin of the fill, which
+        is the colour of the label on that chip (:func:`_slot_thin_ink`).
+
         Args:
-            before: The fill the point is drawn in (the previous chip's).
-            after: The fill it is laid on (the next chip's).
+            before: The colours of the previous chip. The point is drawn in its fill.
+            after: The colours of the next chip. The point is laid on its fill.
 
         Returns:
             The seam's single styled cell.
         """
-        if _fills_blur(before, after):
-            return Text(POWERLINE_THIN, style=f"{_seam_ink(before, after)} on {after}")
-        return Text(POWERLINE_SEP, style=f"{before} on {after}")
+        if _fills_blur(before.fill, after.fill):
+            ink = _thin_ink(before, after)
+            return Text(POWERLINE_THIN, style=f"{_FLAT}{ink} on {after.fill}")
+        return Text(POWERLINE_SEP, style=f"{_FLAT}{before.fill} on {after.fill}")
 
     @staticmethod
     def _notch(fill: str) -> Text:
@@ -1058,37 +1096,12 @@ class PathLine:
             The one styled cell.
         """
         text = Text()
-        text.append(POWERLINE_SEP, style=f"{fill} reverse")
+        text.append(POWERLINE_SEP, style=f"{_FLAT}{fill} reverse")
         return text
 
-    def _chip_fill(self, hop: PathHop) -> str:
-        """A chip's fill: cursor accent, override, dim slate, our grey, hue, keyless grey.
-
-        The insertion slot outranks everything — it is the one chip that isn't a node,
-        and it wears the ``cursor`` white so it reads as chrome among identities rather
-        than as a hop with an unlucky hue (white sits outside the node spectrum, and the
-        chip ink is already picked to stay readable on it). The fade comes next, outranking
-        identity including our own: a dimmed hop is one nobody composed (an automatic landing
-        back home, a mirrored return leg), and our end must recede with the rest of that automatic
-        half rather than keep its yellow among the greys. Plain mode says the same thing
-        by fading the name.
-        """
-        if hop.cursor:
-            return _style_hex("cursor") or _KEYLESS_BG
-        if hop.style:
-            resolved = _style_hex(hop.style)
-            if resolved:
-                return resolved
-        if hop.dim:
-            return _DIM_BG
-        if hop.you:
-            return _YOU_BG
-        if hop.key:
-            return _style_hex(node_style(hop.key)) or _KEYLESS_BG
-        return _KEYLESS_BG
-
-    def _chip(self, hop: PathHop, fill: str) -> Text:
-        """One chip: same words as arrow mode, dark ink on the identity fill.
+    @staticmethod
+    def _chip(hop: PathHop, colours: _ChipColours) -> Text:
+        """One chip: the same words as arrow mode, in the chip's ink on its fill.
 
         Every chip is padded on both sides, the ``★`` included (JP, 2026-08-09): the pads
         are not there to make room for a long *word*, they are the chip's own shape, and a
@@ -1096,22 +1109,132 @@ class PathLine:
         than as a segment of the route. Our own chip's ink is the map's yellow on the
         neutral dark grey :data:`_YOU_BG`, so the star in the line and the star on the map
         read as one mark.
+
+        The colours come from the palette of the platform (:func:`_colours_of`).
         """
-        ink = _DIM_FG if hop.dim else (_SELF_INK if hop.you else _CHIP_FG)
-        soft = _DIM_FG if hop.dim else _CHIP_FG_SOFT
+        fill, ink, soft = colours
         text = Text()
-        text.append(" ", style=f"on {fill}")
+        text.append(" ", style=f"{_FLAT}on {fill}")
         if hop.lit_bytes > 0 and not hop.dim:
             split = hop.lit_bytes * 2
-            text.append(hop.label[:split], style=f"bold {ink} on {fill}")
-            text.append(hop.label[split:], style=f"{soft} on {fill}")
+            text.append(hop.label[:split], style=f"{_WEIGHT}{ink} on {fill}")
+            text.append(hop.label[split:], style=f"{_FLAT}{soft} on {fill}")
         else:
-            weight = "" if hop.dim else "bold "
+            weight = _FLAT if hop.dim else _WEIGHT
             text.append(hop.label, style=f"{weight}{ink} on {fill}")
         if hop.annotation:
-            text.append(f" ({hop.annotation})", style=f"{soft} on {fill}")
-        text.append(" ", style=f"on {fill}")
+            text.append(f" ({hop.annotation})", style=f"{_FLAT}{soft} on {fill}")
+        text.append(" ", style=f"{_FLAT}on {fill}")
         return text
+
+
+def _spectrum_fill(hop: PathHop) -> str:
+    """A chip's fill: cursor accent, override, dim slate, our grey, hue, keyless grey.
+
+    The insertion slot outranks everything — it is the one chip that isn't a node,
+    and it wears the ``cursor`` white so it reads as chrome among identities rather
+    than as a hop with an unlucky hue (white sits outside the node spectrum, and the
+    chip ink is already picked to stay readable on it). The fade comes next, outranking
+    identity including our own: a dimmed hop is one nobody composed (an automatic landing
+    back home, a mirrored return leg), and our end must recede with the rest of that automatic
+    half rather than keep its yellow among the greys. Plain mode says the same thing
+    by fading the name.
+    """
+    if hop.cursor:
+        return _style_hex("cursor") or _KEYLESS_BG
+    if hop.style:
+        resolved = _style_hex(hop.style)
+        if resolved:
+            return resolved
+    if hop.dim:
+        return _DIM_BG
+    if hop.you:
+        return _YOU_BG
+    if hop.key:
+        return _style_hex(node_style(hop.key)) or _KEYLESS_BG
+    return _KEYLESS_BG
+
+
+def _spectrum_colours(hop: PathHop) -> _ChipColours:
+    """The colours of a chip on a truecolor terminal: dark ink on the fill."""
+    ink = _DIM_FG if hop.dim else (_SELF_INK if hop.you else _CHIP_FG)
+    soft = _DIM_FG if hop.dim else _CHIP_FG_SOFT
+    return _ChipColours(_spectrum_fill(hop), ink, soft)
+
+
+def _slot_colours(hop: PathHop) -> _ChipColours:
+    """The colours of a chip on the 16-colour console: a bright slot on its dim twin.
+
+    The VT draws a background only from slots 0 to 7, which are the dim twins of the
+    bright slots that colour the node names. Thus a node's chip is the dim twin of its
+    hue, and its label is in the hue itself: the colour that its name has in arrow mode
+    and in each list. A pink name gets a purple chip, a yellow name a brown chip. The
+    whole label is in this colour, a hash label too: a grey for the rest of a hash was
+    not readable on the green and the cyan fills (JP, 2026-10-06).
+
+    A keyless chip is white on light grey, the same pair one bank down. Our ``★``, a
+    faded hop, and the composer's slot have no fill of their own, because the console
+    has no dark grey background. They stand on the page (:data:`_SLOT_PAGE`): the star
+    in its yellow, a faded hop in the dark grey, the slot as a white ``+`` in a break of
+    the ribbon. The order of the rules is the same as on a truecolor terminal
+    (:func:`_spectrum_fill`).
+    """
+    if hop.cursor:
+        return _ChipColours(_SLOT_PAGE, _SLOT_WHITE, _SLOT_WHITE)
+    if hop.style:
+        resolved = _style_hex(hop.style)
+        if resolved:
+            fill = DIM_TWIN.get(resolved, resolved)
+            ink = resolved if resolved in DIM_TWIN else _SLOT_WHITE
+            return _ChipColours(fill, ink, ink)
+    if hop.dim:
+        return _ChipColours(_SLOT_PAGE, _SLOT_FAINT, _SLOT_FAINT)
+    if hop.you:
+        return _ChipColours(_SLOT_PAGE, _SELF_INK, _SELF_INK)
+    hue = _style_hex(node_style(hop.key)) if hop.key else None
+    ink = hue if hue in DIM_TWIN else _SLOT_WHITE
+    return _ChipColours(DIM_TWIN[ink], ink, ink)
+
+
+def _spectrum_thin_ink(before: _ChipColours, after: _ChipColours) -> str:
+    """The thin chevron on a truecolor terminal: the previous fill, shaded."""
+    return _seam_ink(before.fill, after.fill)
+
+
+def _slot_thin_ink(before: _ChipColours, after: _ChipColours) -> str:
+    """The thin chevron on the console: the bright twin of the previous fill.
+
+    On a node's chip, this colour is the label's hue. On the page, it is the dark grey.
+    """
+    return _BRIGHT_TWIN.get(before.fill, before.ink)
+
+
+#: The colours of a chip, the colour of a thin seam, and the two prefixes of the chip
+#: styles. They are bound at platform-switch time (:func:`_bind_chips`).
+_colours_of: Callable[[PathHop], _ChipColours] = _spectrum_colours
+_thin_ink: Callable[[_ChipColours, _ChipColours], str] = _spectrum_thin_ink
+#: The weight of a chip label: ``bold`` on a truecolor terminal.
+_WEIGHT = "bold "
+#: The prefix of each other chip style: empty on a truecolor terminal.
+_FLAT = ""
+
+
+@on_platform
+def _bind_chips(platform: Platform) -> None:
+    """Bind the chip palette to the platform (runs now and on every switch).
+
+    On the 16-colour console, bold is brightness. Rich merges the base style of a row
+    into each span on it, so the ``bold`` of a selected row would move each dim fill on
+    the ribbon to its bright twin. Thus each chip style there says ``not bold``, and a
+    label gets no weight: its bright slot is its emphasis.
+    """
+    global _colours_of, _thin_ink, _WEIGHT, _FLAT
+    if platform.truecolor:
+        _colours_of, _thin_ink = _spectrum_colours, _spectrum_thin_ink
+        _WEIGHT, _FLAT = "bold ", ""
+    else:
+        _colours_of, _thin_ink = _slot_colours, _slot_thin_ink
+        _WEIGHT = _FLAT = "not bold "
 
 
 def _shorten(value: str, hash_bytes: int | None) -> str:

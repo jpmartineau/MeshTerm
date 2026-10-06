@@ -253,6 +253,19 @@ _VT_SLOTS: tuple[tuple[int, str, str], ...] = (
     (15, "white (you, heat.hot, the room mark)", "#ffffff"),
 )
 
+
+def slot_hex(slot: int) -> str:
+    """The ``#rrggbb`` of one console palette slot (:data:`_VT_SLOTS`)."""
+    return _VT_SLOTS[slot][2]
+
+
+#: Each bright console slot and its twin in the dim bank: slot ``n + 8`` and slot ``n``.
+#: The VT draws a background only from slots 0 to 7. Thus, where a bright colour must
+#: become a fill, its dim twin is the only background of the same hue. The path chips
+#: use this pair on the console (:mod:`~meshterm.ui.pathline`): the dim twin is the fill,
+#: and the bright slot is the text on it.
+DIM_TWIN: dict[str, str] = {slot_hex(n + 8): slot_hex(n) for n in range(8)}
+
 #: The custom 16-slot remap P3 originally shipped (tailwind-family RGBs programmed via
 #: ``setvtrgb``) — **archived, not installed**: JP chose the standard palette but asked
 #: to keep this in case he changes his mind. Reinstall with

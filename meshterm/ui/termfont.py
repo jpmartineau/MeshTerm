@@ -42,9 +42,10 @@ Four sources of truth, in confidence order:
   (:attr:`~meshterm.platforms.Platform.font`), every frame is folded down to that font
   at the render boundary, whatever terminal started the app — so the inventory is the
   answer, and asking the terminal would be asking the wrong glass. The Cardputer's panel
-  is Terminus, which carries the core chevrons, so its paths are chips; the PicoCalc's
-  512-glyph console font has no room for them, so its paths stay arrows. Nothing is
-  probed: :data:`~meshterm.ui.fontset.FONTS` already says what each font can draw.
+  is Terminus, which carries the core chevrons. The PicoCalc's 512-glyph console font
+  draws the two chevrons in two donor slots. Thus the paths are chips on both handhelds.
+  Nothing is probed: :data:`~meshterm.ui.fontset.FONTS` already says what each font can
+  draw.
 * **The configured font**, resolved per terminal: Windows Terminal (``WT_SESSION`` +
   ``WT_PROFILE_ID`` → the profile's ``font.face`` in ``settings.json``), VS Code's
   integrated terminal (``TERM_PROGRAM=vscode`` → ``terminal.integrated.fontFamily``,

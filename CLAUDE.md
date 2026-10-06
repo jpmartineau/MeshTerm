@@ -765,8 +765,12 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   `fontset.CARDPUTER_ZERO_CODEPOINTS`, named by `Platform.font` as the PicoCalc's is; the fold
   derives everything from the platform's font (accents, emoji, the `?` net) and quantizes
   colour only where `truecolor` is off. The path line's chips-or-arrows verdict reads the
-  same font (`termfont`, after `MESHTERM_POWERLINE` and before any terminal probe): Terminus
-  has the chevrons, so the Cardputer draws chips; the PicoCalc's 512 glyphs don't, so arrows.
+  same font (`termfont`, after `MESHTERM_POWERLINE` and before any terminal probe), and both
+  handhelds have the chevrons: Terminus natively, the PicoCalc's font in two donor slots. On
+  the PicoCalc a chip can only be filled from the eight background slots, so a node's chip
+  is the dim twin of its hue with the label in the hue itself (`theme.DIM_TWIN`), every chip
+  span says `not bold` (bold is brightness), and our `★`, a faded hop and the composer's
+  slot stand on the page, because there is no dark-grey background (`pathline._slot_colours`).
 - **The Cardputer's exit must fit its launcher's grace.** A held Esc there is the
   launcher's own way out (SIGTERM at 3 s, SIGKILL 3 s later, letting go or not), which is
   where hold-to-quit's timing comes from (see **Navigation**). MeshTerm's whole exit was

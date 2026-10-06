@@ -26,7 +26,9 @@ from __future__ import annotations
 #: Inclusive ``(first, last)`` codepoint ranges present in the font. 519 codepoints over
 #: 512 glyphs — aliases (the rounded corners onto the square ones, ``⋯`` onto ``…``) and
 #: shared slots give a few glyphs more than one codepoint. Verified against a live table
-#: dump of the installed font (2026-08-01, post-P3 build).
+#: dump of the installed font (2026-08-01, post-P3 build). On 2026-10-06, the two powerline
+#: chevrons of the path chips (U+E0B0, U+E0B1) took the donor slots of U+2559 and U+255B.
+#: No live dump checked that build yet.
 # fmt: off
 FONT_RANGES: tuple[tuple[int, int], ...] = (
     (0x0020, 0x007F), (0x00A0, 0x00A0), (0x00A7, 0x00A7), (0x00A9, 0x00A9),
@@ -41,7 +43,7 @@ FONT_RANGES: tuple[tuple[int, int], ...] = (
     (0x250C, 0x250C), (0x2510, 0x2510), (0x2514, 0x2514), (0x2518, 0x2518),
     (0x251C, 0x251C), (0x2524, 0x2524), (0x252C, 0x252C), (0x2534, 0x2534),
     (0x253C, 0x253C), (0x2550, 0x2551), (0x2554, 0x2554), (0x2557, 0x2557),
-    (0x2559, 0x255B),
+    (0x255A, 0x255A),
     (0x255D, 0x2561), (0x2563, 0x2563), (0x2566, 0x256A), (0x256C, 0x2570),
     (0x2580, 0x2580), (0x2584, 0x2584), (0x2588, 0x2588), (0x258C, 0x258C),
     (0x2590, 0x2593), (0x25A0, 0x25A0), (0x25AC, 0x25AC), (0x25B2, 0x25B2),
@@ -49,12 +51,13 @@ FONT_RANGES: tuple[tuple[int, int], ...] = (
     (0x25C0, 0x25C0), (0x25C4, 0x25C4), (0x25C9, 0x25C9), (0x25CB, 0x25CB),
     (0x25CF, 0x25CF), (0x25F7, 0x25F7), (0x2605, 0x2605), (0x263C, 0x263C),
     (0x2699, 0x2699), (0x26A0, 0x26A0), (0x26BF, 0x26BF), (0x2713, 0x2713),
-    (0x2717, 0x2717), (0x276F, 0x276F), (0x2800, 0x28FF), (0xFFFD, 0xFFFD),
+    (0x2717, 0x2717), (0x276F, 0x276F), (0x2800, 0x28FF), (0xE0B0, 0xE0B1),
+    (0xFFFD, 0xFFFD),
 )
 # fmt: on
 
 #: Every codepoint the console font can draw, as one frozen set (built once at import;
-#: 520 members, so the set is small and the per-character membership test is a dict hit).
+#: 519 members, so the set is small and the per-character membership test is a dict hit).
 FONT_CODEPOINTS: frozenset[int] = frozenset(
     cp for first, last in FONT_RANGES for cp in range(first, last + 1)
 )

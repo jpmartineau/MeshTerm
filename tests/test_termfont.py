@@ -256,15 +256,17 @@ def test_powerline_support_kitty_ssh_and_unknown() -> None:
 def test_powerline_support_a_handheld_answers_from_its_own_font() -> None:
     """A handheld's font draws the screen, so its inventory answers and no terminal does.
 
-    The Cardputer's Terminus carries the core chevrons and no rounded caps; the PicoCalc's
-    512-glyph console font has neither, so a kitty that started it changes nothing. The
-    override still outranks the font, as it outranks every probe.
+    The Cardputer's Terminus and the PicoCalc's console font both have the core chevrons
+    and no rounded caps. A font without the chevrons gets ``none``, also when a kitty
+    started the app. The override still outranks the font, as it outranks each probe.
     """
     kitty = {"TERM": "xterm-kitty"}  # a terminal that would otherwise earn core
     cardputer = _powerline_support(kitty, handheld=("cardputer-zero", CARDPUTER_ZERO_CODEPOINTS))
     assert (cardputer.level, cardputer.source) == (CORE, "platform:cardputer-zero")
     picocalc = _powerline_support(kitty, handheld=("picocalc-lyra", FONT_CODEPOINTS))
-    assert (picocalc.level, picocalc.source) == (NONE, "platform:picocalc-lyra")
+    assert (picocalc.level, picocalc.source) == (CORE, "platform:picocalc-lyra")
+    bare = _powerline_support(kitty, handheld=("bare", frozenset(range(0x20, 0x7F))))
+    assert (bare.level, bare.source) == (NONE, "platform:bare")
     capped = CARDPUTER_ZERO_CODEPOINTS | {0xE0B4, 0xE0B6}
     assert _powerline_support({}, handheld=("capped", capped)).level == FULL
     pinned = {"MESHTERM_POWERLINE": "0"}

@@ -21,7 +21,7 @@
 # one; point SHARED at it if it does not. The shared generator is additionally offered
 # under GPL-2.0-only by its source file, permitting its extraction and use here.
 #
-# WHAT IS ONLY HERE. The GPL-2.0 base bitmap, its CP437 unicode mapping, and the same 18
+# WHAT IS ONLY HERE. The GPL-2.0 base bitmap, its CP437 unicode mapping, and the same 20
 # marks redrawn for the shorter cell (MARKS8).
 #
 # The 6x8 base has CP437 coverage, so unlike the Terminus base it has NO CYRILLIC: a node
@@ -72,7 +72,7 @@ exec(compile(_block.group(1), SHARED, "exec"), globals())
 
 OUT8 = os.environ["OUT8"]
 
-# The same 18 marks redrawn for the 6x8 cell (first-draft art; a later tweak round
+# The same 20 marks redrawn for the 6x8 cell (first-draft art; a later tweak round
 # refines whichever font wins the A/B).
 MARKS8 = {
     0x25CF: art([  # BLACK CIRCLE
@@ -111,6 +111,10 @@ MARKS8 = {
         "..##..", "......", "#.##.#", "#.##.#", "......", "..##..", "......", "......"]),
     0x26BF: art([  # SQUARED KEY -- padlock
         ".####.", ".#..#.", "######", "##..##", "##..##", "######", "######", "......"]),
+    0xE0B0: art([  # POWERLINE SOLID RIGHT TRIANGLE: the full cell
+        "##....", "###...", "#####.", "######", "######", "#####.", "###...", "##...."]),
+    0xE0B1: art([  # POWERLINE THIN RIGHT CHEVRON: on the edge of the solid triangle
+        "##....", ".##...", "...##.", "....##", "....##", "...##.", ".##...", "##...."]),
 }
 
 # --- the base bitmap: the Linux kernel's font_6x8 (GPL-2.0; see the header) ------------

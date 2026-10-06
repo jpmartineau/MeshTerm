@@ -170,6 +170,14 @@ MARKS = {
     0x26BF: art([  # SQUARED KEY (drawn as a padlock) -- private channel
         "......", "......", ".####.", ".#..#.", "######", "######",
         "##..##", "##..##", "######", "######", "......", "......"]),
+    # The two powerline chevrons of the path chips (meshterm/ui/pathline.py). They fill
+    # the full cell, so that the point of one chip touches the fill of the next.
+    0xE0B0: art([  # POWERLINE SOLID RIGHT TRIANGLE: the seam between two chips
+        "#.....", "##....", "###...", "####..", "#####.", "######",
+        "######", "#####.", "####..", "###...", "##....", "#....."]),
+    0xE0B1: art([  # POWERLINE THIN RIGHT CHEVRON: the seam between two chips of one colour
+        "#.....", ".#....", "..#...", "...#..", "....#.", ".....#",
+        ".....#", "....#.", "...#..", "..#...", ".#....", "#....."]),
 }
 
 # Donor codepoints whose glyph slots we may repurpose (glyphs MeshTerm never draws).

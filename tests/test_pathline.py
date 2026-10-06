@@ -12,10 +12,14 @@ from __future__ import annotations
 import random
 
 import pytest
+from rich.text import Text
 
 import meshterm.ui.pathline as pathline
-from meshterm.platforms import CARDPUTER_ZERO, set_platform
+from meshterm.emulator import vt
+from meshterm.emulator.vt import Style, Terminal
+from meshterm.platforms import CARDPUTER_ZERO, PICOCALC_LYRA, set_platform
 from meshterm.ui import oklab
+from meshterm.ui.fontset import FONT_CODEPOINTS
 from meshterm.ui.pathline import (
     _DIM_BG,
     _SELF_INK,
@@ -45,7 +49,8 @@ from meshterm.ui.pathline import (
     path_line,
     with_action_mark,
 )
-from meshterm.ui.theme import fold_text, node_style
+from meshterm.ui.theme import DIM_TWIN, fold_text, node_style, slot_hex
+from meshterm.ui.tui.render import render_to_ansi
 from meshterm.ui.widgets import path_text
 
 
@@ -173,6 +178,122 @@ def test_the_cardputer_draws_chips_in_glyphs_its_font_has(monkeypatch: pytest.Mo
     drawn = [line, cut_to(line, 12), cut_mark(line, 1, ELIDE_HEAD)]
     ink = "".join(text.plain for text in drawn)
     assert {POWERLINE_SEP, POWERLINE_THIN, CRACK_TAIL, CRACK_HEAD, "⋯", SELF_GLYPH} <= set(ink)
+    assert fold_text(ink) == ink
+
+
+def _rgb(colour: str) -> tuple[int, int, int]:
+    return (int(colour[1:3], 16), int(colour[3:5], 16), int(colour[5:7], 16))
+
+
+def _console_cells(row: Text) -> list[tuple[str, Style]]:
+    """The cells that the PicoCalc console gets for one row, read back through a VT."""
+    palette = tuple(_rgb(slot_hex(n)) for n in range(16))
+    term = Terminal(53, 1, palette=palette)
+    term.feed(render_to_ansi(row, 53, no_wrap=True))
+    return term.screen[0]
+
+
+def _selected(line: Text) -> Text:
+    """``line`` on a selected row, whose base style is the bold ``cursor``."""
+    row = Text(style="cursor")
+    row.append("❯ ")
+    row.append_text(line)
+    return row
+
+
+@pytest.fixture
+def picocalc(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The PicoCalc, with the chip verdict that its own font gives."""
+    monkeypatch.delenv("MESHTERM_POWERLINE")
+    set_platform(PICOCALC_LYRA)
+
+
+def test_the_picocalc_draws_chips_from_its_eight_backgrounds(picocalc: None) -> None:
+    """A node's chip is the dim twin of its hue, and the label is the hue itself.
+
+    The VT draws a background only from slots 0 to 7. Thus each fill is a dim slot, and
+    each label is the bright slot that the name has in arrow mode. A keyless chip is
+    white on light grey. Our star and a faded hop stand on the page, because the console
+    has no dark grey background. The row is a selected row, whose ``bold`` base style
+    must not move a dim fill to its bright twin: each chip cell arrives without bold.
+    """
+    hops = [
+        PathHop(SELF_GLYPH, you=True),
+        PathHop("Hilltop", key="1c"),
+        PathHop("Alice", key="0a", annotation="0a"),
+        PathHop("3d"),
+        PathHop("Ridge", key="1c", dim=True),
+        PathHop(SELF_GLYPH, you=True),
+    ]
+    line = PathLine(hops).text()  # auto: the console font has the chevrons
+    assert POWERLINE_SEP in line.plain
+    cells = _console_cells(_selected(line))
+    text = "".join(char for char, _ in cells)
+    dim_slots = {_rgb(slot_hex(n)) for n in range(8)}
+    for char, style in cells[2 : 2 + len(line.plain)]:
+        assert style.bg is None or style.bg in dim_slots, f"{char!r} on {style.bg}"
+        assert not style.flags & vt.BOLD, f"{char!r} is bold, so a dim slot turns bright"
+
+    def at(word: str) -> Style:
+        return cells[text.index(word)][1]
+
+    yellow, red = _style_hex(node_style("1c")), _style_hex(node_style("0a"))
+    assert (at("Hilltop").fg, at("Hilltop").bg) == (_rgb(yellow), _rgb(DIM_TWIN[yellow]))
+    assert (at("Alice").fg, at("Alice").bg) == (_rgb(red), _rgb(DIM_TWIN[red]))
+    assert at("(0a)").fg == _rgb(red)  # the annotation is in the label's colour too
+    assert (at("3d").fg, at("3d").bg) == (_rgb(slot_hex(15)), _rgb(slot_hex(7)))
+    assert at("Ridge").bg in (None, _rgb(slot_hex(0)))  # faded: on the page
+    assert at("Ridge").fg == _rgb(slot_hex(8))
+    assert at(SELF_GLYPH).bg in (None, _rgb(slot_hex(0)))
+
+
+def test_a_picocalc_hash_label_is_one_colour(picocalc: None) -> None:
+    """The rest of a hash is in the hue of its lit bytes, not in a grey.
+
+    A grey after the lit byte was not readable on the green and the cyan fills
+    (JP, 2026-10-06).
+    """
+    for key in ("0a", "1c", "44", "70", "9a", "c4"):
+        line = PathLine([PathHop(f"{key}63c6", key=key, lit_bytes=1)]).text()
+        cells = _console_cells(line)
+        hue = _rgb(_style_hex(node_style(key)))
+        label = [style.fg for char, style in cells if char in f"{key}63c6" and char != " "]
+        assert label == [hue] * 6, key
+
+
+def test_picocalc_seams_on_one_colour_and_the_composer_slot(picocalc: None) -> None:
+    """Two chips of one colour join on a thin chevron in the hue. The slot is a break.
+
+    The thin chevron is the bright twin of the fill: the colour of the label on the
+    chip. The composer's slot has no white background on the console, so it is a white
+    ``+`` on the page, and the chips on each side close on a point and open on a notch.
+    """
+    same = PathLine([PathHop("Mill", key="1a"), PathHop("Tower", key="20")]).text()
+    seam = same.plain.index(POWERLINE_THIN)
+    cell = _console_cells(same)[seam][1]
+    yellow = _style_hex(node_style("1a"))
+    assert (cell.fg, cell.bg) == (_rgb(yellow), _rgb(DIM_TWIN[yellow]))
+
+    slot = [
+        PathHop("Hilltop", key="1c"),
+        PathHop(CURSOR_GLYPH, cursor=True),
+        PathHop("Alice", key="0a"),
+    ]
+    line = PathLine(slot).text()
+    cells = _console_cells(line)
+    plus = cells[line.plain.index(CURSOR_GLYPH)][1]
+    assert plus.fg == _rgb(slot_hex(15)) and plus.bg in (None, _rgb(slot_hex(0)))
+    assert line.plain.count(POWERLINE_SEP) == 2  # a point into the break, a notch out of it
+
+
+def test_every_picocalc_chip_glyph_is_in_its_font(picocalc: None) -> None:
+    """Each mark of the chip language is in the console font, so nothing folds to ``?``."""
+    hops = [PathHop(SELF_GLYPH, you=True), PathHop("Hilltop", key="1c"), elision_hop()]
+    line = PathLine([*hops, PathHop("a"), PathHop("b")]).text()
+    drawn = [line, cut_to(line, 12), cut_mark(line, 1, ELIDE_HEAD)]
+    ink = "".join(text.plain for text in drawn)
+    assert {POWERLINE_SEP, POWERLINE_THIN, CRACK_TAIL, CRACK_HEAD, SELF_GLYPH} <= set(ink)
+    assert all(ord(char) in FONT_CODEPOINTS for char in ink)
     assert fold_text(ink) == ink
 
 
