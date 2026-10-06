@@ -1,13 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Run MeshTerm inside the emulator: the TUI unchanged, its terminal ours.
+"""Run MeshTerm in the emulator: the TUI does not change, and the emulator supplies its terminal.
 
-:func:`run` builds the three pieces every front end shares — the :class:`~.vt.Terminal` the
-TUI's bytes land in, the prompt_toolkit output that writes to it (:func:`panel_output`), and
-a pipe input the keys go into — sets them as prompt_toolkit's app session, and calls the
-ordinary CLI with ``--platform`` set to the emulated device, exactly as a shell would. A
-*front end* is the part that differs: where the pixels go and where the keys come from. It
-is handed the terminal, the lock that guards it and a way to type, starts whatever threads
-it needs, and is told each time a frame is complete.
+:func:`run` builds the three parts that all the front ends share:
+
+* the :class:`~.vt.Terminal` that the bytes of the TUI go to,
+* the prompt_toolkit output that writes to that terminal (:func:`panel_output`), and
+* a pipe input that the key presses go into.
+
+Then :func:`run` sets them as the app session of prompt_toolkit. It calls the ordinary CLI
+with ``--platform`` set to the emulated handheld, exactly as a shell does. A *front end* is
+the part that is different: where the pixels go, and where the key presses come from. The
+front end gets the terminal, the lock that guards it, and a function to type with. It
+starts the threads that it uses, and it gets a call each time a frame is complete.
 """
 
 from __future__ import annotations
@@ -33,24 +37,25 @@ def _hex(colour: str) -> RGB:
 
 
 def _palette() -> tuple[RGB, ...]:
-    """The 16 named colours: the same RGBs the PicoCalc's console is programmed with."""
+    """The 16 named colours: the same RGB values that the PicoCalc's console is set to."""
     from ..ui.theme import _VT_SLOTS
 
     return tuple(_hex(rgb) for _, _, rgb in _VT_SLOTS)
 
 
-#: The ink of a cell whose style names none — a desktop terminal's default foreground,
-#: which is what the truecolor theme this platform runs was designed against.
+#: The ink of a cell whose style names no ink: the default foreground of a desktop
+#: terminal. The truecolour theme that this platform runs was designed against it.
 DEFAULT_FG: RGB = (204, 204, 204)
-#: The paper of a cell whose style names none.
+#: The paper of a cell whose style names no paper.
 DEFAULT_BG: RGB = (0, 0, 0)
 
 
 def default_colours(device: EmulatedDevice) -> tuple[RGB, RGB]:
-    """The ink and paper of a cell whose style names none, on ``device``.
+    """The ink and the paper of a cell whose style names none, on ``device``.
 
-    A Linux console's are its own palette's slot 7 on slot 0; MeshTerm drawing a panel
-    itself uses a desktop terminal's, which its truecolour theme was designed against.
+    A Linux console uses slot 7 on slot 0 of its own palette. When MeshTerm draws a
+    display itself, it uses the colours of a desktop terminal, because its truecolour
+    theme was designed against them.
     """
     if device.console:
         palette = _palette()
@@ -59,7 +64,7 @@ def default_colours(device: EmulatedDevice) -> tuple[RGB, RGB]:
 
 
 class _Sink:
-    """The text stream a :class:`Vt100_Output` writes to: bytes into the terminal."""
+    """The text stream that a :class:`Vt100_Output` writes to: bytes into the terminal."""
 
     encoding = "utf-8"
 
@@ -95,7 +100,7 @@ def panel_output(
     on_frame: Callable[[], None],
     depth: ColorDepth = ColorDepth.TRUE_COLOR,
 ) -> Vt100_Output:
-    """A prompt_toolkit output drawing into ``terminal``: fixed size, ``depth`` colours."""
+    """A prompt_toolkit output that draws into ``terminal``: a fixed size, ``depth`` colours."""
     size = Size(rows=terminal.rows, columns=terminal.cols)
     return Vt100_Output(
         _Sink(terminal, lock, on_frame),  # type: ignore[arg-type]
@@ -107,13 +112,13 @@ def panel_output(
 
 
 class FrontEnd(Protocol):
-    """Where the pixels go and its keys come from."""
+    """Where the pixels go, and where the key presses come from."""
 
     def frame_ready(self) -> None:
-        """A complete frame has landed in the terminal; draw it when convenient."""
+        """A complete frame is in the terminal. Draw it when it is convenient."""
 
     def close(self) -> None:
-        """The TUI has ended; stop."""
+        """The TUI has ended. Stop."""
 
 
 #: Builds a front end from the terminal, its lock, and a function that types into the TUI.
@@ -127,12 +132,12 @@ def run(
 ) -> int:
     """Run the MeshTerm CLI with ``argv`` as it runs on ``device``, drawn by ``front_end``.
 
-    The CLI resolves ``device``'s platform as one MeshTerm draws itself
-    (:func:`~meshterm.platforms.drawn_by_meshterm`): a PicoCalc's console is drawn by the
-    emulator here, not by the terminal the emulator was started from.
+    The CLI resolves the platform of ``device`` as a platform that MeshTerm draws itself
+    (:func:`~meshterm.platforms.drawn_by_meshterm`). Thus here the emulator draws the
+    console of a PicoCalc, not the terminal from which the emulator was started.
 
     Returns:
-        The CLI's exit status.
+        The exit status of the CLI.
     """
     from .. import cli
 
@@ -148,8 +153,8 @@ def run(
         output = panel_output(terminal, lock, end.frame_ready, device.color_depth)
         try:
             with create_app_session(input=pipe, output=output), platforms.drawn_by_meshterm():
-                # Standalone, as a shell would run it: the CLI reports its own errors and
-                # ends by raising SystemExit with the status.
+                # Standalone, as a shell runs it: the CLI reports its own errors. At the
+                # end, it raises SystemExit with the status.
                 cli.app(args=["--platform", device.id, *argv], windows_expand_args=False)
             return 0
         except SystemExit as done:

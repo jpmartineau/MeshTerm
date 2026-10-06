@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Fetch the Terminus 12-pixel fonts the emulator draws in — once, and only when asked.
+"""Download the Terminus 12-pixel fonts that the emulator draws in: one time, only on request.
 
-Terminus is licensed under the SIL Open Font License, so MeshTerm never ships it: this
-downloads the upstream release, checks it is the archive it should be, and extracts
-``ter-u12n.bdf``, ``ter-u12b.bdf`` and the licence beside them into the directory the
-emulator reads (:func:`~.font.font_dir`). ``meshterm emulate --fetch-fonts`` runs it.
+Terminus has the SIL Open Font License. Thus MeshTerm never ships it. This module
+downloads the upstream release and checks that it is the correct archive. Then it
+extracts ``ter-u12n.bdf``, ``ter-u12b.bdf``, and the licence next to them into the
+directory that the emulator reads (:func:`~.font.font_dir`). ``meshterm emulate
+--fetch-fonts`` runs it.
 
-Where Python can't fetch it — a certificate store that rejects the mirror — the archive can
-be downloaded any other way and handed over with ``--archive``; it is checked against the
-same digest either way.
+Python can fail to download the archive, for example when a certificate store rejects the
+mirror. Then you can download the archive in a different way and give it with
+``--archive``. In both cases, the module checks the archive against the same digest.
 """
 
 from __future__ import annotations
@@ -26,24 +27,25 @@ URL = (
     "https://sourceforge.net/projects/terminus-font/files/terminus-font-4.49/"
     "terminus-font-4.49.1.tar.gz/download"
 )
-#: The release archive's SHA-256, so a mirror can't hand back something else.
+#: The SHA-256 of the release archive, so that a mirror cannot return a different file.
 SHA256 = "d961c1b781627bf417f9b340693d64fc219e0113ad3a3af1a3424c7aa373ef79"
 _ROOT = "terminus-font-4.49.1/"
 _WANTED = (REGULAR_BDF, BOLD_BDF, "OFL.TXT")
 
 
 def install_terminus(archive: Path | None = None, say: Callable[[str], None] = print) -> Path:
-    """Download (or take) Terminus 4.49.1, verify it, and install the fonts and licence.
+    """Download (or take) Terminus 4.49.1, check it, and install the fonts and the licence.
 
     Args:
-        archive: The release archive, already downloaded; ``None`` downloads it.
-        say: Where progress lines go.
+        archive: The release archive, already downloaded. ``None`` downloads it.
+        say: Where the progress lines go.
 
     Returns:
-        The directory the fonts were installed into.
+        The directory that the fonts were installed into.
 
     Raises:
-        ValueError: The archive is not the release (its digest differs) or lacks a file.
+        ValueError: The archive is not the release (its digest is different), or a file
+            is missing from it.
         OSError: The download or a write failed.
     """
     target = font_dir()

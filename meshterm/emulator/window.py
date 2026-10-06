@@ -1,29 +1,37 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The emulator's desktop window: a device's panel in a window, keys from the desktop.
+"""The emulator's desktop window: a handheld's display, with key presses from the desktop.
 
-Everything between the two ends is the device's own code path — the terminal, the font,
-the rasterizer, the key encoding — so what the window shows is the panel's pixels, scaled
-up without smoothing, and what the desktop keyboard types is what the device's keyboard
-will (:meth:`~.devices.EmulatedDevice.translate`). Where the device's lane keys sit right
-under its panel (the Cardputer Zero's 4 to 8), the window draws them there, at the positions
-the maker's drawing gives them, so a chip that drifts off its key is visible.
+All the code between the two ends is the code path of the handheld itself: the terminal,
+the font, the rasterizer, and the key encoding. Thus the window shows the pixels of the
+display, at a larger scale and without smoothing. The desktop keyboard types what the
+keyboard of the handheld will type (:meth:`~.devices.EmulatedDevice.translate`).
 
-The desktop's own F-keys stand in for the device's lane keys — F4–F8 for the Cardputer
-Zero's Fn+4…8, F1–F5 for the PicoCalc's — and Shift with them is the second bank; the
-window also reports Shift to the lane as it goes down and up, so the bank flips on screen
-the way it will on the device. The mouse presses them too: a click on a drawn key, or on
-a chip of the lane itself, types that slot's key, and Shift held through the click types
-its Shift companion — the app reads the bank off the key that arrives, never off the
-Shift it saw, so the window sends the shifted key itself (:func:`lane_press`). The drawn
-keys wear the lane's own fill, and take its Shift fill while Shift is down, as the chips
-above them do (:func:`lane_fills`). Closing the window leaves MeshTerm at once, as ^Q
-twice would. Ctrl+Shift+S saves the panel at its true size as a PNG in the working
-directory. Esc held in the window quits, as it does on either device
-(:mod:`~meshterm.services.hold_to_quit`): the window sees a key come up, as a terminal
-never does.
+When the lane keys of the handheld are directly under its display (the Cardputer Zero's 4
+to 8), the window draws them there, at the positions that the drawing of the maker gives
+them. Thus a chip that moves away from its keyboard key is visible.
 
-Tk runs on a thread of its own, the TUI on the main thread; the two meet only through the
-terminal's lock, a flag saying a frame is ready, and the function that types.
+The F-keys of the desktop act as the lane keys of the handheld: F4–F8 for the Cardputer
+Zero's Fn+4…8, and F1–F5 for the PicoCalc's lane keys. Shift with them is the second
+bank. The window also reports Shift to the lane when Shift goes down and up. Thus the bank
+changes on the screen as it will on the handheld.
+
+The mouse also presses the lane keys. A click on a drawn keyboard key, or on a chip of the
+lane itself, types the keyboard key of that slot. If Shift is held during the click, the
+click types the Shift companion of that slot. The app reads the bank from the keyboard key
+that arrives, never from the Shift that it saw. Thus the window sends the shifted keyboard
+key itself (:func:`lane_press`). The drawn keyboard keys have the fill of the lane, and
+they take its Shift fill while Shift is down, as the chips above them do
+(:func:`lane_fills`).
+
+A close of the window quits MeshTerm immediately, the same as ^Q pressed two times.
+Ctrl+Shift+S saves the display at its true size as a PNG file in the working directory. A
+held Esc key in the window quits MeshTerm, as it does on each handheld
+(:mod:`~meshterm.services.hold_to_quit`). The window sees a keyboard key come up, and a
+terminal never does.
+
+Tk runs on its own thread, and the TUI runs on the main thread. The two threads share only
+the lock of the terminal, a flag that says that a frame is ready, and the function that
+types.
 """
 
 from __future__ import annotations
@@ -66,16 +74,17 @@ _NAMED = {
 
 _SHIFTS = ("Shift_L", "Shift_R")
 
-#: How long a released Esc waits to be sure it was let go. An X server repeats a held key
-#: as a release and a press back to back, and the press arrives within this; a desktop
-#: that repeats with presses alone never sends the release until the key is up.
+#: How long a released Esc key waits, to be sure that the user let it go. An X server
+#: repeats a held keyboard key as a release and a press, one directly after the other, and
+#: the press arrives within this time. A desktop that repeats with presses only never sends
+#: the release before the keyboard key is up.
 _REPEAT_GAP_MS = 30
 
-#: A drawn lane key's cap, and the ink of the digit printed on it.
+#: The cap of a drawn lane key, and the ink of the digit that is printed on it.
 _KEY_BODY = "#1d2025"
 _KEY_DIGIT = "#eef1f4"
 
-#: Tk's modifier bits: Shift and Control everywhere, Alt where the platform puts it.
+#: The modifier bits of Tk: Shift and Control on all platforms, Alt where the platform puts it.
 _SHIFT_BIT = 0x0001
 _CTRL_BIT = 0x0004
 _ALT_BIT = 0x20000 if sys.platform == "win32" else 0x0008
@@ -99,23 +108,23 @@ def key_from_tk(keysym: str, char: str, state: int) -> Key | None:
 
 
 def lane_press(device: EmulatedDevice, slot: int, *, shift: bool) -> str:
-    """What pressing lane slot ``slot`` types on ``device``, with Shift held or not.
+    """What a press of lane slot ``slot`` types on ``device``, with Shift held or not.
 
-    The slot's plain key, spelled as the desktop's F-key standing in for it would be —
-    so Shift becomes the PicoCalc's F6–F10 and the Cardputer Zero's shifted F4–F8 just as
-    it does from the keyboard (:meth:`~.devices.EmulatedDevice.translate`).
+    The plain keyboard key of the slot, spelled as the desktop F-key that acts for it is
+    spelled. Thus Shift becomes the PicoCalc's F6–F10 and the Cardputer Zero's shifted
+    F4–F8, the same as from the keyboard (:meth:`~.devices.EmulatedDevice.translate`).
     """
     key = Key(name=f"f{device.deck.keys[slot]}", shift=shift)
     return encode(device.translate(key))
 
 
 def lane_fills(device: EmulatedDevice) -> tuple[str, str]:
-    """The lane's chip fills on ``device`` as Tk colours: the plain bank's, then Shift's.
+    """The chip fills of the lane on ``device``, as Tk colours: the plain bank, then Shift.
 
-    Resolved from the deck's own styles in the theme the device runs, through the palette
-    the panel is drawn with — a numbered colour is a palette slot, as the console's every
-    colour is, and anything else its own RGB — so a drawn key is the colour the chip
-    above it is.
+    The fills come from the styles of the deck itself, in the theme that the handheld
+    runs, through the palette that the display is drawn with. A numbered colour is a
+    palette slot, as each colour of the console is. Any other colour is its own RGB. Thus a
+    drawn keyboard key has the same colour as the chip above it.
     """
     theme = MESH_THEME if device.platform.truecolor else MESH_THEME_16
     palette = _palette()
@@ -137,11 +146,11 @@ def lane_fills(device: EmulatedDevice) -> tuple[str, str]:
 def chip_at(terminal: Terminal, deck: LaneDeck, col: int, row: int) -> int | None:
     """The lane slot whose chip is drawn at cell ``(col, row)``, or ``None``.
 
-    The lane is the frame's footer, its last row, and every chip there opens on its key's
-    caption — a live chip, a dimmed one and an unassigned slot's bare caption alike — so
-    a caption at the chip's own column is what says the lane is drawn. A frame without
-    one (a bare share screen, the chromeless splash) leaves the row to its own content,
-    and a click there presses nothing.
+    The lane is the footer of the frame, its last row. Each chip there starts with the
+    caption of its keyboard key: a live chip, a dim chip, and the bare caption of an
+    unassigned slot. Thus a caption at the chip's own column shows that the lane is drawn.
+    A frame without a lane (a bare share screen, the chromeless splash) leaves the row to
+    its own content, and a click there presses nothing.
     """
     if row != terminal.rows - 1:
         return None
@@ -157,7 +166,7 @@ def chip_at(terminal: Terminal, deck: LaneDeck, col: int, row: int) -> int | Non
 
 
 class EmulatorWindow:
-    """A window showing ``device``'s panel, typing the desktop's keys into the TUI."""
+    """A window that shows the display of ``device``, and types desktop key presses into the TUI."""
 
     def __init__(
         self,
@@ -169,7 +178,7 @@ class EmulatorWindow:
         font: Font,
         scale: int = 3,
     ) -> None:
-        """Open the window on a thread of its own, and wait until it is up."""
+        """Open the window on its own thread, and wait until it is open."""
         self._terminal = terminal
         self._lock = lock
         self._type = type_text
@@ -204,7 +213,7 @@ class EmulatorWindow:
     # --- the TUI's side ---------------------------------------------------------------
 
     def frame_ready(self) -> None:
-        """Note that a frame is complete; the window draws it on its next tick."""
+        """Note that a frame is complete. The window draws it on its next tick."""
         self._ready.set()
 
     def close(self) -> None:
@@ -238,9 +247,9 @@ class EmulatorWindow:
         self._draw_keys(canvas, margin, scale)
         root.bind("<KeyPress>", self._on_press)
         root.bind("<KeyRelease>", self._on_release)
-        # A Shift let go in another window never reaches this one; leaving it held here
-        # would keep the lane and the drawn keys in the Shift bank — and an Esc left held
-        # would quit three seconds later.
+        # When the user lets go of Shift in a different window, this window never gets the
+        # release. If Shift stays held here, the lane and the drawn keyboard keys stay in
+        # the Shift bank. Also, an Esc key that stays held quits three seconds later.
         root.bind("<FocusOut>", self._on_focus_out)
         root.protocol("WM_DELETE_WINDOW", self._on_close)
         root.focus_force()
@@ -274,9 +283,10 @@ class EmulatorWindow:
         self._paint_keys()
 
     def _paint_keys(self) -> None:
-        """Colour the drawn keys in the lane's bank: its fill, and its captions.
+        """Colour the drawn keyboard keys in the bank of the lane: its fill, and its captions.
 
-        A key held down under the mouse is filled the way its chip is, white on the fill.
+        A keyboard key that is held down under the mouse has the same fill as its chip:
+        white on the fill.
         """
         canvas = self._tk[1]
         deck = self._device.deck
@@ -300,7 +310,7 @@ class EmulatorWindow:
         self._paint_keys()
 
     def _on_panel_click(self, event) -> None:
-        """A click on the panel presses the lane chip it lands on, if it lands on one."""
+        """A click on the display presses the lane chip at that position, if a chip is there."""
         x = (event.x - self._margin) // self._scale - self._raster.left
         y = (event.y - self._margin) // self._scale - self._raster.top
         if x < 0 or y < 0:
@@ -317,7 +327,7 @@ class EmulatorWindow:
             self._type(data)
 
     def _set_shift(self, down: bool) -> None:
-        """Tell the lane Shift went down or up, and flip the drawn keys' bank with it."""
+        """Tell the lane that Shift went down or up, and change the drawn keys to that bank."""
         modifier_watch.report_shift(down)
         if down != self._shifted:
             self._shifted = down
@@ -372,7 +382,7 @@ class EmulatorWindow:
             self._esc_released()
 
     def _esc_pressed(self) -> None:
-        """Esc went down — or, straight after its release, the X server repeated it."""
+        """The Esc key went down. Or, directly after its release, the X server repeated it."""
         if self._esc_letting_go is not None:
             self._tk[0].after_cancel(self._esc_letting_go)
             self._esc_letting_go = None
@@ -381,7 +391,7 @@ class EmulatorWindow:
         self._esc.down()
 
     def _esc_released(self) -> None:
-        """Esc is up, and no repeat followed: the hold is over."""
+        """The Esc key is up, and no repeat followed: the hold is over."""
         if self._esc_letting_go is not None:
             self._tk[0].after_cancel(self._esc_letting_go)
             self._esc_letting_go = None
@@ -389,7 +399,7 @@ class EmulatorWindow:
         self._esc.up()
 
     def _on_close(self) -> None:
-        # ^Q asks; a second ^Q while it asks leaves at once.
+        # ^Q asks. A second ^Q while it asks quits immediately.
         self._type("\x11")
         time.sleep(0.2)
         self._type("\x11")
@@ -401,17 +411,17 @@ class EmulatorWindow:
 
 
 def front_end(device: EmulatedDevice, scale: int = 3):
-    """The window as a :data:`~.run.FrontEndFactory`, loading the emulator's font first.
+    """The window as a :data:`~.run.FrontEndFactory`. It reads the emulator's font first.
 
     Raises:
-        FileNotFoundError: The font isn't installed (see :func:`~.font.find_font`).
-        RuntimeError: This Python has no Tk to open a window with — the one-file builds
-            leave it out, so the emulator wants MeshTerm installed with pip or pipx.
+        FileNotFoundError: The font is not installed (refer to :func:`~.font.find_font`).
+        RuntimeError: This Python has no Tk to open a window with. The one-file builds do
+            not include Tk, so the emulator must have MeshTerm installed with pip or pipx.
     """
     from .font import find_font
 
     try:
-        import tkinter  # noqa: F401 - only asking whether it is there
+        import tkinter  # noqa: F401 - only a check that it is there
     except ImportError:
         raise RuntimeError(
             "the emulator's window needs Tk, which this copy of MeshTerm doesn't include "

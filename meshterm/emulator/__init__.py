@@ -1,31 +1,37 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The emulator: MeshTerm drawing a handheld's display itself, on the device or in a window.
+"""The emulator: MeshTerm draws a handheld's display itself, on the handheld or in a window.
 
-**Not a strict emulator.** Nothing here runs the handheld's processor or its operating
-system: MeshTerm runs as itself, on whatever machine runs this. What is reproduced is the
-device's *display and keyboard* — its panel's pixel size, the character grid it divides
-into, the font every glyph is drawn in, the colours it can show and how bold changes them,
-and the keys that drive the F-key lane — so the screen in the window obeys the same
-constraints the device's would. It mimics the display; it doesn't emulate the machine.
+**Not a strict emulator.** Nothing here runs the processor or the operating system of the
+handheld. MeshTerm runs as itself, on the machine that runs this package. The emulator
+copies the display and the keyboard of the handheld: the size of the display in pixels,
+the character grid on the display, the font that draws each glyph, the colours that the
+display can show and how bold changes them, and the keyboard keys that drive the F-key
+lane. Thus the screen in the window obeys the same constraints as the screen of the
+handheld. The emulator copies the display. It does not emulate the machine.
 
-It began as the Cardputer Zero's *console host* — the program a text app runs inside — and
-on that device it is still exactly that.
-The Cardputer Zero has no text console an app may use: its launcher owns the screen, the
-kernel's framebuffer console is switched off, and a store app may not run as root to
-switch it back. What an app *does* get is the framebuffer itself and the keyboard's event
-device. So MeshTerm brings its own terminal: this package runs the ordinary TUI in-process,
-with prompt_toolkit writing to a fixed-size output whose bytes go to a small VT parser
-(:mod:`.vt`) rather than to any terminal, and reading from a pipe this package types keys
-into (:mod:`.keys`). The parsed cell grid is drawn into pixels with a 6×12 bitmap font
-(:mod:`.font`, :mod:`.raster`), and the pixels go to one of two front ends:
+The emulator started as the *console host* of the Cardputer Zero: the program that a text
+app runs in. On that handheld, it is still exactly that. The Cardputer Zero has no text
+console that an app can use. Its launcher owns the screen, the framebuffer console of the
+kernel is off, and a store app cannot run as root to turn it on again. An app gets only
+the framebuffer itself and the event device file of the keyboard. Thus MeshTerm brings its
+own terminal. This package runs the ordinary TUI in the same process:
 
-* on the Cardputer Zero, the framebuffer the launcher hands over, with keys from the
-  keyboard's event device (:mod:`.framebuffer`);
-* on a desktop, a window drawing the device's panel scaled up, with keys from the desktop
-  keyboard (:mod:`.window`) — the device's own code path everywhere except the two ends.
+* prompt_toolkit writes to an output of a fixed size. The bytes of that output go to a
+  small VT parser (:mod:`.vt`) instead of to a terminal.
+* prompt_toolkit reads from a pipe, and this package types key presses into that pipe
+  (:mod:`.keys`).
 
-Nothing in the TUI knows it is emulated. The session already takes its input and output
-from prompt_toolkit's app session wherever its own terminal wrappers are off, which they
-are on these platforms, so this package only has to set that session up and call the CLI
-the way a shell would (:mod:`.run`).
+A 6×12 bitmap font draws the parsed cell grid into pixels (:mod:`.font`, :mod:`.raster`).
+The pixels go to one of two front ends:
+
+* On the Cardputer Zero: the framebuffer that the launcher gives, with key presses from
+  the event device file of the keyboard (:mod:`.framebuffer`).
+* On a desktop: a window that draws the display of the handheld at a larger scale, with
+  key presses from the desktop keyboard (:mod:`.window`). The code path is the same as on
+  the handheld, except at these two ends.
+
+Nothing in the TUI knows that it is emulated. When the terminal wrappers of the session
+are off, the session takes its input and output from the app session of prompt_toolkit.
+The wrappers are off on these platforms. Thus this package must only set up that session
+and call the CLI as a shell does (:mod:`.run`).
 """

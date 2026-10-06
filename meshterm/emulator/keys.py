@@ -1,26 +1,27 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Keys to the bytes a terminal sends for them — what the emulator types into MeshTerm.
+"""The bytes that a terminal sends for each keyboard key: what the emulator types into MeshTerm.
 
-Both front ends meet here: the device reads key codes off the keyboard's event
-device, the window reads them off the desktop, and each turns its own events into
-a :class:`Key` for :func:`encode` to spell the way xterm does. xterm's spelling is the
-contract because it is what prompt_toolkit parses, and what a desktop terminal running
-``--platform cardputer-zero`` sends too, so the TUI cannot tell the three apart:
+Both front ends use this module. The handheld reads key codes from the event device file
+of the keyboard, and the window reads them from the desktop. Each front end changes its
+own events into a :class:`Key`, and :func:`encode` spells it as xterm does. The spelling
+of xterm is the contract, because prompt_toolkit parses it. A desktop terminal that runs
+``--platform cardputer-zero`` sends it too. Thus the TUI cannot tell the three apart:
 
 * Shift with F4–F8 is xterm's ``CSI 1;2 S`` / ``CSI 15;2 ~`` …, which prompt_toolkit
-  reads as F16–F20 — the Cardputer deck's Shift bank
+  reads as F16–F20. These are the Shift bank of the Cardputer deck
   (:data:`~meshterm.ui.tui.fkeys.CARDPUTER_ZERO_DECK`).
-* A modified arrow, Home, End, Page key or F-key carries xterm's modifier parameter
-  (``1 + Shift + 2·Alt + 4·Ctrl``), so Ctrl+PgUp is ``CSI 5;5 ~``, the section jump.
-* Ctrl with a letter is its C0 control; Alt with anything is ESC then the key.
+* A modified arrow, Home, End, Page key, or F-key has the modifier parameter of xterm
+  (``1 + Shift + 2·Alt + 4·Ctrl``). Thus Ctrl+PgUp is ``CSI 5;5 ~``, the section jump.
+* Ctrl with a letter is the C0 control of that letter. Alt with any keyboard key is ESC,
+  then that keyboard key.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-#: The keys that are not text, by name. Arrows, Home and End take xterm's ``CSI 1;m X``
-#: modified form; the rest take ``CSI n;m ~``.
+#: The keyboard keys that are not text, by name. Arrows, Home, and End take the modified
+#: form ``CSI 1;m X`` of xterm. The others take ``CSI n;m ~``.
 _CURSOR_FINAL = {"up": "A", "down": "B", "right": "C", "left": "D", "home": "H", "end": "F"}
 _TILDE = {
     "insert": 2,
@@ -42,7 +43,7 @@ _PLAIN = {"escape": "\x1b", "enter": "\r", "tab": "\t", "backspace": "\x7f"}
 
 @dataclass(frozen=True, slots=True)
 class Key:
-    """One key press: a named key (``"up"``, ``"f4"``, ``"enter"``) or the text it types."""
+    """One key press: a named keyboard key (``"up"``, ``"f4"``, ``"enter"``) or its text."""
 
     name: str = ""
     text: str = ""
@@ -52,7 +53,7 @@ class Key:
 
 
 def encode(key: Key) -> str:
-    """The bytes a terminal sends for ``key``, or ``""`` for one it has no spelling for."""
+    """The bytes that a terminal sends for ``key``, or ``""`` if no spelling exists for it."""
     modifier = 1 + key.shift + 2 * key.alt + 4 * key.ctrl
     name = key.name
     if name in _CURSOR_FINAL:

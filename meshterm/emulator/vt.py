@@ -1,18 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The terminal the emulator draws: a VT byte stream parsed into a grid of cells.
+"""The terminal that the emulator draws: a VT byte stream, parsed into a grid of cells.
 
-Small on purpose. Its one producer is MeshTerm itself — prompt_toolkit's ``Vt100_Output``
-and the session's own fast row writer — so it understands what those emit and the handful
-of neighbours a stray library might, and quietly ignores the rest of the VT220/xterm
-universe: cursor movement and addressing, erase and insert/delete, scroll regions, the
-alternate screen, autowrap, and SGR in all three colour depths (16, 256, and truecolor,
-with ``;`` or ``:`` separators). What it does not model it skips by the grammar — a
-whole escape sequence, never part of one — so an unknown sequence can never leak its
-parameters onto the screen as text.
+This module is small on purpose. Its only producer is MeshTerm itself: the
+``Vt100_Output`` of prompt_toolkit, and the fast row writer of the session. Thus the
+module understands what those two write, and the small number of similar sequences that a
+stray library can write. It ignores the rest of the VT220/xterm sequences, with no
+message. It understands cursor movement and addressing, erase and insert/delete, scroll
+regions, the alternate screen, autowrap, and SGR in all three colour depths (16, 256, and
+truecolour, with ``;`` or ``:`` separators).
 
-The grid is the source of truth for the pixels: :class:`Terminal` records which rows
-changed since the emulator last drew (:meth:`Terminal.take_dirty`), so a keystroke that moves
-the highlight one row repaints two rows of the panel, not fourteen.
+The module skips what it does not model by the grammar: a whole escape sequence, never a
+part of one. Thus an unknown sequence can never put its parameters on the screen as text.
+
+The grid is the source of truth for the pixels. :class:`Terminal` keeps a list of the rows
+that changed since the emulator last drew (:meth:`Terminal.take_dirty`). Thus a key press
+that moves the highlight one row draws two rows of the display again, not fourteen.
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from rich.cells import cell_len
 #: A colour, as 8-bit channels.
 RGB = tuple[int, int, int]
 
-#: Style flags (:attr:`Style.flags` is a bitmask of these).
+#: Style flags. :attr:`Style.flags` is a bitmask of these flags.
 BOLD = 1
 DIM = 2
 ITALIC = 4
@@ -37,23 +39,23 @@ STRIKE = 64
 
 @dataclass(frozen=True, slots=True)
 class Style:
-    """How a cell is drawn: its colours (``None`` = the terminal's default) and flags."""
+    """How a cell is drawn: its colours (``None`` = the terminal's default) and its flags."""
 
     fg: RGB | None = None
     bg: RGB | None = None
     flags: int = 0
 
 
-#: The style a fresh or erased cell has.
+#: The style of a new or erased cell.
 PLAIN = Style()
 
-#: A cell: the character drawn there (``""`` for the right half of a wide character)
-#: and its style.
+#: A cell: the character that is drawn there (``""`` for the right half of a wide
+#: character), and its style.
 Cell = tuple[str, Style]
 
 _BLANK: Cell = (" ", PLAIN)
 
-#: A conventional 16-colour palette, for an emulator that passes none of its own.
+#: A standard 16-colour palette, for an emulator that gives no palette of its own.
 _DEFAULT_PALETTE: tuple[RGB, ...] = (
     (0, 0, 0), (205, 0, 0), (0, 205, 0), (205, 205, 0),
     (0, 0, 238), (205, 0, 205), (0, 205, 205), (229, 229, 229),
@@ -68,7 +70,7 @@ _GROUND, _ESC, _CSI, _OSC, _CHARSET, _STRING = range(6)
 
 
 def _xterm_256(index: int, palette: Sequence[RGB]) -> RGB:
-    """The colour xterm's 256-colour index ``index`` names."""
+    """The colour that the xterm 256-colour index ``index`` names."""
     if index < 16:
         return palette[index]
     if index < 232:
@@ -83,14 +85,14 @@ def _xterm_256(index: int, palette: Sequence[RGB]) -> RGB:
 
 
 class Terminal:
-    """A ``cols`` × ``rows`` character grid driven by a VT byte stream.
+    """A ``cols`` × ``rows`` character grid, driven by a VT byte stream.
 
     Args:
-        cols: Width in cells.
-        rows: Height in cells.
-        palette: The 16 colours SGR 30–37/90–97 (and 256-colour indices 0–15) name.
-        reply: Called with the bytes a real terminal would answer a query with (a
-            cursor-position report, a device-attributes reply); ``None`` drops them.
+        cols: The width in cells.
+        rows: The height in cells.
+        palette: The 16 colours that SGR 30–37/90–97 (and 256-colour indices 0–15) name.
+        reply: Called with the bytes that a real terminal sends as the answer to a query
+            (a cursor-position report, a device-attributes reply). ``None`` ignores them.
     """
 
     def __init__(
@@ -101,7 +103,7 @@ class Terminal:
         palette: Sequence[RGB] = _DEFAULT_PALETTE,
         reply: Callable[[str], None] | None = None,
     ) -> None:
-        """Start blank, the cursor home, in the main screen."""
+        """Start blank, with the cursor at home, in the main screen."""
         self.cols = cols
         self.rows = rows
         self.palette = tuple(palette)
@@ -129,22 +131,22 @@ class Terminal:
         return [[_BLANK] * self.cols for _ in range(self.rows)]
 
     def take_dirty(self) -> set[int]:
-        """The rows changed since the last call, which this call forgets."""
+        """The rows that changed since the last call. This call forgets them."""
         dirty, self._dirty = self._dirty, set()
         return dirty
 
     def line(self, row: int) -> str:
-        """Row ``row`` as plain text, wide characters once each."""
+        """Row ``row`` as plain text, with each wide character one time."""
         return "".join(char for char, _ in self.screen[row])
 
     def text(self) -> str:
-        """The whole screen as plain text, one line per row."""
+        """The whole screen as plain text, one line for each row."""
         return "\n".join(self.line(row) for row in range(self.rows))
 
     # --- input --------------------------------------------------------------------------
 
     def feed(self, data: str) -> None:
-        """Parse ``data``, updating the grid."""
+        """Parse ``data``, and update the grid."""
         for char in data:
             state = self._state
             if state == _GROUND:
@@ -165,7 +167,7 @@ class Terminal:
                 elif char >= " ":
                     self._params += char
                 else:
-                    self._control(char)  # C0 controls act even mid-sequence
+                    self._control(char)  # C0 controls act also in the middle of a sequence
             elif state == _ESC:
                 self._escape(char)
             elif state == _OSC:
@@ -178,7 +180,7 @@ class Terminal:
                     self._state = _ESC
                 elif char == "\x07":
                     self._state = _GROUND
-            else:  # _CHARSET: the designator's one final character
+            else:  # _CHARSET: the one final character of the designator
                 self._state = _GROUND
 
     def _escape(self, char: str) -> None:
@@ -204,7 +206,7 @@ class Terminal:
             self._reverse_index()
         elif char == "c":
             self.__init__(self.cols, self.rows, palette=self.palette, reply=self._reply)
-        # "=", ">", "\\" and anything else: nothing to draw.
+        # "=", ">", "\\", and all other characters: nothing to draw.
 
     def _control(self, char: str) -> None:
         if char == "\r":
@@ -218,7 +220,7 @@ class Terminal:
         elif char == "\t":
             self.x = min(self.cols - 1, (self.x // 8 + 1) * 8)
             self._wrap_pending = False
-        # BEL, SO/SI and the rest draw nothing.
+        # BEL, SO/SI, and the other controls draw nothing.
 
     # --- drawing --------------------------------------------------------------------------
 
@@ -226,7 +228,7 @@ class Terminal:
         width = cell_len(char)
         row = self.screen[self.y]
         if width == 0:
-            # A combining mark rides the cell before it.
+            # A combining mark goes into the cell before it.
             if self.x > 0 or self._wrap_pending:
                 col = self.x if self._wrap_pending else self.x - 1
                 base, style = row[col]
@@ -254,7 +256,7 @@ class Terminal:
             self.x = x
 
     def _unsplit(self, row: list[Cell], x: int) -> None:
-        """Before ``x`` is overwritten, blank whatever half of a wide character it was."""
+        """Before ``x`` is overwritten: if it is half of a wide character, blank the other half."""
         char, style = row[x]
         if char == "" and x > 0:
             row[x - 1] = (" ", row[x - 1][1])
@@ -262,7 +264,7 @@ class Terminal:
             row[x + 1] = (" ", style)
 
     def _erase_style(self) -> Style:
-        """What an erased cell carries: the current background, nothing else."""
+        """The style of an erased cell: the current background, and nothing else."""
         return PLAIN if self.style.bg is None else Style(bg=self.style.bg)
 
     def _erase(self, row: int, first: int, last: int) -> None:
@@ -335,7 +337,7 @@ class Terminal:
                 self._private_mode(params, final == "h")
             return
         if private:
-            return  # secondary DA and kin: nothing to draw
+            return  # secondary DA and similar queries: nothing to draw
         if final == "m":
             self._sgr(params)
         elif final in "Hf":
@@ -401,7 +403,7 @@ class Terminal:
                 self._reply("\x1b[0n")
         elif final == "c" and self._reply is not None:
             self._reply("\x1b[?1;2c")
-        # Anything else (window ops, cursor shape, ...) changes nothing here.
+        # All other sequences (window ops, cursor shape, ...) change nothing here.
 
     def _erase_display(self, mode: int) -> None:
         if mode == 0:
@@ -457,14 +459,14 @@ class Terminal:
     def _sgr(self, params: list[str]) -> None:
         if not params:
             params = ["0"]
-        # Flatten "38:2::r:g:b" (colon sub-parameters) into the ";" form's sequence.
+        # Flatten "38:2::r:g:b" (colon sub-parameters) into the sequence of the ";" form.
         codes: list[int] = []
         for part in params:
             pieces = part.split(":")
             if len(pieces) > 1 and pieces[0] in ("38", "48", "58"):
                 head, rest = pieces[0], pieces[1:]
                 if rest[:1] == ["2"] and len(rest) == 5:
-                    rest = ["2", *rest[2:]]  # drop the colour-space id
+                    rest = ["2", *rest[2:]]  # remove the colour-space id
                 codes.extend(int(p) if p.isdigit() else 0 for p in (head, *rest))
             else:
                 codes.append(int(pieces[0]) if pieces[0].isdigit() else 0)

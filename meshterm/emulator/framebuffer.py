@@ -1,28 +1,37 @@
 # SPDX-License-Identifier: Apache-2.0
-"""On the Cardputer Zero: pixels to the framebuffer, keys from the keyboard's event device.
+"""On the Cardputer Zero: pixels to the framebuffer, key events from the keyboard's device file.
 
-The launcher starts an app with the screen to itself and tells it where things are:
-``APPLAUNCH_LINUX_FBDEV_DEVICE`` names the panel's framebuffer and
-``APPLAUNCH_LINUX_KEYBOARD_DEVICE`` its keyboard, which it shares rather than grabs — so the
-app reads key events itself, while the launcher watches the same stream for a held Esc
-(3 s, then SIGTERM to the app's process group, and SIGKILL 3 s after that). This front end
-follows that contract: Esc goes through :mod:`~meshterm.services.hold_to_quit`, which shows
-the hold on the panel the launcher has stopped drawing, and the SIGTERM is taken as the
-quit it is (:func:`~meshterm.services.hold_to_quit.leave_on_sigterm`).
+The launcher starts an app with the screen for that app only, and tells it where things
+are. ``APPLAUNCH_LINUX_FBDEV_DEVICE`` names the framebuffer of the display, and
+``APPLAUNCH_LINUX_KEYBOARD_DEVICE`` names its keyboard. The launcher shares the keyboard
+and does not grab it. Thus the app reads the key events itself, while the launcher
+watches the same stream for a held Esc key (3 s, then SIGTERM to the process group of the
+app, and SIGKILL 3 s after that).
 
-**Written ahead of the hardware** (2026-09-30), from M5's published sources: the
-framebuffer and keyboard paths and the Esc policy from the launcher, the key codes from the
-keyboard driver's keymaps, and the Sym layer's characters from M5's console keymap
-(``tca8418_keypad_m5stack_keymap.map``). The mapping is unit-tested. **Run on the device
-since 2026-10-05**, where the key codes and the Sym layer checked out against the keyboard
-and M5's installed keymap, and the panel turned out to need its pixels written through a
-mapping (:class:`Framebuffer`).
+This front end obeys that contract. The Esc key goes through
+:mod:`~meshterm.services.hold_to_quit`, which shows the hold on the display, where the
+launcher does not draw any more. The front end takes the SIGTERM as a quit, because that is
+what it is (:func:`~meshterm.services.hold_to_quit.leave_on_sigterm`).
 
-The keyboard driver does the Fn layer in the kernel, so Fn+4 arrives as a plain ``KEY_F4``
-and the arrows as real arrow keys; Shift is a real ``KEY_LEFTSHIFT`` held down for as long
-as the sticky Shift is armed. Sym is the exception: its layer sends *placeholder* key codes
-(``KEY_LEFTBRACE`` for ``!``, …) that M5's own keymap gives their symbols, so this module
-gives them the same ones, and is the only place that knows.
+**Written before the hardware was available** (2026-09-30), from the published sources of
+M5:
+
+* the framebuffer and keyboard paths, and the Esc policy, from the launcher,
+* the key codes, from the keymaps of the keyboard driver, and
+* the characters of the Sym layer, from the console keymap of M5
+  (``tca8418_keypad_m5stack_keymap.map``).
+
+The key mapping has unit tests. **Run on the handheld since 2026-10-05.** There, the key
+codes and the Sym layer agreed with the keyboard and with the installed keymap of M5. We
+also found there that the display must get its pixels through a memory mapping
+(:class:`Framebuffer`).
+
+The keyboard driver does the Fn layer in the kernel. Thus Fn+4 arrives as a plain
+``KEY_F4``, and the arrows arrive as real arrow keys. Shift is a real ``KEY_LEFTSHIFT``
+that stays down while the sticky Shift is armed. Sym is the exception. Its layer sends
+placeholder key codes (``KEY_LEFTBRACE`` for ``!``, …), and the keymap of M5 gives them
+their symbols. This module gives them the same symbols, and it is the only place in
+MeshTerm that knows them.
 """
 
 from __future__ import annotations
@@ -43,14 +52,15 @@ from .vt import Terminal
 
 FB_ENV = "APPLAUNCH_LINUX_FBDEV_DEVICE"
 KEYBOARD_ENV = "APPLAUNCH_LINUX_KEYBOARD_DEVICE"
-#: Where the launcher's own default puts the keyboard, when no variable says.
+#: The keyboard device file in the launcher's own default, when no variable names one.
 DEFAULT_KEYBOARD = "/dev/input/by-path/platform-3f804000.i2c-event"
 
-#: ``struct input_event`` on a 64-bit kernel: timeval, then type, code, value.
+#: ``struct input_event`` on a 64-bit kernel: timeval, then type, code, and value.
 _EVENT = struct.Struct("llHHi")
 _EV_KEY = 0x01
 
-#: ``KEY_ESC``: held, the launcher's way out (see :mod:`~meshterm.services.hold_to_quit`).
+#: ``KEY_ESC``. When it is held, it is the launcher's way out (refer to
+#: :mod:`~meshterm.services.hold_to_quit`).
 _ESC = 1
 
 # Modifier key codes (linux/input-event-codes.h).
@@ -58,7 +68,7 @@ _SHIFT = {42, 54}
 _CTRL = {29, 97}
 _ALT = {56, 100}
 
-#: Key codes that are not text, by the name :mod:`.keys` spells them.
+#: Key codes that are not text, mapped to the names that :mod:`.keys` spells them with.
 _NAMED: dict[int, str] = {
     1: "escape",
     14: "backspace",
@@ -80,7 +90,7 @@ _NAMED: dict[int, str] = {
     88: "f12",
 }
 
-#: The base layer's characters.
+#: The characters of the base layer.
 _TEXT: dict[int, str] = {
     **{2 + n: "1234567890"[n] for n in range(10)},
     **{16 + n: "qwertyuiop"[n] for n in range(10)},
@@ -89,7 +99,8 @@ _TEXT: dict[int, str] = {
     57: " ",
 }
 
-#: The Sym layer's placeholder codes and the characters M5's console keymap gives them.
+#: The placeholder codes of the Sym layer, and the characters that the console keymap of
+#: M5 gives them.
 _SYM: dict[int, str] = {
     26: "!", 27: "@", 39: "#", 40: "$", 41: "%", 43: "^", 51: "&", 52: "*",
     53: "(", 94: ")", 55: "~", 69: "`", 70: "_", 71: "-", 72: "+", 73: "=",
@@ -99,7 +110,7 @@ _SYM: dict[int, str] = {
 
 
 class KeyState:
-    """Turns the keyboard's events into :class:`~.keys.Key` presses, tracking modifiers."""
+    """Changes keyboard events into :class:`~.keys.Key` presses, and tracks the modifiers."""
 
     def __init__(self) -> None:
         """Start with no modifier held."""
@@ -107,11 +118,11 @@ class KeyState:
 
     @property
     def shift(self) -> bool:
-        """Whether a Shift key is held — or armed, which the driver reports the same way."""
+        """Whether a Shift key is held or armed. The driver reports the two in the same way."""
         return bool(self._held & _SHIFT)
 
     def event(self, code: int, value: int) -> Key | None:
-        """One ``EV_KEY`` event (``value`` 1 down, 2 repeat, 0 up): the press it makes."""
+        """The key press that one ``EV_KEY`` event makes (``value`` 1 down, 2 repeat, 0 up)."""
         if code in _SHIFT | _CTRL | _ALT:
             if value:
                 self._held.add(code)
@@ -135,21 +146,23 @@ class KeyState:
 
 
 class Framebuffer:
-    """The panel's framebuffer, written a band of pixel rows at a time through a mapping.
+    """The display's framebuffer, written a band of pixel rows at a time through a memory mapping.
 
-    **Through a mapping, never ``write()``.** The panel is a DRM driver (``panel-mipi-dbi``)
-    whose ``/dev/fb0`` is the kernel's fbdev emulation: a buffer the kernel copies to the
-    panel only where it knows something changed, and what it watches is the *mapping* —
-    a write through it faults the page, and the page goes on the next refresh. Bytes sent
-    with ``pwrite`` land in the same buffer, where reading ``/dev/fb0`` back shows them, and
-    never reach the glass: on the device MeshTerm ran with the launcher's loading screen
-    still showing over it, and the reader quit a splash they couldn't see. M5's own apps
-    draw through the mapping too (LVGL's ``lv_linux_fbdev``). Found on the hardware,
-    2026-10-05.
+    **Through a memory mapping, never ``write()``.** The display has a DRM driver
+    (``panel-mipi-dbi``), and its ``/dev/fb0`` is the fbdev emulation of the kernel. That
+    is a buffer that the kernel copies to the display only where it knows that something
+    changed. What the kernel watches is the memory mapping. A write through the mapping
+    causes a page fault, and the kernel sends that page at the next update of the display.
+
+    Bytes from ``pwrite`` go into the same buffer, and a read of ``/dev/fb0`` shows them.
+    But they never get to the display. On the handheld, MeshTerm ran while the loading
+    screen of the launcher stayed visible over it, and the user quit a splash that they
+    could not see. The apps of M5 also draw through the memory mapping (LVGL's
+    ``lv_linux_fbdev``). We found this on the hardware, 2026-10-05.
     """
 
     def __init__(self, path: str, *, width: int, height: int) -> None:
-        """Open and map the framebuffer at ``path`` for a ``width`` × ``height`` panel."""
+        """Open and map the framebuffer at ``path``, for a ``width`` × ``height`` display."""
         self.path = path
         self._fd = os.open(path, os.O_RDWR)
         stride = self._sysfs("stride")
@@ -159,7 +172,7 @@ class Framebuffer:
         self._map = mmap.mmap(
             self._fd,
             self.stride * height,
-            mmap.MAP_SHARED,  # type: ignore[attr-defined]  # Linux only, as the panel is
+            mmap.MAP_SHARED,  # type: ignore[attr-defined]  # Linux only, as is the display
             mmap.PROT_READ | mmap.PROT_WRITE,  # type: ignore[attr-defined]
         )
 
@@ -184,7 +197,7 @@ class Framebuffer:
 
 
 class Device:
-    """The front end on the device: a framebuffer writer and a keyboard reader."""
+    """The front end on the handheld: a framebuffer writer and a keyboard reader."""
 
     def __init__(
         self,
@@ -196,7 +209,7 @@ class Device:
         framebuffer: str,
         keyboard: str,
     ) -> None:
-        """Open the framebuffer, and start the drawing and key-reading threads."""
+        """Open the framebuffer, then start two threads: one draws, one reads the keyboard."""
         self._lock = lock
         self._type = type_text
         self._raster = Raster(
@@ -210,7 +223,7 @@ class Device:
         threading.Thread(target=self._read_keys, name="cardputer-keys", daemon=True).start()
 
     def frame_ready(self) -> None:
-        """Wake the drawing thread: a frame is complete."""
+        """Wake the thread that draws: a frame is complete."""
         self._ready.set()
 
     def close(self) -> None:
@@ -243,7 +256,7 @@ class Device:
                 if kind != _EV_KEY:
                     continue
                 if code == _ESC:
-                    # Down and its repeats are one hold; a tap is typed as it comes up.
+                    # Down and its repeats are one hold. A tap is typed when it comes up.
                     if value:
                         esc.down()
                     else:
@@ -261,14 +274,14 @@ class Device:
 
 
 def front_end():
-    """The device as a :data:`~.run.FrontEndFactory`, from the launcher's environment."""
+    """The handheld as a :data:`~.run.FrontEndFactory`, from the launcher's environment."""
     from .font import find_font
 
     font = find_font()
     framebuffer = os.environ.get(FB_ENV) or "/dev/fb0"
     keyboard = os.environ.get(KEYBOARD_ENV) or DEFAULT_KEYBOARD
-    # From here, not only from the CLI: the launcher's SIGTERM can land while MeshTerm is
-    # still importing, and there it should stop as an interrupt rather than unhandled.
+    # From here, not only from the CLI: the launcher's SIGTERM can arrive while MeshTerm
+    # still imports its modules. Then MeshTerm must stop as an interrupt, not unhandled.
     hold_to_quit.leave_on_sigterm()
 
     def build(terminal: Terminal, lock: threading.Lock, type_text: Callable[[str], None]):

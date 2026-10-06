@@ -1,16 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
-"""``python -m meshterm.emulator`` — run MeshTerm as it runs on a handheld.
+"""``python -m meshterm.emulator``: run MeshTerm as it runs on a handheld.
 
     python -m meshterm.emulator DEVICE [--scale N] [MESHTERM ARGS...]
     python -m meshterm.emulator --framebuffer [MESHTERM ARGS...]
 
-``DEVICE`` (``cardputer-zero``, ``picocalc-lyra``) opens a window showing that device's
-display — the same as ``meshterm emulate DEVICE``, which is how a person runs it. On the
-Cardputer Zero itself, where the launcher names a framebuffer
-(``APPLAUNCH_LINUX_FBDEV_DEVICE``), it draws to that framebuffer and reads the keyboard
-instead; ``--framebuffer`` asks for that anywhere. Everything else is passed to MeshTerm as
-it would be on a command line — ``--mock`` for the simulated mesh, ``--ble``/``--port``/
-``--tcp`` for a companion — with ``--platform`` supplied by the emulator.
+``DEVICE`` (``cardputer-zero``, ``picocalc-lyra``) opens a window that shows the display of
+that handheld. This is the same as ``meshterm emulate DEVICE``, which is the command that
+the user runs. On the Cardputer Zero itself, the launcher names a framebuffer
+(``APPLAUNCH_LINUX_FBDEV_DEVICE``). There, the emulator draws to that framebuffer and reads
+the keyboard instead. ``--framebuffer`` asks for that behaviour on any machine. All the
+other arguments go to MeshTerm as on a command line: ``--mock`` for the simulated mesh, and
+``--ble``/``--port``/``--tcp`` for a companion. The emulator supplies ``--platform``.
 """
 
 from __future__ import annotations
@@ -28,22 +28,23 @@ def start(
     framebuffer: bool | None = None,
     complain: Callable[[str], None] | None = None,
 ) -> int:
-    """Run MeshTerm in the emulator: ``name``'s display in a window, or the real panel.
+    """Run MeshTerm in the emulator: the display of ``name`` in a window, or the real display.
 
     Args:
-        name: The device to emulate in a window, by id; ignored on the framebuffer, which
-            is the Cardputer Zero's own.
-        argv: MeshTerm's own arguments, passed through as a shell would pass them.
-        scale: The window's zoom, in whole pixels.
-        framebuffer: Draw to the device's framebuffer (``True``) or a window (``False``);
-            ``None`` decides by whether the launcher named a framebuffer.
-        complain: Where a sentence saying why it can't start goes (stderr by default).
+        name: The id of the handheld to emulate in a window. It is ignored on the
+            framebuffer, because that framebuffer is the Cardputer Zero's own.
+        argv: The arguments of MeshTerm itself, passed on as a shell passes them.
+        scale: The zoom of the window, in whole pixels.
+        framebuffer: Draw to the framebuffer of the handheld (``True``) or to a window
+            (``False``). ``None`` decides from whether the launcher named a framebuffer.
+        complain: Where the sentence goes that says why the emulator cannot start (stderr
+            by default).
 
     Returns:
-        MeshTerm's exit status, or ``1`` when the emulator couldn't start.
+        The exit status of MeshTerm, or ``1`` when the emulator could not start.
 
     Raises:
-        ValueError: ``name`` is missing or names no device the emulator offers.
+        ValueError: ``name`` is missing, or it names no handheld that the emulator offers.
     """
     from .devices import CARDPUTER_ZERO_DEVICE, device
     from .framebuffer import FB_ENV
@@ -62,7 +63,7 @@ def start(
         emulated = device(name)
         from .window import front_end as window_front_end
 
-        def factory():  # noqa: ANN202 - the window's factory, deferred to report its errors
+        def factory():  # noqa: ANN202 - the window factory. It is deferred to report its errors.
             return window_front_end(emulated, scale)
 
     try:
