@@ -65,17 +65,49 @@ def to_hex(lab: Lab) -> str:
     clipped colour is the nearest the terminal can show, and it stays the right hue to
     the eye at the shifts the app asks for.
     """
+    linear = _linear_rgb(lab)
+    return "#" + "".join(f"{round(_encoded(min(1.0, max(0.0, c))) * 255):02x}" for c in linear)
+
+
+def _linear_rgb(lab: Lab) -> tuple[float, float, float]:
+    """OKLab → linear sRGB. A channel outside 0 to 1 is outside the sRGB gamut."""
     lightness, a, b = lab
     l_ = lightness + 0.3963377774 * a + 0.2158037573 * b
     m_ = lightness - 0.1055613458 * a - 0.0638541728 * b
     s_ = lightness - 0.0894841775 * a - 1.2914855480 * b
     lms = (l_**3, m_**3, s_**3)
-    linear = (
+    return (
         4.0767416621 * lms[0] - 3.3077115913 * lms[1] + 0.2309699292 * lms[2],
         -1.2684380046 * lms[0] + 2.6097574011 * lms[1] - 0.3413193965 * lms[2],
         -0.0041960863 * lms[0] - 0.7034186147 * lms[1] + 1.7076147010 * lms[2],
     )
-    return "#" + "".join(f"{round(_encoded(min(1.0, max(0.0, c))) * 255):02x}" for c in linear)
+
+
+def _in_gamut(lab: Lab) -> bool:
+    """Whether the sRGB gamut holds ``lab`` (a very small tolerance for rounding)."""
+    return all(-1e-6 <= channel <= 1 + 1e-6 for channel in _linear_rgb(lab))
+
+
+def fitted(lab: Lab) -> Lab:
+    """``lab`` with its chroma lowered until the sRGB gamut holds it.
+
+    The lightness and the hue do not change. A colour that is already in the gamut comes
+    back unchanged. Use this instead of the clip in :func:`to_hex` when a set of colours
+    must stay apart: a dark, saturated colour leaves the gamut, and the clip moves many
+    such colours to one corner of the gamut. For example, two greens a few steps apart
+    on the hue wheel both clip to ``#008000``.
+    """
+    if _in_gamut(lab):
+        return lab
+    lightness, a, b = lab
+    low, high = 0.0, 1.0
+    for _ in range(24):  # the chroma scale, to approximately 1e-7
+        middle = (low + high) / 2
+        if _in_gamut((lightness, a * middle, b * middle)):
+            low = middle
+        else:
+            high = middle
+    return (lightness, a * low, b * low)
 
 
 def distance(first: str, second: str) -> float:

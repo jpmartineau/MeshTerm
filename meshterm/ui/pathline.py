@@ -12,16 +12,17 @@ drawn*, so every surface the survey found can eventually route through it:
   look, unchanged. ``powerline`` renders each hop as a colour-filled chip, joined by one
   solid triangle U+E0B0 interlocked between them — the chip behind as its foreground, the
   chip ahead as its background — so a route reads as a ribbon whose segments meet on a
-  chevron: the oh-my-posh look, at one cell a seam. The chip fill is the node's
-  hash-derived hue (:func:`~meshterm.ui.theme.node_style`), our own node the map's yellow
-  ``★`` on a neutral dark grey, a faded hop dark slate, a keyless hop grey. (On the
-  16-colour console of the PicoCalc, a node's chip is the dim twin of its hue, and the
-  label is in the hue itself. Refer to :func:`_slot_colours`.) Two chips that
+  chevron: the oh-my-posh look, at one cell a seam. The label of a node's chip is its
+  hash-derived hue (:func:`~meshterm.ui.theme.node_style`), the colour that its name has
+  on each surface, and the fill is that hue, darker (:data:`CHIP_LIGHTNESS`). Our own
+  node is the map's yellow ``★`` on a neutral dark grey, a faded hop is dark slate, and a
+  keyless hop is light grey on grey. (On the 16-colour console of the PicoCalc, the fill
+  is the dim twin of the hue. Refer to :func:`_slot_colours`.) Two chips that
   land on the *same* fill — a mirrored return leg, a stretch of keyless greys — or on two
   fills too close to tell apart (under :data:`SEAM_BLUR` apart in OKLab, the perceptual
   distance :mod:`~meshterm.ui.oklab` measures) take the one exception the interlock can't
-  draw: the seam is the *thin* chevron instead, the previous fill shaded a step darker
-  (lighter, for a dark fill) and drawn on the next, so the ribbon runs on unbroken and the
+  draw: the seam is the *thin* chevron instead, in the colour of the previous chip's
+  label and drawn on the next, so the ribbon runs on unbroken and the
   join is a line the chip draws on itself (:meth:`PathLine._seam`). Hops elided out of
   the middle break the
   ribbon instead of joining it: the mark sits bare on the page between a closing point and
@@ -140,13 +141,43 @@ _ARROW = " → "
 #: (:func:`~meshterm.ui.tui.render._whiten_identities`) instead of whitening a whole route.
 PATH_INK = "pathline"
 
-#: Chip ink: near-black slate for readable text on every spectrum hue and on white.
+#: The lightness of a node's chip, as a part of the lightness of its hue (OKLab ``L``).
+#: On a truecolor terminal, the fill of a node's chip is its hue with ``L`` multiplied by
+#: this value, and the label on it is the hue itself: the colour that the name has in each
+#: list and in arrow mode. Thus a node is one colour on each surface, and a chip only puts
+#: a darker ground of that colour under it. JP chose this look on the PicoCalc
+#: (2026-10-06), where the dim twin of a slot is the same rule at the resolution of the
+#: console (:data:`~meshterm.ui.theme.DIM_TWIN`). Its dim twins have 0.55 to 0.73 of the
+#: lightness of their bright slots.
+#:
+#: The value came from two ladders of rules over twelve hues. A fixed step down in ``L``
+#: made the blue fills almost black, because the blue hue is the darkest on the wheel.
+#: One ``L`` for all fills made the blue label hard to read on its fill. ``0.65`` made the
+#: blue label weak, and ``0.55`` made the yellow fills dull. The fill also keeps its hue
+#: when the darker colour leaves the sRGB gamut: the chroma comes down, refer to
+#: :func:`~meshterm.ui.oklab.fitted`. A clip there made the greens near ``0x50`` one colour.
+CHIP_LIGHTNESS = 0.60
+
+
+def _chip_fill(colour: str) -> str:
+    """The fill of a chip whose label is ``colour``: the same hue, darker."""
+    lightness, a, b = oklab.from_hex(colour)
+    return oklab.to_hex(oklab.fitted((lightness * CHIP_LIGHTNESS, a, b)))
+
+
+def _chip_label(fill: str) -> str:
+    """The label for a chip whose fill is ``fill``: the reverse of :func:`_chip_fill`."""
+    lightness, a, b = oklab.from_hex(fill)
+    return oklab.to_hex(oklab.fitted((min(1.0, lightness / CHIP_LIGHTNESS), a, b)))
+
+
+#: The text of the composer's slot: near-black slate on the white chip.
 _CHIP_FG = "#0f172a"
-#: Chip ink, softened — annotations and a hash label's unlit tail (the two-tone).
-_CHIP_FG_SOFT = "#334155"
 #: Chip fill for a keyless hop — the ``faint`` grey; colour stays reserved for
 #: keyed identities in chips just as it is in arrow mode.
 _KEYLESS_BG = "#64748b"
+#: The label of a keyless chip: the same pair as a node's chip, in grey.
+_KEYLESS_FG = _chip_label(_KEYLESS_BG)
 #: Our own node's chip fill: a neutral dark grey, so the yellow ``★`` riding it reads as
 #: the map's marker rather than as a node's hue (JP, 2026-08-09). Deliberately *not* a
 #: spectrum colour and not the white it used to be — our end of a route is a fixture the
@@ -166,9 +197,6 @@ _SLOT_FAINT = slot_hex(8)
 #: On the console, white: slot 15. It is the text of a keyless chip and of the
 #: composer's slot.
 _SLOT_WHITE = slot_hex(15)
-#: Each dim console slot and its bright twin: the reverse of
-#: :data:`~meshterm.ui.theme.DIM_TWIN`.
-_BRIGHT_TWIN = {dim: bright for bright, dim in DIM_TWIN.items()}
 
 
 class _ChipColours(NamedTuple):
@@ -313,26 +341,10 @@ def _style_hex(style: str) -> str | None:
 #: doesn't; the two greys, ``0.18`` apart, keep their interlock on the metric alone.
 SEAM_BLUR = 0.06
 
-#: How far the thin chevron's colour steps from the fill it is drawn in, in OKLab ``L``
-#: — a lightness shift alone, so it reads as *that chip's colour, shaded* rather than as
-#: a third colour on the line. The step is taken from the previous fill but measured from
-#: whichever of the two fills is further along (:func:`~meshterm.ui.oklab.shaded`'s
-#: ``floor``), so the mark clears the fill it actually sits on by this much even when the
-#: two differ by everything :data:`SEAM_BLUR` allows. A lightness step is what a thin line
-#: is seen by (the eye resolves detail in luminance, not in chroma), so it needs nothing
-#: like the blur distance to read: ``0.10`` is five noticeable differences, a clear line
-#: that is still plainly the chip's own colour, chosen on the same ladder (JP, 2026-09-16).
-SEAM_SHADE = 0.10
-
 
 def _fills_blur(before: str, after: str) -> bool:
     """Whether two fills are the same to the eye: identical, or under :data:`SEAM_BLUR`."""
     return before == after or oklab.distance(before, after) < SEAM_BLUR
-
-
-def _seam_ink(before: str, after: str) -> str:
-    """The thin chevron's colour: ``before`` shaded :data:`SEAM_SHADE` past both fills."""
-    return oklab.shaded(before, SEAM_SHADE, floor=oklab.from_hex(after)[0])
 
 
 #: A chip's fill, as it appears in a rendered span's style — the ``on #rrggbb`` half.
@@ -1055,18 +1067,16 @@ class PathLine:
         one shade of green on the next, so the test is a perceptual distance under
         :data:`SEAM_BLUR` (:func:`_fills_blur`), not equality and not a hue gap.
 
-        There the seam is the **thin** chevron, :data:`POWERLINE_THIN`, in the previous
-        chip's own fill shaded a step darker — lighter, for a dark fill — and drawn on
-        the fill ahead (:func:`_seam_ink`, JP, 2026-09-16): powerline's own mark for a
-        join inside one colour, and the chip it belongs to drawing a line on itself, so
-        the ribbon runs on unbroken and nothing on it is a colour that isn't a chip's.
-        The solid point drawn bare used to cut a wedge of page out of the route here (a
-        run of near hues read as dashes, and on a light terminal the wedge was a hole),
-        and a chevron in the dark chip ink read as a mark laid on the route rather than a
-        seam in it. One cell either way.
-
-        On the 16-colour console, the thin chevron is the bright twin of the fill, which
-        is the colour of the label on that chip (:func:`_slot_thin_ink`).
+        There the seam is the **thin** chevron, :data:`POWERLINE_THIN`, drawn on the fill
+        ahead in the colour of the previous chip's label: powerline's own mark for a join
+        inside one colour, and the chip it belongs to drawing a line on itself, so the
+        ribbon runs on unbroken and nothing on it is a colour that isn't a chip's. The
+        solid point drawn bare used to cut a wedge of page out of the route here (a run of
+        near hues read as dashes, and on a light terminal the wedge was a hole). The thin
+        chevron was then the previous fill, a lightness step darker (JP, 2026-09-16). When
+        the label became the node's hue on a darker fill of itself (2026-10-06), the label
+        colour became the line: it is the light half of the same pair, so it is visible
+        on each fill and is still the chip's own colour. One cell either way.
 
         Args:
             before: The colours of the previous chip. The point is drawn in its fill.
@@ -1076,8 +1086,7 @@ class PathLine:
             The seam's single styled cell.
         """
         if _fills_blur(before.fill, after.fill):
-            ink = _thin_ink(before, after)
-            return Text(POWERLINE_THIN, style=f"{_FLAT}{ink} on {after.fill}")
+            return Text(POWERLINE_THIN, style=f"{_FLAT}{before.ink} on {after.fill}")
         return Text(POWERLINE_SEP, style=f"{_FLAT}{before.fill} on {after.fill}")
 
     @staticmethod
@@ -1128,38 +1137,38 @@ class PathLine:
         return text
 
 
-def _spectrum_fill(hop: PathHop) -> str:
-    """A chip's fill: cursor accent, override, dim slate, our grey, hue, keyless grey.
+def _spectrum_colours(hop: PathHop) -> _ChipColours:
+    """The colours of a chip on a truecolor terminal: the hue on a darker fill of itself.
+
+    A node's label is its hue: the colour that its name has in each list and in arrow
+    mode. The fill is that hue, darker (:data:`CHIP_LIGHTNESS`). The whole
+    label is in the hue, a hash label and an annotation too, and the lit bytes of a hash
+    are bold. A keyless chip is the same pair in grey. Our ``★`` and a faded hop keep their
+    dark greys, which already carry a light label. The PicoCalc draws the same rules at
+    the resolution of its console (:func:`_slot_colours`).
 
     The insertion slot outranks everything — it is the one chip that isn't a node,
     and it wears the ``cursor`` white so it reads as chrome among identities rather
-    than as a hop with an unlucky hue (white sits outside the node spectrum, and the
-    chip ink is already picked to stay readable on it). The fade comes next, outranking
-    identity including our own: a dimmed hop is one nobody composed (an automatic landing
-    back home, a mirrored return leg), and our end must recede with the rest of that automatic
-    half rather than keep its yellow among the greys. Plain mode says the same thing
-    by fading the name.
+    than as a hop with an unlucky hue (white sits outside the node spectrum, and its
+    dark text stays readable on it). It is the only light chip on the ribbon. The fade
+    comes next, outranking identity including our own: a dimmed hop is one nobody
+    composed (an automatic landing back home, a mirrored return leg), and our end must
+    recede with the rest of that automatic half rather than keep its yellow among the
+    greys. Plain mode says the same thing by fading the name.
     """
     if hop.cursor:
-        return _style_hex("cursor") or _KEYLESS_BG
-    if hop.style:
-        resolved = _style_hex(hop.style)
-        if resolved:
-            return resolved
+        return _ChipColours(_style_hex("cursor") or _KEYLESS_BG, _CHIP_FG, _CHIP_FG)
+    resolved = _style_hex(hop.style) if hop.style else None
+    if resolved:
+        return _ChipColours(_chip_fill(resolved), resolved, resolved)
     if hop.dim:
-        return _DIM_BG
+        return _ChipColours(_DIM_BG, _DIM_FG, _DIM_FG)
     if hop.you:
-        return _YOU_BG
-    if hop.key:
-        return _style_hex(node_style(hop.key)) or _KEYLESS_BG
-    return _KEYLESS_BG
-
-
-def _spectrum_colours(hop: PathHop) -> _ChipColours:
-    """The colours of a chip on a truecolor terminal: dark ink on the fill."""
-    ink = _DIM_FG if hop.dim else (_SELF_INK if hop.you else _CHIP_FG)
-    soft = _DIM_FG if hop.dim else _CHIP_FG_SOFT
-    return _ChipColours(_spectrum_fill(hop), ink, soft)
+        return _ChipColours(_YOU_BG, _SELF_INK, _SELF_INK)
+    hue = _style_hex(node_style(hop.key)) if hop.key else None
+    if hue:
+        return _ChipColours(_chip_fill(hue), hue, hue)
+    return _ChipColours(_KEYLESS_BG, _KEYLESS_FG, _KEYLESS_FG)
 
 
 def _slot_colours(hop: PathHop) -> _ChipColours:
@@ -1177,7 +1186,7 @@ def _slot_colours(hop: PathHop) -> _ChipColours:
     has no dark grey background. They stand on the page (:data:`_SLOT_PAGE`): the star
     in its yellow, a faded hop in the dark grey, the slot as a white ``+`` in a break of
     the ribbon. The order of the rules is the same as on a truecolor terminal
-    (:func:`_spectrum_fill`).
+    (:func:`_spectrum_colours`).
     """
     if hop.cursor:
         return _ChipColours(_SLOT_PAGE, _SLOT_WHITE, _SLOT_WHITE)
@@ -1196,23 +1205,9 @@ def _slot_colours(hop: PathHop) -> _ChipColours:
     return _ChipColours(DIM_TWIN[ink], ink, ink)
 
 
-def _spectrum_thin_ink(before: _ChipColours, after: _ChipColours) -> str:
-    """The thin chevron on a truecolor terminal: the previous fill, shaded."""
-    return _seam_ink(before.fill, after.fill)
-
-
-def _slot_thin_ink(before: _ChipColours, after: _ChipColours) -> str:
-    """The thin chevron on the console: the bright twin of the previous fill.
-
-    On a node's chip, this colour is the label's hue. On the page, it is the dark grey.
-    """
-    return _BRIGHT_TWIN.get(before.fill, before.ink)
-
-
-#: The colours of a chip, the colour of a thin seam, and the two prefixes of the chip
-#: styles. They are bound at platform-switch time (:func:`_bind_chips`).
+#: The colours of a chip, and the two prefixes of the chip styles. They are bound at
+#: platform-switch time (:func:`_bind_chips`).
 _colours_of: Callable[[PathHop], _ChipColours] = _spectrum_colours
-_thin_ink: Callable[[_ChipColours, _ChipColours], str] = _spectrum_thin_ink
 #: The weight of a chip label: ``bold`` on a truecolor terminal.
 _WEIGHT = "bold "
 #: The prefix of each other chip style: empty on a truecolor terminal.
@@ -1228,13 +1223,11 @@ def _bind_chips(platform: Platform) -> None:
     the ribbon to its bright twin. Thus each chip style there says ``not bold``, and a
     label gets no weight: its bright slot is its emphasis.
     """
-    global _colours_of, _thin_ink, _WEIGHT, _FLAT
+    global _colours_of, _WEIGHT, _FLAT
     if platform.truecolor:
-        _colours_of, _thin_ink = _spectrum_colours, _spectrum_thin_ink
-        _WEIGHT, _FLAT = "bold ", ""
+        _colours_of, _WEIGHT, _FLAT = _spectrum_colours, "bold ", ""
     else:
-        _colours_of, _thin_ink = _slot_colours, _slot_thin_ink
-        _WEIGHT = _FLAT = "not bold "
+        _colours_of, _WEIGHT, _FLAT = _slot_colours, "not bold ", "not bold "
 
 
 def _shorten(value: str, hash_bytes: int | None) -> str:

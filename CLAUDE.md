@@ -409,13 +409,23 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   name: the one node the reader never has to be told, and the cells belong to the hops
   that differ from row to row. As a chip it is the map's yellow star on neutral dark
   grey, padded like every other chip.
+- **A path chip is the node's name colour on a darker ground of itself.** The label is the
+  hue `node_style` gives the name on every other surface, so a node is one colour in a
+  list, in arrows and in a chip; the fill is that hue at `pathline.CHIP_LIGHTNESS` of its
+  OKLab lightness, chroma lowered only as far as sRGB needs (`oklab.fitted`; a clip there
+  merged neighbouring greens). The PicoCalc is the same rule at its resolution: the fill
+  is the bright slot's dim twin (`theme.DIM_TWIN`). A hash label and an annotation are
+  the label colour throughout, never a grey; on a truecolor terminal the lit bytes are
+  bold. A keyless chip is the same pair in grey; our `★` and a faded hop keep their dark
+  greys; the composer's slot keeps the white chip (on the PicoCalc, a white `+` in a
+  break of the ribbon).
 - Chip seams are **one** interlocked chevron (previous fill on next). Two chips of the
   same fill are the exception the interlock can't draw — and so are two fills the eye
   can't tell apart: under `pathline.SEAM_BLUR` apart in OKLab (`ui/oklab.py`, THE
   perceptual colour distance — never a hue gap, never sRGB, both of which mis-size the
   greens against the cyans). There the seam is the **thin** chevron (`POWERLINE_THIN`)
-  in the previous chip's own fill shaded `SEAM_SHADE` darker (lighter for a dark fill),
-  drawn on the next, so the ribbon runs on unbroken and the join is a line the chip draws
+  in the previous chip's label colour, drawn on the next, so the ribbon runs on unbroken
+  and the join is a line the chip draws
   on itself, never a wedge of page cut out of the route and never a third colour. An
   elision breaks the ribbon rather than joining it — bare `⋯`
   on the page between a closing point and the next chip's notch, no fill, no padding.

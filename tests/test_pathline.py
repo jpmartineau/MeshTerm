@@ -22,8 +22,10 @@ from meshterm.ui import oklab
 from meshterm.ui.fontset import FONT_CODEPOINTS
 from meshterm.ui.pathline import (
     _DIM_BG,
+    _DIM_FG,
     _SELF_INK,
     _YOU_BG,
+    CHIP_LIGHTNESS,
     CRACK_HEAD,
     CRACK_TAIL,
     CURSOR_GLYPH,
@@ -35,12 +37,10 @@ from meshterm.ui.pathline import (
     POWERLINE_SEP,
     POWERLINE_THIN,
     SEAM_BLUR,
-    SEAM_SHADE,
     SELF_GLYPH,
     WRAP_OFFSET,
     PathHop,
     PathLine,
-    _seam_ink,
     _style_hex,
     cut_mark,
     cut_to,
@@ -52,6 +52,11 @@ from meshterm.ui.pathline import (
 from meshterm.ui.theme import DIM_TWIN, fold_text, node_style, slot_hex
 from meshterm.ui.tui.render import render_to_ansi
 from meshterm.ui.widgets import path_text
+
+
+def _fill(key: str) -> str:
+    """The fill of a node's chip on a truecolor terminal: its hue, darker."""
+    return pathline._chip_fill(_style_hex(node_style(key)))
 
 
 def _styles(text) -> dict[str, str]:  # noqa: ANN001
@@ -132,7 +137,7 @@ def test_chips_are_joined_by_one_interlocked_chevron() -> None:
     the route continues, so a finished path never wears one. It ends square on the last
     chip's own pad, and the only chevrons in the line are the joins.
     """
-    alice_fill = node_style("aa").split()[-1]
+    alice_fill = _fill("aa")
     line = PathLine([PathHop("Alice", key="aa"), PathHop("you", you=True)], mode="powerline")
     text = line.text()
     assert text.plain == f" Alice {POWERLINE_SEP} you "
@@ -143,16 +148,37 @@ def test_chips_are_joined_by_one_interlocked_chevron() -> None:
 def test_chips_keep_the_same_words_and_honour_style_overrides() -> None:
     """Chips change colours and separators, never the words.
 
-    An explicit style override (hex or theme name) becomes the chip fill.
+    An explicit style override (hex or theme name) becomes the chip's colour: the label
+    is in it, on a darker fill of it, as a node's hue is.
     """
     hops = [PathHop("Hub", key="3d", annotation="3d"), PathHop("you", you=True)]
     plain = PathLine(hops, mode="plain").text().plain
     chips = PathLine(hops, mode="powerline").text().plain
     assert plain.replace(" → ", " ") == chips.replace(POWERLINE_SEP, "").replace("  ", " ").strip()
     themed = PathLine([PathHop("X", style="brand")], mode="powerline").text()
-    assert pathline._fills(themed)[-1] == "#5eead4"  # the chip runs to the very last cell
+    brand = pathline._chip_fill("#5eead4")
+    assert pathline._fills(themed)[-1] == brand  # the chip runs to the very last cell
+    assert any(str(s.style) == f"bold #5eead4 on {brand}" for s in themed.spans)
     hexed = PathLine([PathHop("X", style="bold #123456")], mode="powerline").text()
-    assert pathline._fills(hexed)[-1] == "#123456"
+    assert pathline._fills(hexed)[-1] == pathline._chip_fill("#123456")
+
+
+def test_a_chip_is_the_name_colour_on_a_darker_fill_of_it() -> None:
+    """A node's label is its hue, the colour of its name on each surface.
+
+    The fill is the same hue, darker (``CHIP_LIGHTNESS`` of its OKLab lightness). A hash
+    label and an annotation are in the hue too, with only the lit bytes in bold. Where
+    the darker colour leaves the sRGB gamut, the chroma comes down and the hue stays, so
+    two greens a few steps apart on the wheel keep two fills.
+    """
+    hue = _style_hex(node_style("3d"))
+    line = PathLine([PathHop("3d63c6", key="3d", lit_bytes=1, annotation="3d")], mode="powerline")
+    styles = {line.text().plain[s.start : s.end]: str(s.style) for s in line.text().spans}
+    assert styles["3d"] == f"bold {hue} on {_fill('3d')}"
+    assert styles["63c6"] == styles[" (3d)"] == f"{hue} on {_fill('3d')}"
+    fill = oklab.from_hex(_fill("3d"))
+    assert fill[0] == pytest.approx(oklab.from_hex(hue)[0] * CHIP_LIGHTNESS, abs=0.01)
+    assert _fill("4c") != _fill("5c")  # a clip made both #008000
 
 
 def test_auto_mode_follows_the_terminal_verdict(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -374,7 +400,7 @@ def test_cut_to_cracks_a_chip_in_its_own_fill_instead_of_ellipsizing() -> None:
     assert fitted.plain.endswith(CRACK_TAIL)
     assert "…" not in fitted.plain
     # The cut lands inside ``BBBB``, so the crack wears BBBB's hue, not its neighbours'.
-    assert str(fitted.spans[-1].style) == _style_hex(node_style("22bb"))
+    assert str(fitted.spans[-1].style) == _fill("22bb")
     assert cut_to(full, 200) is full  # fits → untouched, no copy, no mark
 
 
@@ -399,13 +425,13 @@ def test_cut_mark_mirrors_itself_and_reads_the_visible_side() -> None:
     body = full.plain.index("AAAA")  # inside the first chip, either way you scan
     head, tail = cut_mark(full, body, ELIDE_HEAD), cut_mark(full, body, ELIDE_TAIL)
     assert (head.plain, tail.plain) == (CRACK_HEAD, CRACK_TAIL)
-    assert str(head.style) == str(tail.style) == _style_hex(node_style("11aa"))
+    assert str(head.style) == str(tail.style) == _fill("11aa")
 
     # A cut landing on the interlocked seam itself cracks in the field that cell carries —
     # the chip *ahead*, whose fill is literally the seam's background — so the mark reads
     # as the next segment beginning and being sheared, not as a colour off the line.
     seam = full.plain.index(POWERLINE_SEP)
-    assert str(cut_mark(full, seam, ELIDE_TAIL).style) == _style_hex(node_style("22bb"))
+    assert str(cut_mark(full, seam, ELIDE_TAIL).style) == _fill("22bb")
 
 
 def test_cut_mark_falls_back_to_the_ellipsis_off_a_chip() -> None:
@@ -665,7 +691,7 @@ def test_wrapped_chip_lines_open_on_the_break_they_continue() -> None:
     # …past the line's own PATH_INK stamp, which covers the whole body from the same cell
     # (it marks the run as a path line for the cursor fold and draws nothing).
     carried = next(s for s in lines[1].spans if s.start == step and str(s.style) != PATH_INK)
-    assert str(carried.style) == f"{_style_hex(node_style('3d'))} reverse"
+    assert str(carried.style) == f"{_fill('3d')} reverse"
     assert lines[0].plain.endswith(POWERLINE_SEP)  # …the path runs on past this line
     assert lines[-1].plain.endswith(" ")  # …and stops square on the last chip's pad
     assert all(line.cell_len <= 20 for line in lines)
@@ -722,7 +748,7 @@ def test_a_line_drawing_only_a_route_middle_wears_the_chevron_at_that_end(monkey
     assert text.plain.startswith(POWERLINE_SEP + " AAAA")  # the notch, not the lozenge
     assert text.plain.endswith("BBBB " + POWERLINE_SEP)  # the point: the route goes on
     opening = next(s for s in text.spans if s.start == 0 and str(s.style) != PATH_INK)
-    assert str(opening.style) == f"{_style_hex(node_style('aa'))} reverse"  # cut out of AAAA
+    assert str(opening.style) == f"{_fill('aa')} reverse"  # cut out of AAAA
 
     # One end at a time: the half that *is* an endpoint keeps its cap either way.
     head = PathLine(hops, mode="powerline", to_destination=False).text().plain
@@ -794,14 +820,14 @@ def _seams(*hops: PathHop) -> list[tuple[str, str]]:
     ]
 
 
-def test_a_seam_between_two_of_one_colour_is_the_thin_chevron_shaded() -> None:
-    """Where two chips land on the same fill, the seam is the thin chevron in that fill, shaded.
+def test_a_seam_between_two_of_one_colour_is_the_thin_chevron_in_its_label() -> None:
+    """Where two chips land on the same fill, the seam is the thin chevron in the label colour.
 
     The interlock can't draw a solid point in its own background, so the join is drawn
     *on* the shared fill instead — powerline's own mark for a join inside one colour —
-    and the ribbon runs on unbroken. Its colour is the previous chip's own, a lightness
-    step darker, so nothing on the line is a colour that isn't a chip's; a dark fill (the
-    faded slate) steps lighter instead.
+    and the ribbon runs on unbroken. Its colour is the label of the previous chip: the
+    light half of the chip's own pair, so it is visible on the fill, and nothing on the
+    line is a colour that is not a chip's. The faded slate draws it in its muted text.
 
     Not a rare accident, either: a mirrored return leg is a run of identically faded hops
     by construction, and a stretch of keyless hops shares one grey. Either way it stays a
@@ -809,21 +835,15 @@ def test_a_seam_between_two_of_one_colour_is_the_thin_chevron_shaded() -> None:
     """
     hue = _style_hex(node_style("aa"))
     glyph, style = _seams(PathHop("A", key="aa"), PathHop("B", key="aa"))[0]
-    assert glyph == POWERLINE_THIN and style == f"{_seam_ink(hue, hue)} on {hue}"
-    shade = _seam_ink(hue, hue)
-    assert oklab.from_hex(shade)[0] < oklab.from_hex(hue)[0]  # darker…
-    assert oklab.distance(shade, hue) == pytest.approx(SEAM_SHADE, abs=0.01)  # …by the step
-    assert oklab.distance(shade, hue) < oklab.distance(hue, _style_hex(node_style("77")))
+    assert (glyph, style) == (POWERLINE_THIN, f"{hue} on {_fill('aa')}")
 
     assert _seams(PathHop("A", key="aa"), PathHop("B", key="77"))[0] == (
         POWERLINE_SEP,
-        f"{hue} on {_style_hex(node_style('77'))}",
+        f"{_fill('aa')} on {_fill('77')}",
     )  # blended, one cell
 
     glyph, style = _seams(PathHop("A", dim=True), PathHop("B", dim=True))[0]
-    assert glyph == POWERLINE_THIN and style.endswith(f" on {_DIM_BG}")
-    lighter = style.split()[0]
-    assert oklab.from_hex(lighter)[0] > oklab.from_hex(_DIM_BG)[0]  # a dark fill steps up
+    assert (glyph, style) == (POWERLINE_THIN, f"{_DIM_FG} on {_DIM_BG}")
 
 
 def test_a_seam_blurs_by_perceived_distance_not_by_hue_gap() -> None:
@@ -831,19 +851,16 @@ def test_a_seam_blurs_by_perceived_distance_not_by_hue_gap() -> None:
 
     The eye, not the wheel: sixteen first-byte steps across the greens are one colour to
     a reader and sixteen across the reds are two, so the same hue gap blurs on one side
-    of the wheel and interlocks on the other. The greys follow the same metric with no
-    exemption: the keyless grey and the faded slate sit well apart and keep their seam.
+    of the wheel and interlocks on the other. The test measures the fills, because the
+    solid point is a fill on a fill. The greys follow the same metric with no exemption:
+    the keyless grey and the faded slate sit well apart and keep their seam.
     """
     green = _seams(PathHop("A", key="4c"), PathHop("B", key="5c"))[0]
     red = _seams(PathHop("A", key="00"), PathHop("B", key="10"))[0]
     assert green[0] == POWERLINE_THIN and red[0] == POWERLINE_SEP
-    assert oklab.distance(_style_hex(node_style("4c")), _style_hex(node_style("5c"))) < SEAM_BLUR
-    assert oklab.distance(_style_hex(node_style("00")), _style_hex(node_style("10"))) > SEAM_BLUR
-
-    # The shade is taken from the chip behind but clears the chip ahead as well.
-    before, after = _style_hex(node_style("4c")), _style_hex(node_style("5c"))
-    assert green[1] == f"{_seam_ink(before, after)} on {after}"
-    assert oklab.distance(_seam_ink(before, after), after) >= SEAM_SHADE - 1e-6
+    assert oklab.distance(_fill("4c"), _fill("5c")) < SEAM_BLUR
+    assert oklab.distance(_fill("00"), _fill("10")) > SEAM_BLUR
+    assert green[1] == f"{_style_hex(node_style('4c'))} on {_fill('5c')}"
 
     wrapped = _seams(PathHop("A", key="fc"), PathHop("B", key="02"))[0]
     assert wrapped[0] == POWERLINE_THIN  # neighbours across the wheel's seam, too

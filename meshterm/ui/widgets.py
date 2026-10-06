@@ -557,14 +557,13 @@ def name_chip(label: str, key: str | None = None, *, you: bool = False) -> Text:
     :class:`~meshterm.ui.pathline.PathLine` and asks it for its line, so the fill, the
     ink, the padding, the rounded cap and the closing point are all whatever a route's
     segments are wearing today, and can never drift from them (JP, 2026-08-12). The colour
-    reads exactly as it does in a route — the *fill* carries the node's hue with dark ink
-    on it, a node no key can place takes the keyless grey, and our own end is the map's
-    ``★`` on its neutral dark grey rather than a name.
+    reads exactly as it does in a route. The name is in the node's hue, on a darker fill
+    of that hue. A node that no key can place takes the keyless grey, and our own end is
+    the map's ``★`` on its neutral dark grey instead of a name.
 
     Degrading is inherited too: where the terminal can't draw powerline separators, a path
     line is arrow-mode text and a lone hop is simply the name in its own hue — which is
-    what a sender label was before it was framed, and what the PicoCalc console (whose font
-    carries no separator glyph) goes on drawing.
+    what a sender label was before it was framed.
 
     Args:
         label: The name as it should read (already resolved; this never renames it).

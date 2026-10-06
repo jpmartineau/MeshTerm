@@ -61,6 +61,25 @@ def test_shaded_floor_clears_a_second_colour_too() -> None:
     assert oklab.from_hex(floored)[0] >= oklab.from_hex(oklab.shaded(slate, 0.15))[0]
 
 
+def test_fitted_lowers_chroma_alone_and_keeps_near_hues_apart() -> None:
+    """A colour outside the gamut comes back inside it, with its lightness and hue.
+
+    A colour in the gamut comes back unchanged. The clip in ``to_hex`` gave two dark
+    greens near ``0x50`` almost one colour. After the fit, they are clearly two colours.
+    """
+    inside = oklab.from_hex(_fill("80"))
+    assert oklab.fitted(inside) == inside
+    darker = [oklab.from_hex(_fill(key)) for key in ("4c", "5c")]
+    outside = [(lab[0] * 0.6, lab[1], lab[2]) for lab in darker]
+    fits = [oklab.fitted(lab) for lab in outside]
+    clipped = oklab.distance(*(oklab.to_hex(lab) for lab in outside))
+    assert oklab.distance(*(oklab.to_hex(lab) for lab in fits)) > 2 * clipped
+    for before, after in zip(outside, fits, strict=True):
+        assert after[0] == before[0]
+        assert after[1] / before[1] == pytest.approx(after[2] / before[2])  # the same hue
+        assert abs(after[1]) < abs(before[1])  # less chroma
+
+
 def test_from_hex_rejects_anything_but_six_digits() -> None:
     """Six hex digits, ``#`` and case optional; anything else is a ``ValueError``."""
     with pytest.raises(ValueError):

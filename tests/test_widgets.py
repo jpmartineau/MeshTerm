@@ -17,6 +17,7 @@ from meshterm.ui.pathline import (
     POWERLINE_ROUND_OPEN,
     PathHop,
     PathLine,
+    _chip_fill,
 )
 from meshterm.ui.theme import node_style
 from meshterm.ui.widgets import (
@@ -242,15 +243,16 @@ def test_name_chip_is_a_path_line_of_one_hop() -> None:
     ]
 
 
-def test_name_chip_wears_the_hue_as_its_fill_padded_like_every_chip(powerline) -> None:
-    """A route's colour scheme: the node's hue fills the chip, the ink on it is dark."""
+def test_name_chip_wears_the_hue_as_its_label_padded_like_every_chip(powerline) -> None:
+    """A route's colour scheme: the name is in its hue, on a darker fill of that hue."""
     powerline(True)
     chip = name_chip("Alice", "a1b2")
 
     assert chip.plain.strip(POWERLINE_ROUND_OPEN + POWERLINE_ROUND_CLOSE) == " Alice "
     ink = _span_style(chip, "Alice")
-    assert ink.bgcolor.name == node_style("a1b2").removeprefix("bold ")  # the hue
-    assert ink.color.name == "#0f172a"  # the chip ink every hop is lettered in
+    hue = node_style("a1b2").removeprefix("bold ")
+    assert ink.color.name == hue  # the colour of the name on each surface
+    assert ink.bgcolor.name == _chip_fill(hue)  # the same hue, darker
 
 
 def test_name_chip_draws_us_as_the_star_never_as_our_name(powerline) -> None:
