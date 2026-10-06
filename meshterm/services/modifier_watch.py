@@ -1,29 +1,32 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The optional Shift-state watcher behind the PicoCalc F-key lane's live flip.
+"""The optional Shift-state watcher for the live change of the PicoCalc F-key lane.
 
-The PicoCalc keyboard's MCU translates Shift+F1..F5 into plain F6–F10 keycodes, so the
-terminal never sees the Shift that produced them — but the kernel input device does, and
-the ``LSHIFT DOWN`` event arrives *before* the translated F-code (measured in P0). This
-watcher reads the raw evdev stream and tracks whether a Shift key is physically held, so
-the footer lane can flip to the F6–F10 bank's labels while the user is mid-chord.
+The MCU of the PicoCalc keyboard translates Shift+F1..F5 into plain F6–F10 keycodes.
+Thus the terminal never gets the Shift that made them. But the kernel input device gets
+it, and the ``LSHIFT DOWN`` event arrives before the translated F-code (measured in P0).
+This watcher reads the raw evdev stream and monitors whether a Shift key is physically
+held. Thus the footer lane can change to the labels of the F6–F10 bank while the user is
+in the middle of a chord.
 
-On-device use (JP, 2026-08-01) turned up a follow-on quirk: the lane can flip back to its
-unshifted bank the instant an F6–F10 code lands, even with Shift still physically held —
-consistent with the MCU's key-matrix scan releasing/re-asserting Shift around the chord
-rather than holding it down continuously through the translation. :func:`note_shift_bank_key`
-bridges that: the session calls it whenever an F6–F10 press actually resolves, and
-:func:`shift_down` latches ``True`` for a short grace window after, so a momentary dip in
-the raw signal can't flip the display mid-keystroke. The window is generous enough to
-outlast the flicker without noticeably outlasting the actual key release — the lane still
-self-corrects within one idle repaint (the 2 s picocalc-lyra tick) either way.
+Use on the handheld (JP, 2026-08-01) found a second quirk. The lane can change back to its
+unshifted bank at the instant that an F6–F10 code arrives, also when Shift is still
+physically held. This agrees with a key-matrix scan in the MCU that releases Shift and
+asserts it again around the chord, instead of a scan that holds Shift down during all of
+the translation. :func:`note_shift_bank_key` corrects that problem. The session calls it
+each time an F6–F10 press resolves, and then :func:`shift_down` latches ``True`` for a
+short grace period. Thus a short dip in the raw signal cannot change the lane in the
+middle of a key press. The period is long enough to continue after the flicker, but it
+does not continue much after the real key release. In both cases, the lane corrects
+itself in one idle paint (the 2 s picocalc-lyra tick).
 
-Strictly an experiment layered over a working static lane, and built to disappear: it
-only ever engages when the platform asks for it (``Platform.modifier_watch``), the input
-device exists, and it is readable (the deploy user is in the ``input`` group on the device) — an ssh
-session on any other machine, a permissions change, or any read error at all just means
-:func:`shift_down` stays ``False`` and the lane stays static. Hand-rolled 30-line evdev
-reader instead of the ``keyboard`` library: no dependency to build on the stripped image,
-and we need exactly two keycodes.
+This watcher is only an experiment on top of a static lane that works, and it is made to
+disappear without effect. It operates only when three conditions are true: the platform
+asks for it (``Platform.modifier_watch``), the input device exists, and MeshTerm can read
+it (the deploy user is in the ``input`` group on the handheld). An ssh session on another
+machine, a change of permissions, or any read error has only one result:
+:func:`shift_down` stays ``False``, and the lane stays static. The module has its own
+30-line evdev reader, instead of the ``keyboard`` library, because then there is no
+dependency to build on the stripped image. Also, the watcher reads only two keycodes.
 """
 
 from __future__ import annotations
@@ -43,31 +46,34 @@ _EV_KEY = 0x01
 _KEY_LEFTSHIFT = 42
 _KEY_RIGHTSHIFT = 54
 
-#: Where the PicoCalc's keyboard MCU registers (same i2c chip as the battery; P0).
+#: The directory where the keyboard MCU of the PicoCalc registers (the same i2c chip as
+#: the battery, P0).
 _SYS_INPUT = Path("/sys/class/input")
 
 _shift_down = False
 _thread: threading.Thread | None = None
 
-#: The session's repaint request, kept from :func:`start` even where no input device was
-#: found, so a Shift report from the emulator (:func:`report_shift`) still repaints.
+#: The paint request of the session. :func:`start` keeps it also when it finds no input
+#: device, so that a Shift report from the emulator (:func:`report_shift`) still causes a
+#: paint.
 _on_change: Callable[[], None] | None = None
 
 #: How long a resolved F6–F10 keycode keeps :func:`shift_down` latched ``True`` after the
-#: raw signal drops — long enough to bridge the MCU's release/re-assert flicker around a
-#: chord, short enough that letting Shift go for real still reads as released well within
-#: one held keypress. See :func:`note_shift_bank_key`.
+#: raw signal goes down. It is long enough to continue across the release and assert
+#: flicker of the MCU around a chord. It is short enough that a real release of Shift still
+#: shows as released well in the time of one held key press. Refer to
+#: :func:`note_shift_bank_key`.
 _SHIFT_BANK_GRACE_S = 0.6
 
 _last_shift_bank_at: float | None = None
 
 
 def shift_down() -> bool:
-    """Whether a Shift key is physically held right now (``False`` when not watching).
+    """Whether a Shift key is physically held now (``False`` when the watcher does not run).
 
     Also ``True`` for :data:`_SHIFT_BANK_GRACE_S` after the last F6–F10 press resolved
-    (see :func:`note_shift_bank_key`), bridging a firmware quirk where the raw signal can
-    dip mid-chord even though Shift never actually came up.
+    (refer to :func:`note_shift_bank_key`). This correction is for a firmware quirk: the
+    raw signal can dip in the middle of a chord, although Shift never came up.
     """
     if _shift_down:
         return True
@@ -78,11 +84,11 @@ def shift_down() -> bool:
 
 
 def report_shift(down: bool) -> None:
-    """Set the Shift state from a source that knows it first-hand, and repaint on a change.
+    """Set the Shift state from a source that knows it directly, and paint on a change.
 
-    The emulator reads the keyboard itself — the simulator's window, the device's event
-    stream — so it knows when Shift goes down before any F-key arrives, and tells the lane
-    here rather than leaving a second reader to find the same keyboard.
+    The emulator reads the keyboard itself (the window of the simulator, or the event
+    stream of the handheld). Thus it knows when Shift goes down before an F-key arrives.
+    It tells the lane here, so that no other code must find and read the same keyboard.
     """
     global _shift_down
     if down == _shift_down:
@@ -97,18 +103,19 @@ def report_shift(down: bool) -> None:
 
 
 def note_shift_bank_key() -> None:
-    """Record that an F6–F10 keycode just resolved — proof Shift was physically down.
+    """Note that an F6–F10 keycode resolved now, which proves that Shift was down.
 
-    The MCU only ever emits these codes while Shift is held, so their arrival is stronger
-    evidence than the watcher's own raw state (see the module docstring). Call this from
-    wherever an F-key press resolves against the Shift bank (:meth:`TuiSession._dispatch`).
+    The MCU sends these codes only while Shift is held. Thus their arrival is better
+    evidence than the raw state of the watcher (refer to the module docstring). Call this
+    function from each place where an F-key press resolves against the Shift bank
+    (:meth:`TuiSession._dispatch`).
     """
     global _last_shift_bank_at
     _last_shift_bank_at = time.monotonic()
 
 
 def _find_keyboard(keyboard: str) -> Path | None:
-    """The event device whose name contains ``keyboard``, or ``None`` when it isn't this machine."""
+    """The event device whose name contains ``keyboard``, or ``None`` on another machine."""
     try:
         for entry in sorted(_SYS_INPUT.glob("event*")):
             name = (entry / "device" / "name").read_text().strip().lower()
@@ -120,15 +127,16 @@ def _find_keyboard(keyboard: str) -> Path | None:
 
 
 def start(on_change: Callable[[], None], keyboard: str) -> bool:
-    """Start the watcher thread if this machine has the keyboard; ``True`` if it engaged.
+    """Start the watcher thread if this machine has the keyboard (``True`` if it started).
 
     Args:
-        on_change: Called (from the watcher thread) whenever the Shift state flips —
-            the session wraps this in a thread-safe repaint request.
-        keyboard: The platform's keyboard, as its input device names itself
-            (``Platform.modifier_watch``): ``picocalc`` on the PicoCalc, ``tca8418c`` on the
-            Cardputer Zero, whose driver holds Shift down in the event stream for as long
-            as its sticky Shift is armed, so a tapped Shift flips the lane as a held one does.
+        on_change: Called (from the watcher thread) each time the Shift state changes.
+            The session puts this callback in a thread-safe paint request.
+        keyboard: The keyboard of the platform, by the name of its input device
+            (``Platform.modifier_watch``): ``picocalc`` on the PicoCalc, ``tca8418c`` on
+            the Cardputer Zero. The driver of the Cardputer Zero holds Shift down in the
+            event stream while its sticky Shift is armed. Thus a tapped Shift changes the
+            lane, as a held Shift does.
     """
     global _thread, _on_change
     _on_change = on_change

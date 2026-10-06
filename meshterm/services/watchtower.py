@@ -1,25 +1,26 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The Watchtower: passive rules over what the hub already hears, raising alerts.
+"""The Watchtower: passive rules on the packets that the hub already hears, which raise alerts.
 
-A sentinel, not a prober — it transmits nothing and asks the radio for nothing. It rides
-the always-on :class:`~meshterm.services.event_hub.EventHub` like the monitor does, and
-watches for the things an operator actually loses sleep over:
+The Watchtower is a sentinel, not a prober: it transmits nothing, and it asks the device
+for nothing. It uses the :class:`~meshterm.services.event_hub.EventHub`, which is always
+on, as the monitor does. It watches for the problems that are most important to a user:
 
-* **silence** — a starred node hasn't been heard for its configured threshold. Fires
-  once per quiet spell (latched in the store) and re-arms when the node returns, which
-  also raises a friendly **recovered** note.
-* **SNR sag** — a starred node's receptions are degrading: the median of its last few
-  readings sits well below the median of the readings before them. A cooldown keeps a
-  slowly dying link from paging every minute.
-* **new node** — something never before seen (not in the observation history at start,
-  not in the store's memory) just appeared on the mesh. Announced at most once per id,
-  ever.
+* **silence**: MeshTerm has not heard a starred node for its configured threshold. The
+  rule fires one time for each silent period (latched in the store). It arms again when
+  the node comes back, and then it also raises a friendly **recovered** note.
+* **SNR sag**: the reception of a starred node becomes worse. The median of its last few
+  readings is much lower than the median of the readings before them. A cooldown
+  prevents an alert each minute from a link that slowly fails.
+* **new node**: a node that MeshTerm never heard before (not in the observation history
+  at the start, not in the memory of the store) appeared on the mesh. The rule announces
+  each id a maximum of one time, forever.
 
-Alerts land in the :class:`~meshterm.core.watch_store.WatchStore` (which persists them),
-feed the header's alert badge, and are read and acknowledged in the Watchtower screen
-(:mod:`meshterm.ui.watchtower_screen`). The service is session-scoped state on the
-:class:`~meshterm.context.AppContext` (``ctx.watchtower``), started alongside the other
-always-on services; scripted CLI runs never start it.
+The alerts go into the :class:`~meshterm.core.watch_store.WatchStore` (which stores
+them), and they give the number on the alert badge of the header. The user reads and
+acknowledges them on the Watchtower screen (:mod:`meshterm.ui.watchtower_screen`). The
+service is state of the session, on the :class:`~meshterm.context.AppContext`
+(``ctx.watchtower``). It starts with the other services that are always on. Scripted CLI
+runs never start it.
 """
 
 from __future__ import annotations
@@ -38,28 +39,28 @@ from ..core.watch_store import OFF
 if TYPE_CHECKING:
     from ..context import AppContext
 
-#: Seconds between rule sweeps (the silence rule is time-driven, not packet-driven).
+#: The seconds between rule sweeps (the silence rule depends on time, not on packets).
 SWEEP_S = 30.0
 
-#: How many recent SNR readings form the "now" side of the sag comparison.
+#: The number of recent SNR readings that make the "now" side of the sag comparison.
 SNR_WINDOW = 4
 
-#: How far (dB) the recent median must sit below the prior median to alert.
+#: How much lower (dB) the recent median must be than the prior median, for an alert.
 SNR_SAG_DB = 6.0
 
-#: Seconds before the sag rule may fire again for the same node.
+#: The seconds before the sag rule can fire again for the same node.
 SNR_COOLDOWN_S = 6 * 3600.0
 
-#: How many SNR readings are kept per node (the comparison uses at most this many).
+#: The number of SNR readings kept for each node (the comparison uses this number at most).
 _SNR_KEEP = 12
 
 
 class WatchtowerService:
-    """Watches starred nodes and the mesh's cast of characters; raises alerts.
+    """Watches the starred nodes and all the nodes on the mesh, and raises alerts.
 
-    Attributes are private; interact through the properties and the async lifecycle
-    methods (:meth:`start`, :meth:`stop`, :meth:`aclose`). Rule evaluation lives in
-    the synchronous :meth:`note` / :meth:`evaluate` so tests can drive it directly.
+    The attributes are private. Use the properties and the async lifecycle methods
+    (:meth:`start`, :meth:`stop`, :meth:`aclose`). The rule evaluation is in the
+    synchronous :meth:`note` and :meth:`evaluate`, so that tests can call it directly.
     """
 
     def __init__(self, ctx: AppContext) -> None:
@@ -71,32 +72,34 @@ class WatchtowerService:
         self._ctx = ctx
         self._unsubscribe: Unsubscribe | None = None
         self._task: asyncio.Task | None = None
-        #: Every node id ever seen (DB history + store memory + this session), the
-        #: baseline the new-node rule compares against. ``None`` until started.
+        #: All the node ids that MeshTerm ever heard (DB history + store memory + this
+        #: session). The new-node rule compares against this baseline. ``None`` until the
+        #: service starts.
         self._known: set[str] | None = None
-        #: Rolling SNR readings per watched node, session-scoped.
+        #: The rolling SNR readings of each watched node, for this session only.
         self._snr: dict[str, deque[float]] = {}
-        #: When the sag rule last fired per node (the cooldown clock).
+        #: The last time that the sag rule fired for each node (the cooldown clock).
         self._snr_fired: dict[str, datetime] = {}
 
     @property
     def active(self) -> bool:
-        """Whether the sentinel is currently watching."""
+        """Whether the sentinel watches now."""
         return self._unsubscribe is not None
 
     def unacked_count(self) -> int:
-        """Alerts awaiting acknowledgement — the header badge's number."""
+        """The alerts that wait for an acknowledgement: the number on the header badge."""
         return self._ctx.watch_store.unacked_count()
 
     # --- lifecycle ---------------------------------------------------------------------
 
     async def start(self) -> None:
-        """Begin watching. Idempotent, device-free, and safe before any connection.
+        """Start to watch. Idempotent, with no device use, and safe before a connection.
 
-        Seeds the new-node baseline from the observation history (every id the DB has
-        ever heard) plus the store's memory of past announcements, then subscribes to
-        the hub and starts the sweep. Like the monitor, packets flow in whenever the
-        hub is pumping — including a hub that opens lazily later.
+        Fills the new-node baseline from the observation history (each id that the DB
+        ever heard), and from the memory of the store about past announcements. Then
+        subscribes to the hub, and starts the sweep. As for the monitor, packets come in
+        each time the hub pumps. This includes a hub that opens later, only when it is
+        necessary.
         """
         if self.active:
             return
@@ -119,7 +122,7 @@ class WatchtowerService:
         self._ctx.log.info("watchtower watching (%d nodes starred)", len(store.watched()))
 
     async def stop(self) -> None:
-        """Stop watching and flush pending store writes. Idempotent."""
+        """Stop the watch, and flush the pending writes of the store. Idempotent."""
         if self._unsubscribe is not None:
             self._unsubscribe()
             self._unsubscribe = None
@@ -133,11 +136,11 @@ class WatchtowerService:
         self._ctx.watch_store.flush()
 
     async def aclose(self) -> None:
-        """Stop watching at session end."""
+        """Stop the watch at the end of the session."""
         await self.stop()
 
     async def _sweep(self) -> None:
-        """Run the time-driven rules on a slow heartbeat."""
+        """Run the rules that depend on time, at a slow heartbeat."""
         while True:
             await asyncio.sleep(SWEEP_S)
             try:
@@ -148,10 +151,10 @@ class WatchtowerService:
     # --- packet-driven rules -------------------------------------------------------------
 
     def note(self, obs: Observation) -> None:
-        """Fold one observation into the rules (called per hub packet; keep cheap).
+        """Add one observation to the rules (called for each hub packet, so keep it fast).
 
         Args:
-            obs: The overheard observation.
+            obs: The observation that MeshTerm heard.
         """
         node = obs.node
         if not node:
@@ -159,8 +162,8 @@ class WatchtowerService:
         store = self._ctx.watch_store
         entry = store.watched().get(node)
 
-        # New node: never in the DB, the store's memory, or this session before now.
-        # Starring a node is itself an introduction, so watched nodes are never "new".
+        # New node: not in the DB, the memory of the store, or this session before now.
+        # A star on a node is also an introduction, so watched nodes are never "new".
         if self._known is not None and node not in self._known:
             self._known.add(node)
             store.remember_known(node)
@@ -185,13 +188,14 @@ class WatchtowerService:
                 "back on the air — heard again after a silence alarm",
                 when=obs.observed_at,
             )
-        # Packet-kind rows measure our link to the last relay, not to the node, so
-        # they prove liveness (above) but say nothing about the node's own signal.
+        # Packet-kind rows measure our link to the last relay, not to the node. Thus they
+        # prove that the node is alive (above), but they tell nothing about the signal of
+        # the node itself.
         if entry.snr_watch and obs.snr is not None and obs.kind != "packet":
             self._track_snr(node, entry.name, obs)
 
     def _track_snr(self, node: str, label: str, obs: Observation) -> None:
-        """Fold one SNR reading in and fire the sag rule when the trend warrants."""
+        """Add one SNR reading, and fire the sag rule when the trend is bad enough."""
         readings = self._snr.setdefault(node, deque(maxlen=_SNR_KEEP))
         readings.append(float(obs.snr))  # type: ignore[arg-type]
         if len(readings) < 2 * SNR_WINDOW:
@@ -215,10 +219,11 @@ class WatchtowerService:
     # --- time-driven rules ---------------------------------------------------------------
 
     def evaluate(self, now: datetime | None = None) -> None:
-        """Run the silence rule over every watched node and flush the store.
+        """Run the silence rule on each watched node, and flush the store.
 
         Args:
-            now: The evaluation time (defaults to the current time; tests inject).
+            now: The evaluation time. The default is the current time. Tests give their
+                own time.
         """
         now = now or utcnow()
         store = self._ctx.watch_store

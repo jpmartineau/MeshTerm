@@ -1,19 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The passive-monitor history logger.
+"""The history logger of the passive monitor.
 
-Passive monitoring records every advert/telemetry frame the companion overhears to the
-database, building the longitudinal history the coverage map and link-quality alerting
-read back. It is not a listener in its own right: the always-on
-:class:`~meshterm.services.event_hub.EventHub` (``ctx.events``) does the listening, and
-this service is simply one of its subscribers — the one that writes observations to the
-database. Recording is always on: there is no user-facing switch. The subscription is
-registered at session start without touching the device, so observations flow the moment
-the hub is pumping — including when the hub itself opens lazily (``connect_on_start``
-off, or no device selected yet).
+Passive monitoring stores each advert or telemetry packet that the companion hears in the
+database. Thus it builds the long-term history that the coverage map and the link-quality
+alerts read. It does not listen itself: the
+:class:`~meshterm.services.event_hub.EventHub` (``ctx.events``), which is always on, does
+the listening. This service is one of its subscribers: the subscriber that writes
+observations to the database.
 
-The service is session-scoped state on the :class:`~meshterm.context.AppContext`
-(``ctx.monitor``). It owns the hub subscription that records observations and the
-counters shown live in the menu header.
+The recording is always on: there is no switch for the user. The subscription is
+registered at the start of the session, and it does not touch the device. Thus
+observations arrive as soon as the hub operates, also when the hub opens only when
+necessary (``connect_on_start`` off, or no device selected yet).
+
+The service is state for the session on the :class:`~meshterm.context.AppContext`
+(``ctx.monitor``). It owns the hub subscription that stores observations, and the counters
+that the menu header shows live.
 """
 
 from __future__ import annotations
@@ -30,21 +32,22 @@ from ..core.models import Observation, utcnow
 if TYPE_CHECKING:
     from ..context import AppContext
 
-#: Seconds per bucket of the all-packet activity histogram — one minute, one braille
-#: dot column of the header indicator and the dashboard's activity chart.
+#: The time (seconds) of one bucket of the all-packet activity histogram: one minute. That
+#: is one column of braille dots in the header indicator and in the activity chart of the
+#: dashboard.
 ACTIVITY_BUCKET_S = 60
 
-#: How many one-minute buckets the histogram retains — six hours, deep enough that the
-#: header and the dashboard can both stretch their charts to fill any realistic terminal
-#: width (two buckets per character cell) and still be drawing history, not padding.
+#: The number of one-minute buckets that the histogram keeps: six hours. This is enough for
+#: the header and the dashboard to make their charts as wide as any realistic terminal (two
+#: buckets for each cell), and still draw history, not padding.
 ACTIVITY_BUCKETS = 360
 
 
 class MonitorService:
-    """Records overheard packets to history as a subscriber of the always-on event hub.
+    """Store heard packets in the history, as a subscriber of the event hub (always on).
 
-    Attributes are private; interact through the properties and the async lifecycle
-    methods (:meth:`start`, :meth:`stop`, :meth:`aclose`).
+    The attributes are private. Use the properties and the async lifecycle methods
+    (:meth:`start`, :meth:`stop`, :meth:`aclose`).
     """
 
     def __init__(self, ctx: AppContext) -> None:
@@ -54,34 +57,38 @@ class MonitorService:
             ctx: The shared application context (device, repository, logger).
         """
         self._ctx = ctx
-        self._unsubscribe: Unsubscribe | None = None  # hub subscription, when recording
-        self._count_unsubscribe: Unsubscribe | None = None  # the all-packet counter's
+        self._unsubscribe: Unsubscribe | None = None  # the hub subscription, while it records
+        self._count_unsubscribe: Unsubscribe | None = None  # for the all-packet counter
         self._run_id: int | None = None
         self._session_count = 0
         self._run_start_count = 0
-        # Observations queue off the event-loop callback onto this worker (see start()),
-        # so a burst of overheard packets writes to disk between repaints instead of
-        # blocking them — the same shape as ChatService's inbound queue.
+        # The event-loop callback puts observations in a queue for this worker (refer to
+        # start()). Thus a burst of heard packets is written to disk between paints, and
+        # does not block them. This is the same design as the inbound queue of ChatService.
         self._queue: asyncio.Queue[Observation] | None = None
         self._worker: asyncio.Future | None = None
-        # All-packet activity, bucketed by wall-clock minute (epoch // span → count).
-        # Every hub event counts — observations, messages, acks — because the header's
-        # indicator answers "is the mesh alive?", not "any mail?". Pruned as it rolls,
-        # so it never holds more than the six-hour window plus one closing bucket.
+        # The activity of all packets, in buckets by wall-clock minute (epoch // span →
+        # count). Each hub event counts (observations, messages, acks), because the
+        # indicator in the header answers "is the mesh alive?", not "any mail?". Old
+        # buckets are removed as time goes on. Thus it never holds more than the six-hour
+        # window plus one closing bucket.
         self._activity: dict[int, int] = {}
-        # The last histogram/flags tuples, keyed by what they derive from — the current
-        # minute bucket and (for the histogram) the packet-arrival stamp below. The header
-        # rebuilds both on every repaint of every screen; between packets and minute
-        # rolls that was 720 dict lookups a frame for identical tuples.
+        # The last histogram and flags tuples, cached with the values from which they
+        # come: the current minute bucket and (for the histogram) the packet-arrival stamp
+        # below. The header builds both again at each paint of each screen. Before this
+        # cache, between two packets or two minutes, that was 720 dict lookups in each
+        # frame for identical tuples.
         self._activity_stamp = 0
         self._histogram_cache: tuple[int, int, tuple[int, ...]] = (-1, -1, ())
         self._flags_cache: tuple[int, tuple[bool, ...]] = (-1, ())
-        # Tallies by packet class (advert/telemetry/packet/message/ack): seeded from
-        # stored history below, then fed live by the kind-unfiltered subscription —
-        # the dashboard's traffic panel, persistent across sessions.
+        # The counts for each packet class (advert/telemetry/packet/message/ack). The
+        # stored history below gives the first values. Then the subscription that does not
+        # filter by kind adds the live counts. This is the traffic panel of the dashboard,
+        # which stays from one session to the next.
         self._kind_counts: dict[str, int] = {}
-        # Housekeeping: age out observations past the retention window once per
-        # session, so an always-recording database stays bounded (0 = keep forever).
+        # Housekeeping: one time in each session, delete the observations that are older
+        # than the retention window. Thus a database that always stores new data keeps a
+        # limited size (0 = keep for all time).
         preferences = getattr(ctx, "preferences", None)
         days = (preferences.history_days if preferences is not None else 0) or 0
         if days:
@@ -91,24 +98,26 @@ class MonitorService:
                     ctx.log.info("history housekeeping: pruned %s observations", pruned)
             except Exception as exc:  # noqa: BLE001 - housekeeping must never block startup
                 ctx.log.debug("history housekeeping failed: %s", exc)
-        # Total observations already in the database when the session began; the live
-        # "total" is this plus what we capture this session (this process is the only
-        # writer during an interactive session), avoiding a DB count on every repaint.
+        # The total number of observations in the database when the session started. The
+        # live "total" is this number plus what we capture in this session (this process
+        # is the only writer during an interactive session). Thus no DB count is necessary
+        # at each paint.
         self._start_total = ctx.repo.observation_count()
-        # The minute this session began: buckets at or after it hold live traffic,
-        # older ones the seeded history — the boundary the activity charts colour by.
+        # The minute at which this session started. The buckets at or after it hold live
+        # traffic, and the older buckets hold the history from the database. The activity
+        # charts use this boundary for their colours.
         self._start_bucket = int(time.time() // ACTIVITY_BUCKET_S)
         self._seed_from_history()
 
     def _seed_from_history(self) -> None:
-        """Warm the activity buckets and kind tallies from stored observations.
+        """Fill the activity buckets and the kind counts from the stored observations.
 
-        The dashboard's persistence: a fresh session opens mid-story — the activity
-        chart already showing the trailing six hours and the traffic panel its
-        all-history tallies — instead of an empty chart that only fills while the app
-        happens to be running. Live events then stack on top (they are *new* rows, so
-        nothing double-counts). Stored history holds observations only; messages and
-        acks resume counting from zero each session.
+        This gives the dashboard its persistence. A new session opens with data: the
+        activity chart already shows the last six hours, and the traffic panel shows its
+        counts for all the history. Without this method, the chart is empty, and it fills
+        only while the app runs. Then live events add to these values (they are *new* rows,
+        thus nothing counts two times). The stored history has only observations. Messages
+        and acks start to count from zero in each session.
         """
         try:
             window = timedelta(seconds=ACTIVITY_BUCKET_S * ACTIVITY_BUCKETS)
@@ -116,32 +125,32 @@ class MonitorService:
                 bucket = int(obs.observed_at.timestamp() // ACTIVITY_BUCKET_S)
                 self._activity[bucket] = self._activity.get(bucket, 0) + 1
             self._kind_counts = dict(self._ctx.repo.kind_counts())
-        except Exception as exc:  # noqa: BLE001 - a cold start is worse than a blank chart
+        except Exception as exc:  # noqa: BLE001 - a failed start is worse than an empty chart
             self._ctx.log.debug("monitor: history seed failed: %s", exc)
 
     @property
     def active(self) -> bool:
-        """Whether observations are currently being recorded to history."""
+        """True while the service stores observations in the history."""
         return self._unsubscribe is not None
 
     @property
     def session_count(self) -> int:
-        """Observations captured since this process started."""
+        """The number of observations captured after this process started."""
         return self._session_count
 
     def total_count(self) -> int:
-        """Return the total observations logged, all time (including this session)."""
+        """Return the total number of observations stored, for all time (with this session)."""
         return self._start_total + self._session_count
 
     def activity_histogram(self) -> tuple[int, ...]:
-        """All-packet counts per one-minute bucket over the trailing six hours.
+        """The counts of all packets for each one-minute bucket over the last six hours.
 
-        Newest first — index 0 is the current minute — the order the chart widgets
-        expect (they draw "now" at the right edge). Seeded from stored observations at
-        session start and fed live by everything the hub fans out, so the header's
-        pulse and the dashboard's chart open mid-story after a restart. Consumers
-        slice however much of the window fits their chart and treat the rest as
-        history in reserve.
+        The newest bucket is first (index 0 is the current minute). The chart widgets
+        expect this order (they draw "now" at the right edge). At the start of the
+        session, the stored observations give the first values. Then all the events that
+        the hub sends out add live counts. Thus after a restart, the pulse in the header
+        and the chart on the dashboard open with data. Each consumer takes the part of the
+        window that fits its chart, and keeps the rest as history in reserve.
 
         Returns:
             :data:`ACTIVITY_BUCKETS` bucket counts.
@@ -155,12 +164,12 @@ class MonitorService:
         return histogram
 
     def activity_session_flags(self) -> tuple[bool, ...]:
-        """Whether each histogram bucket holds this session's own traffic.
+        """For each histogram bucket, True if the bucket holds traffic of this session.
 
-        Aligned with :meth:`activity_histogram` (newest first): ``True`` for buckets
-        at or after the session's first minute, ``False`` for the seeded history —
-        the split the activity charts use to draw live traffic green and a previous
-        session's grey.
+        The flags align with :meth:`activity_histogram` (newest first). ``True`` for the
+        buckets at or after the first minute of the session, and ``False`` for the history
+        from the database. The activity charts use this split: they draw live traffic in
+        green, and the traffic of an earlier session in grey.
 
         Returns:
             :data:`ACTIVITY_BUCKETS` flags, newest first.
@@ -173,27 +182,29 @@ class MonitorService:
         return flags
 
     def kind_counts(self) -> dict[str, int]:
-        """Tallies by packet class: advert/telemetry/packet buckets, message, ack.
+        """The counts for each packet class: the advert/telemetry/packet buckets, message, ack.
 
-        Seeded from stored history at session start and grown live from there, so the
-        numbers describe everything the recorder retains, not just this session.
-        Observation classes come from the packet itself (``Observation.kind``) — a raw
-        ``packet`` frame with a parsed payload class buckets as ``packet:<TYPENAME>``,
-        matching :meth:`~meshterm.persistence.repository.Repository.kind_counts`'s
-        stored seed — and messages and acks are their own classes. A copy, safe to
-        mutate.
+        At the start of the session, the stored history gives the first values. After
+        that, the live counts add to them. Thus the numbers describe all that the recorder
+        keeps, not only this session. The observation classes come from the packet itself
+        (``Observation.kind``). A raw ``packet`` frame with a parsed payload class goes in
+        the bucket ``packet:<TYPENAME>``, the same as in the stored values of
+        :meth:`~meshterm.persistence.repository.Repository.kind_counts`. Messages and acks
+        have their own classes. The return value is a copy, which the caller can change
+        safely.
         """
         return dict(self._kind_counts)
 
     def _count_packet(self, event: MeshEvent) -> None:
-        """Land one packet in the current activity bucket (and prune scrolled-off ones)."""
+        """Count one packet in the current activity bucket (and remove the old buckets)."""
         bucket = int(time.time() // ACTIVITY_BUCKET_S)
         self._activity[bucket] = self._activity.get(bucket, 0) + 1
-        self._activity_stamp += 1  # invalidates the memoized histogram tuple
+        self._activity_stamp += 1  # invalidates the cached histogram tuple
         obs = event.observation
         kind = obs.kind if obs is not None else event.kind.value
         if obs is not None and kind == "packet":
-            # Bucket a classed raw frame by its payload class (the stored seed's shape).
+            # Put a classed raw frame in the bucket of its payload class (the shape of the
+            # stored values).
             typename = (obs.raw or {}).get("payload_typename")
             if typename:
                 kind = f"packet:{typename}"
@@ -204,13 +215,13 @@ class MonitorService:
                 del self._activity[stale]
 
     async def start(self) -> None:
-        """Begin recording overheard observations to history. Idempotent.
+        """Start to store heard observations in the history. Idempotent.
 
-        Registers the recording subscription on the event hub without touching the
-        device, so it is safe (and cheap) to call before any connection exists;
-        observations flow as soon as the hub is pumping. The backing ``monitor`` run row
-        is opened lazily on the first observation, so a session that hears nothing
-        leaves no empty run in history.
+        This method registers the recording subscription on the event hub, and does not
+        touch the device. Thus it is safe (and costs little) to call it before a
+        connection exists. Observations arrive as soon as the hub operates. The
+        ``monitor`` run row that holds them is opened only at the first observation. Thus
+        a session that hears nothing leaves no empty run in the history.
         """
         if self.active:
             return
@@ -219,11 +230,11 @@ class MonitorService:
         self._worker = asyncio.ensure_future(self._process_observations())
 
         def on_event(event: MeshEvent) -> None:
-            # Runs on the event loop as packets arrive; keep it cheap and non-blocking. It
-            # only hands the observation to the worker queue — opening the run row and the
-            # database write happen off the worker, so a burst of overheard packets (every
-            # advert/telemetry/RX-log frame the mesh produces) can never stall the render
-            # and input loop the way a synchronous commit per packet would.
+            # This callback runs on the event loop when packets arrive. Keep it fast, and do
+            # not block. It only gives the observation to the worker queue. The worker
+            # opens the run row and writes to the database. Thus a burst of heard packets
+            # (each advert, telemetry, or RX-log packet that the mesh makes) can never stop
+            # the render and input loop, as a synchronous commit for each packet can.
             obs = event.observation
             if obs is None:
                 return
@@ -233,18 +244,19 @@ class MonitorService:
                 queue.put_nowait(obs)
 
         self._unsubscribe = self._ctx.events.subscribe(on_event, EventKind.OBSERVATION)
-        # A second, kind-unfiltered subscription feeds the header's activity indicator:
-        # every packet the hub hears lands in a five-minute bucket, in memory only.
+        # A second subscription, with no kind filter, feeds the activity indicator in the
+        # header: each packet that the hub hears goes in a one-minute bucket
+        # (``ACTIVITY_BUCKET_S``), only in memory.
         self._count_unsubscribe = self._ctx.events.subscribe(self._count_packet)
         self._ctx.log.info("passive monitor recording")
 
     async def _process_observations(self) -> None:
-        """Serially record queued observations, opening the run row on the first one.
+        """Store the queued observations one at a time, and open the run row at the first one.
 
-        A single worker drains the queue so recording never races the run-row creation and
-        the database write never runs inline with the hub's synchronous event dispatch (see
-        :meth:`start`) — the same shape as :class:`~meshterm.services.chat_service.ChatService`'s
-        inbound worker.
+        One worker empties the queue. Thus the recording never races the creation of the
+        run row, and the database write never runs inline with the synchronous event
+        dispatch of the hub (refer to :meth:`start`). This is the same design as the
+        inbound worker of :class:`~meshterm.services.chat_service.ChatService`.
         """
         assert self._queue is not None
         while True:
@@ -255,16 +267,17 @@ class MonitorService:
                         "monitor", {"mode": "background"}, self._ctx.profile_name
                     )
                 self._ctx.repo.record_observation(self._run_id, obs)
-            except Exception as exc:  # noqa: BLE001 - never let logging break capture
+            except Exception as exc:  # noqa: BLE001 - a failed write must never stop the capture
                 self._ctx.log.debug("monitor: failed to record observation: %s", exc)
             finally:
                 self._queue.task_done()
 
     async def stop(self) -> None:
-        """Stop recording to history and close the run record. Idempotent.
+        """Stop the storage of observations in the history, and close the run record.
 
-        A no-op if not recording. The event hub keeps listening; only this service's
-        recording subscription and its recording worker are removed.
+        Idempotent. If the service does not record, this method does nothing. The event
+        hub continues to listen. Only the recording subscription of this service and its
+        recording worker are removed.
         """
         if not self.active:
             return
@@ -291,5 +304,5 @@ class MonitorService:
             self._run_id = None
 
     async def aclose(self) -> None:
-        """Stop capture at session end."""
+        """Stop the capture at the end of the session."""
         await self.stop()

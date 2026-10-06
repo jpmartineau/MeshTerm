@@ -1,21 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The always-on mesh event hub.
+"""The mesh event hub, which is always on.
 
-The hub is the single seam between the raw companion-device event stream and everything
-that wants to react to it. It opens *one* subscription to the connected device, normalizes
-what arrives into typed :class:`~meshterm.core.events.MeshEvent` values, and fans each
-one out to any number of subscribers. Unlike a one-shot capture it is meant to run for the
-whole life of an interactive session — a MeshCore client must always be listening — so
-subscribers come and go while the pump keeps running underneath them.
+The hub is the only connection point between the raw event stream of the companion device
+and all the code that reacts to it. It opens one subscription to the connected device. It
+normalizes the data that arrives into typed :class:`~meshterm.core.events.MeshEvent`
+values, and it sends each value to all the subscribers (any number of them). A one-shot
+capture stops, but the hub runs for the full life of an interactive session, because a
+MeshCore client must always listen. Thus subscribers come and go while the pump continues
+to run below them.
 
-This decouples *listening* from *consuming*: the passive monitor's database logging becomes
-just one subscriber (see :class:`~meshterm.services.monitor_service.MonitorService`), and
-future client features (a live node list, an incoming-message inbox) attach as additional
-subscribers without touching the device layer.
+This design makes the code that listens independent of the code that uses the events.
+The database logging of the passive monitor is only one subscriber (refer to
+:class:`~meshterm.services.monitor_service.MonitorService`). Future client features (a
+live node list, an inbox for received messages) attach as more subscribers, and they do
+not change the device layer.
 
-The hub is session-scoped state on the :class:`~meshterm.context.AppContext`
-(``ctx.events``). Fan-out runs synchronously on the event loop as packets arrive, so
-handlers should stay cheap; a handler that returns a coroutine is scheduled as a task.
+The hub is state of the session, on the :class:`~meshterm.context.AppContext`
+(``ctx.events``). The fan-out runs synchronously on the event loop when packets arrive.
+Thus handlers must be fast. When a handler returns a coroutine, the hub schedules it as a
+task.
 """
 
 from __future__ import annotations
@@ -31,42 +34,43 @@ from ..core.events import EventKind, MeshEvent
 if TYPE_CHECKING:
     from ..context import AppContext
 
-#: A subscriber callback. Invoked with each matching :class:`MeshEvent`. Keep it cheap;
-#: it runs inline on the event loop as packets arrive. It may return a coroutine, which
-#: the hub schedules as a task rather than awaiting inline.
+#: A subscriber callback. The hub calls it with each matching :class:`MeshEvent`. Keep it
+#: fast, because it runs inline on the event loop when packets arrive. It can return a
+#: coroutine. Then the hub schedules the coroutine as a task, and does not await it inline.
 EventHandler = Callable[[MeshEvent], None | Awaitable[None]]
 
 
 @dataclass(slots=True)
 class _Subscription:
-    """One registered subscriber: a handler plus the kinds it cares about.
+    """One registered subscriber: a handler, and the event kinds that it wants.
 
     Attributes:
-        handler: The callback to invoke with matching events.
-        kinds: The event kinds to deliver; an empty set means *all* kinds.
+        handler: The callback to call with matching events.
+        kinds: The event kinds to deliver. An empty set means all kinds.
     """
 
     handler: EventHandler
     kinds: frozenset = field(default_factory=frozenset)
 
     def wants(self, kind: EventKind) -> bool:
-        """Whether this subscription should receive an event of ``kind``."""
+        """Whether this subscription wants an event of ``kind``."""
         return not self.kinds or kind in self.kinds
 
 
 class EventHub:
-    """Owns the device event subscription and fans events out to subscribers.
+    """Owns the event subscription to the device, and sends the events to subscribers.
 
-    Interact through :meth:`subscribe` / :meth:`stream` to consume events and the async
-    lifecycle methods (:meth:`start`, :meth:`stop`, :meth:`aclose`) to control the pump.
+    Use :meth:`subscribe` or :meth:`stream` to get events. Use the async lifecycle methods
+    (:meth:`start`, :meth:`stop`, :meth:`aclose`) to control the pump.
     """
 
     def __init__(self, ctx: AppContext) -> None:
-        """Initialize an idle hub bound to an application context.
+        """Make an idle hub for an application context.
 
         Args:
-            ctx: The shared application context, used to open the device connection and
-                to log. No device is opened until :meth:`start` is called.
+            ctx: The shared application context. The hub uses it to open the device
+                connection and to log. The hub opens no device until a call to
+                :meth:`start`.
         """
         self._ctx = ctx
         self._device_unsubscribe: Unsubscribe | None = None
@@ -75,19 +79,20 @@ class EventHub:
 
     @property
     def active(self) -> bool:
-        """Whether the pump is running (subscribed to the device)."""
+        """Whether the pump runs (with a subscription to the device)."""
         return self._device_unsubscribe is not None
 
     async def start(self) -> None:
-        """Open the device subscription and begin pumping events. Idempotent.
+        """Open the device subscription, and start the pump of events. Idempotent.
 
-        Opens the companion connection (which may raise if no device can be selected) and
-        subscribes to its observation stream. Subscribers registered before or after this
-        call all receive events once the pump is running.
+        Opens the companion connection (which can raise an error if no device can be
+        selected), and subscribes to its observation stream. While the pump runs, all the
+        subscribers get events, if they registered before this call or after it.
 
         Raises:
-            Exception: Propagates any device/subscription error; the hub stays inactive so
-                the caller can surface the problem and retry later.
+            Exception: Each error from the device or the subscription goes to the caller.
+                The hub stays inactive, so that the caller can show the problem and try
+                again later.
         """
         if self.active:
             return
@@ -96,10 +101,10 @@ class EventHub:
         self._ctx.log.info("event hub started")
 
     async def stop(self) -> None:
-        """Release the device subscription and drop any scheduled handler tasks.
+        """Release the device subscription, and cancel all the scheduled handler tasks.
 
-        Idempotent. Registered subscribers are left in place, so a later :meth:`start`
-        resumes delivering to them.
+        Idempotent. The registered subscribers stay, so a later :meth:`start` delivers to
+        them again.
         """
         if self._device_unsubscribe is not None:
             try:
@@ -112,11 +117,11 @@ class EventHub:
         self._ctx.log.info("event hub stopped")
 
     def subscribe(self, handler: EventHandler, *kinds: EventKind) -> Unsubscribe:
-        """Register ``handler`` to receive events, and return a callable that removes it.
+        """Register ``handler`` for events, and return a callable that removes it.
 
         Args:
-            handler: The callback invoked with each matching :class:`MeshEvent`.
-            *kinds: The event kinds to receive. Pass none to receive *every* kind.
+            handler: The callback that the hub calls with each matching :class:`MeshEvent`.
+            *kinds: The event kinds to get. Give none to get all kinds.
 
         Returns:
             A zero-argument callable that unregisters the subscription.
@@ -128,21 +133,21 @@ class EventHub:
             try:
                 self._subs.remove(sub)
             except ValueError:
-                pass  # already removed; unsubscribe is idempotent
+                pass  # already removed: unsubscribe is idempotent
 
         return unsubscribe
 
     def stream(self, *kinds: EventKind, maxsize: int = 0):
-        """Return an async iterator yielding matching events as they arrive.
+        """Return an async iterator that yields the matching events when they arrive.
 
-        An ergonomic ``async for event in hub.stream(...)`` adapter over :meth:`subscribe`,
-        backed by an :class:`asyncio.Queue`. The subscription is removed automatically when
-        the iterator is closed (e.g. the ``async for`` loop breaks or the consumer is
-        cancelled).
+        An easy ``async for event in hub.stream(...)`` adapter on :meth:`subscribe`, with
+        an :class:`asyncio.Queue` below it. When the iterator closes, the subscription is
+        removed automatically (for example, when the ``async for`` loop breaks, or when the
+        consumer is cancelled).
 
         Args:
-            *kinds: The event kinds to receive. Pass none to receive every kind.
-            maxsize: Optional bound on the backing queue (``0`` = unbounded).
+            *kinds: The event kinds to get. Give none to get all kinds.
+            maxsize: An optional limit on the size of the queue (``0`` = no limit).
 
         Returns:
             An async generator of :class:`MeshEvent`.
@@ -160,11 +165,12 @@ class EventHub:
         return _iterator()
 
     def publish(self, event: MeshEvent) -> None:
-        """Fan ``event`` out to every subscriber that wants its kind.
+        """Send ``event`` to each subscriber that wants its kind.
 
-        Delivery is synchronous and best-effort: a handler that raises is logged and
-        skipped so one bad subscriber can never take down the pump or starve the others.
-        A handler that returns a coroutine is scheduled as a background task.
+        Delivery is synchronous and best-effort. When a handler raises an error, the hub
+        logs it and continues with the next handler. Thus one bad subscriber can never
+        stop the pump, or stop the delivery to the other subscribers. When a handler
+        returns a coroutine, the hub schedules it as a background task.
 
         Args:
             event: The event to deliver.
@@ -181,7 +187,7 @@ class EventHub:
                 self._schedule(result)
 
     def _schedule(self, coro: Awaitable[None]) -> None:
-        """Run an async handler's coroutine as a tracked background task."""
+        """Run the coroutine of an async handler as a tracked background task."""
         task = asyncio.ensure_future(coro)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
@@ -192,19 +198,20 @@ class EventHub:
         predicate: Callable[[MeshEvent], bool] | None = None,
         timeout: float | None = None,
     ) -> MeshEvent | None:
-        """Await the next event matching ``kinds`` (and ``predicate``), or time out.
+        """Await the next event that matches ``kinds`` (and ``predicate``), or time out.
 
-        A one-shot convenience for consumers that want to block for a specific event
-        rather than register a standing handler. The temporary subscription is always
-        removed before returning.
+        A one-shot helper for consumers that want to block for a specific event, instead
+        of a permanent handler. The method always removes the temporary subscription
+        before it returns.
 
         Args:
-            *kinds: The event kinds to accept. Pass none to accept every kind.
-            predicate: Optional extra filter; the event must also satisfy it to match.
-            timeout: Seconds to wait before giving up, or ``None`` to wait indefinitely.
+            *kinds: The event kinds to accept. Give none to accept all kinds.
+            predicate: An optional extra filter. To match, the event must also pass it.
+            timeout: The seconds to wait before the method stops, or ``None`` to wait with
+                no limit.
 
         Returns:
-            The matching :class:`MeshEvent`, or ``None`` if ``timeout`` elapsed first.
+            The matching :class:`MeshEvent`, or ``None`` if the ``timeout`` ended first.
         """
         loop = asyncio.get_running_loop()
         future: asyncio.Future = loop.create_future()
@@ -224,5 +231,5 @@ class EventHub:
             unsubscribe()
 
     async def aclose(self) -> None:
-        """Stop the pump at session end (an alias for :meth:`stop`)."""
+        """Stop the pump at the end of the session (an alias for :meth:`stop`)."""
         await self.stop()

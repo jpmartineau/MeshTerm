@@ -1,25 +1,28 @@
 # SPDX-License-Identifier: Apache-2.0
 """Remote-admin TX-power optimization.
 
-This tunes the transmit power of a *remote* node we have admin rights on — the node
-sitting one hop before a chosen target — to maximize the signal the **target** receives
-from it. We force a path (exactly like the trace tool), so every measurement exercises the
-same admin-node→target link, and read the SNR the target reports at the end of that path.
+This module tunes the transmit power of a *remote* node on which we have admin rights.
+That node is one hop before a selected target. The module tunes it to get the strongest
+signal that the **target** receives from it. We force a path (the same as the trace tool),
+so that each measurement uses the same admin-node→target link. Then we read the SNR that
+the target reports at the end of that path.
 
-Radio links are noisy and the real-world response is non-monotonic (too little power and
-the target can't hear it; too much and its front end saturates), so the search is robust
-by design:
+Radio links are noisy, and the real response is not monotonic. With too little power, the
+target cannot hear the node. With too much power, the front end of the target saturates.
+Thus the search is robust by design:
 
-1. A **coarse sweep** across the TX range, running several traces per level and scoring
-   each level by its trace success rate first and a *median* target SNR second.
-2. A **local refine** filling in integer levels around the coarse winner.
-3. A **verify** pass that re-measures the leading candidate with extra samples so a single
-   lucky (or unlucky) reading can't decide the optimum.
+1. A **coarse sweep** across the TX range. It runs several traces at each level. It scores
+   each level first by its trace success rate, and second by the *median* SNR at the
+   target.
+2. A **local refine** that measures the integer levels around the coarse winner.
+3. A **verify** pass that measures the best candidate again, with more samples. Thus one
+   lucky (or unlucky) reading cannot decide the optimum.
 
-Selection is lexicographic — **reliability first, then SNR** — and on a near-tie in SNR it
-prefers the *lower* TX power, since cranking power for a fraction of a dB only adds
-interference and burns duty cycle. The chosen optimum is written back to the admin node
-when ``apply`` is set (the whole point of the run is to leave it tuned).
+The selection is lexicographic: **reliability first, then SNR**. When two SNRs are almost
+equal, the selection prefers the *lower* TX power, because more power for a fraction of a
+dB only adds interference and uses duty cycle. When ``apply`` is set, the module writes
+the selected optimum back to the admin node (the purpose of the run is to leave the node
+tuned).
 """
 
 from __future__ import annotations
@@ -37,29 +40,31 @@ PersistLevel = Callable[[TxLevelResult], None]
 PhaseCallback = Callable[[str], None]
 
 #: The search phases, in order, as reported to ``on_phase``: the coarse grid sweep, the
-#: integer fill-in around the coarse winner, and the extra-samples re-measure of the leader.
+#: integer levels around the coarse winner, and the new measurement of the leader with more
+#: samples.
 PHASES = ("coarse", "refine", "verify")
 
-#: On a near-tie in target SNR (within this many dB of the best), the lower TX power wins.
+#: When two SNRs at the target are almost equal (within this number of dB of the best), the
+#: lower TX power wins.
 DEFAULT_SNR_TOLERANCE_DB = 1.0
 
 
 def trace_target_snr(trace: TraceResult, target_hash: str) -> float | None:
-    """Return the SNR the *target* received on a single (round-trip) trace.
+    """Return the SNR that the *target* received on a single (round-trip) trace.
 
-    Because we trace out to the target and back (so a reachable node, not the far
-    target, answers), the target is no longer the last hop — it's the turn-around point.
-    We therefore locate it by matching its hash rather than by position. The matched
-    hop's SNR is the signal the target heard from the admin node just before it, which is
-    exactly the link being tuned.
+    We trace out to the target and back, so that a node that we can reach answers, not the
+    far target. Thus the target is not the last hop: it is the turn-around point, and we
+    find it by its hash, not by its position. The SNR of the matched hop is the signal that
+    the target heard from the admin node before it. That is exactly the link that the
+    module tunes.
 
     Args:
         trace: A single trace result.
-        target_hash: The target node's path hash (a leading slice of its public key).
+        target_hash: The path hash of the target node (the first bytes of its public key).
 
     Returns:
-        The target's received SNR in dB, or ``None`` if the trace failed or the target
-        hop wasn't present in the reply.
+        The received SNR of the target in dB, or ``None`` if the trace failed or the
+        target hop was not in the reply.
     """
     if not trace.success:
         return None
@@ -68,8 +73,8 @@ def trace_target_snr(trace: TraceResult, target_hash: str) -> float | None:
         if hop.node is None:
             continue
         node = hop.node.lower().removeprefix("0x")
-        # Match either way: the firmware may report hashes at a different width than the
-        # one we addressed the path with.
+        # Match in both directions: the firmware may report hashes at a width that is
+        # different from the width that we used to address the path.
         if node.startswith(needle) or needle.startswith(node):
             return hop.snr
     return None
@@ -79,14 +84,14 @@ def build_level(tx: int, target: str, target_hash: str, traces: list[TraceResult
     """Aggregate the traces measured at one TX level into a :class:`TxLevelResult`.
 
     Args:
-        tx: The TX power these traces were taken at.
+        tx: The TX power at which these traces were taken.
         target: The target node (for the embedded :class:`TraceStats`).
-        target_hash: The target's path hash, used to find its hop in each trace.
-        traces: Every trace run at this level.
+        target_hash: The path hash of the target, used to find its hop in each trace.
+        traces: Each trace that ran at this level.
 
     Returns:
-        The level's robust aggregate. ``target_snr`` is the median across successful
-        traces, so a single outlier reading barely moves it.
+        The robust aggregate of the level. ``target_snr`` is the median of the successful
+        traces. Thus one outlier reading changes it very little.
     """
     successes = [t for t in traces if t.success]
     snrs = [snr for t in successes if (snr := trace_target_snr(t, target_hash)) is not None]
@@ -104,20 +109,20 @@ def build_level(tx: int, target: str, target_hash: str, traces: list[TraceResult
 def select_best(
     levels: list[TxLevelResult], *, snr_tolerance: float = DEFAULT_SNR_TOLERANCE_DB
 ) -> TxLevelResult:
-    """Pick the optimal level: reliability first, then SNR, then the lowest TX.
+    """Select the optimal level: reliability first, then SNR, then the lowest TX.
 
-    Among the levels with the highest trace success rate, take those whose median target
-    SNR is within ``snr_tolerance`` of the best, and return the one using the least
-    power. The tolerance band is what makes the choice robust to measurement noise: a
-    fractionally-higher SNR from a hotter level doesn't win if a cooler one is within
-    spitting distance.
+    From the levels with the highest trace success rate, take the levels whose median
+    target SNR is within ``snr_tolerance`` of the best. Return the level that uses the
+    least power. The tolerance band makes the selection robust against measurement noise.
+    A level with more power and an SNR that is a fraction higher does not win if a level
+    with less power is very near.
 
     Args:
-        levels: The measured levels (must be non-empty).
-        snr_tolerance: dB band within which SNRs are treated as tied.
+        levels: The measured levels (must not be empty).
+        snr_tolerance: The band (dB) within which SNRs count as equal.
 
     Returns:
-        The chosen :class:`TxLevelResult`.
+        The selected :class:`TxLevelResult`.
     """
     best_rate = max(lv.success_rate for lv in levels)
     contenders = [lv for lv in levels if lv.success_rate >= best_rate - 1e-9]
@@ -127,7 +132,7 @@ def select_best(
 
 
 def _snr_or_floor(level: TxLevelResult) -> float:
-    """Return a level's target SNR, or negative infinity if it never got through."""
+    """Return the target SNR of a level, or negative infinity if no trace got through."""
     return level.target_snr if level.target_snr is not None else float("-inf")
 
 
@@ -151,33 +156,39 @@ async def optimize_tx_power(
     persist_level: PersistLevel | None = None,
     persist_trace: Callable | None = None,
 ) -> TxOptResult:
-    """Tune ``admin_node``'s TX power for the best signal at ``target``.
+    """Tune the TX power of ``admin_node`` for the best signal at ``target``.
 
-    The caller must already be logged in to ``admin_node`` (see
+    The caller must already be logged in to ``admin_node`` (refer to
     :meth:`~meshterm.core.connection.Device.admin_login`).
 
     Args:
-        device: The connected local device, used to trace and to drive the remote node.
-        target: Node whose received SNR is being maximized (the last hop of ``path``).
+        device: The connected local device. It sends the traces and controls the remote
+            node.
+        target: The node whose received SNR the function makes as high as possible (the
+            last hop of ``path``).
         admin_node: The remote node whose TX power is tuned (the hop before ``target``).
-        path: The one-way forced path out to ``target`` (comma-separated hashes, ending
-            at the target). It is traced as a there-and-back round trip internally so a
-            reachable node answers — the far target only has to forward the packet.
-        tx_min: Lowest TX power to consider.
-        tx_max: Highest TX power to consider.
-        coarse_step: Step between coarse-sweep levels.
-        samples_per_level: Traces averaged at each level (and added again on verify).
-        refine: Whether to fill in integer levels around the coarse winner.
-        verify: Whether to re-measure the leading candidate to reject an outlier.
-        apply: Leave the winning TX power on the node when done (otherwise restore the
-            power it had before the sweep, if that could be read).
-        cooldown_s: Delay between individual traces (duty-cycle safety).
-        snr_tolerance: dB band for the lower-power tie-break (see :func:`select_best`).
-        on_level: Optional progress callback ``(completed, total, level_result)``.
-        on_phase: Optional callback announcing each search phase as it begins (one of
-            :data:`PHASES`), so a live view can say *what kind* of measuring is happening.
-        persist_level: Optional callback to store each level's aggregated result.
-        persist_trace: Optional callback to store each individual trace.
+        path: The one-way forced path out to ``target`` (comma-separated hashes, with the
+            target at the end). Internally, the function traces it as a round trip, out
+            and back, so that a node that we can reach answers. The far target must only
+            forward the packet.
+        tx_min: The lowest TX power to try.
+        tx_max: The highest TX power to try.
+        coarse_step: The step between two levels of the coarse sweep.
+        samples_per_level: The number of traces averaged at each level (and added again
+            on verify).
+        refine: True to measure the integer levels around the coarse winner.
+        verify: True to measure the best candidate again, to reject an outlier.
+        apply: Leave the winning TX power on the node at the end. If False, set the power
+            back to the value before the sweep, if that value could be read.
+        cooldown_s: The delay between two traces (for duty-cycle safety).
+        snr_tolerance: The band (dB) for the tie-break to the lower power (refer to
+            :func:`select_best`).
+        on_level: An optional progress callback ``(completed, total, level_result)``.
+        on_phase: An optional callback that tells each search phase when it starts (one
+            of :data:`PHASES`). Thus a live screen can say *what type* of measurement
+            occurs.
+        persist_level: An optional callback to store the aggregated result of each level.
+        persist_trace: An optional callback to store each trace.
 
     Returns:
         A :class:`TxOptResult`.
@@ -190,15 +201,16 @@ async def optimize_tx_power(
 
     original_tx = await device.get_remote_tx_power(admin_node)
 
-    # Trace out to the target and back: the reply then originates at a node near us
-    # (the first hop), not the far target, which only has to forward the packet. The
-    # target's received SNR is read from its hop at the round trip's turn-around point.
+    # Trace out to the target and back. Then the reply comes from a node near us (the
+    # first hop), not from the far target, which must only forward the packet. The
+    # received SNR of the target is read from its hop at the turn-around point of the
+    # round trip.
     outbound = [h for h in path.split(",") if h]
     target_hash = outbound[-1] if outbound else path
     trace_path = _round_trip_path(outbound)
 
-    # Accumulate raw traces per level so a verify pass can *add* samples to a level and
-    # re-aggregate, rather than throwing away what we already measured.
+    # Keep the raw traces for each level. Thus a verify pass can *add* samples to a level
+    # and aggregate again, and does not discard what we measured before.
     traces_by_tx: dict[int, list[TraceResult]] = {}
     levels: dict[int, TxLevelResult] = {}
 
@@ -207,12 +219,12 @@ async def optimize_tx_power(
     completed = 0
 
     async def measure_level(tx: int) -> TxLevelResult:
-        """Run a batch of traces at ``tx`` (accumulating) and refresh its aggregate."""
+        """Run a batch of traces at ``tx`` (added to earlier ones), and refresh its aggregate."""
         nonlocal completed
         if completed and cooldown_s > 0:
-            # ``run_traces`` paces between its own samples but not after the last one,
-            # so without this the first trace of a level follows the previous level's
-            # last one with no gap — a burst across every level boundary.
+            # ``run_traces`` waits between its own samples, but not after the last sample.
+            # Without this sleep, the first trace of a level follows the last trace of the
+            # previous level with no gap. That is a burst at each boundary between levels.
             await asyncio.sleep(cooldown_s)
         await device.set_remote_tx_power(admin_node, tx)
         batch = await trace_runner.run_traces(
@@ -252,15 +264,15 @@ async def optimize_tx_power(
             best = select_best(list(levels.values()), snr_tolerance=snr_tolerance)
 
         if verify:
-            # Re-measure the leader with extra samples; if it was an outlier the larger
-            # sample will pull it back and a steadier neighbor can take over.
+            # Measure the leader again with more samples. If it was an outlier, the larger
+            # sample will pull it back, and a more stable neighbour can take its place.
             if on_phase is not None:
                 on_phase("verify")
             await measure_level(best.tx_power)
             best = select_best(list(levels.values()), snr_tolerance=snr_tolerance)
 
-        # "No result" = not one trace got through at any level (a meaningless winner).
-        # In that case, and when apply is off, leave the node at the power it started at.
+        # "No result" = no trace got through at any level (a winner with no meaning). In
+        # that case, and when apply is off, leave the node at the power of the start.
         got_result = best.successes > 0
         applied = apply and got_result
         if applied:
@@ -268,14 +280,14 @@ async def optimize_tx_power(
         elif original_tx is not None:
             final_tx = original_tx
         else:
-            final_tx = best.tx_power  # nothing to restore to; can't do better
+            final_tx = best.tx_power  # no value to restore. Nothing better is possible.
         await device.set_remote_tx_power(admin_node, final_tx)
     except BaseException:
-        # On any failure, try to leave the node at the power it started with.
+        # After a failure of any type, try to leave the node at the power of the start.
         if original_tx is not None:
             try:
                 await device.set_remote_tx_power(admin_node, original_tx)
-            except Exception:  # noqa: BLE001 - best-effort restore; don't mask the cause
+            except Exception:  # noqa: BLE001 - a best-effort restore. Do not hide the cause.
                 pass
         raise
 
@@ -293,20 +305,20 @@ async def optimize_tx_power(
 
 
 def _round_trip_path(outbound: list[str]) -> str:
-    """Build a there-and-back trace path from a one-way path to the target.
+    """Build a trace path out and back from a one-way path to the target.
 
-    Tracing out to the target then back means the *final* hop is a node near us (the
-    first outbound hop), which can reliably answer; the far target only has to forward
-    the packet, never originate the reply. This mirrors the MeshCore ``A,B,A`` trace
-    convention. The target's own hop (the turn-around point) still records the SNR it
-    heard from the admin node, which is what we read.
+    When the trace goes out to the target and then back, the *last* hop is a node near us
+    (the first outbound hop), which can answer reliably. The far target must only forward
+    the packet, and never starts the reply. This follows the MeshCore ``A,B,A`` trace
+    convention. The hop of the target (the turn-around point) still has the SNR that it
+    heard from the admin node, and we read that value.
 
     Args:
-        outbound: The one-way path hops, ending at the target.
+        outbound: The one-way path hops, with the target at the end.
 
     Returns:
-        The round-trip path as a comma-separated hash string (e.g. ``"3f,f2"`` becomes
-        ``"3f,f2,3f"``). A single-hop path is returned unchanged.
+        The round-trip path as a comma-separated hash string (for example, ``"3f,f2"``
+        becomes ``"3f,f2,3f"``). A single-hop path is returned with no change.
     """
     if len(outbound) < 2:
         return ",".join(outbound)
@@ -314,15 +326,15 @@ def _round_trip_path(outbound: list[str]) -> str:
 
 
 def coarse_levels(tx_min: int, tx_max: int, step: int) -> list[int]:
-    """Build the coarse sweep grid, always including both endpoints.
+    """Build the grid of the coarse sweep. The grid always has both endpoints.
 
-    Public so the live sweep screen can quote the worst-case transmission count
-    of a commit before anything goes on the air.
+    This function is public, so that the live sweep screen can show the worst-case number
+    of transmissions of a commit before anything is transmitted.
 
     Args:
-        tx_min: Lowest TX power.
-        tx_max: Highest TX power.
-        step: Grid spacing.
+        tx_min: The lowest TX power.
+        tx_max: The highest TX power.
+        step: The spacing of the grid.
 
     Returns:
         The ascending list of TX levels to sample in the coarse phase.

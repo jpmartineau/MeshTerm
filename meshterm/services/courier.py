@@ -1,26 +1,29 @@
 # SPDX-License-Identifier: Apache-2.0
 """The Courier: store-and-forward delivery for the outbox.
 
-A session-long background loop over the :class:`~meshterm.core.courier_store.
-CourierStore`. Messages queue for contacts that aren't reachable right now; the courier
-listens to the hub for signs of life and delivers when the recipient is *fresh* —
-heard within the last few minutes — or when a scheduled entry's time arrives. Each
-attempt is one ordinary chat send (:meth:`~meshterm.services.chat_service.ChatService.
-send_direct`, so it lands in the conversation history with its delivery state, exactly
-as if typed), and an acknowledgement settles the entry as delivered.
+A background loop on the :class:`~meshterm.core.courier_store.CourierStore`, which runs
+for the full session. Messages wait in the queue for contacts that MeshTerm cannot reach
+now. The courier listens to the hub for signs of life. It delivers when the recipient is
+*fresh* (heard in the last few minutes), or when the time of a scheduled entry arrives.
+Each try is one usual chat send
+(:meth:`~meshterm.services.chat_service.ChatService.send_direct`). Thus the message goes
+into the conversation history with its delivery state, exactly as if the user typed it.
+An acknowledgement marks the entry as delivered.
 
-Deliberately transmission-shy, like the advert scheduler:
+On purpose, the courier transmits as little as possible, as the advert scheduler does:
 
-* At most **one** delivery attempt per pass, so a backlog drains politely instead of
-  bursting onto a shared mesh.
-* Failed attempts back off exponentially (5 min doubling to an hour) and — after the
-  first shot — wait until the contact has been heard *again*, so an absent contact is never
-  hammered on faith alone. Only a scheduled entry's first attempt fires blind: the
+* A maximum of **one** delivery try in each pass. Thus a backlog empties slowly, and it
+  does not go onto a shared mesh in a burst.
+* After a failed try, the wait increases exponentially (5 min, doubled up to one hour).
+  After the first try, the courier also waits until it hears the contact again. Thus it
+  never sends many tries to an absent contact without evidence that the contact is
+  there. Only the first try of a scheduled entry goes without that evidence, because the
   schedule was an explicit instruction.
-* After :data:`MAX_ATTEMPTS` unacknowledged tries the courier gives up and says so.
+* After :data:`MAX_ATTEMPTS` tries with no acknowledgement, the courier stops and tells
+  the user.
 
-Outcomes (delivered, given-up) are also raised as Watchtower alerts, so the header's
-``▲`` badge lights when an overnight delivery finally lands.
+The results (delivered, given up) also become Watchtower alerts. Thus the ``▲`` badge in
+the header comes on when a delivery during the night is at last complete.
 """
 
 from __future__ import annotations
@@ -40,28 +43,30 @@ if TYPE_CHECKING:
 #: Seconds between courier passes.
 POLL_S = 30.0
 
-#: How recently (seconds) a node must have been heard to count as reachable.
+#: The maximum time (seconds) since MeshTerm heard a node, for the node to count as
+#: reachable.
 FRESH_S = 600.0
 
-#: Delivery attempts before the courier gives up on an entry.
+#: The number of delivery tries before the courier stops its tries for an entry.
 MAX_ATTEMPTS = 5
 
-#: Backoff after a failed attempt: this base doubling per failure, capped below.
+#: The backoff after a failed try: this base, doubled for each failure, with the limit
+#: below.
 BACKOFF_BASE_S = 300.0
 BACKOFF_CAP_S = 3600.0
 
 
 def _preview(text: str, width: int = 32) -> str:
-    """The message body shortened for alert/log one-liners."""
+    """The message body, shortened for one-line alerts and log lines."""
     return text if len(text) <= width else text[: width - 1] + "…"
 
 
 class CourierService:
     """Owns the store-and-forward loop for an interactive session.
 
-    Interact through the async lifecycle methods (:meth:`start`, :meth:`stop`,
-    :meth:`aclose`) and :meth:`attempt_now`; eligibility lives in the synchronous
-    :meth:`eligible` so tests can drive it directly.
+    Use the async lifecycle methods (:meth:`start`, :meth:`stop`, :meth:`aclose`) and
+    :meth:`attempt_now`. The eligibility rules are in the synchronous :meth:`eligible`, so
+    that tests can call them directly.
     """
 
     def __init__(self, ctx: AppContext) -> None:
@@ -73,14 +78,15 @@ class CourierService:
         self._ctx = ctx
         self._task: asyncio.Task | None = None
         self._unsubscribe: Unsubscribe | None = None
-        #: When each node id was last overheard this session (the freshness map).
+        #: The time when MeshTerm last heard each node id in this session (the freshness
+        #: map).
         self._heard: dict[str, datetime] = {}
-        #: Re-entry guard: one attempt in flight at a time, pass or forced.
+        #: Re-entry guard: only one try at a time is in progress, from a pass or forced.
         self._sending = False
 
     @property
     def active(self) -> bool:
-        """Whether the courier loop is running."""
+        """Whether the courier loop runs."""
         return self._task is not None and not self._task.done()
 
     def pending_count(self) -> int:
@@ -90,7 +96,7 @@ class CourierService:
     # --- lifecycle ---------------------------------------------------------------------
 
     async def start(self) -> None:
-        """Start the loop and the freshness subscription. Idempotent, device-free."""
+        """Start the loop and the freshness subscription. Idempotent, with no device use."""
         if self.active:
             return
 
@@ -117,11 +123,11 @@ class CourierService:
                 pass
 
     async def aclose(self) -> None:
-        """Stop the loop at session end (an alias for :meth:`stop`)."""
+        """Stop the loop at the end of the session (an alias for :meth:`stop`)."""
         await self.stop()
 
     async def _run(self) -> None:
-        """Tick forever: sleep, then make one best-effort pass."""
+        """Loop with no end: sleep, then do one best-effort pass."""
         while True:
             await asyncio.sleep(POLL_S)
             try:
@@ -134,26 +140,30 @@ class CourierService:
     # --- eligibility ---------------------------------------------------------------------
 
     def heard_recently(self, node_key: str, now: datetime | None = None) -> bool:
-        """Whether ``node_key`` was overheard within the freshness window."""
+        """Whether MeshTerm heard ``node_key`` in the freshness window."""
         heard = self._heard.get(node_key)
         if heard is None:
             return False
         return ((now or utcnow()) - heard).total_seconds() <= FRESH_S
 
     def eligible(self, message: QueuedMessage, now: datetime | None = None) -> bool:
-        """Whether one queued entry may be attempted right now.
+        """Whether the courier can try one queued entry now.
 
-        The rules, in order: only queued entries; a schedule holds until its time;
-        failed attempts wait out an exponential backoff; and — except for a scheduled
-        entry's first, explicitly-timed shot — the recipient must have been heard
-        within the freshness window.
+        The rules, in order:
+
+        1. Only queued entries.
+        2. A schedule holds the entry until its time.
+        3. After failed tries, the entry waits for the end of an exponential backoff.
+        4. MeshTerm must have heard the recipient in the freshness window. The exception
+           is the first try of a scheduled entry, at its explicit time.
 
         Args:
             message: The outbox entry.
-            now: The evaluation time (defaults to the current time; tests inject).
+            now: The evaluation time. The default is the current time. Tests give their
+                own time.
 
         Returns:
-            ``True`` when an attempt is allowed.
+            ``True`` when a try is permitted.
         """
         now = now or utcnow()
         if message.status != QUEUED:
@@ -170,7 +180,7 @@ class CourierService:
         return True
 
     def next_retry_s(self, message: QueuedMessage, now: datetime | None = None) -> float | None:
-        """Seconds until the backoff releases a failed entry, or ``None`` if free now."""
+        """The seconds until the backoff releases a failed entry, or ``None`` if it is free."""
         if message.last_attempt is None or message.attempts == 0:
             return None
         backoff = min(BACKOFF_CAP_S, BACKOFF_BASE_S * 2 ** (message.attempts - 1))
@@ -180,7 +190,7 @@ class CourierService:
     # --- delivery ------------------------------------------------------------------------
 
     async def _pass(self) -> None:
-        """One pass: attempt the oldest eligible entry, if any (one per pass)."""
+        """One pass: try the oldest eligible entry, if there is one (one for each pass)."""
         if not self._ctx.is_connected or self._sending:
             return
         now = utcnow()
@@ -190,13 +200,13 @@ class CourierService:
                 return
 
     async def attempt_now(self, ident: int) -> str:
-        """Force one delivery attempt for the screen's *Send now*, skipping eligibility.
+        """Force one delivery try for *Send now* on the screen, without the eligibility rules.
 
         Args:
-            ident: The outbox entry's id.
+            ident: The id of the outbox entry.
 
         Returns:
-            A short outcome string: ``delivered``, ``no ack``, ``gave up``,
+            A short result string: ``delivered``, ``no ack``, ``gave up``,
             ``unknown contact``, ``busy``, or ``gone``.
         """
         message = self._ctx.courier_store.get(ident)
@@ -207,14 +217,14 @@ class CourierService:
         return await self._attempt(message)
 
     async def _attempt(self, message: QueuedMessage) -> str:
-        """Run one delivery attempt and settle the entry's state."""
+        """Run one delivery try, and set the new state of the entry."""
         store = self._ctx.courier_store
         self._sending = True
         try:
             contact = await self._resolve(message)
             if contact is None:
-                # Not addressable (yet): the device doesn't know the contact. Leave the
-                # entry waiting — no budget spent on a send that can't happen.
+                # Not addressable (yet): the device does not know the contact. Leave the
+                # entry in the queue, and do not count a try for a send that cannot occur.
                 self._ctx.log.debug("courier: no contact for %r; leaving queued", message.node_name)
                 return "unknown contact"
             store.note_attempt(message.ident)
@@ -251,10 +261,11 @@ class CourierService:
             self._sending = False
 
     def _delivered_late(self, ident: int) -> None:
-        """An attempt's ack arrived after the attempt stopped waiting: it was delivered.
+        """The ack of a try arrived after the try stopped its wait: the message was delivered.
 
-        Without this the entry stayed queued (or gave up) and the next attempt sent the
-        recipient the same message again — every late ack a duplicate on their screen.
+        Without this method, the entry stayed in the queue (or the courier gave up on it),
+        and the next try sent the same message to the recipient again. Each late ack was a
+        duplicate message on the screen of the recipient.
         """
         store = self._ctx.courier_store
         message = store.get(ident)
@@ -269,7 +280,7 @@ class CourierService:
         self._ctx.log.info("courier: delivered to %s (late ack)", message.node_name)
 
     async def _resolve(self, message: QueuedMessage) -> Contact | None:
-        """Find the recipient in the device's contact list, by key then by name."""
+        """Find the recipient in the contact list of the device, by key and then by name."""
         device = await self._ctx.device()
         contacts = await device.get_contacts()
         for contact in contacts:

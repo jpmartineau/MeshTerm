@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Multi-path probing: measure candidate routes to a target and rank what actually works.
+"""Multi-path probing: measure the candidate routes to a target, and rank the routes that work.
 
-The topology graph (:mod:`~meshterm.services.topology`) proposes routes from *received*
-evidence; this module puts them to the test. Each candidate outbound path is traced once
-(by default — repeaters penalize, and can blacklist, nodes that burst traffic), every
-trace is persisted exactly like a normal trace run, the per-candidate aggregate is
-recorded as a ``path_candidates`` row, and the outcomes come back ranked the way the TX
-optimizer ranks its levels: reliability first, bottleneck SNR as the tie-breaker, then
-round-trip time. The caller (the live trace screen) shows the ranking and offers to adopt
-the winner — measurement proposes, the user disposes.
+The topology graph (:mod:`~meshterm.services.topology`) proposes routes from the evidence
+that MeshTerm heard. This module tests them. By default, MeshTerm traces each candidate
+outbound path one time, because repeaters penalize nodes that send traffic in bursts, and
+can blacklist them. Each trace is stored exactly as a normal trace run. The total for each
+candidate is stored as a ``path_candidates`` row. The results come back in the order that
+the TX optimizer uses for its levels: reliability first, then the bottleneck SNR to break
+a tie, then the round-trip time. The caller (the live trace screen) shows the ranking and
+offers to adopt the winner. The measurement only proposes a route, and the user decides.
 """
 
 from __future__ import annotations
@@ -30,9 +30,10 @@ class ProbeCandidate:
     """One route to measure.
 
     Attributes:
-        label: Short description of where the route came from (shown in the results).
-        spec: The forced-path spec to trace — comma-separated hex hashes, outbound
-            only, ending at the target's own hash (the reply retraces it in reverse).
+        label: A short description of the source of the route (shown in the results).
+        spec: The forced-path spec to trace: hex hashes with commas between them,
+            outbound only, which end at the hash of the target itself. The reply goes
+            back along it in reverse.
     """
 
     label: str
@@ -41,11 +42,11 @@ class ProbeCandidate:
 
 @dataclass(slots=True)
 class ProbeOutcome:
-    """One candidate's measured result.
+    """The measured result of one candidate.
 
     Attributes:
         candidate: The route that was measured.
-        stats: The aggregated trace statistics over its traces.
+        stats: The trace statistics, aggregated over its traces.
     """
 
     candidate: ProbeCandidate
@@ -55,8 +56,8 @@ class ProbeOutcome:
     def sort_key(self) -> tuple:
         """A ranking key that sorts the best path first.
 
-        Reliability, then bottleneck SNR, then RTT — the same priority order the TX
-        optimizer applies.
+        Reliability, then bottleneck SNR, then RTT: the same order of priority that the
+        TX optimizer uses.
         """
         snr = self.stats.median_min_snr
         rtt = self.stats.median_rtt_ms
@@ -78,41 +79,46 @@ async def probe_paths(
     persist_trace: Callable[[TraceResult], Awaitable[None] | None] | None = None,
     persist_candidate: PersistCandidate | None = None,
 ) -> list[ProbeOutcome]:
-    """Trace every candidate path and return the outcomes ranked best-first.
+    """Trace each candidate path, and return the results with the best result first.
 
-    Runs the candidates sequentially (one radio, duty cycle applies), a single trace
-    each by default. Persistence is delegated through callbacks so this stays pure
-    measurement: the caller owns the run row and decides where traces and candidate
-    aggregates go. Cancelling the surrounding task stops mid-candidate; everything
-    persisted so far stays persisted.
+    Runs the candidates in sequence (there is one radio, and the duty cycle applies), with
+    one trace for each candidate by default. Callbacks do the storage, so that this
+    function only measures. The caller owns the run row, and it decides where the traces
+    and the candidate totals go. When the task around this function is cancelled, the
+    function stops in the middle of a candidate. All the data stored before then stays
+    stored.
 
     Args:
         device: The connected device to trace through.
-        target: The destination (for :class:`TraceStats` labelling).
+        target: The destination (for the label of :class:`TraceStats`).
         candidates: The routes to measure, in the order to try them.
-        samples: Traces per candidate. The default of one is deliberate — repeaters
-            can blacklist nodes that burst traffic; raise it only when the airtime
-            budget clearly allows.
-        cooldown_s: Pause between traces (and between candidates).
-        on_result: Optional callback ``(candidate_index, done_in_candidate, result)``
-            invoked as each trace lands, e.g. to advance the probe dialog.
-        persist_trace: Optional per-trace persistence callback (sync or async).
-        persist_candidate: Optional callback invoked with each candidate's finished
-            :class:`ProbeOutcome` (e.g. to record a ``path_candidates`` row).
+        samples: The number of traces for each candidate. The default of one is on
+            purpose, because repeaters can blacklist nodes that send traffic in bursts.
+            Increase it only when the airtime budget clearly permits it.
+        cooldown_s: The pause between traces (and between candidates).
+        on_result: An optional callback ``(candidate_index, done_in_candidate, result)``,
+            called when each trace completes. For example, it moves the probe dialog
+            forward.
+        persist_trace: An optional callback that stores each trace (sync or async).
+        persist_candidate: An optional callback, called with the finished
+            :class:`ProbeOutcome` of each candidate (for example, to store a
+            ``path_candidates`` row).
 
     Returns:
-        One :class:`ProbeOutcome` per candidate, ranked by :attr:`ProbeOutcome.sort_key`.
+        One :class:`ProbeOutcome` for each candidate, in the order of
+        :attr:`ProbeOutcome.sort_key`.
     """
     from . import trace_runner
 
     outcomes: list[ProbeOutcome] = []
     for index, candidate in enumerate(candidates):
         if index and cooldown_s > 0:
-            # ``run_traces`` paces *between* its own samples and never after the last
-            # one, so at the default of one trace per candidate it paces nothing at
-            # all: without this the sweep walks every candidate back to back and the
-            # repeaters see a burst — the traffic pattern that gets a node ignored,
-            # after which every later trace comes home empty.
+            # ``run_traces`` pauses between its own samples, and never after the last
+            # one. Thus, at the default of one trace for each candidate, it does not
+            # pause at all. Without this pause, the sweep traces all the candidates one
+            # after the other, and the repeaters hear a burst. Because of that traffic
+            # pattern, the repeaters ignore the node, and then each later trace comes
+            # back empty.
             await asyncio.sleep(cooldown_s)
         results = await trace_runner.run_traces(
             device,

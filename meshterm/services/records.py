@@ -1,33 +1,37 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Walk records: how a completed trace is measured and scored for the trophy case.
+"""Walk records: how MeshTerm measures and scores a completed trace for the trophy case.
 
-A *walk* is one trace whose route starts and ends at our node — we transmit the first
-hop and the final hop's transmission lands back on us. Every trace is one:
+A *walk* is one trace whose route starts and ends at our node: we transmit the first hop,
+and the transmission of the last hop arrives back at us. Each trace is a walk:
 
-* **Trace path** composes the whole circuit by hand and only has to end within our
-  earshot, so its route *is* the walk;
+* **Trace path** composes the full circuit by hand, and it must only end at a node that
+  we can hear. Thus its route *is* the walk.
 * **Trace target** walks the symmetric boomerang ``us → out… → target → out reversed…
-  → us``, which starts and ends at us just the same.
+  → us``, which also starts and ends at us.
 
-So any successful trace can be scored, and the trophy case keeps the record-setters in
-seven disciplines — the longest distance, the farthest node, the longest single link,
-the most nodes (with and without revisits), the weakest surviving link, and the widest
-enclosed loop. This module
-is pure measurement: :func:`walk_from_trace` turns a reply into a spec, a canonical
-route, and its :class:`WalkStats`; :func:`walk_scores` scores those stats against every
-discipline at once (a walk found while tracing one thing still counts everywhere it
-places). The UI owns the radio and the database; nothing here transmits or persists.
+Thus each successful trace can be scored. The trophy case keeps the record holders in
+seven disciplines: the longest distance, the farthest node, the longest single link, the
+most nodes (with and without revisits), the weakest link that still carried the walk, and
+the widest enclosed loop.
 
-One eligibility rule gates every board: a record walk must be a *trail* — a walk that
-never crosses the same link twice in the same direction (see
-:func:`first_repeated_edge`). Repeating a link would let any scoring subpath be stitched
-in again for free score, so :func:`walk_scores` disqualifies such a walk outright.
-Recrossing a link the *other* way stays legal: a Trace target boomerang retraces every
-link backwards by design, and radio links genuinely differ by direction.
+This module only measures. :func:`walk_from_trace` changes a reply into a spec, a
+canonical route, and its :class:`WalkStats`. :func:`walk_scores` scores these stats
+against all the disciplines at the same time (a walk that was found during the trace of
+one thing still counts in each discipline where it places). The UI owns the device and the
+database. No code in this module transmits or stores.
 
-Records live per ``(category, width_bytes)`` because the per-hop hash width bounds both a
-walk's maximum length (the transmitted path field is :data:`MAX_PATH_BYTES`) and its
-collision odds — a 1-byte board and a 4-byte board are different games.
+One rule of eligibility applies to each board: a record walk must be a *trail*. A trail
+is a walk that never crosses the same link two times in the same direction (refer to
+:func:`first_repeated_edge`). If a walk can repeat a link, it can add a scoring subpath
+again for a free score. Thus :func:`walk_scores` disqualifies such a walk completely. A
+walk can cross a link again in the *other* direction: a Trace target boomerang crosses
+each link again backwards by design, and radio links are truly different in each
+direction.
+
+Records are kept for each ``(category, width_bytes)``, because the hash width of each hop
+limits two things: the maximum length of a walk (the transmitted path field is
+:data:`MAX_PATH_BYTES`), and the probability of a collision. A 1-byte board and a 4-byte
+board are different games.
 """
 
 from __future__ import annotations
@@ -40,34 +44,36 @@ from itertools import pairwise
 from ..core.geo import haversine_km
 from ..core.models import Hop, TraceResult
 
-#: The transmitted path field is fixed at 64 bytes (see the contact-route parsing in
-#: :mod:`~meshterm.core.connection`), so a walk may carry at most this many bytes of
-#: hop hashes — the hard reason records are kept per hash width.
+#: The transmitted path field has a fixed size of 64 bytes (refer to the contact-route
+#: parsing in :mod:`~meshterm.core.connection`). Thus a walk can carry a maximum of this
+#: number of bytes of hop hashes. This limit is the strict reason why records are kept
+#: for each hash width.
 MAX_PATH_BYTES = 64
 
 
 def max_hops(width_bytes: int) -> int:
-    """The most hops a spec can carry at ``width_bytes`` per hop (64-byte field)."""
+    """The maximum number of hops in a spec at ``width_bytes`` for each hop (64-byte field)."""
     return MAX_PATH_BYTES // max(1, width_bytes)
 
 
 def first_repeated_edge(nodes: Sequence[str]) -> tuple[str, str] | None:
-    """The first link a walk crosses twice in the same direction, or ``None``.
+    """The first link that a walk crosses two times in the same direction, or ``None``.
 
-    The trophy case's no-cheat rule, shared by the arbiter and every screen that
-    warns about it: a record walk must be a *trail* (graph theory's name for a walk
-    with no repeated edge — here the directed edge ``a → b``, so ``a → b … b → a``
-    stays a trail while ``a → b … a → b`` does not). The walk's implicit endpoints
-    at our own node need not be passed in: the arcs touching us can't repeat unless
-    we relay through ourselves mid-walk.
+    This is the no-cheat rule of the trophy case. The arbiter and each screen that warns
+    about the rule share this function. A record walk must be a *trail*. In graph theory,
+    a trail is a walk with no repeated edge. Here, the edge is the directed edge
+    ``a → b``. Thus ``a → b … b → a`` is still a trail, but ``a → b … a → b`` is not. It
+    is not necessary to give the implicit endpoints of the walk at our node: the arcs that
+    touch us cannot repeat, except when we relay through ourselves in the middle of the
+    walk.
 
     Args:
-        nodes: The walked hops in order — spec tokens or canonical ids, compared
-            case-insensitively; blank entries are ignored.
+        nodes: The walked hops in order: spec tokens or canonical ids. The comparison
+            ignores case. Blank entries are ignored.
 
     Returns:
-        The ``(a, b)`` pair of the first link walked twice (as given, lowercased),
-        or ``None`` when the walk is a trail.
+        The ``(a, b)`` pair of the first link that was walked two times (as given, in
+        lower case), or ``None`` when the walk is a trail.
     """
     walked = [n.strip().lower() for n in nodes if n and n.strip()]
     seen: set[tuple[str, str]] = set()
@@ -83,31 +89,34 @@ def first_repeated_edge(nodes: Sequence[str]) -> tuple[str, str] | None:
 
 @dataclass(slots=True)
 class WalkStats:
-    """Everything a finished walk is scored and displayed by.
+    """All the values by which a finished walk is scored and shown.
 
     Attributes:
-        node_ids: Canonical ids of the walked hops, in walk order (us excluded; the
-            walk implicitly starts and ends at our node).
-        hop_count: Hops in the transmitted spec (= relay transmissions out there).
-        distinct_nodes: How many different nodes the walk visited.
-        repeats: Whether any node was visited more than once.
-        min_snr: The weakest per-hop reading of the walk (dB), when measured.
-        rtt_ms: The walk's round trip, when measured.
-        km_travelled: Great-circle km summed over the circuit us → hops… → us.
-            Segments touching an unpositioned node add 0, making this a lower bound.
-        km_complete: Whether every segment was positioned (``km_travelled`` exact).
-        far_km: The furthest hop's distance from us (km), when both ends are
-            positioned; ``None`` without our own or any hop's position.
-        leg_km: The longest single link of the circuit (km) — one hop's transmission,
-            end to end — when both of its ends are positioned; ``None`` when no
-            segment had both. A different game from ``far_km``: a distant node reached
-            over a chain of short hops scores far, not long.
-        leg_link: The ids of that link's two ends, in walk order, with ``None`` for our
-            own node (a link touching us is the first or last segment). ``None``
-            alongside a ``None`` ``leg_km``.
-        area_km2: The unsigned area enclosed by the circuit's positioned points in
-            walk order (km², shoelace over a local plane). ``None`` below three
-            positioned points; self-crossing walks score their net algebraic area.
+        node_ids: The canonical ids of the walked hops, in walk order (without us,
+            because the walk starts and ends at our node implicitly).
+        hop_count: The number of hops in the transmitted spec (= the relay
+            transmissions on the mesh).
+        distinct_nodes: The number of different nodes that the walk visited.
+        repeats: True if the walk visited a node more than one time.
+        min_snr: The weakest reading of a hop on the walk (dB), when measured.
+        rtt_ms: The round trip of the walk, when measured.
+        km_travelled: The sum of the great-circle km over the circuit us → hops… → us.
+            A segment that touches a node with no position adds 0. Thus this value is a
+            lower bound.
+        km_complete: True if each segment had positions (then ``km_travelled`` is
+            exact).
+        far_km: The distance (km) from us to the farthest hop, when both ends have a
+            position. ``None`` when there is no position for our node or for any hop.
+        leg_km: The longest single link of the circuit (km): the transmission of one
+            hop, from end to end, when both of its ends have a position. ``None`` when
+            no segment had both. This is a different game from ``far_km``: a distant
+            node that is reached over a chain of short hops scores far, not long.
+        leg_link: The ids of the two ends of that link, in walk order, with ``None``
+            for our node (a link that touches us is the first or the last segment).
+            ``None`` when ``leg_km`` is ``None``.
+        area_km2: The unsigned area in the circuit of the points with a position, in
+            walk order (km², shoelace over a local plane). ``None`` below three points
+            with a position. A walk that crosses itself scores its net algebraic area.
     """
 
     node_ids: tuple[str, ...]
@@ -136,29 +145,31 @@ class WalkStats:
             "far_km": round(self.far_km, 3) if self.far_km is not None else None,
             "area_km2": round(self.area_km2, 3) if self.area_km2 is not None else None,
             "leg_km": round(self.leg_km, 3) if self.leg_km is not None else None,
-            # A list, not a tuple, because this round-trips through JSON; our own end
-            # stays null so the reader draws it as the app-wide ★ rather than a name.
+            # A list, not a tuple, because this value goes through JSON and back. Our end
+            # stays null, so that the code that reads it draws the app-wide ★ instead of a
+            # name.
             "leg_link": list(self.leg_link) if self.leg_link is not None else None,
         }
 
 
 @dataclass(frozen=True, slots=True)
 class Category:
-    """One trophy-case discipline: what makes a walk a record.
+    """One discipline of the trophy case: what makes a walk a record.
 
     Attributes:
-        id: Stable identifier (the database key — never renamed, unlike the title).
-        title: Display name, sentence case ("Most nodes").
-        icon: Single glyph for menu rows.
-        description: One-line description of the game being played, shown under the
-            section heading on the records screen (word-wrapped when it must).
-        unit: Short unit suffix for scores ("km", "nodes", "dB", "km²").
-        ascending: ``True`` when *lower* scores win (Weakest link hunts the weakest
-            link that still carried a walk home).
-        needs_positions: Whether scoring requires node positions, so the UI can say
-            why the category is starved rather than silently scoring nothing.
-        score: Maps a walk's stats to its score — ``None`` when the walk simply
-            can't compete in this category (no positions, a repeat in No revisits).
+        id: A stable identifier (the database key). The title can change, but the id is
+            never renamed.
+        title: The name on the screen, in sentence case ("Most nodes").
+        icon: A single glyph for menu rows.
+        description: A one-line description of the game, shown under the section
+            heading on the records screen (word-wrapped when necessary).
+        unit: A short unit suffix for scores ("km", "nodes", "dB", "km²").
+        ascending: ``True`` when *lower* scores win (Weakest link looks for the weakest
+            link that still carried a walk back home).
+        needs_positions: True if the score must have node positions. Thus the UI can
+            say why the category has no scores, and does not score nothing silently.
+        score: Changes the stats of a walk into its score. ``None`` when the walk
+            cannot compete in this category (no positions, or a repeat in No revisits).
     """
 
     id: str
@@ -171,7 +182,7 @@ class Category:
     needs_positions: bool = False
 
     def format_score(self, value: float) -> str:
-        """Render a score in the category's own unit (``12.4 km``, ``7 nodes``)."""
+        """Render a score in the unit of the category (``12.4 km``, ``7 nodes``)."""
         if self.unit == "nodes":
             count = int(value)
             return f"{count} node{'s' if count != 1 else ''}"
@@ -212,8 +223,8 @@ def _score_big_loop(stats: WalkStats) -> float | None:
     return stats.area_km2
 
 
-#: The seven disciplines. Ids are stable database keys and must never change; titles and
-#: descriptions are display-only and kept plain and descriptive.
+#: The seven disciplines. The ids are stable database keys and must never change. The
+#: titles and the descriptions are only for the screen, and they are plain and descriptive.
 CATEGORIES: tuple[Category, ...] = (
     Category(
         id="long_haul",
@@ -284,8 +295,8 @@ CATEGORY_BY_ID: dict[str, Category] = {c.id: c for c in CATEGORIES}
 def local_xy(origin: tuple[float, float], point: tuple[float, float]) -> tuple[float, float]:
     """Project a lat/lon onto a local plane around ``origin``, in km.
 
-    An equirectangular approximation — exact enough for mesh-sized areas (a few tens
-    of km) and keeps the shoelace area in honest km².
+    This is an equirectangular approximation. It is exact enough for areas of the size of
+    a mesh (some tens of km), and it keeps the shoelace area in true km².
     """
     lat0, lon0 = origin
     lat, lon = point
@@ -302,30 +313,31 @@ def compute_walk_stats(
     positions: dict[str, tuple[float, float]],
     self_pos: tuple[float, float] | None,
 ) -> WalkStats:
-    """Measure one successful walk for every category at once.
+    """Measure one successful walk for all the categories at the same time.
 
     Args:
-        node_ids: Canonical ids of the walked hops, in walk order (us excluded).
-        hops: The trace reply's per-hop readings (the final hash-less hop, our own
-            device, contributes its SNR like any other — it is the reading on the
-            homecoming link).
-        rtt_ms: The walk's measured round trip.
-        positions: Known node positions keyed by canonical id.
-        self_pos: Our own node's position, or ``None`` when the device shares none.
+        node_ids: The canonical ids of the walked hops, in walk order (without us).
+        hops: The reading of each hop in the trace reply. The last hop has no hash, and
+            it is our device. It gives its SNR as the other hops do, because it is the
+            reading on the link back home.
+        rtt_ms: The measured round trip of the walk.
+        positions: The known node positions, indexed by canonical id.
+        self_pos: The position of our node, or ``None`` when the device shares no
+            position.
 
     Returns:
-        The walk's :class:`WalkStats`.
+        The :class:`WalkStats` of the walk.
     """
     ids = tuple(node_ids)
     snrs = [h.snr for h in hops if h.snr is not None]
-    # The walked circuit for geometry: us, every hop in order, us again.
+    # The walked circuit for the geometry: us, each hop in order, then us again.
     points: list[tuple[float, float] | None] = [self_pos]
     points.extend(positions.get(node) for node in ids)
     points.append(self_pos)
 
-    # The circuit's segments carry their endpoints alongside their positions, so the
-    # longest one can name the link it was: ``None`` at either end is our own node,
-    # which the walk leaves from and comes home to.
+    # The segments of the circuit carry their endpoints with their positions. Thus the
+    # longest segment can name its link. ``None`` at either end is our node, where the
+    # walk starts and ends.
     ends: list[str | None] = [None, *ids, None]
 
     km = 0.0
@@ -352,7 +364,7 @@ def compute_walk_stats(
 
     area: float | None = None
     if self_pos is not None:
-        placed = [p for p in points[:-1] if p is not None]  # circuit closes itself
+        placed = [p for p in points[:-1] if p is not None]  # the circuit closes itself
         if len(placed) >= 3:
             xy = [local_xy(self_pos, p) for p in placed]
             twice = sum(
@@ -378,14 +390,14 @@ def compute_walk_stats(
 
 
 def walk_scores(stats: WalkStats) -> dict[str, float]:
-    """Score a walk against every category (the every-board-at-once rule).
+    """Score a walk against each category (the rule of all the boards at the same time).
 
-    A walk that repeats a directed link isn't a trail (see
-    :func:`first_repeated_edge`) and is disqualified from every board at once — the
-    arbiter's enforcement of the no-cheat rule, so no caller has to remember it.
+    A walk that repeats a directed link is not a trail (refer to
+    :func:`first_repeated_edge`). It is disqualified from all the boards at the same time.
+    Here, the arbiter applies the no-cheat rule, thus no caller must remember it.
 
     Returns:
-        ``category id → score`` for each category the walk can compete in; empty
+        ``category id → score`` for each category in which the walk can compete. Empty
         for a disqualified walk.
     """
     if first_repeated_edge(stats.node_ids) is not None:
@@ -405,26 +417,30 @@ def walk_from_trace(
     positions: dict[str, tuple[float, float]],
     self_pos: tuple[float, float] | None,
 ) -> tuple[str, tuple[str, ...], WalkStats] | None:
-    """Derive the walk a successful trace just made: its spec, route, and stats.
+    """Get the walk that a successful trace made: its spec, its route, and its stats.
 
-    Every trace is a walk (it starts and ends at us — see the module docstring), so a
-    successful reply is scoreable straight from its hops. The reply's addressed hops are
-    the relays it rode, in order, with a final hash-less hop that is our own device
-    coming home; the relays become both the re-walkable spec (their hashes, joined —
-    exactly what *Trace this path* forces to walk it again) and, canonicalized, the
-    route the geometry is measured over.
+    Each trace is a walk (it starts and ends at us, refer to the module docstring). Thus a
+    successful reply can be scored directly from its hops. The addressed hops of the reply
+    are the relays that it went through, in order. The last hop has no hash: it is our
+    device, at the end of the walk. The relays become two things:
+
+    * the spec for a new walk (their hashes, joined: exactly what *Trace this path*
+      forces to walk it again), and
+    * after canonicalization, the route over which the geometry is measured.
 
     Args:
-        result: The trace reply to measure (must have succeeded).
-        canonical: Folds a hop hash to its canonical node id (the topology's resolver),
-            so positions line up and re-walks resolve; unknown hops keep their hash.
-        positions: Known node positions keyed by canonical id.
-        self_pos: Our own node's position, or ``None`` when the device shares none.
+        result: The trace reply to measure (it must have succeeded).
+        canonical: Changes a hop hash into its canonical node id (the resolver of the
+            topology). Thus the positions align, and new walks resolve. Unknown hops keep
+            their hash.
+        positions: The known node positions, indexed by canonical id.
+        self_pos: The position of our node, or ``None`` when the device shares no
+            position.
 
     Returns:
-        ``(spec, route, stats)`` — the comma-separated hex spec, the canonical route
-        aligned with it, and the walk's :class:`WalkStats` — or ``None`` when the trace
-        failed or carried no addressable relay to score.
+        ``(spec, route, stats)``: the comma-separated hex spec, the canonical route
+        aligned with it, and the :class:`WalkStats` of the walk. ``None`` when the trace
+        failed, or carried no addressable relay to score.
     """
     if not result.success:
         return None

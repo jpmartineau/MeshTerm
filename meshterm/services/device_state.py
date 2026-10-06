@@ -1,44 +1,47 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The session's device-state cache: read the radio once, reuse it everywhere.
+"""The device-state cache of the session: read the device one time, use the facts everywhere.
 
-Opening a screen used to re-read the same stable facts from the companion every time —
-the contacts table, the node's own self-info, the path-hash routing width, the configured
-channel slots, the channel-slot capacity. Over Bluetooth each of those is a full
-request→reply round-trip, and the channel-slot reads dominate: ``get_contacts`` on a busy
-node (hundreds of contacts), the slot probe
-(:func:`~meshterm.core.channel_probe.read_channel_slots`) and the capacity probe
-(:meth:`~meshterm.core.connection.Device.channel_capacity`) each walk
-the slot table one index at a time and are measured in *seconds* on firmware that never
-rejects an out-of-range index. Firing them on every navigation is what made moving between
-screens feel like it stalled.
+Before this cache, each screen read the same stable facts from the companion again when it
+opened: the contacts table, the self-info of our node, the path-hash routing width, the
+configured channel slots, and the channel-slot capacity. Over Bluetooth, each of these
+reads is a full request→reply round trip, and the channel-slot reads are the slowest.
+``get_contacts`` on a busy node (hundreds of contacts), the slot probe
+(:func:`~meshterm.core.channel_probe.read_channel_slots`), and the capacity probe
+(:meth:`~meshterm.core.connection.Device.channel_capacity`) each read the slot table one
+index at a time. On firmware that never rejects an index that is out of range, each of
+these reads takes seconds. MeshTerm did these reads at each navigation, and that is why
+the move between screens seemed to stop for a time.
 
-None of that data actually changes mid-navigation:
+None of these facts changes while the user moves between screens:
 
-* **self-info** changes when the config editor writes it, and otherwise only in its
-  position, which a node with a GPS running moves by itself as it travels;
-* **path-hash mode** changes only when the config editor writes it;
-* **channel slots** change only when the channel editor saves one;
-* **channel-slot capacity** is a fixed firmware build constant — it never changes at all
-  within a connection, so it is simply held for the session and only dropped on a reconnect;
-* **contacts** grow as the mesh advertises, but a minute-stale list is harmless — the app
-  already resolves names from recorded history too.
+* **self-info** changes when the config editor writes it. Otherwise, only its position
+  changes: a node with a GPS that operates changes its own position when it moves.
+* **path-hash mode** changes only when the config editor writes it.
+* **channel slots** change only when the channel editor saves a slot.
+* **channel-slot capacity** is a constant of the firmware build. It never changes during a
+  connection. Thus the service keeps it for the session and removes it only on a reconnect.
+* **contacts** become more when nodes on the mesh send adverts. But a list that is one
+  minute old does no harm, because the app also finds names from the stored history.
 
-So this service reads each fact once, holds it for the session, and hands screens the cached
-copy instantly. The two rules that keep the cache honest:
+Thus this service reads each fact one time and keeps it for the session. It gives the
+cached copy to the screens immediately. Two rules keep the cache correct:
 
-* **Contacts** use *stale-while-revalidate*: a read past :data:`_CONTACTS_TTL_S` returns the
-  cached list immediately and refreshes it in the background, so navigation is never blocked
-  on the slow call, yet newly-heard contacts still appear within a TTL of the next screen.
-  **Self-info** does the same past :data:`_SELF_INFO_TTL_S`, so a screen opened after the
-  node has moved shows where it is now.
-* Everything else is held until an in-app write **invalidates** it (see
-  :meth:`invalidate_self_info`, :meth:`invalidate_channels`, …); the writer is the only thing
-  that can change it, so it is also the only thing that needs to drop the cache.
+* **Contacts** use *stale-while-revalidate*. When the cached list is older than
+  :data:`_CONTACTS_TTL_S`, a read returns the cached list immediately and refreshes it in
+  the background. Thus navigation never waits for the slow call. But a contact that was
+  heard for the first time still shows on the next screen within one TTL.
+  **Self-info** does the same after :data:`_SELF_INFO_TTL_S`. Thus a screen that opens
+  after the node moved shows the current position of the node.
+* The service keeps all the other facts until a write in the app **invalidates** them
+  (refer to :meth:`invalidate_self_info`, :meth:`invalidate_channels`, and the other
+  ``invalidate_*`` methods). Only the writer can change these facts. Thus only the writer
+  must remove them from the cache.
 
-The cache is transport-agnostic — it sits above :meth:`~meshterm.context.AppContext.device`,
-so serial sessions get the same win (smaller, since serial round-trips are faster) and the
-``--mock`` simulator is simply always fast. It is cleared wholesale on a reconnect (see
-:meth:`reset`), since a fresh link should re-read the truth.
+The cache does not depend on the transport, because it is above
+:meth:`~meshterm.context.AppContext.device`. Thus a serial session gets the same benefit.
+The benefit is smaller, because serial round trips are faster. The ``--mock`` simulator is
+always fast. A reconnect clears all of the cache (refer to :meth:`reset`), because a new
+link must read the true values again.
 """
 
 from __future__ import annotations
@@ -55,26 +58,29 @@ if TYPE_CHECKING:
     from ..context import AppContext
     from ..core.models import Contact
 
-#: How long a cached contacts list is served before a read triggers a background refresh
-#: (seconds). Contacts only grow as the mesh advertises, and the list is a naming/addressing
-#: convenience the app also fills from recorded history — so a slightly stale copy costs
-#: nothing, while re-reading the (slow) table on every screen open cost seconds. A read past
-#: this age still returns instantly from cache; the refresh happens behind it.
+#: The age (seconds) after which a read of the cached contacts list also starts a refresh
+#: in the background. The list of contacts only becomes longer when nodes send adverts. The
+#: app uses the list to name and address nodes, and it also gets names from the stored
+#: history. Thus a copy that is a little old costs nothing. But a new read of the slow
+#: table each time that a screen opened cost seconds. After this age, a read still returns
+#: the cached list immediately, and the refresh occurs in the background.
 _CONTACTS_TTL_S = 90.0
 
-#: How long the node's own self-info is served before a read also refreshes it behind the
-#: answer (seconds). Only the position moves without the app writing it — a GPS updating
-#: it as the node travels — and one small frame a minute keeps every screen opened after a
-#: move honest about where the node is, at no cost to navigation.
+#: The age (seconds) after which a read of the self-info of our node also refreshes it in
+#: the background, after the answer. Only the position changes when the app does not write
+#: it: a GPS changes the position when the node moves. One small protocol frame each minute
+#: keeps the position correct on each screen that opens after a move. Navigation does not
+#: wait for it.
 _SELF_INFO_TTL_S = 60.0
 
 
 def _aware(when: datetime | None) -> datetime | None:
-    """Read a stored timestamp as UTC, so two of them can be compared.
+    """Read a stored timestamp as UTC, so that two timestamps can be compared.
 
-    Timestamps are stored as UTC (rendered local only at the very edge), but a row written
-    by an older build may come back without a tzinfo — and comparing one of those against an
-    aware one raises. Since the storage contract says UTC, a naive stamp simply *is* UTC.
+    Timestamps are stored as UTC, and are rendered as local time only at the last step. But
+    a row that an older build wrote can come back without a tzinfo. A comparison of such a
+    timestamp with an aware timestamp raises an error. The storage contract says UTC, thus a
+    naive timestamp is UTC.
     """
     if when is None or when.tzinfo is not None:
         return when
@@ -82,24 +88,26 @@ def _aware(when: datetime | None) -> datetime | None:
 
 
 class DeviceState:
-    """Session-scoped cache of the stable facts screens read from the companion on open.
+    """A cache, for the session, of the stable facts that screens read from the companion.
 
-    Held on the :class:`~meshterm.context.AppContext` as ``ctx.devstate`` and created idle;
-    each getter fetches from the device on first use (opening the connection via
-    :meth:`AppContext.device` if needed) and serves the cached value thereafter. The getters
-    mirror the contract of the underlying :class:`~meshterm.core.connection.Device` methods —
-    :meth:`contacts` and :meth:`self_info` raise on a failed first fetch (their callers either
-    handle it or let it surface), :meth:`path_hash_mode` likewise so its optional-read callers
-    can fall back — so a call site can swap ``device.get_x()`` for ``ctx.devstate.x()`` without
-    changing how it handles failure.
+    The :class:`~meshterm.context.AppContext` holds it as ``ctx.devstate``. It is empty when
+    it is created. At its first use, each getter reads from the device (and opens the
+    connection through :meth:`AppContext.device` if necessary). After that, the getter
+    returns the cached value. The getters follow the contract of the related
+    :class:`~meshterm.core.connection.Device` methods. :meth:`contacts` and
+    :meth:`self_info` raise an error if the first read fails (their callers handle the error
+    or let it go up). :meth:`path_hash_mode` also raises, so that its callers, for which the
+    read is optional, can use a fallback. Thus a call site can replace ``device.get_x()``
+    with ``ctx.devstate.x()``, and its failure handling does not change.
     """
 
     def __init__(self, ctx: AppContext) -> None:
-        """Initialize an empty cache bound to an application context.
+        """Initialize an empty cache that is bound to an application context.
 
         Args:
-            ctx: The shared application context, used to reach the device and to log. No
-                device is opened until a getter is first called.
+            ctx: The shared application context. The cache uses it to get the device and to
+                write to the log. The cache opens no device before the first call to a
+                getter.
         """
         self._ctx = ctx
         self._contacts: list[Contact] | None = None
@@ -110,11 +118,12 @@ class DeviceState:
         self._channels: list[ChannelSlot] | None = None
         self._channels_epoch = 0
         self._channel_capacity: int | None = None
-        #: The companion's default flood scope — ``""`` for none — once read (see
-        #: :meth:`default_scope`); ``None`` while unread.
+        #: The default flood scope of the companion after the first read (refer to
+        #: :meth:`default_scope`), or ``""`` for none. ``None`` before the first read.
         self._default_scope: str | None = None
-        # One lock per slow fetch so overlapping first-access callers (two screens opened in
-        # quick succession) collapse onto a single round-trip instead of each firing their own.
+        # One lock for each slow read. Thus callers that make their first access at the same
+        # time (two screens that open quickly, one after the other) share one round trip,
+        # instead of one round trip for each caller.
         self._contacts_lock = asyncio.Lock()
         self._self_info_lock = asyncio.Lock()
         self._path_hash_lock = asyncio.Lock()
@@ -125,21 +134,21 @@ class DeviceState:
     # -- contacts (stale-while-revalidate) --------------------------------------
 
     async def contacts(self, *, force: bool = False) -> list[Contact]:
-        """Return the device's contacts, cached for the session and refreshed lazily.
+        """Return the contacts of the device, cached for the session and refreshed when old.
 
-        The first call reads the table from the radio (a slow round-trip on a busy node) and
-        holds it. Later calls return the cached list *immediately*; once it is older than
-        :data:`_CONTACTS_TTL_S` a read also kicks off a background refresh, so the list stays
-        current without ever blocking navigation on the slow call.
+        The first call reads the table from the device (a slow round trip on a busy node) and
+        keeps it. Later calls return the cached list immediately. When the list is older than
+        :data:`_CONTACTS_TTL_S`, a read also starts a refresh in the background. Thus the list
+        stays current, and navigation never waits for the slow call.
 
         Args:
-            force: Re-read from the device now (blocking), bypassing the cache — for the rare
-                caller that needs the freshest possible list.
+            force: Read from the device again now, wait for the result, and do not use the
+                cache. This is for the rare caller that must have the most recent list.
 
         Returns:
-            The device's contacts. Raises like
-            :meth:`~meshterm.core.connection.Device.get_contacts` if the *first* fetch fails
-            (a background refresh failure is swallowed, leaving the last good list in place).
+            The contacts of the device. If the first read fails, this method raises the same
+            error as :meth:`~meshterm.core.connection.Device.get_contacts`. If a refresh in
+            the background fails, the error is ignored, and the last good list stays.
         """
         if force:
             return await self._fetch_contacts(force=True)
@@ -150,22 +159,25 @@ class DeviceState:
         return self._contacts
 
     def peek_contacts(self) -> list[Contact] | None:
-        """The contacts already in hand — possibly stale — or ``None``, never a radio read.
+        """The contacts that the cache already has (possibly old), or ``None``.
 
-        For a surface that only wants them as *context* and must not wait for them: the
-        location picker's surrounding nodes. A companion can refuse the contacts read for a
-        stretch (``ERR_CODE_BAD_STATE``), and :meth:`contacts` then blocks through every retry
-        of it — twenty-odd seconds — before giving up.
+        This method never reads from the device. It is for a screen that uses the contacts
+        only as context and must not wait for them: for example, the nodes near the location
+        picker. A companion can refuse the contacts read for some time
+        (``ERR_CODE_BAD_STATE``). Then :meth:`contacts` waits through all the retries (more
+        than twenty seconds) before it stops.
         """
         return self._contacts
 
     async def _fetch_contacts(self, *, force: bool = False) -> list[Contact]:
-        """Read the contacts table from the device and cache it (blocking, deduplicated).
+        """Read the contacts table from the device and cache it. The caller waits for the read.
+
+        Concurrent calls share one read.
 
         Args:
-            force: Fetch unconditionally. When ``False``, a caller that refreshed the cache
-                while this one waited for the lock reuses that fresh result rather than issuing
-                a second identical round-trip.
+            force: Read always. When ``False``, another caller can refresh the cache while
+                this caller waits for the lock. Then this caller uses that new result, and
+                does not send a second, identical round trip.
         """
         async with self._contacts_lock:
             if (
@@ -181,13 +193,14 @@ class DeviceState:
             return self._contacts
 
     async def _remember_and_merge(self, fetched: list[Contact]) -> list[Contact]:
-        """Record the contacts just read, then union in any the device has since forgotten.
+        """Store the contacts that were read, then add the contacts that the device forgot.
 
-        A firmware-less radio bridge loses its contact table on restart, so MeshTerm remembers
-        every contact it reads (keyed by the device's own public key) and merges the missing ones
-        back into the list — leaving a firmware radio, which reports its whole table, untouched
-        (see :mod:`meshterm.core.contact_store`). Best-effort: a store or self-info hiccup just
-        returns the live list unchanged, never blocking the read.
+        A radio bridge without firmware loses its contact table when it starts again. Thus
+        MeshTerm stores each contact that it reads (under the public key of the device) and
+        adds the missing contacts back into the list. A device with firmware reports its full
+        table, so its list does not change (refer to :mod:`meshterm.core.contact_store`).
+        This step is best effort: if the store or the self-info read has a problem, the
+        method returns the live list with no change. It never blocks the read.
         """
         store = getattr(self._ctx, "contact_store", None)
         if store is None:
@@ -196,7 +209,7 @@ class DeviceState:
 
         try:
             pubkey = str((await self.self_info()).get("public_key") or "")
-        except Exception as exc:  # noqa: BLE001 - never block a contacts read on the store
+        except Exception as exc:  # noqa: BLE001 - the store must never block a contacts read
             self._ctx.log.debug("devstate: contact remember/merge skipped: %s", exc)
             return fetched
         if not pubkey:
@@ -205,33 +218,39 @@ class DeviceState:
         return merge_contacts(store, pubkey, fetched)
 
     def _merge_heard(self, contacts: list[Contact]) -> list[Contact]:
-        """Give each contact the *later* of the device's advert time and our own receptions.
+        """Give each contact the later time of the device advert time and our own receptions.
 
-        A contact's ``last_seen`` arrives as the firmware's ``last_advert``, which the
-        advertising node stamped with its own clock — hearsay
-        (:func:`~meshterm.core.models.advert_time` can only refuse a *future* stamp; a node
-        whose clock runs days behind reports a plausible-looking time that never catches
-        up). Our own history holds first-hand evidence instead, stamped when we received
-        something: overheard adverts and telemetry
-        (:meth:`~meshterm.persistence.repository.Repository.last_heard_by_node`) and direct
-        messages the node sent us
-        (:meth:`~meshterm.persistence.repository.Repository.last_message_by_peer`) — which
-        count, because in this app's lexicon "heard" means received from, and a message is
-        received from its sender.
+        The ``last_seen`` value of a contact comes from the ``last_advert`` value of the
+        firmware. The node that sent the advert put that time on it with its own clock, so
+        the time is not first-hand. (:func:`~meshterm.core.models.advert_time` can refuse
+        only a time in the future. A node whose clock is days late reports a time that looks
+        correct and never becomes current.) Our own history has first-hand evidence instead,
+        with the time at which we received something:
 
-        So the three are merged by taking the latest, here — once, at the one point every
-        screen fetches contacts through, so heard lanes, recency sorts, silence alerts and
-        the archive ladder all see the same honest value. Taking the *latest* rather than
-        preferring either side means a device time still stands whenever the firmware caught
-        an advert we did not record (monitoring off, app not running); we only override it
-        with proof of a later reception. A contact we have truly never heard stays ``None``
-        and reads ``never``. Best-effort: a history read failure just returns the list
-        unmerged, never blocking the fetch.
+        * adverts and telemetry that we heard
+          (:meth:`~meshterm.persistence.repository.Repository.last_heard_by_node`), and
+        * direct messages that the node sent to us
+          (:meth:`~meshterm.persistence.repository.Repository.last_message_by_peer`).
+
+        The messages count, because in the lexicon of this app "heard" means "received from",
+        and a message is received from its sender.
+
+        Thus this method merges the three times and takes the latest. It does this one time,
+        here, at the only point through which each screen gets contacts. Thus the heard lanes,
+        the recency sorts, the silence alerts, and the archive ladder all see the same correct
+        value.
+
+        The method takes the latest time, and does not prefer one of the sources. Thus a time
+        from the device stays when the firmware received an advert that we did not store
+        (monitoring off, or the app not running). We replace that time only with proof of a
+        later reception. A contact that we never heard stays ``None`` and shows ``never``.
+        This step is best effort: if a history read fails, the method returns the list
+        without the merge. It never blocks the read.
         """
         try:
             heard = self._ctx.repo.last_heard_by_node()
             messaged = self._ctx.repo.last_message_by_peer()
-        except Exception as exc:  # noqa: BLE001 - never block a contacts read on history
+        except Exception as exc:  # noqa: BLE001 - the history must never block a contacts read
             self._ctx.log.debug("devstate: last-heard merge skipped: %s", exc)
             return contacts
         merged: list[Contact] = []
@@ -239,9 +258,10 @@ class DeviceState:
             ident = (contact.public_key or contact.key_prefix or "").lower()
             ident = ident.removeprefix("0x")
             stamps = [contact.last_seen, heard.get(ident[:12])]
-            # A message's peer is whatever width the wire addressed, which need not match
-            # the contact table's — so either may be the shorter, exactly as the live chat
-            # matches an inbound sender to its thread.
+            # The peer of a message has the width that the address on the wire used. That
+            # width can be different from the width in the contact table. Thus either one can
+            # be the shorter one. The live chat matches an incoming sender to its thread in
+            # the same way.
             stamps += [
                 when
                 for peer, when in messaged.items()
@@ -255,25 +275,27 @@ class DeviceState:
         return merged
 
     async def _refresh_contacts_quietly(self) -> None:
-        """Background contacts refresh: update the cache, swallow a failure (keep the old list)."""
+        """Refresh the contacts in the background. If the refresh fails, keep the old list."""
         try:
             await self._fetch_contacts()
-        except Exception as exc:  # noqa: BLE001 - a stale list is fine; never surface here
+        except Exception as exc:  # noqa: BLE001 - an old list is acceptable. Do not show the error.
             self._ctx.log.debug("devstate: background contacts refresh failed: %s", exc)
 
-    # -- self-info (stale-while-revalidate; an in-app write invalidates it) -------
+    # -- self-info (stale-while-revalidate, and a write in the app invalidates it) ----
 
     async def self_info(self) -> dict:
-        """Return the node's own self-info, cached and refreshed lazily like the contacts.
+        """Return the self-info of our node, cached and refreshed when old, as the contacts are.
 
-        The first call reads it from the radio; later calls return the cached copy at once,
-        and past :data:`_SELF_INFO_TTL_S` also re-read it in the background, for the position
-        a GPS moves. The config editor still invalidates it outright when it writes.
+        The first call reads it from the device. Later calls return the cached copy
+        immediately. After :data:`_SELF_INFO_TTL_S`, a call also reads it again in the
+        background, because a GPS can change the position. When the config editor writes,
+        it also invalidates the cached copy immediately.
 
         Returns:
-            The self-info payload (identity, radio tuning, coordinates, tx power). Raises like
-            :meth:`~meshterm.core.connection.Device.get_self_info` if the first fetch fails;
-            the failure is not cached, so the next call retries.
+            The self-info payload (identity, radio tuning, coordinates, tx power). If the
+            first read fails, this method raises the same error as
+            :meth:`~meshterm.core.connection.Device.get_self_info`. The failure is not cached,
+            thus the next call tries again.
         """
         if self._self_info is None:
             return await self._fetch_self_info()
@@ -282,7 +304,10 @@ class DeviceState:
         return self._self_info
 
     async def _fetch_self_info(self) -> dict:
-        """Read the self-info from the device and cache it (blocking, deduplicated)."""
+        """Read the self-info from the device and cache it.
+
+        The caller waits for the read. Concurrent calls share one read.
+        """
         async with self._self_info_lock:
             if (
                 self._self_info is not None
@@ -295,31 +320,34 @@ class DeviceState:
             return self._self_info
 
     async def _refresh_self_info_quietly(self) -> None:
-        """Background self-info refresh: a failure keeps the copy already held."""
+        """Refresh the self-info in the background. If it fails, keep the copy in the cache."""
         try:
             await self._fetch_self_info()
-        except Exception as exc:  # noqa: BLE001 - a stale copy is fine; never surface here
+        except Exception as exc:  # noqa: BLE001 - an old copy is acceptable. Do not show the error.
             self._ctx.log.debug("devstate: background self-info refresh failed: %s", exc)
 
     def peek_self_info(self) -> dict | None:
-        """The self-info already in hand, or ``None`` — never a radio read.
+        """The self-info that the cache already has, or ``None``.
 
-        The :meth:`peek_contacts` of our own node: context for a surface that must not wait.
+        This method never reads from the device. It is the :meth:`peek_contacts` for our
+        node: context for a screen that must not wait.
         """
         return self._self_info
 
     async def path_hash_mode(self) -> int:
-        """Return the device's path-hash routing mode, cached for the session.
+        """Return the path-hash routing mode of the device, cached for the session.
 
         Returns:
-            The path-hash mode integer. Raises like
-            :meth:`~meshterm.core.connection.Device.get_path_hash_mode` if the read fails, so
-            the optional-read callers that wrap this in ``try`` fall back exactly as before.
+            The path-hash mode as an integer. If the read fails, this method raises the same
+            error as :meth:`~meshterm.core.connection.Device.get_path_hash_mode`. Thus the
+            callers that put this call in a ``try`` block, because the read is optional for
+            them, use their fallback as before.
         """
         if self._path_hash_mode is None:
-            # Locked like the other first fetches: :meth:`prewarm` reads this in the background
-            # at connect, so a screen opening in that same beat would otherwise issue a second,
-            # identical round-trip alongside it rather than awaiting the one in flight.
+            # A lock, as for the other first reads: :meth:`prewarm` reads this value in the
+            # background at connect. Without the lock, a screen that opens at the same time
+            # sends a second, identical round trip, and does not wait for the read that is in
+            # progress.
             async with self._path_hash_lock:
                 if self._path_hash_mode is None:
                     device = await self._ctx.device()
@@ -327,13 +355,13 @@ class DeviceState:
         return self._path_hash_mode
 
     async def routing_prefix_bytes(self) -> int:
-        """The device's path-hash width in bytes, or 0 when unknowable.
+        """The path-hash width of the device in bytes, or 0 when it cannot be known.
 
-        What a surface that *highlights* hashes actually wants: how many leading bytes of a
-        key the mesh routes on, which is what :func:`~meshterm.ui.widgets.highlighted_hash`
-        lights. Best-effort, because every caller reads stored history and must work with no
-        radio at all — an unreachable device (or firmware that doesn't report the mode) just
-        leaves every hash un-highlighted rather than failing the screen.
+        A screen that lights the hashes in keys must have this value: the number of bytes at
+        the start of a key that the mesh routes on. :func:`~meshterm.ui.widgets.highlighted_hash`
+        lights these bytes. This method is best effort, because each caller reads stored
+        history and must work with no device at all. If the device cannot be reached (or the
+        firmware does not report the mode), no hash is lit, and the screen does not fail.
 
         Returns:
             The hash width in bytes (1–4), or 0 when the mode could not be read.
@@ -342,26 +370,28 @@ class DeviceState:
             if not (self._ctx.is_connected or self._ctx.settings.connect_on_start):
                 return 0
             mode = await self.path_hash_mode()
-        except Exception:  # noqa: BLE001 - optional read; absence just skips highlighting
+        except Exception:  # noqa: BLE001 - an optional read. If it is absent, no hash is lit.
             return 0
         return (mode + 1) if isinstance(mode, int) and 0 <= mode <= 3 else 0
 
-    # -- the default flood scope (held until a config write invalidates it) ------
+    # -- the default flood scope (kept until a config write invalidates it) ------
 
     async def default_scope(self) -> str:
-        """The companion's persisted default flood scope, ``""`` for none, read once.
+        """The default flood scope that the companion keeps, or ``""`` for none. Read one time.
 
-        What a plain channel send goes out under, so it is what a channel with no scope of
-        its own records its messages as sent under. One round trip, then held until the
-        config editor writes a setting (:meth:`invalidate_config`) or the link is rebuilt.
+        A plain channel send uses this scope. Thus a channel that has no scope of its own
+        stores its messages as sent in this scope. The method does one round trip. Then the
+        cache keeps the value until the config editor writes a setting
+        (:meth:`invalidate_config`) or the link is made again.
 
         Returns:
             The bare region name, or ``""`` when no default scope is set.
 
         Raises:
-            Exception: Like :meth:`~meshterm.core.connection.Device.get_default_flood_scope`
-                — firmware older than 1.15 has no default scope to read. Not cached, so the
-                next call asks again.
+            Exception: The same errors as
+                :meth:`~meshterm.core.connection.Device.get_default_flood_scope`. Firmware
+                older than 1.15 has no default scope to read. The failure is not cached, thus
+                the next call asks again.
         """
         if self._default_scope is None:
             device = await self._ctx.device()
@@ -369,25 +399,26 @@ class DeviceState:
         return self._default_scope
 
     def note_default_scope(self, name: str | None) -> None:
-        """Record a default scope just read or written elsewhere (Device config).
+        """Keep a default scope that other code read or wrote a short time ago (Device config).
 
         Args:
-            name: The bare name, ``""`` for none, or ``None`` to forget it and re-read.
+            name: The bare name, ``""`` for none, or ``None`` to forget the value and read it
+                again.
         """
         self._default_scope = None if name is None else str(name)
 
-    # -- channel slots (held until the channel editor invalidates them) --------
+    # -- channel slots (kept until the channel editor invalidates them) --------
 
     async def channel_slots(self) -> list[ChannelSlot]:
         """Return the configured channel slots, cached until a channel edit invalidates them.
 
-        The underlying probe (:func:`~meshterm.core.channel_probe.read_channel_slots`) walks
-        every slot index on the firmware, which is one of the slowest reads on a screen open — so it
-        is well worth reading once. It is best-effort itself (an unsupported firmware yields an
-        empty list rather than raising), but a probe that ended early because a *read failed*
-        is answered and then dropped rather than cached — see
-        :func:`~meshterm.core.channel_probe.probe_channel_slots` for why a short list is not a
-        layout.
+        The probe that this method uses (:func:`~meshterm.core.channel_probe.read_channel_slots`)
+        reads each slot index on the firmware. That is one of the slowest reads when a screen
+        opens, thus one read for the session is a large benefit. The probe is best effort (on
+        a firmware that does not support it, it gives an empty list and does not raise). But
+        if the probe stopped early because a read failed, this method returns the result and
+        does not cache it. Refer to :func:`~meshterm.core.channel_probe.probe_channel_slots`
+        for the reason why a short list is not a layout.
 
         Returns:
             One :class:`~meshterm.core.channel_probe.ChannelSlot` per slot, in index order.
@@ -399,27 +430,32 @@ class DeviceState:
                     slots, complete = await probe_channel_slots(device)
                     if complete:
                         self._channels = slots
-                    # An incomplete probe is answered but not kept: one timed-out read used
-                    # to poison the whole session, and the shortfall does not announce
-                    # itself — an empty result reads exactly like a device with no channels.
+                    # Return an incomplete probe, but do not keep it. Before, one read that
+                    # timed out made the cache wrong for the whole session. The missing slots
+                    # do not show themselves: an empty result looks the same as a device with
+                    # no channels.
                     return slots
         return self._channels
 
     async def channel_capacity(self) -> int:
-        """Return the device's channel-slot capacity, discovered once and held for the session.
+        """Return the channel-slot capacity of the device, found once and kept for the session.
 
-        The capacity is a fixed firmware build constant, so it is probed once and reused. The
-        probe (:meth:`~meshterm.core.connection.Device.channel_capacity`) reads slots upward
-        until the firmware rejects an index; on firmware that *never* rejects one it walks up
-        to :data:`~meshterm.core.channels.CHANNEL_SLOT_PROBE_CAP` slots — one of the slowest
-        reads on a screen open, and paid on *every* open of the channel manager before this
-        cache. Unlike the configured-slot list it cannot be safely bounded by a run of empty
-        slots (it must reach a larger firmware's real ceiling), so it is bounded by caching:
-        held until :meth:`reset` (a reconnect re-reads it) rather than invalidated on a channel
-        edit, since editing a channel never changes how many slots the hardware has.
+        The capacity is a constant of the firmware build. Thus the method probes it one time
+        and uses it again. The probe (:meth:`~meshterm.core.connection.Device.channel_capacity`)
+        reads the slots in increasing order until the firmware rejects an index. If the
+        firmware never rejects an index, the probe reads up to
+        :data:`~meshterm.core.channels.CHANNEL_SLOT_PROBE_CAP` slots. That is one of the
+        slowest reads when a screen opens. Before this cache, each open of the channel manager
+        paid that cost.
+
+        Unlike the list of configured slots, a series of empty slots cannot safely limit this
+        probe, because the probe must reach the real limit of a larger firmware. Thus the
+        cache limits the cost: the value stays until :meth:`reset` (a reconnect reads it
+        again). A channel edit does not invalidate it, because an edit of a channel never
+        changes the number of slots that the hardware has.
 
         Returns:
-            The number of addressable channel slots the firmware exposes.
+            The number of addressable channel slots that the firmware makes available.
         """
         if self._channel_capacity is None:
             async with self._capacity_lock:
@@ -431,36 +467,48 @@ class DeviceState:
     # -- prewarm (fill the slow caches in the background, off the navigation path) --
 
     def prewarm(self) -> None:
-        """Warm *every* cached fact in the background after connect, cheapest reads first.
+        """Read all the cached facts in the background after connect, the fastest reads first.
 
-        Called once the session's link is up (see :func:`meshterm.ui.menu._resume_monitor`) so
-        the first screen that reads them — Contacts, Chat, Trace, the Dashboard, the channel
-        manager — is served from cache instantly, rather than paying the round-trips in the
-        navigation path where the user is waiting on the screen to open. It folds the
-        unavoidable first reads into one quiet wait behind the menu instead of surfacing them
-        on the first open.
+        This method is called one time, when the link of the session is up (refer to
+        :func:`meshterm.ui.menu._resume_monitor`). Thus the first screen that reads the facts
+        (Contacts, Chat, Trace, the Dashboard, the channel manager) gets them from the cache
+        immediately. It does not do the round trips in the navigation path, while the user
+        waits for the screen to open. The first reads are necessary, but this method puts them
+        into one quiet wait behind the menu, and the first open does not show them.
 
-        **Order is the whole design.** The reads share one link and run in sequence, so a fact
-        warmed late is a fact the first open still queues behind — and the two slot probes at
-        the end are the slowest reads in the app (each walks the slot table one index at a
-        time, measured in seconds). So the warm runs cheapest-first: the two single round-trips
-        every list screen needs (:meth:`self_info`, :meth:`path_hash_mode`), then the contacts
-        table, then the probes only the channel manager waits on. Opening Contacts a second
-        after connect then finds its three facts already in hand instead of joining the queue
-        behind a slot walk. Warming ``path_hash_mode`` is what closed the last such gap: it is
-        read on the Contacts and Trace open paths to size the key-hash highlight, and nothing
-        else warmed it.
+        **The order is the most important part of the design.** The reads share one link and
+        run one after the other. Thus the first open must still wait for a fact that is read
+        late. The two slot probes at the end are the slowest reads in the app: each probe
+        reads the slot table one index at a time, and takes seconds. Thus the reads go from
+        the fastest to the slowest:
 
-        The work runs as a tracked background task: **sequential** (never gathered — concurrent
-        reads collide on the BLE UART; see the module note), best-effort (a failure just leaves
-        the cache cold for a normal lazy fetch later), and cancelled on :meth:`reset` /
-        :meth:`aclose`. If a getter is reached before this finishes, it awaits the *same*
-        in-flight fetch — the per-fetch locks dedupe — so prewarming never doubles a read.
+        1. the two single round trips that each list screen must have (:meth:`self_info`,
+           :meth:`path_hash_mode`),
+        2. the contacts table,
+        3. the probes for which only the channel manager waits.
+
+        Then, if the user opens Contacts one second after connect, its three facts are
+        already in the cache, and it does not wait behind a slot probe. The read of
+        ``path_hash_mode`` closed the last such gap. The Contacts and Trace screens read it
+        when they open, to find how many bytes of a key to light, and no other code read it
+        before this method did.
+
+        The work runs as a tracked background task:
+
+        * **sequential**: the reads are never gathered, because concurrent reads collide on
+          the BLE UART.
+        * best effort: if a read fails, that fact stays out of the cache, and a normal read on
+          demand gets it later.
+        * cancelled on :meth:`reset` and :meth:`aclose`.
+
+        If a getter is called before this task finishes, it waits for the same read that is
+        in progress (the lock for each read prevents a duplicate). Thus the prewarm never
+        reads a fact two times.
         """
         self._spawn(self._prewarm())
 
     async def _prewarm(self) -> None:
-        """Fetch every cached fact one after another, swallowing failures (best-effort warm)."""
+        """Read each cached fact, one after the other, and ignore failures (best effort)."""
         for label, fetch in (
             ("self-info", self.self_info),
             ("path-hash mode", self.path_hash_mode),
@@ -470,75 +518,86 @@ class DeviceState:
         ):
             try:
                 await fetch()
-            except Exception as exc:  # noqa: BLE001 - a warm miss just falls back to a lazy fetch
+            except Exception as exc:  # noqa: BLE001 - after a failure, a later read gets the fact
                 self._ctx.log.debug("devstate: prewarm of %s failed: %s", label, exc)
 
     # -- invalidation (called by the code that writes device state) ------------
 
     def invalidate_contacts(self) -> None:
-        """Drop the cached contacts so the next read re-fetches (e.g. a contact was removed)."""
+        """Remove the cached contacts, so that the next read gets them again.
+
+        For example, call this method after a contact was removed.
+        """
         self._contacts = None
         self._contacts_at = 0.0
 
     def invalidate_self_info(self) -> None:
-        """Drop the cached self-info — call after writing name/coords/radio/tx power/tuning."""
+        """Remove the cached self-info.
+
+        Call this method after a write of the name, the coordinates, the radio, the tx power,
+        or the tuning.
+        """
         self._self_info = None
 
     def invalidate_path_hash_mode(self) -> None:
-        """Drop the cached path-hash mode — call after writing it in the config editor."""
+        """Remove the cached path-hash mode. Call this method after the config editor writes it."""
         self._path_hash_mode = None
 
     @property
     def channels_epoch(self) -> int:
-        """How many times the channel layout has been dropped this session.
+        """The number of times that the cache removed the channel layout in this session.
 
-        A caller that wants to know whether *anything* rewrote a slot while it was busy
-        compares this across the gap rather than trusting a return value: a write that
-        landed and then raised on its way back moved the device just as much as one that
-        returned cleanly, and the count it never got to increment cannot say so.
+        A caller can want to know if any code wrote a slot again while the caller was busy.
+        That caller compares this value before and after, and does not trust a return value.
+        A write can change the device and then raise an error on its way back. That write
+        changed the device as much as a write that returned with no error. But that write
+        never got to increment its count, so its count cannot show the change.
         """
         return self._channels_epoch
 
     def invalidate_channels(self) -> None:
-        """Drop the cached channel slots — call after the channel editor saves or clears one."""
+        """Remove the cached channel slots.
+
+        Call this method after the channel editor saves or clears a slot.
+        """
         self._channels = None
         self._channels_epoch += 1
 
     def invalidate_config(self) -> None:
-        """Drop everything the config editor can change in one call (self-info + routing mode).
+        """Remove all that the config editor can change, in one call (self-info, routing mode).
 
-        A convenience for the config editor's apply path, which may have written any of the
-        self-info fields and/or the path-hash mode; dropping both is cheaper than tracking
-        exactly which settings changed.
+        This method helps the apply path of the config editor. That path can write any of
+        the self-info fields, the path-hash mode, or both. To remove both costs less than to
+        record exactly which settings changed.
         """
         self.invalidate_self_info()
         self.invalidate_path_hash_mode()
         self._default_scope = None
 
     def reset(self) -> None:
-        """Clear the whole cache and cancel any in-flight background refresh.
+        """Clear all of the cache, and cancel each background refresh that is in progress.
 
-        Called on a reconnect: a fresh link should re-read the truth rather than trust facts
-        cached against the connection that just dropped.
+        This method is called on a reconnect: a new link must read the true values again. It
+        must not trust facts that were cached on the connection that was lost.
         """
         self.invalidate_contacts()
         self.invalidate_self_info()
         self.invalidate_path_hash_mode()
         self.invalidate_channels()
         self._default_scope = None
-        # Capacity is a hardware constant (not touched by channel edits, so it has no per-write
-        # invalidator), but a reconnect may be to a different device — drop it too.
+        # The capacity is a hardware constant. Channel edits do not change it, thus no write
+        # invalidates it. But a reconnect can go to a different device, thus remove it too.
         self._channel_capacity = None
         for task in list(self._tasks):
             task.cancel()
         self._tasks.clear()
 
     async def aclose(self) -> None:
-        """Cancel any background refresh at session end (an alias for :meth:`reset`)."""
+        """Cancel each background refresh at the end of the session (an alias for :meth:`reset`)."""
         self.reset()
 
     def _spawn(self, coro) -> None:  # type: ignore[no-untyped-def]
-        """Run a background refresh as a tracked task so it can be cancelled on reset."""
+        """Run a background refresh as a tracked task, so that a reset can cancel it."""
         task = asyncio.ensure_future(coro)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)

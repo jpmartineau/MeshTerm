@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Collecting the mesh's located nodes into map markers.
+"""Collect the nodes of the mesh that have a location into map markers.
 
-One list, three surfaces: the ``map`` tool's full-screen map, the node page's preview minimap,
-and the editors' pick-a-location map all plot the same mesh, so they all come through
-:func:`gather_markers`. It sits in ``services/`` because it is an assembly job over the
-device's contacts and the observation history — the layer below anything that draws — and
-because two screens and one tool need it, none of which may import from the others.
+One list for three surfaces: the full-screen map of the ``map`` tool, the preview minimap
+of the node page, and the map where the editors pick a location. All three plot the same
+mesh, so they all get their markers from :func:`gather_markers`. The function is in
+``services/`` for two reasons. It assembles data from the contacts of the device and the
+observation history, which is the layer below all the code that draws. Also, two screens
+and one tool use it, and none of them can import from the others.
 """
 
 from __future__ import annotations
@@ -20,21 +21,22 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 
 async def gather_markers(ctx: AppContext, *, wait: bool = True) -> list[MapMarker]:
-    """Collect every located node to plot: the device's contacts, plus our own node.
+    """Collect all the nodes with a location to plot: the contacts of the device, and our node.
 
-    The companion's **contact list** is the authoritative source for a node's name,
-    type (repeater vs. leaf), and advertised position — the passive-monitor
-    observations only carry a location for the rare node that broadcasts one in an
-    advert. So contacts drive the markers, and each contact is enriched with signal
-    detail from the observations when we've overheard it directly.
+    The **contact list** of the companion is the authoritative source for the name of a
+    node, its type (repeater or leaf), and its advertised position. The observations of
+    the passive monitor have a location only for the rare node that broadcasts one in an
+    advert. Thus the contacts set the markers. When MeshTerm heard a contact directly, the
+    marker of that contact also gets signal detail from the observations.
 
     Args:
-        ctx: Shared application context.
-        wait: Whether to wait on the radio for contacts and our own position the session
-            has not cached yet. ``False`` builds the markers from what is already in hand —
-            the cache and our own history — and never makes a round trip, for a surface
-            whose nodes are only context (the location picker): a companion refusing the
-            contacts read can otherwise hold it closed for twenty-odd seconds.
+        ctx: The shared application context.
+        wait: Whether to wait for the device to send the contacts and the position of our
+            node, when the session has not cached them yet. ``False`` makes the markers
+            from the data that MeshTerm already has (the cache and our own history), and
+            never makes a round trip. Use it for a surface whose nodes are only context
+            (the location picker). Without it, a companion that refuses the contacts read
+            can keep that surface closed for twenty seconds or more.
     """
     observed = {n.node: n for n in ctx.repo.heard_nodes() if n.node}
     markers: list[MapMarker] = []
@@ -58,7 +60,8 @@ async def gather_markers(ctx: AppContext, *, wait: bool = True) -> list[MapMarke
             )
         )
 
-    # A node we overheard advertising a location but that isn't in our contacts.
+    # A node that MeshTerm heard when it advertised a location, but that is not in our
+    # contacts.
     for node in observed.values():
         if not node.has_location or node.node in seen:
             continue
@@ -86,7 +89,7 @@ async def gather_markers(ctx: AppContext, *, wait: bool = True) -> list[MapMarke
 
 
 async def _contacts(ctx: AppContext) -> list:
-    """Fetch the device's contacts, best-effort (an unreachable radio yields none)."""
+    """Get the contacts of the device, best-effort (none if MeshTerm cannot reach the device)."""
     try:
         return await ctx.devstate.contacts()
     except Exception:  # noqa: BLE001 - the map still works from observations alone
@@ -94,7 +97,7 @@ async def _contacts(ctx: AppContext) -> list:
 
 
 async def _self_marker(ctx: AppContext) -> MapMarker | None:
-    """Build a marker for our own node from the device, if its location is known."""
+    """Make a marker for our node from the device, if its location is known."""
     try:
         info = await ctx.devstate.self_info()
     except Exception:  # noqa: BLE001 - the map is useful without our own position
@@ -103,10 +106,10 @@ async def _self_marker(ctx: AppContext) -> MapMarker | None:
 
 
 def _marker_for_self(info: dict) -> MapMarker | None:
-    """Our own node's marker from a self-info payload, or ``None`` where it has no fix."""
+    """The marker of our node from a self-info payload, or ``None`` when it has no fix."""
     lat, lon = _as_float(info.get("adv_lat")), _as_float(info.get("adv_lon"))
     if lat is None or lon is None or not usable_fix(lat, lon):
-        return None  # a device with no fix reports 0/0 (or nonsense out-of-range)
+        return None  # a device with no fix reports 0/0 (or bad values out of range)
     return MapMarker(
         label=str(info.get("name") or "this node"),
         lat=lat,
@@ -118,7 +121,7 @@ def _marker_for_self(info: dict) -> MapMarker | None:
 
 
 def _signal_detail(node: object) -> str:
-    """A compact 'N pkts · +x.x dB' reception note for a heard node, or '' if unheard."""
+    """A short 'N pkts · +x.x dB' reception note for a heard node, or '' if it is not heard."""
     if node is None:
         return ""
     detail = f"{node.count} pkts"  # type: ignore[attr-defined]
@@ -128,7 +131,7 @@ def _signal_detail(node: object) -> str:
 
 
 def _as_float(value: object) -> float | None:
-    """Best-effort float conversion, returning ``None`` on missing/garbage values."""
+    """Best-effort float conversion (``None`` for a missing or bad value)."""
     if value is None:
         return None
     try:
