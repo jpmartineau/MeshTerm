@@ -33,11 +33,18 @@ nothing — which makes this an *out-of-band* detection problem: identify the te
 read its configuration, and match the configured face against fonts known to carry the
 powerline block.
 
-Three sources of truth, in confidence order:
+Four sources of truth, in confidence order:
 
 * **An explicit override** — ``MESHTERM_POWERLINE`` (``1``/``full``, ``core``,
   ``0``/``off``) always wins, the same gate pattern as ``MESHTERM_FULL_WIDTH``. The
   user knows their glass better than any probe.
+* **A handheld's own font.** Where the platform names a glyph contract
+  (:attr:`~meshterm.platforms.Platform.font`), every frame is folded down to that font
+  at the render boundary, whatever terminal started the app — so the inventory is the
+  answer, and asking the terminal would be asking the wrong glass. The Cardputer's panel
+  is Terminus, which carries the core chevrons, so its paths are chips; the PicoCalc's
+  512-glyph console font has no room for them, so its paths stay arrows. Nothing is
+  probed: :data:`~meshterm.ui.fontset.FONTS` already says what each font can draw.
 * **The configured font**, resolved per terminal: Windows Terminal (``WT_SESSION`` +
   ``WT_PROFILE_ID`` → the profile's ``font.face`` in ``settings.json``), VS Code's
   integrated terminal (``TERM_PROGRAM=vscode`` → ``terminal.integrated.fontFamily``,
@@ -80,6 +87,8 @@ from functools import lru_cache
 from pathlib import Path
 
 from ..core import win32dll
+from ..platforms import Platform, on_platform
+from .fontset import FONTS
 
 #: Coverage levels a verdict (or a recommended font) can carry, strongest first.
 FULL = "full"
@@ -196,7 +205,8 @@ class PowerlineSupport:
 
     Attributes:
         level: :data:`FULL`, :data:`CORE`, :data:`NONE`, or :data:`UNKNOWN`.
-        source: What decided it — ``"env"`` (the override), ``"font:<terminal>"``
+        source: What decided it — ``"env"`` (the override), ``"platform:<name>"`` (a
+            handheld's own font inventory), ``"font:<terminal>"``
             (a configured face matched, or definitively didn't), ``"renderer:<terminal>"``
             (the terminal draws the glyphs itself), ``"ssh"`` (the font lives on the far
             client, unknowable), or ``"unknown"``.
@@ -576,13 +586,37 @@ def _renderer_backed(environ: Mapping[str, str]) -> str | None:
     return None
 
 
+#: The glyphs the path widget draws at ``core``: the solid triangle every seam is, and the
+#: thin one that joins two fills the eye can't tell apart (:mod:`~meshterm.ui.pathline`).
+_CORE_GLYPHS = (0xE0B0, 0xE0B1)
+
+#: What ``full`` adds that the widget uses: the rounded caps a path's square ends become.
+_FULL_GLYPHS = (0xE0B4, 0xE0B6)
+
+
+def _inventory_coverage(inventory: frozenset[int]) -> str:
+    """The coverage level a known glyph inventory earns — no guess, it is all listed."""
+    if not all(code in inventory for code in _CORE_GLYPHS):
+        return NONE
+    return FULL if all(code in inventory for code in _FULL_GLYPHS) else CORE
+
+
 def _powerline_support(
     environ: Mapping[str, str] | None = None,
     *,
     cwd: Path | None = None,
     conhost_probe: Callable[[], str | None] = _conhost_face,
+    handheld: tuple[str, frozenset[int]] | None = None,
 ) -> PowerlineSupport:
-    """The uncached verdict (see :func:`powerline_support` for the ladder)."""
+    """The uncached verdict (see :func:`powerline_support` for the ladder).
+
+    Args:
+        environ: The environment to inspect (defaults to ``os.environ``).
+        cwd: Where the VS Code workspace walk starts (defaults to the process cwd).
+        conhost_probe: The classic-console face reader (injectable for tests).
+        handheld: The platform's name and glyph inventory where a handheld's own font
+            draws the screen, or ``None`` on a terminal.
+    """
     env = os.environ if environ is None else environ
     override = (env.get("MESHTERM_POWERLINE") or "").strip().lower()
     if override in {"0", "off", "no", "none", "false"}:
@@ -591,6 +625,9 @@ def _powerline_support(
         return PowerlineSupport(FULL, "env")
     if override == "core":
         return PowerlineSupport(CORE, "env")
+    if handheld is not None:
+        name, inventory = handheld
+        return PowerlineSupport(_inventory_coverage(inventory), f"platform:{name}")
 
     detected = detect_terminal_font(env, cwd=cwd, conhost_probe=conhost_probe)
     matched = match_recommended(detected.face) if detected else None
@@ -610,16 +647,17 @@ def _powerline_support(
 def powerline_support() -> PowerlineSupport:
     """The session's powerline verdict, decided once and cached.
 
-    The ladder: the ``MESHTERM_POWERLINE`` override, then the configured font matched
-    against :data:`RECOMMENDED_FONTS`, then a renderer that draws the glyphs itself,
-    then an honest ``none`` (face read, no match, no fallback) or ``unknown`` (ssh, or
-    a terminal we can't identify). Cached because the environment and settings files
-    don't change mid-session; tests exercise :func:`_powerline_support` directly.
+    The ladder: the ``MESHTERM_POWERLINE`` override, then a handheld platform's own font
+    inventory, then the configured font matched against :data:`RECOMMENDED_FONTS`, then
+    a renderer that draws the glyphs itself, then an honest ``none`` (face read, no
+    match, no fallback) or ``unknown`` (ssh, or a terminal we can't identify). Cached
+    because the environment and settings files don't change mid-session, and cleared on
+    a platform switch (:func:`_bind`); tests exercise :func:`_powerline_support` directly.
 
     Returns:
         The :class:`PowerlineSupport` verdict.
     """
-    return _powerline_support(os.environ)
+    return _powerline_support(os.environ, handheld=_HANDHELD_FONT)
 
 
 def powerline_enabled() -> bool:
@@ -638,6 +676,20 @@ def powerline_full() -> bool:
     ends when it is true and squares them off when it isn't.
     """
     return powerline_support().level == FULL
+
+
+#: The active handheld's name and glyph inventory, or ``None`` where a terminal draws
+#: whatever it is sent. Bound at platform-switch time (:func:`_bind`).
+_HANDHELD_FONT: tuple[str, frozenset[int]] | None = None
+
+
+@on_platform
+def _bind(platform: Platform) -> None:
+    """Bind the handheld font the verdict reads, and drop the verdict the last one made."""
+    global _HANDHELD_FONT
+    inventory = FONTS.get(platform.font)
+    _HANDHELD_FONT = (platform.name, inventory) if inventory is not None else None
+    powerline_support.cache_clear()
 
 
 # --- installed-font scan ----------------------------------------------------------

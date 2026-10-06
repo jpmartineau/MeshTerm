@@ -14,6 +14,7 @@ import random
 import pytest
 
 import meshterm.ui.pathline as pathline
+from meshterm.platforms import CARDPUTER_ZERO, set_platform
 from meshterm.ui import oklab
 from meshterm.ui.pathline import (
     _DIM_BG,
@@ -44,7 +45,7 @@ from meshterm.ui.pathline import (
     path_line,
     with_action_mark,
 )
-from meshterm.ui.theme import node_style
+from meshterm.ui.theme import fold_text, node_style
 from meshterm.ui.widgets import path_text
 
 
@@ -156,6 +157,23 @@ def test_auto_mode_follows_the_terminal_verdict(monkeypatch: pytest.MonkeyPatch)
     assert POWERLINE_THIN in PathLine(hops).text().plain  # two keyless greys: the thin seam
     monkeypatch.setattr(pathline, "powerline_enabled", lambda: False)
     assert PathLine(hops).text().plain == "a → b"
+
+
+def test_the_cardputer_draws_chips_in_glyphs_its_font_has(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Cardputer's own font has the chevrons, so its paths are chips that fold clean.
+
+    Its verdict is read off its font (:mod:`~meshterm.ui.termfont`), and the render
+    boundary folds whatever that font lacks to ``?`` — so every mark the chip language
+    spends (both seams, both cracks, the elision, our star) must come through unchanged.
+    """
+    monkeypatch.delenv("MESHTERM_POWERLINE")
+    set_platform(CARDPUTER_ZERO)
+    hops = [PathHop(SELF_GLYPH, you=True), PathHop("Hub", key="3d"), elision_hop()]
+    line = PathLine([*hops, PathHop("a"), PathHop("b")]).text()  # auto: the font decides
+    drawn = [line, cut_to(line, 12), cut_mark(line, 1, ELIDE_HEAD)]
+    ink = "".join(text.plain for text in drawn)
+    assert {POWERLINE_SEP, POWERLINE_THIN, CRACK_TAIL, CRACK_HEAD, "⋯", SELF_GLYPH} <= set(ink)
+    assert fold_text(ink) == ink
 
 
 def test_the_cursor_is_a_hop_of_its_own_in_either_mode() -> None:

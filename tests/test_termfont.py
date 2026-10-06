@@ -12,6 +12,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+from meshterm.platforms import CARDPUTER_ZERO, PICOCALC_LYRA, REGULAR, set_platform
+from meshterm.ui.fontset import CARDPUTER_ZERO_CODEPOINTS, FONT_CODEPOINTS
 from meshterm.ui.termfont import (
     CORE,
     FULL,
@@ -30,6 +34,7 @@ from meshterm.ui.termfont import (
     installed_recommended,
     match_recommended,
     normalize_face,
+    powerline_support,
     primary_family,
 )
 
@@ -246,6 +251,40 @@ def test_powerline_support_kitty_ssh_and_unknown() -> None:
     assert (ssh.level, ssh.source) == (UNKNOWN, "ssh")
     lost = _powerline_support({"TERM": "xterm-256color"})
     assert (lost.level, lost.source) == (UNKNOWN, "unknown")
+
+
+def test_powerline_support_a_handheld_answers_from_its_own_font() -> None:
+    """A handheld's font draws the screen, so its inventory answers and no terminal does.
+
+    The Cardputer's Terminus carries the core chevrons and no rounded caps; the PicoCalc's
+    512-glyph console font has neither, so a kitty that started it changes nothing. The
+    override still outranks the font, as it outranks every probe.
+    """
+    kitty = {"TERM": "xterm-kitty"}  # a terminal that would otherwise earn core
+    cardputer = _powerline_support(kitty, handheld=("cardputer-zero", CARDPUTER_ZERO_CODEPOINTS))
+    assert (cardputer.level, cardputer.source) == (CORE, "platform:cardputer-zero")
+    picocalc = _powerline_support(kitty, handheld=("picocalc-lyra", FONT_CODEPOINTS))
+    assert (picocalc.level, picocalc.source) == (NONE, "platform:picocalc-lyra")
+    capped = CARDPUTER_ZERO_CODEPOINTS | {0xE0B4, 0xE0B6}
+    assert _powerline_support({}, handheld=("capped", capped)).level == FULL
+    pinned = {"MESHTERM_POWERLINE": "0"}
+    assert _powerline_support(pinned, handheld=("cardputer-zero", CARDPUTER_ZERO_CODEPOINTS)) == (
+        _powerline_support(pinned)
+    )
+
+
+def test_powerline_support_follows_a_platform_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The memoized verdict is dropped on a switch, so it never answers for the last glass."""
+    monkeypatch.delenv("MESHTERM_POWERLINE", raising=False)
+    monkeypatch.setenv("TERM", "xterm-kitty")
+    monkeypatch.delenv("WT_SESSION", raising=False)
+    monkeypatch.delenv("TERM_PROGRAM", raising=False)
+    set_platform(CARDPUTER_ZERO)
+    assert powerline_support().source == "platform:cardputer-zero"
+    set_platform(PICOCALC_LYRA)
+    assert powerline_support().source == "platform:picocalc-lyra"
+    set_platform(REGULAR)
+    assert powerline_support().source == "renderer:kitty"
 
 
 def test_installed_recommended_never_raises() -> None:
