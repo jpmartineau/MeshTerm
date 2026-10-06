@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """The selectable-list screen: the reusable replacement for ``questionary.select``.
 
-A :class:`SelectScreen` shows grouped, arrow-navigable choices with type-to-filter, bounded
-to the viewport and scrolled to keep the highlighted row visible. Choice values are
-arbitrary objects, so the same screen drives the main menu (tool names), the device picker
-(device objects), and the config editor (setting keys).
+A :class:`SelectScreen` shows grouped choices that the arrows move through, with
+type-to-filter. The list is limited to the viewport, and it scrolls to keep the highlighted
+row visible. A choice value can be any object. Thus the same screen operates the main menu
+(tool names), the device picker (device objects), and the config editor (setting keys).
 """
 
 from __future__ import annotations
@@ -25,14 +25,15 @@ from .screen import LazyLines, Screen
 def _wants_width(fn: Callable) -> bool:
     """Whether a callable :attr:`Choice.title` takes the render width.
 
-    A title callable with at least one *required* positional parameter is the width-aware
-    form; one with none (including defaults-only signatures) stays the zero-argument
-    live-repaint form. Decided from the signature once at construction — never by trying
-    the call, so a ``TypeError`` raised *inside* a title can't be mistaken for arity.
+    A title callable with one or more required positional parameters is the width-aware
+    form. A title callable with none (also a signature with only defaults) is the
+    zero-argument form, which is called again at each paint. The signature decides this one
+    time, at construction. A trial call never decides it, so that a ``TypeError`` raised in
+    a title is not mistaken for a wrong arity.
     """
     try:
         parameters = inspect.signature(fn).parameters.values()
-    except (TypeError, ValueError):  # a builtin without an introspectable signature
+    except (TypeError, ValueError):  # a builtin with a signature that cannot be examined
         return False
     return any(
         p.default is p.empty and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
@@ -45,48 +46,53 @@ class Choice:
     """One selectable row.
 
     Attributes:
-        title: Text shown for the row — a plain string or a Rich :class:`~rich.text.Text`
-            (for a coloured segment such as an unread badge). Either may instead be a
-            zero-argument callable resolved fresh on every repaint, so a row can track state
-            that changes while the list is open — or a callable taking the **render width**
-            (one required positional argument), the :class:`Separator` power extended to
-            rows: a route-bearing row can then middle-elide itself to the terminal
-            (``PathLine.ellipsized``) instead of being amputated at the right edge.
-        value: Value returned when the row is chosen.
-        deletable: Whether pressing Delete on this row asks to remove it. When set, Delete
-            resolves the list with a :class:`DeleteRequest` wrapping this row's value instead
-            of choosing it, so the caller can run a remove flow and re-open the list. Off by
-            default, so an ordinary list ignores Delete.
-        detail: An optional second line, drawn hanging under ``title`` at the pointer's
-            indent — context that doesn't belong in the selectable line itself (a route's
-            weakest SNR/sample count/provenance tag, say). Never scrolls or wraps; it
-            ellipsizes on its own if too wide. ``None`` (the default) draws nothing, so an
-            ordinary row stays exactly one line. May be a zero-argument callable like
-            ``title``.
-        hscroll_from: Cells at the *head* of the row that stay pinned while ``←→`` scroll
-            everything to their right (``hscroll`` lists only; ``0``, the default, slides
-            the whole line). For a row that is fixed lanes followed by one long run — the
-            Trophy case's rank/date/score columns in front of the walk — the lanes are the
-            reader's place in the list, and sliding them off to read the walk costs the row
-            its identity and gains nothing (the columns are the part that already fits).
-            Set it to the cell width of that fixed block, measured from the row itself, so
-            the scroll rides only the run that overflows. Setting it at all also *turns the
-            list's scrolling on* (see :class:`SelectScreen`): a head block is only meaningful
-            as the part that stays put, so a row that pins one is a row built to scroll,
-            wherever the builder's list ends up being shown.
-        fitted: The width-aware title *is* the row at any width, not a cut of a longer one:
-            its lanes are fixed and only a trailing chart gives cells back (the Channels
-            list's activity sparkline, which drops its oldest buckets to fit). The
-            highlighted row of an ``hscroll`` list then draws that fitted form too, instead
-            of keeping its natural one for ←→ to slide over — nothing past the edge of such a
-            row is worth sliding to, and a highlight that flipped the row back to a cut-off
-            chart would undo the fit on exactly the row being read.
-        pans: The row is a line of a *table* that ←→ pan as one: every panning row and
-            panning column header (:attr:`Separator.pans`) slides by the same shift, so the
-            lanes stay under their labels however far the reader has panned, and the shift
-            survives ↑↓ rather than snapping back on each new row. Declaring it turns the
-            list's panning on, the way :attr:`hscroll_from` turns scrolling on; rows that
-            don't pan (an action row under the table) stay put. See :class:`SelectScreen`.
+        title: The text of the row: a plain string or a Rich :class:`~rich.text.Text` (for
+            a coloured segment such as an unread badge). Instead, each of them can be a
+            zero-argument callable, resolved again at each paint. Thus a row can follow a
+            state that changes while the list is open. It can also be a callable that takes
+            the **render width** (one required positional argument). This is the ability of
+            :class:`Separator`, extended to rows. Thus a row with a route can elide its
+            middle to fit the terminal (``PathLine.ellipsized``), instead of a cut at the
+            right edge.
+        value: The value that is returned when the user chooses the row.
+        deletable: Whether a press of Delete on this row asks to remove the row. When it is
+            set, Delete resolves the list with a :class:`DeleteRequest` that wraps the value
+            of this row, instead of a choice of the row. Thus the caller can run a remove
+            flow and open the list again. It is off by default, so a usual list ignores
+            Delete.
+        detail: An optional second line, drawn under ``title`` at the indent of the
+            pointer. It gives context that does not belong in the selectable line itself
+            (for example, the weakest SNR, the sample count, or the provenance tag of a
+            route). It never scrolls or wraps. If it is too wide, it ellipsizes itself.
+            ``None`` (the default) draws nothing, so a usual row stays exactly one line. It
+            can be a zero-argument callable, as ``title`` can.
+        hscroll_from: The cells at the head of the row that stay pinned while ``←→``
+            scroll all the text to their right (only in ``hscroll`` lists. With ``0``, the
+            default, the full line slides). Some rows are fixed lanes, then one long run:
+            for example, the rank, date, and score columns of the Trophy case, in front of
+            the walk. The lanes tell the user where the row is in the list. If they slide
+            off when the user reads the walk, the row loses its identity, and nothing is
+            gained (the columns are the part that already fits). Set it to the cell width
+            of that fixed block, measured from the row itself. Thus the scroll moves only
+            the run that overflows. A value other than 0 also turns on the scroll of the
+            list (refer to :class:`SelectScreen`). A head block has a meaning only as the
+            part that does not move. Thus a row that pins one is a row made to scroll, on
+            whichever screen its list is shown.
+        fitted: The width-aware title is the full row at each width, not a cut of a longer
+            row. Its lanes are fixed, and only a chart at the end gives cells back (the
+            activity sparkline of the Channels list, which removes its oldest buckets to
+            fit). Then the highlighted row of an ``hscroll`` list also draws that fitted
+            form, instead of its natural form for ←→ to slide over. Past the edge of such a
+            row, there is nothing that is worth a slide. Also, if the highlight changes the
+            row back to a chart that is cut off, the fit is lost on the row that the user
+            reads.
+        pans: The row is a line of a table that ←→ pan as one unit. Each row and each
+            column header that pans (:attr:`Separator.pans`) slides by the same shift. Thus
+            the lanes stay under their labels, however far the user panned. The shift also
+            stays when ↑↓ move, and does not go back to zero on each new row. A row that
+            declares it turns on the pan of the list, in the same way as
+            :attr:`hscroll_from` turns on the scroll. Rows that do not pan (an action row
+            under the table) do not move. Refer to :class:`SelectScreen`.
     """
 
     title: str | Text | Callable[[], str | Text] | Callable[[int], str | Text]
@@ -98,48 +104,49 @@ class Choice:
     pans: bool = False
 
     def __post_init__(self) -> None:
-        """Read the title callable's arity once, so no paint has to ask again."""
-        # The callable form's arity, read once — see _wants_width.
+        """Read the arity of the title callable one time, so that no paint must ask again."""
+        # The arity of the callable form, read one time. Refer to _wants_width.
         self._title_wants_width = callable(self.title) and _wants_width(self.title)
 
     def text(self, width: int) -> str | Text:
-        """The row's content at ``width`` cells, resolving either callable form."""
+        """The content of the row at ``width`` cells. This method resolves the callable forms."""
         if not callable(self.title):
             return self.title
         return self.title(width) if self._title_wants_width else self.title()
 
     @property
     def label(self) -> str | Text:
-        """The row's *natural* (unbounded) text — what filtering and measuring read."""
+        """The natural (unbounded) text of the row. The filter and the measurements read it."""
         return self.text(_UNBOUNDED)
 
     def scroll_text(self, width: int) -> str | Text:
-        """What this row draws, and ←→ slide, as the highlighted row of an ``hscroll`` list.
+        """What this row draws (and ←→ slide) as the highlighted row of an ``hscroll`` list.
 
-        Its natural form, so the whole line can be slid along — or, for a row whose fitted
-        form is complete (:attr:`fitted`), that form at ``width``, which by construction
-        leaves nothing to slide. The drawing, the slide's clamp, and the footer's ←→ atom
-        all read this one answer, so none of them can disagree about whether the row moves.
+        It is the natural form, so that the full line can slide. For a row whose fitted
+        form is complete (:attr:`fitted`), it is that form at ``width``, which by design
+        leaves nothing to slide. The drawing, the clamp of the slide, and the ←→ atom of the
+        footer all read this one answer. Thus they cannot disagree about whether the row
+        moves.
         """
         return self.text(width) if self.fitted else self.label
 
     @property
     def detail_label(self) -> str | Text | None:
-        """The row's current detail line, resolving a callable on each read."""
+        """The current detail line of the row. A callable is resolved at each read."""
         return self.detail() if callable(self.detail) else self.detail
 
 
 @dataclass
 class DeleteRequest:
-    """A request, raised from a select list, to remove the highlighted row.
+    """A request from a select list to remove the highlighted row.
 
-    Pressing Delete on a :class:`Choice` marked ``deletable`` resolves the select with this
-    wrapper rather than the row's value itself, so the caller can tell "the user wants to
-    remove this" apart from "the user chose this" — typically running a confirm-then-forget
-    flow and re-opening the list.
+    A press of Delete on a :class:`Choice` marked ``deletable`` resolves the select with
+    this wrapper, instead of with the value of the row itself. Thus the caller can tell "the
+    user wants to remove this" from "the user chose this". The caller usually runs a flow
+    that confirms, then forgets, and then opens the list again.
 
     Attributes:
-        value: The :attr:`Choice.value` of the row the user asked to remove.
+        value: The :attr:`Choice.value` of the row that the user asked to remove.
     """
 
     value: Any
@@ -147,17 +154,18 @@ class DeleteRequest:
 
 @dataclass
 class KeyRequest:
-    """A shortcut key pressed on a select list, with the row it was pressed on.
+    """A shortcut key pressed on a select list, with the row that it was pressed on.
 
     The sibling of :class:`DeleteRequest`, for a list that declares its own bare-key
-    shortcuts (see :class:`SelectScreen`'s ``keys``): the list resolves with this rather
-    than with a row's value, so the caller can tell "the user pressed *this key*" apart
-    from "the user chose this row" and act accordingly before re-opening the list.
+    shortcuts (refer to the ``keys`` argument of :class:`SelectScreen`). The list resolves
+    with this request instead of with the value of a row. Thus the caller can tell "the user
+    pressed this key" from "the user chose this row", and act on it before it opens the
+    list again.
 
     Attributes:
-        action: The token the pressed key was declared for.
-        value: The :attr:`Choice.value` of the highlighted row, or ``None`` where the list
-            had no rows to highlight. A screen-wide shortcut simply ignores it.
+        action: The token that the pressed key was declared for.
+        value: The :attr:`Choice.value` of the highlighted row, or ``None`` if the list
+            had no rows to highlight. A shortcut for the full screen ignores it.
     """
 
     action: Any
@@ -165,17 +173,17 @@ class KeyRequest:
 
 
 def _plain(label: str | Text) -> str:
-    """The plain-text form of a row label, for filtering (a :class:`Text` keeps its ``plain``)."""
+    """The plain-text form of a row label, for the filter (a :class:`Text` gives its ``plain``)."""
     return label.plain if isinstance(label, Text) else label
 
 
 def splice_hint(base: str, segment: str) -> str:
-    """Insert ``segment`` into a footer hint just before its trailing ``Esc`` clause.
+    """Insert ``segment`` into a footer hint, immediately before its last ``Esc`` clause.
 
-    Keeps the hint grammar's "Esc last" rule when a per-row hint (e.g. ``Del remove`` on a
-    deletable row) is added while the cursor sits on it: the segment lands as its own ``·``
-    atom right before the final ``· Esc …``, rather than after it. A hint with no ``Esc``
-    clause simply gains the segment at the end.
+    This keeps the "Esc last" rule of the hint grammar when a hint for one row (for
+    example, ``Del remove`` on a deletable row) is added while the highlight is on that
+    row. The segment goes in as its own ``·`` atom immediately before the last
+    ``· Esc …``, not after it. A hint with no ``Esc`` clause gets the segment at the end.
     """
     marker = " · Esc"
     idx = base.rfind(marker)
@@ -185,15 +193,15 @@ def splice_hint(base: str, segment: str) -> str:
 
 
 def _esc_verb(base: str, verb: str) -> str:
-    """Rewrite a footer hint's trailing ``Esc`` clause to ``Esc <verb>``.
+    """Change the last ``Esc`` clause of a footer hint to ``Esc <verb>``.
 
-    Esc's verb is fixed per surface (``back``, ``cancel``, ``keep`` …) — except while a
-    find-as-you-type filter is standing, where the press peels the filter instead of
-    leaving, and the line has to say so. The map and the mesh walk have always spelled that
-    ``Esc clear``; this is the same swap for a list, which keeps the rest of its atoms
-    rather than giving the whole line over to the query.
+    The verb of Esc is fixed for each surface (``back``, ``cancel``, ``keep``, and others).
+    The exception is while a find-as-you-type filter stands. Then the press clears the
+    filter instead of a leave, and the line must tell this. The map and the mesh walk
+    always wrote this as ``Esc clear``. This function does the same change for a list. The
+    list keeps its other atoms, and does not give all the line to the query.
 
-    A hint with no ``Esc`` clause is returned unchanged: there is nothing being claimed to
+    A hint with no ``Esc`` clause is returned without a change: it makes no claim to
     correct.
     """
     marker = " · Esc "
@@ -204,11 +212,12 @@ def _esc_verb(base: str, verb: str) -> str:
 
 
 def _insert_atom(base: str, atom: str, index: int = 1) -> str:
-    """Insert ``atom`` as the ``index``-th ` · `-separated atom of a footer hint.
+    """Insert ``atom`` as atom number ``index`` of a footer hint (atoms between ` · `).
 
-    Surfaces a conditional *navigation* atom (the ←→ per-row scroll) right after the
-    leading move atom, keeping the hint's navigation-then-actions-then-``Esc`` shape — where
-    :func:`splice_hint` instead places an *action* atom just before the trailing ``Esc``.
+    This function adds a conditional navigation atom (the ←→ scroll of one row)
+    immediately after the first move atom. Thus the hint keeps its form: navigation, then
+    actions, then ``Esc``. :func:`splice_hint`, by contrast, puts an action atom
+    immediately before the last ``Esc``.
     """
     parts = base.split(" · ")
     parts.insert(min(index, len(parts)), atom)
@@ -220,36 +229,38 @@ class Separator:
     """A non-selectable row between choices.
 
     Attributes:
-        title: The row's text — a plain string drawn uniformly in :attr:`style`, or a Rich
-            :class:`~rich.text.Text` carrying its own spans (for a column header that lights
-            just its active sort column, say), rendered as-authored with ``style`` ignored.
-            It may instead be a callable taking the **render width** and returning either
-            — unlike :attr:`Choice.title`'s zero-argument callable — so a column header can
-            size its labels to the terminal it is being drawn on (see
-            :func:`~meshterm.ui.menus.column_header`).
-        style: Theme style a *string* title is drawn in. Section headings pass ``"heading"``
-            so they read as landmarks; the default ``"muted"`` fits the
-            structural rows (blank spacers, column-header lines, inline notes). A ``Text``
-            title styles itself, so this is unused for one.
-        pinned: Whether this row stays on screen for the *whole* list once scrolled past,
-            above any section heading pinned under it — for a column header, whose lane
-            names mean the same in every section (see
-            :meth:`~meshterm.ui.tui.screen.Screen.sticky_rows`). Off by default: an
-            ordinary separator only pins while its own section is on screen. At most one
-            row per list should set it; the last one recorded wins.
-        heading: Whether this row is a *section landmark*: it re-pins to the top row while
-            its own section is scrolled through, and it delimits the Ctrl+PageUp/PageDown
-            section jumps. Off by default, because most separators label nothing below them
-            — a blank spacer, an empty-state note, a discipline's wrapped description — and
-            pinning one of those overhead would say nothing while costing a content row (and
-            would shadow the heading it sits under). Set through
-            :func:`~meshterm.ui.menus.section_heading`, or by hand on a column header that
-            *is* its block's only landmark.
-        pans: The column header of a table that ←→ pan as one (see :attr:`Choice.pans`):
-            drawn in its fullest form and slid with the rows under it, so each label stays
-            over its lane. It is laid out like a row — its first two cells are the pointer
-            column, which stays put while the rest slides — which is how
-            :func:`~meshterm.ui.menus.column_header` already indents it.
+        title: The text of the row: a plain string, drawn all in :attr:`style`, or a Rich
+            :class:`~rich.text.Text` with its own spans (for example, a column header that
+            marks only its active sort column). A ``Text`` is rendered as written, and
+            ``style`` is ignored. Instead, it can be a callable that takes the **render
+            width** and returns one of the two. This is different from the zero-argument
+            callable of :attr:`Choice.title`. Thus a column header can fit its labels to the
+            terminal that draws it (refer to :func:`~meshterm.ui.menus.column_header`).
+        style: The theme style for a title that is a string. Section headings give
+            ``"heading"``, so that they look like landmarks. The default ``"muted"`` fits
+            the structural rows (blank spacers, column-header lines, inline notes). A
+            ``Text`` title has its own style, so this attribute is not used for it.
+        pinned: Whether this row stays on the screen for the full list after it scrolls
+            past, above each section heading that pins under it. It is for a column header,
+            whose lane names have the same meaning in each section (refer to
+            :meth:`~meshterm.ui.tui.screen.Screen.sticky_rows`). It is off by default: a
+            usual separator pins only while its own section is on the screen. A maximum of
+            one row in each list must set it. If more rows set it, the last row that is
+            recorded wins.
+        heading: Whether this row is a *section landmark*. A landmark pins again to the top
+            line while the user scrolls through its section. It also marks the limits of
+            the section jumps of Ctrl+PageUp/PageDown. It is off by default, because most
+            separators label nothing below them: a blank spacer, an empty-state note, the
+            wrapped description of a discipline. If one of these pins at the top, it tells
+            nothing, it takes a content line, and it hides the heading above it. It is set
+            through :func:`~meshterm.ui.menus.section_heading`, or by
+            hand on a column header that is the only landmark of its block.
+        pans: The column header of a table that ←→ pan as one unit (refer to
+            :attr:`Choice.pans`). It is drawn in its fullest form, and it slides with the
+            rows under it. Thus each label stays above its lane. Its layout is the same as a
+            row: its first two cells are the pointer column, which does not move while the
+            rest slides. :func:`~meshterm.ui.menus.column_header` already indents it in this
+            way.
     """
 
     title: str | Text | Callable[[int], str | Text]
@@ -259,32 +270,33 @@ class Separator:
     pans: bool = False
 
     def text(self, width: int) -> str | Text:
-        """The row's content at ``width`` cells, resolving a width-aware title."""
+        """The content of the row at ``width`` cells. This method resolves a width-aware title."""
         return self.title(width) if callable(self.title) else self.title
 
 
 Item = "Choice | Separator"
 
-#: The width handed to a width-aware :class:`Separator` or :class:`Choice` when a
-#: *natural* width is being measured rather than a real terminal one
-#: (:attr:`SelectScreen.dialog_width`, :attr:`Choice.label`) — wide enough that a
-#: self-fitting column header or self-eliding row returns its fullest form.
+#: The width given to a width-aware :class:`Separator` or :class:`Choice` when the code
+#: measures a natural width, not the width of a real terminal
+#: (:attr:`SelectScreen.dialog_width`, :attr:`Choice.label`). It is wide enough that a
+#: column header that fits itself, or a row that elides itself, returns its fullest form.
 _UNBOUNDED = 10_000
 
-#: Cells a choice row's pointer (``❯ `` / ``  ``) takes — the column a panning header keeps
-#: still too, so its labels slide in step with the rows (see :attr:`Separator.pans`).
+#: The cells that the pointer of a choice row (``❯ `` / ``  ``) takes. A header that pans
+#: also keeps this column still, so that its labels slide in step with the rows (refer to
+#: :attr:`Separator.pans`).
 _POINTER = 2
 
 
 def _pans(items: list) -> bool:
-    """Whether any of ``items`` is a table row or header that ←→ pan (see :attr:`Choice.pans`)."""
+    """Whether one of ``items`` is a table row or a header that pans (:attr:`Choice.pans`)."""
     return any(getattr(item, "pans", False) for item in items)
 
 
-#: The navigation actions that move the highlight to another row, so an ``hscroll`` list
-#: drops the current row's horizontal shift (each row scrolls on its own — see
-#: :meth:`SelectScreen.handle`). The filter edits reset it in their own branches. A panning
-#: list keeps its shift: the table is what moved, not the row.
+#: The navigation actions that move the highlight to another row. Thus an ``hscroll`` list
+#: removes the horizontal shift of the current row (each row scrolls by itself, refer to
+#: :meth:`SelectScreen.handle`). The filter edits reset the shift in their own branches. A
+#: list that pans keeps its shift, because the table moved, not the row.
 _HSHIFT_RESET_ACTIONS = frozenset(
     {
         "up",
@@ -304,40 +316,42 @@ _HSHIFT_RESET_ACTIONS = frozenset(
 class SelectScreen(Screen):
     """A grouped, filterable, single-choice list.
 
-    Resolves with the chosen :class:`Choice` value, or :data:`~meshterm.ui.tui.screen.CANCEL`
-    if the user presses Esc.
+    Resolves with the value of the chosen :class:`Choice`, or with
+    :data:`~meshterm.ui.tui.screen.CANCEL` if the user presses Esc.
     """
 
-    #: Cells one ←/→ press shifts an h-scrolling list by (see the ``hscroll`` flag).
+    #: The number of cells that one ←/→ press shifts an ``hscroll`` list (refer to ``hscroll``).
     _HSCROLL_STEP = 8
 
     @property
     def picocalc_lyra_lane(self):
-        """The shared pager, the section jumps on F1/F2, and row deletion on F3.
+        """The shared pager, the section jumps on F1/F2, and the delete of a row on F3.
 
-        Ctrl+PageUp/PageDown step the highlight heading by heading — and on the PicoCalc
-        they are the one binding in the app that is *physically unreachable*: paging has
-        no key there to hold Ctrl over. So a grouped list promotes them onto the lane,
-        keeping the shared handedness — a pair rises toward its outer key, so on this
-        left-edge pair *up* takes F1 (see :data:`~meshterm.ui.tui.fkeys.DEFAULT_LANE`).
+        Ctrl+PageUp/PageDown move the highlight from one heading to the next. On the
+        PicoCalc, they are the only binding in the app that the user cannot physically
+        press: there is no paging key to hold Ctrl over. Thus a grouped list puts them on
+        the lane. It keeps the shared handedness: a pair rises toward its outer key, so on
+        this pair at the left edge, up takes F1 (refer to
+        :data:`~meshterm.ui.tui.fkeys.DEFAULT_LANE`).
 
-        Their two gates say different things, per the lane's empty-versus-dim rule. A list
-        that has no headings *at all* leaves both slots blank: sections aren't a thing
-        here. A grouped list whose live filter has narrowed the rows down to a single
-        surviving section keeps its labels and dims them — the sections are still a thing,
-        they just have nowhere to jump right now.
+        Their two conditions tell different things, by the empty-or-dim rule of the lane. A
+        list that has no headings leaves the two slots blank, because sections do not exist
+        here. A grouped list whose live filter shows rows from only one section keeps the
+        labels and dims them. The sections still exist, but there is no place to jump to at
+        this time.
 
-        ``Delete`` is the same claim as the footer's per-row delete atom, on a platform
-        that draws no footer: only a list that hands out :attr:`Choice.deletable` rows at
-        all shows the slot, and it lights exactly on the rows the key would act on. The
-        chip says ``Delete`` on every such list rather than echoing each one's own hint
-        phrasing, because six cells hold the key's verb and not the object it removes —
-        which the highlighted row is already naming.
+        ``Delete`` makes the same claim as the delete atom of the footer for each row, on a
+        platform that draws no footer. Only a list that has :attr:`Choice.deletable` rows
+        shows the slot, and the slot is enabled only on the rows that the key acts on. The
+        chip shows ``Delete`` on each such list, instead of the hint text of each list. The
+        reason is that six cells hold the verb of the key, not the object that it removes,
+        and the highlighted row already names that object.
         """
         from .fkeys import FPair, default_lane
 
-        # One pass over the displayed rows for the whole lane: this runs every paint on
-        # the platform that draws it, and `_rows()` re-filters the item list each call.
+        # One pass over the shown rows for the full lane: this code runs at each paint on
+        # the platform that draws the lane, and `_rows()` filters the item list again at each
+        # call.
         rows = self._rows()
         lane = list(default_lane(nav=len(self._choices(rows)) > 1))
         if len(self._all_section_starts()) >= 2:
@@ -368,82 +382,87 @@ class SelectScreen(Screen):
         """Build a select screen.
 
         Args:
-            title: Short heading shown in the border.
-            items: A list of :class:`Choice` and :class:`Separator` in display order.
-            prompt: An optional instruction shown inside the box, above the list — so a
-                floating select reads like the other dialogs (a prompt above its controls).
-            default: A choice value to pre-highlight, if present.
-            footer_hint: Footer key hint; defaults to one that mentions type-to-filter only
-                when ``filterable`` (a fixed list shouldn't advertise a filter it ignores).
-            delete_hint: A key-hint atom (e.g. ``"Del remove"``) surfaced in the footer only
-                while the highlighted row is :attr:`Choice.deletable` — so the removal key
-                advertises itself exactly when it would act, and stays hidden on rows it can't
-                touch. Empty (the default) leaves the footer fixed.
-            filterable: Whether typing narrows the list. Off for short, fixed lists (e.g.
-                the startup device picker) where type-to-filter would only get in the way.
-            hscroll: Whether ←/→ horizontally scroll the *highlighted* row so an over-long
-                line can be read to its end (the Watchtower's alert log). ``None`` (the
-                default) lets the rows decide: one that pins a head block
-                (:attr:`Choice.hscroll_from`) turns scrolling on, and without one the rows
-                simply ellipsize at the right edge and ←/→ stay inert. ``False`` keeps it off
-                whatever the rows declare — the editor pages (Device config, repeater admin),
-                whose Actions rows pin heads but whose lanes are meant to end at the edge
-                rather than slide. Only a row that
-                actually overflows the width scrolls; a short row (and every separator or
-                column header) stays put, and the shift resets to the start whenever the
-                highlight moves to another row or the filter is edited — each row scrolls
-                on its own, independently of the rest of the screen. A row may hold a head
-                block out of the scroll (:attr:`Choice.hscroll_from`), so only its
-                overflowing run slides; whichever edges the line then continues past wear a
-                :func:`~meshterm.ui.pathline.cut_mark`. A list whose rows *pan*
-                (:attr:`Choice.pans`) scrolls differently, and takes precedence: ←→ slide
-                the whole table — its column header and every panning row by one shared
-                shift, clamped to the widest of them — and the shift stays put as the
-                highlight moves.
-            hscroll_hint: The footer atom surfaced (as the second ` · ` atom, right after
-                the move atom) while ``hscroll`` is on and the highlighted row overflows —
-                so ←→ advertises itself exactly when it would do something. Ignored when
-                ``hscroll`` is off.
-            keys: Bare-key shortcuts this list answers, mapping the character pressed to a
-                token naming what it means — the idiom
-                :meth:`~meshterm.ui.tui.session.TuiSession.button_dialog` already uses for a
-                dialog's y/n accelerators. The list resolves with a :class:`KeyRequest`
-                carrying the token and the highlighted row's value, so the caller can act
-                and re-open. **Only honoured on a non-filterable list**, where a bare letter
-                has nothing else to do: on a filtering list every letter belongs to the
-                query, and a shortcut stealing one would be a key that silently stops the
-                reader typing a name.
-            key_hint: What those shortcuts are called in the footer, asked of the *highlighted
-                row's value* on every paint and spliced in just before the trailing ``Esc``
-                clause. Return one ` · `-joined run of atoms, or ``""`` for a row none of the
-                shortcuts would touch — the same rule ``delete_hint`` follows, and for the
-                same reason: the footer must never name a key that would do nothing where the
-                reader is standing. The policy lives with the caller because only it knows
-                which rows its keys mean anything on.
+            title: The short heading in the border.
+            items: A list of :class:`Choice` and :class:`Separator`, in the order to show.
+            prompt: An optional instruction in the box, above the list. Thus a floating
+                select looks like the other dialogs (a prompt above its controls).
+            default: A choice value to highlight at the start, if it is present.
+            footer_hint: The footer key hint. The default hint mentions type-to-filter only
+                when ``filterable`` is true (a fixed list must not show a filter that it
+                ignores).
+            delete_hint: A key-hint atom (for example, ``"Del remove"``) that the footer
+                shows only while the highlighted row is :attr:`Choice.deletable`. Thus the
+                hint shows the remove key exactly when the key acts, and hides it on rows
+                that the key cannot change. Empty (the default) keeps the footer fixed.
+            filterable: Whether typed text narrows the list. It is off for short, fixed lists
+                (for example, the device picker at startup), where type-to-filter only causes
+                problems.
+            hscroll: Whether ←/→ scroll the highlighted row horizontally, so that the user can
+                read a long line to its end (the alert log of the Watchtower). ``None`` (the
+                default) lets the rows decide. A row that pins a head block
+                (:attr:`Choice.hscroll_from`) turns the scroll on. Without one, the rows
+                ellipsize at the right edge, and ←/→ do nothing. ``False`` keeps the scroll
+                off, whatever the rows declare. This is for the editor pages (Device config,
+                repeater admin), whose Actions rows pin heads, but whose lanes must end at
+                the edge and not slide. Only a row that is wider than the width scrolls. A
+                short row (and each separator or column header) does not move. The shift
+                goes back to the start when the highlight moves to another row or when the
+                filter changes: each row scrolls by itself, independently of the rest of the
+                screen. A row can keep a head block out of the scroll
+                (:attr:`Choice.hscroll_from`), so only its run that overflows slides. Each
+                edge past which the line continues then shows a
+                :func:`~meshterm.ui.pathline.cut_mark`. A list whose rows pan
+                (:attr:`Choice.pans`) scrolls in a different way, and this way has priority.
+                ←→ slide the full table: its column header and each row that pans move by
+                one shared shift, clamped to the widest of them. The shift does not change
+                when the highlight moves.
+            hscroll_hint: The footer atom that the footer shows (as the second ` · ` atom,
+                immediately after the move atom) while ``hscroll`` is on and the highlighted
+                row overflows. Thus the hint shows ←→ exactly when these keys do something.
+                Ignored when ``hscroll`` is off.
+            keys: The bare-key shortcuts that this list answers. Each maps the pressed
+                character to a token that names what it means.
+                :meth:`~meshterm.ui.tui.session.TuiSession.button_dialog` already uses this
+                idiom for the y/n accelerators of a dialog. The list resolves with a
+                :class:`KeyRequest` that holds the token and the value of the highlighted
+                row. Thus the caller can act and open the list again. **Only a list that is
+                not filterable obeys them**, because there a bare letter has no other
+                function. On a list with a filter, each letter belongs to the query. A
+                shortcut that takes a letter is a key that stops the user, without a sign,
+                when the user types a name.
+            key_hint: The names of those shortcuts in the footer. At each paint, the screen
+                calls it with the value of the highlighted row, and inserts the result
+                immediately before the last ``Esc`` clause. Return one run of atoms joined
+                by ` · `, or ``""`` for a row that no shortcut changes. ``delete_hint``
+                follows the same rule, for the same reason: the footer must never name a key
+                that does nothing on the row where the user is. The caller keeps this
+                policy, because only the caller knows on which rows its keys have a meaning.
         """
         super().__init__()
         self.title = title
-        # A row that pins a head block (:attr:`Choice.hscroll_from`) is a row built to
-        # scroll — the head is only meaningful as "the part that stays put" — so declaring
-        # one turns the list's scrolling on without the builder having to reach the screen
-        # it will be shown in. That is what makes every label+description list
-        # (:func:`~meshterm.ui.menus.menu_rows`, the main menu) scroll its description
-        # wherever it is opened, ``ctx.ui.select`` included — unless the list itself has
-        # said ``hscroll=False``, which the rows cannot overrule.
+        # A row that pins a head block (:attr:`Choice.hscroll_from`) is a row made to
+        # scroll, because the head has a meaning only as "the part that stays put". Thus a
+        # row that declares one turns on the scroll of the list, and the builder does not
+        # have to reach the screen that will show it. Because of this, each
+        # label+description list (:func:`~meshterm.ui.menus.menu_rows`, the main menu)
+        # scrolls its description wherever it is opened, also through ``ctx.ui.select``.
+        # The exception is a list that itself says ``hscroll=False``. The rows cannot
+        # override that.
         self._hscroll_auto = hscroll is None
         self._hscroll = bool(hscroll) or (
             self._hscroll_auto and any(getattr(item, "hscroll_from", 0) > 0 for item in items)
         )
         self._hscroll_hint = hscroll_hint
-        # A row built as a line of a table turns panning on, as a pinned head turns on
-        # scrolling (see Choice.pans); it is read off the rows each time they change.
+        # A row made as a line of a table turns on the pan, as a pinned head turns on the
+        # scroll (refer to Choice.pans). The value is read from the rows each time they
+        # change.
         self._pan = _pans(items)
-        # Shortcuts are the non-filterable list's compensation for having no filter: the
-        # letters are free, so a list may spend them (see the ``keys`` argument).
+        # Shortcuts compensate a list that is not filterable for its missing filter. The
+        # letters are free, so the list can use them (refer to the ``keys`` argument).
         self._keys: dict[str, Any] = {} if filterable else dict(keys or {})
         self._key_hint = key_hint
         self._hshift = 0
-        self._last_width = 0  # the last render width, for the footer's overflow probe
+        self._last_width = 0  # the last render width, for the overflow check of the footer
         if footer_hint is None:
             footer_hint = (
                 "↑↓ move · type to filter · Enter select · Esc back"
@@ -456,12 +475,12 @@ class SelectScreen(Screen):
         self._filterable = filterable
         self._items = items
         self._filter = ""
-        # Index into the currently-selectable (filtered) choices.
+        # The index in the choices that can be selected now (after the filter).
         self._index = 0
         self._highlight(default)
 
     def _highlight(self, default: Any) -> None:
-        """Land the highlight on the choice whose value is ``default`` (first row otherwise)."""
+        """Put the highlight on the choice whose value is ``default`` (or else on the first row)."""
         self._index = 0
         if default is None:
             return
@@ -471,22 +490,27 @@ class SelectScreen(Screen):
                 return
 
     def turn_page(self, items: list, *, title: str, prompt: str = "", default: Any = None) -> None:
-        """Show a *different* list in the same box — a stepped dialog's next page, or its last.
+        """Show a different list in the same box: the next or previous page of a stepped dialog.
 
-        The other way a list's rows change under a reader, and the opposite claim from
-        :meth:`replace_items`: that one refreshes the *same* list (its rows are data that
-        moved), so the filter and the highlight ride along. A page turned is a new question
-        — pick the node to tune, now pick where to measure — so nothing rides along: the
-        query typed to find a row on the last page would narrow this one to nothing it was
-        meant for, the scroll starts at the top, and the highlight lands on ``default`` (a
-        page turned *back* to offers its previous answer, exactly as a step of
-        :func:`~meshterm.ui.menus.run_steps` does) or on the first row.
+        This is the other way that the rows of a list change while the user looks at them.
+        It makes the opposite claim to :meth:`replace_items`. That method refreshes the same
+        list (its rows are data that moved), so the filter and the highlight stay. A new
+        page is a new question (select the node to tune, then select where to measure), so
+        nothing stays:
+
+        - The query that the user typed to find a row on the previous page is cleared. If it
+          stays on this page, it narrows the list to rows that it was not meant for.
+        - The scroll starts at the top.
+        - The highlight goes to ``default`` or to the first row. (A page that the user turns
+          back to offers its previous answer, exactly as a step of
+          :func:`~meshterm.ui.menus.run_steps` does.)
 
         Args:
-            items: The new page's rows, in display order.
-            title: The new heading — the one place the reader sees which step this is.
+            items: The rows of the new page, in the order to show.
+            title: The new heading. It is the only place where the user sees which step this
+                is.
             prompt: The instruction above the rows, or ``""`` for none.
-            default: The choice value to highlight, if present.
+            default: The choice value to highlight, if it is present.
         """
         self._items = items
         if self._hscroll_auto:
@@ -502,27 +526,28 @@ class SelectScreen(Screen):
     def replace_items(
         self, items: list, *, title: str | None = None, prompt: str | None = None
     ) -> None:
-        """Swap the list's rows (and optionally its title) in place, keeping the reader's place.
+        """Replace the rows (and the title, if given) in place, and keep the place of the user.
 
-        The counterpart to :meth:`~meshterm.ui.tui.session.TuiSession.stay` for a list whose
-        *content* is data: an editor's rows carrying a staged ``current → new`` value, a
-        title counting what is staged, a queue that just lost the message it sent. Those
-        lists used to be rebuilt as a whole new screen every round, which threw away the
-        typed filter and left the cursor to be approximated by a ``default=`` restore.
+        This is the counterpart of :meth:`~meshterm.ui.tui.session.TuiSession.stay` for a
+        list whose content is data: the rows of an editor with a staged ``current → new``
+        value, a title that counts what is staged, a queue that just lost the message that
+        it sent. Before, these lists were built again as a new screen at each round. That
+        removed the typed filter, and only a ``default=`` restore put the highlight back at
+        an approximate place.
 
-        The place is kept by *value*, not by index: the highlight lands back on the row it
-        was on wherever that row moved to, and falls back to the same position in the list
-        (clamped) when the row is gone entirely — which is what a reader expects after
-        deleting the row they were sitting on. The filter and the horizontal shift ride
-        along; the shift resets when the highlighted row changes, exactly as it does when
-        the highlight is moved by hand.
+        The place is kept by value, not by index. The highlight goes back to the row that it
+        was on, wherever that row moved to. If the row is gone, the highlight goes to the
+        same position in the list (clamped). A user expects this after the user deletes the
+        row that the highlight was on. The filter and the horizontal shift stay. The shift
+        goes back to the start when the highlighted row changes, exactly as when the user
+        moves the highlight.
 
         Args:
-            items: The new rows, in display order.
-            title: A new heading, or ``None`` to keep the current one.
-            prompt: A new instruction/summary line above the rows, or ``None`` to keep the
-                current one — the channel detail's vital signs, which age and count unread
-                alongside the rows they head.
+            items: The new rows, in the order to show.
+            title: A new heading, or ``None`` to keep the current heading.
+            prompt: A new instruction or summary line above the rows, or ``None`` to keep
+                the current line. An example is the vital signs of the channel detail,
+                which age and count unread messages next to the rows below them.
         """
         current = self._current_choice()
         was = current.value if current is not None else None
@@ -542,16 +567,16 @@ class SelectScreen(Screen):
         if index is None:
             index = max(0, min(position, len(selectable) - 1))
             if not self._pan:
-                self._hshift = 0  # a different row is highlighted now; a pan is the table's
+                self._hshift = 0  # another row is highlighted now. A pan belongs to the table.
         self._index = index
 
     # --- filtering -----------------------------------------------------------
 
     def _rows(self) -> list:
-        """Return the items to display given the active filter.
+        """Return the items to show with the active filter.
 
-        Without a filter, groups and headings show as authored. With a filter, only the
-        matching choices are shown — but every separator stays, so the list keeps its
+        Without a filter, groups and headings show as written. With a filter, only the
+        choices that match are shown. But each separator stays, so the list keeps its
         section landmarks (and column headers) while it narrows.
         """
         needle = self._filter.strip().lower()
@@ -564,25 +589,26 @@ class SelectScreen(Screen):
         ]
 
     def _choices(self, rows: list | None = None) -> list:
-        """Return just the selectable choices among ``rows`` (or the current rows)."""
+        """Return only the selectable choices in ``rows`` (or in the current rows)."""
         rows = self._rows() if rows is None else rows
         return [it for it in rows if isinstance(it, Choice)]
 
     def _section_starts(self, rows: list | None = None) -> list[int]:
-        """Choice indices that begin a section — the first choice after each run of separators.
+        """The choice indices that start a section: the first choice after each run of separators.
 
-        Drives Ctrl+PageUp/PageDown section jumps. Computed over the *displayed* rows by
-        default, so the jumps keep working while a filter narrows the list (the headings
-        stay — see :meth:`_rows` — and empty sections simply yield no stop).
+        The section jumps of Ctrl+PageUp/PageDown use them. By default, they are calculated
+        from the shown rows. Thus the jumps continue to work while a filter narrows the
+        list (the headings stay, refer to :meth:`_rows`, and an empty section gives no
+        stop).
 
         Args:
-            rows: The rows to read the sections off, or ``None`` for the displayed ones.
-                :meth:`_all_section_starts` passes the unfiltered items instead, to ask
-                the structural question rather than the live one.
+            rows: The rows to read the sections from, or ``None`` for the shown rows.
+                :meth:`_all_section_starts` gives the unfiltered items instead, to ask the
+                structural question instead of the live question.
         """
         starts: list[int] = []
         idx = 0
-        fresh = True  # the next choice opens a section (top of the list, or just past a heading)
+        fresh = True  # the next choice starts a section (top of the list, or after a heading)
         for item in self._rows() if rows is None else rows:
             if isinstance(item, Separator):
                 fresh = True
@@ -594,20 +620,21 @@ class SelectScreen(Screen):
         return starts
 
     def _all_section_starts(self) -> list[int]:
-        """The section starts of the *unfiltered* list — whether this list has sections at all.
+        """The section starts of the unfiltered list: they tell if this list has sections.
 
-        The F-key lane needs both questions answered separately (see :attr:`picocalc_lyra_lane`):
-        a flat list never offers a section jump, while a grouped one whose filter has
-        collapsed it to one section offers it again the moment the filter is edited.
+        The F-key lane must have the answers to the two questions separately (refer to
+        :attr:`picocalc_lyra_lane`). A flat list never offers a section jump. A grouped list
+        whose filter shows only one section offers the jump again when the filter changes.
         """
         return self._section_starts(self._items)
 
     def _jump_section(self, direction: int) -> None:
-        """Move the highlight to the next section (``+1``) or the current/previous one (``-1``).
+        """Move the highlight to the next section (``+1``), or the current or previous one (``-1``).
 
-        Mirrors the scroll-based section jump of read-only screens, but in choice space: down
-        lands on the first choice of the following section; up lands on the first choice of the
-        section we're in, or the previous section's when already at a section start.
+        It is the same as the section jump of the read-only screens, which scrolls, but it
+        moves through the choices. Down goes to the first choice of the next section. Up
+        goes to the first choice of the current section, or to the first choice of the
+        previous section when the highlight is already at the start of a section.
         """
         starts = self._section_starts()
         if not starts:
@@ -626,7 +653,7 @@ class SelectScreen(Screen):
                 self._index = at_or_before[-2] if len(at_or_before) >= 2 else 0
 
     def _current_choice(self) -> Choice | None:
-        """The choice the highlight currently sits on, or ``None`` when the list is empty."""
+        """The choice that the highlight is on now, or ``None`` when the list is empty."""
         choices = self._choices()
         if not choices:
             return None
@@ -634,21 +661,22 @@ class SelectScreen(Screen):
 
     @property
     def footer_hint(self) -> str:
-        """The footer key hint, gaining dynamic atoms only where their keys would act.
+        """The footer key hint, with dynamic atoms only where their keys act.
 
-        Two conditional atoms fold in exactly where they apply, so the bottom border never
-        advertises a key that would do nothing:
+        Conditional atoms go in exactly where they apply. Thus the bottom border never
+        shows a key that does nothing:
 
-        * the :attr:`_delete_hint` atom, spliced just before the trailing ``Esc`` clause
-          (see :func:`splice_hint`) while the highlighted row is :attr:`Choice.deletable`;
-        * whatever ``key_hint`` names for the highlighted row's value — the shortcut keys
-          (``keys``) that would act on *it*, spliced the same way;
-        * the :attr:`_hscroll_hint` atom (``hscroll`` lists only), inserted right after the
-          move atom (see :func:`_insert_atom`) while the highlighted row overflows the width
-          — a short row scrolls nowhere, so ←→ stays hidden on it.
+        * The :attr:`_delete_hint` atom, inserted immediately before the last ``Esc``
+          clause (refer to :func:`splice_hint`), while the highlighted row is
+          :attr:`Choice.deletable`.
+        * The names that ``key_hint`` gives for the value of the highlighted row: the
+          shortcut keys (``keys``) that act on that row, inserted in the same way.
+        * The :attr:`_hscroll_hint` atom (only in ``hscroll`` lists), inserted immediately
+          after the move atom (refer to :func:`_insert_atom`), while the highlighted row
+          is wider than the width. A short row cannot scroll, so ←→ stays hidden on it.
 
-        And the trailing ``Esc`` clause turns into ``Esc clear`` while a filter is typed,
-        because that is what the press does then (see :meth:`handle`).
+        Also, the last ``Esc`` clause changes to ``Esc clear`` while a filter is typed,
+        because the press then clears the filter (refer to :meth:`handle`).
         """
         base = self._footer_base
         current = self._current_choice()
@@ -665,17 +693,17 @@ class SelectScreen(Screen):
         return base
 
     def _selected_overflows(self) -> bool:
-        """Whether the highlighted row's label is too wide for the last render width.
+        """Whether the label of the highlighted row is too wide for the last render width.
 
-        The gate for both the ←→ scroll and its footer atom: a row that fits has nothing to
-        scroll. Measured against the row's content area (the width less the 2-cell pointer),
-        using the width the last :meth:`render_body` saw (``0`` before the first paint, so
-        nothing reads as overflowing until a real width is known). Asked of
-        :meth:`_max_hshift` rather than of the raw label width, so a row that pins a head
-        block (:attr:`Choice.hscroll_from`) is judged on the run that would actually move —
-        the marks a scrolled row spends cells on included. A panning list asks the same of
-        the whole table rather than of one row, since ←→ move the table wherever the
-        highlight is standing.
+        This is the condition for the ←→ scroll and for its footer atom: a row that fits
+        has nothing to scroll. The label is measured against the content area of the row
+        (the width less the pointer of 2 cells), at the width of the last
+        :meth:`render_body` (``0`` before the first paint, so nothing overflows until a
+        real width is known). The question goes to :meth:`_max_hshift`, not to the raw
+        label width. Thus a row that pins a head block (:attr:`Choice.hscroll_from`) is
+        measured by the run that moves, with the cells for the marks of a scrolled row. A
+        list that pans asks the same question of the full table instead of one row,
+        because ←→ move the table wherever the highlight is.
         """
         if self._pan and self._last_width > 0:
             return self._pan_limit(self._last_width) > 0
@@ -694,12 +722,12 @@ class SelectScreen(Screen):
 
     @property
     def sizing_footer_hint(self) -> str:
-        """The fullest the footer can get, for stable box sizing (see :attr:`footer_hint`).
+        """The longest form of the footer, for a stable box size (refer to :attr:`footer_hint`).
 
-        The delete-hint atom is always folded in here, so a compositor that sizes a box to
-        the footer width (the startup splash's :func:`~meshterm.ui.tui.frame.compose_startup`)
-        reserves room for it up front — the box then never widens the moment the highlight
-        lands on a deletable row.
+        The delete-hint atom is always in it. Thus a compositor that sets the size of a box
+        from the width of the footer (:func:`~meshterm.ui.tui.frame.compose_startup` of the
+        startup splash) keeps space for the atom from the start. Then the box never becomes
+        wider when the highlight goes onto a deletable row.
         """
         if self._delete_hint:
             return splice_hint(self._footer_base, self._delete_hint)
@@ -709,16 +737,17 @@ class SelectScreen(Screen):
 
     @property
     def dialog_width(self) -> int:
-        """Natural outer width so a floating select hugs its widest row, not the terminal.
+        """The natural outer width, so that a floating select fits its widest row, not the terminal.
 
-        The widest of the prompt, title, footer, and every row (with room for the pointer),
-        so a short menu is a tidy popup rather than a full-width banner. The compositor still
-        caps this to the space available, and this is only read for a *floating* select — the
-        full-screen base menu is laid out by ``compose_base`` and ignores it. The footer is
-        measured at its fullest — with the delete-hint atom folded in — so a deletable row
-        surfacing that hint never widens the box mid-navigation. A width-aware separator is
-        measured at its fullest too (see :data:`_UNBOUNDED`): the box asks for room for the
-        whole header, and the header only abbreviates once the *terminal* caps the box.
+        It is the widest of the prompt, the title, the footer, and each row (with space for
+        the pointer). Thus a short menu is a small dialog, not a banner of full width. The
+        compositor still limits this width to the available space. Only a floating select
+        reads it: ``compose_base`` sets the layout of the full-screen base menu and ignores
+        it. The footer is measured at its longest, with the delete-hint atom in it. Thus a
+        deletable row that shows that hint never makes the box wider during navigation. A
+        width-aware separator is also measured at its fullest (refer to
+        :data:`_UNBOUNDED`). The box asks for space for the full header, and the header
+        becomes shorter only when the terminal limits the box.
         """
         footer = (
             splice_hint(self._footer_base, self._delete_hint)
@@ -727,23 +756,23 @@ class SelectScreen(Screen):
         )
         widths = [cell_len(self.title), cell_len(footer), cell_len(self._prompt)]
         for item in self._items:
-            label = item.text(_UNBOUNDED)  # both row kinds measure at their fullest form
+            label = item.text(_UNBOUNDED)  # the two types of row measure at their fullest form
             widths.append(cell_len(_plain(label)) + 2)  # + the "❯ " / "  " pointer column
             if isinstance(item, Choice) and item.detail_label is not None:
                 widths.append(cell_len(_plain(item.detail_label)) + 2)  # same hanging indent
         return max(widths, default=20) + 8
 
     def render_body(self, width: int) -> list[str]:
-        """Plan the body's lines, drawing the rows the viewport actually shows.
+        """Plan the lines of the body, and draw only the rows that the viewport shows.
 
-        Walks every row to lay the body out — how many lines it takes, where the highlight
-        landed, which separators are sticky landmarks — because the frame's scroll clamp and
-        pinning need all of that exactly. But a *choice* row's own rasterizing is handed over
-        as a callable rather than done here (see
-        :class:`~meshterm.ui.tui.screen.LazyLines`): a list of 141 contacts laid out 150 rows
-        tall only ever shows the twenty that fit, so the other hundred and thirty were built
-        and discarded on every keystroke and every idle tick. Separators are rendered on the
-        spot — they are few, and their lines are the ones :meth:`sticky_rows` pins *outside*
+        The method goes through each row to make the layout of the body: how many lines the
+        body takes, where the highlight is, and which separators are sticky landmarks. The
+        scroll clamp and the pins of the frame must have all of this, exactly. But the
+        render of a choice row is given as a callable, and is not done here (refer to
+        :class:`~meshterm.ui.tui.screen.LazyLines`). A list of 141 contacts, 150 rows tall,
+        shows only the twenty rows that fit. Before, the other hundred and thirty rows were
+        built and thrown away at each key press and at each idle tick. Separators are
+        rendered immediately: they are few, and :meth:`sticky_rows` pins their lines outside
         the slice.
         """
         rows = self._rows()
@@ -751,13 +780,15 @@ class SelectScreen(Screen):
         self._index = max(0, min(self._index, len(choices) - 1)) if choices else 0
         selected = choices[self._index] if choices else None
 
-        # Horizontal scroll rides only the *highlighted* row, and only as far as its own
-        # tail: → stops once that row's end is in view, and a short (or unselected) row
-        # can't shift at all. Measured fresh each paint — a callable title may have changed
-        # width — against the row's content area (width less the 2-cell pointer).
+        # The horizontal scroll moves only the highlighted row, and only as far as its own
+        # end: → stops when the end of that row is visible, and a short (or not selected)
+        # row cannot shift. It is measured again at each paint, because a callable title
+        # can change its width. It is measured against the content area of the row (the
+        # width less the pointer of 2 cells).
         self._last_width = width
         if self._pan:
-            # A panning list slides the table as one, as far as its widest line's tail.
+            # A list that pans slides the table as one unit, as far as the end of its
+            # widest line.
             self._hshift = max(0, min(self._hshift, self._pan_limit(width)))
         elif self._hscroll and self._hshift:
             avail = max(1, width - 2)
@@ -767,45 +798,50 @@ class SelectScreen(Screen):
                 0, min(self._hshift, self._max_hshift(sel_len, anchor, max(1, width - 2)))
             )
 
-        # One entry per body line: a finished string, or a callable that draws it when the
-        # frame asks. Positions are exact either way, which is all the layout below reads.
+        # One entry for each body line: a finished string, or a callable that draws the line
+        # when the frame asks. The positions are exact in the two cases, and the layout below
+        # reads only the positions.
         lines: list[str | Callable[[], str]] = []
-        # A prompt (when set) sits above the list, offsetting every row below it. Every index
-        # recorded below — the cursor line, the sticky headers — is read off ``len(lines)``,
-        # which already counts the prompt's lines, so none of them adds the offset again.
+        # A prompt (when set) is above the list, and moves each row below it down. Each index
+        # recorded below (the line of the highlight, the sticky headers) comes from
+        # ``len(lines)``, which already counts the lines of the prompt. Thus no index adds
+        # the offset again.
         if self._prompt:
             lines.extend(render_lines(Text(self._prompt), width))
             lines.append("")
-        # Record each section heading (a Separator that says it is one) as a sticky block, so
-        # one that scrolls off is re-pinned to the top rows by the base Screen.sticky_block —
-        # and a pinned separator (a column header) as the whole-list header pinned above it.
-        # A heading's block runs on through the separators that *immediately* follow it, before
-        # the section's first row: prose written there is the section's preamble (the Trophy
-        # case's "what this discipline scores"), so it belongs overhead with the heading rather
-        # than scrolling away from the rows it explains. Everything else — blank spacers,
-        # empty-state notes under a section that has rows, a stray line between choices — is
-        # the landmark of nothing and stays out of the running, so the rows pinned overhead
-        # are always the section that governs. Separators survive filtering (see _rows), so
-        # the pinning keeps working while the list narrows.
+        # Record each section heading (a Separator that says that it is one) as a sticky
+        # block. Thus, when one scrolls off, the base Screen.sticky_block pins it again to the
+        # top lines. Also record a pinned separator (a column header) as the header of the
+        # full list, pinned above it. The block of a heading continues through the separators
+        # that follow it immediately, before the first row of the section. Prose there is the
+        # preamble of the section (the "what this discipline scores" of the Trophy case).
+        # Thus it belongs at the top with the heading, and does not scroll away from the rows
+        # that it explains. All the other separators (blank spacers, empty-state notes under
+        # a section that has rows, a stray line between choices) are the landmark of
+        # nothing, and are not candidates. Thus the lines pinned at the top are always from
+        # the section that governs. Separators stay when the filter applies (refer to
+        # _rows), so the pins continue to work while the list narrows.
         self._sticky_headers = []
         self._pinned_header = None
-        block: list[str] | None = None  # the heading block still taking rows, if any
+        block: list[str] | None = None  # the heading block that still takes lines, if any
         if self._filter:
             lines.append(query_line(self._filter, width))
-        # A row's detail line (see Choice.detail) can make it two lines tall, so the cursor
-        # is tracked inline as rows are drawn rather than derived from the row index.
+        # The detail line of a row (refer to Choice.detail) can make the row two lines tall.
+        # Thus the code follows the line of the highlight while it draws the rows, and does
+        # not calculate it from the row index.
         cursor_at: int | None = None
         for item in rows:
             if isinstance(item, Separator):
-                # A Text title carries its own spans (a two-colour column header); a plain
-                # string is drawn uniformly in the separator's style. A separator h-scrolls
-                # only as a panning table's column header — the per-row shift rides the
-                # highlighted choice row alone.
+                # A Text title has its own spans (a column header with two colours). A plain
+                # string is drawn all in the style of the separator. A separator scrolls
+                # horizontally only as the column header of a table that pans. The shift for
+                # each row moves only the highlighted choice row.
                 title = item.text(_UNBOUNDED if item.pans and self._pan else width)
                 content = title if isinstance(title, Text) else Text(title, style=item.style)
                 if item.pans and self._pan:
-                    # Its fullest form, slid with the rows, its pointer column held still:
-                    # one line however wide, since its labels must stay over their lanes.
+                    # Its fullest form, slid with the rows, with its pointer column held
+                    # still. It is one line, however wide, because its labels must stay above
+                    # their lanes.
                     slid = self._scroll_window(content, _POINTER, width)
                     drawn = [render_to_ansi(slid, width, no_wrap=True)]
                     if item.pinned:
@@ -814,57 +850,59 @@ class SelectScreen(Screen):
                         block = list(drawn)
                         self._sticky_headers.append((len(lines), block))
                 elif item.pinned:
-                    # A pinned header is drawn *outside* the body slice and is exactly one
-                    # row tall, so it crops like a row rather than wrapping — a column
-                    # header too wide for the terminal ellipsizes instead of stealing a
-                    # second reserved row from the content.
+                    # A pinned header is drawn outside the body slice and is exactly one
+                    # line tall. Thus it crops like a row and does not wrap. A column header
+                    # that is too wide for the terminal ellipsizes, and does not take a
+                    # second reserved line from the content.
                     drawn = [render_to_ansi(content, width, no_wrap=True)]
-                    # A whole-list header stands outside the section run too: it pins above
-                    # the section headings rather than taking a turn among them, and so is
-                    # no section boundary for the Ctrl+PageUp/PageDown jumps either.
+                    # A header for the full list is also outside the sequence of sections.
+                    # It pins above the section headings, and does not take a turn among
+                    # them. Thus it is also not a section boundary for the
+                    # Ctrl+PageUp/PageDown jumps.
                     self._pinned_header = (len(lines), drawn[0])
                 else:
-                    # A prose separator (a note above a startup list) may wrap; each row it
-                    # takes is its own body line, so the viewport still counts them all — and
-                    # every one of them joins the block, wrapped continuations included.
+                    # A prose separator (a note above a startup list) can wrap. Each line that
+                    # it takes is its own body line, so the viewport still counts all of
+                    # them. Also, each of them joins the block, the wrapped lines too.
                     drawn = render_lines(content, width)
                     if item.heading:
                         block = list(drawn)
                         self._sticky_headers.append((len(lines), block))
                     elif block is not None:
-                        block.extend(drawn)  # the heading's preamble, pinned with it
+                        block.extend(drawn)  # the preamble of the heading, pinned with it
                 lines.extend(drawn)
                 continue
-            block = None  # a row closes the heading's block; prose past here is its own
+            block = None  # a row ends the heading block. Prose after it is not in the block.
             is_sel = item is selected
             if is_sel:
                 cursor_at = len(lines)
             lines.append(self._row_drawer(item, is_sel, width))
-            # Resolved here, not in the drawer: whether the row is one line tall or two is
-            # part of the layout, so a callable detail is read while planning — and its one
-            # resolved value is what the drawer below renders, never a second call.
+            # Resolved here, not in the drawer. Whether the row is one line tall or two is
+            # part of the layout, so a callable detail is read during the plan. The drawer
+            # below renders this one resolved value, and never calls the callable again.
             detail = item.detail_label if isinstance(item, Choice) else None
             if detail is not None and _plain(detail):
                 lines.append(self._detail_drawer(detail, width))
         if not choices:
-            # With no row to highlight the empty state holds its place: kept in view, and
-            # the page still edge-scrolls past it to whatever sits above and below.
+            # With no row to highlight, the empty state takes its place: it is kept visible,
+            # and the page still has edge scroll past it, to the lines above and below it.
             cursor_at = len(lines)
             lines.append(render_to_ansi(Text("no matches", style="muted"), width))
-        # Remember where the highlighted row landed so the session can keep it in view.
+        # Keep the line of the highlighted row, so that the session can keep it visible.
         self._cursor = cursor_at
         return LazyLines(lines)
 
     def _row_drawer(self, item: Choice, is_sel: bool, width: int) -> Callable[[], str]:
-        """A callable that rasterizes one choice row — run only if the row is on screen."""
+        """A callable that renders one choice row. It runs only if the row is on the screen."""
 
         def draw() -> str:
-            # A width-aware title fits itself to the row's content area (the width less
-            # the 2-cell pointer). The exception is the highlighted row of an ``hscroll``
+            # A width-aware title fits itself to the content area of the row (the width less
+            # the pointer of 2 cells). The exception is the highlighted row of an ``hscroll``
             # list, which keeps its natural form: ←→ slide the full line, and a row that
-            # pre-elided itself would have nothing left to slide over — unless the row
-            # declares its fitted form complete (``Choice.fitted``). A panning table's rows
-            # all keep their natural form, highlighted or not: the pan slides every one.
+            # elided itself before has nothing to slide. But a row can declare that its
+            # fitted form is complete (``Choice.fitted``). All the rows of a table that pans
+            # keep their natural form, highlighted or not, because the pan slides each of
+            # them.
             panned = self._pan and item.pans
             if panned or (self._hscroll and not self._pan and is_sel):
                 label = item.scroll_text(max(1, width - 2))
@@ -872,22 +910,24 @@ class SelectScreen(Screen):
                 label = item.text(max(1, width - 2))
             pointer = "❯ " if is_sel else "  "
             style = "cursor" if is_sel else ""
-            # A Text label carries its own spans (e.g. a red badge); keep them and lay the
-            # row's base style underneath, so the highlight tints the row while the badge
-            # keeps its colour. A plain string is styled uniformly as before.
+            # A Text label has its own spans (for example, a red badge). Keep them, and put the
+            # base style of the row under them. Thus the highlight tints the row, and the
+            # badge keeps its colour. A plain string gets one style for all its text, as
+            # before.
             text = Text(pointer, style=style)
             label_text = label if isinstance(label, Text) else Text(label)
             if panned or (self._hscroll and not self._pan and self._hshift and is_sel):
-                # Only the label slides — the 2-cell pointer stays pinned. Per-row scrolling
-                # moves the highlighted row alone; a pan moves every row of the table, and
-                # draws its cut marks at the shift of 0 too, where a line runs off the edge.
+                # Only the label slides. The pointer of 2 cells stays pinned. The scroll for
+                # each row moves only the highlighted row. A pan moves each row of the table,
+                # and also draws its cut marks at a shift of 0, where a line goes past the
+                # edge.
                 label_text = self._scroll_window(label_text, item.hscroll_from, max(1, width - 2))
             text.append_text(label_text)
             text.style = style
             text.no_wrap = True
-            # Cut rather than truncate, so a row carrying a path line (a trophy walk, a
-            # probe candidate) breaks its chip off on the crack while every ordinary row
-            # still ends in the ellipsis — ``cut_to`` decides that from the row itself.
+            # Cut, do not truncate. Thus a row with a path line (a trophy walk, a probe
+            # candidate) breaks its chip off on the crack, and each usual row still ends in
+            # the ellipsis. ``cut_to`` decides this from the row itself.
             text = cut_to(text, width)
             text.no_wrap = True
             return render_to_ansi(text, width)
@@ -895,44 +935,45 @@ class SelectScreen(Screen):
         return draw
 
     def _max_hshift(self, label_cells: int, anchor: int, avail: int) -> int:
-        """How far ←→ may slide a row of ``label_cells`` whose head holds ``anchor`` cells.
+        """How far ←→ can slide a row of ``label_cells`` whose head holds ``anchor`` cells.
 
-        The stop is the first whole :attr:`_HSCROLL_STEP` that brings the run's tail inside
-        the lane — not the exact cell that flushes it right. A scrolled row has given up a
-        cell to its left :func:`~meshterm.ui.pathline.cut_mark`, so its last window spans one
-        less than the lane; stopping short of a whole step would leave the *right* mark drawn
-        at the far end, promising a remainder ←→ can no longer reach. (Both hand-rolled
-        windowed path rows — the node page's routes, the Message paths lanes — clamp the
-        same way.)
+        The stop is the first whole :attr:`_HSCROLL_STEP` that brings the end of the run
+        into the lane, not the exact cell that puts the end at the right edge. A scrolled
+        row gave one cell to its left :func:`~meshterm.ui.pathline.cut_mark`. Thus its last
+        visible slice is one cell shorter than the lane. If the slide stops before a whole
+        step, the right mark stays drawn at the far end, and promises more text that ←→ can
+        no longer reach. (The two path rows that cut their own visible slice by
+        hand, the routes of the node page and the lanes of Message paths, clamp in the same
+        way.)
         """
         lane = max(1, avail - max(0, anchor))
         run = max(0, label_cells - max(0, anchor))
         if run <= lane:
-            return 0  # the whole run is in view unscrolled: nothing to slide to
+            return 0  # the full run is visible without a scroll: nothing to slide to
         steps = -(-max(0, run - (lane - 1)) // self._HSCROLL_STEP)
         return steps * self._HSCROLL_STEP
 
     def _pan_limit(self, width: int) -> int:
-        """How far ←→ may pan this list's table at ``width``: to its widest line's tail.
+        """How far ←→ can pan the table of this list at ``width``: to the end of its widest line.
 
-        Every panning line is measured on the same terms — a row in the content area after
-        its pointer, a column header over the whole width with its pointer column held — so
-        the two measure the same table and agree on where it ends.
+        Each line that pans is measured in the same way: a row in the content area after
+        its pointer, and a column header over the full width with its pointer column held.
+        Thus the two measure the same table and agree on where it ends.
 
-        The stop is the exact shift that brings the widest line's tail to the edge, not the
-        whole :attr:`_HSCROLL_STEP` past it that :meth:`_max_hshift` takes for one row. Here
-        every line moves, so a whole-step stop would leave the entire table ending short of
-        the edge — and a box sized to its content (the startup splash) would shrink under the
-        reader on the last press, shedding hint atoms as it went. At the exact stop the
-        widest line meets the edge with no right-hand mark: its first hidden cell is past
-        its own end.
+        The stop is the exact shift that brings the end of the widest line to the edge. It
+        is not the whole :attr:`_HSCROLL_STEP` past it that :meth:`_max_hshift` takes for
+        one row. Here each line moves. Thus a stop at a whole step makes the full table end
+        before the edge. Also, a box with the size of its content (the startup splash) then
+        becomes smaller under the user at the last press, and removes hint atoms as it
+        becomes smaller. At the exact stop, the widest line touches the edge with no mark at
+        the right: its first hidden cell is after its own end.
         """
         avail = max(1, width - _POINTER)
 
         def tail(cells: int, anchor: int, room: int) -> int:
             lane = max(1, room - anchor)
             run = max(0, cells - anchor)
-            return 0 if run <= lane else run - (lane - 1)  # the left mark costs a cell
+            return 0 if run <= lane else run - (lane - 1)  # the left mark takes a cell
 
         limit = 0
         for item in self._rows():
@@ -947,21 +988,22 @@ class SelectScreen(Screen):
         return limit
 
     def _scroll_window(self, label: Text, anchor: int, avail: int) -> Text:
-        """The highlighted row's label with its head pinned and its run slid ``_hshift`` in.
+        """The label of the highlighted row: head pinned, run slid in by ``_hshift``.
 
-        The first ``anchor`` cells are drawn whole and never move — a row that declares them
-        (:attr:`Choice.hscroll_from`) is columns-then-content, and the columns are what tells
-        the reader which row they are on. Everything past them is the scrolling run, shown a
-        lane at a time, with the edge it continues past on each side wearing
-        :func:`~meshterm.ui.pathline.cut_mark` — a chip broken off in its own fill where the
-        run is a path drawn in chips, the faint ``…`` where it isn't. Those marks are chrome
-        *inside* the lane rather than extra width, so each costs the window a cell and the
-        crop is measured only once both are known; else the run would draw a cell past the
-        row. With ``anchor`` at ``0`` (the default) the whole line is the run, which is the
-        behaviour every hscroll list had before rows could pin a head.
+        The first ``anchor`` cells are drawn in full and never move. A row that declares
+        them (:attr:`Choice.hscroll_from`) has columns, then content, and the columns tell
+        the user which row the highlight is on. All the text after them is the run that
+        scrolls, shown one lane at a time. On each side where the run continues past the
+        edge, the edge shows :func:`~meshterm.ui.pathline.cut_mark`: a chip broken off in its
+        own fill where the run is a path drawn in chips, or the faint ``…`` where it is not.
+        These marks are chrome in the lane, not more width. Thus each mark takes a cell from
+        the visible slice, and the crop is measured only when the two marks are known. If
+        the crop is measured before, the run draws one cell past the row. With ``anchor`` at
+        ``0`` (the default), the full line is the run. This is the behaviour that each
+        hscroll list had before rows could pin a head.
         """
         head = crop_cells(label, 0, anchor) if anchor > 0 else Text()
-        anchor = head.cell_len  # a head wider than the label itself keeps only what is there
+        anchor = head.cell_len  # a head wider than the label keeps only the cells that exist
         run = max(0, label.cell_len - anchor)
         shift = self._hshift
         left = 1 if shift else 0
@@ -979,10 +1021,10 @@ class SelectScreen(Screen):
 
     @staticmethod
     def _detail_drawer(detail: str | Text, width: int) -> Callable[[], str]:
-        """A callable that rasterizes a row's already-resolved detail line, on demand.
+        """A callable that renders the detail line of a row (already resolved), on demand.
 
-        Hangs under the row at the pointer's own indent — never scrolls or wraps, just
-        ellipsizes on its own if it's too wide to fit.
+        The line hangs under the row, at the indent of the pointer. It never scrolls or
+        wraps. It ellipsizes itself if it is too wide to fit.
         """
 
         def draw() -> str:
@@ -1003,18 +1045,18 @@ class SelectScreen(Screen):
     # --- input ---------------------------------------------------------------
 
     def handle(self, action: str, data: str = "") -> None:
-        """Move the highlight, edit the filter, or commit/cancel the selection."""
+        """Move the highlight, edit the filter, or commit or cancel the selection."""
         choices = self._choices()
         if self._hscroll and not self._pan and action in _HSHIFT_RESET_ACTIONS:
-            self._hshift = 0  # moving off a row abandons its scroll — each row scrolls alone
+            self._hshift = 0  # a move off a row resets its scroll. Each row scrolls by itself.
         if action == "up":
             if choices:
-                # Both ends clamp; nothing in the app rolls a highlight over. A ↓ off the
-                # last row would haul the window back to the head and flip the edge
-                # markers with it, which reads as the screen changing under the reader
-                # rather than as one step — and across a grouped list's section headings
-                # it reads as a jump rather than as continuing to scroll. Held-down arrows
-                # settle at an end instead.
+                # Both ends clamp. Nothing in the app rolls a highlight over. If a ↓ off the
+                # last row rolls over, it pulls the viewport back to the start and changes
+                # the edge markers with it. To the user, this looks like a change of the screen
+                # under them, not like one step. Across the section headings of a grouped
+                # list, it looks like a jump, not like a scroll that continues. Held-down
+                # arrows stop at an end instead.
                 self._index = max(0, self._index - 1)
         elif action == "down":
             if choices:
@@ -1024,9 +1066,9 @@ class SelectScreen(Screen):
         elif action == "pagedown":
             self._index = min(len(choices) - 1, self._index + self._page_step) if choices else 0
         elif action in ("home", "ctrl_home"):
-            # The jump goes to the very top of the *page*, not just the first choice: the
-            # rows above it (a heading, its preamble, a lead-in note) scroll back into
-            # view too, rather than staying folded behind their pinned stand-ins.
+            # The jump goes to the top of the page, not only to the first choice. The lines
+            # above it (a heading, its preamble, a lead-in note) also scroll back onto the
+            # screen, and do not stay hidden behind their pinned copies.
             self._index = 0
             self.scroll_to_top()
         elif action in ("end", "ctrl_end"):
@@ -1039,18 +1081,19 @@ class SelectScreen(Screen):
             if choices:
                 self.resolve(choices[self._index].value)
         elif action == "delete":
-            # Delete asks to remove the highlighted row, but only where the row opted in
-            # (e.g. a remembered network device in the picker); elsewhere it's inert.
+            # Delete asks to remove the highlighted row, but only where the row opted in (for
+            # example, a remembered network device in the picker). On other rows, it does
+            # nothing.
             if choices and choices[self._index].deletable:
                 self.resolve(DeleteRequest(choices[self._index].value))
         elif action == "left" and (self._hscroll or self._pan):
             self._hshift = max(0, self._hshift - self._HSCROLL_STEP)
         elif action == "right" and (self._hscroll or self._pan):
-            self._hshift += self._HSCROLL_STEP  # clamped at render, to the row's or table's tail
+            self._hshift += self._HSCROLL_STEP  # clamped at render to the end of the row or table
         elif action == "escape":
-            # A typed filter is the most recent thing the reader entered, so Esc peels that
-            # before it leaves — the map and the mesh walk's rule, now every filtering
-            # screen's. Leaving a narrowed list is the second Esc.
+            # A typed filter is the most recent thing that the user entered. Thus Esc clears
+            # it before Esc leaves. This was the rule of the map and the mesh walk, and now it
+            # is the rule of each screen with a filter. The second Esc leaves a narrowed list.
             if self._filterable and self._filter:
                 self._filter = ""
                 self._index = 0
@@ -1062,15 +1105,16 @@ class SelectScreen(Screen):
             self._index = 0
             self._hshift = 0
         elif action == "text" and data in self._keys:
-            # A declared shortcut resolves the list with what was pressed and where the
-            # highlight was standing; only a non-filterable list can declare any.
+            # A declared shortcut resolves the list with the pressed key and the row of the
+            # highlight. Only a list that is not filterable can declare shortcuts.
             self.resolve(
                 KeyRequest(self._keys[data], choices[self._index].value if choices else None)
             )
         elif action == "text" and self._filterable and data.isprintable():
-            # A leading space is ignored (the filter never begins with whitespace); a
-            # trailing one is dropped when matching (see _rows), so spaces count only
-            # mid-query — inside a multi-word name like "Homestead R&D".
+            # A space at the start is ignored (the filter never starts with whitespace). A
+            # space at the end is removed when the filter matches (refer to _rows). Thus
+            # spaces count only in the middle of the query, in a name of more than one word
+            # such as "Homestead R&D".
             if not data.isspace() or self._filter:
                 self._filter += data
                 self._index = 0
@@ -1078,30 +1122,32 @@ class SelectScreen(Screen):
 
 
 class ReorderScreen(Screen):
-    """A list whose rows the user rearranges in place with the arrow keys.
+    """A list whose rows the user puts in a new order in place, with the arrow keys.
 
-    Move the cursor with ↑/↓; press Enter on a row to *grab* it, then ↑/↓ carry it up and
-    down the list; press Enter again to *drop* it. Below the list sit the action rows,
-    following the config editor's pattern: once the order has actually changed, an
-    ok-tinted *Apply* joins an err-tinted *Back — discard*; while it is untouched there
-    are no action rows at all, because Esc already leaves. Enter on Apply commits,
-    resolving with the final order as a list of the original row indices (so ``[2, 0, 1]``
-    means "the row that started third is now first"); Enter on Back — like Esc anywhere —
-    resolves :data:`CANCEL` so the caller keeps the original order.
+    Move the highlight with ↑/↓. Press Enter on a row to "grab" it. Then ↑/↓ move it up and
+    down the list. Press Enter again to "drop" it.
+
+    The action rows are below the list, in the same pattern as the config editor. When the
+    order has changed, an "Apply" row in the ``ok`` tint and a "Back — discard" row in the
+    ``err`` tint appear. While the order has no change, there are no action rows, because
+    Esc already leaves. Enter on Apply commits. It resolves with the final order as a list
+    of the original row indices (thus ``[2, 0, 1]`` means "the row that started third is
+    now first"). Enter on Back, like Esc on all screens, resolves :data:`CANCEL`, so the
+    caller keeps the original order.
     """
 
-    #: Action-row sentinels (kept distinct from list positions, which are ints).
+    #: Sentinels for the action rows (different from list positions, which are ints).
     _APPLY = "apply"
     _BACK = "back"
 
-    #: Footer hints for both grab states — dialog_width sizes to the longer one, so the
-    #: box never resizes when a grab starts.
+    #: The footer hints for the two grab states. ``dialog_width`` uses the longer one, so the
+    #: box never changes size when a grab starts.
     _HINT_IDLE = "↑↓ move · Enter grab / select · Esc cancel"
     _HINT_GRABBED = "↑↓ move row · Enter drop · Esc cancel"
 
     @property
     def picocalc_lyra_lane(self):
-        """No lane: the whole screen is ↑↓ and Enter, three keys already on the keyboard."""
+        """No lane: the full screen uses ↑↓ and Enter, three keys that are on the keyboard."""
         from .fkeys import EMPTY_LANE
 
         return EMPTY_LANE
@@ -1110,29 +1156,30 @@ class ReorderScreen(Screen):
         """Build a reorder screen.
 
         Args:
-            title: Heading shown above the list.
+            title: The heading above the list.
             labels: The row labels, in their current order.
         """
         super().__init__()
         self.title = title
         self._labels = list(labels)
-        # order[position] == the label's original index; a moved row carries its index along.
+        # order[position] == the original index of the label. A moved row keeps its index.
         self._order = list(range(len(labels)))
         self._index = 0
         self._grabbed = False
 
     @property
     def footer_hint(self) -> str:  # type: ignore[override]
-        """Key hint, phrased for whether a row is currently grabbed."""
+        """The key hint, with words that depend on whether a row is grabbed now."""
         return self._HINT_GRABBED if self._grabbed else self._HINT_IDLE
 
     @property
     def dialog_width(self) -> int:
-        """Natural outer width so a floating reorder hugs its widest row (see SelectScreen).
+        """The natural outer width, so that a floating reorder box fits its widest row.
 
-        Sized for the fullest the box can get — both footer hints and the dirty-state
-        action rows — so it never widens mid-interaction when a grab starts or Apply
-        appears. The compositor still caps this to the terminal.
+        Refer to SelectScreen. The size is for the largest form of the box: the two footer
+        hints and the action rows of the changed state. Thus the box never becomes wider
+        during the interaction, when a grab starts or when Apply appears. The compositor
+        still limits this width to the terminal.
         """
         widths = [cell_len(self.title), cell_len(self._HINT_IDLE), cell_len(self._HINT_GRABBED)]
         rows = self._labels + [label.plain for _key, label in self._dirty_actions()]
@@ -1140,28 +1187,28 @@ class ReorderScreen(Screen):
         return max(widths, default=20) + 8
 
     def _dirty(self) -> bool:
-        """Whether the rows have actually left their original order."""
+        """Whether the rows are no longer in their original order."""
         return self._order != list(range(len(self._order)))
 
     @staticmethod
     def _dirty_actions() -> list[tuple[str, Text]]:
-        """The full exit group shown once the order has changed (also sizes dialog_width)."""
+        """The full exit group, shown after the order changes (it also sets dialog_width)."""
         return [
             (ReorderScreen._APPLY, Text.assemble(("✓ ", "ok"), "Apply new order")),
             (ReorderScreen._BACK, Text.assemble(("✗ ", "err"), "Back — discard changes")),
         ]
 
     def _actions(self) -> list[tuple[str, Text]]:
-        """The action rows below the list, matching the config editor's exit group.
+        """The action rows below the list, the same as the exit group of the config editor.
 
-        An untouched order offers none: Esc leaves, and a row saying so was retired
-        app-wide. A changed one offers the pair, because Apply has no key of its own and
-        its counterpart names what leaving costs.
+        An order with no change offers no rows: Esc leaves, and we removed the row that told
+        this from all the app. A changed order offers the pair, because Apply has no key of
+        its own, and its counterpart tells what a leave costs.
         """
         return self._dirty_actions() if self._dirty() else []
 
     def render_body(self, width: int) -> list[str]:
-        """Render the rows, a blank spacer, then the action group, marking the cursor."""
+        """Render the rows, a blank spacer, then the action group, and mark the highlight."""
         n = len(self._order)
         lines: list[str] = []
         for pos, orig in enumerate(self._order):
@@ -1182,29 +1229,29 @@ class ReorderScreen(Screen):
             lines.append("")
         for i, (_key, label) in enumerate(actions):
             if n + i == self._index:
-                # The cursor row takes the highlight like the list rows above it,
-                # trading the ✓/✗ tint for the highlight.
+                # The highlighted action row gets the ``cursor`` style, as the list rows
+                # above it do. It loses the ✓/✗ tint for this style.
                 text = Text("❯ " + label.plain, style="cursor", no_wrap=True)
             else:
                 text = Text("  ", no_wrap=True)
                 text.append_text(label)
             text.truncate(width, overflow="ellipsis")
             lines.append(render_to_ansi(text, width))
-        # The spacer line offsets every action row by one on screen.
+        # The spacer line moves each action row down by one line on the screen.
         self._cursor = self._index if self._index < n else self._index + 1
         return lines
 
     def cursor_line(self) -> int | None:
-        """Return the body line index of the cursor row, so the session keeps it in view."""
+        """Return the body line index of the highlight, so that the session keeps it visible."""
         return getattr(self, "_cursor", None)
 
     def handle(self, action: str, data: str = "") -> None:
-        """Move the cursor, carry a grabbed row, grab/drop, run an action, or cancel on Esc."""
+        """Move the highlight or a grabbed row, grab or drop, run an action, or cancel on Esc."""
         n = len(self._order)
         actions = self._actions()
         total = n + len(actions)
-        # A change undone while the cursor sat on an action row would strand it past the
-        # end; clamp before anything reads it.
+        # If a change is undone while the highlight is on an action row, the highlight is
+        # past the end. Clamp it before anything reads it.
         self._index = min(self._index, max(0, total - 1))
         if action == "up":
             if self._grabbed and self._index > 0:
@@ -1214,9 +1261,9 @@ class ReorderScreen(Screen):
                 )
                 self._index -= 1
             elif not self._grabbed and total:
-                # Clamps like every other row cursor, and like the grabbed one just above:
+                # Clamp, as each other row highlight does, and as the grabbed row above does:
                 # the same two keys must not mean "stop at the end" in one mode and "leap
-                # to the other end" in the other.
+                # to the other end" in the other mode.
                 self._index = max(0, self._index - 1)
         elif action == "down":
             if self._grabbed and self._index < n - 1:
@@ -1228,9 +1275,9 @@ class ReorderScreen(Screen):
             elif not self._grabbed and total:
                 self._index = min(total - 1, self._index + 1)
         elif action in ("home", "ctrl_home") and not self._grabbed and total:
-            # Home and End jump to the first row and the last, as on every list, and edge
-            # scroll takes the page to its ends with them. A grabbed row is carried a step
-            # at a time only, so they leave it where it is.
+            # Home and End jump to the first row and the last, as on each list, and the edge
+            # scroll moves the page to its ends with them. A grabbed row moves only one step
+            # at a time, so these keys do not move it.
             self._index = 0
         elif action in ("end", "ctrl_end") and not self._grabbed and total:
             self._index = total - 1

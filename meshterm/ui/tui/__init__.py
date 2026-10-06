@@ -1,22 +1,28 @@
 # SPDX-License-Identifier: Apache-2.0
-"""A small, centralized, reusable full-screen text-UI library.
+"""A small, central, reusable library for a full-screen text UI.
 
-Built on prompt_toolkit (for the terminal, input, and resize handling) and Rich (for all
-content rendering), this package gives the interactive app a consistent, bounded, layered
-UI: screens never overflow the terminal, long content scrolls, going deeper stacks dialogs
-over a dimmed parent, and Esc always dismisses the current layer.
+The package uses prompt_toolkit for the terminal, the input, and the resize events, and
+Rich to render all the content. It gives the interactive app a UI that is consistent,
+bounded, and in layers:
 
-Navigation is a strict stack: one push per screen entered, one pop per Esc, and the screen
-object survives the whole visit so its cursor, sort and filter are still there when a
-sub-screen closes (:meth:`~meshterm.ui.tui.session.TuiSession.stay`). The one shortcut past
-it is ^W, which unwinds every frame at once by raising
+- A screen never becomes larger than the terminal.
+- Long content scrolls.
+- When the user goes deeper, each dialog is put over its dimmed parent.
+- The Esc key always closes the current layer.
+
+Navigation is a strict stack. Each screen that the user enters is one push, and each Esc is
+one pop. The screen object stays for the whole visit. Thus its highlight, its sort, and its
+filter are still there when a screen above it closes
+(:meth:`~meshterm.ui.tui.session.TuiSession.stay`). The only shortcut past the stack is ^W.
+It unwinds all the screens on the stack at one time, because it raises
 :class:`~meshterm.ui.tui.screen.PopToMenu` through them.
 
 Public API:
-    - :class:`~meshterm.ui.tui.session.TuiSession` — the running session and prompt helpers.
-    - :class:`~meshterm.ui.tui.select.Choice` / :class:`~meshterm.ui.tui.select.Separator`
-      — items for ``session.select``.
-    - Screen classes for advanced/custom layers.
+    - :class:`~meshterm.ui.tui.session.TuiSession`: the running session and the prompt
+      helpers.
+    - :class:`~meshterm.ui.tui.select.Choice` / :class:`~meshterm.ui.tui.select.Separator`:
+      the items for ``session.select``.
+    - The screen classes, for advanced or custom layers.
 """
 
 from __future__ import annotations

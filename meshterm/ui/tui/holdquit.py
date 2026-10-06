@@ -1,18 +1,25 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The session's half of hold-Esc-to-quit: the box, its bar, and what holding it engages.
+"""The part of hold-Esc-to-quit that the session does: the dialog, its bar, and the quiesce.
 
-:mod:`~meshterm.services.hold_to_quit` says what the gesture is and why; this is what the
-session does with it. :class:`EscHoldWatch` is the session's listener: told that Esc went
-down, it waits out :data:`~meshterm.services.hold_to_quit.DIALOG_S`, claims the hold, floats
-a :class:`HoldQuitDialog` over whatever is up, so nothing under it stops, and engages the
-app's :class:`Quiet`; told that Esc came up, it takes the box down and gives the quiet
-back. Held to :data:`~meshterm.services.hold_to_quit.QUIT_S`, it leaves
+:mod:`~meshterm.services.hold_to_quit` tells what the gesture is and why it exists. This
+module tells what the session does with it. :class:`EscHoldWatch` is the listener of the
+session. When it is told that the Esc key went down, it does these steps:
+
+- It waits for :data:`~meshterm.services.hold_to_quit.DIALOG_S`.
+- It claims the hold.
+- It floats a :class:`HoldQuitDialog` over the screen that is up. Thus nothing under the
+  dialog stops.
+- It engages the quiesce of the app (:class:`Quiet`).
+
+When it is told that the Esc key came up, it closes the dialog and releases the quiesce.
+If the key is held until :data:`~meshterm.services.hold_to_quit.QUIT_S`, it leaves
 (:meth:`~meshterm.ui.tui.session.TuiSession.leave`).
 
-Who says Esc went down and up depends on who has the keys. A front end that reads them
-itself (the emulator's) says so directly. Where a terminal delivers them, :class:`WatchedEsc`
-asks the keyboard whether an arriving Esc is still down, and if it is, holds it back and
-watches it until it comes up.
+The source of the down and up events of the Esc key depends on what reads the keys. A
+front end that reads the keys itself (the front end of the emulator) reports them directly.
+When a terminal delivers the keys, :class:`WatchedEsc` asks the keyboard if an Esc that
+arrives is still down. If it is, :class:`WatchedEsc` holds it back and watches it until the
+key comes up.
 """
 
 from __future__ import annotations
@@ -38,27 +45,28 @@ if TYPE_CHECKING:
 
 _log = get_logger()
 
-#: Seconds between repaints while the bar fills. The bar gains a step every few hundredths
-#: of a second, but a frame costs real time on a handheld, and ten a second reads as a
-#: smooth fill while leaving most of a core to whatever the app is finishing up.
+#: Seconds between two paints while the bar fills. The bar gets one more step after a few
+#: hundredths of a second. But a frame costs real time on a handheld. Ten paints each
+#: second look like a smooth fill, and most of a core stays free for the work that the app
+#: must finish.
 BAR_TICK_S = 0.1
 
-#: The box's width, border included: the bar is the width of the text above it.
+#: The width of the dialog, with its border: the bar has the width of the text above it.
 _WIDTH = 30
 
 
 class Quiet:
-    """The app's quiesce (:meth:`~meshterm.ui.tui.session.TuiSession.set_quiesce`), held.
+    """The quiesce of the app (:meth:`~meshterm.ui.tui.session.TuiSession.set_quiesce`), held.
 
-    Entered in a task of its own, since what it takes — the transmit lock — may have to
-    wait for a transmission to finish, and the box must not wait with it. Given back
-    (:meth:`release`) when the reader lets go of Esc. When the app leaves it is never given
-    back: it goes when the event loop is shut down, after the device has been disconnected,
-    so nothing starts transmitting while the app tears down.
+    The quiesce is entered in its own task, because the thing that it takes (the transmit
+    lock) may have to wait until a transmission finishes, and the dialog must not wait with
+    it. The quiesce is released (:meth:`release`) when the user releases the Esc key. When
+    the app leaves, it is never released. It stops when the event loop shuts down, after
+    the device is disconnected. Thus no transmission starts while the app shuts down.
     """
 
     def __init__(self, enter: Callable[[], AbstractAsyncContextManager[Any]] | None) -> None:
-        """Start entering ``enter`` (``None``: nothing to enter, engaged at once)."""
+        """Start to enter ``enter`` (``None``: there is nothing to enter, so engage at once)."""
         self._engaged = asyncio.Event()
         self._released = asyncio.Event()
         self._task = asyncio.ensure_future(self._hold(enter))
@@ -77,11 +85,11 @@ class Quiet:
         except Exception as exc:  # noqa: BLE001 - a failed quiesce must not stop a quit
             _log.warning("could not quiet the app before leaving: %s", exc)
         finally:
-            # Never keep a leave waiting on a quiesce that failed or was cancelled.
+            # A leave must never wait for a quiesce that failed or was cancelled.
             self._engaged.set()
 
     async def engaged(self, timeout: float) -> bool:
-        """Wait up to ``timeout`` seconds for the quiesce to take hold; whether it did."""
+        """Wait up to ``timeout`` seconds for the quiesce to engage. Return whether it did."""
         try:
             await asyncio.wait_for(self._engaged.wait(), timeout)
         except asyncio.TimeoutError:
@@ -89,18 +97,19 @@ class Quiet:
         return True
 
     def release(self) -> None:
-        """Give the quiesce back: what it held up goes ahead."""
+        """Release the quiesce: the work that it held back continues."""
         self._released.set()
 
 
 class HoldQuitDialog(Screen):
-    """The box a held Esc raises: that MeshTerm is about to quit, and how soon.
+    """The dialog that a held Esc key opens: MeshTerm will quit soon, and it shows when.
 
-    The bar is the time left: it starts filling the moment the box appears and is full at
-    :data:`~meshterm.services.hold_to_quit.QUIT_S` from the press, when the app leaves —
-    and when, on the Cardputer Zero, the launcher sends its SIGTERM. No buttons, since the
-    only answer is in the reader's hand: keep holding, or let go. Modal, so no key reaches
-    the screen beneath while it is up.
+    The bar shows the time that remains. It starts to fill when the dialog appears. It is
+    full at :data:`~meshterm.services.hold_to_quit.QUIT_S` after the key press. At that
+    time, the app leaves, and on the Cardputer Zero, the launcher sends its SIGTERM. The
+    dialog has no buttons, because the only answer is in the hand of the user: hold the
+    key, or release it. The dialog is modal, so no key press gets to the screen below it
+    while it is up.
     """
 
     title = "Quit MeshTerm"
@@ -110,7 +119,7 @@ class HoldQuitDialog(Screen):
     footer_hint = "let go of Esc to stay"
 
     def __init__(self, since: float, *, clock: Callable[[], float] = time.monotonic) -> None:
-        """A box for the hold that began at ``since`` (``clock``'s time, ``time.monotonic``)."""
+        """A dialog for the hold that started at ``since``, in ``clock`` time (monotonic)."""
         super().__init__()
         self._starts = since + hold_to_quit.DIALOG_S
         self._span = hold_to_quit.QUIT_S - hold_to_quit.DIALOG_S
@@ -118,7 +127,7 @@ class HoldQuitDialog(Screen):
 
     @property
     def picocalc_lyra_lane(self):
-        """No lane: nothing on the keyboard but the Esc in the reader's hand does anything."""
+        """No lane: no keyboard key has an effect, except the Esc key that the user holds."""
         from .fkeys import EMPTY_LANE
 
         return EMPTY_LANE
@@ -130,24 +139,24 @@ class HoldQuitDialog(Screen):
 
     @property
     def fraction(self) -> float:
-        """How full the bar is, ``0`` when the box appears to ``1`` when the app leaves."""
+        """How full the bar is: ``0`` when the dialog appears, to ``1`` when the app leaves."""
         return min(1.0, max(0.0, (self._clock() - self._starts) / self._span))
 
     def render_body(self, width: int) -> list[str]:
-        """``Hold Esc to quit`` over the bar, which fills the line's width."""
+        """``Hold Esc to quit`` above the bar. The bar fills the width of the line."""
         bar = meter(self.fraction, width, style="warn", slim=True, track="track")
         return render_lines(Group(Text("Hold Esc to quit", style="warn"), Text(""), bar), width)
 
     def handle(self, action: str, data: str = "") -> None:
-        """Swallow every key: the box answers to Esc being held or let go, and nothing else."""
+        """Ignore all keys: the dialog responds only to a hold or a release of the Esc key."""
         return
 
 
 class EscHoldWatch:
-    """The session's :class:`~meshterm.services.hold_to_quit.Listener`.
+    """The :class:`~meshterm.services.hold_to_quit.Listener` of the session.
 
-    Its three listener methods are called from other threads and only hand their work to
-    the session's loop; everything else here runs on the loop.
+    Other threads call its three listener methods. These methods only give their work to
+    the loop of the session. All the other code here runs on the loop.
     """
 
     def __init__(self, session: TuiSession, loop: asyncio.AbstractEventLoop) -> None:
@@ -157,7 +166,7 @@ class EscHoldWatch:
         self._raise: asyncio.TimerHandle | None = None
         self._quit: asyncio.TimerHandle | None = None
         self._ticker: asyncio.Future | None = None
-        #: The box while it is up, and the backdrop pushed under it when nothing was.
+        #: The dialog while it is up, and the backdrop pushed under it when no screen was up.
         self._dialog: HoldQuitDialog | None = None
         self._backdrop: Screen | None = None
 
@@ -178,7 +187,7 @@ class EscHoldWatch:
     def _call(self, work: Callable[..., None], *args: Any) -> None:
         try:
             self._loop.call_soon_threadsafe(work, *args)
-        except RuntimeError:  # the loop has closed: the app is gone already
+        except RuntimeError:  # the loop is closed: the app has already stopped
             pass
 
     # --- on the loop --------------------------------------------------------------------
@@ -189,7 +198,7 @@ class EscHoldWatch:
         self._raise = self._loop.call_later(max(0.0, delay), self._show, since)
 
     def _show(self, since: float) -> None:
-        """Raise the box, if the hold that asked for it is still held."""
+        """Open the dialog, if the hold that asked for it continues."""
         self._raise = None
         if self._session.leaving or not hold_to_quit.claim(since):
             return
@@ -197,11 +206,12 @@ class EscHoldWatch:
         dialog = self._dialog = HoldQuitDialog(since)
         left = since + hold_to_quit.QUIT_S - time.monotonic()
         self._quit = self._loop.call_later(max(0.0, left), self._session.leave)
-        # Pushed here and popped by :meth:`_stand_down`, the way the busy card is: the box
-        # answers to the key, not to a future, and a release landing in the same breath
-        # has nothing half-made to miss. On an empty stack (a tool between two screens) it
-        # gets a blank backdrop of its own, as the busy card does, never the menu: the menu
-        # may be pushed again under it by then, and popping it would take the menu away.
+        # This method pushes the dialog and :meth:`_stand_down` pops it, the same as the busy
+        # card. The dialog responds to the key, not to a future. Thus a release that arrives
+        # at the same moment cannot miss a dialog that is only half made. On an empty stack
+        # (a tool between two screens), the dialog gets its own blank backdrop, as the busy
+        # card does. It never uses the menu as its backdrop: by that time, the menu may be
+        # pushed again under the dialog, and a pop of the backdrop then removes the menu.
         if self._session.top is None:
             self._backdrop = ScrollScreen("", floating=False, footer_hint="")
             self._session.push(self._backdrop)
@@ -209,7 +219,7 @@ class EscHoldWatch:
         self._ticker = asyncio.ensure_future(self._fill(dialog))
 
     async def _fill(self, dialog: HoldQuitDialog) -> None:
-        """Repaint while the bar fills; the last repaint shows it full."""
+        """Request a paint while the bar fills. The last paint shows the full bar."""
         while True:
             await asyncio.sleep(BAR_TICK_S)
             self._session.invalidate()
@@ -218,12 +228,12 @@ class EscHoldWatch:
 
     def _on_released(self) -> None:
         if self._session.leaving:
-            return  # the bar ran out: the app is on its way, and the launcher's SIGTERM too
+            return  # the bar is full: the app leaves, and the launcher's SIGTERM comes too
         self._stand_down()
         self._session.unquiet()
 
     def _stand_down(self) -> None:
-        """Cancel the hold under way: its timers, its repaints, and its box."""
+        """Cancel the hold that is in progress: its timers, its paints, and its dialog."""
         for timer in (self._raise, self._quit):
             if timer is not None:
                 timer.cancel()
@@ -239,34 +249,40 @@ class EscHoldWatch:
             self._backdrop = None
 
 
-#: Whether a terminal's keys arrive as a VT byte stream, whose last Esc can be parsed after
-#: the key is up: everywhere but Windows, where prompt_toolkit reads the console's events.
+#: Whether the keys of a terminal arrive as a VT byte stream. In such a stream, the last Esc
+#: can be parsed after the key is up. This is true on all platforms except Windows, where
+#: prompt_toolkit reads the events of the console.
 VT_INPUT = sys.platform != "win32"
 
-#: Seconds between looks at the keyboard while a terminal's Esc is held. A tap is let go
-#: well within a tenth of a second of this, and the probes cost next to nothing to ask.
+#: Seconds between two probes of the keyboard while the Esc key of a terminal is held. At
+#: this interval, MeshTerm finds the release of a tap well within a tenth of a second. Each
+#: probe costs almost nothing.
 POLL_S = 0.03
 
 
 class WatchedEsc:
-    """A terminal's Esc, with the keyboard asked whether it is still held.
+    """The Esc key of a terminal, with a probe that asks the keyboard if it is still held.
 
-    Where no front end owns the keys, Esc arrives through the terminal like any other key,
-    and the terminal never says when it comes up. The keyboard does
-    (:func:`~meshterm.services.hold_to_quit.esc_probe`). So an Esc that arrives while the
-    key is still down is held back, and the hold reported and watched, the same hold an
-    owning front end reports: let go at once and it is delivered, a second's hold raises
-    the box, and the keyboard's repeats are part of the hold.
+    When no front end owns the keys, the Esc key arrives through the terminal like all
+    other keys, and the terminal never tells when the key comes up. The keyboard tells it
+    (:func:`~meshterm.services.hold_to_quit.esc_probe`). Thus an Esc that arrives while the
+    key is still down is held back. Then the hold is reported and watched, the same as a
+    hold that a front end with its own keys reports:
 
-    Through a VT stream a lone Esc byte reaches the screen only once prompt_toolkit has
-    waited to be sure it starts no sequence (``ttimeoutlen``), so a tap is usually let go
-    before it arrives and is never held back at all; and the last repeat of a hold can
-    arrive *after* the key is up. Repeats arriving that late are swallowed for as long as
-    that wait lasts, rather than going back a screen behind a box the reader just let go of.
+    - If the user releases the key at once, the Esc is delivered.
+    - A hold of one second opens the dialog.
+    - The repeats of the keyboard are part of the hold.
+
+    Through a VT stream, a lone Esc byte gets to the screen only after prompt_toolkit waits
+    to be sure that it starts no sequence (``ttimeoutlen``). Thus the user usually releases
+    a tap before it arrives, and the tap is never held back. Also, the last repeat of a hold
+    can arrive after the key is up. Repeats that arrive this late are ignored for the length
+    of that wait. Thus a late repeat does not leave the screen under a dialog that the user
+    just released.
     """
 
     def __init__(self, session: TuiSession, down: Callable[[], bool]) -> None:
-        """Hold back ``session``'s Esc while ``down()`` says the key is still held."""
+        """Hold back the Esc of ``session`` while ``down()`` tells that the key is still held."""
         self._session = session
         self._down = down
         self._watching: asyncio.Future | None = None
@@ -280,17 +296,17 @@ class WatchedEsc:
             return False
         if self._watching is not None:
             self._repeats += 1
-            return True  # the keyboard repeating a held key
+            return True  # the keyboard repeats a held key
         if time.monotonic() < self._late_until:
-            return True  # a repeat of the hold just let go, parsed late
+            return True  # a repeat of the hold that just ended, parsed late
         if not self._down() or not hold_to_quit.press():
-            return False  # let go already, or nothing listening
+            return False  # the key is already up, or nothing listens
         self._repeats = 0
         self._watching = asyncio.ensure_future(self._until_let_go())
         return True
 
     def ahead(self) -> None:
-        """Another key arrived: deliver an Esc still held back first, so keys keep order."""
+        """Another key arrived: first deliver a held-back Esc, so that the keys stay in order."""
         if self._watching is not None and hold_to_quit.interrupt():
             self._deliver()
 

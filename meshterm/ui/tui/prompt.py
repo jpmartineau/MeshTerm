@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Input screens: text, confirm, and autocomplete — the ``questionary`` replacements.
+"""Input screens: text, confirm, and autocomplete. They replace ``questionary``.
 
-These reimplement the small slice of ``questionary`` the app uses (a validated line editor,
-a yes/no toggle, and a free-text field with suggestions) as uniform TUI screens, so every
-prompt shares the framework's look, layering, resize, and Esc-to-cancel behavior.
+These screens implement again the small part of ``questionary`` that the app uses: a line
+editor with validation, a yes/no toggle, and a free-text field with suggestions. They are
+uniform TUI screens. Thus each prompt has the same look, layering, resize, and
+Esc-to-cancel behaviour as the rest of the framework.
 """
 
 from __future__ import annotations
@@ -23,29 +24,31 @@ from .spinner import Spinner
 if TYPE_CHECKING:
     from .fkeys import FPair
 
-#: A validator returns ``True`` when the input is acceptable, or an error message to show.
+#: A validator returns ``True`` when the input is acceptable. Otherwise, it returns an error
+#: message to show.
 Validator = Callable[[str], "bool | str"]
 
-#: MeshCore's LoRa payload caps a direct message at 150 UTF-8 bytes and an (unscoped)
-#: channel broadcast at 130; past the cap the companion silently drops the packet. Every
-#: compose bar that feeds one of those sends — the chat input, the courier's message entry —
-#: counts bytes against these and blocks over the limit rather than losing the packet.
+#: The LoRa payload of MeshCore limits a direct message to 150 UTF-8 bytes, and an
+#: (unscoped) channel broadcast to 130 bytes. Past the limit, the companion discards the
+#: packet and gives no error. Each compose bar that feeds one of those sends (the chat input,
+#: the message entry of the courier) counts bytes against these limits. Over the limit, it
+#: blocks the send, instead of a lost packet.
 DM_BYTE_LIMIT = 150
 CHANNEL_BYTE_LIMIT = 130
 
-#: Byte-counter thresholds (bytes *remaining*) at which its colour escalates, plus the two
-#: mid-band hues. The theme's ``warn``/``err`` sit too close together (an amber that reads
-#: orange, then red), so the counter names a truer yellow and orange directly to keep the
-#: green→yellow→orange→red fuel gauge visibly stepped.
+#: The thresholds of the byte counter (in bytes that remain) at which its colour goes up one
+#: step, and the two colours of the middle band. The theme's ``warn`` and ``err`` are too close
+#: together (an amber that looks orange, then red). Thus the counter names a truer yellow and
+#: orange directly, so that the green→yellow→orange→red fuel gauge has visible steps.
 _BYTES_TIGHT, _BYTES_LOW = 20, 10
 _BYTES_YELLOW = "bold #fde047"
 _BYTES_ORANGE = "bold #ff9500"
 
 
 def byte_style(remaining: int) -> str:
-    """Map bytes remaining to the counter's escalating colour (green→yellow→orange→red)."""
+    """Map the bytes that remain to the colour of the counter (green→yellow→orange→red)."""
     if remaining <= 0:
-        return "err"  # at or over the limit — the send is blocked
+        return "err"  # at or over the limit: the send is blocked
     if remaining <= _BYTES_LOW:
         return _BYTES_ORANGE
     if remaining <= _BYTES_TIGHT:
@@ -54,12 +57,13 @@ def byte_style(remaining: int) -> str:
 
 
 def byte_counter(used: int, limit: int) -> Text:
-    """The inline ``used/limit`` budget; only ``used`` is coloured by how much is left.
+    """The inline ``used/limit`` budget. Only ``used`` gets a colour, from how much is left.
 
-    Green with room to spare, yellow within :data:`_BYTES_TIGHT` bytes, orange within
-    :data:`_BYTES_LOW`, and red once the limit is met or exceeded — so the number reads as a
-    fuel gauge while the ``/limit`` suffix stays muted (it never changes). The shared gauge
-    the chat compose bar and the courier's message field both draw.
+    The colour is green when there is space to spare, yellow within :data:`_BYTES_TIGHT`
+    bytes, orange within :data:`_BYTES_LOW`, and red when the text is at or over the limit.
+    Thus the number is a fuel gauge, and the ``/limit`` suffix stays muted (it never
+    changes). The chat compose bar and the message field of the courier both draw this
+    shared gauge.
     """
     counter = Text()
     counter.append(str(used), style=byte_style(limit - used))
@@ -68,13 +72,14 @@ def byte_counter(used: int, limit: int) -> Text:
 
 
 def _center(content: Text, width: int) -> Text:
-    """Center ``content`` in ``width`` with plain padding on both sides.
+    """Centre ``content`` in ``width``, with plain padding on the two sides.
 
-    Used instead of ``Text(justify="center")`` for lines that hold a reverse-video button
-    chip: Rich strips a styled span's *trailing* whitespace when it sits directly against
-    justify padding, which would shave the right edge off the chip (``"  Quit"`` instead of
-    ``"  Quit  "``) and leave the label hugging the left of the fill. Padding manually keeps
-    a real segment after the chip, so its trailing cells survive and the fill stays symmetric.
+    Use this function instead of ``Text(justify="center")`` for lines that hold a
+    reverse-video button chip. When a styled span is directly against justify padding, Rich
+    removes the trailing whitespace of the span. That removes the right edge of the chip
+    (``"  Quit"`` instead of ``"  Quit  "``), and the label then stays at the left of the
+    fill. Padding added by hand keeps a real segment after the chip. Thus the trailing cells
+    of the chip stay, and the fill stays symmetric.
     """
     pad = max(0, width - content.cell_len)
     left = pad // 2
@@ -85,39 +90,40 @@ def _center(content: Text, width: int) -> Text:
 
 
 class LineEditor:
-    """A minimal single-line text editor (insert, delete, and cursor movement).
+    """A small single-line text editor (insert, delete, and cursor movement).
 
-    Shared by :class:`TextScreen` and :class:`AutocompleteScreen`. Tracks the text and the
-    cursor position; rendering shows the cursor as a reverse-video cell.
+    :class:`TextScreen` and :class:`AutocompleteScreen` share it. It tracks the text and the
+    cursor position. The render shows the cursor as a reverse-video cell.
     """
 
     def __init__(self, initial: str = "", *, max_length: int | None = None) -> None:
         """Start the editor with ``initial`` text and the cursor at its end.
 
         Args:
-            initial: The starting buffer contents.
-            max_length: Optional hard cap on the number of characters; further insertions are
-                dropped (or a paste truncated to fit). ``None`` leaves the length unbounded.
+            initial: The contents of the buffer at the start.
+            max_length: An optional hard limit on the number of characters. More insertions
+                are ignored (or a paste is truncated to fit). ``None`` leaves the length
+                without a limit.
         """
         self.text = initial
         self.cursor = len(initial)
         self._max_length = max_length
 
     def edit(self, action: str, data: str = "") -> bool:
-        """Apply an editing action, returning ``True`` if it changed the buffer/cursor.
+        """Apply an edit action. Return ``True`` if it changed the buffer or the cursor.
 
         Args:
             action: The normalized key action.
-            data: The character to insert when ``action`` is ``text`` — or the whole run
-                pasted when ``action`` is ``paste``.
+            data: The character to insert when ``action`` is ``text``, or the whole pasted
+                run when ``action`` is ``paste``.
 
         Returns:
-            ``True`` if the action was an editing action handled here.
+            ``True`` if the action was an edit action that this method handled.
         """
         if action == "paste":
-            # A paste arrives as one multi-character run. A single-line field can't hold
-            # newlines or control characters, so fold them to spaces, then insert the run
-            # exactly like typed text (the max-length trim below still applies).
+            # A paste arrives as one multi-character run. A single-line field cannot hold
+            # newlines or control characters, so fold them to spaces. Then insert the run
+            # exactly as typed text (the max-length trim below still applies).
             data = "".join(ch if ch.isprintable() else " " for ch in data)
             if not data:
                 return False
@@ -126,8 +132,8 @@ class LineEditor:
             if self._max_length is not None:
                 room = self._max_length - len(self.text)
                 if room <= 0:
-                    return False  # at capacity — swallow the key without changing the buffer
-                data = data[:room]  # a multi-char paste fills only the remaining slots
+                    return False  # full: ignore the key, and do not change the buffer
+                data = data[:room]  # a multi-character paste fills only the slots that remain
             self.text = self.text[: self.cursor] + data + self.text[self.cursor :]
             self.cursor += len(data)
         elif action == "backspace" and self.cursor > 0:
@@ -152,11 +158,12 @@ class LineEditor:
         return True
 
     def _word_left(self, pos: int) -> int:
-        """Index of the start of the word at/left of ``pos`` (the previous word if already there).
+        """Index of the word start at or left of ``pos`` (the previous word if already there).
 
-        Skips any whitespace immediately left of the cursor, then the run of word characters, so
-        from mid-word it lands on that word's first character and from a word start it steps back
-        to the previous word — the usual Ctrl+Left behavior of a text editor.
+        It skips the whitespace immediately left of the cursor, then the run of word characters.
+        Thus from the middle of a word, it lands on the first character of that word. From a
+        word start, it steps back to the previous word. This is the usual Ctrl+Left behaviour
+        of a text editor.
         """
         i = pos
         while i > 0 and self.text[i - 1].isspace():
@@ -168,8 +175,8 @@ class LineEditor:
     def _word_right(self, pos: int) -> int:
         """Index of the start of the next word after ``pos`` (or the line end if none remains).
 
-        Skips the current run of word characters, then the whitespace after it, landing on the
-        first character of the following word — the usual Ctrl+Right behavior.
+        It skips the current run of word characters, then the whitespace after it. Thus it
+        lands on the first character of the next word. This is the usual Ctrl+Right behaviour.
         """
         n = len(self.text)
         i = pos
@@ -186,12 +193,13 @@ class LineEditor:
 
         Args:
             mask: When ``True``, replace each character with a bullet (password entry).
-            overflow_at: Character index at which the text spills past a byte budget; that
-                character and everything after it are shown in the error style so the user
-                can see exactly what to trim. ``None`` (the default) styles the line plainly.
-            slots: When set, render exactly this many fixed positions (a masked PIN field):
-                typed positions show a bullet, still-blank ones a muted centre dot. Takes
-                precedence over ``mask``/``overflow_at``.
+            overflow_at: The character index at which the text goes past a byte budget. That
+                character and all characters after it show in the error style, so that the
+                user can see exactly what to cut. ``None`` (the default) gives the line a
+                plain style.
+            slots: When set, render exactly this number of fixed positions (a masked PIN
+                field). A typed position shows a bullet, and a blank position shows a muted
+                centre dot. This argument has priority over ``mask`` and ``overflow_at``.
         """
         if slots is not None:
             return self._render_slots(slots)
@@ -210,9 +218,10 @@ class LineEditor:
     def _render_slots(self, slots: int) -> Text:
         """Render a fixed-width masked field: filled bullets and centred dots for blanks.
 
-        Used for PIN entry — each of ``slots`` positions shows a bullet (``•``) once typed and
-        a muted centre dot (``·``) while still blank, spaced apart so the field reads as a row
-        of PIN boxes rather than a growing line. The cursor position is drawn reverse-video.
+        The PIN entry uses this method. Each of the ``slots`` positions shows a bullet (``•``)
+        after it is typed, and a muted centre dot (``·``) while it is blank. Spaces separate
+        the positions, so that the field looks like a row of PIN boxes, not a line that grows.
+        The cursor position is drawn in reverse video.
         """
         filled = len(self.text)
         text = Text("› ", style="accent")
@@ -230,33 +239,33 @@ class LineEditor:
 
 
 class _KeylessDialog(Screen):
-    """A dialog with no F-key lane, because it has nothing a lane could carry.
+    """A dialog with no F-key lane, because it has nothing that a lane can carry.
 
-    Every prompt in this module is answered with Enter, Esc, the arrows, and typing —
-    keys that sit right under the reader's hands on both platforms. None of them scroll,
-    so the shared pager (which the base :class:`~meshterm.ui.tui.screen.Screen` hands out)
-    would name two keys that do nothing here. The lane's standing rule is to leave a slot
-    **empty** rather than dim when the action is not a thing on this screen *at all* —
-    dim is for a thing that just isn't available this paint — so these dialogs draw the
-    bare key numbers (see :mod:`~meshterm.ui.tui.fkeys`).
+    The user answers each prompt in this module with Enter, Esc, the arrow keys, and typed
+    text. These keyboard keys are directly under the hands of the user on both platforms.
+    None of these prompts scroll. Thus the shared pager (which the base
+    :class:`~meshterm.ui.tui.screen.Screen` gives by default) names two keys that do nothing
+    here. The rule of the lane is: leave a slot **empty**, not dim, when the action
+    does not exist on this screen. Dim is for an action that is not available for this paint
+    only. Thus these dialogs draw only the key numbers (refer to :mod:`~meshterm.ui.tui.fkeys`).
 
-    Every one of them is also :attr:`~meshterm.ui.tui.screen.Screen.modal`: a prompt is an
-    unanswered question, so the pop-all key (^W) declines to unwind past it and the reader
-    answers or Escs out first.
+    Each of these dialogs is also :attr:`~meshterm.ui.tui.screen.Screen.modal`. A prompt is a
+    question with no answer yet, so the pop-all key (^W) does not unwind past it. The user
+    answers it first, or leaves it with the Esc key.
     """
 
     modal = True
 
     @property
     def picocalc_lyra_lane(self):
-        """No slots: nothing on a prompt pages, jumps, or needs promoting off a chord."""
+        """No slots. On a prompt, nothing pages or jumps, and no chord must have a chip."""
         from .fkeys import EMPTY_LANE
 
         return EMPTY_LANE
 
 
 class TextScreen(_KeylessDialog):
-    """A validated single-line text prompt. Resolves with the string, or CANCEL on Esc."""
+    """A validated single-line text prompt. It resolves with the string, or CANCEL on Esc."""
 
     def __init__(
         self,
@@ -273,20 +282,21 @@ class TextScreen(_KeylessDialog):
         """Build a text prompt.
 
         Args:
-            title: Short heading shown in the dialog's border.
-            prompt: The question/instruction shown inside the box, above the field. Keep
-                the ``title`` short and put the detail here, so the popup reads like the
-                button dialogs (a prompt above its controls) rather than a lone field.
+            title: A short heading in the border of the dialog.
+            prompt: The question or instruction in the box, above the field. Keep the
+                ``title`` short and put the detail here. Thus the dialog looks like the
+                button dialogs (a prompt above its controls), not like a lone field.
             default: Prefilled text.
-            validate: Optional validator run on Enter; a returned string is shown as an
-                error and blocks submission.
-            help_text: Optional muted hint shown under the field.
+            validate: An optional validator that runs on Enter. If it returns a string, the
+                string shows as an error and the submission is blocked.
+            help_text: An optional muted hint under the field.
             password: When ``True``, mask the entered text.
-            byte_limit: When set, the field carries the shared UTF-8 byte gauge
-                (:func:`byte_counter`) pinned bottom-right and blocks submission once the
-                text exceeds it — for a field that feeds a size-capped packet (a direct
-                message, a courier entry). Left ``None`` for an unbounded field.
-            footer_hint: Footer key hint.
+            byte_limit: When set, the field has the shared UTF-8 byte gauge
+                (:func:`byte_counter`) pinned at the bottom right. The field blocks the
+                submission when the text is longer than the limit. Use it for a field that
+                feeds a packet with a size limit (a direct message, a courier entry). Keep
+                ``None`` for a field with no limit.
+            footer_hint: The key hint in the footer.
         """
         super().__init__()
         self.title = title
@@ -301,14 +311,16 @@ class TextScreen(_KeylessDialog):
 
     @property
     def dialog_width(self) -> int:
-        """Natural outer width so the frame sizes the box to its content (see ButtonDialog).
+        """Natural outer width: the frame sizes the box to its content (refer to ButtonDialog).
 
-        The widest of the prompt, title, hint, footer, and the field's current text, plus a
-        comfortable field minimum — so a short prompt is a tidy box, not a banner stretched
-        across the terminal. The compositor still caps this to the width available.
+        The width is the widest of these: the prompt, the title, the hint, the footer, and the
+        current text of the field, plus a comfortable minimum for the field. Thus a short
+        prompt is a tidy box, not a banner across the terminal. The compositor still limits
+        this width to the width that is available.
         """
-        # A byte gauge rides the field's right edge, so the field lane needs room for the
-        # text, its cursor, and the counter ("150/150" ≈ 8 cells) without them colliding.
+        # A byte gauge sits at the right edge of the field. Thus the field lane must have space
+        # for the text, its cursor, and the counter ("150/150" ≈ 8 cells), so that they do not
+        # collide.
         field_slack = 12 if self._byte_limit is not None else 4
         inner = max(
             cell_len(self._prompt),
@@ -316,24 +328,24 @@ class TextScreen(_KeylessDialog):
             cell_len(self._help),
             cell_len(self.footer_hint),
             cell_len(self._editor.text) + field_slack,
-            36,  # a comfortable minimum so a short field isn't a cramped sliver
+            36,  # a comfortable minimum, so that a short field is not too narrow
         )
-        return inner + 8  # panel padding + border, plus horizontal breathing room
+        return inner + 8  # panel padding + border, plus horizontal space to spare
 
     def _used_bytes(self) -> int:
-        """UTF-8 byte length of the field — what counts against ``byte_limit``."""
+        """The UTF-8 byte length of the field: the value that counts against ``byte_limit``."""
         return len(self._editor.text.encode("utf-8"))
 
     def render_body(self, width: int) -> list[str]:
-        """Render the optional prompt, the field (+ byte gauge), help, and any error."""
+        """Render the optional prompt, the field (and its byte gauge), the help, and an error."""
         parts: list[RenderableType] = []
         if self._prompt:
             parts.append(Text(self._prompt))
             parts.append(Text(""))
         field = self._editor.render(mask=self._password)
         if self._byte_limit is not None:
-            # The gauge pins to the field's right edge — a steady fuel gauge in the corner,
-            # exactly as the chat compose bar draws it (both via ``byte_counter``).
+            # The gauge pins to the right edge of the field: a steady fuel gauge in the corner,
+            # exactly as the chat compose bar draws it (both through ``byte_counter``).
             field = right_aligned_tail(
                 field, byte_counter(self._used_bytes(), self._byte_limit), width
             )
@@ -368,34 +380,35 @@ class TextScreen(_KeylessDialog):
 
 
 class PinDialog(_KeylessDialog):
-    """A startup popup that collects a Bluetooth pairing PIN, re-asking on a rejected code.
+    """A startup dialog that gets a Bluetooth pairing PIN, and asks again after a rejected code.
 
-    Shown by the device picker when a chosen companion answers the scan but refuses the GATT
-    connection until it is bonded. It presents a masked field centered in its own bordered box
-    under the wordmark — the same chromeless-splash presentation as the picker and its spinner
-    — so it reads as one more step of the startup flow rather than a context switch.
+    The device picker shows it when a selected companion answers the scan, but refuses the
+    GATT connection until it is bonded. It shows a masked field, centred in its own box with a
+    border, under the wordmark. This is the same chromeless-splash presentation as the picker
+    and its spinner. Thus the dialog looks like one more step of the startup flow, not like a
+    change of context.
 
-    It only *collects* a PIN; verifying it means actually opening the BLE connection, which the
-    picker does. So a rejected code isn't detected here — the picker catches the authentication
-    failure and re-opens this dialog with ``error`` set, which is why the field starts empty each
-    time. Resolves with the entered PIN, or :data:`CANCEL` on Esc (the user gave up — the picker
-    returns them to the device list).
+    It only gets a PIN. To check the PIN, MeshTerm must open the BLE connection, and the
+    picker does that. Thus this dialog does not find a rejected code. The picker catches the
+    authentication failure and opens this dialog again with ``error`` set. For this reason,
+    the field is empty each time. It resolves with the entered PIN, or with :data:`CANCEL` on
+    Esc (the user stopped, and the picker returns the user to the device list).
     """
 
     footer_hint = "Enter connect · Esc cancel"
 
-    #: MeshCore pairing PINs are a fixed six digits, so the field is capped at six characters
-    #: and drawn as six slots (typed digits as bullets, blanks as centre dots).
+    #: A MeshCore pairing PIN has exactly six digits. Thus the field is limited to six
+    #: characters, and drawn as six slots (typed digits as bullets, blanks as centre dots).
     PIN_LENGTH = 6
 
     def __init__(self, device_name: str, *, error: str = "", help_text: str = "") -> None:
         """Build the PIN dialog.
 
         Args:
-            device_name: The companion's display name, woven into the prompt.
-            error: A message shown in the error style — set by the picker on a re-ask after a
-                rejected PIN; empty on the first ask.
-            help_text: A muted hint under the field (e.g. where to read the code).
+            device_name: The display name of the companion, which the prompt includes.
+            error: A message in the error style. The picker sets it when it asks again after
+                a rejected PIN. It is empty on the first ask.
+            help_text: A muted hint under the field (for example, where to read the code).
         """
         super().__init__()
         self.title = "Bluetooth PIN required"
@@ -421,7 +434,7 @@ class PinDialog(_KeylessDialog):
         """Edit the field, submit a non-empty PIN on Enter, or cancel on Esc."""
         if action == "enter":
             pin = self._editor.text.strip()
-            if not pin:  # an empty PIN can't be right — nudge rather than pointlessly retry
+            if not pin:  # an empty PIN cannot be correct: tell the user, not a useless retry
                 self._error = "Enter the PIN, or press Esc to cancel."
                 return
             self.resolve(pin)
@@ -439,18 +452,18 @@ class ConfirmScreen(_KeylessDialog):
         title: str,
         *,
         default: bool = True,
-        # The ButtonDialog hint verbatim: a yes/no prompt is a button row like any other,
-        # and the row is what differs, not the keys. The y/n accelerators stay unwritten —
-        # the Yes/No labels are their own hint, and naming them cost the Esc verb its
-        # cells inside a PicoCalc-width box.
+        # The ButtonDialog hint, word for word: a yes/no prompt is a button row like all
+        # others. The row is what is different, not the keys. The hint does not name the y/n
+        # accelerators. The Yes/No labels are their own hint, and when the hint named them,
+        # the Esc verb lost its cells in a box of PicoCalc width.
         footer_hint: str = "←→ choose · Enter select · Esc cancel",
     ) -> None:
         """Build a confirm prompt.
 
         Args:
             title: The yes/no question.
-            default: The initially highlighted answer.
-            footer_hint: Footer key hint.
+            default: The answer that has the highlight at the start.
+            footer_hint: The key hint in the footer.
         """
         super().__init__()
         self.title = title
@@ -459,7 +472,7 @@ class ConfirmScreen(_KeylessDialog):
 
     @property
     def dialog_width(self) -> int:
-        """Natural outer width so the box hugs the question rather than stretching wide."""
+        """Natural outer width, so that the box fits the question and does not become wide."""
         inner = max(
             cell_len(self.title),
             cell_len(self.footer_hint),
@@ -488,13 +501,14 @@ class ConfirmScreen(_KeylessDialog):
 
 
 class ButtonDialog(_KeylessDialog):
-    """A centered dialog: a prompt above a row of side-by-side buttons.
+    """A centred dialog: a prompt above a row of buttons, side by side.
 
-    A reusable choose-one prompt. The buttons sit in a row; ←/→ (or Tab) move the highlight,
-    Enter commits the highlighted button, and Esc cancels. Optional single-key shortcuts
-    commit a button instantly (e.g. ``y``/``n``, self-hinted by ``Yes``/``No`` labels). The
-    highlight and border colours are parametrised so a caller can theme it (a destructive
-    action in red, say). Resolves with the chosen button's value, or CANCEL on Esc.
+    A prompt that can be used again, to select one item. The buttons are in a row. ←/→ (or
+    Tab) move the highlight, Enter commits the highlighted button, and Esc cancels. Optional
+    single-key shortcuts commit a button immediately (for example ``y``/``n``, which the
+    ``Yes``/``No`` labels hint themselves). The highlight and border colours are parameters,
+    so that a caller can theme the dialog (for example, a destructive action in red). It
+    resolves with the value of the selected button, or CANCEL on Esc.
     """
 
     def __init__(
@@ -515,24 +529,28 @@ class ButtonDialog(_KeylessDialog):
         """Build a button dialog.
 
         Args:
-            prompt: The question shown above the buttons. A plain string is styled with
-                ``prompt_style``; a pre-styled (possibly multi-line) :class:`Text` is
-                rendered as-is, so a caller can float richly-marked output — e.g. the
-                message dialog's "[ok]✓[/ok] …" outcome lines — without losing colour.
+            prompt: The question above the buttons. A plain string gets the style
+                ``prompt_style``. A :class:`Text` that already has its styles (possibly on
+                more than one line) is rendered as it is. Thus a caller can float output with
+                rich marks, and the colour is not lost. An example is the outcome lines
+                "[ok]✓[/ok] …" of the message dialog.
             buttons: ``(label, value)`` pairs laid out left to right.
-            title: Optional dialog heading.
-            default: Index of the initially highlighted button.
-            keys: Optional map of a lowercase shortcut character to the value it commits
-                immediately (bypassing the highlight), e.g. ``{"y": True, "n": False}``.
-            footer_hint: Footer key hint (hints Enter and Esc, as the other dialogs do).
-            prompt_style: Rich style for the question (e.g. ``"warn"`` for a cautionary
-                action); empty for the default foreground.
-            button_style: Rich style for the highlighted button.
-            button_idle_style: Rich style for the un-highlighted buttons.
-            border_style: Rich style for the dialog border (read by the frame compositor).
-            lane: An F-key lane for the one question that has a chip worth offering — the
-                quit confirm's, whose F3 is the chip that asked it, pressed again (see
-                ``menu._confirm_quit``). ``None`` keeps a prompt's empty lane.
+            title: An optional heading for the dialog.
+            default: The index of the button that has the highlight at the start.
+            keys: An optional map from a lowercase shortcut character to the value that it
+                commits immediately (without the highlight), for example
+                ``{"y": True, "n": False}``.
+            footer_hint: The key hint in the footer (it names Enter and Esc, as the other
+                dialogs do).
+            prompt_style: The Rich style for the question (for example ``"warn"`` for an
+                action with a risk). Empty for the default foreground.
+            button_style: The Rich style for the highlighted button.
+            button_idle_style: The Rich style for the buttons without the highlight.
+            border_style: The Rich style for the border of the dialog (the frame
+                compositor reads it).
+            lane: An F-key lane for the one question that has a chip to offer: the quit
+                confirm. Its F3 is the chip that asked the question, pressed again (refer to
+                ``menu._confirm_quit``). ``None`` keeps the empty lane of a prompt.
         """
         super().__init__()
         self._lane = tuple(lane) if lane is not None else None
@@ -548,12 +566,12 @@ class ButtonDialog(_KeylessDialog):
         self._button_idle_style = button_idle_style
 
     def _prompt_lines(self) -> list[Text]:
-        """The prompt as one styled :class:`Text` per line.
+        """The prompt as one styled :class:`Text` for each line.
 
-        A plain-string prompt becomes a single line in ``prompt_style``; a :class:`Text`
-        prompt keeps its own spans and is split on newlines so each line can be centered
-        independently (centering the block as a whole would skew every line to the
-        longest one's margin).
+        A plain-string prompt becomes a single line in ``prompt_style``. A :class:`Text`
+        prompt keeps its own spans, and is split on newlines, so that each line can be
+        centred alone. (If the block is centred as a whole, each line moves to the margin of
+        the longest line.)
         """
         if isinstance(self._prompt, Text):
             return list(self._prompt.split("\n")) or [Text("")]
@@ -561,27 +579,27 @@ class ButtonDialog(_KeylessDialog):
 
     @property
     def picocalc_lyra_lane(self):
-        """The caller's lane where one was given, else a prompt's empty one.
+        """The lane of the caller when the caller gave one, or else the empty lane of a prompt.
 
-        The per-deck definition, as every screen's is; the Cardputer's deck follows it.
+        This is the definition for one deck, as on all screens. The Cardputer deck follows it.
         """
         return self._lane if self._lane is not None else super().picocalc_lyra_lane
 
     @property
     def _button_row_width(self) -> int:
-        """Display width of the button row (``  Label  `` cells joined by 4-space gaps)."""
+        """The width in cells of the button row (``  Label  `` chips joined by 4-space gaps)."""
         cells = sum(cell_len(label) + 4 for label, _ in self._buttons)
         gaps = 4 * max(0, len(self._buttons) - 1)
         return cells + gaps
 
     @property
     def dialog_width(self) -> int:
-        """Natural outer width so the frame sizes the box to its content, not the terminal.
+        """Natural outer width: the frame sizes the box to its content, not to the terminal.
 
-        The widest of the prompt lines, button row, title, and footer hint, plus a
-        comfortable margin and the border — so a short confirm reads as a tidy box rather
-        than a banner stretched across the screen. The compositor still caps this to the
-        terminal.
+        The width is the widest of these: the prompt lines, the button row, the title, and
+        the footer hint. Then a comfortable margin and the border are added. Thus a short
+        confirm is a tidy box, not a banner across the terminal. The compositor still limits
+        this width to the terminal.
         """
         inner = max(
             max(line.cell_len for line in self._prompt_lines()),
@@ -589,10 +607,10 @@ class ButtonDialog(_KeylessDialog):
             cell_len(self.title),
             cell_len(self.footer_hint),
         )
-        return inner + 12  # panel padding + border, plus horizontal breathing room
+        return inner + 12  # panel padding + border, plus horizontal space to spare
 
     def render_body(self, width: int) -> list[str]:
-        """Render the prompt line(s) centered above a centered row of buttons."""
+        """Render the prompt lines, centred above a centred row of buttons."""
         row = Text()
         for i, (label, _value) in enumerate(self._buttons):
             if i:
@@ -605,14 +623,14 @@ class ButtonDialog(_KeylessDialog):
     def handle(self, action: str, data: str = "") -> None:
         """Move the highlight, commit on Enter or a shortcut key, or cancel on Esc."""
         if action in ("left", "right") and self._buttons:
-            # ←→ clamp, like every other cursor the app steers with a directional pair —
-            # a highlight that leaps end to end is the one move that reads as the screen
-            # changing rather than as one step.
+            # ←→ clamp, like all other highlights that the app moves with a directional pair.
+            # A highlight that jumps from one end to the other is the one move that looks like
+            # a change of the screen, instead of one step.
             step = -1 if action == "left" else 1
             self._index = max(0, min(len(self._buttons) - 1, self._index + step))
         elif action == "tab" and self._buttons:
-            # Tab is the exception the rule allows: a forward-only key with no reverse of
-            # its own, so it cycles or it dead-ends on the last chip.
+            # Tab is the exception that the rule permits: a forward-only key with no reverse
+            # key of its own. Thus it cycles, or else it stops on the last chip with no way on.
             self._index = (self._index + 1) % len(self._buttons)
         elif action == "text" and data.lower() in self._keys:
             self.resolve(self._keys[data.lower()])
@@ -623,44 +641,45 @@ class ButtonDialog(_KeylessDialog):
 
 
 class CountdownDialog(_KeylessDialog):
-    """A wait you can watch, and back out of: the seconds left, over one Cancel chip.
+    """A wait that you can watch and leave: the seconds that remain, above one Cancel chip.
 
-    Shown while a cooldown holds a transmission back (see
-    :func:`meshterm.ui.cooldown.wait_for_cooldown`). The point is that a wait long enough
-    to notice should say *why* it is waiting and leave a way out — a frozen screen says
-    neither, and on a radio app it reads as a lost connection rather than as courtesy.
+    It shows while a cooldown holds back a transmission (refer to
+    :func:`meshterm.ui.cooldown.wait_for_cooldown`). A wait that is long enough to notice
+    must tell why it waits, and must give a way out. A frozen screen tells neither. On a
+    radio app, a frozen screen looks like a lost connection, not like courtesy.
 
-    It resolves itself: the caller ticks it down with :meth:`set_remaining` and the dialog
-    resolves ``True`` the moment the clock reaches zero. Esc — or Enter on its Cancel chip
-    — resolves CANCEL instead, and the caller abandons whatever was waiting.
+    The dialog resolves itself. The caller counts it down with :meth:`set_remaining`, and
+    the dialog resolves ``True`` when the clock gets to zero. Esc (or Enter on its Cancel
+    chip) resolves CANCEL instead, and the caller abandons the thing that waited.
 
-    One chip, not two: there is nothing to choose between, only something to abandon, so
-    it takes the lone-button hint shape (no ``←→``) with Cancel as its verb.
+    One chip, not two: there is nothing to select between, only something to abandon. Thus
+    the dialog uses the lone-button hint shape (no ``←→``), with Cancel as its verb.
     """
 
     def __init__(self, action: str, remaining: float, *, reason: str = "") -> None:
         """Build a countdown over one Cancel chip.
 
         Args:
-            action: What is waiting, named as the thing that will happen ("Flood advert").
-            remaining: Seconds left when the dialog opens.
-            reason: One muted line under the clock saying why the wait exists; empty for
-                no line at all.
+            action: The thing that waits, named as the thing that will occur
+                ("Flood advert").
+            remaining: The seconds that remain when the dialog opens.
+            reason: One muted line under the clock that tells why the wait is necessary.
+                Empty for no line.
         """
         super().__init__()
         self.title = action
-        # Both keys do the one thing this dialog offers, so they share an atom rather
-        # than each claiming "cancel" in turn (the hint line's shared-key rule).
+        # Both keys do the one thing that this dialog offers. Thus they share an atom,
+        # instead of one atom each that says "cancel" (the shared-key rule of the hint line).
         self.footer_hint = "Enter/Esc cancel"
         self.border_style = "warn"
         self._remaining = max(0.0, remaining)
         self._reason = reason
 
     def set_remaining(self, remaining: float) -> None:
-        """Update the clock, resolving the dialog once it reaches zero.
+        """Set the clock, and resolve the dialog when the clock gets to zero.
 
-        Resolving twice is harmless — :meth:`~meshterm.ui.tui.screen.Screen.resolve` drops
-        a second result — so the tick never has to know whether Esc beat it to it.
+        To resolve two times causes no problem: :meth:`~meshterm.ui.tui.screen.Screen.resolve`
+        ignores a second result. Thus the tick never has to know if Esc came first.
         """
         self._remaining = max(0.0, remaining)
         if self._remaining <= 0:
@@ -668,11 +687,12 @@ class CountdownDialog(_KeylessDialog):
 
     @property
     def dialog_width(self) -> int:
-        """Natural outer width, sized for the widest line it will ever draw.
+        """Natural outer width, sized for the widest line that the dialog will ever draw.
 
-        Measured against the *opening* clock rather than the current one, so the box does
-        not shrink a cell as the seconds tick from 10 to 9 — a dialog that resizes while
-        you read it is harder to read than a slightly wide one.
+        The width is measured against the clock at the opening, not the current clock. Thus
+        the box does not become one cell narrower when the seconds go from 10 to 9. A dialog
+        that changes size while you read it is harder to read than a dialog that is a little
+        wide.
         """
         inner = max(
             cell_len(self.title),
@@ -681,20 +701,20 @@ class CountdownDialog(_KeylessDialog):
             cell_len(self._reason),
             len("  Cancel  "),
         )
-        return inner + 12  # panel padding + border, plus breathing room (see ButtonDialog)
+        return inner + 12  # panel padding + border, plus space to spare (refer to ButtonDialog)
 
     @staticmethod
     def _clock_text(remaining: float) -> str:
-        """The clock line: whole seconds, counted the way a person would say them."""
-        seconds = max(0, int(remaining + 0.999))  # 0.2s left still reads as "1s"
+        """The clock line: whole seconds, counted as a person says them."""
+        seconds = max(0, int(remaining + 0.999))  # 0.2s left still shows as "1s"
         return f"Ready in {seconds}s"
 
     def render_body(self, width: int) -> list[str]:
-        """Draw the clock and its reason centered above a centered Cancel chip.
+        """Draw the clock and its reason, centred above a centred Cancel chip.
 
-        Centered line by line, the way :class:`ButtonDialog` and :class:`ProgressDialog`
-        draw theirs: a chip is a chip wherever it appears, and one shoved against the left
-        border read as an afterthought beside its siblings' centered rows.
+        Each line is centred alone, as :class:`ButtonDialog` and :class:`ProgressDialog` draw
+        their lines. A chip is a chip in all places. A chip against the left border looked
+        like a late addition, next to the centred rows of the other dialogs.
         """
         parts: list[Text] = [_center(Text(self._clock_text(self._remaining), style="warn"), width)]
         if self._reason:
@@ -710,15 +730,16 @@ class CountdownDialog(_KeylessDialog):
 
 
 class TypedConfirmDialog(_KeylessDialog):
-    """A destructive-action gate: the user must type a confirmation word to proceed.
+    """A gate for a destructive action: the user must type a confirmation word to continue.
 
-    A centered, error-themed dialog for the actions a stray Enter must never be able to
-    trigger (factory reset, identity overwrite). It shows the warning, then a field the
-    user has to type the exact confirmation word into; Enter commits only when the field
-    matches (anything else shows a nudge and keeps the dialog up), and Esc always backs
-    out. Matching is case-insensitive so a forgotten CapsLock doesn't read as hesitation —
-    the friction is having to *type the word*, not its case. Resolves ``True`` on a match,
-    or :data:`~meshterm.ui.tui.screen.CANCEL` on Esc (never ``False``).
+    A centred dialog with the error theme, for the actions that a stray Enter must never
+    start (factory reset, identity overwrite). It shows the warning, then a field in which
+    the user must type the exact confirmation word. Enter commits only when the field
+    matches. All other text shows a short message and keeps the dialog open. Esc always
+    leaves. The match ignores case, so that a forgotten CapsLock does not look like
+    hesitation. The effort that the dialog asks for is to type the word, not its case. It
+    resolves ``True`` on a match, or :data:`~meshterm.ui.tui.screen.CANCEL` on Esc (never
+    ``False``).
     """
 
     border_style = "err"
@@ -728,9 +749,9 @@ class TypedConfirmDialog(_KeylessDialog):
         """Build the typed-confirmation dialog.
 
         Args:
-            warning: The consequence, spelled out (e.g. "This erases ALL data …").
-            word: The word the user must type to confirm (e.g. ``"RESET"``).
-            title: Dialog heading.
+            warning: The result, in full words (for example "This erases ALL data …").
+            word: The word that the user must type to confirm (for example ``"RESET"``).
+            title: The heading of the dialog.
         """
         super().__init__()
         self.title = title
@@ -741,22 +762,22 @@ class TypedConfirmDialog(_KeylessDialog):
 
     @property
     def dialog_width(self) -> int:
-        """Natural outer width so the frame sizes the box to its content (see ButtonDialog)."""
+        """Natural outer width: the frame sizes the box to its content (refer to ButtonDialog)."""
         inner = max(
             cell_len(self._warning),
             cell_len(self.title),
             cell_len(self.footer_hint),
             cell_len(self._ask),
         )
-        return min(inner, 72) + 12  # panel padding + border, plus breathing room
+        return min(inner, 72) + 12  # panel padding + border, plus space to spare
 
     @property
     def _ask(self) -> str:
-        """The instruction line naming the word to type."""
+        """The instruction line that names the word to type."""
         return f"Type {self._word} to confirm:"
 
     def render_body(self, width: int) -> list[str]:
-        """Render the warning, the instruction, the typed field, and any mismatch nudge."""
+        """Render the warning, the instruction, the typed field, and a mismatch message."""
         parts: list[RenderableType] = [
             Text(self._warning, style="err"),
             Text(""),
@@ -783,25 +804,28 @@ class TypedConfirmDialog(_KeylessDialog):
 
 
 class ReconnectDialog(_KeylessDialog):
-    """A centered dialog shown when the companion link drops mid-session.
+    """A centred dialog that shows when the link to the companion goes down during a session.
 
-    An animated spinner and message sit above a single ``Abort`` button. Unlike the other
-    dialogs there is nothing to *choose*: the app watches for the device to return and
-    dismisses this screen itself (resolving its future) the moment the reconnect succeeds, so
-    the user's only action is to give up and abort. Only Enter resolves ``"quit"``; Esc is
-    deliberately inert, so an idle habit of pressing Esc can't drop the session while a replug
-    may be a second away. The button uses the shared ``selected`` highlight style (the theme's
-    cyan) — the same fill as the quit-confirmation dialog — so every popup dialog reads alike.
-    The animation is the reusable :class:`~meshterm.ui.tui.spinner.Spinner`, advanced by
-    :meth:`tick` from the session's animation timer.
+    An animated spinner and a message are above a single ``Abort`` button. In this dialog,
+    there is nothing to select, as there is in the other dialogs. The app watches for the
+    device to come back, and closes this dialog itself (it resolves its future) when the
+    reconnect is successful. Thus the only action of the user is to stop and abort.
 
-    Once the device is back but the reconnect keeps failing, the reason sits under the
-    spinner line (:meth:`set_detail`) — a port another program took while we waited, a
-    pairing that went stale — since a spinner alone would wait on it forever.
+    Only Enter resolves ``"quit"``. Esc does nothing, on purpose: a user who presses Esc
+    from habit cannot lose the session while a replug may be only one second away. The
+    button uses the shared ``selected`` chip style (a grey fill), the same fill as
+    the quit-confirmation dialog. Thus all dialogs look the same. The animation is the
+    reusable :class:`~meshterm.ui.tui.spinner.Spinner`, which :meth:`tick` moves forward
+    from the animation timer of the session.
+
+    When the device is back but the reconnect continues to fail, the reason shows under the
+    spinner line (:meth:`set_detail`). For example, another program took the port while we
+    waited, or a pairing became stale. Without the reason, a spinner alone waits on the
+    problem forever.
     """
 
-    #: The widest a reason runs before it wraps: a sentence or two at a reading measure,
-    #: rather than a box stretched to the terminal's edges to hold it on one line.
+    #: The maximum width of a reason before it wraps: one or two sentences at a width that is
+    #: easy to read, instead of a box as wide as the terminal that holds it on one line.
     DETAIL_MEASURE = 56
 
     def __init__(
@@ -816,11 +840,12 @@ class ReconnectDialog(_KeylessDialog):
         """Build the reconnect dialog.
 
         Args:
-            message: The line shown beside the spinner (e.g. "Waiting for your device…").
-            title: Dialog heading.
-            footer_hint: Footer key hint (only Abort is offered).
-            prompt_style: Rich style for the message (``"warn"`` for the cautionary tone).
-            border_style: Rich style for the dialog border (read by the frame compositor).
+            message: The line next to the spinner (for example "Waiting for your device…").
+            title: The heading of the dialog.
+            footer_hint: The key hint in the footer (only Abort is offered).
+            prompt_style: The Rich style for the message (``"warn"`` for a tone of caution).
+            border_style: The Rich style for the border of the dialog (the frame
+                compositor reads it).
         """
         super().__init__()
         self.title = title
@@ -833,7 +858,7 @@ class ReconnectDialog(_KeylessDialog):
 
     @property
     def dialog_width(self) -> int:
-        """Natural outer width so the frame sizes the box to its content (see ButtonDialog)."""
+        """Natural outer width: the frame sizes the box to its content (refer to ButtonDialog)."""
         detail = 0
         if self._detail is not None:
             widest = max(cell_len(line.plain) for line in self._detail.split("\n"))
@@ -845,27 +870,27 @@ class ReconnectDialog(_KeylessDialog):
             len("  Abort  "),
             detail,
         )
-        return inner + 12  # panel padding + border, plus horizontal breathing room
+        return inner + 12  # panel padding + border, plus horizontal space to spare
 
     @property
     def message(self) -> str:
-        """The line shown beside the spinner."""
+        """The line next to the spinner."""
         return self._message
 
     def set_message(self, message: str) -> None:
-        """Replace the line shown beside the spinner (e.g. to note a stalled retry)."""
+        """Replace the line next to the spinner (for example, to tell of a stalled retry)."""
         self._message = message
 
     def set_detail(self, detail: Text | None) -> None:
-        """Show why the reconnect keeps failing, under the spinner line; ``None`` clears it."""
+        """Show why the reconnect continues to fail, under the spinner line. ``None`` clears it."""
         self._detail = detail
 
     def tick(self) -> None:
-        """Advance the spinner to its next frame (driven by the session's animation timer)."""
+        """Move the spinner to its next animation step (the session's animation timer calls it)."""
         self._spinner.tick()
 
     def render_body(self, width: int) -> list[str]:
-        """Render the spinner and message, then any reason, centered above an Abort button."""
+        """Render the spinner and the message, then a reason, centred above an Abort button."""
         line = self._spinner.text()
         line.append("  ")
         line.append(self._message, style=self._prompt_style)
@@ -873,8 +898,8 @@ class ReconnectDialog(_KeylessDialog):
         row.append("  Abort  ", style="selected")
         parts: list[Text] = [_center(line, width)]
         if self._detail is not None:
-            # Wrapped and centred line by line; it holds no chip, so Rich's own centring
-            # is safe here (see _center for the one case it isn't).
+            # Wrapped and centred line by line. It holds no chip, so the centring of Rich
+            # itself is safe here (refer to _center for the one case where it is not safe).
             detail = self._detail.copy()
             detail.justify = "center"
             parts += [Text(""), detail]
@@ -882,7 +907,7 @@ class ReconnectDialog(_KeylessDialog):
         return render_lines(Group(*parts), width)
 
     def handle(self, action: str, data: str = "") -> None:
-        """Abort only on Enter; ignore everything else, Esc included (the app auto-dismisses)."""
+        """Abort only on Enter. Ignore all other keys, also Esc (the app closes the dialog)."""
         if action == "enter":
             self.resolve("quit")
 
@@ -890,14 +915,15 @@ class ReconnectDialog(_KeylessDialog):
 class AutocompleteScreen(_KeylessDialog):
     """A free-text field with a live suggestion list (``questionary.autocomplete``).
 
-    The user may type any value; matching suggestions appear below and can be highlighted
-    with the arrows and accepted into the field with Tab. Enter commits the typed text
-    (after validation). Resolves with the string, or CANCEL on Esc.
+    The user can type any value. The suggestions that match appear below the field. The
+    user can move the highlight to one of them with the arrow keys, and accept it into the
+    field with Tab. Enter commits the typed text (after validation). It resolves with the
+    string, or CANCEL on Esc.
     """
 
-    #: Cap the suggestion list so it never dominates the dialog.
+    #: The limit of the suggestion list, so that the list never fills most of the dialog.
     MAX_SUGGESTIONS = 8
-    #: Home and End move the field's caret, so edge scroll leaves them alone.
+    #: Home and End move the caret of the field, so edge scroll does not take them.
     home_end_jumps = False
 
     def __init__(
@@ -913,12 +939,12 @@ class AutocompleteScreen(_KeylessDialog):
         """Build an autocomplete prompt.
 
         Args:
-            title: Short heading shown in the dialog's border.
-            choices: Suggestion strings to match against.
-            prompt: The instruction shown inside the box, above the field.
+            title: A short heading in the border of the dialog.
+            choices: The suggestion strings to match against.
+            prompt: The instruction in the box, above the field.
             default: Prefilled text.
-            validate: Optional validator run on Enter.
-            footer_hint: Footer key hint.
+            validate: An optional validator that runs on Enter.
+            footer_hint: The key hint in the footer.
         """
         super().__init__()
         self.title = title
@@ -933,7 +959,7 @@ class AutocompleteScreen(_KeylessDialog):
 
     @property
     def dialog_width(self) -> int:
-        """Natural outer width so the box fits its prompt/suggestions, not the whole screen."""
+        """Natural outer width: the box fits its prompt and suggestions, not the whole terminal."""
         widths = [
             cell_len(self._prompt),
             cell_len(self.title),
@@ -945,7 +971,7 @@ class AutocompleteScreen(_KeylessDialog):
         return max(widths) + 8
 
     def _suggestions(self) -> list[str]:
-        """Return suggestions matching the current text, capped for display."""
+        """Return the suggestions that match the current text, up to the maximum that shows."""
         needle = self._editor.text.lower()
         if not needle:
             matches = list(self._choices)
@@ -956,8 +982,8 @@ class AutocompleteScreen(_KeylessDialog):
     def render_body(self, width: int) -> list[str]:
         """Render the optional prompt, the field, the matching suggestions, and any error.
 
-        The suggestions are drawn a row at a time so the highlighted one's body line is
-        known (see :meth:`cursor_line`).
+        The suggestions are drawn one row at a time, so that the body line of the
+        highlighted suggestion is known (refer to :meth:`cursor_line`).
         """
         parts: list[RenderableType] = []
         if self._prompt:
@@ -980,11 +1006,11 @@ class AutocompleteScreen(_KeylessDialog):
         return lines
 
     def cursor_line(self) -> int | None:
-        """The highlighted suggestion's body line, kept in view on a box too short for all."""
+        """The body line of the highlighted suggestion, kept visible in a box too short for all."""
         return self._cursor
 
     def handle(self, action: str, data: str = "") -> None:
-        """Edit the field, move/accept suggestions, submit on Enter, or cancel on Esc."""
+        """Edit the field, move or accept suggestions, submit on Enter, or cancel on Esc."""
         suggestions = self._suggestions()
         if action == "up":
             self._sugg = max(0, self._sugg - 1) if suggestions else 0

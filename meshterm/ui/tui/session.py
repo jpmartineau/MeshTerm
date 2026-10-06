@@ -1,13 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The persistent full-screen session: the heart of the TUI library.
+"""The persistent full-screen session: the central part of the TUI library.
 
 A :class:`TuiSession` owns one prompt_toolkit :class:`Application`, a stack of
-:class:`~meshterm.ui.tui.screen.Screen` layers, and the persistent header/footer frame. It
-translates prompt_toolkit key events into normalized *actions* dispatched to the top screen,
-composes the current view (bounded to the terminal, reflowing on resize) via
-:mod:`~meshterm.ui.tui.frame`, and exposes ``async`` helpers (``select``/``text``/
-``confirm``/``autocomplete``/``scroll``/``progress``) that push a screen, await its result,
-and pop it — the push/await/pop model behind every prompt.
+:class:`~meshterm.ui.tui.screen.Screen` layers, and the persistent header and footer. It
+does these tasks:
+
+- It changes the prompt_toolkit key events into normalized *actions*, and it sends each
+  action to the top screen.
+- It composes the current frame through :mod:`~meshterm.ui.tui.frame`. The frame stays in
+  the limits of the terminal, and its content flows again when the terminal changes size.
+- It gives ``async`` helpers (``select``/``text``/``confirm``/``autocomplete``/``scroll``/
+  ``progress``). Each helper pushes a screen, awaits its result, and pops it. This push,
+  await, and pop model is behind each prompt.
 """
 
 from __future__ import annotations
@@ -53,42 +57,53 @@ from .screen import CANCEL, POP_ALL, BusyDialog, BusyScreen, PopToMenu, Screen, 
 from .select import Choice, ReorderScreen, SelectScreen, Separator
 from .spinner import spinner_interval
 
-#: Every Ctrl-letter chord the app binds, keyed by the bare lowercase letter — the single
-#: source of truth for both halves of a chord's life: the ``Keys.Control*`` bindings folded
-#: into :data:`_KEY_ACTIONS` below, and the right-Ctrl rescue in :meth:`TuiSession._dispatch`
-#: (see :func:`_right_ctrl_down`), which promotes the bare letter a layout-claimed right Ctrl
-#: delivers as *text* back into the chord. Add a chord here and both Ctrl keys reach it — no
-#: second edit, no chord that works on one side of the keyboard only. ``quit`` and
-#: ``paste_clipboard`` are the session's own (answered in ``_dispatch``); the rest are actions
-#: forwarded to the top screen. A bare letter only reaches text while the right Ctrl is held
-#: when the layout has no third-level glyph for that key (i.e. it really is the chord) — a
-#: genuine third-level character arrives as some *other* glyph and never matches this table.
-#: ``m``/``i``/``h`` are not free: prompt_toolkit spells Enter, Tab and Backspace as
-#: ``Keys.ControlM``/``ControlI``/``ControlH``, so claiming them here would rebind those keys.
-#: A chord's letter is the mnemonic of the *action*, not of one screen's word for it —
-#: ``locate`` is ^Y for **you** (JP, 2026-08-09), the same key on the map and in the mesh
-#: walk, because what it names on both is our own node; it was ^U until 2026-10-01, when U
-#: went to ``url_code`` — a chat message's links as QR codes.
+#: Each Ctrl-letter chord that the app binds, indexed by the bare lowercase letter. This
+#: table is the single source of truth for the two halves of the life of a chord:
 #:
-#: Two of these are app-wide rather than a screen's: ``to_menu`` (^W) unwinds the whole
-#: navigation stack back to the main menu, and ``quit`` (^Q, alongside the older ^C) asks
-#: to leave the app from anywhere — a second press while it asks is the leaving (see
-#: :meth:`TuiSession.request_quit`). Neither is advertised in a footer hint or an F-key
-#: chip — the lane has three free slots per screen and a global verb would claim one on
-#: every screen forever (JP, 2026-08-30) — save ``^Q quit?`` on the main menu's own hint,
-#: where Esc is inert and the reader looks for the way out (issue #22). ^W was
-#: picked for the close-this-whole-thing reflex; both were verified deliverable on the
-#: Canadian Multilingual layout (^W ``U+0017``, ^Q ``U+0011``) and neither is eaten by the
-#: terminal — prompt_toolkit's raw mode clears ``IXON``/``IXOFF``, so ^Q is not XON here.
+#: - the ``Keys.Control*`` bindings, which are folded into :data:`_KEY_ACTIONS` below.
+#: - the right-Ctrl rescue in :meth:`TuiSession._dispatch` (refer to
+#:   :func:`_right_ctrl_down`). When a keyboard layout claims the right Ctrl key, that key
+#:   sends a bare letter as text. The rescue changes that letter back into the chord.
+#:
+#: Add a chord here, and the two Ctrl keys get it. A second edit is not necessary, and no
+#: chord works on only one side of the keyboard. ``quit`` and ``paste_clipboard`` belong to
+#: the session (``_dispatch`` answers them). The other entries are actions that the session
+#: sends to the top screen. While the right Ctrl key is held, a bare letter gets to the text
+#: only when the layout has no third-level glyph for that key (that is, when the key press is
+#: the chord). A real third-level character arrives as a different glyph, and it never
+#: matches this table.
+#: ``m``/``i``/``h`` are not free: prompt_toolkit spells Enter, Tab, and Backspace as
+#: ``Keys.ControlM``/``ControlI``/``ControlH``. If this table claims them, it binds those
+#: keys again.
+#: The letter of a chord is the mnemonic of the action, not of the word that one screen uses
+#: for it. ``locate`` is ^Y for **you** (JP, 2026-08-09). It is the same keyboard key on the
+#: map and in the mesh walk, because on both it names our node. It was ^U until 2026-10-01.
+#: Then U went to ``url_code``: the links of a chat message as QR codes.
+#:
+#: Two of these chords are for the full app, not for one screen:
+#:
+#: - ``to_menu`` (^W) unwinds the full navigation stack back to the main menu.
+#: - ``quit`` (^Q, and also the older ^C) asks to quit the app from any screen. A second
+#:   press while the question is open quits (refer to :meth:`TuiSession.request_quit`).
+#:
+#: No footer hint and no F-key chip shows these two chords. The F-key lane has three free
+#: slots for each screen, and a chip for a global verb uses one slot on each screen permanently
+#: (JP, 2026-08-30). The only exception is ``^Q quit?`` in the hint of the main menu. There
+#: the Esc key does nothing, and the user looks for the way out (issue #22). We chose ^W
+#: because users press it by reflex to close everything. On the Canadian Multilingual layout,
+#: we checked that the keyboard sends the two chords (^W ``U+0017``, ^Q ``U+0011``), and the
+#: terminal does not consume either of them. The raw mode of prompt_toolkit clears
+#: ``IXON``/``IXOFF``, so ^Q is not XON here.
 _CTRL_LETTER_CHORDS: dict[str, str] = {
     "c": "quit",
-    # ^L logs in to the room a room view is open on.
+    # ^L logs in to the room that a room screen shows.
     "l": "login",
     "p": "paths",
     "q": "quit",
     "r": "retry",
-    # ^S is XOFF's key, and safe here for the same reason ^Q is not XON (see above): raw
-    # mode clears IXON/IXOFF, so the terminal never eats it to freeze the screen.
+    # ^S is the XOFF key. It is safe here for the same reason that ^Q is not XON (refer to
+    # the text above): the raw mode clears IXON/IXOFF. Thus the terminal never takes it to
+    # freeze the screen.
     "s": "reveal",
     "u": "url_code",
     "v": "paste_clipboard",
@@ -96,7 +111,7 @@ _CTRL_LETTER_CHORDS: dict[str, str] = {
     "y": "locate",
 }
 
-#: Maps prompt_toolkit keys to the normalized action names screens understand.
+#: Maps the prompt_toolkit keys to the normalized action names that the screens understand.
 _KEY_ACTIONS: dict[Any, str] = {
     Keys.Up: "up",
     Keys.Down: "down",
@@ -119,39 +134,42 @@ _KEY_ACTIONS: dict[Any, str] = {
     Keys.ControlUp: "ctrl_up",
     Keys.ControlDown: "ctrl_down",
     Keys.Enter: "enter",
-    # Ctrl+Enter, as far as a terminal can spell it. There is no such keycode: Enter *is*
-    # ^M, so a console that doesn't do modifyOtherKeys has nothing left to modify and
-    # sends plain CR. What most do send is LF — prompt_toolkit's ``ControlJ`` — which is
-    # otherwise unbound here (an unprintable char, dropped by ``_typed``), so claiming it
-    # costs nothing and wins on the terminals that offer it. The right-Ctrl rescue below
-    # covers the rest through _CTRL_CHORDS, and on a console that spells neither, the
-    # F-lane chip is the affordance (which is the platform where that is already true).
+    # Ctrl+Enter, as well as a terminal can spell it. No such keycode exists: Enter is ^M.
+    # Thus a console without modifyOtherKeys has nothing more to modify, and it sends a
+    # plain CR. Most consoles send LF (``ControlJ`` in prompt_toolkit). LF has no other
+    # binding here (it is an unprintable character, and ``_typed`` removes it). Thus this
+    # binding costs nothing, and it works on the terminals that send LF. The right-Ctrl
+    # rescue below covers the other cases through _CTRL_CHORDS. On a console that spells
+    # neither, the chip on the F-key lane is the affordance (that is already true on the
+    # platform of that console).
     Keys.ControlJ: "ctrl_enter",
     Keys.Escape: "escape",
     Keys.Backspace: "backspace",
     Keys.Delete: "delete",
     Keys.Tab: "tab",
     Keys.BackTab: "shift_tab",
-    # The function keys, for a handheld's F-key lane. All of them, since which keycodes
-    # drive the lane is the platform's deck's business, not this table's: the PicoCalc's
-    # MCU sends its Shift bank as F6–F10, the Cardputer's emulator sends Shift+F4..F8
-    # as xterm does, which prompt_toolkit reads as F16–F20. The session resolves them
-    # against the top screen's lane in _dispatch; a key the deck doesn't use, or a
-    # platform without a lane, resolves to nothing and falls away. Alt+Fn is the kernel's
-    # VT switch on the PicoCalc and must never be bound.
+    # The function keys, for the F-key lane of a handheld. This table binds all of them,
+    # because the deck of the platform decides which keycodes drive the lane, not this
+    # table. The MCU of the PicoCalc sends its Shift bank as F6–F10. The emulator of the
+    # Cardputer sends Shift+F4..F8 the same as xterm, and prompt_toolkit reads them as
+    # F16–F20. In _dispatch, the session resolves them against the lane of the top screen.
+    # A key that the deck does not use, or a key on a platform without a lane, resolves to
+    # nothing and is ignored. On the PicoCalc, Alt+Fn is the VT switch of the kernel, and
+    # it must never have a binding.
     **{getattr(Keys, f"F{n}"): f"f{n}" for n in range(1, 25)},
-    # The Ctrl-letter chords, generated from the one table above so a chord can never be
-    # bound without its right-Ctrl rescue (or rescued into an action nothing binds).
+    # The Ctrl-letter chords, made from the one table above. Thus a chord can never have a
+    # binding without its right-Ctrl rescue (or a rescue into an action that nothing binds).
     **{
         getattr(Keys, f"Control{letter.upper()}"): action
         for letter, action in _CTRL_LETTER_CHORDS.items()
     },
 }
 
-#: The plain actions that have a Ctrl-chord sibling, for the right-Ctrl rescue in
-#: :meth:`TuiSession._dispatch` (see :func:`_right_ctrl_down`). Navigation keys, plus
-#: ``enter`` — the one key a terminal cannot reliably spell chorded (see ``Keys.ControlJ``
-#: above), so the rescue is not a fallback there but the surer of the two paths.
+#: The plain actions that have a related Ctrl chord, for the right-Ctrl rescue in
+#: :meth:`TuiSession._dispatch` (refer to :func:`_right_ctrl_down`). These are the
+#: navigation keys, and also ``enter``. A terminal cannot reliably spell ``enter`` as a chord
+#: (refer to ``Keys.ControlJ`` above). Thus, for ``enter``, the rescue is not a fallback: it
+#: is the more reliable of the two ways.
 _CTRL_CHORDS: dict[str, str] = {
     "up": "ctrl_up",
     "down": "ctrl_down",
@@ -166,35 +184,37 @@ _CTRL_CHORDS: dict[str, str] = {
 
 
 def _right_ctrl_down() -> bool:
-    """Whether the right Ctrl key is physically held right now (Windows; ``False`` elsewhere).
+    """Whether the right Ctrl key is physically held now (Windows, ``False`` on other systems).
 
-    The rescue behind right-Ctrl chords. Keyboard layouts that claim the right Ctrl key as a
-    character-group modifier — the Canadian Multilingual Standard uses it to reach a third
-    character level — can deliver a right-Ctrl'd arrow to the console as a *bare* arrow, no
-    ctrl flag left for prompt_toolkit to map, so only the left Ctrl ever steered a sortable
-    list. This probes the physical key state (``GetAsyncKeyState``) instead of trusting the
-    stripped event modifiers: if an arrow reached our dispatch, our terminal had focus, so a
-    right Ctrl held at that instant is the user chording it. Non-Windows platforms report
-    ``False`` — a VT terminal encodes the ctrl modifier side-agnostically itself, and there
-    is no per-side key state to consult anyway.
+    This function is the rescue behind the right-Ctrl chords. Some keyboard layouts claim the
+    right Ctrl key as a modifier for a character group. (The Canadian Multilingual Standard
+    uses it to get to a third character level.) These layouts can send an arrow with the
+    right Ctrl key to the console as a bare arrow. Then no Ctrl flag stays for prompt_toolkit
+    to map, so only the left Ctrl key could control a sortable list. This function probes the
+    physical state of the key (``GetAsyncKeyState``). It does not trust the event modifiers,
+    because the layout removed them. If an arrow got to our dispatch, our terminal had the
+    focus. Thus a right Ctrl key that is held at that instant is a chord that the user makes.
+    The platforms other than Windows report ``False``. A VT terminal itself encodes the Ctrl
+    modifier the same for the two sides, and there is no key state for each side to examine.
     """
     if sys.platform != "win32":
         return False
     try:
         return bool(win32dll.user32().GetAsyncKeyState(0xA3) & 0x8000)  # VK_RCONTROL
-    except Exception:  # noqa: BLE001 - a failed probe just leaves the plain action
+    except Exception:  # noqa: BLE001 - if the probe fails, the plain action stays
         return False
 
 
 def _read_clipboard() -> str:
-    """Best-effort read of the OS clipboard's Unicode text (Windows; ``""`` elsewhere).
+    """Try to read the Unicode text of the OS clipboard (Windows, ``""`` on other systems).
 
-    The fallback behind Ctrl-V on a terminal that delivers the key literally rather than as a
-    bracketed paste (see :meth:`TuiSession._dispatch`): it pulls the clipboard's text
-    straight from the Win32 API. Every failure — a non-Windows platform, an empty or
-    non-text clipboard, a clipboard busy elsewhere we couldn't open — collapses to ``""``, so
-    the paste simply does nothing rather than raising into the key handler. Pointer-returning
-    calls declare a ``c_void_p`` result so a 64-bit handle isn't truncated to an int.
+    This function is the fallback behind Ctrl-V on a terminal that sends the key as it is,
+    instead of as a bracketed paste (refer to :meth:`TuiSession._dispatch`). It gets the text
+    of the clipboard directly from the Win32 API. Each failure gives ``""``: a platform that
+    is not Windows, an empty clipboard, a clipboard without text, or a clipboard that another
+    program uses, so that we could not open it. Thus the paste does nothing, and no exception
+    goes into the key handler. The calls that return a pointer declare a ``c_void_p`` result,
+    so that a 64-bit handle is not truncated to an int.
     """
     if sys.platform != "win32":
         return ""
@@ -202,8 +222,8 @@ def _read_clipboard() -> str:
         import ctypes
 
         CF_UNICODETEXT = 13
-        # Private handles; the argtypes below would otherwise be declared on objects
-        # every library in the process shares. See meshterm.core.win32dll.
+        # Private handles. Without them, the argtypes below are declared on objects that all
+        # the libraries in the process share. Refer to meshterm.core.win32dll.
         user32 = win32dll.user32()
         kernel32 = win32dll.kernel32()
         user32.GetClipboardData.restype = ctypes.c_void_p
@@ -226,36 +246,43 @@ def _read_clipboard() -> str:
                 kernel32.GlobalUnlock(handle)
         finally:
             user32.CloseClipboard()
-    except Exception:  # noqa: BLE001 - a clipboard hiccup must never break a keypress
+    except Exception:  # noqa: BLE001 - a small clipboard problem must never break a key press
         return ""
 
 
 def _reclaim_last_column() -> bool | None:
-    """Whether to reclaim the terminal's final column — or ``None``, to ask the terminal.
+    """Whether to use the last column of the terminal, or ``None`` to ask the terminal.
 
-    prompt_toolkit's Windows console output reports the window one column narrower than it
-    really is, on purpose (see :func:`_probe_hides_last_column`), so the frame is drawn to
-    ``columns - 1`` and the true last column sits unused — visibly selectable to the right of
-    the border. When this is on, :class:`_WidthExtendedOutput` tells both the renderer and
-    the frame compositor the window is one column wider, and that final column gets drawn.
+    The Windows console output of prompt_toolkit reports the window as one column narrower
+    than it is. It does this on purpose (refer to :func:`_probe_hides_last_column`). Thus the
+    frame is drawn to ``columns - 1``, and the real last column is not used. The user can see
+    that column at the right of the border, and can select it. When this value is on,
+    :class:`_WidthExtendedOutput` tells the renderer and the frame compositor that the window
+    is one column wider. Then that last column is drawn.
 
-    It is *correct* only where the probe hid the column. Everywhere else the extra column
-    falls off the real screen, and since prompt_toolkit draws with autowrap off, each row's
-    phantom last cell is written over the real one before it: whatever sits flush right
-    loses its final character. On Linux that cut the header's battery gauge, so a full pack's
-    bare ``100`` read ``10`` and 99% read ``9%``. Hence the default is a question rather than
-    an answer: ``None`` means "reclaim if, and only if, the output this session draws on is
-    one whose probe hides the column", decided once that output exists.
+    This is correct only where the probe hid the column. In all other cases, the extra column
+    is outside the real screen. prompt_toolkit draws with autowrap off, so the phantom last
+    cell of each row is written over the real cell before it. Thus the text at the right edge
+    loses its last character. On Linux, this cut the battery gauge of the header: a full
+    battery showed ``10`` instead of ``100``, and 99% showed ``9%``. Thus the default is a
+    question, not an answer. ``None`` means "reclaim if, and only if, the output this session
+    draws on is one whose probe hides the column". The session decides this when that output
+    exists.
 
-    Three sources, in confidence order, because the person at the keyboard can see the
-    column and the code can only infer it: ``MESHTERM_FULL_WIDTH=0``/``=1`` for a one-off,
-    then the ``full_width`` preference (``yes``/``no``; ``auto`` — the default — steps
-    aside), then the platform, which answers ``False`` outright where its console is exact
-    (:data:`~meshterm.platforms.PICOCALC_LYRA`) and otherwise leaves it to the terminal.
+    Three sources give the answer, in the order of confidence, because the user at the
+    keyboard can see the column and the code can only infer it:
 
-    Read fresh on every call (never cached at import time) so it reflects whichever platform
-    :func:`~meshterm.platforms.set_platform` installed for this process — see that module's
-    docstring for why a cached/imported copy of the platform would go stale.
+    1. ``MESHTERM_FULL_WIDTH=0``/``=1``, for one run.
+    2. The ``full_width`` preference (``yes``/``no``). ``auto``, the default, gives no
+       answer.
+    3. The platform. It answers ``False`` where its console is exact
+       (:data:`~meshterm.platforms.PICOCALC_LYRA`). In the other cases, it lets the terminal
+       decide.
+
+    The function reads the values again at each call (never at import time, into a cache).
+    Thus it agrees with the platform that :func:`~meshterm.platforms.set_platform` installed
+    for this process. Refer to the docstring of that module for the reason why a cached or
+    imported copy of the platform becomes old.
     """
     from ...core.preferences import current as current_preferences
 
@@ -269,17 +296,18 @@ def _reclaim_last_column() -> bool | None:
 
 
 def _probe_hides_last_column(output: Any) -> bool:
-    """Whether prompt_toolkit sizes ``output`` one column narrower than its window.
+    """Whether prompt_toolkit gives ``output`` a width one column narrower than its window.
 
-    True of its Windows console output and nothing else. ``Win32Output.get_size`` takes the
-    visible width as ``srWindow.Right - srWindow.Left`` (an inclusive span, so one short) and
-    then caps it below the buffer's right margin — "windows will wrap otherwise" — and
-    ``Windows10_Output`` and ``ConEmuOutput`` both hand their size to the ``Win32Output``
-    they hold. A POSIX terminal's ``Vt100_Output`` reads ``TIOCGWINSZ``, which is exact, so
-    there is nothing there to reclaim.
+    True for its Windows console output, and for no other output. ``Win32Output.get_size``
+    takes the visible width as ``srWindow.Right - srWindow.Left``. This is an inclusive span,
+    so it is one column short. Then the function limits the width to less than the right
+    margin of the buffer ("windows will wrap otherwise"). ``Windows10_Output`` and
+    ``ConEmuOutput`` both use the size of the ``Win32Output`` that they hold. The
+    ``Vt100_Output`` of a POSIX terminal reads ``TIOCGWINSZ``, which is exact. Thus there is
+    no column to reclaim there.
     """
     if sys.platform != "win32":
-        return False  # prompt_toolkit's win32 module asserts the platform on import
+        return False  # the win32 module of prompt_toolkit asserts the platform on import
     from prompt_toolkit.output.win32 import Win32Output
 
     return isinstance(output, Win32Output) or isinstance(
@@ -287,48 +315,55 @@ def _probe_hides_last_column(output: Any) -> bool:
     )
 
 
-#: What each ``color_depth`` preference value asks for. ``auto`` is deliberately absent: it
-#: is the one answer that is not a depth, and :func:`_color_depth` resolves it separately.
+#: The depth for each value of the ``color_depth`` preference. ``auto`` is not in the table
+#: on purpose: it is the only value that is not a depth, and :func:`_color_depth` resolves it
+#: separately.
 _DEPTH_BY_NAME = {
     "truecolor": ColorDepth.DEPTH_24_BIT,
     "256": ColorDepth.DEPTH_8_BIT,
     "16": ColorDepth.DEPTH_4_BIT,
 }
 
-#: What ``COLORTERM`` says on a terminal that means it about 24-bit colour. There is no
-#: in-band way to ask — a terminal that cannot do truecolor answers a truecolor SGR by
-#: quietly approximating it, which looks from here exactly like one that can — so this
-#: convention, which every truecolor terminal follows, is the whole of the evidence.
+#: The ``COLORTERM`` values of a terminal that tells the truth about 24-bit colour. There is
+#: no in-band way to ask. A terminal without truecolor answers a truecolor SGR with an
+#: approximation, and it does not tell us. From here, that looks exactly the same as a
+#: terminal with truecolor. Thus this convention, which each truecolor terminal follows, is
+#: all the evidence.
 _TRUECOLOR_COLORTERM = frozenset({"truecolor", "24bit"})
 
 
 def _color_depth() -> ColorDepth | None:
-    """How many colours to send this terminal, or ``None`` to keep prompt_toolkit's verdict.
+    """How many colours to send to this terminal, or ``None`` to keep the prompt_toolkit verdict.
 
-    prompt_toolkit picks a depth per *output class*, and its two classes disagree:
-    ``Windows10_Output`` returns ``TRUE_COLOR`` outright, while ``Vt100_Output`` returns
-    ``DEPTH_8_BIT`` for every ``TERM`` but ``linux`` and a dumb terminal. So the same build
-    of MeshTerm, drawing the same theme, is 24-bit on Windows and 256 colours on macOS and
-    Linux — and it is quantized *silently*, which is why this went unnoticed: the app looks
-    fine, just flatter. It costs exactly what this palette is made of. The seven ``heat.*``
-    steps and the per-node hue wheel (:func:`~meshterm.ui.theme.node_style`) are close
-    pastels chosen to be told apart; snapped to the 216-colour cube, neighbours collide and
-    identities stop being distinguishable by hue. ``COLORTERM`` is not consulted by
-    prompt_toolkit at all — only ``PROMPT_TOOLKIT_COLOR_DEPTH`` is — so a terminal
-    announcing truecolor in the conventional way is still handed 256.
+    prompt_toolkit chooses a depth for each *output class*, and its two classes do not agree.
+    ``Windows10_Output`` returns ``TRUE_COLOR`` directly. ``Vt100_Output`` returns
+    ``DEPTH_8_BIT`` for each ``TERM`` except ``linux`` and a dumb terminal. Thus the same
+    build of MeshTerm, with the same theme, has 24-bit colour on Windows and 256 colours on
+    macOS and Linux. The quantization is silent, and for this reason nobody saw it: the app
+    looks correct, only flatter. But the quantization damages exactly the thing that this
+    palette is made of. The seven ``heat.*`` steps and the hue wheel for the nodes
+    (:func:`~meshterm.ui.theme.node_style`) are pastels that are near each other, and we
+    chose them so that the user can tell them apart. In the 216-colour cube, neighbours become
+    the same colour, and the user cannot tell the identities apart by hue. prompt_toolkit
+    does not read ``COLORTERM``. It reads only ``PROMPT_TOOLKIT_COLOR_DEPTH``. Thus a
+    terminal that announces truecolor in the usual way still gets 256 colours.
 
-    Three sources, in confidence order, the same shape as :func:`_reclaim_last_column`:
-    ``MESHTERM_COLOR_DEPTH`` for a one-off, then the ``color_depth`` preference, then a
-    reading of the environment.
+    Three sources give the answer, in the order of confidence, the same as in
+    :func:`_reclaim_last_column`:
 
-    The reading only ever *raises* the verdict, never lowers it. A terminal we cannot get a
-    positive claim from returns ``None`` and keeps precisely the depth it had, so a host
-    this function has never heard of cannot be made worse by it — which matters more than
-    being right everywhere, because the failure mode of guessing 24-bit at a terminal
-    without it is not a duller palette but no colour at all.
+    1. ``MESHTERM_COLOR_DEPTH``, for one run.
+    2. The ``color_depth`` preference.
+    3. A reading of the environment.
+
+    The reading only increases the verdict. It never decreases it. If a terminal does not
+    give a positive claim, the function returns ``None``, and the terminal keeps exactly the
+    depth that it had. Thus this function cannot make a host worse when it does not know that
+    host. This is more important than a correct answer everywhere. If the function guesses
+    24-bit for a terminal without 24-bit colour, the result is not a duller palette: it is no
+    colour at all.
 
     Returns:
-        The depth to force, or ``None`` to leave prompt_toolkit's own default in place.
+        The depth to force, or ``None`` to keep the default of prompt_toolkit.
     """
     from ...core.preferences import current as current_preferences
 
@@ -338,42 +373,43 @@ def _color_depth() -> ColorDepth | None:
         return _DEPTH_BY_NAME[preferred]
     if preferred != "auto":
         return None
-    # A 16-slot console is already right and has no truecolor to claim: the theme addresses
-    # its palette by index (see theme._VT_SLOTS), and promoting the depth would send RGB to
-    # a screen with sixteen colours to put it in.
+    # A 16-slot console is already correct, and it has no truecolor to claim. The theme
+    # addresses its palette by index (refer to theme._VT_SLOTS). If the function increases
+    # the depth, it sends RGB to a screen that has only sixteen colours for it.
     if not get_platform().truecolor:
         return None
     if os.environ.get("COLORTERM", "").strip().lower() in _TRUECOLOR_COLORTERM:
         return ColorDepth.DEPTH_24_BIT
-    # terminfo's own spelling for a direct-colour entry (``xterm-direct``, ``*-direct16m``).
+    # The terminfo spelling for a direct-colour entry (``xterm-direct``, ``*-direct16m``).
     if os.environ.get("TERM", "").endswith(("-direct", "-direct16m")):
         return ColorDepth.DEPTH_24_BIT
     return None
 
 
-#: How many stacked dialog layers the layout can float over the background at once. A fixed
-#: pool of centered-box floats (see :meth:`TuiSession._build_app`), sized well past the deepest
-#: real nesting — a tool's list, an item's detail popup, and a confirm over that is only three.
+#: The maximum number of dialog layers that the layout can float over the background at one
+#: time. It is a fixed pool of floats, each one a centred box (refer to
+#: :meth:`TuiSession._build_app`). The pool is much larger than the deepest real nesting: the
+#: list of a tool, a detail dialog for an item, and a confirm over it are only three.
 _MAX_DIALOG_LAYERS = 8
 
-#: How long :meth:`TuiSession.leave` waits for the app's quiesce to take hold — for a
-#: transmission under way to finish — before it leaves anyway. On the Cardputer Zero the
-#: whole exit has to fit the launcher's three seconds between SIGTERM and SIGKILL
-#: (:data:`~meshterm.services.hold_to_quit.GRACE_S`), and the rest of it was measured at
-#: about one second there (2026-10-06).
+#: How long :meth:`TuiSession.leave` waits for the quiesce of the app to start (that is, for
+#: a transmission in progress to finish). After this time, the method continues all the same.
+#: On the Cardputer Zero, the full exit must fit in the three seconds that the launcher gives
+#: between SIGTERM and SIGKILL (:data:`~meshterm.services.hold_to_quit.GRACE_S`). The rest of
+#: the exit took approximately one second there (measured on 2026-10-06).
 QUIESCE_WAIT_S = 1.0
 
 _log = get_logger()
 
 
 def _changed_rows(before: str, after: str) -> list[int] | None:
-    """Which lines of a full-screen frame differ, or ``None`` when they can't be compared.
+    """Which lines of a full-screen frame are different, or ``None`` if a comparison fails.
 
-    Both frames are composed one line per terminal row (see
-    :func:`~meshterm.ui.tui.frame.compose_base`), so a line index *is* a row index — the
-    mapping :meth:`TuiSession._scrub_rows` needs. A differing line count means the frame's
-    height moved (a resize, a splash giving way to the framed layout) and no such mapping
-    holds; the caller falls back to repainting everything.
+    The two frames are composed with one line for each terminal row (refer to
+    :func:`~meshterm.ui.tui.frame.compose_base`). Thus a line index is also a row index, and
+    :meth:`TuiSession._scrub_rows` uses this mapping. If the line counts are different, the
+    height of the frame changed (a resize, or a splash that gives its place to the framed
+    layout), and this mapping is not true. Then the caller does a full paint.
     """
     old, new = before.split("\n"), after.split("\n")
     if len(old) != len(new):
@@ -382,27 +418,28 @@ def _changed_rows(before: str, after: str) -> list[int] | None:
 
 
 def _has_wide_glyph(text: str) -> bool:
-    """Whether ``text`` holds a glyph prompt_toolkit reserves two cells for.
+    """Whether ``text`` has a glyph for which prompt_toolkit reserves two cells.
 
-    A width-2 glyph is where the terminal and the renderer can disagree: an emoji (``👋``)
-    that the terminal draws in a *single* cell is the common case here — pt reserves two,
-    the terminal advances one, and from that point the row's cursor model is off. Node-type
-    marks (``▲●■``) and chart braille are width-1 everywhere, so they never trip this. The
-    ``>= 0x1100`` guard skips the ASCII/Latin bulk of a frame before the width lookup, which
-    matters because this runs over the whole composed frame on every repaint.
+    The terminal and the renderer can disagree about a width-2 glyph. The usual case here is
+    an emoji (``👋``) that the terminal draws in one cell. pt reserves two cells, the
+    terminal moves forward one cell, and after that point the cursor model of the row is
+    incorrect. The node-type marks (``▲●■``) and the braille of a chart have a width of 1
+    everywhere, so they never cause a ``True`` result. The ``>= 0x1100`` guard skips the
+    ASCII and Latin characters, which are most of a frame, before the width lookup. This is
+    important, because this function examines the full composed frame at each paint.
 
-    On a platform that folds its frames to a fixed font the answer is ``False`` by
-    construction — that font is a 512-glyph set with no wide glyph in it, so nothing a
-    composed frame can contain would return ``True``. Answering from the platform instead
-    of the text skips a per-character scan of the entire frame on every repaint, and with
-    it the scrub machinery that a ``True`` would arm, leaving the cheap differential paint
-    permanently in play.
+    On a platform that folds its frames to a fixed font, the answer is always ``False``.
+    That font is a set of 512 glyphs with no wide glyph in it. Thus nothing that a composed
+    frame can contain can return ``True``. The function answers from the platform instead of
+    from the text. Thus it skips a scan of each character of the full frame at each paint.
+    It also skips the scrub machinery that a ``True`` result arms, so the cheap differential
+    paint always stays in use.
 
-    The fold is the guarantee, not the icon table: a terminal that merely can't draw
-    *emoji* (the classic Windows console — see :func:`meshterm.ui.termfont.emoji_support`)
-    still renders the rest of the BMP, and a contact named in CJK is two cells wide there
-    like anywhere else. Reading ``emoji`` here instead would have skipped the scan on a
-    frame that genuinely needed it, and smeared the row.
+    The fold gives this guarantee, not the icon table. A terminal that cannot draw emoji (the
+    classic Windows console, refer to :func:`meshterm.ui.termfont.emoji_support`) still
+    renders the rest of the BMP. A contact with a CJK name is two cells wide there, the same
+    as everywhere else. If this function reads ``emoji`` instead, it skips the scan on a frame
+    that must have it, and leaves stray characters in the row.
     """
     if get_platform().font:
         return False
@@ -410,13 +447,14 @@ def _has_wide_glyph(text: str) -> bool:
 
 
 class _WidthExtendedOutput:
-    """A prompt_toolkit ``Output`` proxy that reports one extra terminal column.
+    """A prompt_toolkit ``Output`` proxy that reports one more terminal column.
 
-    Wraps the real output and forwards everything untouched *except* :meth:`get_size`, which
-    adds a column. Because the whole render pipeline — prompt_toolkit's differential renderer
-    and MeshTerm's own frame compositor (via :meth:`TuiSession._size`) — keys off
-    ``output.get_size()``, this single override makes both use the reclaimed column in
-    lock-step. See :func:`_reclaim_last_column` for when this is right (and when it isn't).
+    The proxy wraps the real output, and forwards all calls to it with no change, except
+    :meth:`get_size`, which adds a column. The full render pipeline uses
+    ``output.get_size()``: the differential renderer of prompt_toolkit, and the frame
+    compositor of MeshTerm (through :meth:`TuiSession._size`). Thus this one override makes
+    the two use the reclaimed column together. Refer to :func:`_reclaim_last_column` for when
+    this is correct (and when it is not).
     """
 
     def __init__(self, inner: Any) -> None:
@@ -424,28 +462,29 @@ class _WidthExtendedOutput:
         self._inner = inner
 
     def get_size(self) -> Size:
-        """The wrapped size with one column added, so the last column is claimed."""
+        """The wrapped size with one more column, so that the last column is used."""
         size = self._inner.get_size()
         return Size(rows=size.rows, columns=size.columns + 1)
 
     def __getattr__(self, name: str) -> Any:
-        """Forward every other attribute/method straight to the wrapped output."""
+        """Forward each other attribute or method directly to the wrapped output."""
         return getattr(self._inner, name)
 
 
 def _message_border(message: Text | str) -> str:
-    """Pick a message dialog's border style from the strongest tone in the text.
+    """Choose the border style of a message dialog from the strongest tone in the text.
 
-    Outcome notes carry their severity as theme spans (``[err]``, ``[warn]``, ``[ok]``),
-    so the dialog frame can echo it: an error message gets the ``err`` border, a warning
-    (e.g. "device rebooting") the cautionary one, and anything else — successes included —
-    the standard accent. A plain string carries no spans and always reads as neutral.
+    A note about a result has its severity as theme spans (``[err]``, ``[warn]``, ``[ok]``).
+    Thus the border of the dialog can show the same severity. An error message gets the
+    ``err`` border. A warning (for example "device rebooting") gets the caution border. All
+    the other messages, also the success messages, get the standard accent. A plain string
+    has no spans, and it is always neutral.
 
     Args:
-        message: The dialog's message, styled or plain.
+        message: The message of the dialog, with styles or plain.
 
     Returns:
-        The Rich style name for the dialog border.
+        The Rich style name for the border of the dialog.
     """
     if isinstance(message, Text):
         styles = {str(span.style) for span in message.spans}
@@ -457,45 +496,48 @@ def _message_border(message: Text | str) -> str:
 
 
 class Visit:
-    """One screen's stay on the stack, handed out by :meth:`TuiSession.stay`.
+    """The stay of one screen on the stack, which :meth:`TuiSession.stay` returns.
 
-    Holds nothing but the session and the screen; :meth:`result` arms a fresh future on that
-    screen and awaits it, leaving the screen exactly where it is. Calling it again is the
-    next round of the same visit — the loop shape a hub screen wants.
+    It holds only the session and the screen. :meth:`result` arms a new future on that screen
+    and awaits it, and the screen stays exactly where it is. A second call is the next round
+    of the same visit. This is the loop shape that a hub screen must have.
     """
 
     __slots__ = ("_session", "_screen")
 
     def __init__(self, session: TuiSession, screen: Screen) -> None:
-        """Bind a visit to its session and screen, and arm the screen's first round."""
+        """Bind a visit to its session and screen, and arm the first round of the screen."""
         self._session = session
         self._screen = screen
         self._arm()
 
     @property
     def screen(self) -> Screen:
-        """The screen being visited (the same object for the whole stay)."""
+        """The screen of this visit (the same object for the whole stay)."""
         return self._screen
 
     def _arm(self) -> None:
-        """Give the screen a fresh future to resolve into.
+        """Give the screen a new future to resolve into.
 
-        A visited screen is *always* armed — from the moment it is pushed until the visit
-        ends — because it is on the stack the whole time and a key can reach it whenever it
-        is on top. Arming only inside :meth:`result` would leave a gap between rounds in
-        which :meth:`~meshterm.ui.tui.screen.Screen.resolve` has nowhere to put its value
-        and the press is silently dropped.
+        A visited screen is always armed, from the moment when it is pushed until the end of
+        the visit. The reason is that it is on the stack all the time, and a key press can
+        get to it each time that it is on top. If only :meth:`result` arms it, there is a
+        gap between the rounds. In that gap,
+        :meth:`~meshterm.ui.tui.screen.Screen.resolve` has no place to put its value, and the
+        key press is lost with no message.
         """
         self._screen.future = asyncio.get_running_loop().create_future()
 
     async def result(self) -> Any:
         """Await one round of the visited screen: its resolved value, or ``CANCEL`` on Esc.
 
-        A round already resolved — because the screen was armed while the caller was still
-        busy with the last one — is returned immediately rather than waited for again.
+        A round can be already resolved, because the screen was armed while the caller was
+        still busy with the last round. Such a round is returned immediately, and the method
+        does not wait for it again.
 
         Raises:
-            PopToMenu: If the pop-all key was pressed, here or while the caller was busy.
+            PopToMenu: If the user pressed the pop-all key, here or while the caller was
+                busy.
         """
         self._session._check_unwind()
         future = self._screen.future
@@ -505,87 +547,91 @@ class Visit:
         try:
             return self._session._unpack(await future)
         finally:
-            self._arm()  # the next round is live the moment this one is read
+            self._arm()  # the next round is live from the moment when this round is read
 
 
 class TuiSession:
-    """A running full-screen TUI: screen stack, frame, input loop, and async prompts."""
+    """A running full-screen TUI: the screen stack, the frame, the input loop, and async prompts."""
 
     def __init__(
         self,
         header: Callable[[int], RenderableType] | None = None,
         *,
-        input: Any = None,  # noqa: A002 - matches prompt_toolkit's Application(input=) name
+        input: Any = None,  # noqa: A002 - the same name as Application(input=) in prompt_toolkit
         output: Any = None,
     ) -> None:
         """Create a session.
 
         Args:
-            header: Callable taking the terminal width in columns and returning the
-                persistent header renderable (banner + live status), re-invoked on
-                every repaint — the width lets it stretch trailing content (the
-                activity sparkline) to fill the row exactly. Defaults to a plain title.
-            input: Optional prompt_toolkit input to drive the app from (tests use a pipe);
-                defaults to the real terminal.
-            output: Optional prompt_toolkit output to render to (tests use a dummy);
-                defaults to the real terminal.
+            header: A callable that takes the width of the terminal in cells and returns
+                the persistent header renderable (the banner and the live status). The
+                session calls it again at each paint. With the width, the header can
+                stretch the content at its end (the activity sparkline) to fill the row
+                exactly. The default is a plain title.
+            input: An optional prompt_toolkit input that drives the app (the tests use a
+                pipe). The default is the real terminal.
+            output: An optional prompt_toolkit output to render to (the tests use a dummy).
+                The default is the real terminal.
         """
         self._stack: list[Screen] = []
         self._header = header or (lambda cols: Text("MeshTerm", style="brand"))
         self._app: Application | None = None
         self._input = input
         self._output = output
-        # The top-most floating "working" overlay (a skeleton card), or None when idle. It is
-        # deliberately *not* on the screen stack: it hovers above every layer and is shown/
-        # hidden by busy_overlay, independent of whatever screens are pushed.
+        # The top floating "working" overlay (a skeleton card), or None when the app is idle.
+        # It is not on the screen stack, on purpose: it floats above each layer, and
+        # busy_overlay shows and hides it, independently of the screens that are pushed.
         self._overlay: BusyOverlay | None = None
-        # The busy card currently pushed by :meth:`busy_dialog`, or None. Unlike the overlay
-        # this one *is* a screen — it has to be, to take the keys the hub underneath would
-        # otherwise bank — and this holds it so a nested wait rides it instead of stacking.
+        # The busy card that :meth:`busy_dialog` pushed, or None. Different from the
+        # overlay, this card is a screen. It must be a screen, so that it takes the key
+        # presses. If it does not take them, the hub below it keeps them for later. This
+        # attribute holds the card, so that a nested wait uses the same card instead of a
+        # second card on the stack.
         self._busy: BusyDialog | None = None
-        # What each drawn layer last composed — ``layer -> (text, carries a wide glyph)`` — so
-        # :meth:`_emit` can tell a frame that actually changed from one the 1 Hz refresh just
-        # re-rendered identically, and can ask whether anything currently on screen needs the
-        # full-repaint treatment. Reconciled against the layers actually drawn on every paint
-        # (see :meth:`_reconcile_layers`).
+        # The last composition of each drawn layer: ``layer -> (text, carries a wide
+        # glyph)``. With it, :meth:`_emit` can tell a frame that changed from a frame that
+        # the 1 Hz paint timer rendered again with no change. It can also find if anything
+        # on the screen now must have a full paint. At each paint, this dict is reconciled
+        # against the layers that were drawn (refer to :meth:`_reconcile_layers`).
         self._layers: dict[str, tuple[str, bool]] = {}
-        # Armed by the pop-all key (^W) and disarmed by the menu loop once it has caught the
-        # unwind. While armed, every navigation boundary raises PopToMenu rather than showing
-        # another screen — see :meth:`request_pop_all`.
+        # The pop-all key (^W) arms this flag, and the menu loop disarms it after it catches
+        # the unwind. While the flag is armed, each navigation boundary raises PopToMenu
+        # instead of showing another screen. Refer to :meth:`request_pop_all`.
         self._unwinding = False
-        # The screen the unwind lands on (the main menu), so ^W can no-op when it is already
-        # the top rather than pointlessly rebuilding it — and what a popup floats over when
-        # nothing else is pushed (see :meth:`_floated`). ``None`` until the menu declares it.
+        # The screen at the end of the unwind (the main menu). With it, ^W can do nothing
+        # when that screen is already the top, instead of a rebuild with no purpose. A
+        # dialog also floats over it when no other screen is pushed (refer to
+        # :meth:`_floated`). ``None`` until the menu declares it.
         self._root: Screen | None = None
-        # The quit confirm ^Q raises from anywhere (see :meth:`request_quit`), declared by
-        # the app with :meth:`set_quit_confirm`; and whether it is up right now, which is
-        # what turns the next ^Q into the leaving itself.
+        # The quit confirm that ^Q opens from any screen (refer to :meth:`request_quit`).
+        # The app declares it with :meth:`set_quit_confirm`. Then a flag that tells if the
+        # confirm is open now. When it is open, the next ^Q quits the app.
         self._quit_confirm: Callable[[], Awaitable[bool]] | None = None
         self._quit_asking = False
-        # What the app does to stop starting things before it may have to leave (see
-        # :meth:`set_quiesce`), the quiesce while it is held, and whether the app is on its
-        # way out — the one-way flag :meth:`leave` raises.
+        # What the app does to stop the start of new work before it possibly must quit
+        # (refer to :meth:`set_quiesce`). Then the quiesce while it is held. Then the
+        # one-way flag that :meth:`leave` raises, which tells if the app is on its way out.
         self._quiesce: Callable[[], AbstractAsyncContextManager[Any]] | None = None
         self._quiet: Quiet | None = None
         self._leaving = False
-        # A terminal's Esc, held back while the keyboard says it is still down — where
-        # something can say so (see :meth:`set_esc_probe`).
+        # The Esc of a terminal, held back while the keyboard says that the key is still
+        # down (where something can tell this, refer to :meth:`set_esc_probe`).
         self._watched_esc: WatchedEsc | None = None
 
     # --- stack ---------------------------------------------------------------
 
     @property
     def top(self) -> Screen | None:
-        """The active (top-most) screen, or ``None`` when the stack is empty."""
+        """The active screen (the top screen), or ``None`` when the stack is empty."""
         return self._stack[-1] if self._stack else None
 
     def push(self, screen: Screen) -> None:
-        """Push a screen onto the stack and repaint."""
+        """Push a screen onto the stack, and paint the frame again."""
         self._stack.append(screen)
         self.invalidate()
 
     def pop(self, screen: Screen | None = None) -> None:
-        """Pop ``screen`` (or the top) off the stack and repaint."""
+        """Pop ``screen`` (or the top screen) off the stack, and paint the frame again."""
         if not self._stack:
             return
         popped: Screen | None = None
@@ -595,37 +641,41 @@ class TuiSession:
             self._stack.remove(screen)
             popped = screen
         self._expose_overlay()
-        # A floating dialog is drawn as a content-sized box over the screen beneath. If any
-        # of its cells held a glyph the terminal painted wider than prompt_toolkit tracks
-        # (an emoji or box-draw fallback the differential renderer can't see), that overhang
-        # would otherwise survive as stray characters in the dialog's wake. Force the frame
-        # beneath to rewrite every cell as the dialog is torn down so nothing of it lingers.
+        # A floating dialog is drawn as a box, sized to its content, over the screen below
+        # it. A cell of the dialog can hold a glyph that the terminal drew wider than
+        # prompt_toolkit tracks (an emoji or a box-drawing fallback that the differential
+        # renderer cannot see). Then the extra part stays as stray characters after the
+        # dialog closes. Thus, when the dialog closes, force the frame below it to write
+        # each cell again, so that nothing of the dialog stays.
         if popped is not None and getattr(popped, "floating", False):
             self._invalidate_last_frame()
         self.invalidate()
 
     def reset(self) -> None:
-        """Clear the whole screen stack and repaint.
+        """Clear the full screen stack, and paint the frame again.
 
-        Used to unwind to a blank frame after a cancelled activity — e.g. when a mid-session
-        device disconnect abandons whatever screens the interrupted work had pushed, before
-        the reconnect dialog is shown over a clean slate. Screens hold no external resources
-        (their callers pop them in ``finally``), so dropping any stragglers here is safe.
+        MeshTerm uses this method to unwind to a blank frame after a cancelled activity. For
+        example, when the device disconnects during a session, MeshTerm abandons all the
+        screens that the interrupted work pushed. Then it shows the reconnect dialog over a
+        clean frame. Screens hold no external resources (their callers pop them in
+        ``finally``). Thus it is safe to remove the remaining screens here.
         """
         self._stack.clear()
-        # A reset is its own unwind — the caller has already abandoned whatever was running
-        # (see :func:`~meshterm.ui.menu._session_loop`), so an armed ^W has nothing left to
-        # unwind and would otherwise fire into the reconnect flow that replaces it.
+        # A reset is an unwind itself. The caller has already abandoned all that was running
+        # (refer to :func:`~meshterm.ui.menu._session_loop`). Thus an armed ^W has nothing
+        # more to unwind. If it stays armed, it goes off in the reconnect flow that
+        # replaces the abandoned work.
         self._unwinding = False
         self._expose_overlay()
         self.invalidate()
 
     def _expose_overlay(self) -> None:
-        """Restart the busy overlay's fade whenever a stack change re-exposes it.
+        """Restart the fade of the busy overlay when a stack change shows it again.
 
-        A prompt pushed over an active overlay hides the card; popping back to an empty stack
-        re-exposes it. Restart the intro then so the black hold and fade-in replay fresh each
-        time the card is shown, rather than snapping back at full brightness (see
+        A prompt that is pushed over an active overlay hides the card. A pop back to an empty
+        stack shows the card again. Then restart the intro, so that the black hold and the
+        fade-in start again from the beginning each time that the card is shown. Without the
+        restart, the card comes back immediately at full brightness (refer to
         :meth:`~meshterm.ui.tui.overlay.BusyOverlay.restart`).
         """
         if self._overlay is not None and not self._stack:
@@ -634,13 +684,16 @@ class TuiSession:
     # --- navigation ----------------------------------------------------------
 
     def set_root(self, screen: Screen | None) -> None:
-        """Declare ``screen`` the navigation root — where an unwind lands.
+        """Declare ``screen`` as the navigation root: the screen at the end of an unwind.
 
-        The main menu calls this with its own list. Only two things depend on it: ^W is a
-        no-op while the root is already the top screen (you cannot go back to where you
-        are), and a popup with nothing under it floats over the root rather than over an
-        empty frame (:meth:`_floated`). Nothing else in the app needs to know which screen
-        is the menu.
+        The main menu calls this method with its own list. Only two things depend on it:
+
+        - ^W does nothing while the root is already the top screen (you cannot go back to
+          where you are).
+        - A dialog with nothing below it floats over the root, not over an empty frame
+          (:meth:`_floated`).
+
+        No other part of the app must know which screen is the menu.
 
         Args:
             screen: The root screen, or ``None`` to forget it.
@@ -653,26 +706,28 @@ class TuiSession:
         return self._root
 
     def set_quit_confirm(self, ask: Callable[[], Awaitable[bool]] | None) -> None:
-        """Declare the question the quit chord asks before it leaves.
+        """Declare the question that the quit chord asks before the app quits.
 
-        The app declares it once, because only the app knows what the question offers —
-        the main menu's confirm adds *Unpair & quit* over a Bluetooth bond, which needs the
-        application context the session never holds. ``ask`` floats its dialog and returns
-        whether to leave; it owns any side effect of the answer (recording an unpair).
+        The app declares it one time, because only the app knows what the question offers.
+        Over a Bluetooth bond, the confirm of the main menu adds *Unpair & quit*, and that
+        choice must have the application context, which the session never holds. ``ask``
+        floats its dialog and returns whether to quit. It owns all side effects of the answer
+        (for example, it stores the record of an unpair).
 
         Args:
-            ask: The confirm, or ``None`` to have the quit chord leave without asking.
+            ask: The confirm, or ``None`` if the quit chord must quit without a question.
         """
         self._quit_confirm = ask
 
     async def confirm_quit(self) -> bool:
-        """Ask the declared quit confirm, as the main menu's Quit row does.
+        """Ask the declared quit confirm, as the Quit row of the main menu does.
 
-        The same question ^Q asks, and the same dialog: while it is up the chord's next
-        press leaves outright (see :meth:`request_quit`), whichever door opened it.
+        It is the same question that ^Q asks, and the same dialog. While the dialog is open,
+        the next press of the chord quits immediately (refer to :meth:`request_quit`),
+        whichever way opened the dialog.
 
         Returns:
-            Whether the reader chose to leave — ``True`` with no confirm declared.
+            Whether the user chose to quit. ``True`` if no confirm is declared.
         """
         self._quit_asking = True
         return await self._asking_quit()
@@ -685,24 +740,25 @@ class TuiSession:
             self._quit_asking = False
 
     def request_quit(self) -> None:
-        """Answer the quit chord (^Q, and ^C beside it): ask first, leave on the second press.
+        """Answer the quit chord (^Q, and also ^C): ask first, and quit on the second press.
 
-        ^Q sits one key from ^W, the chord that climbs back to the menu, so a slip on the way
-        to the menu used to close the app — and a running capture or a courier queue with
-        it. It now floats the quit confirm over whatever is up, from anywhere (issue #22,
-        option D). The confirm is a detached flow (:meth:`run_detached`): nothing under it
-        is interrupted, a capture keeps capturing behind the box, and Esc puts the reader
-        back exactly where they were.
+        ^Q is one key from ^W, the chord that goes back to the menu. Thus a wrong key press
+        on the way to the menu once closed the app, and with it a running capture or a
+        courier queue. Now the chord floats the quit confirm over the current screen, from
+        any screen (issue #22, option D). The confirm is a detached flow
+        (:meth:`run_detached`). Nothing below it is interrupted, a capture continues behind
+        the box, and Esc puts the user back exactly where they were.
 
-        While the confirm is up, the chord leaves at once, so the fastest way out is still
-        two keys and still works when a screen is wedged or a device read hangs — the
-        second press never waits on the dialog to paint or take a key. The flag is raised
-        here, synchronously, so two presses arriving in one input batch are still a quit
-        rather than two dialogs.
+        While the confirm is open, the chord quits immediately. Thus the fastest way out is
+        still two key presses, and it still works when a screen is stuck or a device read
+        does not return. The second press never waits for the dialog to paint or to take a
+        key. The flag is raised here, synchronously. Thus two presses that arrive in one
+        input batch are still a quit, not two dialogs.
 
-        Leaving is clean either way: :meth:`run` cancels the coroutine driving the app and
-        waits for its unwind, so the history and chat runs close, the services stop, and the
-        exit watchdog is armed, the same as quitting from the menu.
+        In the two cases, the app quits cleanly. :meth:`run` cancels the coroutine that
+        drives the app and waits for its unwind. Thus the history runs and the chat runs
+        close, the services stop, and the exit watchdog is armed, the same as a quit from
+        the menu.
         """
         if self._quit_asking or self._quit_confirm is None:
             self._exit_app()
@@ -716,20 +772,21 @@ class TuiSession:
         self.run_detached(ask())
 
     def _exit_app(self) -> None:
-        """Exit the running application, from under whatever flow is driving it."""
+        """Exit the running application, whatever flow drives it."""
         if self._app is not None and self._app.is_running:
             self._app.exit()
 
     def set_quiesce(self, enter: Callable[[], AbstractAsyncContextManager[Any]] | None) -> None:
-        """Declare how the app stops *starting* things, for when it may be about to leave.
+        """Declare how the app stops the start of new work, for when it possibly must quit soon.
 
-        Entered when a held Esc raises its box and left again if the reader lets go (see
-        :mod:`~meshterm.services.hold_to_quit`); entered on the way out by :meth:`leave`,
-        and then kept until the process ends. It must take nothing apart, since letting go
-        has to undo it: the app's own is to hold the device's transmit lock, so nothing new
-        goes on the air and a scoped channel send in flight closes its window first. The
-        app declares it, as it declares the quit confirm, because only the app has a
-        device.
+        The session enters the quiesce when a held Esc opens its box, and ends it again if
+        the user releases the key (refer to :mod:`~meshterm.services.hold_to_quit`).
+        :meth:`leave` also enters it on the way out, and then keeps it until the process
+        ends. The quiesce must not take anything apart, because a release of the key must
+        undo it. The quiesce of the app holds the transmit lock of the device. Thus nothing
+        new goes on the air, and a scoped channel send in progress closes its window first.
+        The app declares the quiesce, as it declares the quit confirm, because only the app
+        has a device.
 
         Args:
             enter: Makes the async context manager to hold, or ``None`` for nothing.
@@ -737,49 +794,51 @@ class TuiSession:
         self._quiesce = enter
 
     def set_esc_probe(self, down: Callable[[], bool] | None) -> None:
-        """Declare how to ask whether Esc is physically down, for a terminal's Esc.
+        """Declare how to ask whether the Esc key is physically down, for the Esc of a terminal.
 
-        With one, an Esc that arrives while its key is still down is held back and watched
-        as a hold (:class:`~meshterm.ui.tui.holdquit.WatchedEsc`): the hold-to-quit gesture
-        where a terminal, which never reports a key coming up, delivers the keys. The app
-        declares it, because only the app knows the keys are this machine's own — not a
-        front end's that reads them itself (the emulator's), not another machine's over SSH.
+        With a probe, an Esc that arrives while its key is still down is held back and
+        watched as a hold (:class:`~meshterm.ui.tui.holdquit.WatchedEsc`). This gives the
+        hold-to-quit gesture where a terminal sends the keys, and a terminal never reports
+        that a key comes up. The app declares the probe, because only the app knows that the
+        keys are the keys of this machine. They are not the keys of a front end that reads
+        them itself (the emulator), and not the keys of another machine over SSH.
 
         Args:
-            down: Answers whether Esc is down right now
+            down: Tells whether the Esc key is down now
                 (:func:`~meshterm.services.hold_to_quit.esc_probe`), or ``None``.
         """
         self._watched_esc = None if down is None else WatchedEsc(self, down)
 
     @property
     def leaving(self) -> bool:
-        """Whether the app is on its way out (:meth:`leave`), which nothing calls back."""
+        """Whether the app is on its way out (:meth:`leave`). Nothing reverses this state."""
         return self._leaving
 
     def quiet(self) -> Quiet:
-        """Engage the app's quiesce (:meth:`set_quiesce`), or return the one already held."""
+        """Engage the quiesce of the app (:meth:`set_quiesce`), or return the held quiesce."""
         if self._quiet is None:
             self._quiet = Quiet(self._quiesce)
         return self._quiet
 
     def unquiet(self) -> None:
-        """Give the quiesce back — never once the app is leaving, which keeps it to the end."""
+        """Release the quiesce, except after :meth:`leave`: then the app keeps it to the end."""
         if self._quiet is not None and not self._leaving:
             self._quiet.release()
             self._quiet = None
 
     def leave(self) -> None:
-        """Leave the app now, without asking — once nothing is mid-transmission.
+        """Quit the app now, without a question, when no transmission is in progress.
 
-        The end of a held Esc, and the launcher's SIGTERM: a decision already made, so
-        there is no confirm. It is the same exit as Quit (:meth:`run` unwinds the flow and
-        the app tears down) with one step first: the app's quiesce is engaged, so a scoped
-        channel send under way closes its window before the device goes. That wait is
-        bounded by :data:`QUIESCE_WAIT_S`, because on the Cardputer Zero the launcher's
-        SIGKILL follows its SIGTERM by three seconds whatever the app is doing.
+        The end of a held Esc and the SIGTERM of the launcher call this method. The decision
+        is already made, so there is no confirm. It is the same exit as Quit (:meth:`run`
+        unwinds the flow, and the app tears down), with one more step first. The quiesce of
+        the app is engaged, so that a scoped channel send in progress closes its window
+        before the device goes. :data:`QUIESCE_WAIT_S` limits that wait, because on the
+        Cardputer Zero, the SIGKILL of the launcher comes three seconds after its SIGTERM,
+        whatever the app does.
 
-        Idempotent and one-way: a SIGTERM landing on a hold that just ran out is the same
-        exit, not a second one.
+        The method is idempotent and one-way. A SIGTERM that arrives when a hold has just run
+        out is the same exit, not a second exit.
         """
         if self._leaving:
             return
@@ -795,42 +854,45 @@ class TuiSession:
         self.run_detached(go())
 
     def request_pop_all(self) -> bool:
-        """Arm the unwind to the navigation root (the ^W key). Returns whether it fired.
+        """Arm the unwind to the navigation root (the ^W key). Return whether it is armed.
 
-        Two refusals, both deliberate:
+        The method refuses in two cases, both on purpose:
 
-        * **A modal layer is on top.** A dialog is an unanswered question and a progress or
-          busy screen is work in flight (:attr:`~meshterm.ui.tui.screen.Screen.modal`);
-          unwinding past either would discard something the user is in the middle of, so ^W
-          simply does nothing there and they answer or wait first.
-        * **The root is already the top.** There is nowhere to go.
+        * **A modal layer is on top.** A dialog is a question with no answer yet, and a
+          progress screen or a busy screen is work in progress
+          (:attr:`~meshterm.ui.tui.screen.Screen.modal`). An unwind past either one
+          discards something that the user is in the middle of. Thus ^W does nothing there,
+          and the user must first answer or wait.
+        * **The root is already the top.** There is no place to go.
 
-        Otherwise it sets the unwind flag and resolves **every** frame's future with
-        :data:`~meshterm.ui.tui.screen.POP_ALL` — top first, down to but never including
-        the root — which each frame awaiting one turns into
+        In all other cases, the method sets the unwind flag, and resolves the future of
+        **each** screen on the stack with :data:`~meshterm.ui.tui.screen.POP_ALL`. It starts
+        at the top and goes down to the root, but it never includes the root. Each caller
+        that awaits one of these futures changes the value into
         :class:`~meshterm.ui.tui.screen.PopToMenu`.
 
-        Arming the whole stack, not just the top, is what makes ^W a *stack* verb rather
-        than a *call chain* one. A screen opened from a key handler cannot be awaited by
-        its opener — a handler is sync, so the live feed floats the packet viewer with
-        ``ensure_future(run_screen(...))`` and the chain that would have carried an unwind
-        ends in a detached task. Sending the sentinel only to the top left that unwind to
-        die there while the hub below sat on a ``visit.result()`` nothing would resolve:
-        ^W closed the viewer and stopped, and the still-armed flag fired at whatever the
-        reader pressed next instead (JP, 2026-08-31). Every frame is on the stack whether
-        or not anything awaits it, so the stack is the reliable path down.
+        The method arms the full stack, not only the top. This makes ^W a verb of the stack,
+        not a verb of the call chain. The code that opens a screen from a key handler cannot
+        await that screen, because a handler is sync. Thus the live feed floats the packet
+        viewer with ``ensure_future(run_screen(...))``, and the chain that could carry an
+        unwind ends in a detached task. When the method sent the sentinel only to the top,
+        the unwind stopped there, while the hub below waited on a ``visit.result()`` that
+        nothing could resolve. ^W closed the viewer and stopped. Then the flag, which was
+        still armed, went off at the next key that the user pressed (JP, 2026-08-31). Each
+        screen is on the stack, whether something awaits it or not. Thus the stack is the
+        reliable way down.
 
-        The walk stops at a **modal** frame for the reason the top-of-stack refusal above
-        gives: work in flight is not to be discarded out from under itself. The flag stays
-        armed, so the unwind still fires at the next navigation boundary past it. Resolving
-        a frame that is not being awaited is inert — the value is simply never read, and
-        :meth:`~meshterm.ui.tui.screen.Screen.resolve` no-ops on a screen with no future
-        at all.
+        The walk stops at a **modal** screen, for the same reason as the refusal above for
+        the top of the stack: the method must not discard work in progress from below that
+        work. The flag stays armed, so the unwind still goes off at the next navigation
+        boundary after that screen. If the method resolves a screen that nothing awaits,
+        nothing occurs: nothing reads the value, and
+        :meth:`~meshterm.ui.tui.screen.Screen.resolve` does nothing on a screen with no
+        future.
 
-        The flag matters independently of the futures: a key can arrive while *no* screen
-        is awaiting anything (mid device read, under the busy overlay), and then the
-        unwind is raised by the next navigation boundary instead — see
-        :meth:`_check_unwind`.
+        The flag is important independently of the futures. A key press can arrive while no
+        screen awaits anything (during a device read, below the busy overlay). Then the next
+        navigation boundary raises the unwind instead (refer to :meth:`_check_unwind`).
 
         Returns:
             ``True`` if the unwind was armed, ``False`` if it was refused.
@@ -841,33 +903,33 @@ class TuiSession:
         self._unwinding = True
         for screen in reversed(self._stack):
             if screen is self._root:
-                break  # the root is where the unwind lands; it is not unwound itself
+                break  # the unwind ends at the root, and the root itself is not unwound
             if screen is not top and screen.modal:
                 break
             screen.resolve(POP_ALL)
         return True
 
     def unwound(self) -> None:
-        """Disarm the unwind — called by the menu loop once it has caught :class:`PopToMenu`."""
+        """Disarm the unwind. The menu loop calls this after it catches :class:`PopToMenu`."""
         self._unwinding = False
 
     def _check_unwind(self) -> None:
-        """Raise :class:`PopToMenu` if an unwind is armed, before showing another screen.
+        """Raise :class:`PopToMenu` if an unwind is armed, before another screen is shown.
 
-        Every navigation boundary calls this on the way *in* as well as reading the result on
-        the way out, which is what makes ^W work during a device read: the key arms the flag
-        while no future is armed to carry :data:`POP_ALL`, and the very next screen the flow
-        tries to open refuses to open and unwinds instead.
+        Each navigation boundary calls this method on the way in, and also reads the result
+        on the way out. This makes ^W work during a device read. The key arms the flag while
+        no future is armed to carry :data:`POP_ALL`. Then the next screen that the flow tries
+        to open does not open, and it unwinds instead.
         """
         if self._unwinding:
             raise PopToMenu()
 
     @staticmethod
     def _unpack(result: Any) -> Any:
-        """Return a screen's result, turning :data:`POP_ALL` into :class:`PopToMenu`.
+        """Return the result of a screen, and change :data:`POP_ALL` into :class:`PopToMenu`.
 
-        The sentinel exists only to travel through an ``asyncio.Future``; no caller in the
-        app ever sees it, so it is converted at the one boundary that reads a future.
+        The sentinel exists only to go through an ``asyncio.Future``. No caller in the app
+        ever sees it. Thus it is changed at the only boundary that reads a future.
         """
         if result is POP_ALL:
             raise PopToMenu()
@@ -875,10 +937,10 @@ class TuiSession:
 
     @asynccontextmanager
     async def stay(self, screen: Screen, *, dialog: bool = False) -> AsyncIterator[Visit]:
-        """Keep ``screen`` pushed for a whole visit while its sub-screens come and go.
+        """Keep ``screen`` pushed for a full visit, while the screens above it open and close.
 
-        The counterpart to :meth:`run_screen`, and the shape every screen that *owns a loop*
-        should use::
+        This method is the counterpart of :meth:`run_screen`. Each screen that *owns a loop*
+        must use this shape::
 
             screen = ContactsScreen(...)
             async with session.stay(screen) as visit:
@@ -888,20 +950,20 @@ class TuiSession:
                         return
                     await open_node_detail(ctx, chosen)   # nests above the list
 
-        One push, one pop, and the object survives the whole visit — so the cursor, the sort,
-        the scroll offset and any live filter are simply still there when a sub-screen closes,
-        without a ``default=`` restore that can only ever recover the cursor. Because the
-        screen never leaves the stack, a dialog raised from inside the loop already has it as
-        a backdrop, and a full-frame sub-screen pushed above it draws over it (see
-        :meth:`_base_index`) — the two things callers used to arrange by popping and
-        re-pushing the same screen by hand.
+        One push and one pop, and the object stays for the full visit. Thus the highlight,
+        the sort, the scroll offset, and any live filter are still there when a screen above
+        it closes. No ``default=`` restore is necessary, and such a restore can only recover
+        the highlight. The screen never leaves the stack. Thus a dialog that the loop opens
+        already has the screen as its backdrop, and a full-frame screen that is pushed above
+        it draws over it (refer to :meth:`_base_index`). Before, callers got these two
+        results by hand: they popped the same screen and pushed it again.
 
         Args:
-            screen: The screen to keep pushed for the duration of the block.
-            dialog: The visit is a *popup's* — a stepped dialog turning its pages
-                (:func:`~meshterm.ui.menus.run_wizard`) rather than a hub — so it must draw
-                as a box even when it is the only thing on the stack: a blank base goes under
-                it for the visit, exactly as :meth:`run_dialog` does for a one-shot.
+            screen: The screen to keep pushed while the block runs.
+            dialog: The visit belongs to a dialog: a stepped dialog that turns its pages
+                (:func:`~meshterm.ui.menus.run_wizard`), not a hub. Thus it must draw as a
+                box, also when it is the only screen on the stack. A blank base goes below it
+                for the visit, exactly as :meth:`run_dialog` does for a one-time dialog.
 
         Yields:
             A :class:`Visit` whose :meth:`~Visit.result` awaits one round of the screen.
@@ -915,40 +977,43 @@ class TuiSession:
                 self.pop(screen)
 
     def invalidate(self) -> None:
-        """Request a repaint if the application is running."""
+        """Request a paint if the application is running."""
         if self._app is not None:
             self._app.invalidate()
 
     def request_full_repaint(self) -> None:
-        """Force the next paint to rewrite every cell, then schedule it.
+        """Force the next paint to write each cell again, then schedule that paint.
 
-        prompt_toolkit repaints differentially: cells equal to the previous frame are left
-        untouched. That is normally what we want, but it also means terminal-side corruption
-        (a double-width fallback glyph the diff can't see) survives until those exact cells
-        change. Callers use this when leaving a screen that could have smeared the terminal —
-        the map — so the screen drawn underneath starts from a clean slate.
+        prompt_toolkit paints differentially: it does not touch the cells that are equal to
+        the cells of the last frame. Usually we want this. But then damage on the terminal
+        side (a double-width fallback glyph that the diff cannot see) stays until those exact
+        cells change. Callers use this method when the user leaves a screen that can leave
+        stray characters on the terminal (the map). Thus the screen that is drawn below it
+        starts from a clean frame.
         """
         self._invalidate_last_frame()
         self.invalidate()
 
     def _invalidate_last_frame(self) -> None:
-        """Drop prompt_toolkit's cached last frame so the next paint rewrites every cell.
+        """Remove the cached last frame of prompt_toolkit, so that the next paint writes all cells.
 
-        Touches a prompt_toolkit internal, so it fails soft if the attribute ever moves.
+        This method uses an internal of prompt_toolkit. Thus it fails softly if the attribute
+        moves.
         """
         renderer = getattr(self._app, "renderer", None)
         if renderer is not None and hasattr(renderer, "_last_screen"):
             renderer._last_screen = None
 
     def _scrub_columns(self, start: int, stop: int) -> None:
-        """Force prompt_toolkit to repaint terminal columns ``[start, stop)`` on the next diff.
+        """Force prompt_toolkit to paint the terminal columns ``[start, stop)`` at the next diff.
 
-        Overwrites those cells in pt's remembered last frame with a sentinel that can't equal
-        any real content, so the differential renderer treats them as changed and redraws
-        them — scrubbing a double-width fallback glyph that smeared over a *static* edge (the
-        map's panel border, a floating dialog's), without the whole-frame flicker of dropping
-        the entire cached frame. Touches a pt internal, so it fails soft if the structure ever
-        moves.
+        This method writes a sentinel over those cells in the last frame that pt remembers.
+        The sentinel can never be equal to real content. Thus the differential renderer
+        thinks that the cells changed, and draws them again. This removes a double-width
+        fallback glyph that left stray characters on a static edge (the panel border of the
+        map, or the border of a floating dialog). It does this without the flicker of the
+        full frame that occurs when the full cached frame is removed. This method uses an
+        internal of pt, so it fails softly if the structure moves.
         """
         renderer = getattr(self._app, "renderer", None)
         last = getattr(renderer, "_last_screen", None)
@@ -958,38 +1023,40 @@ class TuiSession:
             from prompt_toolkit.layout.screen import Char
 
             buffer = last.data_buffer
-            sentinel = Char("￿")  # a non-character; never equals real cell content
+            sentinel = Char("￿")  # a non-character, never equal to real cell content
             for x in range(max(0, start), stop):
                 for row in list(buffer.keys()):
                     buffer[row][x] = sentinel
-        except Exception:  # noqa: BLE001 - a cosmetic scrub must never break rendering
+        except Exception:  # noqa: BLE001 - a cosmetic scrub must never stop the render
             pass
 
     def _scrub_right_columns(self, count: int) -> None:
-        """Scrub the terminal's rightmost ``count`` columns — a full-frame panel's edge."""
+        """Scrub the last ``count`` columns of the terminal: the edge of a full-frame panel."""
         cols, _ = self._size()
         self._scrub_columns(cols - count, cols)
 
     def _scrub_rows(self, rows: Sequence[int]) -> bool:
-        r"""Force prompt_toolkit to rewrite these whole terminal rows on the next diff.
+        r"""Force prompt_toolkit to write these full terminal rows again at the next diff.
 
-        The row-wise twin of :meth:`_scrub_columns`, and the cheap form of the wide-glyph
-        repaint (:meth:`_emit`): every column of each listed row is sentinelled, so pt finds
-        the entire row changed and writes it from column 0 in one contiguous run — which is
-        the whole requirement for a row whose glyph the terminal draws narrower than pt
-        reserved. Rows that did not change are not touched at all, and nothing is erased.
+        This method is the row version of :meth:`_scrub_columns`, and the cheap form of the
+        wide-glyph paint (:meth:`_emit`). It puts the sentinel in each column of each listed
+        row. Thus pt finds that the full row changed, and writes it from column 0 in one
+        continuous sequence. That is all that is necessary for a row with a glyph that the
+        terminal draws narrower than the cells that pt reserved. The method does not touch
+        the rows that did not change, and it erases nothing.
 
-        Row-scoped is sound because pt's cursor is *relative*: stepping down a row emits
-        ``\\r\\n``, which returns the terminal to a true column 0 whatever the drift on the row
-        above, so a mis-measured row can never throw off the rows below it. The drift only
-        matters *within* a row, and a row rewritten whole never jumps inside itself.
+        A scrub by row is correct, because the cursor of pt is relative. A step down one row
+        writes ``\\r\\n``, which puts the terminal back to a real column 0, whatever the
+        drift on the row above. Thus a row with an incorrect measurement can never move the
+        rows below it. The drift is important only in a row, and a row that is written again
+        in full never jumps inside itself.
 
         Args:
-            rows: The terminal row indices to mark changed.
+            rows: The indices of the terminal rows to mark as changed.
 
         Returns:
-            Whether the scrub was applied — ``False`` when pt has no remembered frame to
-            scrub (it is already going to repaint everything) or the internals moved.
+            Whether the scrub was done. ``False`` when pt has no remembered frame to scrub
+            (it will paint all the frame again), or when the internals moved.
         """
         renderer = getattr(self._app, "renderer", None)
         last = getattr(renderer, "_last_screen", None)
@@ -1000,48 +1067,48 @@ class TuiSession:
             from prompt_toolkit.layout.screen import Char
 
             buffer = last.data_buffer
-            sentinel = Char("￿")  # a non-character; never equals real cell content
+            sentinel = Char("￿")  # a non-character, never equal to real cell content
             for y in rows:
                 row = buffer[y]
                 for x in range(cols):
                     row[x] = sentinel
-        except Exception:  # noqa: BLE001 - a cosmetic scrub must never break rendering
+        except Exception:  # noqa: BLE001 - a cosmetic scrub must never stop the render
             return False
         return True
 
     # --- async prompt helpers ------------------------------------------------
 
     def run_detached(self, work: Any) -> asyncio.Future:
-        """Run ``work`` — a flow that opens a screen — off a key handler, unawaited.
+        """Run ``work`` (a flow that opens a screen) from a key handler, without an await.
 
-        A screen's ``handle`` is synchronous, so a key that opens something over the
-        current screen (the live feed's packet viewer, the chat's delivery paths, the
-        trace screen's path flows) can only *start* the flow, as a task. That task sits
-        outside the navigation call chain: nothing awaits it, so a
-        :class:`~meshterm.ui.tui.screen.PopToMenu` raised inside it has nowhere to
-        propagate and lands in the event loop's exception handler as an unretrieved
-        error.
+        The ``handle`` method of a screen is synchronous. Thus a key that opens something
+        over the current screen can only start the flow, as a task. Examples are the packet
+        viewer of the live feed, the delivery paths of the chat, and the path flows of the
+        trace screen. That task is outside the navigation call chain: nothing awaits it.
+        Thus a :class:`~meshterm.ui.tui.screen.PopToMenu` that is raised in the task has no
+        place to propagate to. It goes to the exception handler of the event loop as an
+        unretrieved error.
 
-        Absorbing it here is safe because the unwind never travelled this way to begin
-        with: ^W arms every frame on the stack (see :meth:`request_pop_all`), so the
-        screen that opened this one carries the unwind out on its own awaited frame. What
-        this catch drops is a duplicate of an unwind already in flight — and the flow's
-        own ``finally`` blocks still run on the way through it.
+        It is safe to absorb the exception here, because the unwind never went this way.
+        ^W arms each screen on the stack (refer to :meth:`request_pop_all`). Thus the screen
+        that opened this screen takes the unwind out, because its own caller awaits it. This
+        catch removes only a copy of an unwind that is already in progress. Also, the
+        ``finally`` blocks of the flow still run when the exception goes through them.
 
         Args:
             work: The coroutine to run, usually a :meth:`run_screen` call.
 
         Returns:
-            The task, for a caller that wants to cancel or await it. The app's own
-            callers are key handlers and ignore it; the screen they opened is on the
-            stack, which is how everything else finds it.
+            The task, for a caller that must cancel it or await it. The callers in the app
+            are key handlers, and they ignore it. The screen that they opened is on the
+            stack, and all other code finds the screen there.
         """
 
         async def guarded() -> None:
             try:
                 await work
             except PopToMenu:
-                pass  # the stack carries the unwind; this task was never on its path
+                pass  # the stack carries the unwind, and this task was never on its way
 
         return asyncio.ensure_future(guarded())
 
@@ -1052,11 +1119,11 @@ class TuiSession:
             screen: The screen to run.
 
         Returns:
-            The screen's resolved value, or :data:`~meshterm.ui.tui.screen.CANCEL`.
+            The resolved value of the screen, or :data:`~meshterm.ui.tui.screen.CANCEL`.
 
         Raises:
-            PopToMenu: If the pop-all key was pressed — on this screen, or while the caller
-                was busy and had nothing pushed at all.
+            PopToMenu: If the user pressed the pop-all key: on this screen, or while the
+                caller was busy and had nothing pushed.
         """
         self._check_unwind()
         loop = asyncio.get_running_loop()
@@ -1080,17 +1147,17 @@ class TuiSession:
         delete_hint: str = "",
         floating: bool = False,
     ) -> Any:
-        """Show a select screen; return the chosen value or ``None`` if cancelled.
+        """Show a select screen. Return the chosen value, or ``None`` if the user cancelled.
 
-        ``prompt`` draws an instruction inside the box above the list; ``filterable`` and
-        ``footer_hint`` are forwarded for short, fixed lists (a yes-or-no style choice) that
-        want no type-to-filter and a tailored hint. ``delete_hint`` (with rows marked
-        :attr:`~meshterm.ui.tui.select.Choice.deletable`) surfaces the Delete key's atom
-        while the highlight sits on such a row; Delete then resolves a
-        :class:`~meshterm.ui.tui.select.DeleteRequest` the caller unwraps. ``floating``
-        is :meth:`text`'s: the list is a *question* asked on the way into a tool (which
-        node to administer) rather than the tool's own page, so it must draw as a box
-        even when it is the only frame on the stack — see :meth:`_floated`.
+        ``prompt`` draws an instruction in the box, above the list. ``filterable`` and
+        ``footer_hint`` go to the screen for short, fixed lists (a choice of the yes-or-no
+        type) that must have no type-to-filter and a special hint. ``delete_hint`` (with rows
+        marked :attr:`~meshterm.ui.tui.select.Choice.deletable`) shows the atom of the Delete
+        key while the highlight is on such a row. Then Delete resolves a
+        :class:`~meshterm.ui.tui.select.DeleteRequest`, which the caller unwraps.
+        ``floating`` is the same as in :meth:`text`: the list is a question on the way into a
+        tool (which node to administer), not the page of the tool. Thus it must draw as a
+        box, also when it is the only screen on the stack. Refer to :meth:`_floated`.
         """
         kwargs: dict[str, Any] = dict(
             prompt=prompt,
@@ -1118,36 +1185,36 @@ class TuiSession:
         live: Callable[[Callable[[list], None]], Awaitable[None]] | None = None,
         hscroll: bool | None = None,
     ) -> Any:
-        """Show a chromeless select splash (banner above a content-sized box).
+        """Show a chromeless select splash (a banner above a box sized to its content).
 
-        Like :meth:`select`, but drawn without the header/footer status bars and centered
-        under ``banner`` — the startup device picker's presentation. Esc's verb here is
-        ``bye``, the app's one send-off: this splash is the door, and the reader leaving it
-        has not started anything to quit out of. Type-to-filter is off:
-        the device list is short and fixed, so stray keys never narrow it. An optional
-        ``footnote`` (e.g. a copyright notice) sits muted below the box. When any row opts
-        into removal (a :attr:`~meshterm.ui.tui.select.Choice.deletable` row), a "Del remove"
-        atom joins the footer — but only while the highlight is actually on such a row, so the
-        removal key advertises itself exactly where it acts (see
-        :attr:`~meshterm.ui.tui.select.SelectScreen.footer_hint`).
+        The splash is like :meth:`select`, but it has no header or footer status bars, and
+        it is centred below ``banner``. This is the presentation of the startup device
+        picker. Here the verb of Esc is ``bye``, the only farewell of the app. This splash is
+        the door, and a user who leaves it has started nothing to quit. Type-to-filter is
+        off: the device list is short and fixed, so stray key presses never make it shorter.
+        An optional ``footnote`` (for example a copyright notice) is muted, below the box.
+        When a row accepts removal (a :attr:`~meshterm.ui.tui.select.Choice.deletable` row),
+        a "Del remove" atom is added to the footer. But the atom shows only while the
+        highlight is on such a row, so the removal key shows itself exactly where it acts
+        (refer to :attr:`~meshterm.ui.tui.select.SelectScreen.footer_hint`).
 
-        ``live`` is work to do *while* the list is up — the device picker's rescan, which
-        keeps looking for a companion the whole time the splash is open. It is handed one
-        function, ``redraw(items)``, which swaps the rows under the reader and repaints;
-        the screen itself stays in here, since a caller holding one could not repaint it
-        anyway (``invalidate`` is the session's, not the screen's). It runs as a task for
-        exactly as long as the screen does and is cancelled when the screen resolves, so
-        nothing outlives the list it was redrawing and no repaint lands on a dialog that
-        has since opened over it.
+        ``live`` is work to do while the list is visible: the rescan of the device picker,
+        which looks for a companion all the time that the splash is open. It gets one
+        function, ``redraw(items)``, which replaces the rows while the user looks at them,
+        and paints the frame again. The screen itself stays in this method, because a caller
+        that held it could not paint it again (``invalidate`` belongs to the session, not to
+        the screen). The work runs as a task for exactly as long as the screen runs, and it
+        is cancelled when the screen resolves. Thus nothing continues after the list that it
+        drew, and no paint goes onto a dialog that opened over the list later.
 
-        ``hscroll`` overrules what the rows imply: a splash whose rows pin no head block
-        still wants ←→ to read a long row to its end, and a row that pins nothing cannot
-        ask for that on its own (see :class:`~meshterm.ui.tui.select.SelectScreen`).
+        ``hscroll`` overrules what the rows imply. A splash whose rows pin no head block
+        still must let ←→ read a long row to its end, and a row that pins nothing cannot ask
+        for that itself (refer to :class:`~meshterm.ui.tui.select.SelectScreen`).
 
-        ``keys`` hands the list bare-key shortcuts — which a splash can afford precisely
-        because it does not filter, so every letter is free (see :class:`SelectScreen`) —
-        and ``key_hint`` says what they are called on the row the highlight is standing on,
-        so they advertise themselves exactly where they act, as ``Del remove`` does.
+        ``keys`` gives bare-key shortcuts to the list. A splash can have them because it does
+        not filter, so each letter is free (refer to :class:`SelectScreen`). ``key_hint``
+        gives their names on the row where the highlight is. Thus they show themselves
+        exactly where they act, as ``Del remove`` does.
         """
         delete_hint = (
             "Del remove" if any(isinstance(it, Choice) and it.deletable for it in items) else ""
@@ -1166,16 +1233,16 @@ class TuiSession:
         screen.chrome = False
         screen.banner = banner
         screen.footnote = footnote
-        # The splash's border is its only hint line and it is narrow (47 cells on the
-        # PicoCalc), so when the sentence outgrows the box it gives up the scroll atom
-        # first — ←→ are already named by the move atom in front of it — and then the
-        # *hide* key. Between the two shortcuts the one that survives is the way back:
-        # ⇧H only appears at all once something is hidden, which is exactly the state where
-        # a reader needs to be told how to undo it, and by then they have already found h.
+        # The border of the splash is its only hint line, and it is narrow (47 cells on the
+        # PicoCalc). Thus, when the sentence becomes wider than the box, it first removes
+        # the scroll atom (the move atom in front of it already names ←→). Then it removes
+        # the hide key. Of the two shortcuts, the one that stays is the way back. ⇧H shows
+        # only after something is hidden, and that is exactly the state where the user must
+        # learn how to undo it. At that time, the user has already found h.
         screen.spare_hint_atoms = ("←→ scroll", "h hide")
 
         def redraw(new_items: list) -> None:
-            """Swap the rows and repaint. The reader keeps their place, by value."""
+            """Replace the rows and paint again. The user keeps their place, by value."""
             screen.replace_items(new_items)
             self.invalidate()
 
@@ -1204,34 +1271,36 @@ class TuiSession:
     ) -> bool:
         """Confirm a destructive splash action with a Cancel/verb dialog (chromeless).
 
-        The startup-splash sibling of :meth:`button_dialog`: the same platform-dialog layout
-        — the safe *Cancel* on the left and the committing verb on the right and default, so
-        Enter commits and Esc backs out. Themed as data loss (the reserved red prompt and
-        border), since it only ever gates forgetting a remembered device — the splash sibling
-        of a ``destructive`` :meth:`button_dialog`.
+        This is the startup-splash version of :meth:`button_dialog`, with the same
+        platform-dialog layout. The safe *Cancel* is on the left, and the committing verb is
+        on the right and is the default. Thus Enter commits, and Esc backs out. The theme is
+        the theme of data loss (the reserved red prompt and border), because this dialog only
+        asks before MeshTerm forgets a remembered device. It is the splash version of a
+        ``destructive`` :meth:`button_dialog`.
 
-        When ``backdrop_items`` is given, the device list they describe is redrawn as the
-        chromeless base and the red confirm *floats over it* as a centred box (a modal popup
-        over the pushed backdrop, the way every other dialog behaves) — so removing a device
-        reads as a popup on top of the picker rather than a splash that replaces it. The
-        ``backdrop_default`` row is pre-highlighted so the confirm reads as being about it.
-        Without ``backdrop_items`` the confirm draws as its own chromeless splash under
-        ``banner`` (the fallback for a caller with no list to float over).
+        When ``backdrop_items`` is given, the device list that they describe is drawn again
+        as the chromeless base. The red confirm floats over it as a centred box (a modal
+        dialog over the pushed backdrop, as each other dialog does). Thus the removal of a
+        device looks like a dialog on top of the picker, not a splash that replaces it. The
+        ``backdrop_default`` row is highlighted first, so that the user sees that the confirm
+        is about it. Without ``backdrop_items``, the confirm draws as its own chromeless
+        splash below ``banner`` (the fallback for a caller with no list to float over).
 
         Args:
-            prompt: The question shown above the buttons.
-            title: Short heading shown in the dialog's border.
-            confirm_label: Label for the committing button (e.g. ``"Remove"``).
-            banner: Wordmark rows drawn above the box (as on the other startup splashes).
-            footnote: Muted line drawn below the box.
-            backdrop_items: The picker's rows to redraw behind the confirm; ``None`` falls
-                back to a standalone chromeless confirm splash.
-            backdrop_default: The row value to pre-highlight in the backdrop list.
-            backdrop_title: Heading for the backdrop list (the picker's own title).
-            footer_hint: Footer key hint.
+            prompt: The question above the buttons.
+            title: The short heading in the border of the dialog.
+            confirm_label: The label of the committing button (for example ``"Remove"``).
+            banner: The wordmark rows above the box (as on the other startup splashes).
+            footnote: The muted line below the box.
+            backdrop_items: The rows of the picker to draw again behind the confirm.
+                ``None`` gives a standalone chromeless confirm splash instead.
+            backdrop_default: The row value to highlight in the backdrop list.
+            backdrop_title: The heading of the backdrop list (the title of the picker).
+            footer_hint: The key hint of the footer.
 
         Returns:
-            ``True`` only when the user chose the committing button; ``False`` on Cancel/Esc.
+            ``True`` only when the user chose the committing button. ``False`` on Cancel or
+            Esc.
         """
         dialog = ButtonDialog(
             prompt,
@@ -1248,9 +1317,10 @@ class TuiSession:
             dialog.banner = banner
             dialog.footnote = footnote
             return await self.run_screen(dialog) is True
-        # Keep the picker on screen as the chromeless base and float the red confirm over it,
-        # so the removal confirm sits *on top of* the device list it acts on. The backdrop is
-        # a static redraw of the same rows (it never takes a key — the dialog above owns input).
+        # Keep the picker on the screen as the chromeless base, and float the red confirm over
+        # it. Thus the removal confirm is on top of the device list that it acts on. The
+        # backdrop is a static copy of the same rows. It never takes a key, because the dialog
+        # above it owns the input.
         backdrop = SelectScreen(
             backdrop_title,
             backdrop_items,
@@ -1277,7 +1347,7 @@ class TuiSession:
         footnote: str | None = None,
         footer_hint: str = "Enter continue",
     ) -> None:
-        """Show a chromeless message splash (banner above a boxed renderable) until dismissed."""
+        """Show a chromeless message splash (a banner over a boxed renderable) until it closes."""
         screen = ScrollScreen(renderable, title=title, footer_hint=footer_hint)
         screen.chrome = False
         screen.banner = banner
@@ -1294,26 +1364,28 @@ class TuiSession:
         footnote: str | None = None,
         interval: float | None = None,
     ) -> Any:
-        """Await ``coro`` while showing an animated spinner on the chromeless splash.
+        """Await ``coro``, and show an animated spinner on the chromeless splash while it runs.
 
-        Keeps the startup splash on screen (same wordmark and box) and swaps its contents for
-        an ASCII spinner beside ``message`` while the awaited task runs, then returns the
-        task's result. A background timer advances the spinner and repaints every
-        ``interval`` seconds; it is always cancelled and the splash popped before returning.
+        The method keeps the startup splash on the screen (the same wordmark and box). While
+        the awaited task runs, the method replaces the content of the splash with an ASCII
+        spinner next to ``message``. Then it returns the result of the task. A background
+        timer moves the spinner forward and paints the frame again every ``interval``
+        seconds. Before the method returns, it always cancels the timer and pops the splash.
 
         Args:
-            message: The line shown beside the spinner (e.g. "Talking to Wio on COM5…").
-            coro: The awaitable to run (e.g. a device smoke test).
-            title: Optional panel title for the splash box.
-            banner: Wordmark rows drawn above the box (as on the other startup splashes).
-            footnote: Muted line drawn below the box.
-            interval: Seconds between spinner frames. Defaults to the platform's cadence,
-                which is the point on a slow console: a repaint there costs more than this
-                loop used to wait between them, so a hardcoded rate spent the whole event
-                loop redrawing the spinner and starved the very work it was reporting on.
+            message: The line next to the spinner (for example "Talking to Wio on COM5…").
+            coro: The awaitable to run (for example a device smoke test).
+            title: An optional panel title for the splash box.
+            banner: The wordmark rows above the box (as on the other startup splashes).
+            footnote: The muted line below the box.
+            interval: The seconds between two animation steps of the spinner. The default is
+                the cadence of the platform, and on a slow console that is the purpose.
+                There, a paint costs more time than this loop waited between two paints
+                before. Thus a hardcoded rate used all the event loop to draw the spinner,
+                and the work that the spinner reported on did not get time to run.
 
         Returns:
-            Whatever ``coro`` resolves to.
+            The value that ``coro`` resolves to.
         """
         tick = spinner_interval() if interval is None else interval
         screen = BusyScreen(message, title=title)
@@ -1333,14 +1405,15 @@ class TuiSession:
             return await coro
         finally:
             ticker.cancel()
-            # Await the cancelled ticker so it is never garbage-collected while still
-            # pending: that surfaces as a screen-corrupting "Task was destroyed but it is
-            # pending!" loop error. The spinner is cosmetic, so any glitch is swallowed.
+            # Await the cancelled ticker, so that it is never garbage-collected while it is
+            # still pending. If it is, the loop shows the error "Task was destroyed but it is
+            # pending!", which damages the screen. The spinner is cosmetic, so any problem
+            # is ignored.
             try:
                 await ticker
             except asyncio.CancelledError:
                 pass
-            except Exception:  # noqa: BLE001 - a spinner hiccup must never break startup
+            except Exception:  # noqa: BLE001 - a small spinner problem must never stop the startup
                 pass
             self.pop(screen)
 
@@ -1353,18 +1426,19 @@ class TuiSession:
         banner: Any | None = None,
         footnote: str | None = None,
     ) -> str | None:
-        """Ask for a companion's Bluetooth PIN on the chromeless startup splash.
+        """Ask for the Bluetooth PIN of a companion on the chromeless startup splash.
 
-        Drawn like :meth:`notify_startup` / :meth:`select_startup` — a bordered box centered
-        under ``banner`` with no status bars — so the PIN request is visually part of the same
-        device-selection flow. ``error`` is shown in the box on a re-ask after a rejected code.
+        It is drawn like :meth:`notify_startup` / :meth:`select_startup`: a box with a
+        border, centred below ``banner``, with no status bars. Thus the PIN request looks like
+        a part of the same device-selection flow. When the method asks again after a rejected
+        code, ``error`` shows in the box.
 
         Args:
-            device_name: The companion's display name, shown in the prompt.
-            error: A rejected-PIN message to display (empty on the first ask).
-            help_text: A muted hint under the field.
-            banner: Wordmark rows drawn above the box (as on the other startup splashes).
-            footnote: Muted line drawn below the box.
+            device_name: The display name of the companion, shown in the prompt.
+            error: A message about a rejected PIN, to show (empty at the first request).
+            help_text: A muted hint below the field.
+            banner: The wordmark rows above the box (as on the other startup splashes).
+            footnote: The muted line below the box.
 
         Returns:
             The entered PIN, or ``None`` if the user pressed Esc to cancel.
@@ -1387,21 +1461,22 @@ class TuiSession:
         banner: Any | None = None,
         footnote: str | None = None,
     ) -> str | None:
-        """Ask for a line of text on the chromeless startup splash (e.g. a TCP host:port).
+        """Ask for a line of text on the chromeless startup splash (for example a TCP host:port).
 
-        Drawn like :meth:`prompt_pin_startup` — a bordered :class:`TextScreen` centered under
-        ``banner`` with no status bars — so entering a network address reads as part of the
-        same device-selection flow. ``validate`` blocks submission on a bad value the same way
-        the in-menu text prompt does.
+        It is drawn like :meth:`prompt_pin_startup`: a :class:`TextScreen` with a border,
+        centred below ``banner``, with no status bars. Thus the entry of a network address
+        looks like a part of the same device-selection flow. ``validate`` blocks the
+        submission of a bad value, the same as the text prompt in the menu.
 
         Args:
-            title: Short heading shown in the dialog's border.
-            prompt: The instruction shown inside the box, above the field.
-            default: Prefilled text.
-            validate: Optional validator run on Enter; a returned string blocks submission.
-            help_text: A muted hint under the field.
-            banner: Wordmark rows drawn above the box (as on the other startup splashes).
-            footnote: Muted line drawn below the box.
+            title: The short heading in the border of the dialog.
+            prompt: The instruction in the box, above the field.
+            default: The text that is in the field at the start.
+            validate: An optional validator that runs on Enter. If it returns a string, the
+                submission is blocked.
+            help_text: A muted hint below the field.
+            banner: The wordmark rows above the box (as on the other startup splashes).
+            footnote: The muted line below the box.
 
         Returns:
             The entered text, or ``None`` if the user pressed Esc to cancel.
@@ -1416,11 +1491,11 @@ class TuiSession:
         return None if result is CANCEL else result
 
     async def reorder(self, title: str, labels: list[str]) -> list[int]:
-        """Show a drag-with-arrows reorder screen; return the final order of row indices.
+        """Show a reorder screen (arrows move rows). Return the final order of the row indices.
 
-        The Apply action row below the list commits the rearrangement; Back (or Esc)
-        cancels, which comes back as the original (identity) order so the caller
-        treats it as "no change".
+        The Apply action row below the list commits the new order. Back (or Esc) cancels. A
+        cancel returns the original (identity) order, so that the caller sees it as "no
+        change".
         """
         result = await self.run_screen(ReorderScreen(title, labels))
         return list(range(len(labels))) if result is CANCEL else result
@@ -1437,16 +1512,17 @@ class TuiSession:
         byte_limit: int | None = None,
         floating: bool = False,
     ) -> str | None:
-        """Show a text prompt; return the string or ``None`` if cancelled.
+        """Show a text prompt. Return the string, or ``None`` if the user cancelled.
 
-        ``floating`` guarantees the prompt draws as a centered popup even on an empty stack
-        — a question asked on the way in (a remote-admin password, a typed trace target)
-        rather than a tool's own page. It then floats over the menu the way
-        :meth:`button_dialog` and :meth:`typed_confirm` do (see :meth:`run_dialog`); with
-        a screen already beneath it there is no difference.
+        ``floating`` makes sure that the prompt draws as a centred dialog, also on an empty
+        stack. Use it for a question on the way into a tool (a remote-admin password, a typed
+        trace target), not for the page of a tool. The prompt then floats over the menu, as
+        :meth:`button_dialog` and :meth:`typed_confirm` do (refer to :meth:`run_dialog`).
+        When a screen is already below it, there is no difference.
 
-        ``byte_limit`` puts the shared UTF-8 byte gauge on the field and blocks submission
-        past it — for a field that feeds a size-capped packet (see :class:`TextScreen`).
+        ``byte_limit`` puts the shared UTF-8 byte gauge on the field, and blocks a submission
+        that is longer than the limit. Use it for a field that goes into a packet with a
+        maximum size (refer to :class:`TextScreen`).
         """
         screen = TextScreen(
             title,
@@ -1462,7 +1538,7 @@ class TuiSession:
         return None if result is CANCEL else result
 
     async def confirm(self, title: str, *, default: bool = True) -> bool | None:
-        """Show a yes/no prompt; return the bool or ``None`` if cancelled."""
+        """Show a yes/no prompt. Return the bool, or ``None`` if the user cancelled."""
         result = await self.run_screen(ConfirmScreen(title, default=default))
         return None if result is CANCEL else result
 
@@ -1481,13 +1557,14 @@ class TuiSession:
         border_style: str = "accent",
         lane: Sequence[fkeys.FPair | None] | None = None,
     ) -> Any:
-        """Show a centered button dialog; return the chosen value or ``None`` if cancelled.
+        """Show a centred button dialog. Return the chosen value, or ``None`` if cancelled.
 
-        A reusable prompt-above-buttons dialog (see :class:`~meshterm.ui.tui.prompt.
-        ButtonDialog`): the colours, prompt, buttons, and single-key shortcuts are all
-        parametrised, so a caller can theme it (e.g. a destructive action in red) or wire
-        instant y/n keys. ``keys`` maps a shortcut character to the value it commits.
-        The prompt may be a pre-styled :class:`Text` (see the ButtonDialog docs).
+        A reusable dialog with a prompt above buttons (refer to
+        :class:`~meshterm.ui.tui.prompt.ButtonDialog`). The colours, the prompt, the
+        buttons, and the single-key shortcuts are all parameters. Thus a caller can give it
+        a theme (for example, red for a destructive action), or connect immediate y/n keys.
+        ``keys`` maps a shortcut character to the value that it commits. The prompt can be a
+        :class:`Text` that already has styles (refer to the ButtonDialog docs).
         """
         screen = ButtonDialog(
             prompt,
@@ -1507,17 +1584,17 @@ class TuiSession:
 
     @asynccontextmanager
     async def _floated(self) -> AsyncIterator[None]:
-        """Guarantee that whatever is pushed inside the block draws as a box, not full-frame.
+        """Make sure that all that is pushed in the block draws as a box, not as a full frame.
 
-        On an empty stack a lone floating screen is drawn *as* the background — framed
-        chrome filling the terminal, no popup (see :meth:`_base_index`) — so a base is
-        pushed first and popped once the block ends. The base is the **root** (the main
-        menu, popped while a tool runs but still the screen the reader chose the tool
-        from), so a question asked on the way into a tool floats over the menu it came
-        from: a dialog is smaller than the frame, and what shows around it should be the
-        page behind it, never an empty frame. A blank base is the fallback for a session
-        with no root declared. With a background already present there is nothing to do:
-        the dialog simply floats over it.
+        On an empty stack, a lone floating screen is drawn as the background: the full
+        chrome, which fills the terminal, and no dialog (refer to :meth:`_base_index`). Thus
+        a base is pushed first, and popped when the block ends. The base is the **root**:
+        the main menu. The menu is popped while a tool runs, but it is still the screen where
+        the user chose the tool. Thus a question on the way into a tool floats over the menu
+        that it came from. A dialog is smaller than the frame, and the area around it must
+        show the page behind it, never an empty frame. A blank base is the fallback for a
+        session with no declared root. When a background is already there, there is nothing
+        to do: the dialog floats over it.
         """
         backdrop: Screen | None = None
         if not self._stack:
@@ -1530,16 +1607,16 @@ class TuiSession:
                 self.pop(backdrop)
 
     async def run_dialog(self, screen: Screen) -> Any:
-        """Run a floating dialog as a one-shot, drawn as a centered box (see :meth:`_floated`)."""
+        """Run a floating dialog one time, drawn as a centred box (refer to :meth:`_floated`)."""
         async with self._floated():
             return await self.run_screen(screen)
 
     async def typed_confirm(self, warning: str, word: str, *, title: str = "Are you sure?") -> bool:
-        """Gate a destructive action behind typing ``word``; return whether it was typed.
+        """Ask the user to type ``word`` before a destructive action. Return whether it was typed.
 
-        Shows the error-themed :class:`~meshterm.ui.tui.prompt.TypedConfirmDialog` and
-        collapses its result to a plain bool: ``True`` only when the user typed the word,
-        ``False`` when they backed out with Esc.
+        The method shows the :class:`~meshterm.ui.tui.prompt.TypedConfirmDialog` with the
+        error theme, and changes its result into a plain bool: ``True`` only when the user
+        typed the word, ``False`` when the user backed out with Esc.
         """
         result = await self.run_dialog(TypedConfirmDialog(warning, word, title=title))
         return result is True
@@ -1553,27 +1630,29 @@ class TuiSession:
         default: str = "",
         validate: Validator | None = None,
     ) -> str | None:
-        """Show a free-text prompt with suggestions; return text or ``None`` if cancelled."""
+        """Show a free-text prompt with suggestions. Return the text, or ``None`` if cancelled."""
         result = await self.run_dialog(
             AutocompleteScreen(title, choices, prompt=prompt, default=default, validate=validate)
         )
         return None if result is CANCEL else result
 
     async def message_dialog(self, message: Text | str, *, title: str = "") -> None:
-        """Show a short outcome in a centered popup with a single OK button.
+        """Show a short result in a centred dialog with one OK button.
 
-        The lightweight acknowledgement counterpart of :meth:`scroll`: a one-line result
-        ("✓ flood advertisement sent") doesn't warrant a full result window, so it floats
-        as a small dialog over whatever screen is beneath — Enter (OK) or Esc dismisses
-        it. The border takes the message's strongest tone (see :func:`_message_border`),
-        so an error pops red while a success stays in the standard accent. It delegates to
-        :meth:`button_dialog`, which floats it over a blank base when the stack is empty (a
-        tool run straight from the menu, which is popped while the tool executes).
+        This is the light acknowledgement counterpart of :meth:`scroll`. A one-line result
+        ("✓ flood advertisement sent") is too small for a full result screen. Thus it floats
+        as a small dialog over the screen below it. Enter (OK) or Esc closes it. The border
+        takes the strongest tone of the message (refer to :func:`_message_border`). Thus an
+        error shows in red, and a success stays in the standard accent. The method calls
+        :meth:`button_dialog`, which floats the dialog over a blank base when the stack is
+        empty (a tool that runs directly from the menu, which is popped while the tool
+        runs).
 
         Args:
-            message: The outcome to show — a pre-styled :class:`Text` (note markup
-                survives into the dialog) or a plain string.
-            title: Optional dialog heading (typically the tool or action name).
+            message: The result to show: a :class:`Text` that already has styles (the note
+                markup stays in the dialog), or a plain string.
+            title: An optional dialog heading (usually the name of the tool or of the
+                action).
         """
         await self.button_dialog(
             message,
@@ -1586,7 +1665,7 @@ class TuiSession:
     async def scroll(
         self, renderable: RenderableType, *, title: str = "", footer_hint: str = ""
     ) -> None:
-        """Show a dismissable, scrollable view of a renderable (a result window)."""
+        """Show a renderable on a scrollable screen that the user can close (a result screen)."""
         screen = ScrollScreen(
             renderable,
             title=title,
@@ -1595,7 +1674,7 @@ class TuiSession:
         await self.run_screen(screen)
 
     def progress(self, title: str = "Working") -> TuiProgress:
-        """Return a progress context manager backed by a pushed :class:`ProgressScreen`."""
+        """Return a progress context manager that uses a pushed :class:`ProgressScreen`."""
         return TuiProgress(self, title)
 
     @asynccontextmanager
@@ -1606,51 +1685,53 @@ class TuiSession:
         title: str = "",
         interval: float | None = None,
     ) -> AsyncIterator[BusyOverlay]:
-        """Float a skeleton card on top of everything for the duration of a block.
+        """Float a skeleton card on top of all other content while a block runs.
 
-        Wrap a slow, screen-affecting operation — most usefully a device menu navigation,
-        which can otherwise sit on a blank frame while the companion answers — in::
+        Put a slow operation that affects the screen in this block. The most useful case is
+        a device menu navigation, which can otherwise stay on a blank frame while the
+        companion answers::
 
             async with session.busy_overlay("reading…", title="Nodes"):
                 await slow_work()
 
-        The card stands in for the screen being fetched: a title and the one-cell working
-        chip beside the caption. A background timer advances the chip,
-        fades the card in, and repaints while the block runs; it is always cleared and the
-        timer cancelled on exit, even on error. The card fades in from black rather than
-        popping in (see :attr:`BusyOverlay.brightness`), so a quick operation only paints a
-        near-black card and it never appears suddenly. It is drawn only in the gaps between
-        screens (see :meth:`_overlay_visible`), so it announces the wait without covering a
-        prompt the user is interacting with.
+        The card takes the place of the screen whose data MeshTerm reads: a title, and the
+        one-cell working chip next to the caption. While the block runs, a background timer
+        moves the chip forward, fades the card in, and paints the frame again. At the exit,
+        the card is always cleared and the timer cancelled, also after an error. The card
+        fades in from black (refer to :attr:`BusyOverlay.brightness`). Thus a quick
+        operation paints only an almost black card, and the card never appears suddenly. It
+        is drawn only in the gaps between screens (refer to :meth:`_overlay_visible`). Thus
+        it shows the wait, and it does not cover a prompt that the user works in.
 
         Args:
-            message: An optional caption drawn beside the working chip.
-            title: An optional heading naming the screen being fetched.
-            interval: Seconds between animation frames (also the fade's repaint cadence).
-                Defaults to the platform's cadence — see :meth:`busy_startup`, which this
-                shares a hazard with: the card animates *over* a device read, so a rate the
-                console can't sustain steals the loop from the read it is covering for.
+            message: An optional caption next to the working chip.
+            title: An optional heading that names the screen whose data MeshTerm reads.
+            interval: The seconds between two animation steps (also the cadence of the fade
+                paints). The default is the cadence of the platform. Refer to
+                :meth:`busy_startup`, which has the same hazard: the card animates over a
+                device read. Thus a rate that the console cannot sustain takes the loop from
+                the read that the card covers.
 
         Yields:
-            The live :class:`BusyOverlay`, in case the caller wants to update its caption.
+            The live :class:`BusyOverlay`, if the caller must change its caption.
         """
         tick = spinner_interval() if interval is None else interval
-        # A nested busy_overlay keeps the outer one (the outermost wait owns the screen); its
-        # own body still runs, it just doesn't install a second card.
+        # A nested busy_overlay keeps the outer overlay (the outermost wait owns the screen).
+        # Its own body still runs, but it does not install a second card.
         if self._overlay is not None:
             yield self._overlay
             return
         overlay = BusyOverlay(message, title=title)
         self._overlay = overlay
         if self._overlay_visible():
-            self.invalidate()  # start the fade-in promptly, before the first tick
+            self.invalidate()  # start the fade-in immediately, before the first tick
 
         async def animate() -> None:
             while True:
                 await asyncio.sleep(tick)
                 overlay.tick()
-                # Only repaint when the card is actually on screen, so an overlay waiting
-                # behind a live prompt doesn't churn that prompt's repaints for nothing.
+                # Paint again only when the card is on the screen. Thus an overlay that waits
+                # behind a live prompt does not cause paints of that prompt with no purpose.
                 if self._overlay_visible():
                     self.invalidate()
 
@@ -1676,54 +1757,58 @@ class TuiSession:
         title: str = "",
         interval: float | None = None,
     ) -> AsyncIterator[BusyDialog]:
-        """Float a modal busy card over the current screen for the duration of a block.
+        """Float a modal busy card over the current screen while a block runs.
 
-        The in-stack counterpart to :meth:`busy_overlay`, and the one a screen wants when
-        *it* starts the slow work::
+        This is the counterpart of :meth:`busy_overlay` on the stack. A screen must use it
+        when that screen itself starts the slow work::
 
             async with session.busy_dialog("saving Lakeside…", title="Channels"):
                 await device.set_channel(...)
 
-        Two things separate it from the overlay, and both are why the overlay could not do
-        this job. It is a real :class:`~meshterm.ui.tui.screen.BusyDialog` *pushed on the
-        stack*, so it draws over a hub instead of only in the gaps between screens — the
-        overlay paints on an empty stack alone (see :meth:`_overlay_visible`), which is
-        exactly never while a hub is visited. And being modal, it **owns the keyboard**: a
-        hub kept up with :meth:`stay` stays armed while the work runs, so without a modal
-        layer every key pressed during the wait still reaches it — letters landing in its
-        live filter (a list that comes back showing nothing), Esc resolving it to be handed
-        back the instant the work finishes (a screen that appears to close on its own a
-        beat later). Those presses now reach this card and stop there.
+        Two things make it different from the overlay, and for these two reasons the
+        overlay could not do this job:
 
-        Nesting keeps the outermost card, so a batch of writes reports as one wait rather
-        than flashing a box per write; the inner block still runs. The caller may retitle
-        the card as it goes — ``busy.message = …`` — which is how a sequence says which
-        step it is on.
+        - It is a real :class:`~meshterm.ui.tui.screen.BusyDialog` that is pushed on the
+          stack. Thus it draws over a hub, not only in the gaps between screens. The overlay
+          paints only on an empty stack (refer to :meth:`_overlay_visible`), and the stack
+          is never empty while the user visits a hub.
+        - It is modal, so it **owns the keyboard**. A hub that :meth:`stay` keeps up stays
+          armed while the work runs. Without a modal layer, each key that the user presses
+          during the wait still gets to the hub. Letters go into its live filter, and the
+          list comes back with nothing in it. Esc resolves the hub, and the hub is returned
+          at the instant when the work finishes: the screen seems to close by itself a
+          moment later. Now these key presses get to this card, and stop there.
 
-        Unlike :meth:`busy_overlay` there is no fade-in. The fade is there so a fast
-        operation shows nothing at all, and that is a fine trade for a cosmetic card; this
-        one is also the key guard, and a guard that arrives late is a guard with a hole in
-        it.
+        Nesting keeps the outermost card. Thus a batch of writes shows as one wait, and a
+        box does not flash for each write. The inner block still runs. The caller can
+        change the caption of the card while the work continues (``busy.message = …``).
+        This is how a sequence tells which step it is on.
+
+        Different from :meth:`busy_overlay`, this card has no fade-in. The fade makes sure
+        that a fast operation shows nothing, and that is a good exchange for a cosmetic
+        card. But this card is also the key guard, and a guard that arrives late lets some
+        keys through.
 
         Args:
-            message: The caption drawn beside the spinner.
-            title: An optional heading naming the feature doing the work.
-            interval: Seconds between spinner frames; defaults to the platform's cadence
-                (see :meth:`busy_startup`, which shares the hazard: the card animates *over*
-                a device read, so a rate the console can't sustain steals the loop from the
-                work it is reporting on).
+            message: The caption next to the spinner.
+            title: An optional heading that names the feature that does the work.
+            interval: The seconds between two animation steps of the spinner. The default is
+                the cadence of the platform (refer to :meth:`busy_startup`, which has the
+                same hazard: the card animates over a device read, so a rate that the console
+                cannot sustain takes the loop from the work that the card reports on).
 
         Yields:
-            The live :class:`~meshterm.ui.tui.screen.BusyDialog`, so its caption can change.
+            The live :class:`~meshterm.ui.tui.screen.BusyDialog`, so that its caption can
+            change.
         """
         tick = spinner_interval() if interval is None else interval
-        if self._busy is not None:  # a nested wait rides the card its caller already put up
+        if self._busy is not None:  # a nested wait uses the card that its caller already shows
             yield self._busy
             return
         screen = BusyDialog(message, title=title)
-        # A lone floating screen on an empty stack is drawn *as* the background, framed and
-        # full-frame rather than as a box, so it gets the same blank backdrop every other
-        # dialog uses (see :meth:`run_dialog`).
+        # A lone floating screen on an empty stack is drawn as the background, full-frame and
+        # with borders, not as a box. Thus it gets the same blank backdrop that each other
+        # dialog uses (refer to :meth:`run_dialog`).
         backdrop = None
         if not self._stack:
             backdrop = ScrollScreen("", floating=False, footer_hint="")
@@ -1746,7 +1831,7 @@ class TuiSession:
                 await ticker
             except asyncio.CancelledError:
                 pass
-            except Exception:  # noqa: BLE001 - a spinner hiccup must never break a flow
+            except Exception:  # noqa: BLE001 - a small spinner problem must never break a flow
                 pass
             self._busy = None
             self.pop(screen)
@@ -1756,21 +1841,22 @@ class TuiSession:
     # --- application lifecycle ------------------------------------------------
 
     async def run(self, main: Any) -> None:
-        """Run ``main`` (the menu loop) inside the full-screen application.
+        """Run ``main`` (the menu loop) in the full-screen application.
 
-        Starts the prompt_toolkit event loop, drives ``main`` as a background task on that
-        same loop, and exits the application when ``main`` returns. Any exception from
-        ``main`` is re-raised after the loop unwinds.
+        The method starts the prompt_toolkit event loop, and drives ``main`` as a background
+        task on that same loop. When ``main`` returns, the method exits the application. If
+        ``main`` raises an exception, the method raises it again after the loop unwinds.
 
         Args:
-            main: The coroutine driving the session (typically the menu loop).
+            main: The coroutine that drives the session (usually the menu loop).
         """
         self._app = self._build_app()
         keyboard = get_platform().modifier_watch
         if keyboard:
-            # The Shift watcher flips the F-key lane's labels live. It reports from its
-            # own thread; hop onto the app loop for the repaint. Failure to engage (no
-            # device, no permission) just leaves the lane static — see the module doc.
+            # The Shift watcher changes the labels of the F-key lane live. It reports from
+            # its own thread, so go to the app loop for the paint. If the watcher cannot
+            # start (no input device, no permission), the lane stays static. Refer to the
+            # module doc.
             loop = asyncio.get_running_loop()
             modifier_watch.start(lambda: loop.call_soon_threadsafe(self.invalidate), keyboard)
         box: dict[str, BaseException] = {}
@@ -1781,49 +1867,51 @@ class TuiSession:
                 await main
             except asyncio.CancelledError:
                 raise
-            except BaseException as exc:  # noqa: BLE001 - re-raised after the app unwinds
+            except BaseException as exc:  # noqa: BLE001 - raised again after the app unwinds
                 box["exc"] = exc
             finally:
-                # ``is_running`` rather than ``not is_done``: prompt_toolkit clears its
-                # future on the way out, which makes ``is_done`` read False again once the
-                # app has already finished — and ``exit()`` on a finished app raises. This
-                # ``finally`` now also runs *after* the app is gone (the quit chords exit it
-                # from under us and ``run`` then cancels this task), so it has to tell "still
-                # up" from "already down" rather than "not yet finished".
+                # ``is_running`` instead of ``not is_done``: prompt_toolkit clears its future
+                # on the way out. Thus ``is_done`` reads False again after the app has
+                # finished, and ``exit()`` on a finished app raises. This ``finally`` now
+                # also runs after the app is gone (the quit chords exit the app from below
+                # us, and then ``run`` cancels this task). Thus it must tell "still up" from
+                # "already down", instead of "not yet finished".
                 if self._app is not None and self._app.is_running:
                     self._app.exit()
 
         def pre_run() -> None:
             task["driver"] = asyncio.ensure_future(driver())
 
-        # A held Esc, where a front end can tell one (the emulator's), raises the quit box,
-        # and the launcher's SIGTERM leaves through here too: see services.hold_to_quit.
-        # Listening costs nothing where nobody reports a key going down.
+        # A held Esc opens the quit box, where a front end can detect one (the emulator).
+        # The SIGTERM of the launcher also quits through here. Refer to
+        # services.hold_to_quit. The listener costs nothing where nothing reports that a key
+        # goes down.
         watch = EscHoldWatch(self, asyncio.get_running_loop())
         hold_to_quit.listen(watch)
         try:
-            # Don't let prompt_toolkit install its own loop exception handler: on any stray
-            # background-task error it prints a traceback and a "Press ENTER to continue..."
-            # prompt straight over the full-screen UI. With it disabled, asyncio's default
-            # handler logs such errors to the ``asyncio`` logger instead, which is routed to
-            # the file log (see :func:`meshterm.persistence.logging.configure_logging`) and
-            # never touches the screen. Errors from ``main`` still propagate via
-            # ``driver``/``box``.
+            # Do not let prompt_toolkit install its own loop exception handler. On a stray
+            # error in a background task, that handler prints a traceback and a "Press ENTER
+            # to continue..." prompt directly over the full-screen UI. When it is disabled,
+            # the default handler of asyncio logs such errors to the ``asyncio`` logger
+            # instead. That logger goes to the file log (refer to
+            # :func:`meshterm.persistence.logging.configure_logging`), and never touches the
+            # screen. Errors from ``main`` still propagate through ``driver``/``box``.
             await self._app.run_async(pre_run=pre_run, set_exception_handler=False)
         finally:
-            # Whichever door it left by, the app is tearing down from here on, and a
-            # SIGTERM arriving now must join that rather than interrupt it.
+            # Whichever way the app exited, it tears down from here. A SIGTERM that arrives
+            # now must join this teardown, not interrupt it.
             self._leaving = True
             hold_to_quit.leaving()
             hold_to_quit.unlisten(watch)
-        # The app can also exit from *under* the driver: the quit chords (^Q/^C) call
-        # ``Application.exit`` from their detached confirm, or straight from the key handler
-        # on the second press (see request_quit), so ``run_async`` returns while
-        # ``main`` is still parked on whatever screen was up. Left alone, that coroutine is
-        # simply abandoned mid-await and its ``finally`` never runs — which is where the
-        # history and chat runs are closed, the background services stopped, and the exit
-        # watchdog armed. Cancel it and wait for the unwind so quitting from anywhere tears
-        # down exactly as much as quitting from the menu does.
+        # The app can also exit from below the driver. The quit chords (^Q/^C) call
+        # ``Application.exit`` from their detached confirm, or directly from the key handler
+        # on the second press (refer to request_quit). Thus ``run_async`` returns while
+        # ``main`` still waits on the screen that was open. If nothing is done, that
+        # coroutine is abandoned during its await, and its ``finally`` never runs. That
+        # ``finally`` closes the history runs and the chat runs, stops the background
+        # services, and arms the exit watchdog. Cancel the coroutine and wait for the
+        # unwind. Thus a quit from any screen tears down exactly as much as a quit from the
+        # menu.
         driver_task = task.get("driver")
         if driver_task is not None and not driver_task.done():
             driver_task.cancel()
@@ -1835,14 +1923,15 @@ class TuiSession:
             raise box["exc"]
 
     def _build_app(self) -> Application:
-        """Construct the prompt_toolkit application, layout, and key bindings."""
+        """Build the prompt_toolkit application, its layout, and its key bindings."""
         base_control = ClusterTextControl(self._render_base, focusable=True)
         base_window = Window(base_control, always_hide_cursor=True)
-        # One centered-box float per stacked dialog layer, bottom-to-top: each renders the
-        # k-th screen floating above the background (see :meth:`_float_layers`), so a dialog
-        # opened over an existing popup draws *over* it — both at their own size — instead of
-        # the lower one being stretched to fill the frame. A generous fixed pool covers any
-        # realistic nesting; the ConditionalContainer hides the layers not in use this frame.
+        # One float with a centred box for each dialog layer on the stack, from bottom to
+        # top. Each float renders the k-th screen that floats above the background (refer to
+        # :meth:`_float_layers`). Thus a dialog that opens over a dialog draws over it, and
+        # the two keep their own sizes. The lower dialog is not stretched to fill the frame.
+        # A large fixed pool covers all realistic nesting. The ConditionalContainer hides
+        # the layers that this frame does not use.
         dialog_floats = [
             Float(
                 ConditionalContainer(
@@ -1855,9 +1944,10 @@ class TuiSession:
             )
             for i in range(_MAX_DIALOG_LAYERS)
         ]
-        # The busy overlay is the last float, so it draws on top of every dialog float — the
-        # top of the z-order. It is a content-sized window (dont_extend_*) with no anchors, so
-        # the FloatContainer centres just its skeleton card over the screen rather than blanking it.
+        # The busy overlay is the last float, so it draws on top of each dialog float: the
+        # top of the z-order. It is a ``Window`` sized to its content (dont_extend_*), with
+        # no anchors. Thus the FloatContainer centres only its skeleton card over the screen,
+        # and does not blank the screen.
         overlay_window = Window(
             ClusterTextControl(self._render_overlay),
             always_hide_cursor=True,
@@ -1878,26 +1968,29 @@ class TuiSession:
             key_bindings=self._key_bindings(),
             full_screen=True,
             mouse_support=False,
-            # Keeps the live monitor counter in the header ticking. Per-platform, so a host
-            # where an idle repaint is expensive can breathe more slowly between frames.
+            # Keeps the live monitor counter in the header up to date. The value is set for
+            # each platform, so that a host where an idle paint is expensive can wait
+            # longer between frames.
             refresh_interval=get_platform().tick_s,
-            # Repaint as soon as the loop is free, rather than spinning the event loop for
-            # up to 10 ms first. prompt_toolkit's default postpone is there to protect a
-            # UI whose *own* output floods it with invalidations (its motivating case was
-            # a terminal multiplexer); here an invalidation is a keystroke or the 2 s
-            # header tick, so the delay buys nothing and was measured as a flat 3 ms on
-            # the PicoCalc and 10 ms on desktop, paid on every single key.
+            # Paint as soon as the loop is free, instead of a spin of the event loop for up
+            # to 10 ms first. The default postpone of prompt_toolkit protects a UI whose own
+            # output floods it with invalidations (the case that caused it was a terminal
+            # multiplexer). Here an invalidation is a key press or the 2 s header tick. Thus
+            # the delay gives no advantage. We measured it as a constant 3 ms on the
+            # PicoCalc and 10 ms on the desktop, for each key press.
             max_render_postpone_time=None,
             input=self._input,
             output=self._resolve_output(),
-            # None leaves the output's own default alone; see _color_depth for why the
-            # two prompt_toolkit outputs disagree and why only a raise is ever applied.
+            # None keeps the default of the output. Refer to _color_depth for the reason
+            # why the two prompt_toolkit outputs do not agree, and why the function only
+            # increases the depth.
             color_depth=_color_depth(),
         )
         if fastrender.enabled():
-            # Swap in the row-diff renderer for plain full-screen frames. Built with the
-            # same arguments Application gave the stock one, so everything except the
-            # paint itself — CPR, alternate screen, mouse, cursor shape — is unchanged.
+            # Use the row-diff renderer for plain full-screen frames. It is built with the
+            # same arguments that Application gave the standard renderer. Thus all is
+            # unchanged (CPR, alternate screen, mouse, cursor shape), except the paint
+            # itself.
             app.renderer = fastrender.FastRenderer(
                 app._merged_style,
                 app.output,
@@ -1909,21 +2002,24 @@ class TuiSession:
         return app
 
     def _resolve_output(self) -> Any:
-        """The output the app renders to: the real terminal, pinned and optionally widened.
+        """The output that the app renders to: the real terminal, with pins and possibly wider.
 
-        Only the *real* terminal (``self._output is None``, so prompt_toolkit would build its
-        own output) is wrapped: a test that supplies its own output keeps the exact size and
-        the exact bytes it set, so headless rendering stays deterministic. Two wraps, each
-        where its own gate says so, and either may be the only one:
+        Only the real terminal is wrapped (``self._output is None``, so prompt_toolkit would
+        build its own output). A test that gives its own output keeps the exact size and the
+        exact bytes that it set. Thus a headless render stays deterministic. There are two
+        wraps. Each one applies where its own gate says so, and either one can be the only
+        one:
 
         * :class:`~meshterm.ui.tui.colsnap.PinnedOutput`, where
-          :func:`~meshterm.ui.tui.colsnap.enabled` — every glyph prompt_toolkit's renderer
-          writes lands in the column that renderer measured it into.
-        * :class:`_WidthExtendedOutput`, where :func:`_reclaim_last_column` — or, left to the
-          terminal, where :func:`_probe_hides_last_column` — outermost, since the size it
-          reports is what both renderers and the compositor lay out against.
+          :func:`~meshterm.ui.tui.colsnap.enabled` is true. Each glyph that the renderer of
+          prompt_toolkit writes goes to the column that the renderer measured for it.
+        * :class:`_WidthExtendedOutput`, where :func:`_reclaim_last_column` is true (or, if
+          the terminal decides, where :func:`_probe_hides_last_column` is true). This wrap is
+          the outermost, because the two renderers and the compositor lay out against the
+          size that it reports.
 
-        With neither, this is ``None`` and prompt_toolkit builds its own output as before.
+        With neither wrap, this is ``None``, and prompt_toolkit builds its own output as
+        before.
         """
         pin = colsnap.enabled()
         reclaim = _reclaim_last_column()
@@ -1950,19 +2046,21 @@ class TuiSession:
         return max(20, size.columns), max(6, size.rows)
 
     def base_body_size(self) -> tuple[int, int]:
-        """Return the ``(width, height)`` in cells available to the base screen's body.
+        """Return the ``(width, height)`` in cells that the body of the base screen can use.
 
-        Mirrors the layout math in :func:`~meshterm.ui.tui.frame.compose_base` so a
-        full-screen screen (e.g. the map) can size its own content to fill the frame exactly,
-        without waiting a repaint to learn its height. *Both* of that function's branches:
-        a borderless platform swaps the panel's two border rows and four padding columns for
-        a single title-bar row, so a screen sizing itself against the bordered math there
-        would leave a row of the frame it was handed permanently blank. The width is the
-        current base screen's, which a :attr:`~meshterm.ui.tui.screen.Screen.flush` one
-        widens by the two padding columns it does without.
+        This method copies the layout arithmetic of
+        :func:`~meshterm.ui.tui.frame.compose_base`. Thus a full-screen screen (for example
+        the map) can size its own content to fill the frame exactly, and it does not wait for
+        a paint to learn its height. It copies the two branches of that function. A
+        borderless platform replaces the two border rows and the four padding columns of the
+        panel with one title-bar row. If a screen uses the arithmetic for borders there, one
+        row of the frame that it gets stays blank permanently. The width is the width of
+        the current base screen. A :attr:`~meshterm.ui.tui.screen.Screen.flush` screen adds
+        the two padding columns that it does not use.
 
         Returns:
-            The inner content width and the body viewport height, both in character cells.
+            The width of the inner content and the height of the body viewport, both in
+            cells.
         """
         cols, rows = self._size()
         header_h = len(frame.header_lines(self._header(cols), cols))
@@ -1974,13 +2072,13 @@ class TuiSession:
         return cols, max(1, rows - header_h - 1 - 1)  # minus footer(1) and title bar(1)
 
     def _base_index(self) -> int:
-        """Stack index of the full-frame background screen.
+        """The stack index of the full-frame background screen.
 
-        The background is the top-most *non-floating* screen — a menu, map, or list that
-        fills the frame — and every floating dialog above it is drawn as a centered box
-        over it (see :meth:`_float_layers`). When the whole stack is floating (a tool
-        whose own primary screen is a floating select, e.g. Channels), the bottom screen
-        is the background: it is the one the dialogs above it should float over.
+        The background is the top screen that does not float: a menu, the map, or a list
+        that fills the frame. Each floating dialog above it is drawn as a centred box over
+        it (refer to :meth:`_float_layers`). When all the screens on the stack float (a tool
+        whose own main screen is a floating select, for example Channels), the bottom screen
+        is the background: the dialogs above it must float over it.
         """
         for i in range(len(self._stack) - 1, -1, -1):
             if not getattr(self._stack[i], "floating", False):
@@ -1994,55 +2092,56 @@ class TuiSession:
         return self._stack[self._base_index()]
 
     def _float_layers(self) -> list[Screen]:
-        """The floating dialogs stacked above the background, bottom-to-top.
+        """The floating dialogs on the stack above the background, from bottom to top.
 
-        Each is drawn as its own centered box over the ones beneath — so opening a dialog
-        over an existing popup leaves that popup at its own size rather than stretching it
-        to fill the frame (the single-float compositor's old failing).
+        Each one is drawn as its own centred box over the dialogs below it. Thus when a
+        dialog opens over a dialog, the lower dialog keeps its own size, and is not stretched
+        to fill the frame (this was the old fault of the compositor with one float).
         """
         if not self._stack:
             return []
         return self._stack[self._base_index() + 1 :]
 
     def _has_float(self) -> bool:
-        """Whether any dialog floats over the background this frame."""
+        """Whether a dialog floats over the background in this frame."""
         return bool(self._float_layers())
 
     def _emit(self, text: str, layer: str = "base") -> ANSI:
-        r"""Wrap a composed frame as prompt_toolkit :class:`ANSI`.
+        r"""Wrap a composed frame as a prompt_toolkit :class:`ANSI`.
 
-        A row holding a glyph the terminal may draw narrower than pt reserves for it is
-        repainted whole, rather than differentially.
+        A row with a glyph that the terminal may draw narrower than the cells that pt
+        reserves for it gets a full paint, not a differential paint.
 
-        prompt_toolkit paints differentially: it rewrites only the cells that changed since
-        the last frame, and it steps the cursor *relative* to its own width model. That is
-        sound only while every glyph is one cell wide. A width-2 glyph the terminal draws in
-        a single cell (an emoji in a chat line, a menu icon) leaves everything to its right on
-        that row one column left of where pt thinks it is; a later paint that jumps into the
-        row — skipping the unchanged emoji — writes at pt's column, one past the content it
-        meant to overwrite, and the stale cell lingers.
+        prompt_toolkit paints differentially. It writes again only the cells that changed
+        since the last frame, and it moves the cursor relative to its own width model. That
+        is correct only while each glyph is one cell wide. The terminal can draw a width-2
+        glyph in one cell (an emoji in a chat line, a menu icon). Then all the text to its
+        right on that row is one column to the left of where pt thinks it is. A later paint
+        that jumps into the row (and skips the unchanged emoji) writes at the column of pt,
+        one column after the content that it must write over. Thus the old cell stays.
 
-        The requirement that fixes is narrow: a row carrying such a glyph must be rewritten
-        *whole*, from column 0, so the terminal's own cursor advance re-lays it. It does not
-        need the screen erased, and it does not need the rows around it touched — pt steps
-        down a row with ``\\r\\n``, which returns the terminal to a true column 0 whatever the
-        drift above it, so the misalignment can never spread past the row it is on.
+        The repair has a narrow requirement: a row that has such a glyph must be written
+        again in full, from column 0, so that the cursor of the terminal lays it out again.
+        It is not necessary to erase the screen, or to touch the rows around it. pt goes down
+        a row with ``\\r\\n``, which puts the terminal back to a real column 0, whatever the
+        drift above it. Thus the incorrect alignment can never spread past its row.
 
-        So the changed rows are rewritten and nothing else is (:meth:`_scrub_rows`). Three
-        things narrow it to that:
+        Thus the changed rows are written again, and nothing else is (:meth:`_scrub_rows`).
+        Three rules limit the work to that:
 
-        * **Nothing changed → nothing to do.** The app repaints on a 1 Hz timer to tick the
-          header's pulse, and an idle screen composes identically each time. pt writes no
-          cells, so its cursor cannot drift; the previous paint already left the terminal
-          aligned. (This alone is the flicker: erasing an emoji-bearing screen and rewriting
-          it identically, once a second.)
+        * **Nothing changed → nothing to do.** The app paints on a 1 Hz timer to move the
+          pulse of the header, and an idle screen composes the same each time. pt writes no
+          cells, so its cursor cannot drift. The last paint already left the terminal
+          aligned. (This case alone caused the flicker: once each second, the app erased a
+          screen with an emoji and wrote it again, with no change.)
         * **No wide glyph drawn → nothing to do.** The plain differential paint is exact.
-        * **Otherwise, only the rows that changed.** The background composes one line per
-          terminal row, so its diff maps straight onto rows — a ticking header repaints the
-          header, not the screen under it. A *float* is a centred box whose rows the layout
-          places, not us, so a dialog changing (or closing — see :meth:`_reconcile_layers`)
-          still falls back to dropping pt's cached frame, as does a frame whose height moved.
-          Those are user-driven and occasional; the timer is neither.
+        * **In all other cases, only the rows that changed.** The background composes one
+          line for each terminal row, so its diff maps directly onto rows. Thus a header that
+          ticks paints the header again, not the screen below it. A float is a centred box,
+          and the layout places its rows, not us. Thus when a dialog changes (or closes,
+          refer to :meth:`_reconcile_layers`), the fallback still removes the cached frame of
+          pt. The same occurs for a frame whose height changed. The user causes these cases,
+          and they are not frequent. The timer is neither of the two.
         """
         entry = (text, _has_wide_glyph(text))
         previous = self._layers.get(layer)
@@ -2051,24 +2150,25 @@ class TuiSession:
         self._layers[layer] = entry
         if any(wide for _text, wide in self._layers.values()):
             rows = _changed_rows(previous[0], text) if previous is not None else None
-            # The background's line i *is* terminal row i; nothing else can claim that.
+            # Line i of the background is terminal row i. No other layer can claim that.
             if layer != "base" or rows is None or not self._scrub_rows(rows):
                 self._invalidate_last_frame()
         return ANSI(text)
 
     def _repaint_if_wide(self) -> None:
-        """Upgrade this paint to a full repaint if any drawn layer holds a wide glyph."""
+        """Change this paint into a full paint if a drawn layer has a wide glyph."""
         if any(wide for _text, wide in self._layers.values()):
             self._invalidate_last_frame()
 
     def _reconcile_layers(self) -> None:
-        """Forget the layers this paint won't draw, and treat their leaving as a change.
+        """Forget the layers that this paint will not draw, and count their removal as a change.
 
-        A float is hidden by dropping its window from the layout, so a closing dialog simply
-        stops calling :meth:`_emit` — nothing would otherwise notice it had gone, and the
-        cells it gives back to the base would be rewritten piecemeal over a row the terminal
-        may be drawing shifted. Called at the top of the paint, from the base layer, since
-        the background is composed before the floats above it.
+        A float is hidden when its ``Window`` is removed from the layout. Thus a dialog that
+        closes only stops its calls to :meth:`_emit`. Without this method, nothing sees that
+        the dialog is gone. Then the cells that it gives back to the base are written again
+        in small parts, over a row that the terminal may draw out of position.
+        The base layer calls this method at the start of the paint, because the background
+        is composed before the floats above it.
         """
         live = {f"float{i}" for i in range(len(self._float_layers()))}
         if self._base_screen() is not None:
@@ -2082,7 +2182,7 @@ class TuiSession:
             self._repaint_if_wide()
 
     def _render_base(self) -> ANSI:
-        """Render the persistent frame around the background screen."""
+        """Render the background screen with the persistent header and footer around it."""
         self._reconcile_layers()  # the paint starts here: the background composes first
         cols, rows = self._size()
         base = self._base_screen()
@@ -2091,11 +2191,11 @@ class TuiSession:
         scrub = base.consume_edge_scrub()
         if scrub:
             self._scrub_right_columns(scrub)
-        # A bare base (the share screen's QR code) is its body on blank rows, nothing else.
+        # A bare base (the QR code of the share screen) is only its body on blank rows.
         if base.bare:
             return self._emit(frame.compose_bare(base, cols, rows))
-        # A chromeless base (the startup splash) forgoes the header/footer bars and is
-        # centered under its banner instead of stretched across the terminal.
+        # A chromeless base (the startup splash) has no header or footer bars. It is
+        # centred below its banner, instead of stretched across the terminal.
         if not base.chrome:
             return self._emit(frame.compose_startup(base, cols, rows))
         footer = self.top.footer_hint if self.top else base.footer_hint
@@ -2105,21 +2205,22 @@ class TuiSession:
         )
 
     def _plain_frame(self) -> str | None:
-        """The whole frame as rows, when this paint is one the fast path may take.
+        """The full frame as rows, when the fast path can do this paint.
 
-        The background screen, with every floating dialog composited over it exactly where
-        prompt_toolkit's ``FloatContainer`` would centre it (see
-        :func:`~meshterm.ui.tui.frame.composite_float`) — so a confirm, a picker or the
-        packet viewer stays on the row-diff path rather than paying prompt_toolkit's whole
-        grid rebuild on every keystroke.
+        The frame is the background screen, with each floating dialog composited over it
+        exactly where the ``FloatContainer`` of prompt_toolkit would centre it (refer to
+        :func:`~meshterm.ui.tui.frame.composite_float`). Thus a confirm, a picker, or the
+        packet viewer stays on the row-diff path, and does not pay for the full grid rebuild
+        of prompt_toolkit at each key press.
 
-        Answers ``None`` — meaning "let prompt_toolkit lay this one out" — for the two
-        frames we don't place ourselves: the busy overlay, which is a content-sized window
-        the float container measures, and an empty stack, which has no background at all.
+        The method returns ``None`` (that is, "let prompt_toolkit lay this one out") for the
+        two frames that we do not place ourselves: the busy overlay, which is a ``Window``
+        sized to its content that the float container measures, and an empty stack, which
+        has no background.
 
-        Every layer still goes through its usual renderer (:meth:`_render_base`,
-        :meth:`_render_float_layer`), so the layer bookkeeping those keep is identical
-        whichever path the paint takes.
+        Each layer still goes through its usual renderer (:meth:`_render_base`,
+        :meth:`_render_float_layer`). Thus the layer records that those renderers keep are
+        the same, whichever path the paint takes.
         """
         if self._overlay_visible() or not self._stack:
             return None
@@ -2135,11 +2236,12 @@ class TuiSession:
 
     @staticmethod
     def _fkey_lane(active: Screen) -> Callable[[], Text] | None:
-        """A deferred F-key lane row for ``active``, or ``None`` on a platform without one.
+        """A deferred F-key lane row for ``active``, or ``None`` on a platform without a lane.
 
-        Deferred because the frame resolves it *after* the body renders: a lane dims the
-        slots whose action would do nothing, and that reading comes from the scroll
-        metrics this paint is about to record (see :func:`~meshterm.ui.tui.fkeys.default_lane`).
+        The row is deferred because the frame resolves it after the body renders. A lane
+        dims the slots whose action does nothing, and that information comes from the
+        scroll metrics that this paint will store (refer to
+        :func:`~meshterm.ui.tui.fkeys.default_lane`).
         """
         deck = fkeys.active_deck()
         if deck is None:
@@ -2147,7 +2249,7 @@ class TuiSession:
         return lambda: deck.lane_text(active.fkey_lane, shifted=modifier_watch.shift_down())
 
     def _render_float_layer(self, index: int) -> ANSI:
-        """Render the ``index``-th floating dialog (bottom-to-top) as a centered box."""
+        """Render the ``index``-th floating dialog (from bottom to top) as a centred box."""
         layers = self._float_layers()
         if index >= len(layers):
             return ANSI("")
@@ -2155,18 +2257,19 @@ class TuiSession:
         return self._emit(frame.compose_dialog(layers[index], cols, rows), f"float{index}")
 
     def _overlay_visible(self) -> bool:
-        """Whether the busy overlay should be painted this frame.
+        """Whether to paint the busy overlay in this frame.
 
-        Gated on an empty screen stack so the card only appears in the "black screen" gaps a
-        device operation opens between screens (a menu navigation before the tool's first
-        prompt, say) and never buries a dialog the user is meant to be reading. It also stays
-        unpainted through the overlay's initial hold (:attr:`BusyOverlay.brightness` is 0), so
-        an operation that finishes within the hold shows nothing and never flashes.
+        The overlay shows only on an empty screen stack. Thus the card appears only in the
+        "black screen" gaps that a device operation opens between screens (for example, a
+        menu navigation before the first prompt of the tool). It never covers a dialog that
+        the user must read. It also stays unpainted during the initial hold of the overlay
+        (:attr:`BusyOverlay.brightness` is 0). Thus an operation that finishes during the
+        hold shows nothing and never flashes.
         """
         return self._overlay is not None and not self._stack and self._overlay.brightness > 0
 
     def _render_overlay(self) -> ANSI:
-        """Render the busy overlay's skeleton card (only when :meth:`_overlay_visible`)."""
+        """Render the skeleton card of the busy overlay (only when :meth:`_overlay_visible`)."""
         if self._overlay is None:
             return ANSI("")
         return self._emit(self._overlay.render(), "overlay")
@@ -2174,11 +2277,11 @@ class TuiSession:
     # --- input ---------------------------------------------------------------
 
     def _key_bindings(self) -> KeyBindings:
-        """Build the global key bindings that dispatch normalized actions to the top.
+        """Build the global key bindings that send normalized actions to the top screen.
 
-        Every key — navigation, Ctrl chord, typed character, pasted run — funnels through
-        :meth:`_dispatch`, which is what lets the right-Ctrl rescue there cover the whole app
-        rather than the screen actions only.
+        Each key (navigation, Ctrl chord, typed character, pasted text) goes through
+        :meth:`_dispatch`. Thus the right-Ctrl rescue there covers the full app, not only the
+        screen actions.
         """
         kb = KeyBindings()
 
@@ -2199,57 +2302,61 @@ class TuiSession:
                 self._dispatch("text", data)
             elif len(data) > 1:
                 # A bracketed paste (Ctrl-V, right-click, Ctrl-Shift-V) arrives as one
-                # multi-character run — hand the whole thing to the top screen as a paste it
-                # can confirm and insert, rather than dropping it as the old len==1 guard did.
+                # multi-character sequence. Give all of it to the top screen as a paste that
+                # the screen can confirm and insert. The old len==1 guard removed it instead.
                 self._dispatch("paste", data)
 
         return kb
 
     def _dispatch(self, action: str, data: str = "") -> None:
-        """Forward an action to the top screen and repaint.
+        """Send an action to the top screen, and paint the frame again.
 
-        Right Ctrl is read as Ctrl first, app-wide: a plain navigation key, or *any* bare
-        letter arriving as text, is promoted to its Ctrl chord while the right Ctrl key is
-        physically held (see :func:`_right_ctrl_down`, :data:`_CTRL_CHORDS`,
-        :data:`_CTRL_LETTER_CHORDS`) — a no-op when the console already reported the chord, and
-        the rescue when a layout-claimed right Ctrl stripped it to a bare character. Because
-        every binding funnels through here, the rescue covers the session's own chords too, not
-        just the screen actions: right Ctrl-V pastes into a compose line instead of typing a
-        ``v``, right Ctrl-C quits.
+        In all the app, the right Ctrl key is first read as Ctrl. While the right Ctrl key is
+        physically held, a plain navigation key, or any bare letter that arrives as text,
+        changes into its Ctrl chord (refer to :func:`_right_ctrl_down`, :data:`_CTRL_CHORDS`,
+        :data:`_CTRL_LETTER_CHORDS`). When the console already reported the chord, this does
+        nothing. When a keyboard layout claimed the right Ctrl key and removed it, so that
+        only a bare character arrived, this is the rescue. Each binding goes through this
+        method. Thus the rescue also covers the chords of the session, not only the screen
+        actions: right Ctrl-V pastes into a compose line instead of a typed ``v``, and right
+        Ctrl-C quits.
 
-        The session-level actions are answered here rather than forwarded — no screen ever
-        sees ``to_menu``, ``quit``, ``quit_now`` or ``paste_clipboard``.
+        This method answers the session-level actions itself, and does not send them to a
+        screen. No screen ever gets ``to_menu``, ``quit``, ``quit_now``, or
+        ``paste_clipboard``.
 
-        The repaint keeps prompt_toolkit's fast differential paint; a frame carrying a glyph
-        the terminal may draw narrower than pt reserves for it (an emoji) upgrades itself to a
-        full repaint at compose time — see :meth:`_emit`.
+        The paint keeps the fast differential paint of prompt_toolkit. A frame with a glyph
+        that the terminal may draw narrower than the cells that pt reserves for it (an emoji)
+        changes itself into a full paint when it is composed. Refer to :meth:`_emit`.
         """
-        # An F-key resolves against the top screen's lane on the platform's deck (see
-        # ui.tui.fkeys) into a normal screen action; an unassigned slot, a key the deck
-        # doesn't use, or a platform without a lane drops the press here.
+        # An F-key resolves against the lane of the top screen, on the deck of the platform
+        # (refer to ui.tui.fkeys), into a normal screen action. With an unassigned slot, a
+        # key that the deck does not use, or a platform without a lane, the key press stops
+        # here.
         if len(action) in (2, 3) and action[0] == "f" and action[1:].isdigit():
             number = int(action[1:])
             deck = fkeys.active_deck()
             if deck is None:
                 return
             if deck.is_shift_key(number):
-                # However this resolves, the code only exists because Shift was
-                # physically down for the keyboard to emit it — latch the lane's shifted
-                # display against the release/re-assert flicker (see modifier_watch).
+                # Whatever this resolves to, the keyboard sent this code only because Shift
+                # was physically down. Thus latch the shifted labels of the lane, to stop the
+                # flicker when Shift is released and pressed again (refer to modifier_watch).
                 modifier_watch.note_shift_bank_key()
             top = self.top or self._base_screen()
             resolved = deck.action_for(top.fkey_lane, number) if top else None
             if resolved is None:
                 return
             action = resolved
-        # The key-state probe comes last in each test, so it only runs for a key that could
-        # be a chord at all — not on every keystroke.
+        # The key-state probe comes last in each test. Thus it runs only for a key that can
+        # be a chord, not at each key press.
         if action in _CTRL_CHORDS and _right_ctrl_down():
             action = _CTRL_CHORDS[action]
         elif action == "text" and data.lower() in _CTRL_LETTER_CHORDS and _right_ctrl_down():
             action, data = _CTRL_LETTER_CHORDS[data.lower()], ""
-        # A terminal's Esc still held down is a hold, not yet a press; any other key goes
-        # behind an Esc held back, so keys keep their order (see set_esc_probe).
+        # An Esc of a terminal that is still held down is a hold, not yet a press. Any other
+        # key goes after an Esc that is held back, so that the keys keep their order (refer
+        # to set_esc_probe).
         watched = self._watched_esc
         if watched is not None:
             if action == "escape":
@@ -2259,38 +2366,43 @@ class TuiSession:
             else:
                 watched.ahead()
         if action == "to_menu":
-            # Pop every frame at once (^W). Refused over a dialog or work in flight; see
-            # request_pop_all. The repaint below is still wanted either way — a refusal
-            # changes nothing, and an armed unwind is about to change everything.
+            # Pop all the screens on the stack at one time (^W). The unwind is refused over a
+            # dialog or over work in progress (refer to request_pop_all). The paint below is
+            # still wanted in the two cases. After a refusal, it changes nothing, and an
+            # armed unwind will soon change everything.
             self.request_pop_all()
             self.invalidate()
             return
         if action == "quit":
-            # Asks first, from anywhere; a second press while it asks leaves (see
-            # request_quit). "Unpair & quit" rides the confirm the menu declared.
+            # Ask first, from any screen. A second press while the question is open quits
+            # (refer to request_quit). "Unpair & quit" comes with the confirm that the menu
+            # declared.
             self.request_quit()
             self.invalidate()
             return
         if action == "quit_now":
-            # Straight out, no question: the main menu's ``Quit!`` chip, on the Shift half
-            # of the ``Quit?`` it sits behind — a deliberate two-key reach on the one screen
-            # that offers it, never a chord a slip on the way to ^W could land on.
+            # Quit immediately, with no question: the ``Quit!`` chip of the main menu, on the
+            # Shift half of the ``Quit?`` chip. It is a two-key press on purpose, on the only
+            # screen that offers it. It is never a chord that a wrong key press on the way to
+            # ^W can hit.
             self._exit_app()
             return
         if action == "paste_clipboard":
-            # Some terminals deliver Ctrl-V as the literal control key — no bracketed-paste
-            # sequence, so no text on the event. Read the OS clipboard ourselves and hand the
-            # run to the top screen as a paste. Terminals that instead translate Ctrl-V into a
-            # bracketed paste never reach here — that lands in _typed as a multi-char run.
+            # Some terminals send Ctrl-V as the literal control key, with no bracketed-paste
+            # sequence, so the event has no text. Read the OS clipboard here, and give the
+            # text to the top screen as a paste. Terminals that change Ctrl-V into a
+            # bracketed paste never get here: that paste goes to _typed as a multi-character
+            # sequence.
             text = _read_clipboard()
             if text:
                 self._dispatch("paste", text)
             return
         top = self.top
-        # Edge scroll and its snap-back get the key first (Screen.edge_scroll): a key that
-        # would act on a highlight scrolled out of view brings it back before doing anything,
-        # and Home/End take the page to its ends. An arrow goes on to the screen, and the
-        # next paint scrolls the page instead if it moved nothing (Screen.note_highlight).
+        # The edge scroll and its snap-back get the key first (Screen.edge_scroll). A key
+        # that acts on a highlight that is not visible first brings the highlight back, and
+        # does nothing more. Home/End take the page to its ends. An arrow continues to the
+        # screen. If the arrow moved nothing, the next paint scrolls the page instead
+        # (Screen.note_highlight).
         if top is not None and not top.edge_scroll(action):
             top.handle(action, data)
         self.invalidate()

@@ -1,23 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The busy skeleton: a titled card floated between screens while a load runs.
+"""The busy skeleton: a card with a title that floats between screens while a load runs.
 
 A :class:`BusyOverlay` is the model behind :meth:`~meshterm.ui.tui.session.TuiSession.
-busy_overlay` — a small *skeleton card* standing in for a screen the device is still
-fetching: a title and the one-cell working :class:`~meshterm.ui.tui.spinner.Spinner`
-beside a caption. Unlike a :class:`~meshterm.ui.tui.screen.Screen` it is *not* part of the
-screen stack: the session draws it as the top-most float, so it hovers over the gap between
-screens that a slow device operation (Bluetooth most of all) opens — the caller shows it
-while the fetch runs and drops it when that fetch returns.
+busy_overlay`. It is a small *skeleton card* that stands in for a screen whose data
+MeshTerm still reads from the device. It has a title, and the one-cell working
+:class:`~meshterm.ui.tui.spinner.Spinner` next to a caption. The card is not part of the
+screen stack, as a :class:`~meshterm.ui.tui.screen.Screen` is. The session draws it as the
+top-most float. Thus it floats over the gap between screens that a slow device operation
+opens (Bluetooth most of all). The caller shows the card while the read runs, and removes
+it when that read returns.
 
-Rather than pop in, it stays fully black for a short *hold* and then *fades in from black*
-over its next fraction of a second (see :attr:`brightness`): an operation that finishes within
-the hold shows nothing at all, and a longer one eases up out of the black rather than appearing
-suddenly — so the card never flashes and never pops in.
+The card does not appear suddenly. It stays fully black for a short *hold*, then it fades
+in from black during the next fraction of a second (refer to :attr:`brightness`). An
+operation that finishes during the hold shows nothing. During a longer operation, the card
+comes up slowly out of the black. Thus the card never flashes and never appears suddenly.
 
-The spinning chip is the whole animation, and says everything the card has to say: the app is
-working. It once shared the card with a scanning-light LED bar (JP, 2026-08-29) — eighteen
-cells of travelling red that drew the eye harder than the words did, for a screen the reader
-is only ever passing through.
+The chip of the spinner is the whole animation, and it tells all that the card must tell:
+the app is working. The card once also had an LED bar with a scanning light
+(JP, 2026-08-29): eighteen cells of red that moved across the bar. That bar pulled the eye
+more strongly than the words did, on a screen that the user only passes through.
 """
 
 from __future__ import annotations
@@ -30,27 +31,32 @@ from rich.text import Text
 from .render import render_to_ansi
 from .spinner import Spinner
 
-#: The title line's colour (the theme's ``title.accent``, as hex so the fade can dim it).
+#: The colour of the title line (the theme's ``title.accent``, in hex so that the fade can
+#: dim it).
 _TITLE_COLOR = "bold #a5b4fc"
 
-#: The working chip's colour (the theme's ``accent`` — the same beloved one-cell spinner).
+#: The colour of the working chip (the theme's ``accent``). The chip has the same one-cell
+#: spinner as the other dialogs.
 _CHIP_COLOR = "bold #818cf8"
 
-#: The caption colour (the theme's ``muted``, as a hex so it can be dimmed for the fade).
+#: The colour of the caption (the theme's ``muted``, in hex so that the fade can dim it).
 _CAPTION_COLOR = "#94a3b8"
 
 
 class BusyOverlay:
-    """A skeleton card (title, working chip + caption) drawn as the session's top-most float.
+    """A skeleton card (a title, the working chip, and a caption): the top-most float.
 
     Attributes:
-        spinner: The animated one-cell :class:`~meshterm.ui.tui.spinner.Spinner` — the same
-            working chip used inline elsewhere — sitting beside the caption.
-        title: An optional heading for the screen being fetched (empty for a bare card).
-        message: An optional caption drawn beside the chip (e.g. "reading from …").
-        started_at: The monotonic time the card was created, from which the hold + fade run.
-        hold: Seconds the card stays fully black before the fade begins.
-        fade: The fade-in duration in seconds, after the hold.
+        spinner: The animated one-cell :class:`~meshterm.ui.tui.spinner.Spinner` next to
+            the caption. It is the same working chip that other places use inline.
+        title: An optional heading for the screen whose data is still read (empty for a
+            bare card).
+        message: An optional caption next to the chip (for example "reading from …").
+        started_at: The monotonic time at which the card was created. The hold and the
+            fade count from this time.
+        hold: The time in seconds for which the card stays fully black before the fade
+            starts.
+        fade: The duration of the fade-in in seconds, after the hold.
     """
 
     def __init__(
@@ -64,11 +70,12 @@ class BusyOverlay:
         """Create a busy skeleton card.
 
         Args:
-            message: A short caption drawn beside the working chip (empty for a bare card).
-            title: An optional heading naming the screen being fetched.
-            hold: Seconds to stay fully black before fading in, so an operation that finishes
-                this fast shows nothing at all.
-            fade: Seconds over which the card then brightens from black to full colour.
+            message: A short caption next to the working chip (empty for a bare card).
+            title: An optional heading that names the screen whose data is still read.
+            hold: The time in seconds for which the card stays fully black before it fades
+                in. Thus an operation that finishes in this time shows nothing.
+            fade: The time in seconds in which the card then becomes brighter, from black
+                to full colour.
         """
         self.spinner = Spinner()
         self.title = title
@@ -79,11 +86,11 @@ class BusyOverlay:
 
     @property
     def brightness(self) -> float:
-        """The current fade level in ``[0, 1]``: 0 through the :attr:`hold`, then easing to 1.
+        """The current fade level in ``[0, 1]``: 0 during the :attr:`hold`, then a soft rise to 1.
 
-        Stays exactly 0 for the first :attr:`hold` seconds (nothing paints), then a smoothstep
-        easing over :attr:`fade` gives a gentle glow up out of the black rather than a linear
-        ramp.
+        The level stays exactly 0 for the first :attr:`hold` seconds (nothing paints). Then a
+        smoothstep curve over :attr:`fade` gives a gentle glow up out of the black, instead of
+        a linear ramp.
         """
         elapsed = time.monotonic() - self.started_at - self.hold
         if elapsed <= 0:
@@ -94,15 +101,17 @@ class BusyOverlay:
         return t * t * (3 - 2 * t)  # smoothstep
 
     def tick(self) -> None:
-        """Advance the working chip one frame — the card's only animation."""
+        """Move the working chip forward one animation step (the only animation of the card)."""
         self.spinner.tick()
 
     def restart(self) -> None:
-        """Restart the intro from scratch: rewind the fade ramp and the chip to their starts.
+        """Start the intro again: set the fade ramp and the chip back to their start.
 
-        Called each time the card is (re)exposed — its first appearance and every time it comes
-        back after a prompt covered it — so the black hold and fade-in play fresh every display
-        rather than the card snapping back at full brightness mid-way through an operation.
+        This method is called each time that the card becomes visible: at its first
+        appearance, and each time that it comes back after a prompt covered it. Thus the black
+        hold and the fade-in play again from the start each time that the card shows. If this
+        method is not called, the card comes back at full brightness in the middle of an
+        operation.
         """
         self.started_at = time.monotonic()
         self.spinner.reset()
@@ -110,12 +119,13 @@ class BusyOverlay:
     def render(self) -> str:
         """Render the skeleton card as a centred ANSI block, at the current fade level.
 
-        The title and the chip + caption line are each padded to a common width and joined
-        into one multi-line :class:`~rich.text.Text`, so the session's content-sized float
-        centres a clean rectangle over the gap between screens.
+        The title line, and the line with the chip and the caption, are padded to the same
+        width. Then they are joined into one :class:`~rich.text.Text` of more than one line.
+        Thus the float of the session, which has the size of its content, centres a clean
+        rectangle over the gap between screens.
 
         Returns:
-            An ANSI string of the card's rows.
+            An ANSI string with the rows of the card.
         """
         level = self.brightness
         lines: list[Text] = []
@@ -132,7 +142,7 @@ class BusyOverlay:
 
 
 def _center_text(text: Text, width: int) -> Text:
-    """Return ``text`` padded with spaces so it is centred within ``width`` cells."""
+    """Return ``text`` with spaces added so that it is centred in ``width`` cells."""
     pad = max(0, width - cell_len(text.plain))
     left = pad // 2
     out = Text(" " * left)
@@ -144,8 +154,9 @@ def _center_text(text: Text, width: int) -> Text:
 def dim_color(style: str, factor: float) -> str:
     """Scale a Rich hex-colour style toward black by ``factor`` (0 = black, 1 = unchanged).
 
-    Only the ``#rrggbb`` token is scaled; any attribute words (e.g. ``bold``) are preserved.
-    A style without a hex colour is returned untouched, as is any ``factor >= 1``.
+    Only the ``#rrggbb`` token is scaled. The attribute words (for example ``bold``) stay as
+    they are. A style without a hex colour is returned with no change. The style is also
+    returned with no change when ``factor >= 1``.
 
     Args:
         style: A Rich style such as ``"#38bdf8"`` or ``"bold #ecfeff"``.

@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""A progress screen whose handle mimics the slice of ``rich.progress`` the tools use.
+"""A progress screen whose handle copies the part of ``rich.progress`` that the tools use.
 
-Trace and TX-optimize sweeps drive progress with ``add_task`` / ``advance`` / ``update`` on a
-Rich ``Progress`` in CLI mode. In the TUI the same calls update a bounded, centered progress
-dialog instead, so tool code stays identical across both front-ends (see
-:meth:`meshterm.ui.surface.PlainUi.progress` vs :meth:`~meshterm.ui.surface.TuiUi.progress`).
+In CLI mode, the trace sweep and the TX-optimize sweep show their progress with
+``add_task`` / ``advance`` / ``update`` on a Rich ``Progress``. In the TUI, the same calls
+change a progress dialog instead. The dialog has a limited size and is at the centre of
+the screen. Thus the tool code is the same for the two front ends (refer to
+:meth:`meshterm.ui.surface.PlainUi.progress` and
+:meth:`~meshterm.ui.surface.TuiUi.progress`).
 """
 
 from __future__ import annotations
@@ -36,15 +38,15 @@ class _Task:
 
 
 class ProgressScreen(Screen):
-    """A non-interactive dialog showing one or more running progress bars."""
+    """A non-interactive dialog that shows one or more progress bars of work that runs."""
 
     footer_hint = "working…"
     floating = True
-    modal = True  # work in flight owns the keyboard; ^W must not unwind out from under it
+    modal = True  # the work owns the keyboard. ^W must not unwind the stack while it runs.
 
     @property
     def picocalc_lyra_lane(self):
-        """No lane: the dialog is non-interactive, so no key does anything to it."""
+        """No lane: the dialog is non-interactive, so no keyboard key has an effect on it."""
         from .fkeys import EMPTY_LANE
 
         return EMPTY_LANE
@@ -55,25 +57,28 @@ class ProgressScreen(Screen):
         self.title = title
         self._tasks: dict[int, _Task] = {}
         self._next = 0
-        #: The one-cell working chip, spun by an animation timer (see :class:`TuiProgress`).
-        #: It is the liveness signal every row carries so a slow task — a trace that only
-        #: advances once, at the very end — reads as *working* rather than frozen while it
-        #: waits, which a static meter alone cannot show.
+        #: The working chip, one cell wide. An animation timer turns it (refer to
+        #: :class:`TuiProgress`). Each row has this chip as its sign of activity. Thus a slow
+        #: task (a trace that advances only one time, at the end) looks active, not frozen,
+        #: while it waits. A static meter alone cannot show this.
         self.spinner = Spinner()
 
     def tick(self) -> None:
-        """Advance the working chip one frame (called from the dialog's animation timer)."""
+        """Advance the working chip by one animation step.
+
+        The animation timer of the dialog calls this method.
+        """
         self.spinner.tick()
 
     def add_task(self, description: str, total: float | None = None) -> int:
-        """Add a task and return its id (mirrors ``rich.progress.Progress.add_task``)."""
+        """Add a task and return its id (the same as ``rich.progress.Progress.add_task``)."""
         task_id = self._next
         self._next += 1
         self._tasks[task_id] = _Task(description=description, total=total)
         return task_id
 
     def advance(self, task_id: int, amount: float = 1.0) -> None:
-        """Advance a task's completed count (mirrors ``Progress.advance``)."""
+        """Increase the completed count of a task (the same as ``Progress.advance``)."""
         self._tasks[task_id].completed += amount
 
     def update(
@@ -84,7 +89,7 @@ class ProgressScreen(Screen):
         completed: float | None = None,
         total: float | None = None,
     ) -> None:
-        """Update a task's fields (mirrors the ``Progress.update`` kwargs used)."""
+        """Change the fields of a task (the ``Progress.update`` arguments that the tools use)."""
         task = self._tasks[task_id]
         if description is not None:
             task.description = description
@@ -96,14 +101,18 @@ class ProgressScreen(Screen):
     def render_body(self, width: int) -> list[str]:
         """Render each task as ``chip  description [meter] m/n``.
 
-        Every row leads with the animated working :attr:`spinner` chip — the app's one-cell
-        indicator — so the row is visibly alive whatever the bar is doing; it flips to a
-        green ``✓`` once the task completes. When a total is known, the bar is the app's
-        braille :func:`~meshterm.ui.braillechart.meter` — the one way MeshTerm draws a
-        proportion — a slim gauge filling a visible ``track`` and turning ``ok`` green at
-        full. A task with no known total (nothing to divide by) shows no bar at all — a dead,
-        never-moving track reads as broken — and leans on the spinning chip beside its running
-        count to signal progress.
+        Each row starts with the animated working chip (:attr:`spinner`), which is the
+        one-cell indicator of the app. Thus the row shows that it is active, whatever the bar
+        does. When the task completes, the chip changes to a green ``✓``.
+
+        When the total is known, the bar is the braille
+        :func:`~meshterm.ui.braillechart.meter` of the app, which is the only way that
+        MeshTerm draws a proportion. It is a slim gauge that fills a visible ``track``, and
+        it changes to the ``ok`` green when it is full.
+
+        A task with no known total (there is nothing to divide by) shows no bar, because a
+        track that never moves looks broken. Instead, the animated chip next to the current
+        count shows the progress.
         """
         bar_width = max(10, min(40, width - 26))
         table = Table.grid(padding=(0, 1))
@@ -124,7 +133,7 @@ class ProgressScreen(Screen):
                 counts = f"{int(task.completed)}/{int(task.total)}"
             else:
                 done = False
-                bar = Text("")  # indeterminate: the chip carries the liveness, not a dead track
+                bar = Text("")  # no total. The chip shows the activity, not a static track.
                 counts = str(int(task.completed))
             chip = Text("✓", style="ok") if done else self.spinner.text("brand")
             table.add_row(
@@ -134,18 +143,19 @@ class ProgressScreen(Screen):
         return render_lines(Group(body), width)
 
     def handle(self, action: str, data: str = "") -> None:
-        """Swallow all keys: progress advances with the work, not the keyboard."""
+        """Ignore all keyboard keys: the progress advances with the work, not the keyboard."""
         return
 
 
 @dataclass
 class TuiProgress:
-    """Context manager yielding a :class:`ProgressScreen` handle, pushed for its lifetime.
+    """A context manager that yields a :class:`ProgressScreen` handle and keeps it pushed.
 
-    Presents the same ``with ... as progress:`` shape as ``make_progress`` so tools need
-    only swap the factory. Entering pushes the dialog and starts an animation timer that
-    keeps its working chip spinning; the ``add_task`` / ``advance`` / ``update`` methods
-    mutate it and repaint; exiting cancels the timer and pops it.
+    It has the same ``with ... as progress:`` form as ``make_progress``. Thus a tool must
+    change only the factory. On entry, the context manager pushes the dialog and starts an
+    animation timer that keeps the working chip in motion. The ``add_task`` / ``advance`` /
+    ``update`` methods change the dialog and request a paint. On exit, the context manager
+    cancels the timer and pops the dialog.
     """
 
     session: TuiSession
@@ -157,14 +167,14 @@ class TuiProgress:
     def __enter__(self) -> ProgressScreen:
         """Push the progress dialog and start its animation timer."""
         self._screen = ProgressScreen(self.title)
-        # Wrap add_task/advance/update so each repaints the session automatically.
+        # Wrap add_task/advance/update, so that each call requests a paint of the session.
         for name in ("add_task", "advance", "update"):
             setattr(self._screen, name, self._wrap(getattr(self._screen, name)))
         self.session.push(self._screen)
-        # The task mutates the dialog only when it advances, which can be seconds apart (a
-        # trace advances just once, at the end). Without a heartbeat the chip would sit frozen
-        # between those beats and read as broken, so spin it on a timer, exactly as the busy
-        # splash does, for the dialog's whole lifetime.
+        # The task changes the dialog only when it advances, and the advances can be seconds
+        # apart (a trace advances only one time, at the end). Without a timer, the chip stays
+        # frozen between the advances and looks broken. Thus a timer turns the chip for the
+        # full life of the dialog, in the same way as the busy splash.
         self._ticker = asyncio.ensure_future(self._animate())
         return self._screen
 
@@ -176,19 +186,20 @@ class TuiProgress:
         self.session.pop(self._screen)
 
     async def _animate(self) -> None:
-        """Advance the dialog's working chip and repaint every :attr:`interval` seconds."""
+        """Advance the working chip and request a paint, each :attr:`interval` seconds."""
         try:
             while True:
                 await asyncio.sleep(self.interval)
                 self._screen.tick()
                 self.session.invalidate()
         except asyncio.CancelledError:
-            # Swallow the cancellation so the task finishes cleanly on its final loop cycle
-            # rather than being torn down while pending (a screen-corrupting loop warning).
+            # Catch the cancellation and ignore it, so that the task ends cleanly on its last
+            # loop cycle. If the loop destroys the task while it is pending, the loop shows a
+            # warning, and the warning corrupts the screen.
             pass
 
     def _wrap(self, method):  # type: ignore[no-untyped-def]
-        """Wrap a mutating method so it repaints the session after running."""
+        """Wrap a method that changes the dialog, so that it requests a paint after it runs."""
 
         def wrapped(*args, **kwargs):  # type: ignore[no-untyped-def]
             result = method(*args, **kwargs)
