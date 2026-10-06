@@ -292,28 +292,77 @@ def test_the_cap_reports_itself_by_name(cardputer: Path) -> None:
     assert spiradio.board_name(spiradio.CARDPUTER_ZERO_CAP) == ""  # some other Pi
 
 
+#: Every mark of a uConsole, as JP's CM5 uConsole showed them.
+_UCONSOLE_MARKS = (
+    *sorted(spiradio.UCONSOLE_TREE),
+    spiradio.UCONSOLE_KEYBOARD,
+)
+
+
 @pytest.fixture()
-def uconsole(monkeypatch: pytest.MonkeyPatch) -> set[str]:
-    """A machine with the AIO's SPI node; add the uConsole's panel to make it a uConsole."""
-    tree: set[str] = {"raspberrypi,5-compute-module", "brcm,bcm2712"}
+def uconsole(monkeypatch: pytest.MonkeyPatch) -> set:
+    """A uConsole with the AIO's SPI node: every mark present, for a test to take one away."""
+    marks: set = set(_UCONSOLE_MARKS)
+    tree = {"raspberrypi,5-compute-module", "brcm,bcm2712"}
+    usb = {("1d6b", "0002", "Linux", "xHCI Host Controller")}
     monkeypatch.setattr(spiradio, "spi_present", lambda w: w.spidev == "/dev/spidev1.0")
-    monkeypatch.setattr(spiradio, "device_tree_compatibles", lambda: frozenset(tree))
-    return tree
+    monkeypatch.setattr(
+        spiradio,
+        "device_tree_compatibles",
+        lambda: frozenset(tree | {m for m in marks if isinstance(m, str)}),
+    )
+    monkeypatch.setattr(
+        spiradio,
+        "usb_devices",
+        lambda: frozenset(usb | {m for m in marks if isinstance(m, tuple)}),
+    )
+    return marks
 
 
-def test_the_aio_is_named_on_a_uconsole(uconsole: set[str]) -> None:
-    """The uConsole's own screen in the device tree is what makes the AIO the uConsole AIO."""
-    uconsole.add(spiradio.UCONSOLE_PANEL)
+def test_the_aio_is_named_on_a_uconsole(uconsole: set) -> None:
+    """With every mark of a uConsole present, the AIO is the uConsole AIO."""
     radios = spiradio.spi_radios({})
     assert [(d.port, d.name) for d in radios] == [("/dev/spidev1.0", "uConsole AIO")]
     assert spiradio.board_name(SpiWiring()) == "uConsole AIO"
 
 
-def test_the_aio_s_node_elsewhere_stays_unnamed(uconsole: set[str]) -> None:
-    """Any other Pi with spidev1.0 is listed on the AIO's wiring, but never called one."""
+@pytest.mark.parametrize("missing", _UCONSOLE_MARKS, ids=str)
+def test_one_missing_mark_is_enough_to_doubt_it(uconsole: set, missing: object) -> None:
+    """Any one mark missing and the radio is listed on the AIO's wiring, but never named."""
+    uconsole.discard(missing)
     radios = spiradio.spi_radios({})
     assert [(d.port, d.name) for d in radios] == [("/dev/spidev1.0", None)]
     assert spiradio.board_name(SpiWiring()) == ""
+
+
+def test_the_keyboard_s_names_are_part_of_its_mark(uconsole: set) -> None:
+    """1eaf:0024 is any LeafLabs Maple; only ClockworkPi's uConsole keyboard counts."""
+    uconsole.discard(spiradio.UCONSOLE_KEYBOARD)
+    uconsole.add(("1eaf", "0024", "LeafLabs", "Maple"))
+    assert spiradio.board_name(SpiWiring()) == ""
+
+
+def test_usb_devices_are_read_from_sysfs(tmp_path: Path) -> None:
+    """Ids, maker and product per device; a device naming none reads as empty there."""
+    keyboard = tmp_path / "1-1.1"
+    keyboard.mkdir()
+    for name, value in (
+        ("idVendor", "1eaf"),
+        ("idProduct", "0024"),
+        ("manufacturer", "ClockworkPI"),
+        ("product", "uConsole"),
+    ):
+        (keyboard / name).write_text(value + "\n", encoding="utf-8")
+    hub = tmp_path / "1-1.4"
+    hub.mkdir()
+    (hub / "idVendor").write_text("1a86\n", encoding="utf-8")
+    (hub / "idProduct").write_text("8091\n", encoding="utf-8")
+    (tmp_path / "1-1.1-if0").mkdir()  # an interface, not a device: no idVendor
+    assert spiradio.usb_devices(tmp_path) == {
+        ("1eaf", "0024", "ClockworkPI", "uConsole"),
+        ("1a86", "8091", "", ""),
+    }
+    assert spiradio.usb_devices(tmp_path / "nowhere") == frozenset()
 
 
 def test_the_device_tree_is_read_whole(tmp_path: Path) -> None:

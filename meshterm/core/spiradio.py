@@ -40,7 +40,7 @@ import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -230,8 +230,9 @@ CARDPUTER_ZERO_CAP = SpiWiring(
 )
 
 
-#: Where Linux exposes the device tree the machine booted with.
+#: Where Linux exposes the device tree the machine booted with, and its USB devices.
 DEVICE_TREE = Path("/sys/firmware/devicetree/base")
+USB_DEVICES = Path("/sys/bus/usb/devices")
 
 
 @functools.cache
@@ -254,6 +255,58 @@ def device_tree_compatibles(root: Path = DEVICE_TREE) -> frozenset[str]:
     return frozenset(found)
 
 
+def usb_devices(root: Path = USB_DEVICES) -> frozenset[tuple[str, str, str, str]]:
+    """Every USB device attached now, as ``(vendor id, product id, maker, product)``.
+
+    The ids are the lowercase hex sysfs gives; a device that names no maker or product
+    has ``""`` there. Empty where there is no sysfs.
+    """
+
+    def read(path: Path) -> str:
+        try:
+            return path.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            return ""
+
+    found: set[tuple[str, str, str, str]] = set()
+    for device in root.glob("*"):
+        vendor = read(device / "idVendor")
+        if vendor:
+            found.add(
+                (
+                    vendor,
+                    read(device / "idProduct"),
+                    read(device / "manufacturer"),
+                    read(device / "product"),
+                )
+            )
+    return frozenset(found)
+
+
+#: What ClockworkPi's uConsole overlay puts in the device tree: the uConsole's own 5-inch
+#: screen (the DevTerm's is ``cw,cwd686``), its AXP228 power chip, and its backlight. Seen
+#: on JP's uConsole, a CM5; matched by compatible, never by path, since the paths move
+#: with the Compute Module.
+UCONSOLE_TREE = frozenset({"cw,cwu50", "x-powers,axp228", "ocp8178-backlight"})
+
+#: The uConsole's built-in keyboard as USB reports it. 1eaf:0024 alone is a generic
+#: hobby-board id (LeafLabs' Maple), so its maker and product names are part of the mark.
+UCONSOLE_KEYBOARD = ("1eaf", "0024", "ClockworkPI", "uConsole")
+
+
+def is_uconsole() -> bool:
+    """Whether this machine is certainly a ClockworkPi uConsole.
+
+    A uConsole runs a stock Compute Module, whose model string says only that, so no one
+    fact will do: every mark must be there, from two independent sources. The device-tree
+    marks are ClockworkPi's overlay describing the hardware (:data:`UCONSOLE_TREE`); the
+    keyboard is the hardware answering for itself (:data:`UCONSOLE_KEYBOARD`). An overlay
+    applied to the wrong machine has no uConsole keyboard, and a uConsole keyboard plugged
+    into another machine has no uConsole overlay.
+    """
+    return UCONSOLE_TREE <= device_tree_compatibles() and UCONSOLE_KEYBOARD in usb_devices()
+
+
 @dataclass(frozen=True)
 class BuiltinRadio:
     """A radio whose wiring ships with MeshTerm, listed with no profile where its board is.
@@ -264,38 +317,30 @@ class BuiltinRadio:
         wiring: How it is wired.
         marker: A path only its board has, for a radio whose ``/dev/spidev*`` node alone
             would claim every Raspberry Pi with SPI switched on. Empty for none.
-        compatible: A device-tree ``compatible`` only its board's tree carries, for a board
-            that marks itself there rather than with a path of its own. Empty for none.
+        board: A test only its machine passes, for one that has no single path of its
+            own (:func:`is_uconsole`); ``None`` for none.
     """
 
     name: str
     wiring: SpiWiring
     marker: str = ""
-    compatible: str = ""
+    board: Callable[[], bool] | None = None
 
     def present(self) -> bool:
-        """Whether this machine is its board: the SPI node exists, and every marker it has."""
+        """Whether this machine is its board: the SPI node exists, and every mark it has."""
         return (
             spi_present(self.wiring)
             and (not self.marker or os.path.exists(self.marker))
-            and (not self.compatible or self.compatible in device_tree_compatibles())
+            and (self.board is None or self.board())
         )
 
-
-#: The uConsole's own 5-inch screen, as ClockworkPi's uConsole overlay declares it. A
-#: uConsole runs a stock Compute Module, whose model string says only that, and its power
-#: chip and backlight are the DevTerm's too; the panel is the one part no other machine
-#: has (the DevTerm's is ``cw,cwd686``). Seen on JP's uConsole, a CM5, at
-#: ``/axi/pcie@1000120000/rp1/dsi@128000/panel@0``: matched by compatible, not by path,
-#: since the path moves with the Compute Module.
-UCONSOLE_PANEL = "cw,cwu50"
 
 #: The radios MeshTerm knows the wiring of, in the order they are listed; the first that is
 #: present on a node is the one used there. A profile on the same node wins over any of them.
 #: The AIO is named only where the machine is certainly a uConsole, and listed unnamed on
 #: any other board with ``spidev1.0``, where its default wiring is still the best guess.
 BUILTIN_RADIOS = (
-    BuiltinRadio("uConsole AIO", SpiWiring(), compatible=UCONSOLE_PANEL),
+    BuiltinRadio("uConsole AIO", SpiWiring(), board=is_uconsole),
     BuiltinRadio("", SpiWiring()),
     BuiltinRadio("Cap LoRa-1262", CARDPUTER_ZERO_CAP, marker="/sys/class/leds/ext_5v_out"),
 )

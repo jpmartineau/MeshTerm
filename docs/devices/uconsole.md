@@ -186,12 +186,14 @@ meshterm --spi
 `--spi` finds the AIO's radio at `/dev/spidev1.0` and starts a node on it. The startup
 device picker also lists it — a row reading **uConsole AIO (/dev/spidev1.0)** with a 📍
 icon — whenever that device node exists, so `meshterm` with no flags gets you there too.
-MeshTerm knows it's on a uConsole from the uConsole's own screen, which ClockworkPi's
-uConsole overlay declares. Without that overlay, the row reads **SPI radio** instead.
+MeshTerm only calls it that once four things all say it's on a uConsole: the uConsole's
+screen, power chip, and backlight as ClockworkPi's uConsole overlay declares them, and the
+uConsole's own keyboard on USB. If any one is missing, the row reads **SPI radio** instead.
 
 You're connected when **Device info** or the dashboard shows a node name instead of a
 connection error. MeshTerm reports the device model as **uConsole AIO** (or **MeshTerm SPI
-node** without the overlay), and the header's connection label reads **SPI**.
+node** where it isn't sure it's on a uConsole), and the header's connection label reads
+**SPI**.
 
 **What happens underneath.** MeshTerm starts the node when it connects and ends it when
 you disconnect or quit — including a crash: the node exits with MeshTerm, and the kernel
