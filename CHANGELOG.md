@@ -9,6 +9,151 @@ can change how things behave. It does not only add new things.
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-10-07
+
+**You can join room servers, move your channels to a new device, and find the public
+channels that MeshTerm heard. On the handhelds, paths are chips, QR codes are braille, and
+the map no longer freezes.** MeshTerm now logs in to a room server, reads its board, and
+posts to it. The Channels page exports and imports all your channels, and its channel guide
+adds a public channel that MeshTerm heard on the mesh. You can hold Esc to quit. The
+Cardputer Zero runs MeshTerm for the first time, but it is not supported yet.
+
+### Added
+
+- **You can join a room server, read its board, and post to it.** A room server is a message
+  board on a radio. The new **Rooms** page, next to Channels, lists each room server that
+  your radio knows, with the rooms that you joined first. Each room has a page: join, log in
+  again, change the password, open the board, forget the room, or delete its stored posts.
+  MeshTerm asks for the room password one time and remembers it. On the board, each post
+  shows under the member who wrote it. Joined rooms are in Chat, and their new posts count
+  toward the unread badge. A read-only member sees why the room drops their posts, instead
+  of a compose line. A room does not answer a wrong password. Thus, when a login gets no
+  answer, MeshTerm says what it knows and offers one next step: try by flood, try again, or
+  add the room as a contact first. ^L logs in again (F6 on the handhelds). The new
+  preference `room_relogin_minutes` (30 by default) sets how long a room can be quiet before
+  MeshTerm logs in again by itself. On the command line, use `meshterm rooms list`,
+  `rooms join`, and `rooms forget`. `chat send --to` posts to a room, and `chat history`
+  names the author of each post. To try it with no radio, `meshterm --mock` has a room,
+  Lakeside BBS, with the password `hello`.
+  ([#24](https://github.com/jpmartineau/MeshTerm/issues/24))
+- **You can export your channels to a file, and import them on another device.** A new
+  device has only Public. On the Channels page, the new section "Export and import" has two
+  rows. **Export channels** writes each channel to one file, with its key, its send scope,
+  and its mute. **Import channels** reads the file on the new device. It shows its plan
+  first, then it adds the channels in the order of the file. It never removes a channel.
+  The file holds the keys of your private channels, so keep it private. A file from
+  `config backup` also imports. On the command line, use `meshterm channels export FILE` and
+  `meshterm channels import --file FILE`.
+  ([#25](https://github.com/jpmartineau/MeshTerm/issues/25))
+- **The channel guide lists the public channels that MeshTerm heard, and adds one with
+  Enter.** It is the first row of "Add a channel" on the Channels page. The channels that are
+  not on your device come first. Each row shows the number of messages heard, the age of the
+  last one, and seven days of activity. A packet gives its channel only as a hash, so
+  MeshTerm tries names: the channels of your device, each `#name` in a stored message, and
+  each region that it knows. A guessed name must match two messages or more. A private
+  channel never shows. On the command line, use `meshterm channels guide`.
+  ([#25](https://github.com/jpmartineau/MeshTerm/issues/25))
+- **You can hold Esc to quit.** Where MeshTerm can see that the Esc key is held, a hold of one
+  second shows a dialog, and a hold of three seconds quits. This works in a Windows terminal,
+  on a Linux console where MeshTerm can read the keyboard (the PicoCalc and the uConsole), in
+  the emulator, and on the Cardputer Zero. A tap of Esc still goes back one screen. On macOS
+  and over SSH, Esc does not change. MeshTerm also quits cleanly when the system sends it
+  SIGTERM, for example at shutdown.
+- **`meshterm emulate` shows the display of a handheld in a window on your desktop.**
+  `meshterm emulate picocalc-lyra --mock` and `meshterm emulate cardputer-zero --mock` draw
+  MeshTerm as that handheld draws it, with its font, its colours, and its F-key lane. Run
+  `meshterm emulate --fetch-fonts` one time first. It copies the limits of the display and
+  of the keyboard. It does not run the processor or the system of the handheld.
+- **On the PicoCalc, each link in a chat message has a QR code under the message.** Point a
+  phone at the code to open the link. On the desktop and on the Cardputer Zero, select a
+  message and press ^U to show its links as QR codes, one at a time. ←→ go to the next code.
+- **A link with no `https://` is a link too.** `meshterm.net/map` and `www.example.org` now
+  open and get a QR code, but `file.txt` stays text. MeshTerm knows the real top-level
+  domains from the list of IANA.
+- **On a page that is taller than the screen, the arrows reach its top and its bottom.** With
+  the highlight on the first row, ↑ scrolls the page up one line. With the highlight on the
+  last row, ↓ scrolls it down. Thus the text above the first row and below the last row is
+  always available. Home and End go to the ends of the page. This applies to each screen
+  with a highlight. On the trace screen, ↓ now goes on into the results.
+- **MeshTerm runs on the M5Stack Cardputer Zero, but it is not supported yet.** It draws on
+  the display itself, opens from the app launcher of the device, and reads its battery. The
+  Cap LoRa-1262 works with `--spi` and no setup. When you set the custom variable `gps` to
+  `1`, the GPS of the Cap moves your node. For now, you must install MeshTerm from the source
+  code. Read [the Cardputer Zero page](https://github.com/jpmartineau/MeshTerm/blob/main/docs/devices/cardputer-zero.md)
+  before you try it.
+
+### Changed
+
+- **A path chip shows the colour of its node on a darker ground of the same colour.** Before,
+  a chip had dark text on the colour of the node. Thus the colour moved from the name to the
+  ground. Now a node has one colour in a list, in an arrow path, and in a chip.
+- **The PicoCalc and the Cardputer Zero draw paths as chips.** Before, they drew arrows. On
+  the PicoCalc, run the console font script again to get the two new glyphs (refer to
+  [the PicoCalc page](https://github.com/jpmartineau/MeshTerm/blob/main/docs/devices/picocalc-lyra.md)).
+- **On the PicoCalc and the Cardputer Zero, each QR code is drawn in braille.** A code is half
+  the size, so a contact card and its link fit on one screen. On the handhelds, the braille
+  dots now fill their cell, so the charts and the map draw solid lines.
+- **The handhelds have new platform names: `picocalc-lyra` and `cardputer-zero`.** If you use
+  `--platform picocalc` or `MESHTERM_PLATFORM=picocalc`, change it to `picocalc-lyra`.
+  MeshTerm refuses the old name. MeshTerm finds the PicoCalc by itself, so most users have
+  nothing to change.
+- **^Y finds your own node on the map and in the mesh walk.** It was ^U, which now shows the
+  QR codes of a chat message.
+- **The trace screen draws the link of each hop as a path line.** A long name no longer
+  pushes the table past the edge of the screen.
+- **The device screen shows each field whole.** A long address no longer cuts the name. The
+  address is last, and ←→ scroll a wide row.
+- **The documents are in ASD-STE100 Simplified Technical English**, with Canadian spelling.
+  Short sentences and one word for each concept make them easier to read, also when English
+  is not your first language. The documents are now in folders: `docs/guide`, `docs/cli`,
+  `docs/devices`, and `docs/development`.
+- Section headings are dark grey, not the colour of the frame.
+- The chat list reads CONVERSATION, NEW, LAST, and MESSAGE. The Channels list reads NEW over
+  the unread count.
+- On the desktop, the map uses the full width between the side borders.
+- The legend of the node types says "room" instead of "room server". Thus it fits on one
+  line on a handheld.
+- On the PicoCalc, F3 in the quit dialog quits, because F3 on the main menu opened it.
+- On the F-key lane, the scope chip and the window chip show only the name, so a region name
+  gets all six cells.
+- A chart keeps a fixed width for its axis labels. Thus it no longer moves sideways when the
+  peak grows.
+- The Support page sends bug reports to the Discord server.
+- On the uConsole, the radio of the AIO shows as "uConsole AIO".
+
+### Fixed
+
+- **A full battery shows 100% on Linux and macOS.** A full T1000-E showed 9 or 10%. The
+  battery was correct, but MeshTerm drew one column past the right edge of the terminal, and
+  the last digit was lost. Only the Windows console needs that extra column.
+- **More direct messages and room posts show as delivered.** MeshTerm waited approximately
+  6 s for the acknowledgement of a flood, but a flood from some hops away takes 10 s. Also,
+  an acknowledgement that came late was lost. Now MeshTerm waits approximately 15 s for a
+  flood, and a late acknowledgement still marks the message as delivered. The Courier no
+  longer sends a message again when its acknowledgement only came late.
+- **The map no longer freezes the PicoCalc when you pan or zoom quickly.** The decoded tiles
+  filled the memory of the device, and the device then used its swap on the SD card. Now
+  the map keeps its tiles in a memory budget, fills large areas faster, and checks the
+  serial port away from the screen. In a test on the device, the longest stop went from
+  11.6 s to 0.6 s. A zoom also no longer shows a black screen between the two views.
+- **The device list on the PicoCalc responds at once.** Each key press read the logo from the
+  disk again.
+- **A connection that does not open says why.** The reconnect dialog shows the reason after a
+  second failure. A device that you name on the command line shows its error before the
+  menu opens. A TCP failure names its cause: no such host, nothing on the port, no route, no
+  answer, or the companion closed the connection. A Linux Bluetooth error keeps its full
+  text.
+- **On Linux, a companion with a PIN that closes the link asks for its PIN in seconds.**
+  Before, the connection waited 60 s and did not ask. A link that drops while MeshTerm reads
+  its services is tried again.
+- **An SPI radio finds its GPIO chip by its label.** The number of the chip changes with the
+  Compute Module and the kernel. Thus the uConsole AIO failed on some CM5 kernels.
+- **A command in Repeater admin no longer takes a room post as its answer.** Before, any
+  direct message that arrived during the command was read as the answer of the node.
+- Repeater admin calls the guest password of a room server "Room password".
+- The Trophy case draws each hop at the position of its contact, as the scoring does. One hop
+  was drawn 38 km from its real place.
+
 ## [0.10.2] - 2026-09-29
 
 **It is harder to leave the app by accident. The dashboard and the Time Machine have a scope
@@ -285,7 +430,8 @@ commands.
 MeshTerm is free and open source, under the Apache 2.0 licence. The licence does not cover
 the name and the logo (refer to `NOTICE`). A fork is welcome under its own name.
 
-[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.10.2...HEAD
+[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.10.3...HEAD
+[0.10.3]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.10.3
 [0.10.2]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.10.2
 [0.10.1]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.10.1
 [0.10.0]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.10.0
