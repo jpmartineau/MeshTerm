@@ -14,7 +14,12 @@
 # This is the entry for developers. Run it from a source checkout that has its venv at
 # .venv (refer to docs/devices/cardputer-zero.md). It writes into /usr/share, so it asks
 # sudo for the two files and for nothing else. Then it restarts the launcher, so that the
-# icon appears. A package from a store will replace it, and `remove` takes it out again.
+# icon appears. `remove` takes it out again.
+#
+# The entry has its own file names and a negative icon (meshterm-dev.png). Thus it is not
+# the same as the entry of the package from the store (build-deb.sh), and the two can be
+# installed together. The package owns meshterm.desktop and meshterm.png, and this script
+# never touches them.
 set -eu
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -39,18 +44,18 @@ install)
 [Desktop Entry]
 Name=MeshTerm
 Exec=$PYTHON -m meshterm.emulator
-Icon=share/images/meshterm.png
+Icon=share/images/meshterm-dev.png
 Terminal=false
 Type=Application
 EOF
-    sudo install -m 644 "$entry" "$APPS/meshterm.desktop"
-    sudo install -m 644 "$HERE/meshterm.png" "$IMAGES/meshterm.png"
+    sudo install -m 644 "$entry" "$APPS/meshterm-dev.desktop"
+    sudo install -m 644 "$HERE/meshterm-dev.png" "$IMAGES/meshterm-dev.png"
     rm -f "$entry"
-    echo "installed $APPS/meshterm.desktop (runs $PYTHON)"
+    echo "installed $APPS/meshterm-dev.desktop (runs $PYTHON)"
     ;;
 remove)
-    sudo rm -f "$APPS/meshterm.desktop" "$IMAGES/meshterm.png"
-    echo "removed MeshTerm from the launcher"
+    sudo rm -f "$APPS/meshterm-dev.desktop" "$IMAGES/meshterm-dev.png"
+    echo "removed the checkout's MeshTerm from the launcher"
     ;;
 *)
     echo "usage: $0 [install|remove]" >&2
