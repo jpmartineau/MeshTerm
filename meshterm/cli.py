@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Typer entry point.
 
-Global options are parsed once in the callback, which builds the shared
-:class:`~meshterm.context.AppContext`. Running with no subcommand launches the
-interactive menu; otherwise the selected tool's subcommand runs. Both paths funnel
-through :func:`run_tool_command` / :func:`run_menu`, so behavior stays identical.
+The callback parses the global options one time, and builds the shared
+:class:`~meshterm.context.AppContext`. If there is no subcommand, MeshTerm starts the
+interactive menu. If there is a subcommand, MeshTerm runs the subcommand of the selected
+tool. Both paths go through :func:`run_tool_command` or :func:`run_menu`, so the behaviour
+is the same.
 """
 
 from __future__ import annotations
@@ -44,48 +45,49 @@ from .ui.renderers import OutputFormat
 from .ui.termfont import emoji_support
 from .ui.theme import make_console
 
-#: The exit-status table, printed under every ``--help``. A documented return value is
-#: half of what makes the CLI scriptable (the other half is :mod:`meshterm.ui.script`),
-#: and a caller should not have to find it in a README.
+#: The table of exit statuses, printed under each ``--help``. A documented return value is
+#: one half of what makes the CLI scriptable (the other half is :mod:`meshterm.ui.script`).
+#: A caller must not have to look for it in a README.
 EXIT_STATUS_EPILOG = "Exit status: " + " · ".join(
     f"{code} {meaning}" for code, meaning in exitcodes.MEANINGS.items()
 )
 
 
 class _GlobalOptionsAnywhere(TyperGroup):
-    """A group whose own options may be typed after the subcommand as well as before.
+    """A group whose own options the user can type after the subcommand and before it.
 
-    Click binds an option to whatever command declares it, so a global declared on the
-    callback is a parse error one word later: ``meshterm contacts --json`` failed with a
-    bare usage error while ``meshterm --json contacts`` worked. That is the wrong way
-    round for an output-format flag — ``-o json`` goes *after* the verb in every tool that
-    has one, and ``--json`` is the first thing anyone will reach for here.
+    Click binds an option to the command that declares it. Thus a global option that the
+    callback declares is a parse error one word later. ``meshterm contacts --json`` failed
+    with a bare usage error, but ``meshterm --json contacts`` worked. This is the wrong
+    order for a flag of the output format. In each tool that has such a flag, ``-o json``
+    goes after the verb, and ``--json`` is the first option that anyone will try here.
 
-    So the group's own options are lifted to the front before Click sees them, and both
-    orders mean the same run. ``--`` stops the lifting, which is the standard way to say
-    the rest is data; ``--help`` is deliberately never lifted, since ``contacts --help``
-    must stay the *contacts* help rather than silently becoming the program's.
+    Thus the group moves its own options to the front before Click sees them, and both
+    orders give the same run. ``--`` stops the moving, which is the standard way to say that
+    the rest is data. ``--help`` is never moved on purpose, because ``contacts --help`` must
+    stay the help of *contacts* and must not become the help of the program.
     """
 
     def parse_args(self, ctx: typer.Context, args: list[str]) -> list[str]:
-        """Lift this group's options out of ``args``, then parse as Click normally would."""
+        """Move the options of this group out of ``args``, then parse as Click does."""
         return super().parse_args(ctx, _globals_first(self, args))
 
 
 def _globals_first(group: TyperGroup, args: list[str]) -> list[str]:
-    """``args`` with ``group``'s own options moved ahead of the subcommand.
+    """``args`` with the own options of ``group`` moved ahead of the subcommand.
 
-    An option is told from an argument by carrying ``is_flag`` — Typer vendors Click, so
-    there is no importable ``click.Option`` to test against, and the attribute is the same
-    question asked without reaching into a private package.
+    The function finds an option, and tells it from an argument, because the option has
+    ``is_flag``. Typer includes its own copy of Click, so there is no ``click.Option`` that
+    code can import to test against. The attribute asks the same question, and the code does
+    not reach into a private package.
 
     Args:
         group: The command whose options count as global.
-        args: The argument list as typed.
+        args: The list of arguments as the user typed it.
 
     Returns:
-        A reordered list. The relative order of the options, and of everything else, is
-        preserved, so a repeated flag resolves exactly as Click would resolve it.
+        A list in a new order. The relative order of the options, and of all the other
+        items, does not change. Thus a repeated flag resolves in the same way as in Click.
     """
     takes_value: dict[str, bool] = {}
     for param in group.params:
@@ -119,12 +121,13 @@ app = typer.Typer(
     cls=_GlobalOptionsAnywhere,
     add_completion=False,
     no_args_is_help=False,
-    # Click's own plain help, not Typer's rich one: no boxed Options/Commands panels, no
-    # colour, no markup to strip out of a piped `--help`. The CLI is read by scripts, and
-    # its help is read the way every other utility's is (see meshterm.ui.script).
+    # The plain help of Click, not the rich help of Typer. There are no boxed panels for
+    # Options and Commands, no colour, and no markup to remove from a piped `--help`. Scripts
+    # read the CLI, and users read its help in the same way as the help of each other
+    # utility (refer to meshterm.ui.script).
     rich_markup_mode=None,
-    # The one description, same as the package summary and the PyPI page. See
-    # `meshterm.__doc__` — if this drifts from that, one of them is lying.
+    # The one description. It is the same as the package summary and the PyPI page. Refer to
+    # `meshterm.__doc__`. If this text and that text are different, one of them is wrong.
     help=(
         "MeshTerm is a full-featured TUI MeshCore client for your terminal. "
         "Connects to a companion over USB, Bluetooth, or TCP. "
@@ -135,12 +138,13 @@ app = typer.Typer(
 
 
 def _print_version(value: bool) -> None:
-    """Print the version and stop, the moment ``--version`` is seen.
+    """Print the version and stop, when MeshTerm sees ``--version``.
 
-    Eager, so it answers before the callback opens a database, resolves a platform or looks
-    for a radio — the one question that is true of the program rather than of a run. Bare
-    ``meshterm <version>``: the caller asked for a version, and a script reading it back has
-    one field to take. Exits ``0``, because knowing the version is a success.
+    The option is eager. Thus it answers before the callback opens a database, resolves a
+    platform, or looks for a radio. The version is true of the program and not of one run.
+    The output is bare: ``meshterm <version>``. The caller asked for a version, and a script
+    that reads it back has one field to take. It exits with ``0``, because to know the
+    version is a success.
     """
     if not value:
         return
@@ -148,11 +152,11 @@ def _print_version(value: bool) -> None:
     raise typer.Exit(exitcodes.OK)
 
 
-# The context built by the callback and consumed by subcommands within one process.
+# The context that the callback builds and the subcommands use in one process.
 _state: AppContext | None = None
 
-# The platform resolution the callback made, for the ``platform`` diagnostic subcommand
-# to report back (see :func:`platform_command`) without re-deriving it independently.
+# The platform resolution that the callback made. The ``platform`` diagnostic subcommand
+# reports it (refer to :func:`platform_command`) and does not derive it again by itself.
 _platform_resolution: Resolution | None = None
 
 
@@ -202,37 +206,38 @@ def main_callback(
         ),
     ),
 ) -> None:
-    """Build the application context and dispatch to the menu or a subcommand.
+    """Build the application context, then go to the menu or to a subcommand.
 
     Args:
-        ctx: The Click/Typer context.
-        version: Print the version and exit (handled eagerly by :func:`_print_version`).
-        profile: Named device profile to use.
-        port: Explicit serial port, overriding the profile.
-        ble: Explicit Bluetooth address, selecting the BLE transport.
-        ble_pin: Optional BLE pairing PIN for the Bluetooth companion.
-        tcp: Explicit network address ``host[:port]``, selecting the TCP transport.
-        spi: Select the radio on this machine's SPI bus, whose node MeshTerm runs itself.
+        ctx: The Click or Typer context.
+        version: Print the version and exit (:func:`_print_version` handles it eagerly).
+        profile: The name of the device profile to use.
+        port: An explicit serial port, which overrides the profile.
+        ble: An explicit Bluetooth address, which selects the BLE transport.
+        ble_pin: An optional BLE pairing PIN for the Bluetooth companion.
+        tcp: An explicit network address ``host[:port]``, which selects the TCP transport.
+        spi: Select the radio on the SPI bus of this machine. MeshTerm itself runs the node.
         mock: Whether to use the simulator instead of real hardware.
-        db_path: Override the database location. Without it, a ``--mock`` run records to
-            the simulator's own database rather than the real history.
+        db_path: Override the location of the database. If it is not set, a ``--mock`` run
+            stores to the own database of the simulator and not to the real history.
         json_output: Print the answer as JSON instead of aligned text.
-        absolute: Print times as ISO-8601 instants rather than relative ages, for this run.
-        quiet: Suppress console logging (file logging continues).
-        platform: Explicit ``--platform`` override; see :func:`meshterm.platforms.resolve`.
+        absolute: Print times as ISO-8601 instants instead of relative ages, for this run.
+        quiet: Suppress console logging (logging to the file continues).
+        platform: An explicit ``--platform`` override. Refer to
+            :func:`meshterm.platforms.resolve`.
     """
     global _state, _platform_resolution
 
-    # Resolved and installed first, before anything below it (make_console, the theme,
-    # the eventual TuiSession) reads the active platform.
+    # MeshTerm resolves and installs the platform first, before the code below it reads the
+    # active platform (make_console, the theme, and the TuiSession that follows).
     try:
         _platform_resolution = resolve(platform)
     except ValueError as exc:
         raise typer.BadParameter(str(exc), param_hint="--platform") from exc
-    # A terminal that cannot draw emoji is asked about here rather than in resolve(),
-    # which answers "which flavour" from the flag, the env and the device tree and should
-    # stay that pure — this is the *terminal's* limit, and it applies whichever flavour
-    # those three chose. See meshterm.ui.termfont.emoji_support.
+    # MeshTerm asks here whether the terminal can draw emoji, and not in resolve().
+    # resolve() answers "which flavour" from the flag, the environment, and the device
+    # tree, and it must stay that pure. This is a limit of the terminal, and it applies to
+    # the flavour that those three inputs chose. Refer to meshterm.ui.termfont.emoji_support.
     active = _platform_resolution.platform
     if not emoji_support().supported:
         active = without_emoji(active)
@@ -244,67 +249,72 @@ def main_callback(
         if given
     ]
     if spi and len(named_radios) > 1:
-        # The SPI radio is on this machine and every other flag names a radio that isn't.
+        # The SPI radio is on this machine. Each other flag names a radio that is not.
         raise typer.BadParameter(f"--spi and {named_radios[0]} name different devices; pass one")
     if mock and named_radios:
-        # One flag says "pretend", the other names one exact radio, and `--mock` used to
-        # win silently — so a scheduled `--port COM7 --mock info` reported on a simulator
-        # while reading as though it had reached the radio. Two contradictory claims about
-        # which device to talk to is a bad command line, not a precedence question.
+        # One flag says "pretend", and the other names one exact radio. `--mock` used to win
+        # without a message. Thus a scheduled `--port COM7 --mock info` reported on a
+        # simulator, and it looked as if it had reached the radio. Two claims that
+        # contradict each other about the device to talk to are a bad command line. They are
+        # not a question of precedence.
         raise typer.BadParameter(f"--mock and {named_radios[0]} name different devices; pass one")
 
     settings = Settings.load()
     if db_path is not None:
         settings.db_path = db_path
     elif mock:
-        # The simulator is a fake radio, not a fake MeshTerm: everything it adverts was
-        # written to the real history like anything a companion said, and its four
-        # invented contacts then turned up in the mesh walk, the dashboard and the map of
-        # the mesh you actually run. A pretend radio gets a pretend history —
-        # ``<config_dir>/meshterm-mock.db``, created on first use — while ``--db`` still
-        # wins, because naming a database is a deliberate claim about where a run records.
-        # ``$MESHTERM_HOME`` remains the only thing that isolates a run whole: the contact
-        # and channel caches, the outbox and the remembered devices live beside the
-        # database either way (see docs/cli/README.md).
+        # The simulator is a fake radio, but it is not a fake MeshTerm. MeshTerm stored all
+        # that the simulator sent as adverts to the real history, in the same way as
+        # anything that a companion said. Then its four invented contacts appeared in the
+        # mesh walk, the dashboard, and the map of the mesh that you really run. A pretend
+        # radio gets a pretend history: ``<config_dir>/meshterm-mock.db``, which MeshTerm
+        # creates at first use. ``--db`` still wins, because to name a database is a
+        # deliberate claim about where a run stores its data. ``$MESHTERM_HOME`` is still the
+        # only thing that isolates a whole run. The contact and channel caches, the outbox,
+        # and the remembered devices are next to the database in each case (refer to
+        # docs/cli/README.md).
         settings.db_path = settings.config_dir / MOCK_DB_FILENAME
 
-    # Two front ends, two consoles, and which one this process gets is settled here — a
-    # named subcommand is a scripted run, so it prints on the plain, colourless,
-    # never-wrapping console the CLI's output language is written for (see
-    # meshterm.ui.script); no subcommand means the menu, which needs the themed one.
+    # There are two front ends and two consoles. This code decides which console the process
+    # gets. A named subcommand is a scripted run. It prints on the plain console, without
+    # colour and without wrapping, for which the output language of the CLI is written
+    # (refer to meshterm.ui.script). If there is no subcommand, the menu runs, and it needs
+    # the console with the theme.
     scripted = ctx.invoked_subcommand is not None
     console = script.console() if scripted else make_console()
-    # Loaded before logging is configured, because how much goes in the file is one of
-    # them — and handed to the context afterwards so the file is not read twice.
+    # MeshTerm loads the preferences before it configures logging, because one preference
+    # sets how much goes into the file. It gives them to the context afterwards, so that
+    # it does not read the file two times.
     prefs = Preferences.load(settings.config_dir / PREFERENCES_FILENAME)
     if absolute:
-        # An override of the preference rather than a second switch beside it: *how
-        # MeshTerm behaves* is a preference by this project's own rule, and a flag that
-        # bypassed the registry would be a behaviour a reader could not find. Set, never
-        # saved — it is a claim about this run.
+        # An override of the preference, and not a second switch next to it. By the rule of
+        # this project, how MeshTerm behaves is a preference. A flag that bypassed the
+        # registry would be a behaviour that a user cannot find. MeshTerm sets it and never
+        # saves it, because it is a claim about this run.
         prefs.set("cli_time_format", "absolute")
     configure_logging(
-        # A scripted run's stdout carries its answer and nothing else, so log records go
-        # to stderr instead of interleaving with the data a caller is parsing.
+        # The stdout of a scripted run carries its answer and nothing else. Thus the log
+        # records go to stderr, and they do not mix with the data that a caller parses.
         script.stderr_console() if scripted else console,
         settings.config_dir,
-        # And it only hears about faults. Every *expected* failure is already reported on
-        # stderr in one line and in the exit status (see `_reported`), so echoing the same
-        # thing again as a WARNING record would say it twice; the file keeps both either
-        # way. The menu stays at INFO, where the log pane is the only place these show.
+        # A scripted run hears only about faults. MeshTerm already reports each expected
+        # failure on stderr in one line and in the exit status (refer to `_reported`). If it
+        # also printed a WARNING record, the same thing would appear two times. The file
+        # keeps both in each case. The menu stays at INFO, because the log pane is the only
+        # place where these records appear.
         level=logging.ERROR if scripted else logging.INFO,
         file_level=level_from_name(prefs.log_level),
         quiet=quiet or json_output,
     )
-    # What the file held that no preference now takes — reported only now, since the file
-    # was read before there was a log to say so in.
+    # The file can hold values that no preference takes now. MeshTerm reports them only at
+    # this point, because it read the file before there was a log to report them to.
     report_dropped(prefs, get_logger())
 
     if profile is not None and settings.resolve_profile(profile) is None:
-        # Falling through to ordinary discovery would pick whichever radio is attached, so
-        # a typo in a scheduled `--profile yagi config advert` transmits from the wrong
-        # node rather than failing. Naming a profile is a claim about *which* device, and
-        # an unkeepable claim is a bad argument.
+        # If MeshTerm continued to the ordinary discovery, it would pick the radio that is
+        # attached. Then a typing error in a scheduled `--profile yagi config advert` would
+        # transmit from the wrong node, and would not fail. To name a profile is a claim
+        # about which device to use, and a claim that MeshTerm cannot keep is a bad argument.
         known = ", ".join(sorted(settings.profiles)) or "none are defined"
         raise typer.BadParameter(f"no device profile named {profile!r} (known: {known})")
 
@@ -323,8 +333,8 @@ def main_callback(
         spi_override=spi,
         ble_pin=ble_pin,
         output=OutputFormat.JSON if json_output else OutputFormat.PLAIN,
-        # Whether a tool may stop and ask, which is a different question from what its
-        # output looks like. A pipe on stdin means nobody is there to answer.
+        # Whether a tool can stop and ask. This is a different question from the question
+        # of what its output looks like. A pipe on stdin means that nobody is there to answer.
         interactive=_stdin_is_a_person(),
         explicit_selection=(
             profile is not None or port is not None or ble is not None or tcp is not None or spi
@@ -335,36 +345,37 @@ def main_callback(
 
     if ctx.invoked_subcommand is None:
         if json_output:
-            # There is no document an interactive session can emit, and launching the
-            # full-screen menu for a caller that asked for JSON would hang whatever was
-            # waiting to parse it.
+            # An interactive session cannot emit a document. If MeshTerm started the
+            # full-screen menu for a caller that asked for JSON, the program that waits to
+            # parse the JSON would hang.
             raise typer.BadParameter("--json needs a subcommand; the menu has no document")
 
         from .ui.menu import run_menu
 
-        # Before prompt_toolkit takes the screen: this can change the console's own font,
-        # or hand the whole session to a better terminal, and the full-screen frame should
-        # be drawn once, in whatever it ends up in.
+        # This runs before prompt_toolkit takes the screen. It can change the font of the
+        # console, or give the whole session to a better terminal. MeshTerm must draw the
+        # full-screen frame one time, in the terminal where the session ends up.
         if _offer_a_console_that_can_draw_meshterm(console, prefs):
             return
 
         from .services import consolefont as vt_console_font
 
-        # The PicoCalc's whole console shares one font, so asking for the 6x8 build changes
-        # what the *shell* is drawn in too. Save the reader's font before the first paint
-        # and put it back on the way out — from the `finally` here, and from an `atexit`
-        # remember() arms, since ^Q and an unhandled error leave by other doors. This is
-        # the menu's boundary only: a scripted run prints into a console it was invited
-        # into and never touches its font.
+        # The whole console of the PicoCalc has one font. Thus a request for the 6x8 build
+        # also changes the font of the shell. MeshTerm saves the font of the user before the
+        # first paint, and puts it back when the app ends. It does this in the `finally`
+        # here, and in an `atexit` handler that remember() arms, because ^Q and an unhandled
+        # error leave through other paths. This is only the boundary of the menu. A scripted
+        # run prints into a console that it was invited into, and it never changes the font.
         saved_font = vt_console_font.remember()
         vt_console_font.apply(prefs.get("console_font"))
 
-        # The interactive session is the one that holds the stores in memory and rewrites
-        # them whole, so it is the one that claims the directory. One-shot subcommands are
-        # brief and mostly read; blocking `meshterm contacts` because a menu is open in
-        # another window would be an obstacle rather than a guard.
-        # A SIGTERM (the Cardputer launcher's end of a held Esc, a system shutting down)
-        # leaves the menu the way Quit does, instead of stopping it wherever it stood.
+        # The interactive session keeps the stores in memory and rewrites them whole. Thus it
+        # is the session that claims the directory. One-shot subcommands are short and
+        # mostly read data. If an open menu in another window blocked `meshterm contacts`,
+        # that would be an obstacle and not a guard.
+        # A SIGTERM (the end of a held Esc from the launcher of the Cardputer, or a system
+        # that shuts down) makes the menu leave in the same way as Quit. It does not stop
+        # the menu at the place where it was.
         from .services import hold_to_quit
 
         hold_to_quit.leave_on_sigterm()
@@ -376,16 +387,17 @@ def main_callback(
             raise typer.Exit(code=1) from None
         except Exception as exc:
             if type(exc).__name__ == "NoConsoleScreenBufferError":
-                # prompt_toolkit needs a real Win32 console and reports its absence in the
-                # language of its own internals. A traceback reads as "this app is broken"
-                # when the answer is "open a different terminal", so answer that instead.
+                # prompt_toolkit needs a real Win32 console. It reports that the console is
+                # absent in the language of its own internals. A traceback looks like "this
+                # app is broken", but the answer is "open a different terminal". Thus
+                # MeshTerm gives that answer.
                 get_logger().warning("no Windows console available: %s", exc)
                 _report_no_windows_console(console)
                 raise typer.Exit(code=1) from None
-            # Logged before it is re-raised, and this is the case the log matters most for:
-            # a session launched by double-clicking the executable owns its console window,
-            # so when it dies the window closes with it and takes the traceback along. The
-            # file is the only thing left to read afterwards.
+            # MeshTerm logs the error before it raises it again. In this case the log is
+            # most important. A session that the user started with a double-click on the
+            # executable owns its console window. When the session dies, the window closes
+            # and the traceback goes with it. Then the file is the only thing to read.
             get_logger().exception("the interactive session raised an unhandled error")
             _report_log_location(console, settings.config_dir)
             raise
@@ -394,25 +406,29 @@ def main_callback(
 
 
 def _offer_a_console_that_can_draw_meshterm(console: Console, prefs: Preferences) -> bool:
-    """On the classic Windows console, get the reader somewhere better than it.
+    """On the classic Windows console, move the user to a better place.
 
-    Two remedies, and they are not asked the same way.
+    There are two remedies. MeshTerm does not ask about them in the same way.
 
-    **Windows Terminal** first, and simply done. It is the only thing that gets the whole
-    app — emoji icons included, which no font can put on that console, the only Windows
-    fonts carrying any being proportional and a console taking none of them. Moving there
-    installs nothing and changes nothing, so there is one sensible answer to a question
-    that would be put to someone who has not seen the app yet and cannot judge it.
+    The first remedy is **Windows Terminal**, and MeshTerm does it without a question. It
+    is the only place that shows the whole app, with the emoji icons. No font can put emoji
+    on the classic console. The only Windows fonts that have emoji are proportional, and a
+    console does not take them. The move installs nothing and changes nothing. If MeshTerm
+    asked, it would ask someone who has not seen the app yet and cannot judge it, and the
+    question has only one sensible answer.
 
-    **A font** second, only where the move was not possible, and that one *is* asked —
-    it writes a file onto someone's machine, which is theirs to agree to.
+    The second remedy is **a font**. MeshTerm uses it only where the move was not possible.
+    MeshTerm does ask about this one, because it writes a file onto the machine of a person,
+    and that person must agree to it.
 
     Args:
         console: The console to report and ask on.
-        prefs: The preference set, read for a previous refusal and written on a new one.
+        prefs: The preference set. The function reads it for a previous refusal and writes a
+            new refusal to it.
 
     Returns:
-        ``True`` when the session is being reopened elsewhere and this one should stop.
+        ``True`` when MeshTerm reopens the session in another place and this session must
+        stop.
     """
     from .ui.termfont import classic_console
 
@@ -429,21 +445,21 @@ def _offer_a_console_that_can_draw_meshterm(console: Console, prefs: Preferences
 def _move_to_windows_terminal(console: Console) -> bool:
     """Reopen the session in Windows Terminal, where the app can draw all of itself.
 
-    Done rather than offered. The classic console cannot show a single icon whatever it is
-    given, so "reopen there?" is a question with one sensible answer, asked of someone who
-    has not seen the app yet and so cannot judge it — and asked at the worst moment, before
-    anything has been drawn. Moving costs nothing and changes nothing: no install, no
-    setting, one window instead of another.
+    MeshTerm does this and does not offer it. The classic console cannot show an icon, in
+    all cases. Thus "reopen there?" is a question that has one sensible answer. It is asked
+    of someone who has not seen the app yet and cannot judge it. It is also asked at the
+    worst moment, before MeshTerm has drawn anything. The move costs nothing and changes
+    nothing: no install, no setting, and one window instead of another.
 
-    It is announced rather than silent, and the announcement names the way to stop it,
-    because a program that opens a window you did not ask for should at least say so.
-    ``console_setup`` set to ``off`` keeps the session here for good.
+    MeshTerm announces the move, and does not do it silently. The announcement names the
+    way to stop it, because a program that opens a window that the user did not ask for
+    must at least say so. If ``console_setup`` is ``off``, the session stays here always.
 
     Args:
         console: The console to report on.
 
     Returns:
-        Whether Windows Terminal took over and this session should stand down.
+        Whether Windows Terminal took over and this session must stop.
     """
     from .core import winterminal
 
@@ -465,24 +481,27 @@ def _move_to_windows_terminal(console: Console) -> bool:
 
 
 def _offer_a_font_this_console_can_draw(console: Console, prefs: Preferences) -> None:
-    """Offer a font that can at least draw the charts and marks, for a reader who stays.
+    """Offer a font that can at least draw the charts and marks, for a user who stays.
 
-    The console does no font fallback: whatever its font lacks is a box, and its default
-    — Consolas, or Lucida Console under Windows PowerShell — lacks most of what MeshTerm
-    is drawn with, including every one of the 44 braille cells the timelines are made of.
+    The console has no font fallback. If its font does not have a glyph, the console shows
+    a box. Its default font (Consolas, or Lucida Console under Windows PowerShell) does not
+    have most of the glyphs that MeshTerm draws with. This includes each of the 44 braille
+    cells that make the timelines.
 
-    Two shapes, depending on what is already there: a machine with Windows Terminal (and
-    every Windows 11 machine) already has Cascadia, so the offer is only to *use* it; a
-    bare Windows 10 gets the offer to install the copy MeshTerm ships.
+    The offer has two forms, which depend on what is already there. A machine with Windows
+    Terminal (and each Windows 11 machine) already has Cascadia, so the offer is only to use
+    it. A bare Windows 10 gets the offer to install the copy that MeshTerm includes.
 
-    Declining is answered with a plain description of what declining looks like, and then
-    asked once more — a reader who has never seen the app has no way to know what "some
-    glyphs may not render" is going to mean. A second decline is remembered, in the
-    ``console_setup`` preference, so the question is asked twice in total and never again.
+    If the user declines, MeshTerm answers with a plain description of what the refusal
+    looks like, and asks one more time. A user who has never seen the app cannot know what
+    "some glyphs may not render" will mean. MeshTerm remembers a second refusal in the
+    ``console_setup`` preference. Thus it asks the question two times in total, and then
+    never again.
 
     Args:
         console: The console to ask on.
-        prefs: The preference set, read for a previous refusal and written on a new one.
+        prefs: The preference set. The function reads it for a previous refusal and writes a
+            new refusal to it.
     """
     from .core import consolefont
     from .ui.termfont import face_draws_charts, installed_chart_font
@@ -526,7 +545,7 @@ def _offer_a_font_this_console_can_draw(console: Console, prefs: Preferences) ->
     prefs.set("console_setup", "off")
     try:
         prefs.save()
-    except (OSError, RuntimeError) as exc:  # a read-only config dir is not fatal here
+    except (OSError, RuntimeError) as exc:  # a read-only config dir is not a fatal error here
         get_logger().warning("could not remember the console setup choice: %s", exc)
     console.print()
     console.print("[muted]   Leaving it as it is. Change your mind on the Preferences[/muted]")
@@ -535,7 +554,7 @@ def _offer_a_font_this_console_can_draw(console: Console, prefs: Preferences) ->
 
 
 def _use_a_better_console_font(console: Console, installed: str | None) -> None:
-    """Install (when needed) and select the font, and say plainly what happened."""
+    """Install the font if it is necessary, select it, and say plainly what happened."""
     from .core import consolefont
 
     face = installed
@@ -551,27 +570,29 @@ def _use_a_better_console_font(console: Console, installed: str | None) -> None:
         console.print(f"[ok]✓[/ok]  Now drawing with [accent]{face}[/accent].")
         get_logger().info("console font set to %s", face)
     else:
-        # Installed but not selected: the font is there for next time and for the
-        # console's own properties dialog, which is worth saying rather than swallowing.
+        # The font is installed but not selected. It is there for the next time, and for the
+        # properties dialog of the console. MeshTerm says this and does not hide it.
         console.print(f"[warn]⚠[/warn]  {face} is installed, but this console kept its own")
         console.print("   font. It will be available the next time you open one.")
         get_logger().warning("console refused the font %s", face)
 
 
 def _asks_yes(console: Console, prompt: str, *, default: bool = False) -> bool:
-    """Ask a yes/no question on the console.
+    """Ask a yes or no question on the console.
 
-    Not a TUI dialog: this runs before prompt_toolkit owns the screen, alongside the other
-    plain-console reports here. An unanswerable prompt — no stdin, a closed pipe — takes
-    the default, and each caller's default is the answer that costs the reader least.
+    This is not a TUI dialog. It runs before prompt_toolkit owns the screen, with the other
+    reports on the plain console here. If nobody can answer the prompt (no stdin, or a
+    closed pipe), the function uses the default. The default of each caller is the answer
+    that costs the user the least.
 
     Args:
         console: The console to ask on.
-        prompt: The question, ending in its own spacing.
-        default: The answer an empty line means, and the one an unreadable stdin takes.
+        prompt: The question, which ends with its own spacing.
+        default: The answer that an empty line means, and the answer that an unreadable stdin
+            gives.
 
     Returns:
-        Whether the reader said yes.
+        Whether the user said yes.
     """
     console.print(prompt, end="")
     try:
@@ -585,7 +606,7 @@ def _asks_yes(console: Console, prompt: str, *, default: bool = False) -> bool:
 
 
 def _report_log_location(console: Console, config_dir: Path) -> None:
-    """Point at the log after a fault, since it is the copy that outlives the terminal."""
+    """Name the log after a fault, because the log is the copy that outlives the terminal."""
     console.print()
     console.print(f"[muted]The details are in {log_path(config_dir)}[/muted]")
     console.print("[muted]Attach it to a bug report. For more detail next time, raise[/muted]")
@@ -593,11 +614,12 @@ def _report_log_location(console: Console, config_dir: Path) -> None:
 
 
 def _report_no_windows_console(console: Console) -> None:
-    """Explain a console MeshTerm cannot draw in, and how to get one it can.
+    """Explain that MeshTerm cannot draw in this console, and how to get a console that it can.
 
-    Reached when prompt_toolkit finds no Win32 console screen buffer: a Git Bash, MSYS or
-    Cygwin shell — which announce themselves as ``xterm`` and are not Windows consoles at
-    all — or a process whose output has been redirected away from one.
+    The code gets here when prompt_toolkit finds no screen buffer of a Win32 console. This
+    happens in a Git Bash, MSYS, or Cygwin shell. These announce themselves as ``xterm``,
+    and they are not Windows consoles. It also happens in a process whose output was
+    redirected away from a console.
     """
     console.print("[err]✗[/err] MeshTerm needs a Windows console, and could not find one.")
     console.print()
@@ -618,22 +640,22 @@ def _report_no_windows_console(console: Console) -> None:
     help="Show which platform MeshTerm runs as, and why",
 )
 def platform_command() -> None:
-    """Print the resolved platform and every input the resolution looked at.
+    """Print the resolved platform and each input that the resolution examined.
 
-    A diagnostic for the platform seam (see ``meshterm/platforms.py``): confirms which
-    flavour a given invocation would run as, and why — the ``--platform``/
-    ``MESHTERM_PLATFORM`` inputs, what ``/proc/device-tree/model`` reports (``None`` off
-    the actual hardware), and which of those decided it.
+    This is a diagnostic for the platform seam (refer to ``meshterm/platforms.py``). It
+    confirms the flavour that a given run would use, and why. It shows the ``--platform``
+    and ``MESHTERM_PLATFORM`` inputs, the value of ``/proc/device-tree/model`` (``None`` off
+    the real hardware), and the input that decided the result.
 
-    It also reports the terminal's own emoji verdict, which is a separate question from
-    the flavour and the usual reason a Windows session looks plainer than the screenshots
-    (see :func:`meshterm.ui.termfont.emoji_support`).
+    It also reports the emoji decision for the terminal. This is a separate question from
+    the flavour. It is the usual reason why a Windows session looks plainer than the
+    screenshots (refer to :func:`meshterm.ui.termfont.emoji_support`).
     """
     from .ui import fields
     from .ui.report import Facts
 
-    assert _platform_resolution is not None  # set by the callback that always runs first
-    assert _state is not None  # ditto
+    assert _platform_resolution is not None  # the callback sets it, and it always runs first
+    assert _state is not None  # the same
     r = _platform_resolution
     emoji = emoji_support()
     renderers.for_format(_state.output, _state.console).render(
@@ -668,27 +690,26 @@ def platform_command() -> None:
     help="Print every mark, icon, and colour MeshTerm draws",
 )
 def specimen_command() -> None:
-    """Print the visual-language specimen for the active platform.
+    """Print the specimen of the visual language for the active platform.
 
-    Every mark, icon funnel, colour scale and fold on one card, drawn through the same
-    theme and glyph machinery the TUI uses — so on the PicoCalc console it is the
-    font/palette acceptance screen, and with ``--platform picocalc-lyra`` on a desktop it
-    previews that flavour. See :mod:`meshterm.ui.specimen`.
+    The card shows each mark, icon funnel, colour scale, and fold. It is drawn through the
+    same theme and glyph code that the TUI uses. Thus on the console of the PicoCalc it is
+    the acceptance screen for the font and the palette. With ``--platform picocalc-lyra`` on
+    a desktop, it shows a preview of that flavour. Refer to :mod:`meshterm.ui.specimen`.
 
-    The one command that keeps its colour, and it builds its own themed console to do it
-    (rather than the plain one every other subcommand prints on — see
-    :mod:`meshterm.ui.script`). This is not scripted output that happens to be pretty: the
-    colour *is* the output. A monochrome specimen would test nothing.
+    This is the only command that keeps its colour. It builds its own console with the
+    theme to do this (and does not use the plain console that each other subcommand prints
+    on, refer to :mod:`meshterm.ui.script`). It is not scripted output that is also pretty.
+    The colour is the output. A specimen without colour would test nothing.
 
-    It is also the one command that *refuses* ``--json``, loudly and as a usage error.
-    There is no data behind a colour card, so a document of it would be either a lie or an
-    empty gesture — and a loud refusal is the same answer this project already gives for
-    the map, the dashboard and the live feed, which simply have no subcommand to refuse
-    from.
+    It is also the only command that refuses ``--json``, with a clear message and as a usage
+    error. There is no data behind a colour card. A document of it would be a lie or an
+    empty gesture. The project gives the same clear refusal for the map, the dashboard, and
+    the live feed. These have no subcommand that could refuse.
     """
     from .ui.specimen import specimen_lines
 
-    assert _state is not None  # set by the callback that always runs first
+    assert _state is not None  # the callback sets it, and it always runs first
     if _state.output is not OutputFormat.PLAIN:
         raise typer.BadParameter(
             "specimen has no machine-readable output — its output is the colour"
@@ -699,18 +720,20 @@ def specimen_command() -> None:
         console.print(line)
 
 
-#: Globals the emulated MeshTerm must not inherit: the emulator names its platform itself,
-#: refuses a machine-readable face, and answers ``--version`` before anything runs.
+#: Global options that the emulated MeshTerm must not inherit. The emulator names its own
+#: platform, it refuses a machine-readable face, and it answers ``--version`` before
+#: anything runs.
 _NOT_FORWARDED = {"platform", "json_output", "version", "help"}
 
 
 def _forwarded_globals(ctx: typer.Context) -> list[str]:
-    """The global options this invocation set, spelled again for the emulated MeshTerm.
+    """The global options that this run set, written again for the emulated MeshTerm.
 
-    A global is lifted ahead of the subcommand wherever it was typed (see
-    :func:`_globals_first`), so ``meshterm emulate picocalc-lyra --mock`` parses ``--mock``
-    on the outer MeshTerm. The emulated one is a second invocation, and it needs the same
-    flags, so they are read back off the root's parsed values and written out again.
+    MeshTerm moves a global option ahead of the subcommand in all cases, wherever the user
+    typed it (refer to :func:`_globals_first`). Thus ``meshterm emulate picocalc-lyra
+    --mock`` parses ``--mock`` in the outer MeshTerm. The emulated MeshTerm is a second run,
+    and it needs the same flags. Thus the function reads them from the parsed values of the
+    root, and writes them out again.
     """
     root = ctx.find_root()
     out: list[str] = []
@@ -746,20 +769,20 @@ def emulate_command(
         None, "--archive", help="Install the font from this downloaded release archive"
     ),
 ) -> None:
-    """Run MeshTerm in a window that shows a handheld's display, pixel for pixel.
+    """Run MeshTerm in a window that shows the display of a handheld, pixel for pixel.
 
-    Not a strict emulator: MeshTerm runs as itself on this machine, and what the window
-    reproduces is the device's display and keyboard — its panel, its grid, its font, the
-    colours it can show, the keys that drive its F-key lane (see :mod:`meshterm.emulator`).
-    Every global option given (``--mock``, ``--port``, ``--ble``…) is passed on to the
-    MeshTerm the window runs.
+    This is not a strict emulator. MeshTerm runs as itself on this machine. The window
+    reproduces the display and the keyboard of the device: its display, its grid, its font,
+    the colours that it can show, and the keys that drive its F-key lane (refer to
+    :mod:`meshterm.emulator`). The command passes each global option that the user gives
+    (``--mock``, ``--port``, ``--ble``…) to the MeshTerm that runs in the window.
 
-    Like ``specimen`` it has no machine-readable face — a window is no document — so it
-    refuses ``--json`` as a usage error.
+    Like ``specimen``, it has no machine-readable face, because a window is not a document.
+    Thus it refuses ``--json`` as a usage error.
     """
     from .emulator.__main__ import start
 
-    assert _state is not None  # set by the callback that always runs first
+    assert _state is not None  # the callback sets it, and it always runs first
     if _state.output is not OutputFormat.PLAIN:
         raise typer.BadParameter("emulate has no machine-readable output — it opens a window")
 
@@ -786,49 +809,52 @@ def emulate_command(
 
 
 def run_tool_command(tool: Tool, params: dict) -> None:
-    """Execute a tool from a CLI subcommand and render its result.
+    """Run a tool from a CLI subcommand and render its result.
 
-    Builds and tears down the device connection within a single event loop so the
-    ``meshcore`` client is never used across loops.
+    The function builds the device connection and takes it down again in one event loop.
+    Thus the ``meshcore`` client is never used across loops.
 
     Args:
         tool: The tool to run.
-        params: Parameters parsed from the subcommand's options.
+        params: The parameters that MeshTerm parsed from the options of the subcommand.
     """
-    assert _state is not None  # set by the callback before any subcommand runs
+    assert _state is not None  # the callback sets it before any subcommand runs
     try:
         result = asyncio.run(_drive(_execute_and_render(tool, params, _state), _state))
     except DeviceSelectionError as exc:
-        # No companion could be picked at all: nothing was transmitted, and no retry is
-        # going to help until the caller attaches a device or names one.
+        # MeshTerm could not pick any companion. It transmitted nothing, and a retry does
+        # not help until the caller attaches a device or names one.
         raise _reported(tool, exc, exitcodes.NO_DEVICE) from exc
     except DeviceCommandError as exc:
-        # A device was reached and the operation failed. Worth retrying.
+        # MeshTerm reached a device, and the operation failed. A retry is useful.
         raise _reported(tool, exc, exitcodes.DEVICE) from exc
     except (DeviceConfigError, PreferenceError) as exc:
-        # A value we were given is wrong — a bad setting key, an out-of-range preference.
-        # Retrying changes nothing; the caller has to change what it asked for.
+        # A value that the caller gave is wrong, for example a bad setting key or a
+        # preference that is out of range. A retry changes nothing. The caller must change
+        # what it asked for.
         raise _reported(tool, exc, exitcodes.FAILURE) from exc
     except (typer.BadParameter, typer.Abort, typer.Exit):
-        # A tool that rejected one of its own arguments (an unresolvable `--to`, a
-        # malformed path) raised the same thing the parser would have. It is a usage
-        # error, Click already knows how to print it and what to exit with, and it is not
-        # a fault — so it passes through without a traceback or a pointer to the log.
+        # A tool rejected one of its own arguments (for example a `--to` that cannot be
+        # resolved, or a malformed path). It raised the same exception that the parser
+        # would raise. It is a usage error. Click already knows how to print it and which
+        # exit status to use. It is not a fault. Thus it goes through, without a traceback
+        # and without a pointer to the log.
         raise
     except Exception as exc:
-        # A dropped serial link (device unplugged/powered off mid-command) can't be
-        # recovered from in a one-shot scripted run the way the interactive menu offers —
-        # but it reads as a clean message, not a traceback, and as a device failure.
+        # If the serial link drops (the device is unplugged or loses power during a
+        # command), a one-shot scripted run cannot recover, as the interactive menu can
+        # offer. But the user gets a clean message and not a traceback, and the exit status
+        # is a device failure.
         if is_connection_lost(exc):
             raise _reported(
                 tool,
                 "the connection to the device was lost (it may have been unplugged or powered off)",
                 exitcodes.DEVICE,
             ) from exc
-        # Anything else is a real fault. It still reaches the terminal as a traceback,
-        # because a person looking at one wants to see it — but it also lands in the log,
-        # which is the copy that survives the terminal being closed and is the one thing
-        # worth attaching to a bug report.
+        # Each other exception is a real fault. It still reaches the terminal as a traceback,
+        # because a person who looks at the terminal wants to see it. It also goes into the
+        # log. The log is the copy that stays after the terminal closes, and it is the one
+        # thing that is useful to attach to a bug report.
         get_logger().exception("%s raised an unhandled error", tool.name)
         _report_log_location(script.stderr_console(), _state.settings.config_dir)
         raise
@@ -839,58 +865,60 @@ def run_tool_command(tool: Tool, params: dict) -> None:
 def _stdin_is_a_person() -> bool:
     """Whether somebody is there to answer a prompt.
 
-    The test a tool actually wants before it stops and asks: a redirected or piped stdin
-    means nobody is watching, and a command that blocks there has hung rather than failed.
-    ``tx-optimize`` used to ask ``--json`` instead — a flag about output format, which
-    answers a different question and answered this one wrong in both directions.
+    This is the test that a tool needs before it stops and asks. If stdin is redirected or
+    piped, nobody watches, and a command that blocks there hangs and does not fail.
+    ``tx-optimize`` used to check ``--json`` instead. That flag is about the output format.
+    It answers a different question, and it gave a wrong answer to this question in both
+    directions.
 
-    ``isatty`` alone is not enough on Windows, and the gap is exactly the case this exists
-    for. ``NUL`` is a *character device*, so a scheduled task's empty stdin answers yes —
-    and :func:`getpass.getpass` on Windows then reads the console directly through
-    ``msvcrt`` rather than through stdin, and waits forever for a keypress nobody is there
-    to make. ``GetConsoleMode`` succeeds only on a real console handle, which is the
-    question being asked.
+    On Windows, ``isatty`` alone is not enough, and the gap is exactly the case that this
+    function exists for. ``NUL`` is a character device. Thus the empty stdin of a scheduled
+    task answers yes. Then :func:`getpass.getpass` on Windows reads the console directly
+    through ``msvcrt`` and not through stdin, and it waits forever for a key press that
+    nobody is there to make. ``GetConsoleMode`` succeeds only on the handle of a real
+    console, and that is the question that the function asks.
 
     Returns:
-        ``True`` only where stdin is a terminal somebody could type into.
+        ``True`` only where stdin is a terminal that somebody can type into.
     """
     try:
         if not sys.stdin.isatty():
             return False
-    except (AttributeError, ValueError):  # pragma: no cover - stdin closed or replaced
+    except (AttributeError, ValueError):  # pragma: no cover - stdin is closed or replaced
         return False
     if sys.platform != "win32":
         return True
-    try:  # pragma: no cover - the branch is Windows-only and needs a real handle
+    try:  # pragma: no cover - the branch is for Windows only and needs a real handle
         import ctypes
         import msvcrt
 
         mode = ctypes.c_uint()
         handle = msvcrt.get_osfhandle(sys.stdin.fileno())
         return bool(win32dll.kernel32().GetConsoleMode(handle, ctypes.byref(mode)))
-    except Exception:  # pragma: no cover - no console, or a stubbed kernel32
+    except Exception:  # pragma: no cover - there is no console, or kernel32 is a stub
         return False
 
 
 def _reported(tool: Tool, problem: object, code: int) -> typer.Exit:
-    """Log a failure, say so on stderr, and build the exit it should end on.
+    """Log a failure, say so on stderr, and build the exit with which the run must end.
 
-    The message goes to stderr in the ``program: what went wrong`` shape every utility
-    uses, so a caller redirecting stdout still sees it and a caller parsing stdout never
-    has to filter it out. It carries no mark and no colour — the exit status is what says
-    this failed, which is why it is classified (see :mod:`meshterm.core.exitcodes`).
+    The message goes to stderr in the form ``program: what went wrong``, which each utility
+    uses. Thus a caller that redirects stdout still sees it, and a caller that parses stdout
+    never has to filter it out. It has no mark and no colour. The exit status shows that the
+    run failed, and this is the reason why the status is classified (refer to
+    :mod:`meshterm.core.exitcodes`).
 
-    It is logged at warning rather than error because these are the *ordinary* failures —
-    an absent device, a wrong password — and a log holding only crashes cannot answer
-    "what happened just before it".
+    MeshTerm logs it at the level warning and not error, because these are the ordinary
+    failures, for example an absent device or a wrong password. A log that holds only
+    crashes cannot answer the question "what happened just before it".
 
     Args:
         tool: The tool that failed, for the log line.
-        problem: The exception or message to report.
+        problem: The exception or the message to report.
         code: The status to exit with.
 
     Returns:
-        The :class:`typer.Exit` for the caller to raise.
+        The :class:`typer.Exit` that the caller must raise.
     """
     get_logger().warning("%s failed: %s", tool.name, problem)
     script.stderr_console().print(f"meshterm: {problem}", style="err", highlight=False)
@@ -898,15 +926,16 @@ def _reported(tool: Tool, problem: object, code: int) -> typer.Exit:
 
 
 async def _drive(coro, ctx: AppContext):  # noqa: ANN201 - passes the awaited value through
-    """Await a coroutine then disconnect the device (but keep the repo open).
+    """Await a coroutine, then disconnect the device (but keep the repo open).
 
     Args:
         coro: The coroutine to run (a tool execution or the menu loop).
-        ctx: The application context whose device should be closed afterward.
+        ctx: The application context whose device must be closed afterward.
 
     Returns:
-        Whatever ``coro`` returned — a :class:`~meshterm.tools.base.ToolResult` on the
-        scripted path, whose ``exit_code`` the caller turns into the process status.
+        The value that ``coro`` returned. On the scripted path, this is a
+        :class:`~meshterm.tools.base.ToolResult`, and the caller changes its ``exit_code``
+        to the status of the process.
     """
     try:
         return await coro
@@ -914,32 +943,33 @@ async def _drive(coro, ctx: AppContext):  # noqa: ANN201 - passes the awaited va
         if ctx._device is not None:
             try:
                 await ctx._device.disconnect()
-            except Exception:  # noqa: BLE001 - a dead/lost link must not crash teardown
+            except Exception:  # noqa: BLE001 - a dead or lost link must not crash the teardown
                 pass
             ctx._device = None
 
 
 async def _execute_and_render(tool: Tool, params: dict, ctx: AppContext) -> ToolResult:
-    """Run a tool, render the answer it stated, and close with what it has to say.
+    """Run a tool, render the answer that it stated, and close with what it has to say.
 
-    The one place a report becomes output. The tool says what happened as data and this
-    hands it to whichever renderer ``--json`` selected, exactly as ``exit_code`` is stated
-    here and turned into a process status by the caller — which is what lets a third format
-    be a new renderer rather than an edit to twenty tools.
+    This is the only place where a report becomes output. The tool states what happened as
+    data, and this function gives the data to the renderer that ``--json`` selected. The
+    ``exit_code`` works in the same way: the tool states it here, and the caller changes it
+    to the status of the process. Thus a third format is a new renderer, and it is not an
+    edit to twenty tools.
 
-    A tool's ``message`` — "✓ applied 3 changes", "✓ traced Alice" — goes to **stderr**,
-    like every other acknowledgement (see :meth:`~meshterm.ui.surface.PlainUi.ack`). It is
-    the closing line rather than the answer, so it must stay out of a redirect; it is also
-    the count a person at a prompt actually wanted after a command that scrolled, so
-    dropping it was throwing it away to protect a stream it was never going to reach.
+    The ``message`` of a tool ("✓ applied 3 changes", "✓ traced Alice") goes to **stderr**,
+    as each other acknowledgement does (refer to :meth:`~meshterm.ui.surface.PlainUi.ack`).
+    It is the closing line and not the answer, so it must stay out of a redirect. It is also
+    the count that a person at a prompt wanted after a command that scrolled. MeshTerm
+    once dropped it. That threw it away to protect a stream that it never reached.
 
     Args:
-        tool: The tool to execute.
-        params: Parameters for the tool.
+        tool: The tool to run.
+        params: The parameters for the tool.
         ctx: The application context.
 
     Returns:
-        The tool's :class:`ToolResult`.
+        The :class:`ToolResult` of the tool.
     """
     result = await tool.execute(ctx, params)
     renderers.for_format(ctx.output, ctx.console).render(result.report)
@@ -949,7 +979,7 @@ async def _execute_and_render(tool: Tool, params: dict, ctx: AppContext) -> Tool
 
 
 def _register_all() -> None:
-    """Register every tool's CLI subcommand with the Typer app."""
+    """Register the CLI subcommand of each tool with the Typer app."""
     for tool in all_tools():
         tool.register_cli(app)
 
@@ -958,17 +988,18 @@ _register_all()
 
 
 def _owns_its_console() -> bool:
-    """Whether this process is the only one on its console — i.e. it was double-clicked.
+    """Whether this process is the only one on its console, that is, the user double-clicked it.
 
-    Windows gives a console to a process launched from Explorer and destroys it the moment
-    that process ends, so an error message is displayed and erased in the same instant.
-    Launched from a shell instead, the console belongs to the shell and survives.
+    Windows gives a console to a process that Explorer starts, and destroys the console when
+    that process ends. Thus the console shows an error message and erases it at the same
+    instant. If a shell starts the process, the console belongs to the shell and stays.
 
-    ``GetConsoleProcessList`` tells the two apart: it reports how many processes are
-    attached to this console. One is us, alone, holding a window that dies with us.
+    ``GetConsoleProcessList`` shows the difference: it reports how many processes are
+    attached to this console. If the count is one, MeshTerm is alone, and it holds a window
+    that dies with it.
 
     Returns:
-        ``True`` only on Windows, and only when nothing else shares the console.
+        ``True`` only on Windows, and only when no other process shares the console.
     """
     if sys.platform != "win32":
         return False
@@ -977,7 +1008,7 @@ def _owns_its_console() -> bool:
 
         buffer = (ctypes.c_uint * 4)()
         count = win32dll.kernel32().GetConsoleProcessList(buffer, 4)
-    except Exception:  # pragma: no cover - no console at all, or a stubbed kernel32
+    except Exception:  # pragma: no cover - there is no console at all, or kernel32 is a stub
         return False
     return count == 1
 
@@ -985,16 +1016,18 @@ def _owns_its_console() -> bool:
 def main() -> None:
     """Console-script entry point.
 
-    Holds the window open after a failure when MeshTerm owns it, because otherwise the
-    error is drawn and destroyed together and the person who needs to read it sees a
-    flash. Only on that path: a successful run should not make anyone press a key, and a
-    run from a shell leaves its output on the screen anyway.
+    After a failure, the function keeps the window open when MeshTerm owns it. If it did
+    not, the console would draw the error and destroy it together, and the person who must
+    read the error would see only a flash. This happens only on that path. A successful run
+    must not make anyone press a key, and a run from a shell leaves its output on the screen
+    in any case.
     """
     try:
-        # No wildcard expansion on Windows. Click expands an argument holding `*` into
-        # the files it matches — even one the shell passed through quoted, which it can't
-        # tell apart — so `chat send --scope '*'` arrived as the working directory's file
-        # names. No MeshTerm argument is a file glob, and `*` is the wildcard region.
+        # No wildcard expansion on Windows. Click expands an argument that has `*` to the
+        # files that match it. It does this also when the shell passed the argument
+        # through in quotes, because Click cannot see the difference. Thus
+        # `chat send --scope '*'` arrived as the file names of the working directory. No
+        # argument of MeshTerm is a file glob, and `*` is the wildcard region.
         app(windows_expand_args=False)
     except SystemExit as exit_request:
         if exit_request.code and _owns_its_console():
@@ -1007,12 +1040,12 @@ def main() -> None:
 
 
 def _wait_before_the_window_closes() -> None:
-    """Ask for a keypress so a message stays readable, and never fail doing it."""
+    """Ask for a key press so that a message stays readable. This function never fails."""
     try:
         print()
         print("-- Press Enter to close this window --")
         input()
-    except Exception:  # pragma: no cover - stdin closed, redirected, or gone
+    except Exception:  # pragma: no cover - stdin is closed, redirected, or gone
         pass
 
 

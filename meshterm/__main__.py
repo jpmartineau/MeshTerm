@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Enable ``python -m meshterm``."""
+"""Make ``python -m meshterm`` work."""
 
 from .cli import main
 

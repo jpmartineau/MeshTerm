@@ -1,20 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The platform seam: a frozen spec every consumer binds to once, at boot.
+"""The platform seam: a frozen spec that each consumer binds to once, at boot.
 
-MeshTerm runs its flavours from one codebase — the regular desktop terminal, the
-PicoCalc's 53-column framebuffer console, and the Cardputer Zero's 53×14 panel — with no
-forked screens and no runtime layer.
-A :class:`Platform` is resolved once, at process start, and held in a module-level
-singleton; everything downstream (the theme, the frame compositor, the header, the
-session's width handling) reads it at *its own* construction/call time and binds its
-behaviour accordingly, so the render loop itself never branches on platform.
+MeshTerm runs its flavours from one codebase: the regular desktop terminal, the
+PicoCalc's 53-column framebuffer console, and the display of the Cardputer Zero (53×14
+cells). There are no separate screens for each flavour and no runtime layer.
+A :class:`Platform` is resolved one time, at the start of the process, and kept in a
+module-level singleton. Each consumer downstream (the theme, the frame compositor, the
+header, the width handling of the session) reads it when that consumer is constructed or
+called, and binds its behaviour then. Thus the render loop itself never branches on the
+platform.
 
 Read the active platform through :func:`get_platform` (or the module-qualified
-``platforms.PLATFORM``) — never ``from meshterm.platforms import PLATFORM`` at a
-module's top level. That statement runs once, at import time, and copies whatever
-:data:`PLATFORM` pointed to *then*; :func:`set_platform` rebinding the module global
-afterwards would never reach that stale copy. A function call always re-reads the
-current value, so it has no such trap.
+``platforms.PLATFORM``). Never use ``from meshterm.platforms import PLATFORM`` at the top
+level of a module. That statement runs one time, at import time, and copies the value
+that :data:`PLATFORM` had *then*. If :func:`set_platform` rebinds the module global
+afterwards, the rebinding does not reach the old copy. A function call always reads the
+current value, so it does not have this problem.
 """
 
 from __future__ import annotations
@@ -28,145 +29,159 @@ from pathlib import Path
 
 @dataclass(frozen=True, slots=True)
 class Platform:
-    """One flavour's complete rendering/behaviour spec.
+    """The complete rendering and behaviour spec of one flavour.
 
-    Every field is data a consumer binds to at its own construction/call time (see the
-    module docstring) — there is no code path that branches on ``platform.name`` itself
-    outside this module and the small set of binding points documented at each field.
+    Each field is data that a consumer binds to when that consumer is constructed or called
+    (refer to the module docstring). Only this module and the binding points that each
+    field names branch on ``platform.name`` itself.
 
     Attributes:
-        name: Stable identifier — ``"regular"``, ``"picocalc-lyra"`` or ``"cardputer-zero"``
-            — used for ``--platform``/``MESHTERM_PLATFORM`` matching and diagnostics. A
-            handheld's is its product and the variant that sets it apart from its siblings:
-            M5Stack makes three Cardputers and only the Zero runs Linux, and the PicoCalc
-            takes several cores and only the Luckfox Lyra runs MeshTerm.
-        readable_cols: The readability standard (CLAUDE.md's "screens stay readable at
-            N columns") and the dual-platform gallery's test width.
-        readable_rows: The row *floor* a screen designs to. PicoCalc's live console is
-            53×26 (custom 6×12 font); a 6×8 font rebuild (P5) gives 53×40. Screens design
-            to this floor and exploit extra rows fluidly; the gallery renders picocalc-lyra at
-            both 26 and 40 rows.
-        frame_border: Whether the base screen draws inside a bordered ``Panel``. ``False``
-            swaps it for a title-bar row instead (+4 cols, +1 row reclaimed) — a PicoCalc
-            chrome saving, wired in P4.
-        menu_icons: Whether a *command row* leads with a decorative icon — the main menu's
-            per-tool mark, an action list's ``🗑``/``🕒``, a body action's ``✎``. The label
-            already names the action, so the icon is a family cue, not information; where
-            the console can only spell it as a one-glyph stand-in the cue is worth less
-            than the cells it costs and reads as noise besides (``@`` for both Map and
-            Mesh walk, ``…`` for both Live feed and Time machine — JP, on-device,
-            2026-08-11). ``False`` drops the whole lane, mark and emoji alike, and the
-            cells go to the label and its description. This is about *decoration* only:
-            a glyph that carries data — a channel's openness, a packet's class, a node's
-            type, a status mark on an outcome — is not a menu icon and is never dropped
-            (see :func:`~meshterm.ui.menus.command_label`).
-        dialog_margin: Total columns a floating dialog leaves to the backdrop it sits over
-            — half of it on each side (see
-            :func:`~meshterm.ui.tui.frame._dialog_layout`). The gutter is what makes a
-            dialog read as floating rather than as a new screen, and three columns a side
-            do that comfortably at 72. On the 53-column console the *same* gutter is a
-            twelfth of the whole display, and it costs content: a packet card's reception
-            row folds ``rssi`` onto a line of its own for want of two cells (JP, on-device,
-            2026-08-10). Two columns a side still reads as floating and buys them back.
-        dialog_row_margin: Rows a floating dialog leaves to the frame around it — the header
-            above and the footer below, plus any blank row between them and the box. One row
-            of air above and below is what lets a box read as floating on a 24-row terminal
-            (4 in all). On the Cardputer's 14 rows every row a dialog gives up is a row it
-            can't show, its side gutters already say it floats, and there is no header row
-            above the title bar, so a tall box runs from the top row to the lane (1),
-            drawing over the bar — whose ends either side of the box are blanked rather than
-            left as fragments (see :func:`~meshterm.ui.tui.frame.composite_float`). Never
-            over the lane: a dialog's lane is the dialog's own, and the keys on it are named
-            nowhere else.
-        header_atoms: Which segments compose the persistent header, in the vocabulary
-            ``"version"``, ``"device"``, ``"badges"``, ``"pulse"``, ``"battery"``. Wired
-            into :func:`~meshterm.ui.menu._header` in P4; unconsumed until then.
+        name: The stable identifier: ``"regular"``, ``"picocalc-lyra"``, or
+            ``"cardputer-zero"``. MeshTerm uses it to match ``--platform`` and
+            ``MESHTERM_PLATFORM``, and in diagnostics. The name of a handheld is its product
+            and the variant that makes it different from its siblings. M5Stack makes three
+            Cardputers, and only the Zero runs Linux. The PicoCalc takes several cores, and
+            only the Luckfox Lyra runs MeshTerm.
+        readable_cols: The readability standard (the rule in CLAUDE.md that screens stay
+            readable at N columns) and the test width of the dual-platform gallery.
+        readable_rows: The minimum number of rows that a screen is designed for. The live
+            console of the PicoCalc is 53×26 (custom 6×12 font). A rebuild with a 6×8 font
+            (P5) gives 53×40. Screens are designed for this minimum and use extra rows when
+            they are there. The gallery renders picocalc-lyra at 26 rows and at 40 rows.
+        frame_border: Whether the base screen draws inside a ``Panel`` with a border.
+            ``False`` replaces the border with a title-bar row (4 more columns and 1 more
+            row). This saves chrome on the PicoCalc. Wired in P4.
+        menu_icons: Whether a command row starts with a decorative icon: the mark of each
+            tool in the main menu, the ``🗑`` or ``🕒`` of an action list, the ``✎`` of an
+            action in a body. The label already names the action, so the icon only shows
+            the family of the action. It gives no information. Where the console can only
+            spell the icon as a stand-in of one glyph, the icon is worth less than the cells
+            that it uses, and it also looks like noise (``@`` for both Map and Mesh walk,
+            ``…`` for both Live feed and Time machine, JP, on the handheld, 2026-08-11). ``False``
+            removes the whole lane, the mark and the emoji. The cells go to the label and its
+            description. This is only about decoration. A glyph that carries data is not a
+            menu icon, and MeshTerm never removes it. Examples are the openness of a channel,
+            the class of a packet, the type of a node, and a status mark on an outcome (refer
+            to :func:`~meshterm.ui.menus.command_label`).
+        dialog_margin: The total number of columns that a floating dialog leaves to the
+            backdrop under it, half on each side (refer to
+            :func:`~meshterm.ui.tui.frame._dialog_layout`). The gutter makes the dialog look
+            like it floats, and not like a new screen. At 72 columns, three columns on each
+            side are enough. On the console of 53 columns, the same gutter is one twelfth of
+            the whole display, and it costs content. For example, the reception row of a
+            packet card puts ``rssi`` on a line of its own, because two cells are missing
+            (JP, on the handheld, 2026-08-10). Two columns on each side still look like floating,
+            and they give the cells back.
+        dialog_row_margin: The number of rows that a floating dialog leaves to the frame
+            around it. These are the header above, the footer below, and each blank row
+            between them and the box. One row of space above and one below make a box look
+            like it floats on a terminal of 24 rows (the value is 4). The Cardputer has 14
+            rows. There, each row that a dialog gives up is a row that it cannot show. The
+            side gutters already show that the dialog floats. There is no header row above
+            the title bar, so a tall box runs from the top row to the lane (the value is 1).
+            It draws over the bar, and MeshTerm blanks the ends of the bar on each side of
+            the box, so that no fragments remain (refer to
+            :func:`~meshterm.ui.tui.frame.composite_float`). The box never draws over the
+            lane. The lane of a dialog belongs to the dialog, and no other place names the
+            keys on it.
+        header_atoms: The segments that make the persistent header, from this vocabulary:
+            ``"version"``, ``"device"``, ``"badges"``, ``"pulse"``, ``"battery"``. Wired into
+            :func:`~meshterm.ui.menu._header` in P4. Nothing uses it before then.
         header_row: Whether the persistent header has a row of its own above the frame.
-            Where it doesn't (the Cardputer, JP 2026-10-03), the header's atoms ride the
-            borderless title bar's right end, after the way out — so its badges and battery
-            sit in the top-right corner they always had, one row up, and every screen gets
-            that row back — and the wordmark becomes the main menu's title (see
-            :func:`~meshterm.ui.menu._menu_title`). Only a borderless frame can fold it: the
-            bordered panel has no bar to carry it.
-        lane_deck: Which F-key lane deck the footer deals, by name (see
-            :data:`~meshterm.ui.tui.fkeys.DECKS`), or ``""`` where the footer is each
-            screen's own ``footer_hint`` string instead. A deck is everything about the lane
-            that belongs to one keyboard: which keycodes drive its slots, where its chips sit
-            on the row, how they are drawn, and which of a screen's lane definitions it reads
-            (``Screen.picocalc_lyra_lane``, ``Screen.cardputer_zero_lane``). Each handheld names its
-            own, so one can change without the other following. :attr:`footer_fkeys` is the
-            yes/no reading of it.
-        width_reclaim: Whether the session may report one extra terminal column (see
-            :class:`~meshterm.ui.tui.session._WidthExtendedOutput`). ``True`` only *lets*
-            it: the column is reclaimed where the terminal's size probe hid one, which is
-            prompt_toolkit's Windows console output and nothing else
-            (:func:`~meshterm.ui.tui.session._probe_hides_last_column`). ``False`` on
-            PicoCalc's exact-width console, where a phantom extra column tears the frame.
-            ``MESHTERM_FULL_WIDTH`` remains an explicit override on top of this default.
-        emoji: Whether emoji icons render at all. ``False`` means every icon funnel routes
-            through a compact single-BMP-glyph table instead (P3), and neither half of the
-            emoji alignment runs — the reserve-two measurement
-            (:func:`~meshterm.ui.tui.emoji_width.install`) or the column pinning
-            (:mod:`~meshterm.ui.tui.colsnap`). Once no emoji are ever drawn, every glyph on
-            screen is one the console font has verified, and the stock widths are exact.
-        font: The glyph inventory the screen is drawn in, by name (see
-            :data:`~meshterm.ui.fontset.FONTS`), or ``""`` where a terminal draws whatever
-            it is sent. A handheld's every frame is folded down to its font at the render
-            boundary (:func:`~meshterm.ui.theme.fold_text`) — an accent the font lacks
-            stripped, an emoji turned to its compact glyph, anything else still missing a
-            narrow ``?`` — so nothing the panel can't draw is ever sent to it. Storage is
-            never touched.
-        truecolor: Whether the theme may use arbitrary 24-bit SGR colour. ``False`` selects
-            a 16-slot palette theme instead (the console's real ceiling — no per-cell RGB),
-            and quantizes the two scales that would otherwise spend a gradient — the
-            per-node key hue (:func:`~meshterm.ui.theme.node_style`) and the heard-age heat
-            (:func:`~meshterm.ui.widgets._recency_style`). Wired in P3.
-        solid_braille: Whether the console font draws a braille cell's eight dots as solid
-            tiles with no gap between them or between neighbouring cells — the PicoCalc's
-            built fonts (``scripts/picocalc-lyra``) do — so braille is a true 2×4 pixel grid,
-            fine enough for what must stay contiguous. It is what lets every QR code be
-            drawn in braille, one module a dot (:mod:`~meshterm.ui.qr`). A desktop font's
-            braille is dotted, and a code drawn in it scans as nothing.
-        url_codes: Whether a chat message's URLs are drawn as QR codes under it, side by
-            side (:meth:`~meshterm.ui.chat.ChatScreen._body_lines`) — so a link read on the
-            handheld opens on a phone without being typed out. The PicoCalc's alone: it
-            takes braille codes (:attr:`solid_braille`) to be small enough to sit in a
-            transcript at all, a quarter the area of the half blocks a desktop draws, and
-            it takes rows — a short link's code is 9 of them, which the Cardputer's 14
-            cannot spare under every message that carries one (JP, 2026-10-01).
-        effects: Whether animated/decorative rendering runs at all — the braille spinner,
-            which drops to a ``LINE`` fallback. Cheaper on a console where a repaint is
-            dear. The header battery gauge is deliberately *not* behind it: its sweep is
-            the charging state itself and its blink is the last warning before the pack
-            dies, and both ride the idle repaint that happens anyway. Wired in P2/P3.
-        tick_s: The :class:`~prompt_toolkit.application.Application` refresh interval — the
-            *idle* repaint cadence only, since every screen pushes its own repaint through
-            ``TuiSession.invalidate`` when its data actually moves. Composing one frame was
-            measured at 74 ms on the PicoCalc at 53×26 (110 ms at 53×40), so a 1 Hz idle
-            tick alone costs 7–11% of a core doing nothing; it ticks at half that rate
-            there. What drifts is cosmetic — the header's per-minute pulse and its packet
-            counter — and none of it is legible at one-second resolution anyway.
-        spinner_tick_s: Seconds between frames of a "working" spinner. The single source for
-            every animated wait in the app. The desktop's 0.12 s is not a rate this hardware
-            can hold: a PicoCalc frame would claim 62% of a core at 53×26, and at 53×40 its
-            110 ms of compose would leave under 10 ms of each interval for the work actually
-            being waited on — and before this phase's savings it did not fit at all, at
-            152 ms against a 120 ms budget. It slows to a cadence the hardware can hold
-            comfortably while still reading as alive.
-        battery: Which source feeds the header's battery gauge — ``"companion"`` (read
-            from the connected MeshCore device) or ``"host"`` (the PicoCalc's own sysfs
-            ``power_supply`` driver, confirmed present in P0). Wired in P5.
-        own_display: Whether MeshTerm draws this display itself (:mod:`meshterm.emulator`)
-            rather than running in a terminal — where the app is its own terminal, nothing
-            about the one it was started from (a classic Windows console to move out of, a
-            font to offer) is its business. True on the Cardputer Zero, whose launcher gives
-            an app no console; and for any platform while the emulator shows it in a window.
-        modifier_watch: The keyboard whose Shift state the optional evdev watcher follows,
-            flipping the displayed F-key lane live while Shift is held — a case-insensitive
-            substring of the input device's name, or ``""`` to leave the watcher off.
-            Handhelds only: desktop terminals have no lane to flip, and the watcher needs
-            ``/dev/input`` access a handheld's deploy user has (the ``input`` group). Always
-            optional and lazy; wired in P4.
+            If it does not (the Cardputer, JP 2026-10-03), the atoms of the header go at the
+            right end of the title bar without a border, after the way out. Thus the badges
+            and the battery stay in the top-right corner, one row up, and each screen gets
+            that row back. The wordmark becomes the title of the main menu (refer to
+            :func:`~meshterm.ui.menu._menu_title`). Only a frame without a border can fold the
+            header in this way, because the panel with a border has no bar to carry it.
+        lane_deck: The name of the F-key lane deck that the footer deals (refer to
+            :data:`~meshterm.ui.tui.fkeys.DECKS`). It is ``""`` where the footer is the
+            ``footer_hint`` string of each screen. A deck is all the parts of the lane that
+            belong to one keyboard: the keycodes that drive its slots, the places of its
+            chips on the row, how MeshTerm draws the chips, and which lane definitions of a
+            screen it reads (``Screen.picocalc_lyra_lane``, ``Screen.cardputer_zero_lane``).
+            Each handheld names its own deck. Thus a change to one deck does not change the
+            other. :attr:`footer_fkeys` is the yes or no form of this field.
+        width_reclaim: Whether the session can report one extra terminal column (refer to
+            :class:`~meshterm.ui.tui.session._WidthExtendedOutput`). ``True`` only lets the
+            session do it. The session reclaims the column where the size probe of the
+            terminal hid one. This is the console output of prompt_toolkit on Windows, and
+            nowhere else (:func:`~meshterm.ui.tui.session._probe_hides_last_column`).
+            ``False`` on the console of the PicoCalc, which has the exact width, because a
+            phantom extra column tears the frame. ``MESHTERM_FULL_WIDTH`` is still an
+            explicit override of this default.
+        emoji: Whether emoji icons render at all. ``False`` means that each icon funnel uses
+            a compact table of single glyphs in the BMP instead (P3). Then neither part of the
+            emoji alignment runs: the reserve-two measurement
+            (:func:`~meshterm.ui.tui.emoji_width.install`) and the column pinning
+            (:mod:`~meshterm.ui.tui.colsnap`). When MeshTerm never draws emoji, each glyph on
+            the screen is a glyph that the console font was checked for, and the stock widths
+            are exact.
+        font: The name of the glyph inventory that the screen is drawn in (refer to
+            :data:`~meshterm.ui.fontset.FONTS`). It is ``""`` where a terminal draws all that
+            it receives. At the render boundary, MeshTerm folds each frame of a handheld down
+            to its font (:func:`~meshterm.ui.theme.fold_text`). It removes an accent that the
+            font does not have, changes an emoji to its compact glyph, and changes any other
+            missing character to a narrow ``?``. Thus MeshTerm never sends the display a
+            character that it cannot draw. The stored data does not change.
+        truecolor: Whether the theme can use any 24-bit SGR colour. ``False`` selects a theme
+            with a palette of 16 slots instead (the real limit of the console: no RGB for
+            each cell). It also quantizes the two scales that would use a gradient: the hue
+            of the key of each node (:func:`~meshterm.ui.theme.node_style`) and the heat of
+            the heard age (:func:`~meshterm.ui.widgets._recency_style`). Wired in P3.
+        solid_braille: Whether the console font draws the eight dots of a braille cell as
+            solid tiles, with no gap between them or between neighbouring cells. The built
+            fonts of the PicoCalc (``scripts/picocalc-lyra``) do this. Thus braille is a true
+            2×4 pixel grid, fine enough for what must stay contiguous. Because of this, each
+            QR code can be drawn in braille, with one dot for each module
+            (:mod:`~meshterm.ui.qr`). The braille of a desktop font has gaps between the dots,
+            and a code that is drawn in it does not scan.
+        url_codes: Whether MeshTerm draws the URLs of a chat message as QR codes under the
+            message, side by side (:meth:`~meshterm.ui.chat.ChatScreen._body_lines`). Thus the
+            user can open a link that was read on the handheld on a phone, and does not type
+            it. This is true only on the PicoCalc. It has braille codes
+            (:attr:`solid_braille`), which have a quarter of the area of the half blocks that
+            a desktop draws, and only then are they small enough to be in a transcript. It
+            also has the rows. The code of a short link has 9 rows, and the 14 rows of the
+            Cardputer cannot spare them under each message that has a link (JP, 2026-10-01).
+        effects: Whether animated and decorative rendering runs at all. An example is the
+            braille spinner, which changes to a ``LINE`` fallback. This costs less on a
+            console where a paint is expensive. The battery gauge of the header is not
+            controlled by this field. The sweep of the gauge is the charging state itself,
+            and its blink is the last warning before the pack is empty. Both use the idle
+            paint that happens in any case. Wired in P2/P3.
+        tick_s: The refresh interval of the
+            :class:`~prompt_toolkit.application.Application`. This is only the rate of the
+            idle paint, because each screen pushes its own paint through
+            ``TuiSession.invalidate`` when its data changes. MeshTerm composed one frame in
+            74 ms on the PicoCalc at 53×26 (110 ms at 53×40). Thus an idle tick of 1 Hz alone
+            costs 7–11% of a core that does nothing. On the PicoCalc, the tick has half that
+            rate. The things that then change late are only cosmetic: the pulse of the header
+            for each minute and its packet counter. Nobody can read them at a resolution of
+            one second in any case.
+        spinner_tick_s: The seconds between the animation steps of a "working" spinner. This
+            is the only source for each animated wait in the app. This hardware cannot
+            keep the 0.12 s of the desktop. A frame of the PicoCalc would use 62% of a core
+            at 53×26. At 53×40, its 110 ms of composing would leave less than 10 ms of each
+            interval for the work that the user waits for. Before the savings of this phase,
+            the frame did not fit at all: it needed 152 ms against a budget of 120 ms. The
+            spinner now has a rate that the hardware can keep, and it still looks alive.
+        battery: The source of the battery gauge in the header. ``"companion"`` reads it from
+            the connected MeshCore device. ``"host"`` reads it from the ``power_supply``
+            driver of sysfs on the PicoCalc itself (confirmed present in P0). Wired in P5.
+        own_display: Whether MeshTerm itself draws this display (:mod:`meshterm.emulator`)
+            and does not run in a terminal. Then the app is its own terminal, and the
+            terminal that started it is not its business. Examples are a classic Windows
+            console to move out of and a font to offer. This is true on the Cardputer Zero,
+            because its launcher gives an app no console. It is also true on each platform
+            while the emulator shows the platform in a window.
+        modifier_watch: The keyboard whose Shift state the optional evdev watcher follows.
+            While Shift is held, the watcher changes the F-key lane on the screen at once.
+            The value is a substring of the name of the input device, and case does not
+            matter. ``""`` keeps the watcher off. This is for handhelds only. Desktop
+            terminals have no lane to flip. The watcher needs access to ``/dev/input``, which
+            the deploy user of a handheld has (the ``input`` group). It is always optional
+            and lazy. Wired in P4.
     """
 
     name: str
@@ -194,11 +209,12 @@ class Platform:
 
     @property
     def footer_fkeys(self) -> bool:
-        """Whether the footer is an F-key lane rather than each screen's hint string."""
+        """Whether the footer is an F-key lane and not the hint string of each screen."""
         return bool(self.lane_deck)
 
 
-#: Exactly today's behaviour — the desktop/ssh terminal, unchanged by this seam's arrival.
+#: Exactly the behaviour of the desktop or ssh terminal. The arrival of this seam did not
+#: change it.
 REGULAR = Platform(
     name="regular",
     readable_cols=72,
@@ -224,10 +240,10 @@ REGULAR = Platform(
     modifier_watch="",
 )
 
-#: The PicoCalc/Lyra/Calculinux framebuffer console. Field values not yet consumed by a
-#: binding point (header_atoms, font, truecolor, effects beyond the
-#: two P1 bindings, tick_s, battery, modifier_watch) are P2–P5's targets, recorded here
-#: now so the seam exists before the flavour work lands.
+#: The framebuffer console of the PicoCalc, Lyra, and Calculinux. No binding point uses
+#: some of the field values yet (header_atoms, font, truecolor, effects beyond the two P1
+#: bindings, tick_s, battery, modifier_watch). They are the targets of P2 to P5. They are
+#: recorded here now, so that the seam exists before the work on the flavour arrives.
 PICOCALC_LYRA = Platform(
     name="picocalc-lyra",
     readable_cols=53,
@@ -236,9 +252,9 @@ PICOCALC_LYRA = Platform(
     menu_icons=False,
     dialog_margin=4,
     dialog_row_margin=4,
-    # JP's call (2026-08-01, post-P7 review): the handheld's header brands the app —
-    # "MeshTerm vX" — rather than naming the device/port (on a soldered radio the port
-    # never changes), and the activity pulse takes whatever room remains.
+    # JP's decision (2026-08-01, after the P7 review): the header of the handheld shows the
+    # name of the app ("MeshTerm vX") instead of the device or the port, because the port
+    # of a soldered radio never changes. The activity pulse takes the room that remains.
     header_atoms=("version", "badges", "pulse", "battery"),
     header_row=True,
     lane_deck="picocalc-lyra",
@@ -256,19 +272,21 @@ PICOCALC_LYRA = Platform(
     modifier_watch="picocalc",
 )
 
-#: M5Stack's Cardputer Zero: a 320×170 panel drawn in 6×12 cells (53×14), under a
-#: 46-key keyboard whose number keys 4–8 sit right below the display. Hardware not yet in
-#: hand (2026-10-04), so this is chosen by ``--platform cardputer-zero`` / ``MESHTERM_PLATFORM``
-#: only — no device-tree auto-detection until the device reports its own model string.
+#: The Cardputer Zero of M5Stack. Its display is 320×170 pixels, drawn in cells of 6×12
+#: (53×14). Under it is a keyboard of 46 keys, and the number keys 4 to 8 are right below
+#: the display. The hardware was not in hand on 2026-10-04. Thus only ``--platform
+#: cardputer-zero`` or ``MESHTERM_PLATFORM`` chooses this platform. There is no
+#: device-tree auto-detection until the device reports its own model string.
 #:
-#: The same 53 columns as the PicoCalc, which is why most of its flavour carries over; the
-#: new constraint is rows. It has its own F-key lane deck (Fn+4…8, chips centred over their
-#: keys), dealing the PicoCalc's lanes for now (JP, 2026-09-30). MeshTerm draws the panel
-#: itself in RGB565 (:mod:`meshterm.emulator`), so it is not held to a 16-slot palette
-#: (``truecolor``). Provisional until measured on the device: the cadences, taken from the
-#: PicoCalc; and ``effects`` off. The battery is the handheld's own BQ27220 gauge, which the
-#: kernel publishes as the ``power_supply`` ``bq27220-0`` (seen on the device, 2026-10-05) —
-#: the pack the reader is holding, whichever radio is connected, as on the PicoCalc.
+#: It has the same 53 columns as the PicoCalc, so most of the flavour of the PicoCalc
+#: applies. The new constraint is the number of rows. It has its own F-key lane deck (Fn+4…8,
+#: with the chips centred over their keys). For now, the deck deals the lanes of the PicoCalc
+#: (JP, 2026-09-30). MeshTerm draws the display itself in RGB565 (:mod:`meshterm.emulator`),
+#: so the 16-slot palette does not limit it (``truecolor``). These values are provisional
+#: until MeshTerm measures them on the device: the cadences, which come from the PicoCalc,
+#: and ``effects`` off. The battery is the BQ27220 gauge of the handheld itself. The kernel
+#: publishes it as the ``power_supply`` ``bq27220-0`` (seen on the device, 2026-10-05). It
+#: is the pack that the user holds, with any connected radio, the same as on the PicoCalc.
 CARDPUTER_ZERO = Platform(
     name="cardputer-zero",
     readable_cols=53,
@@ -277,9 +295,10 @@ CARDPUTER_ZERO = Platform(
     menu_icons=False,
     dialog_margin=4,
     dialog_row_margin=1,
-    # No header row (JP, 2026-10-03): the badges and battery ride the title bar's right
-    # end, the wordmark is the main menu's title, and the pulse, which only ever had the
-    # header's leftover cells, goes — the dashboard draws the mesh's activity in full.
+    # No header row (JP, 2026-10-03). The badges and the battery go at the right end of the
+    # title bar, and the wordmark is the title of the main menu. The pulse is removed. It
+    # only ever had the cells that the header did not use, and the dashboard draws the
+    # activity of the mesh in full.
     header_atoms=("badges", "battery"),
     header_row=False,
     lane_deck="cardputer-zero",
@@ -287,8 +306,8 @@ CARDPUTER_ZERO = Platform(
     emoji=False,
     font="cardputer-zero",
     truecolor=True,
-    # The emulator draws its own braille, as the PicoCalc's built fonts do: solid
-    # tiles, no gap between dots (meshterm/emulator/font.py, BRAILLE).
+    # The emulator draws its own braille, the same as the built fonts of the PicoCalc: solid
+    # tiles, with no gap between the dots (meshterm/emulator/font.py, BRAILLE).
     solid_braille=True,
     url_codes=False,
     effects=False,
@@ -301,38 +320,41 @@ CARDPUTER_ZERO = Platform(
 
 _BY_NAME = {p.name: p for p in (REGULAR, PICOCALC_LYRA, CARDPUTER_ZERO)}
 
-#: The active platform. Do not import this name directly (see the module docstring) —
-#: read it through :func:`get_platform`, and change it only through :func:`set_platform`.
+#: The active platform. Do not import this name directly (refer to the module docstring).
+#: Read it through :func:`get_platform`, and change it only through :func:`set_platform`.
 PLATFORM = REGULAR
 
 
 def get_platform() -> Platform:
     """Return the active :class:`Platform`.
 
-    Safe to call from anywhere, at any time — always reflects the most recent
-    :func:`set_platform` call, however that module was imported.
+    You can call this function from anywhere, at any time. It always returns the platform of
+    the most recent :func:`set_platform` call, in whatever way the module was imported.
     """
     return PLATFORM
 
 
-#: Callbacks re-run on every :func:`set_platform`, so a module can bind platform-derived
-#: state (a chosen theme, a swapped function implementation) once per *switch* instead of
-#: re-deriving it per call in a render loop. Registered via :func:`on_platform`.
+#: Callbacks that run again at each :func:`set_platform`. Thus a module can bind state that
+#: comes from the platform (a chosen theme, a changed function implementation) one time for
+#: each switch, and does not derive it again at each call in a render loop. Register a
+#: callback with :func:`on_platform`.
 _BINDINGS: list[Callable[[Platform], None]] = []
 
 
 def on_platform(binding: Callable[[Platform], None]) -> Callable[[Platform], None]:
-    """Register (and immediately run) a platform binding.
+    """Register a platform binding and run it at once.
 
-    The seam's principle is *bind at construction time, never per frame*: a consumer that
-    must swap behaviour with the platform (the theme's ``name_style`` impl, the
-    rasterizer's console cache) registers a binding here at its own import time. The
-    binding runs once right away — against the platform active *now* — and again on every
-    later :func:`set_platform`, so tests that swap platforms rebind automatically and the
-    consumer's hot path reads a plain module global.
+    The principle of the seam is to bind at construction time, never for each frame. A
+    consumer that must change its behaviour with the platform registers a binding here, at
+    its own import time. Examples are the ``name_style`` implementation of the theme and the
+    console cache of the rasterizer. The binding runs one time at once, with the platform
+    that is active now. It runs again at each later :func:`set_platform`. Thus tests that
+    change the platform bind again automatically, and the hot path of the consumer reads a
+    plain module global.
 
     Args:
-        binding: Called with the active :class:`Platform`; must be idempotent.
+        binding: A callback that is called with the active :class:`Platform`. It must be
+            idempotent.
 
     Returns:
         ``binding`` unchanged, so it can be used as a decorator.
@@ -345,11 +367,12 @@ def on_platform(binding: Callable[[Platform], None]) -> Callable[[Platform], Non
 def set_platform(platform: Platform) -> None:
     """Install ``platform`` as the active one and re-run every registered binding.
 
-    Called exactly once by the CLI callback, before :func:`~meshterm.ui.theme.make_console`
-    — every other read of :func:`get_platform` in the same process happens after this.
-    Idempotent (setting the same platform twice is a no-op in effect) and reversible, so
-    tests can swap in a platform for one test and restore the previous one afterwards
-    (see the ``_reset_platform`` autouse fixture in ``tests/conftest.py``).
+    The CLI callback calls this function one time, before
+    :func:`~meshterm.ui.theme.make_console`. Each other read of :func:`get_platform` in the
+    same process happens after this call. The function is idempotent (if you set the same
+    platform two times, the second call has no effect) and reversible. Thus a test can set a
+    platform for one test and restore the previous platform afterwards (refer to the
+    ``_reset_platform`` autouse fixture in ``tests/conftest.py``).
 
     Args:
         platform: The platform to make active.
@@ -362,18 +385,19 @@ def set_platform(platform: Platform) -> None:
 
 @dataclass(frozen=True, slots=True)
 class Resolution:
-    """What :func:`resolve` looked at and what it landed on.
+    """The inputs that :func:`resolve` examined, and the platform that it chose.
 
-    Exists so the ``meshterm platform`` diagnostic can report every input the resolution
-    considered, not just the final answer.
+    The ``meshterm platform`` diagnostic uses this class. Thus it can report each input that
+    the resolution considered, and not only the final answer.
 
     Attributes:
-        flag: The ``--platform`` value passed on the command line, if any.
-        env: The ``MESHTERM_PLATFORM`` environment variable's value, if set.
-        detected_model: The ``/proc/device-tree/model`` contents read during resolution
-            (trailing NUL/space stripped), or ``None`` when the file doesn't exist (every
-            non-Lyra machine, including every desktop and CI runner).
-        source: Which input decided the outcome — ``"--platform flag"``,
+        flag: The ``--platform`` value from the command line, if there is one.
+        env: The value of the ``MESHTERM_PLATFORM`` environment variable, if it is set.
+        detected_model: The contents of ``/proc/device-tree/model`` that the resolution read
+            (without the NUL and the spaces at the end). It is ``None`` when the file does
+            not exist (each machine that is not a Lyra, with each desktop and each CI
+            runner).
+        source: The input that decided the result: ``"--platform flag"``,
             ``"MESHTERM_PLATFORM env var"``, ``"auto-detect"``, or ``"default"``.
         platform: The resolved :class:`Platform`.
     """
@@ -385,23 +409,24 @@ class Resolution:
     platform: Platform
 
 
-#: Where the Lyra reports itself in the device tree. P0 (2026-08-01) recorded a trailing
-#: space before the NUL; re-verified live on-device during P1 (2026-08-01) as exactly
-#: ``b"Luckfox Lyra\x00"`` — no trailing space. :func:`_read_device_tree_model` strips
-#: whatever surrounds it either way, so this is a documentation correction, not a behaviour
-#: change — flagged here in case a different unit/firmware revision does carry one.
+#: Where the Lyra reports itself in the device tree. P0 (2026-08-01) recorded a space at the
+#: end, before the NUL. During P1 (2026-08-01), a check on the handheld showed exactly
+#: ``b"Luckfox Lyra\x00"``, with no space at the end. :func:`_read_device_tree_model` removes
+#: all the characters around the name in both cases. Thus this is a correction of the
+#: documentation and not a change of behaviour. It is noted here because a different unit
+#: or firmware revision can have the space.
 _LYRA_MODEL = "Luckfox Lyra"
 
 _DEVICE_TREE_MODEL_PATH = Path("/proc/device-tree/model")
 
 
 def _read_device_tree_model() -> str | None:
-    """Read and normalize ``/proc/device-tree/model``, or ``None`` when it doesn't exist.
+    """Read and normalize ``/proc/device-tree/model``, or return ``None`` if it does not exist.
 
-    Absent on every machine that isn't running a device-tree-based Linux kernel — every
-    desktop, every CI runner, and (today) every ``ssh`` session onto one of those. This is
-    deliberately the *only* signal auto-detection consults (no terminal-size guessing), so
-    a small window on the desktop is never mistaken for the device.
+    The file is absent on each machine that does not run a Linux kernel with a device tree:
+    each desktop, each CI runner, and (today) each ``ssh`` session to one of these. This is
+    the only signal that auto-detection uses, on purpose. It does not guess from the size of
+    the terminal. Thus a small window on the desktop is never mistaken for the device.
     """
     try:
         raw = _DEVICE_TREE_MODEL_PATH.read_bytes()
@@ -411,37 +436,39 @@ def _read_device_tree_model() -> str | None:
 
 
 def _lookup(name: str, *, source: str) -> Platform:
-    """Resolve a platform name to its :class:`Platform`, or raise a clear ``ValueError``."""
+    """Resolve a platform name to its :class:`Platform`, or raise a ``ValueError``."""
     try:
         return _BY_NAME[name.strip().lower()]
     except KeyError:
         choices = ", ".join(sorted(_BY_NAME))
-        # Plain ASCII: this can surface through Typer/Click's own error path (raised
-        # before make_console() has reconfigured stdout/stderr to UTF-8), which mangles
-        # non-ASCII on a legacy Windows console the way make_console's docstring warns of.
+        # Plain ASCII. This error can come through the own error path of Typer and Click.
+        # They raise it before make_console() sets stdout and stderr to UTF-8. On a legacy
+        # Windows console, this damages non-ASCII text, as the docstring of make_console
+        # warns.
         raise ValueError(
             f"unknown platform {name!r} (from {source}) - choose from: {choices}"
         ) from None
 
 
 def resolve(flag: str | None = None) -> Resolution:
-    """Decide which platform is active, and record what the decision looked at.
+    """Decide which platform is active, and record the inputs of the decision.
 
-    Resolution order: the explicit ``--platform`` flag, then the ``MESHTERM_PLATFORM``
-    environment variable, then device-tree auto-detection, then :data:`REGULAR`. Only the
-    input that actually decides the outcome is name-validated — an env var typo is
-    reported when the flag isn't set, but never blocks a session that passed an explicit
-    (correct) flag.
+    The order of resolution is: the explicit ``--platform`` flag, then the
+    ``MESHTERM_PLATFORM`` environment variable, then device-tree auto-detection, then
+    :data:`REGULAR`. MeshTerm checks the name only for the input that decides the result.
+    If the flag is not set, a typing error in the environment variable is reported. But
+    the error never blocks a session that has an explicit and correct flag.
 
     Args:
-        flag: The ``--platform`` command-line value, if given.
+        flag: The ``--platform`` value from the command line, if there is one.
 
     Returns:
-        The full :class:`Resolution`, for both immediate use (``.platform``) and the
-        ``meshterm platform`` diagnostic's report.
+        The full :class:`Resolution`. The caller can use it at once (``.platform``), and the
+        report of the ``meshterm platform`` diagnostic uses it.
 
     Raises:
-        ValueError: The deciding input (flag or env var) named an unknown platform.
+        ValueError: The input that decided the result (the flag or the environment
+            variable) named an unknown platform.
     """
     found = _resolve(flag)
     if _DRAWN_BY_MESHTERM and not found.platform.own_display:
@@ -450,7 +477,7 @@ def resolve(flag: str | None = None) -> Resolution:
 
 
 def _resolve(flag: str | None) -> Resolution:
-    """:func:`resolve`'s decision, before :func:`drawn_by_meshterm` has its say."""
+    """The decision of :func:`resolve`, before :func:`drawn_by_meshterm` has an effect."""
     env = os.environ.get("MESHTERM_PLATFORM") or None
     model = _read_device_tree_model()
     if flag:
@@ -468,20 +495,21 @@ def _resolve(flag: str | None) -> Resolution:
     return Resolution(flag, env, model, "default", REGULAR)
 
 
-#: Set while :mod:`meshterm.emulator` runs MeshTerm in a display of its own drawing (see
-#: :func:`drawn_by_meshterm`).
+#: True while :mod:`meshterm.emulator` runs MeshTerm in a display that MeshTerm draws itself
+#: (refer to :func:`drawn_by_meshterm`).
 _DRAWN_BY_MESHTERM = False
 
 
 @contextmanager
 def drawn_by_meshterm() -> Iterator[None]:
-    """Resolve every platform as one MeshTerm draws itself, for as long as this lasts.
+    """Resolve each platform as a platform that MeshTerm draws itself, while the context lasts.
 
-    The emulator shows a PicoCalc (Lyra) in a window: the platform is that device's in every
-    respect but one — no console draws it, MeshTerm does — so it resolves with
-    :attr:`Platform.own_display` set, and nothing about the terminal the emulator was
-    started from (a classic Windows console to leave, a font to offer) is the emulated
-    session's business. In-process only: nothing leaks into a child process's environment.
+    The emulator shows a PicoCalc (Lyra) in a window. The platform is the platform of that
+    device in each way but one: no console draws it, and MeshTerm does. Thus it resolves
+    with :attr:`Platform.own_display` set. The terminal that started the emulator is not the
+    business of the emulated session (for example, a classic Windows console to leave, or a
+    font to offer). This works only in the process. Nothing goes into the environment of a
+    child process.
     """
     global _DRAWN_BY_MESHTERM
     previous = _DRAWN_BY_MESHTERM
@@ -493,19 +521,19 @@ def drawn_by_meshterm() -> Iterator[None]:
 
 
 def without_emoji(platform: Platform) -> Platform:
-    """The same platform with its icons routed through the compact glyph table.
+    """The same platform, with its icons sent through the compact glyph table.
 
-    A terminal that cannot draw emoji is not a different *flavour* — the classic Windows
-    console has the desktop's width, colour depth and keyboard, and wants every other
-    thing :data:`REGULAR` says. Only the one flag moves, which is what the seam's flags
-    being independent is for: ``font`` stays unset, so accents and the rest of the BMP
-    still come through.
+    A terminal that cannot draw emoji is not a different flavour. The classic Windows
+    console has the width, the colour depth, and the keyboard of the desktop, and it needs
+    all the other values that :data:`REGULAR` has. Only the one flag changes. This is the
+    reason why the flags of the seam are independent. ``font`` stays unset, so accents and
+    the rest of the BMP still go through.
 
     Args:
         platform: The resolved platform.
 
     Returns:
-        ``platform`` itself when its icons are already compact, else a copy with
+        ``platform`` itself if its icons are already compact. If not, a copy with
         ``emoji`` cleared.
     """
     return platform if not platform.emoji else replace(platform, emoji=False)
