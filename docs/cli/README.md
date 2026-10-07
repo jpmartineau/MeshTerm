@@ -1283,6 +1283,7 @@ the room).
 | `import INDEX URL` | Import a `meshcore://channel/add` link. |
 | `import --file FILE [--dry-run]` | Add the channels of a file from `export` to the device. |
 | `export FILE` | Write each channel to a file, with its key, its send scope, and its mute. Another device can import the file. |
+| `guide` | The public channels that MeshTerm heard, with the number of messages and the age of the last one. |
 | `share INDEX` | Print the share link of a slot. |
 | `clear INDEX --yes` | Clear a slot. This removes the channel from the device. |
 | `scope INDEX [REGION] [--clear]` | Show or set the region into which the channel's messages are flooded. |
@@ -1390,6 +1391,29 @@ $ meshterm channels import --file brigade.toml --json
 $ meshterm channels export channels.toml --json
 {"path":null,"channels":0,"private":0}
 ```
+
+**The guide.** `guide` lists each public channel that MeshTerm heard, the most recently
+heard first. MeshTerm stores each channel packet that it hears, also on a channel that is
+not on your device. A packet gives its channel only as a hash, so MeshTerm tries names:
+the channels of your device, `Public`, each `#name` in a stored message, and each region
+that it knows. The key of a public channel comes from its name, and MeshTerm checks the MAC
+of each packet with that key, as the firmware does. A guessed name must match two messages
+or more, because one match of three bytes is not proof. A private channel, or a public
+channel whose name nobody wrote, has no name in the guide. stderr gives the number of
+these messages.
+
+```console
+$ meshterm channels guide
+NAME      HASH  MSGS  LAST  DEVICE
+#news     03       2   now  yes
+#harbour  26       3   now  no
+```
+
+`MSGS` counts different messages: the copies that repeaters relayed count one time.
+`DEVICE` says whether the device has the channel. To add a channel from the guide, give
+its name to `add` (`channels add 2 "#harbour"`). When MeshTerm heard no public channel,
+`guide` exits with `5`. Under `--json`, each record is
+`{"name":"#news","hash":"03","messages":2,"last_heard":"2026-10-07T05:23:09Z","on_device":true}`.
 
 #### `meshterm courier`
 

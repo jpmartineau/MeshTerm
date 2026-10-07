@@ -877,6 +877,40 @@ def _channels_manager(cols: int, rows: int) -> Screen:
     return SelectScreen(title, items, footer_hint=_MANAGER_HINT)
 
 
+def _channel_guide(cols: int, rows: int) -> Screen:
+    """The channel guide when it is widest: a name at the maximum of its lane, two sections.
+
+    One channel is on the device, so the second section and its ``✓`` rows are drawn. One
+    channel was heard long ago, so its chart is flat, and the closing note counts the
+    messages that no name matched.
+    """
+    from datetime import timedelta
+
+    from meshterm.core.channel_guide import Guide, HeardChannel
+    from meshterm.core.channel_probe import ChannelSlot
+    from meshterm.ui.channel_guide import _GUIDE_HINT, guide_items
+
+    now = datetime.now(timezone.utc)
+
+    def heard(name: str, messages: int, hours: float, busy: bool = True) -> HeardChannel:
+        histogram = tuple((i * 3 + messages) % 4 if busy else 0 for i in range(28))
+        last = now - timedelta(hours=hours)
+        return HeardChannel(name, derive_secret(name), messages, last, last, histogram)
+
+    guide = Guide(
+        channels=(
+            heard("#harbour", 7578, 0.1),
+            heard("#lakeside-watchkeeper", 49, 2),
+            heard("#ops", 129, 30),
+            heard("#old-net", 3, 2000, busy=False),
+        ),
+        unnamed=3438,
+    )
+    slots = [ChannelSlot(idx=0, name="#harbour", secret=derive_secret("#harbour"))]
+    title, items = guide_items(guide, slots)
+    return SelectScreen(title, items, footer_hint=_GUIDE_HINT)
+
+
 def _channel_detail(cols: int, rows: int, *, scope: str | None = None) -> Screen:
     """The action page of one channel, with its summary line above the rows."""
     from meshterm.core.channel_probe import ChannelSlot
@@ -1710,6 +1744,7 @@ _ENTRIES: list[_Entry] = [
     _Entry("room_page", _room_page),
     _Entry("room_login_card", _room_login_card),
     _Entry("channels_manager", _channels_manager),
+    _Entry("channel_guide", _channel_guide),
     _Entry("channel_detail", _channel_detail),
     _Entry("channel_detail_scoped", _channel_detail_scoped),
     _Entry("scope_picker", _scope_picker),

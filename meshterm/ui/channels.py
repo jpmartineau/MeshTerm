@@ -10,6 +10,9 @@ comes from the name), joining with a key that the user pastes, or importing a sc
 ``meshcore://`` link. Each change is written to the device at once, as in a phone app.
 Thus the list always shows the state of the radio.
 
+The channel guide (:mod:`meshterm.ui.channel_guide`) is the first row of "Add a channel". It
+lists the public channels that MeshTerm heard, and it adds one with Enter.
+
 The section "Export and import" moves all the channels to another device. The export writes
 each channel, with its key, its send scope, and its mute, to one TOML file. The import adds
 the channels of such a file to the device, in the order of the file, and it never removes a
@@ -121,6 +124,7 @@ _IMPORT = "__import__"
 _REORDER = "__reorder__"
 _EXPORT_FILE = "__export_file__"
 _IMPORT_FILE = "__import_file__"
+_GUIDE = "__guide__"
 
 # The sentinels of the actions of the channel detail screen.
 _QR = "qr"
@@ -243,6 +247,10 @@ async def manage_channels(ctx: AppContext) -> int:
             await _export_channels(ctx, slots)  # it writes a file, and the device stays the same
         elif choice == _IMPORT_FILE:
             changes += await _import_channels(ctx, device, capacity)
+        elif choice == _GUIDE:
+            from .channel_guide import channel_guide  # it imports this module
+
+            changes += await channel_guide(ctx, device, capacity)
         else:  # an existing slot index
             slot = next((s for s in slots if s.idx == choice), None)
             if slot is not None:
@@ -767,7 +775,7 @@ def _menu_items(
     # cells (＋ ＃ 🌐 🔑 🔗), and not one column early. The Organize row once corrected this
     # by hand, with two spaces and a comment of four lines. The column is empty where the
     # platform draws no icons, and the labels use the cells.
-    lane = icon_lane(("↕", "💾", "📂", "🌐", "＋", "＃", "🔑", "🔗"))
+    lane = icon_lane(("↕", "💾", "📂", "⚡", "🌐", "＋", "＃", "🔑", "🔗"))
     if len(slots) > 1:
         items.append(section_heading("Organize"))
         reorder = marked_label("↕", "Reorder channels", "", lane=lane)
@@ -782,8 +790,12 @@ def _menu_items(
     import_file = marked_label("📂", "Import channels…", "", lane=lane)
     transfer.append((import_file, "Add them from a file", _IMPORT_FILE))
 
-    adds = []
-    if _next_free_slot(slots, capacity) is not None:
+    # The guide is first, and it stays when each slot is full: its list of the channels heard
+    # is worth a read then too, and an add from it says why it cannot add.
+    guide = marked_label("⚡", "Channel guide…", "", lane=lane)
+    adds = [(guide, "Public channels heard on the mesh", _GUIDE)]
+    free = _next_free_slot(slots, capacity) is not None
+    if free:
         # The Public channel of the firmware has a fixed key. It has one well-known secret, so
         # it is the same channel on each slot. Offer to restore it only if no slot has it
         # already.
@@ -825,9 +837,8 @@ def _menu_items(
     items.append(section_heading("Export and import"))
     items.extend(aligned[: len(transfer)])
     items.append(section_heading("Add a channel"))
-    if adds:
-        items.extend(aligned[len(transfer) :])
-    else:
+    items.extend(aligned[len(transfer) :])
+    if not free:
         # The list already knows that there is no free slot. It says so here, and it does not
         # offer four rows that all end in the same refusal.
         items.append(Separator("  every slot is full — clear one first"))

@@ -2335,6 +2335,39 @@ class Repository:
             )
         return stats
 
+    def channel_packets(self) -> list[tuple[str, str, str, str | None, str | None]]:
+        """Each different channel packet that MeshTerm stored, for the channel guide.
+
+        A repeater relays a message, so MeshTerm often hears one message several times. The
+        copies have the same hash, MAC, and ciphertext, and the query groups them into one
+        row. Thus each row is one message, with the time when MeshTerm first and last heard
+        it. A packet with no MAC or no ciphertext cannot be checked against a key, and the
+        query does not return it.
+
+        Returns:
+            ``(chan_hash, cipher_mac, crypted, first_heard, last_heard)`` for each message.
+            The times are the stored ISO 8601 text.
+        """
+        rows = self._conn.execute(
+            "SELECT chan_hash, cipher_mac, crypted, "
+            "MIN(observed_at) AS first_at, MAX(observed_at) AS last_at FROM observations "
+            "WHERE chan_hash IS NOT NULL AND cipher_mac IS NOT NULL AND crypted IS NOT NULL "
+            "GROUP BY chan_hash, cipher_mac, crypted"
+        ).fetchall()
+        return [
+            (r["chan_hash"], r["cipher_mac"], r["crypted"], r["first_at"], r["last_at"])
+            for r in rows
+        ]
+
+    def message_texts(self) -> list[str]:
+        """The text of each stored chat message, for the names that the channel guide tests.
+
+        Returns:
+            The texts, in no specific order. An empty text is not returned.
+        """
+        rows = self._conn.execute("SELECT text FROM messages WHERE text IS NOT NULL AND text != ''")
+        return [row["text"] for row in rows]
+
     def backfill_channel_ids(self, mapping: dict[int, str]) -> int:
         """Give old channel messages an identity, keyed by the slot on which they were stored.
 

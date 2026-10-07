@@ -6,7 +6,7 @@ In the menu, the tool opens a full-screen channel manager (refer to
 With it, the user can create a private channel, add a public ``#`` channel, join a channel
 with a key, import a scanned ``meshcore://`` link, and share any channel as a QR code. On
 the CLI, the tool gives the ``list``, ``add``, ``join``, ``import``, ``share``, ``clear``,
-``scope``, and ``export`` subcommands for use in scripts. ``export`` writes all the
+``scope``, ``export``, and ``guide`` subcommands for use in scripts. ``export`` writes all the
 channels to a file, and ``import --file`` adds the channels of that file to another device
 (refer to :mod:`meshterm.core.channel_file`).
 
@@ -92,6 +92,8 @@ class ChannelsTool(Tool):
             return await self._cli_export(ctx, params)
         if action == "import_file":
             return await self._cli_import_file(ctx, params)
+        if action == "guide":
+            return await self._cli_guide(ctx)
         return await self._cli_list(ctx)
 
     async def _cli_list(self, ctx: AppContext) -> ToolResult:
@@ -338,6 +340,30 @@ class ChannelsTool(Tool):
             report=_imported(plan, dry_run),
         )
 
+    async def _cli_guide(self, ctx: AppContext) -> ToolResult:
+        """List the public channels that MeshTerm heard, as the channel guide of the menu does.
+
+        One record for each channel, the most recently heard first: its name, its hash, the
+        number of different messages, the age of the last one, and whether the device has
+        the channel. The count of the messages that no name matched goes to stderr, because
+        it is a note about the listing and not a record in it. No public channel heard is
+        exit 5.
+        """
+        from ..ui.channel_guide import read_guide
+
+        slots = list(await ctx.devstate.channel_slots())
+        guide = await read_guide(ctx, slots)
+        on_device = {slot.identity for slot in slots}
+        if guide.unnamed:
+            ctx.ui.ack(
+                f"[muted]{guide.unnamed} more messages on channels with no known name[/muted]"
+            )
+        return ToolResult(
+            summary={"channels": len(guide.channels), "unnamed": guide.unnamed},
+            report=(_guide_listing(guide, on_device),),
+            exit_code=exitcodes.OK if guide.channels else exitcodes.NO_RESULT,
+        )
+
     @staticmethod
     async def _show_qr(ctx: AppContext, name: str, url: str) -> None:
         """Draw the share link of a channel as a QR code, only in the menu.
@@ -416,6 +442,10 @@ class ChannelsTool(Tool):
                 raise typer.BadParameter("--dry-run works only with --file.")
             run_tool_command(self, {"cli_action": "import", "index": index, "url": url})
 
+        @channels_app.command("guide", help="List the public channels heard on the mesh")
+        def _guide_cmd() -> None:
+            run_tool_command(self, {"cli_action": "guide"})
+
         @channels_app.command("export", help="Write every channel to a file, for another device")
         def _export_cmd(
             path: Path = typer.Argument(..., help="Destination file"),
@@ -489,6 +519,37 @@ async def _complete_slots(ctx: AppContext) -> tuple[Any, list]:
     if not complete:
         raise DeviceCommandError("could not read every channel slot; nothing was changed")
     return device, slots
+
+
+def _guide_listing(guide: Any, on_device: set[str]) -> Listing:
+    """The channels of the guide, one record for each channel.
+
+    ``DEVICE`` says whether the device has the channel. ``LAST`` is an age, as each time in
+    a listing is. The document has the time itself, in UTC.
+    """
+    from ..ui import fields
+    from ..ui.report import Listing
+
+    return Listing(
+        key="channels",
+        columns=(
+            fields.name("name", "NAME"),
+            fields.hexid("hash", "HASH"),
+            fields.integer("messages", "MSGS"),
+            fields.when("last_heard", "LAST"),
+            fields.flag("on_device", "DEVICE"),
+        ),
+        rows=[
+            {
+                "name": channel.name,
+                "hash": channel.hash,
+                "messages": channel.messages,
+                "last_heard": channel.last_heard,
+                "on_device": channel.identity in on_device,
+            }
+            for channel in guide.channels
+        ],
+    )
 
 
 def _exported(path: Path | None, channels: int, private: int) -> Facts:
