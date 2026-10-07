@@ -28,7 +28,10 @@ that STE does not use (dashes, semicolons, contractions, Latin abbreviations).
 
 These texts are not in STE: the legal text, the written pages in `meshterm/assets/pages/`,
 the code of conduct, the fixed description of MeshTerm, the UX strings (they follow the UX
-standards below), and this file.
+standards below), and this file. This file stays dense on purpose, because it loads in
+every session. It keeps some older words that the glossary replaced: in code text and
+documents, "the reader" is **the user**, "popup" is **dialog**, "a frame on the stack" is
+**a screen on the stack**, and a truncated key is a **key prefix**, never a hash.
 
 ## Licensing — what every file and every build carries
 
