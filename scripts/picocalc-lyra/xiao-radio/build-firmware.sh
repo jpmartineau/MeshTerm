@@ -1,22 +1,24 @@
 #!/bin/sh
 # build-firmware.sh -- build the XIAO nRF52840 MeshCore radio firmware for the PicoCalc.
 #
-# Runs on your DEV MACHINE (not the Lyra). Produces a single .uf2 you flash with flash.py.
+# Run it on your DEVELOPMENT MACHINE (not the Lyra). It makes one .uf2 that you flash with
+# flash.py.
 #
 # What it does:
-#   1. clones MeshCore (pinned to a tested commit) if you don't already have it
-#   2. applies meshcore-uart1.patch -- the two changes that make this work:
+#   1. clones MeshCore (pinned to a tested commit) if you do not already have it
+#   2. applies meshcore-uart1.patch, which has the two changes that make this work:
 #        * teach the existing SERIAL_RX companion interface to build on nRF52 (upstream
-#          declares an ESP32-only HardwareSerial; nRF52 wants Serial1)
-#        * add a Xiao_nrf52_companion_radio_serial env: companion on D6/D7, and I2C moved
-#          off those pads (to internal pins 16/17) so it can't seize them
+#          declares a HardwareSerial for ESP32 only, and nRF52 needs Serial1)
+#        * add a Xiao_nrf52_companion_radio_serial env: the companion is on D6/D7, and I2C
+#          moves off those pads (to internal pins 16/17), so that I2C cannot take them
 #   3. builds that environment
 #   4. converts the .hex to .uf2
 #
-# The patch is upstream-shaped and has been submitted to MeshCore. Once it lands, delete
-# the `git apply` step below -- the env ships with the firmware and nothing needs patching.
+# The patch has the form that upstream needs, and we submitted it to MeshCore. After it is
+# merged, delete the `git apply` step below. The env is then part of the firmware, and
+# nothing needs a patch.
 #
-# Prerequisites: git, and PlatformIO CLI on PATH (`pio`). Install pio with:
+# Prerequisites: git, and the PlatformIO CLI on PATH (`pio`). Install pio with:
 #     pip install platformio
 #
 # Usage:
@@ -29,9 +31,9 @@ HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PATCH="$HERE/meshcore-uart1.patch"
 MC="${MESHCORE_DIR:-$HERE/_meshcore-build}"
 ENV=Xiao_nrf52_companion_radio_serial
-# Commit this patch was cut against (a `dev` commit -- that is the branch MeshCore takes work
-# on). Newer MeshCore may need the edits re-applied by hand (see README "Updating").
-# Override with MESHCORE_COMMIT= to track upstream.
+# The commit that this patch is made against (a `dev` commit, because `dev` is the branch
+# where MeshCore takes new work). A newer MeshCore can need the edits to be applied again by
+# hand (refer to the README, "Updating"). Set MESHCORE_COMMIT= to follow upstream.
 PIN="${MESHCORE_COMMIT:-e9edfc8e}"
 
 command -v git >/dev/null 2>&1 || { echo "ERROR: git not found"; exit 1; }

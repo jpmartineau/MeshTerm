@@ -1,20 +1,20 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
-# launcher-entry -- put MeshTerm on the Cardputer Zero's app launcher, from a checkout.
+# launcher-entry -- put MeshTerm on the app launcher of the Cardputer Zero, from a checkout.
 #
 # Usage: scripts/cardputer-zero/launcher-entry.sh [install|remove]
 #
-# The stock launcher (APPLaunch) lists what it finds in
-# /usr/share/APPLaunch/applications. An entry with Terminal=false gets the panel and the
-# keyboard to itself, the launcher naming them in APPLAUNCH_LINUX_FBDEV_DEVICE and
-# APPLAUNCH_LINUX_KEYBOARD_DEVICE -- which is how `python -m meshterm.emulator` knows to
-# draw on the panel rather than open a window. Holding Esc for three seconds still ends it:
-# the launcher sends SIGTERM, and MeshTerm takes that as a quit.
+# The stock launcher (APPLaunch) lists the entries that it finds in
+# /usr/share/APPLaunch/applications. An entry with Terminal=false gets the display and the
+# keyboard for itself. The launcher names them in APPLAUNCH_LINUX_FBDEV_DEVICE and
+# APPLAUNCH_LINUX_KEYBOARD_DEVICE. This is how `python -m meshterm.emulator` knows that it
+# must draw on the display and not open a window. If the user holds Esc for three seconds,
+# the app still ends. The launcher sends SIGTERM, and MeshTerm treats it as a quit.
 #
-# This is the developer's entry, run from a source checkout with its venv at .venv (see
-# docs/devices/cardputer-zero.md). It writes into /usr/share, so it asks sudo for the two
-# files and nothing else, then restarts the launcher so the icon appears. A store package
-# will replace it; `remove` takes it out again.
+# This is the entry for developers. Run it from a source checkout that has its venv at
+# .venv (refer to docs/devices/cardputer-zero.md). It writes into /usr/share, so it asks
+# sudo for the two files and for nothing else. Then it restarts the launcher, so that the
+# icon appears. A package from a store will replace it, and `remove` takes it out again.
 set -eu
 
 HERE=$(cd "$(dirname "$0")" && pwd)

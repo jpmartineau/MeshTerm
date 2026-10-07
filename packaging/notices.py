@@ -1,30 +1,33 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Builds ``THIRD-PARTY-NOTICES.txt``: every license the frozen build has to carry.
+"""Build ``THIRD-PARTY-NOTICES.txt``: each licence that the frozen build must carry.
 
-A one-file PyInstaller build is a *copy* of MeshTerm and of everything MeshTerm imports
-at runtime — Apache-2.0 §4(a)/(d) want MeshTerm's own LICENSE and NOTICE distributed
-with every such copy, and each MIT/BSD/PSF dependency wants its own notice kept with
-copies too. Before this module existed, the spec (``packaging/meshterm.spec``) bundled
-neither: the five installers carried the bundled font's license and nothing else.
+A PyInstaller build of one file is a copy of MeshTerm and of all the code that MeshTerm
+imports at run time. Apache-2.0 §4(a) and §4(d) require the LICENSE and NOTICE of MeshTerm
+with each such copy. Each MIT, BSD, and PSF dependency also requires that its own notice
+stays with the copies. Before this module existed, the spec (``packaging/meshterm.spec``)
+bundled neither of them. The five installers carried the licence of the bundled font and
+nothing more.
 
-This is deliberately a *generator*, not a checked-in file: a checked-in copy invites
-drift the moment a dependency changes hands or its license text, silently, the next time
-someone bumps a version pin. It runs at build time (see the spec) and again in
-:mod:`tests.test_notices`, walking the actual runtime dependency closure of the
-``mesh-term`` distribution installed in *this* interpreter — so a build's notices always
-match what that build actually bundled, on whichever platform built it. A dependency
-only one platform needs (a bleak backend, ``tomli`` below 3.11) shows up only in that
-platform's notices, because it was never in the other platforms' closures to begin with.
+This module is a generator on purpose, and not a file in git. A copy in git becomes wrong,
+with no message, when a dependency changes owner or its licence text, or when somebody
+changes a version pin. The generator runs at build time (refer to the spec) and again in
+:mod:`tests.test_notices`. It examines the real runtime dependency closure of the
+``mesh-term`` distribution that is installed in this interpreter. Thus the notices of a
+build always match the packages that the build bundled, on the platform that built it. A
+dependency that only one platform needs (a bleak backend, ``tomli`` below 3.11) is only in
+the notices of that platform, because it was never in the closures of the other platforms.
 
-Two things get no exception:
+Two rules have no exception:
 
-* A dependency with no discoverable license file fails the whole build, loudly, rather
-  than shipping quietly without one — see :data:`_VENDORED_LICENSE_GAPS` for the one
-  currently-known exception, and why it is a documented fix rather than a silent one.
-* Python's own PSF license is always the first entry, found the same way the ``license``
-  builtin finds it (reusing its own candidate-file search, not re-deriving the layout it
-  already knows) — venv or not, Windows or POSIX, a future interpreter layout it wasn't
-  written against still resolves correctly, or fails loudly instead of guessing wrong.
+* If a dependency has no licence file that the module can find, the whole build fails with
+  an error. The build must not ship with no message and without the file. Refer to
+  :data:`_VENDORED_LICENSE_GAPS` for the one exception that we know, and the reason that
+  it is a documented repair and not a silent one.
+* The PSF licence of Python is always the first entry. The module finds it in the same way
+  as the ``license`` builtin. It uses the search of that builtin for candidate files, and it
+  does not work out the layout again. Thus it resolves correctly with a venv or without
+  one, on Windows or POSIX. A future interpreter layout that the code does not expect
+  also resolves correctly, or it fails with an error and does not guess wrongly.
 """
 
 from __future__ import annotations
@@ -40,36 +43,35 @@ from packaging.markers import default_environment
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
-#: The distribution this build actually ships — see ``pyproject.toml``. Not a parameter
-#: callers are expected to vary: a notices file for a *different* distribution's closure
-#: would not describe what this build bundles.
+#: The distribution that this build ships (refer to ``pyproject.toml``). Callers must not
+#: change it as a parameter. A notices file for the closure of a different distribution
+#: does not describe what this build bundles.
 ROOT_DISTRIBUTION = "mesh-term"
 
-#: A handful of dependencies whose wheels on PyPI carry a license *classifier* or
-#: *expression* but were built and uploaded without the license text itself — verified
-#: by inspecting each wheel directly (``unzip -l``), not assumed from the metadata
-#: alone. Their real text is vendored here, unmodified, from each project's own
-#: repository — see each vendored file's own header for the exact source and the date
-#: it was pulled. Nothing else gets this treatment: a dependency not listed here still
-#: fails the build the moment its wheel has the same gap, which is the point — this is
-#: a documented fix for known, verified problems, not a general escape hatch for an
-#: unknown future one.
+#: A small number of dependencies. Their wheels on PyPI have a licence *classifier* or
+#: *expression*, but the authors built and uploaded them without the licence text. We
+#: verified this by an examination of each wheel (``unzip -l``). We did not assume it from
+#: the metadata alone. The real text is stored here, with no change, from the repository of
+#: each project. The header of each stored file gives the exact source and the date of the
+#: download. No other dependency gets this treatment. A dependency that is not in this list
+#: still fails the build if its wheel has the same gap. This is the purpose of the list: it
+#: is a documented repair for known problems that we verified. It is not a general way out
+#: for an unknown problem in the future.
 #:
-#: * ``pyserial`` — no newer release exists to bump to; 3.5 (2020) is still the latest
-#:   pyserial on PyPI, and its wheel has never shipped a LICENSE, COPYING, or NOTICE
-#:   file of any kind.
-#: * The nine ``winrt-*`` packages — bleak's Windows BLE backend (``bleak.backends.
-#:   winrt``) pulls these in only on ``sys_platform == "win32"``, so they only appear
-#:   in a Windows build's closure. All nine are generated and published together by the
-#:   pywinrt project and share the one upstream license file, which none of their
-#:   wheels include.
-#: * ``pyobjc-core`` and ``pyobjc-framework-libdispatch`` — two of the four pyobjc
-#:   packages bleak's macOS BLE backend (``bleak.backends.corebluetooth``) pulls in on
-#:   ``sys_platform == "darwin"``, so they only appear in a macOS build's closure, which
-#:   is where the 0.3.3 release build caught them. Their 12.2.2 wheels ship no license
-#:   file; the other two (Cocoa, CoreBluetooth) do, and are read from their dist-info
-#:   like everything else. All four come from the one pyobjc repository and its single
-#:   MIT text.
+#: * ``pyserial``: no newer release exists. Version 3.5 (2020) is still the latest pyserial
+#:   on PyPI, and its wheel never included a LICENSE, COPYING, or NOTICE file.
+#: * The nine ``winrt-*`` packages: the Windows BLE backend of bleak
+#:   (``bleak.backends.winrt``) adds these only on ``sys_platform == "win32"``, so they are
+#:   only in the closure of a Windows build. The pywinrt project generates and publishes all
+#:   nine together. They share one upstream licence file, which none of their wheels
+#:   include.
+#: * ``pyobjc-core`` and ``pyobjc-framework-libdispatch``: two of the four pyobjc packages
+#:   that the macOS BLE backend of bleak (``bleak.backends.corebluetooth``) adds on
+#:   ``sys_platform == "darwin"``. Thus they are only in the closure of a macOS build, and
+#:   the release build of 0.3.3 found them there. Their 12.2.2 wheels have no licence file.
+#:   The other two (Cocoa, CoreBluetooth) have one, and the module reads it from their
+#:   dist-info as it does for all other packages. All four come from the one pyobjc
+#:   repository and its single MIT text.
 _VENDORED_LICENSE_GAPS: dict[str, tuple[str, ...]] = {
     "pyserial": ("vendored-licenses/pyserial-LICENSE.txt",),
     "pyobjc-core": ("vendored-licenses/pyobjc-LICENSE.txt",),
@@ -87,18 +89,18 @@ _VENDORED_LICENSE_GAPS: dict[str, tuple[str, ...]] = {
     "winrt-windows-storage-streams": ("vendored-licenses/pywinrt-LICENSE.txt",),
 }
 
-#: Conventional bare-directory license filenames a pre-PEP-639 wheel might bundle at its
-#: dist-info root without ever declaring them in metadata. Matched case-insensitively by
-#: prefix, so ``LICENSE``, ``LICENSE.txt``, ``LICENSE-MIT`` and ``License.rst`` all hit.
+#: The usual licence file names that a wheel from before PEP 639 can bundle at its dist-info
+#: root, with no declaration in the metadata. The match ignores case and uses the prefix.
+#: Thus ``LICENSE``, ``LICENSE.txt``, ``LICENSE-MIT``, and ``License.rst`` all match.
 _CONVENTIONAL_LICENSE_PREFIXES = ("LICENSE", "LICENCE", "COPYING", "NOTICE")
 
 
 class NoticesError(RuntimeError):
-    """A license notice this build needs could not be found.
+    """A licence notice that this build needs is not available.
 
-    Raised instead of quietly omitting an entry — a bundle that silently drops a notice
-    is the exact failure mode this module exists to prevent, so a missing one stops the
-    build rather than shipping.
+    The module raises this error instead of a silent omission of an entry. A bundle that
+    drops a notice with no message is the exact failure that this module prevents. Thus a
+    missing notice stops the build, and the build does not ship.
     """
 
 
@@ -107,13 +109,14 @@ class Notice:
     """One entry in the generated notices file.
 
     Attributes:
-        name: The distribution's own name, as PyPI (or, for Python itself, the
-            ``platform`` module) spells it — not canonicalised, so the rendered file
-            reads the way a person searching for the package by its usual name expects.
+        name: The name of the distribution, as PyPI spells it. For Python itself, it is the
+            spelling of the ``platform`` module. The name is not canonicalised. Thus the
+            file shows the name that a person expects when they search for the package.
         version: The installed version.
-        summary: The license expression or classifier(s) this distribution declares,
-            for the header line. Never the license text itself — that is :attr:`text`.
-        text: The verbatim license text (one or more files, concatenated), unmodified.
+        summary: The licence expression or classifiers that this distribution declares, for
+            the header line. It is never the licence text. The licence text is :attr:`text`.
+        text: The licence text, word for word and with no change (one or more files,
+            joined).
     """
 
     name: str
@@ -123,25 +126,26 @@ class Notice:
 
 
 def _python_notice() -> Notice:
-    """Return the PSF license notice for the interpreter running this build.
+    """Return the PSF licence notice for the interpreter that runs this build.
 
-    Reuses the candidate-file search the ``license`` builtin itself does
-    (``site.setcopyright`` builds it from ``os.path.dirname(os.__file__)`` plus the
-    Windows install-root layout, the POSIX lib layout, and a same-directory fallback)
-    rather than re-deriving those paths and risking a layout it didn't anticipate. This
-    resolves correctly from inside a venv too, without any venv-specific casing here,
-    because ``os.__file__`` always points at the *base* interpreter's standard library.
+    The function uses the search for candidate files that the ``license`` builtin does.
+    ``site.setcopyright`` builds the search from ``os.path.dirname(os.__file__)``, the
+    install-root layout of Windows, the lib layout of POSIX, and a fallback in the same
+    directory. The function does not work out these paths again, because a layout that it
+    does not expect can occur. It also resolves correctly in a venv, with no special code
+    for a venv. This is because ``os.__file__`` always points to the standard library of
+    the base interpreter.
 
     Raises:
-        NoticesError: No candidate file exists, and the ``license`` builtin's own
-            fallback text (a pointer to a URL, not license text) is not good enough to
-            ship as a notice.
+        NoticesError: No candidate file exists. The fallback text of the ``license``
+            builtin is a pointer to a URL and not licence text, so it is not good enough
+            to ship as a notice.
     """
     printer = getattr(builtins, "license", None)
     if printer is None:
-        # `site` normally installs this at interpreter startup; it is only missing if
-        # the interpreter was started with `-S`. Install it ourselves rather than give
-        # up — a build environment that happens to do this shouldn't lose the notice.
+        # `site` usually installs this at the start of the interpreter. It is missing only
+        # if the interpreter started with `-S`. Install it here and do not give up. A build
+        # environment that starts the interpreter in this way must not lose the notice.
         import site
 
         site.setcopyright()
@@ -168,14 +172,15 @@ def _python_notice() -> Notice:
 
 
 def _license_summary(dist: Distribution) -> str:
-    """The short "which license" line for a distribution's header.
+    """The short "which licence" line for the header of a distribution.
 
-    Prefers the PEP 639 ``License-Expression`` (the SPDX expression a modern build
-    backend writes), then the ``License ::`` classifiers older packages rely on
-    instead, then the legacy free-text ``License`` field only if it is short enough to
-    be a label rather than a pasted-in license itself. "unspecified" is a last resort,
-    not a failure: an unclear *label* is a readability problem, unlike a missing license
-    *file*, which is a compliance one and raises instead (see :func:`_license_text`).
+    The first choice is the PEP 639 ``License-Expression`` (the SPDX expression that a
+    modern build backend writes). The second choice is the ``License ::`` classifiers that
+    older packages use. The third choice is the old free-text ``License`` field, but only
+    if it is short enough to be a label and not a pasted licence. "unspecified" is the last
+    choice, and it is not a failure. An unclear label is a problem of readability. A missing
+    licence file is a problem of compliance, and it raises an error (refer to
+    :func:`_license_text`).
     """
     metadata = dist.metadata
     expression = metadata.get("License-Expression")
@@ -191,42 +196,42 @@ def _license_summary(dist: Distribution) -> str:
 
 
 def _dist_info_files(dist: Distribution) -> list[PackagePath]:
-    """Every file RECORD lists under this distribution's own ``.dist-info`` directory.
+    """Each file that RECORD lists under the own ``.dist-info`` directory of this distribution.
 
-    Built from :attr:`Distribution.files` rather than the private
-    ``Distribution._path`` some tools reach for, so this stays correct however a future
-    ``importlib.metadata`` lays a distribution's metadata out on disk — it only ever
-    asks the distribution for files it already told us it owns.
+    The function uses :attr:`Distribution.files`. It does not use the private
+    ``Distribution._path`` that some tools use. Thus the function stays correct if a future
+    ``importlib.metadata`` puts the metadata of a distribution in a different layout on the
+    disk. The function only asks the distribution for files that it already says it owns.
     """
     files = dist.files or []
     return [f for f in files if str(f).split("/", 1)[0].endswith(".dist-info")]
 
 
 def _license_files(dist: Distribution) -> list[PackagePath]:
-    """The dist-info files that make up this distribution's license text.
+    """The dist-info files that make the licence text of this distribution.
 
-    PEP 639's ``License-File`` metadata entries win when present, matched by basename
-    since a build backend is free to nest them (hatchling puts every one under a
-    ``licenses/`` subdirectory; other tools leave them at the dist-info root). Lacking
-    any declaration at all — true of most wheels built before 2024 — falls back to
-    whatever the wheel happened to bundle at the dist-info root under a conventional
-    name, which is the same thing a person skimming the directory would go looking for.
+    If the metadata has ``License-File`` entries (PEP 639), the function uses them. It
+    matches them by base name, because a build backend can put them in a subdirectory.
+    (hatchling puts each one in a ``licenses/`` subdirectory. Other tools leave them at the
+    dist-info root.) If there is no declaration, the function uses the files that the wheel
+    has at the dist-info root, with a usual name. Most wheels from before 2024 have no
+    declaration. A person who looks in the directory searches for the same files.
     """
     dist_files = _dist_info_files(dist)
     declared = dist.metadata.get_all("License-File") or []
     if declared:
         wanted = [Path(name).name for name in declared]
         by_name = {Path(str(f)).name: f for f in dist_files}
-        # Declared order, not RECORD's, so the concatenated text below reads in the
-        # order the package's own author declared it.
+        # Use the declared order, not the order of RECORD. Thus the joined text below has
+        # the order that the author of the package declared.
         return [by_name[name] for name in wanted if name in by_name]
     return sorted(
         (
             f
             for f in dist_files
-            # dist-info root only — one path segment below the directory itself. A
-            # nested `licenses/` folder with no metadata declaration pointing at it
-            # isn't a convention to guess at.
+            # Only the dist-info root: one path segment below the directory itself. A
+            # nested `licenses/` folder that no metadata declaration names is not a
+            # convention that the function must guess.
             if str(f).count("/") == 1
             and Path(str(f)).name.upper().startswith(_CONVENTIONAL_LICENSE_PREFIXES)
         ),
@@ -235,18 +240,18 @@ def _license_files(dist: Distribution) -> list[PackagePath]:
 
 
 def _vendored_license_files(canonical_name: str) -> list[Path]:
-    """Local fallback license text for a dependency whose wheel ships none at all."""
+    """The local fallback licence text for a dependency whose wheel has none."""
     here = Path(__file__).parent
     return [here / rel for rel in _VENDORED_LICENSE_GAPS.get(canonical_name, ())]
 
 
 def _license_text(dist: Distribution, canonical_name: str) -> str:
-    """The concatenated, verbatim license text for one distribution.
+    """The licence text of one distribution, joined and word for word.
 
     Raises:
-        NoticesError: Nothing was found in the dist-info and nothing is vendored for
-            it either. Nothing downstream is in a position to notice a quietly-missing
-            notice, so this stops the build instead of shipping a gap.
+        NoticesError: The dist-info has no licence file, and no file is stored for the
+            distribution. No later step can notice a notice that is missing with no
+            message. Thus this error stops the build, and the build does not ship a gap.
     """
     matches = _license_files(dist)
     if matches:
@@ -275,23 +280,22 @@ def _license_text(dist: Distribution, canonical_name: str) -> str:
 
 
 def dependency_closure(root: str = ROOT_DISTRIBUTION) -> list[Distribution]:
-    """The installed distributions ``root`` actually pulls in on this interpreter.
+    """The installed distributions that ``root`` pulls in on this interpreter.
 
-    Walks ``Requires-Dist`` recursively (``importlib.metadata`` exposes it as
-    :attr:`Distribution.requires`), evaluating each requirement's environment marker
-    against *this* interpreter and platform — with ``extra`` forced to the empty
-    string, which is what "no extras requested" means to a marker (a bare
-    ``pip install mesh-term`` asks for none), so a requirement guarded by
-    ``extra == "dev"`` reads as false and the ``dev`` extra's own tooling (pytest,
-    pytest-asyncio, ruff) never enters the closure. A marker that instead names a
-    platform or Python version this interpreter doesn't match is excluded the same
-    way — the point of evaluating markers at all rather than reading every
-    ``Requires-Dist`` line flat.
+    The function walks ``Requires-Dist`` recursively (``importlib.metadata`` gives it as
+    :attr:`Distribution.requires`). It evaluates the environment marker of each requirement
+    against this interpreter and platform. It sets ``extra`` to the empty string. For a
+    marker, this means that no extras are requested (a bare ``pip install mesh-term`` asks
+    for none). Thus a requirement with ``extra == "dev"`` is false, and the tools of the
+    ``dev`` extra (pytest, pytest-asyncio, ruff) never enter the closure. A marker that
+    names a platform or a Python version that this interpreter does not match is excluded in
+    the same way. This is the reason to evaluate the markers, and not to read each
+    ``Requires-Dist`` line as plain text.
 
     Returns:
-        Distributions sorted by their canonical (PEP 503) name, deterministically, and
-        never including ``root`` itself — MeshTerm's own license is ``LICENSE`` and
-        ``NOTICE``, not a third-party notice.
+        The distributions, in the order of their canonical (PEP 503) name. The order is
+        deterministic. The list never includes ``root`` itself, because the licence of
+        MeshTerm is ``LICENSE`` and ``NOTICE``, and it is not a third-party notice.
     """
     environment = default_environment()
     environment["extra"] = ""
@@ -315,12 +319,12 @@ def dependency_closure(root: str = ROOT_DISTRIBUTION) -> list[Distribution]:
 
 
 def collect_notices(root: str = ROOT_DISTRIBUTION) -> list[Notice]:
-    """All notices this build's ``THIRD-PARTY-NOTICES.txt`` should carry.
+    """All the notices that ``THIRD-PARTY-NOTICES.txt`` of this build must carry.
 
-    Python's own PSF notice always comes first — Python is not a PyPI distribution
-    ``Requires-Dist`` can name, so it can never turn up in :func:`dependency_closure`.
-    Every dependency follows it, sorted by name, for a stable, reviewable diff between
-    one build's notices file and the next.
+    The PSF notice of Python is always first. Python is not a PyPI distribution that
+    ``Requires-Dist`` can name, so it can never appear in :func:`dependency_closure`. Each
+    dependency follows it, in the order of its name. Thus the difference between the notices
+    file of one build and the next is stable, and a person can examine it.
     """
     notices = [_python_notice()]
     for dist in dependency_closure(root):
@@ -352,7 +356,7 @@ _RULE = "=" * 78
 
 
 def render(notices: list[Notice]) -> str:
-    """Render ``notices`` as one deterministic, newline-terminated UTF-8 document."""
+    """Render ``notices`` as one UTF-8 document that is deterministic and ends with a newline."""
     blocks = [_HEADER]
     for notice in notices:
         header = f"{notice.name} {notice.version} — {notice.summary}"
@@ -361,14 +365,14 @@ def render(notices: list[Notice]) -> str:
 
 
 def write_third_party_notices(path: str | Path, root: str = ROOT_DISTRIBUTION) -> Path:
-    r"""Generate and write ``THIRD-PARTY-NOTICES.txt`` to ``path``.
+    r"""Generate ``THIRD-PARTY-NOTICES.txt`` and write it to ``path``.
 
-    Written as raw UTF-8 bytes rather than through text mode, so a Windows build
-    doesn't translate the ``\n`` line endings to ``\r\n`` — the file is meant to be
-    byte-identical in content across the platforms that each build it.
+    The function writes raw UTF-8 bytes. It does not use text mode. Thus a Windows build
+    does not change the ``\n`` line endings to ``\r\n``. The content of the file must be the
+    same, byte for byte, on each platform that builds it.
 
     Returns:
-        ``path``, resolved to a :class:`~pathlib.Path`, for the caller's convenience.
+        ``path``, as a :class:`~pathlib.Path`, for the convenience of the caller.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

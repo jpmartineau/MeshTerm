@@ -3,15 +3,16 @@
 #
 # Usage: wifi-set
 #
-# Shows known and nearby networks for reference, asks for an SSID and a
-# password, writes the credential the way iwd expects it
-# (/var/lib/iwd/<SSID>.psk -- the same pattern calculinux-setup.sh uses for
-# first-boot provisioning), then asks iwd to join it right away. Re-execs
-# itself under sudo if not already root, since /var/lib/iwd is root-only.
+# The script shows the known and nearby networks for reference. It asks for an SSID and a
+# password. It writes the credential in the form that iwd expects
+# (/var/lib/iwd/<SSID>.psk, the same pattern that calculinux-setup.sh uses for
+# provisioning at the first boot). Then it asks iwd to join the network at once. If the
+# user is not root, the script runs itself again under sudo, because /var/lib/iwd is
+# only for root.
 #
-# Unrelated to /etc/wifi-kick.sh: that one only nudges the rtl8xxxu dongle
-# past a cold-boot firmware-load race so iwd can associate to whatever
-# network is already known -- it does not care which network that is.
+# This script is not related to /etc/wifi-kick.sh. That script only nudges the rtl8xxxu
+# dongle past a race in the firmware load at a cold boot, so that iwd can associate to a
+# network that is already known. It does not care which network that is.
 
 set -eu
 

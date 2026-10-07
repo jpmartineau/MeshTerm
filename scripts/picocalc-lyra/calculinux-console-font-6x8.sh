@@ -1,42 +1,44 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0-only
 # calculinux-console-font-6x8.sh -- build and install meshterm8.psf.gz, the 6x8 (53x40)
-# console font for the PicoCalc panel.
+# console font for the PicoCalc display.
 #
-# LICENCE -- READ THIS FIRST. The base bitmap embedded below is the Linux kernel's own
-# font_6x8 (lib/fonts/font_6x8.c), which is GPL-2.0. This script is therefore GPL-2.0-only
-# and so is the PSF it produces; the full licence text sits beside it as
-# scripts/picocalc-lyra/LICENSE.GPL-2.0. The rest of MeshTerm is Apache-2.0 and stays that way: the
-# produced meshterm8.psf.gz is a DATA FILE the Linux kernel console reads with setfont, on
-# the device, at run time. MeshTerm never links it, never bundles it, and never
-# redistributes it -- it is built on the machine it runs on, from this script, and the
-# Python package excludes scripts/ from its sdist entirely. Nothing GPL-2.0 enters the
-# distributed program; MeshTerm merely names a file on the console's filesystem.
+# LICENCE -- READ THIS FIRST. The base bitmap that is embedded below is the own font_6x8
+# of the Linux kernel (lib/fonts/font_6x8.c), which is GPL-2.0. Thus this script is
+# GPL-2.0-only, and the PSF that it produces is GPL-2.0-only too. The full licence text is
+# beside this script, as scripts/picocalc-lyra/LICENSE.GPL-2.0. The rest of MeshTerm is
+# Apache-2.0, and it stays Apache-2.0. The file meshterm8.psf.gz that this script produces
+# is a DATA FILE. The console of the Linux kernel reads it with setfont, on the handheld,
+# at run time. MeshTerm never links it, never bundles it, and never redistributes it. The
+# handheld builds it on the machine where it runs, from this script. The Python package
+# does not have scripts/ in its sdist at all. No GPL-2.0 material enters the distributed
+# program. MeshTerm only names a file on the filesystem of the console.
 #
-# WHERE THE SHARED PARTS LIVE. The donor, alias and keeper tables, the braille generator
-# and the PSF2 writer are NOT duplicated here. They are read out of
-# calculinux-console-font-6x12.sh (Apache-2.0), between its "shared generator (BEGIN)" and
-# "(END)" marker lines, and exec'd -- so the two fonts can never drift, and a repo test
-# that parses those tables has exactly one file to parse. That file must sit beside this
-# one; point SHARED at it if it does not. The shared generator is additionally offered
-# under GPL-2.0-only by its source file, permitting its extraction and use here.
+# WHERE THE SHARED PARTS ARE. This script does NOT have its own copy of the donor, alias,
+# and keeper tables, the braille generator, and the PSF2 writer. It reads them out of
+# calculinux-console-font-6x12.sh (Apache-2.0), between the marker lines "shared generator
+# (BEGIN)" and "(END)" of that file, and executes them with exec. Thus the two fonts
+# cannot differ, and a test in the repository that parses those tables has only one file
+# to parse. That file must be beside this script. If it is not, set SHARED to the path of
+# that file. The source file also offers the shared generator under GPL-2.0-only. This
+# permits the extraction and the use of the generator here.
 #
 # WHAT IS ONLY HERE. The GPL-2.0 base bitmap, its CP437 unicode mapping, and the same 20
-# marks redrawn for the shorter cell (MARKS8).
+# marks that are redrawn for the shorter cell (MARKS8).
 #
-# The 6x8 base has CP437 coverage, so unlike the Terminus base it has NO CYRILLIC: a node
-# named in Cyrillic draws as tofu in this font. The keeper list drops the Cyrillic canary
-# accordingly, and only pi is checked.
+# The 6x8 base has CP437 coverage. Thus, unlike the Terminus base, it has NO CYRILLIC. A
+# node with a name in Cyrillic draws as tofu in this font. The keeper list does not have
+# the Cyrillic canary, and the script checks only pi.
 #
-# Run as root on the Lyra, either on its own or through calculinux-console-font-6x12.sh, which
-# calls it:
+# Run this script as root on the Lyra, alone or through calculinux-console-font-6x12.sh,
+# which calls it:
 #
 #     sh calculinux-console-font-6x8.sh
 #
-# Idempotent. It installs the font and nothing else -- it never runs setfont, never touches
-# /etc/vconsole.conf and never touches the palette. Choose the font live from MeshTerm's
-# Preferences page (Display -> Console font), or by hand with
-# `setfont /usr/share/consolefonts/meshterm8.psf.gz`.
+# The script is idempotent. It installs the font and nothing else. It never runs setfont,
+# never changes /etc/vconsole.conf, and never changes the palette. To choose the font
+# live, use the Preferences page of MeshTerm (Display -> Console font), or use this
+# command by hand: `setfont /usr/share/consolefonts/meshterm8.psf.gz`.
 set -eu
 
 FONT_NAME=meshterm
@@ -45,7 +47,7 @@ OUT8="$CONSOLEFONTS/${FONT_NAME}8.psf.gz"
 HERE=$(dirname "$0")
 SHARED=${SHARED:-"$HERE/calculinux-console-font-6x12.sh"}   # Apache-2.0; holds the shared tables
 
-# --- preflight: fail early with a plain reason, never half-apply -----------------------
+# --- preflight: stop early with a plain reason, and never apply half of the change ------
 [ "$(id -u)" = 0 ] || { echo "error: run as root (writes $CONSOLEFONTS)" >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo "error: python3 not found" >&2; exit 1; }
 [ -f "$SHARED" ] || { echo "error: shared generator not found: $SHARED" >&2; exit 1; }

@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Flash the built .uf2 onto the XIAO nRF52840 via its UF2 bootloader.
+"""Flash the built .uf2 onto the XIAO nRF52840 through its UF2 bootloader.
 
-Runs on your DEV MACHINE with the XIAO's own USB-C plugged into it. Works on
-Windows / Linux / macOS.
+This script runs on your development machine. The USB-C port of the XIAO must be connected
+to that machine. It works on Windows, Linux, and macOS.
 
-The XIAO enters bootloader mode either by a physical **double-tap of its reset button**
-(it mounts as the ``XIAO-SENSE`` drive) or, if it is running app firmware that exposes a
-serial port, by the automatic 1200-baud "touch" this script attempts first.
+The XIAO goes into bootloader mode in one of two ways. The first way is a physical
+**double-tap of its reset button**. Then it mounts as the ``XIAO-SENSE`` drive. The second
+way is for a XIAO that runs app firmware with a serial port. This script first tries an
+automatic 1200-baud "touch" on that port.
 
 Usage:
     python flash.py                       # flash ./meshcore-xiao-radio.uf2
@@ -43,12 +44,12 @@ def find_uf2_drive():
 
 
 def touch_1200():
-    """Best-effort: pulse any Seeed XIAO app serial port at 1200 baud to reset to bootloader.
+    """Try to reset to the bootloader: open each Seeed XIAO app serial port at 1200 baud.
 
-    Matched on Seeed's USB vendor id (2886) *only*. Deliberately not widened to Adafruit's
-    239A even though nRF52840 boards commonly use it: other nRF52840 gear on the same bench
-    (a LilyGo T-Echo, say) answers to 239A, and knocking somebody else's radio into its
-    bootloader is a rude way to find out you grabbed the wrong board.
+    The function matches only the USB vendor id of Seeed (2886). We did not add the Adafruit
+    id 239A on purpose, although nRF52840 boards often use it. Other nRF52840 devices on the
+    same bench (for example, a LilyGo T-Echo) use 239A. If the function puts the radio of
+    another person into its bootloader, you find the wrong board in a bad way.
     """
     try:
         import serial
@@ -66,15 +67,15 @@ def touch_1200():
 
 
 def bootloader_port():
-    """Return the COM/tty device of a XIAO sitting in its bootloader, or None."""
+    """Return the COM or tty device of a XIAO that is in its bootloader, or None."""
     try:
         import serial.tools.list_ports as lp
     except Exception:
         return None
     for p in lp.comports():
         hwid = (p.hwid or "").upper()
-        # Seeed VID + bootloader PID: 0x0045 (Sense) or 0x0044 (plain nRF52840), both from
-        # Adafruit's UF2 bootloader board.h for this chip family.
+        # The Seeed VID and the bootloader PID: 0x0045 (Sense) or 0x0044 (plain nRF52840).
+        # Both come from the board.h of the Adafruit UF2 bootloader for this chip family.
         if "2886" in hwid and ("0045" in hwid or "0044" in hwid):
             return p.device
     return None
@@ -95,12 +96,13 @@ def read_uf2_info(drive):
 
 
 def check_drive_is_ours(drive, force=False):
-    """Refuse to write to a bootloader that isn't the board this firmware was built for.
+    """Refuse to write to a bootloader that is not the board that this firmware is built for.
 
-    Two different mistakes are cheap to make and expensive to debug. A drive letter is not an
-    identity -- when one board leaves the bus another can inherit its letter, so the volume you
-    found may not be the one you just touched. And this firmware links for SoftDevice S140 v7
-    (app at 0x27000); a board carrying S140 6.1.1 wants it at 0x26000 and would simply not boot.
+    Two mistakes are easy to make and difficult to debug. The first is that a drive letter is
+    not an identity. When one board leaves the bus, another board can get its letter. Thus the
+    volume that you found can be different from the volume that you touched. The second is
+    that this firmware links for SoftDevice S140 v7 (the app is at 0x27000). A board with
+    S140 6.1.1 needs the app at 0x26000, and it does not boot with this firmware.
     """
     info = read_uf2_info(drive)
     model = info.get("Model", "?")
@@ -122,11 +124,11 @@ def check_drive_is_ours(drive, force=False):
 
 
 def main():
-    """Put the XIAO in its bootloader and copy the firmware onto the drive it exposes.
+    """Put the XIAO in its bootloader and copy the firmware onto the drive that it shows.
 
-    Takes the .uf2 to flash, defaulting to the one built beside this script, and
-    refuses to write to a drive that turns out to be some other board unless
-    ``--force`` says otherwise.
+    The function takes the .uf2 to flash. The default is the .uf2 that the build made next
+    to this script. The function refuses to write to a drive that is a different board,
+    unless the user gives ``--force``.
     """
     args = [a for a in sys.argv[1:] if a != "--force"]
     force = "--force" in sys.argv[1:]
@@ -145,8 +147,8 @@ def main():
                 break
             time.sleep(1)
     if drive and drive == before:
-        # The letter was already there before we touched anything, so it may belong to some
-        # other board entirely -- check what it says rather than trusting the letter.
+        # The letter was there before we touched anything, so it can belong to a different
+        # board. Check what the drive reports. Do not trust the letter.
         print(f"   note: {drive} was already mounted before the touch")
     if not drive:
         port = bootloader_port()
@@ -171,7 +173,7 @@ def main():
         dst.flush()
         os.fsync(dst.fileno())
 
-    # the bootloader reboots into the app once written; the drive disappears
+    # After the write, the bootloader reboots into the app, and the drive goes away.
     for _ in range(10):
         if not os.path.exists(os.path.join(drive, "INFO_UF2.TXT")):
             print("DONE. XIAO flashed and rebooting into the radio firmware.")

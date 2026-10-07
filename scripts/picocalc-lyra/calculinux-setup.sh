@@ -1,51 +1,62 @@
 #!/bin/sh
 # calculinux-setup.sh -- one-time bring-up of MeshTerm on a Luckfox Lyra / PicoCalc
-# running Calculinux (Yocto, systemd, read-only root with /usr + /etc + /home overlays
-# backed by /data). Run as root on a freshly-flashed SD, over the serial console is fine:
+# that runs Calculinux (Yocto, systemd, a read-only root with /usr, /etc, and /home overlays
+# stored on /data). Run it as root on a new SD card. The serial console is sufficient:
 #
 #     sh calculinux-setup.sh
 #
-# It is idempotent -- safe to re-run; each phase checks before it acts. It sequences the
-# whole deploy this repo's Lyra target needed, in the order the discoveries fell out:
+# The script is idempotent. It is safe to run it again, because each phase checks before it
+# acts. It does the complete deploy that the Lyra target of this repository needs, in the
+# order in which we found the problems:
 #
-#   1. opkg packages   Calculinux ships a STRIPPED python3.13 (no pip/venv/ensurepip and
-#                      missing stdlib: sqlite3, ctypes, curses, shlex, xml). /usr is a
-#                      writable overlay, so `opkg install python3-modules python3-pip`
-#                      restores the full interpreter and persists on /data.
-#   2. wi-fi kick      The USB RTL8188EU (rtl8xxxu) firmware finishes loading AFTER iwd's
-#                      first scans, so on cold boot wlan0 stays UP/NO-CARRIER and the known
-#                      network is never joined. A oneshot service drives RAW `iw` scans
-#                      until a DHCP lease -- a completed raw scan is what lets iwd associate.
-#   3. time sync       The Lyra has no battery-backed RTC, so every cold boot starts at the
-#                      kernel's build-time epoch until something sets the clock -- wrong
-#                      until then, which is fatal for "heard" ordering, TTL, etc. A oneshot
-#                      service waits for a real route, then steps the clock once (NTP client
-#                      if the image has one, else an HTTPS Date-header fallback).
-#   4. timezone        `$TIMEZONE`, Eastern (America/Toronto) unless you say otherwise, via
-#                      timedatectl if tzdata's opkg feed is reachable, else a POSIX TZ rule
-#                      in /etc/environment -- glibc honours it with no zoneinfo database.
-#                      The POSIX fallback rule is only known for the default zone; a custom
-#                      $TIMEZONE without tzdata is set via timedatectl only, with a warning.
-#   5. deploy user     The `$DEPLOY_USER` login MeshTerm runs under, `meshterm` unless you
-#                      say otherwise (created if absent; no password is set here -- run
-#                      `passwd` for it yourself).
-#   6. clone           Pull MeshTerm over SSH with the read-only GitHub deploy key if one
-#                      is present at $KEY_PATH, else a public HTTPS clone of $REPO_URL.
-#   7. venv + install  A venv + `pip install -e .`. pip's C builds hit ENOSPC because /tmp
-#                      is a tiny RAM tmpfs, so TMPDIR is redirected to $HOME/tmp on /data.
-#   8. PATH            Put the venv's `meshterm` on that user's login PATH via ~/.profile.
-#   9. console font    Hand off to calculinux-console-font-6x12.sh (braille + node glyphs +
-#                      rounded frame corners + the list cursor the bare console can't draw).
+#   1. opkg packages   Calculinux ships a STRIPPED python3.13. It has no pip, venv, or
+#                      ensurepip, and it does not have some of the standard library:
+#                      sqlite3, ctypes, curses, shlex, and xml. /usr is a writable
+#                      overlay, so `opkg install python3-modules python3-pip` restores
+#                      the full interpreter, and it stays on /data.
+#   2. wi-fi kick      The firmware of the USB RTL8188EU (rtl8xxxu) finishes loading AFTER
+#                      the first scans of iwd. Thus, at a cold boot, wlan0 stays
+#                      UP/NO-CARRIER and the known network is never joined. A oneshot
+#                      service runs RAW `iw` scans until a DHCP lease arrives. A completed
+#                      raw scan is what lets iwd associate.
+#   3. time sync       The Lyra has no RTC with a battery. Thus each cold boot starts at the
+#                      build-time epoch of the kernel, until something sets the clock. The
+#                      time is wrong until then, and this is a serious problem for the
+#                      order of "heard" times, for TTL, and for other time values. A
+#                      oneshot service waits for a real route, then sets the clock one time
+#                      (with an NTP client if the image has one, or else with the Date
+#                      header of an HTTPS response).
+#   4. timezone        `$TIMEZONE`, Eastern (America/Toronto) unless you set another zone.
+#                      The script uses timedatectl if the opkg feed of tzdata is available.
+#                      If it is not, the script uses a POSIX TZ rule in /etc/environment.
+#                      glibc accepts that rule with no zoneinfo database. The script knows
+#                      the POSIX fallback rule only for the default zone. For a custom
+#                      $TIMEZONE without tzdata, the script uses timedatectl only, with a
+#                      warning.
+#   5. deploy user     The `$DEPLOY_USER` login that MeshTerm runs under. The default is
+#                      `meshterm`. The script makes it if it does not exist. The script does
+#                      not set a password. Run `passwd` for the user yourself.
+#   6. clone           Pull MeshTerm over SSH with the read-only GitHub deploy key if the
+#                      key is at $KEY_PATH. If not, make a public HTTPS clone of $REPO_URL.
+#   7. venv + install  A venv and `pip install -e .`. The C builds of pip fail with ENOSPC,
+#                      because /tmp is a small RAM tmpfs. Thus the script changes TMPDIR to
+#                      $HOME/tmp on /data.
+#   8. PATH            Put the `meshterm` of the venv on the login PATH of that user, through
+#                      ~/.profile.
+#   9. console font    Hand off to calculinux-console-font-6x12.sh (braille, node glyphs,
+#                      rounded frame corners, and the list cursor that the bare console
+#                      cannot draw).
 #
-# Two prerequisites this script cannot safely embed and will check for / guide you through:
-#   * the read-only deploy key at $KEY_PATH, if you want the SSH clone (never commit a
-#     private key) -- omit it and the clone falls back to public HTTPS;
-#   * Wi-Fi credentials known to iwd. The kick only nudges an ALREADY-known network. Either
-#     provision it once by hand (`iwctl station wlan0 connect <SSID>`), or export
-#     WIFI_SSID and WIFI_PSK before running and this script writes the iwd config for you.
+# This script cannot safely include two prerequisites. It checks for them and guides you:
+#   * The read-only deploy key at $KEY_PATH, if you want the SSH clone (never commit a
+#     private key). If you omit it, the clone uses public HTTPS.
+#   * Wi-Fi credentials that iwd knows. The kick only nudges a network that iwd ALREADY
+#     knows. Provide the network one time by hand (`iwctl station wlan0 connect <SSID>`).
+#     Or export WIFI_SSID and WIFI_PSK before you run the script, and the script writes the
+#     iwd config for you.
 set -eu
 
-# --- knobs (override via the environment) ----------------------------------------------
+# --- knobs (the environment can override them) -----------------------------------------
 DEPLOY_USER="${DEPLOY_USER:-meshterm}"
 TIMEZONE="${TIMEZONE:-America/Toronto}"
 REPO_SSH="${REPO_SSH:-git@github.com:jpmartineau/MeshTerm.git}"
@@ -69,7 +80,7 @@ runas() { su - "$DEPLOY_USER" -c "$1"; }
 log "1/9  system packages (opkg)"
 if have opkg; then
     opkg update >/dev/null 2>&1 || info "opkg update failed (no network yet?) -- continuing"
-    # git and kbd ship in the base image; the python pieces are what the stripped build drops.
+    # git and kbd are in the base image. The stripped build removes the python parts.
     for pkg in python3-modules python3-pip git kbd; do
         if opkg status "$pkg" 2>/dev/null | grep -q '^Status:.*installed'; then
             info "$pkg already installed"
@@ -86,8 +97,9 @@ have python3 || die "python3 still missing after opkg (check the opkg feed / net
 # --- 2. wi-fi boot-scan kick (rtl8xxxu race workaround) --------------------------------
 log "2/9  wi-fi boot-scan kick"
 
-# Optionally provision the iwd network so the kick has something known to join. Secrets
-# come from the environment only -- nothing is written to disk from this repo.
+# Optional: provide the iwd network, so that the kick has a known network to join. The
+# secrets come only from the environment. The script writes nothing from this repository to
+# the disk.
 if [ -n "$WIFI_SSID" ] && [ -n "$WIFI_PSK" ]; then
     info "writing iwd credentials for '$WIFI_SSID'"
     mkdir -p /var/lib/iwd
@@ -243,10 +255,10 @@ if [ -f "/usr/share/zoneinfo/$TIMEZONE" ]; then
         info "already $TIMEZONE (timedatectl)"
     fi
 elif [ "$TIMEZONE" = "America/Toronto" ] || [ "$TIMEZONE" = "America/Montreal" ]; then
-    # opkg.calculinux.org's feed has been observed fully empty (404 at the index, not just
-    # this package) -- no zoneinfo database reaches the device then. glibc still honours a
-    # POSIX TZ rule without one, so fall back to the exact US/Canada Eastern DST rule
-    # (2nd Sun Mar -> 1st Sun Nov) America/Toronto and America/Montreal have shared since 2007.
+    # We saw that the feed of opkg.calculinux.org was fully empty (404 at the index, not only
+    # for this package). Then no zoneinfo database reaches the device. glibc still accepts a
+    # POSIX TZ rule without one. Thus use the exact US and Canada Eastern DST rule (2nd Sun
+    # Mar -> 1st Sun Nov). America/Toronto and America/Montreal have used it since 2007.
     TZ_POSIX='EST5EDT,M3.2.0,M11.1.0/2'
     if grep -q "^TZ=$TZ_POSIX\$" /etc/environment 2>/dev/null; then
         info "already set (TZ=$TZ_POSIX in /etc/environment, no tzdata)"
@@ -262,8 +274,9 @@ elif [ "$TIMEZONE" = "America/Toronto" ] || [ "$TIMEZONE" = "America/Montreal" ]
         info "added TZ export to $DEPLOY_USER's ~/.profile (belt-and-suspenders for non-PAM logins)"
     fi
 else
-    # No POSIX DST rule is known here for a non-default $TIMEZONE without a tzdata feed;
-    # set it via timedatectl if it takes, otherwise warn and move on rather than guess.
+    # The script does not know a POSIX DST rule for a $TIMEZONE that is not the default,
+    # when there is no tzdata feed. Set the zone with timedatectl if it works. If it does
+    # not work, give a warning and continue. Do not guess.
     if timedatectl set-timezone "$TIMEZONE" 2>/dev/null; then
         info "set via timedatectl"
     else
@@ -282,12 +295,12 @@ else
     else
         adduser -D -s /bin/bash "$DEPLOY_USER" || die "adduser failed"
     fi
-    # wheel -> sudo; harmless if the group is absent.
+    # wheel gives sudo. There is no problem if the group does not exist.
     (usermod -aG wheel "$DEPLOY_USER" 2>/dev/null || adduser "$DEPLOY_USER" wheel 2>/dev/null) || true
     info "no password set -- run:  passwd $DEPLOY_USER"
 fi
-# input -> the F-key lane's Shift watcher reads /dev/input (services/modifier_watch);
-# dialout/video are needed for serial radios and the framebuffer. All idempotent.
+# input: the Shift watcher of the F-key lane reads /dev/input (services/modifier_watch).
+# dialout and video are necessary for serial radios and the framebuffer. All are idempotent.
 for grp in input dialout video; do
     (usermod -aG "$grp" "$DEPLOY_USER" 2>/dev/null || adduser "$DEPLOY_USER" "$grp" 2>/dev/null) || true
 done
@@ -298,7 +311,7 @@ if [ -f "$KEY_PATH" ]; then
     CLONE_URL="$REPO_SSH"
     KNOWN_HOSTS="/home/$DEPLOY_USER/.ssh/known_hosts"
     SSH_CMD="ssh -i $KEY_PATH -o IdentitiesOnly=yes -o UserKnownHostsFile=$KNOWN_HOSTS"
-    # Pin github.com's host key up front so the clone never blocks on an interactive prompt.
+    # Pin the host key of github.com at the start. Thus the clone never stops at an interactive prompt.
     if ! runas "test -f $KNOWN_HOSTS && grep -q github.com $KNOWN_HOSTS"; then
         info "recording github.com host key"
         runas "ssh-keyscan -t ed25519 github.com >> $KNOWN_HOSTS 2>/dev/null" || info "ssh-keyscan failed (offline?)"
@@ -318,12 +331,12 @@ else
     runas "${CLONE_ENV}git clone $CLONE_URL ~/MeshTerm" \
         || die "clone failed (key not authorized, or offline)"
     if [ -f "$KEY_PATH" ]; then
-        # Bake the deploy key into the checkout so later pulls just work.
+        # Put the deploy key in the checkout. Thus later pulls work with no more steps.
         runas "git -C ~/MeshTerm config core.sshCommand '$SSH_CMD'"
     fi
 fi
 
-# --- 6. venv + editable install (TMPDIR off the RAM tmpfs) -----------------------------
+# --- 6. venv + editable install (TMPDIR not on the RAM tmpfs) --------------------------
 log "7/9  python venv + install"
 if runas "test -x ~/MeshTerm/.venv/bin/python"; then
     info "venv exists"

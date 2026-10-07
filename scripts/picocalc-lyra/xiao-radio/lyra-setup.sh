@@ -1,17 +1,18 @@
 #!/bin/sh
 # lyra-setup.sh -- make the UART-attached XIAO radio work on the Luckfox Lyra (Calculinux).
 #
-# Runs ON THE DEVICE as root. Idempotent -- safe to re-run.
+# Run it ON THE HANDHELD, as root. The script is idempotent, so it is safe to run it again.
 #
-#   1. installs uart1-mux.py and a systemd oneshot that re-applies the UART1->GP4/GP5 pin
-#      routing on every boot (Calculinux leaves /dev/ttyS1 wired to no pad otherwise)
-#   2. adds the MeshTerm user to the `dialout` group so it can open /dev/ttyS1
-#   3. writes a default MeshTerm serial profile pointing at /dev/ttyS1
+#   1. installs uart1-mux.py and a systemd oneshot that applies the UART1->GP4/GP5 pin
+#      routing again at each boot (without it, Calculinux leaves /dev/ttyS1 connected to no
+#      pad)
+#   2. adds the MeshTerm user to the `dialout` group, so that it can open /dev/ttyS1
+#   3. writes a default MeshTerm serial profile for /dev/ttyS1
 #
-# The MeshTerm user defaults to `meshterm`; override with:  MT_USER=youruser sh lyra-setup.sh
+# The default MeshTerm user is `meshterm`. To change it, use:  MT_USER=youruser sh lyra-setup.sh
 #
-# Prereq: the XIAO must be flashed with the radio firmware (see build-firmware.sh / flash.py)
-# and soldered per the README wiring table.
+# Prerequisite: the XIAO must have the radio firmware (refer to build-firmware.sh and
+# flash.py), and it must be soldered as the README wiring table shows.
 set -eu
 
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)

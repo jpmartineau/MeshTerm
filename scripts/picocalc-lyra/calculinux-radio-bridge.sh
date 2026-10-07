@@ -2,43 +2,49 @@
 # calculinux-radio-bridge.sh -- put the UART-attached MeshCore radio on TCP for MeshTerm
 # (Luckfox Lyra / PicoCalc running Calculinux).
 #
-# The hardware this serves: a Seeed XIAO nRF52840 + Wio-SX1262 running a custom MeshCore
-# companion firmware whose frame protocol is bound to the XIAO's hardware UART1 (D6=TX,
-# D7=RX) at 115200 8N1, soldered to the Lyra's UART1. UART0 carries the Linux console, so
-# the radio lives on /dev/ttyS1 -- which this script never touches beyond opening it.
+# The hardware that this script serves: a Seeed XIAO nRF52840 with a Wio-SX1262. It runs a
+# custom MeshCore companion firmware. The frame protocol of the firmware is on the hardware
+# UART1 of the XIAO (D6=TX, D7=RX) at 115200 8N1, and the XIAO is soldered to the UART1 of
+# the Lyra. UART0 carries the Linux console, so the radio is on /dev/ttyS1. This script
+# only opens that port and does nothing else with it.
 #
-# Why a bridge instead of pointing MeshTerm straight at the port: pyserial's Linux
-# enumeration hides platform-bus UARTs ("hide non-present internal serial ports"), so a
-# soldered SoC port like /dev/ttyS1 never appears in discovery or the liveness poll. The
-# TCP transport has none of those problems -- MeshTerm already lists a TCP profile on the
-# startup splash and tracks the socket for liveness -- and the same bridge makes the radio
-# reachable from the LAN (`meshterm --tcp <lyra-ip>:5000` on another machine).
+# The reason for a bridge, and not a direct connection from MeshTerm to the port: the Linux
+# enumeration of pyserial hides platform-bus UARTs ("hide non-present internal serial
+# ports"). Thus a soldered SoC port such as /dev/ttyS1 never appears in discovery or in the
+# liveness poll. The TCP transport does not have these problems. MeshTerm already lists a
+# TCP profile on the startup splash, and it tracks the socket for liveness. The same bridge
+# also makes the radio available from the LAN (`meshterm --tcp <lyra-ip>:5000` on another
+# machine).
 #
 # Run as root on the device:
 #
 #     sh calculinux-radio-bridge.sh
 #
-# It is idempotent -- safe to re-run; each phase checks before it acts.
+# The script is idempotent. It is safe to run it again, because each phase checks before it
+# acts.
 #
-#   1. UART sanity    /dev/ttyS1 exists, the console isn't on it, no getty owns it.
-#   2. bridge         A stdlib-only python UART<->TCP pump (no pyserial, no venv) installed
-#                     as /etc/meshterm-radio-bridge.py + a systemd service, enabled at boot.
-#                     It serves ONE client at a time -- two clients would interleave
-#                     companion frames -- which is why this isn't a `socat ... fork` line.
-#   3. profile        A `[profiles.radio]` TCP profile (127.0.0.1:5000) in the deploy
-#                     user's ~/.meshterm/config.toml, made the default profile, so a bare
-#                     `meshterm` lists the radio on the splash and `-p radio` connects.
-#   4. report         Service state and how to connect, locally and over the LAN.
+#   1. UART sanity    /dev/ttyS1 exists, the console is not on it, and no getty owns it.
+#   2. bridge         A python UART<->TCP pump that uses only the standard library (no
+#                     pyserial, no venv). The script installs it as
+#                     /etc/meshterm-radio-bridge.py with a systemd service, enabled at boot.
+#                     It serves ONE client at a time, because two clients would interleave
+#                     companion frames. This is the reason that it is not a `socat ... fork`
+#                     line.
+#   3. profile        A `[profiles.radio]` TCP profile (127.0.0.1:5000) in the
+#                     ~/.meshterm/config.toml of the deploy user. The script makes it the
+#                     default profile. Thus a bare `meshterm` lists the radio on the splash,
+#                     and `-p radio` connects.
+#   4. report         The service state, and how to connect, locally and over the LAN.
 #
-# What this script does NOT do: it never routes UART1 to physical pads. On stock
-# Calculinux the DT enables the UART1 controller (hence /dev/ttyS1 existing) without
-# applying its pinctrl, so TX/RX reach no pad and this pump would faithfully serve a port
-# that is electrically dead. Pin routing now lives in xiao-radio/uart1-mux.py, which uses
-# a different pad pair (header GP4/GP5) than this script's header once assumed -- run that
-# (via xiao-radio/lyra-setup.sh) first if you need the radio actually wired up.
+# What this script does NOT do: it never routes UART1 to physical pads. On stock Calculinux,
+# the DT enables the UART1 controller (thus /dev/ttyS1 exists) but does not apply its
+# pinctrl. Thus TX and RX reach no pad, and this pump serves a port that is electrically
+# dead. The pin routing is now in xiao-radio/uart1-mux.py. It uses a different pad pair
+# (header GP4/GP5) than the pair that the header of this script once assumed. If you need
+# the radio to be wired, run that script first (through xiao-radio/lyra-setup.sh).
 set -eu
 
-# --- knobs (override via the environment) ----------------------------------------------
+# --- knobs (the environment can override them) -----------------------------------------
 DEPLOY_USER="${DEPLOY_USER:-meshterm}"
 RADIO_PORT="${RADIO_PORT:-/dev/ttyS1}"     # the Lyra UART the XIAO is soldered to
 RADIO_BAUD="${RADIO_BAUD:-115200}"         # must match the firmware's Serial1.begin()
@@ -68,14 +74,14 @@ log "1/4  UART sanity ($RADIO_PORT)"
    the UART1 overlay may be disabled -- enable it (luckfox-config / the board's dtbo
    mechanism), reboot, and re-run this script"
 
-# The kernel console must stay on UART0; a console sharing the radio's UART would corrupt
-# the companion frame stream in both directions.
+# The kernel console must stay on UART0. A console on the UART of the radio corrupts the
+# companion frame stream in both directions.
 if grep -q "console=$TTY_NAME" /proc/cmdline; then
     die "the kernel console is on $TTY_NAME -- refusing to bridge over it"
 fi
 info "console is not on $TTY_NAME"
 
-# Same story for a login getty: it would eat radio bytes and echo garbage back.
+# The same is true for a login getty. It takes radio bytes and echoes invalid data back.
 if ps w | grep -v grep | grep getty | grep -q "$TTY_NAME"; then
     die "a getty holds $TTY_NAME -- free it first:
      systemctl disable --now serial-getty@$TTY_NAME.service"
@@ -220,8 +226,8 @@ mkdir -p "$(dirname "$CONFIG")"
 if grep -q "^\[profiles\.$PROFILE_NAME\]" "$CONFIG"; then
     info "profile already present -- leaving config.toml untouched"
 else
-    # default_profile is a top-level key, so it must sit ABOVE any [table] header --
-    # prepend it rather than appending after the profile blocks.
+    # default_profile is a top-level key, so it must be ABOVE each [table] header.
+    # Put it at the start of the file. Do not add it after the profile blocks.
     if ! grep -q '^default_profile' "$CONFIG"; then
         TMP="$CONFIG.tmp"
         printf 'default_profile = "%s"\n\n' "$PROFILE_NAME" > "$TMP"

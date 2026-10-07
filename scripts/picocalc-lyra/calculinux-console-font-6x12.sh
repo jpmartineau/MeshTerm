@@ -3,51 +3,56 @@
 # calculinux-console-font-6x12.sh -- build, install, and persist the "meshterm" console fonts
 # and the 16-slot palette.
 #
-# MeshTerm runs on a Luckfox Lyra inside a ClockworkPi PicoCalc under Calculinux, drawing
-# to the bare ILI9488 framebuffer console (fbcon). That console loads a single PSF font,
-# and every font Calculinux ships is a classic 256-glyph VGA font -- so out of the box the
-# panel cannot draw what MeshTerm's UI leans on hardest: braille charts (U+2800-U+28FF),
-# the node/status marks, the P3 compact-icon marks, rounded panel corners, or the list
-# cursor. This script synthesizes the 512-glyph PSF2 font MeshTerm runs in:
+# MeshTerm runs on a Luckfox Lyra inside a ClockworkPi PicoCalc under Calculinux. It draws
+# to the bare ILI9488 framebuffer console (fbcon). That console loads one PSF font, and
+# each font that Calculinux ships is a classic 256-glyph VGA font. Thus, as it comes, the
+# display cannot draw the things that the UI of MeshTerm uses most: braille charts
+# (U+2800-U+28FF), the node and status marks, the marks of the P3 compact icons, rounded
+# panel corners, and the pointer of the list. This script makes the 512-glyph PSF2 font in
+# which MeshTerm runs:
 #
 #   * meshterm.psf.gz   6x12 (Terminus base)     -> 53x26 -- the installed default
 #
-# meshterm.psf.gz is a derivative of Terminus Font (OFL-1.1) and must not itself be called
-# "Terminus" -- the stock ter-u12n.psf.gz base keeps its own OFL-1.1 licence, distinct from
-# this repository's Apache-2.0.
+# meshterm.psf.gz is a derivative of Terminus Font (OFL-1.1). It must not have the name
+# "Terminus". The stock ter-u12n.psf.gz base keeps its own OFL-1.1 licence, which is not
+# the Apache-2.0 licence of this repository.
 #
-# The taller-screen companion, meshterm8.psf.gz (6x8 -> 53x40), is built by
-# calculinux-console-font-6x8.sh, which this script runs for you when it sits alongside
-# (set SKIP_6X8=1 to build only the default). It lives in its own file because its base
-# bitmap is the Linux kernel's font_6x8 and therefore GPL-2.0: keeping that material in one
-# clearly marked file is the point of the split. The two scripts share ONE copy of the
-# donor / alias / keeper tables and the whole generator -- the block between the
-# "shared generator" markers below, which the 6x8 script extracts from this file and execs.
-# Edit those tables here and both fonts move together. The shared generator block is
-# additionally offered under GPL-2.0-only, to permit its use by calculinux-console-font-6x8.sh.
+# The companion for the taller display, meshterm8.psf.gz (6x8 -> 53x40), is built by
+# calculinux-console-font-6x8.sh. This script runs it for you when it is in the same
+# directory (set SKIP_6X8=1 to build only the default). It is in its own file because its
+# base bitmap is the font_6x8 of the Linux kernel, and that is GPL-2.0. The purpose of the
+# split is to keep that material in one file with a clear mark. The two scripts share ONE
+# copy of the donor, alias, and keeper tables, and the whole generator. This copy is the
+# block between the "shared generator" markers below. The 6x8 script extracts it from this
+# file and executes it with exec. If you change those tables here, both fonts change
+# together. The shared generator block is also offered under GPL-2.0-only, to permit its
+# use by calculinux-console-font-6x8.sh.
 #
-# Both fonts install into /usr/share/consolefonts. Flip live with
-# `setfont /usr/share/consolefonts/meshterm8.psf.gz` (and back with meshterm.psf.gz), or
-# from MeshTerm's own Preferences page (Display -> Console font); persist a permanent
-# choice via FONT= in /etc/vconsole.conf.
+# Both fonts install into /usr/share/consolefonts. To change the font live, use
+# `setfont /usr/share/consolefonts/meshterm8.psf.gz` (and use meshterm.psf.gz to change
+# it back). You can also use the Preferences page of MeshTerm (Display -> Console font).
+# To make a permanent choice, set FONT= in /etc/vconsole.conf.
 #
-# Why 512 and not more: fbcon caps a font at 512 glyphs. Braille alone is 256 and the base
-# set is another 256 -- the budget is already full, so every extra mark is drawn into a
-# DONOR slot (a pictograph MeshTerm never emits) whose codepoint is repointed. Choosing a
-# donor means knowing its slot's FULL codepoint list: bases alias lookalikes onto one glyph
-# (donating pi once erased Cyrillic pe), so a donor miss aborts the build and a keeper list
-# is verified after it. The rounded corners and the midline ellipsis cost no glyph: they
-# are aliased onto existing bitmaps.
+# Why 512 and not more: fbcon limits a font to 512 glyphs. Braille alone is 256, and the
+# base set is another 256. The budget is full, so MeshTerm draws each extra mark into a
+# DONOR slot (a pictograph that MeshTerm never sends) and points its codepoint to the new
+# mark. To choose a donor, you must know the FULL codepoint list of its slot. Bases alias
+# lookalikes onto one glyph (when we used pi as a donor, it erased Cyrillic pe). Thus a
+# donor that is not found stops the build, and the script checks a keeper list after the
+# build. The rounded corners and the midline ellipsis cost no glyph, because they are
+# aliased onto existing bitmaps.
 #
-# Everything else is pure geometry, generated on-device; only the stock Terminus font and
-# python3 are required. Run as root on the Lyra (serial console is fine):
+# All other glyphs are pure geometry, generated on the handheld. The script needs only the
+# stock Terminus font and python3. Run it as root on the Lyra (the serial console is
+# acceptable):
 #
 #     sh calculinux-console-font-6x12.sh
 #
-# Idempotent -- safe to re-run after a MeshTerm update or a font tweak. Also manages the
-# 16-slot palette: a default run restores the stock VT palette (theme._VT_SLOTS) and
-# removes any custom remap; MESHTERM_CUSTOM_PALETTE=1 installs the archived remap
-# (theme._VT_SLOTS_CUSTOM, pinned to theme.vtrgb_lines() by a test).
+# The script is idempotent, so it is safe to run again after an update of MeshTerm or a
+# change to a font. It also manages the 16-slot palette. A default run restores the stock
+# VT palette (theme._VT_SLOTS) and removes each custom remap. MESHTERM_CUSTOM_PALETTE=1
+# installs the archived remap (theme._VT_SLOTS_CUSTOM, which a test pins to
+# theme.vtrgb_lines()).
 set -eu
 
 FONT_NAME=meshterm
@@ -59,17 +64,18 @@ VCONSOLE=/etc/vconsole.conf
 HERE=$(dirname "$0")
 BUILD8="$HERE/calculinux-console-font-6x8.sh"  # GPL-2.0; see its header
 
-# --- preflight: fail early with a plain reason, never half-apply -----------------------
+# --- preflight: stop early with a plain reason, and never apply half of the change ------
 [ "$(id -u)" = 0 ] || { echo "error: run as root (writes $CONSOLEFONTS and $VCONSOLE)" >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo "error: python3 not found" >&2; exit 1; }
 command -v setfont >/dev/null 2>&1 || { echo "error: setfont not found (install kbd tools)" >&2; exit 1; }
 [ -f "$BASE" ] || { echo "error: base font not found: $BASE" >&2; exit 1; }
 
 # --- build the 6x12 font -----------------------------------------------------------------
-# The generator is inlined (quoted heredoc, so the shell expands nothing) and reads its
-# paths from the environment. It is the single source of truth for the synthesized glyphs:
-# the block between the "shared generator" markers is extracted and exec'd verbatim by
-# calculinux-console-font-6x8.sh, so the donor, alias and keeper tables exist ONCE.
+# The generator is inline (a quoted heredoc, so the shell expands nothing) and reads its
+# paths from the environment. It is the only source of truth for the glyphs that the
+# script makes. calculinux-console-font-6x8.sh extracts the block between the "shared
+# generator" markers and executes it with exec, without a change. Thus the donor, alias,
+# and keeper tables exist ONCE.
 echo "building $OUT (6x12) ..."
 BASE="$BASE" OUT="$OUT" python3 - <<'PYEOF'
 import os
@@ -268,12 +274,13 @@ build(glyphs12, entries12, 12, 12, MARKS, BANDS12, [0x043F, 0x03C0], OUT)
 
 PYEOF
 
-# --- the 6x8 companion, out of its own (GPL-2.0) file -----------------------------------
-# Kept separate because its base bitmap is the kernel's font_6x8 and the produced PSF is
-# therefore GPL-2.0 -- see scripts/picocalc-lyra/calculinux-console-font-6x8.sh and scripts/picocalc-lyra/LICENSE.GPL-2.0.
-# It re-uses the shared generator block above rather than carrying a second copy of the
-# donor/alias/keeper tables, so a run here still produces both fonts, as it always did.
-# A failure there is not a failure here: the 6x12 default is the font the device boots in.
+# --- the 6x8 companion, from its own (GPL-2.0) file -------------------------------------
+# It is a separate file because its base bitmap is the font_6x8 of the kernel, and thus
+# the PSF that it produces is GPL-2.0. Refer to scripts/picocalc-lyra/calculinux-console-font-6x8.sh and scripts/picocalc-lyra/LICENSE.GPL-2.0.
+# It uses the shared generator block above and does not have a second copy of the
+# donor, alias, and keeper tables. Thus a run here still produces both fonts, as it
+# always did. A failure there is not a failure here, because the handheld boots in the
+# 6x12 default font.
 if [ "${SKIP_6X8:-0}" = 1 ]; then
     echo "skipping $OUT8 (SKIP_6X8=1)"
 elif [ -f "$BUILD8" ]; then
@@ -282,13 +289,13 @@ else
     echo "note: $BUILD8 not found -- only $OUT was built (copy the whole scripts/picocalc-lyra/ dir)" >&2
 fi
 
-# --- apply live: setfont re-renders the whole console immediately -----------------------
+# --- apply live: setfont renders the whole console again immediately ---------------------
 TTY=/dev/tty1
 [ -c "$TTY" ] || TTY=/dev/tty0
 echo "applying $OUT (6x12, the default) to $TTY ..."
 setfont -C "$TTY" "$OUT"
 
-# --- persist: systemd-vconsole-setup reads FONT= from vconsole.conf at every boot -------
+# --- persist: systemd-vconsole-setup reads FONT= from vconsole.conf at each boot --------
 if [ -f "$VCONSOLE" ] && grep -q '^FONT=' "$VCONSOLE"; then
     sed -i "s/^FONT=.*/FONT=$FONT_NAME/" "$VCONSOLE"
 else
@@ -301,16 +308,16 @@ if [ -f "$OUT8" ]; then
 fi
 
 # --- palette -----------------------------------------------------------------------------
-# By design, the console keeps its STANDARD kernel palette -- black
-# background, stock hues -- and meshterm/ui/theme.MESH_THEME_16 is designed against those
-# (theme._VT_SLOTS). The custom tailwind-family remap originally shipped is ARCHIVED,
-# one environment variable away for anyone who wants it back:
+# By design, the console keeps its STANDARD kernel palette (black background, stock hues).
+# meshterm/ui/theme.MESH_THEME_16 is designed for that palette (theme._VT_SLOTS). The
+# custom tailwind-family remap that we shipped first is ARCHIVED. A user who wants it back
+# needs only one environment variable:
 #
 #     MESHTERM_CUSTOM_PALETTE=1 sh calculinux-console-font-6x12.sh
 #
-# The opt-in block's values match theme.vtrgb_lines() / theme._VT_SLOTS_CUSTOM exactly (a
-# test keeps them in sync). A DEFAULT run removes any previously-installed remap and
-# resets the live palette to stock.
+# The values of the opt-in block are exactly the same as theme.vtrgb_lines() and
+# theme._VT_SLOTS_CUSTOM (a test makes sure that they stay the same). A DEFAULT run removes
+# each remap that was installed before, and sets the live palette to stock.
 VTRGB=/etc/vtrgb
 APPLIER=/usr/local/sbin/meshterm-vtrgb
 UNIT=/etc/systemd/system/meshterm-vtrgb.service
@@ -357,9 +364,9 @@ else
     systemctl disable meshterm-vtrgb.service >/dev/null 2>&1 || true
     rm -f "$UNIT" "$VTRGB" "$APPLIER"
     systemctl daemon-reload 2>/dev/null || true
-    # Restore the STANDARD palette explicitly: a previous setvtrgb overwrote the
-    # kernel's *default* colormap, so the OSC reset (ESC ] R) alone would "reset"
-    # straight back to the custom values. Program the stock PC palette, then reset.
+    # Restore the STANDARD palette explicitly. A previous setvtrgb overwrote the default
+    # colormap of the kernel. Thus the OSC reset (ESC ] R) alone "resets" the palette to
+    # the custom values. Program the stock PC palette, then reset.
     TTY=/dev/tty1
     [ -c "$TTY" ] || TTY=/dev/tty0
     if command -v setvtrgb >/dev/null 2>&1; then

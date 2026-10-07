@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """
-meshterm-spi-bridge — expose an SPI-attached MeshCore radio to MeshTerm.
+meshterm-spi-bridge: make an SPI-attached MeshCore radio available to MeshTerm.
 
-Some boards (the ClockworkPi uConsole hackergadgets AIO, Waveshare LoRa HATs)
-wire the LoRa chip straight to the host's SPI bus — there is no companion MCU
-and no firmware to flash. The node runs *in software* on the host via the
-`openhop_core` library (`pymc_core` until its rename in mid-2026; both are
-supported, the newer preferred). MeshTerm, though, speaks the MeshCore
-companion protocol over serial/BLE/TCP and expects to talk to a node, not to
+Some boards (the hackergadgets AIO of the ClockworkPi uConsole, and Waveshare LoRa HATs)
+connect the LoRa chip directly to the SPI bus of the host. They have no companion MCU and
+no firmware to flash. The node runs in software on the host, with the `openhop_core`
+library. The name of the library was `pymc_core` until its rename in mid-2026. The bridge
+supports both names, and it prefers the newer one. But MeshTerm uses the MeshCore
+companion protocol over serial, BLE, or TCP. It expects to talk to a node. It does not
 drive a bare radio.
 
-This tool bridges the two: it runs the software node itself and puts the
-standard companion protocol in front of it on a local TCP port, so that
+This tool connects the two. It runs the software node itself, and it puts the standard
+companion protocol in front of the node, on a local TCP port. Then
 
     meshterm --tcp 127.0.0.1:5000
 
-connects exactly as if a real companion device were plugged in.
+connects in the same way as if a real companion device is connected.
 
-It is BOTH a friendly setup menu and the bridge process. Run it with any
-Python 3 — it finds the node runtime for you and re-execs the bridge half
-under that interpreter automatically. You never need to know about venvs.
+This file is two things: a setup menu and the bridge process. Run it with any Python 3.
+It finds the node runtime for you, and it runs the bridge half again under that
+interpreter automatically. You do not need to know about venvs.
 
     ./meshterm-spi-bridge            # interactive menu
     ./meshterm-spi-bridge --check    # run prerequisite checks and exit
@@ -47,18 +47,18 @@ DEFAULT_NODE_NAME = "uConsole"
 
 HOME = Path.home()
 
-# The node runtimes this bridge can drive, newest first. `pymc_core` was renamed
-# `openhop_core` in 2026 (PyPI `pymc-core` stops at 1.0.12; `openhop-core` carries on
-# from 1.1.x) and the newer one has taken two of this file's three compat shims upstream,
-# so when both are installed the newer wins.
+# The node runtimes that this bridge can drive, newest first. `pymc_core` became
+# `openhop_core` in 2026. (PyPI `pymc-core` stops at 1.0.12, and `openhop-core` continues
+# from 1.1.x.) The newer library has taken two of the three compat shims of this file
+# upstream. Thus, when both are installed, the bridge uses the newer one.
 RUNTIMES = ("openhop_core", "pymc_core")
 
-# Interpreters likely to have a runtime, in preference order. First the bridge's own
-# venv — the answer on a host whose distro package cannot be upgraded (the
-# meshcore-uconsole .deb for trixie is built against Python 3.13 and will not run on a
-# bookworm uConsole; `python3 -m venv <this path> && pip install "openhop-core[hardware]"`
-# gives the bridge the current runtime while the GUI keeps its own). Then the
-# hackergadgets uConsole .deb's private virtualenv.
+# The interpreters that probably have a runtime, in order of preference. The first is the
+# own venv of the bridge. This is the answer on a host where the distro package cannot be
+# upgraded. (The meshcore-uconsole .deb for trixie is built against Python 3.13 and does
+# not run on a bookworm uConsole. `python3 -m venv <this path> && pip install
+# "openhop-core[hardware]"` gives the bridge the current runtime, and the GUI keeps its
+# own.) The second is the private virtualenv of the hackergadgets uConsole .deb.
 VENV_CANDIDATES = [
     str(HOME / ".local" / "share" / APP_NAME / "venv" / "bin" / "python"),
     "/opt/venvs/meshcore-uconsole/bin/python",
@@ -73,7 +73,7 @@ THIN = "-" * 62
 
 
 # --------------------------------------------------------------------------- #
-# Colour (restrained — off when piped, dumb terminal, or NO_COLOR is set)
+# Colour (restrained, and off when piped, on a dumb terminal, or when NO_COLOR is set)
 # --------------------------------------------------------------------------- #
 
 _USE_COLOR = (
@@ -113,12 +113,12 @@ def cyan(t: str) -> str:
 
 
 def cmd(t: str) -> str:
-    """Highlight a command the user should type/copy."""
+    """Highlight a command that the user must type or copy."""
     return bold(cyan(t))
 
 
 # --------------------------------------------------------------------------- #
-# Small text helpers (deliberately plain — a little colour, no flourish)
+# Small text helpers (plain on purpose: a little colour, and no decoration)
 # --------------------------------------------------------------------------- #
 
 
@@ -150,10 +150,11 @@ def confirm(prompt: str, default_yes: bool = False) -> bool:
 
 
 def python_runtime(python: str) -> str | None:
-    """The node runtime `python` can import — a name from RUNTIMES — or None.
+    """The node runtime that `python` can import (a name from RUNTIMES), or None.
 
-    One subprocess per interpreter: it reports the first runtime it finds in
-    RUNTIMES order, so an interpreter carrying both answers `openhop_core`.
+    The function starts one subprocess for each interpreter. The subprocess reports the
+    first runtime that it finds, in the order of RUNTIMES. Thus an interpreter that has both
+    runtimes answers `openhop_core`.
     """
     if not python or not os.path.exists(python):
         return None
@@ -178,12 +179,12 @@ def python_runtime(python: str) -> str | None:
 
 
 def python_has_pymc(python: str) -> bool:
-    """Return whether `python` can import a node runtime (kept for the older name)."""
+    """Return whether `python` can import a node runtime. This function keeps the older name."""
     return python_runtime(python) is not None
 
 
 def _meshcore_console_python() -> str | None:
-    """Resolve the interpreter behind the `meshcore-console` command, if present."""
+    """Resolve the interpreter behind the `meshcore-console` command, if the command exists."""
     exe = shutil.which("meshcore-console")
     if not exe:
         return None
@@ -201,11 +202,11 @@ def _meshcore_console_python() -> str | None:
 def find_runtime_python() -> tuple[str, str] | None:
     """Find an interpreter that has a node runtime: `(python, runtime)`, or None.
 
-    Candidates in order: the explicit override, this interpreter, the known venv
-    paths, then the interpreter behind an installed `meshcore-console`. The newest
-    runtime wins across all of them — an interpreter with `openhop_core` beats an
-    earlier candidate that only has `pymc_core` — and the override is the one
-    exception: MESHTERM_PYMC_PYTHON names a python, and whatever it has is used.
+    The candidates, in order, are: the explicit override, this interpreter, the known venv
+    paths, and the interpreter behind an installed `meshcore-console`. The newest runtime
+    wins across all of them. An interpreter with `openhop_core` is better than an earlier
+    candidate that has only `pymc_core`. The override is the one exception.
+    MESHTERM_PYMC_PYTHON names a python, and the function uses the runtime that it has.
     """
     seen: set[str] = set()
     override = os.environ.get("MESHTERM_PYMC_PYTHON", "")
@@ -232,7 +233,10 @@ def find_runtime_python() -> tuple[str, str] | None:
 
 
 def find_pymc_python() -> str | None:
-    """The interpreter `find_runtime_python` picks, or None (kept for the older name)."""
+    """The interpreter that `find_runtime_python` chooses, or None.
+
+    This function keeps the older name.
+    """
     hit = find_runtime_python()
     return hit[0] if hit else None
 
@@ -260,7 +264,7 @@ def _first_spidev() -> str | None:
 
 
 def port_listening(host: str, port: int) -> bool:
-    """Return whether something is already accepting connections on host:port."""
+    """Return whether a process already accepts connections on host:port."""
     try:
         with socket.create_connection((host, port), timeout=1.5):
             return True
@@ -269,7 +273,10 @@ def port_listening(host: str, port: int) -> bool:
 
 
 def meshcore_console_running() -> list[str]:
-    """Best-effort list of running meshcore-console (GUI/CLI) command lines."""
+    """The command lines of the meshcore-console (GUI or CLI) processes that run.
+
+    The list can be incomplete.
+    """
     try:
         out = subprocess.check_output(
             ["pgrep", "-af", "meshcore-console"], text=True, stderr=subprocess.DEVNULL
@@ -278,8 +285,8 @@ def meshcore_console_running() -> list[str]:
         return []
     lines = []
     for line in out.splitlines():
-        # our own bridge invokes the meshcore-uconsole venv python, not the
-        # meshcore-console binary, so it never matches — but guard anyway.
+        # Our own bridge calls the python of the meshcore-uconsole venv, not the
+        # meshcore-console binary. Thus it never matches, but the check is a guard.
         if "--run-bridge" in line or APP_NAME in line:
             continue
         lines.append(line.strip())
@@ -343,7 +350,7 @@ class Preflight:
         print(f"  {tag(self.gpio_ok)} GPIO chip            /dev/gpiochip0 — {self.gpio_detail}")
         if not self.gpio_ok and "permission" in self.gpio_detail:
             print("         fix: sudo usermod -aG gpio $USER  (then log out/in)")
-        # 4. radio availability (informational)
+        # 4. radio availability (information only)
         if self.svc_active:
             print(f"  {tag(True)} bridge service       running (radio in use by the boot service)")
         elif self.gui:
@@ -470,7 +477,7 @@ def action_install_service(pre: Preflight) -> None:
         print("Cancelled.")
         return
 
-    # Install a stable copy of this script for the unit to point at.
+    # Install a stable copy of this script. The unit points to this copy.
     INSTALL_PATH.parent.mkdir(parents=True, exist_ok=True)
     if os.path.abspath(__file__) != str(INSTALL_PATH):
         shutil.copyfile(os.path.abspath(__file__), INSTALL_PATH)
@@ -484,7 +491,7 @@ def action_install_service(pre: Preflight) -> None:
         print("  " + (r.stderr.strip() or "unknown error"))
         return
 
-    # Try to make it start at boot even before you log in.
+    # Try to make the service start at boot, also before you log in.
     linger = subprocess.run(
         ["loginctl", "enable-linger", os.environ.get("USER", "")],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -518,7 +525,8 @@ def action_uninstall_service() -> None:
     except FileNotFoundError:
         pass
     systemctl_user("daemon-reload")
-    # Remove the installed helper copy (but not a repo checkout you ran from).
+    # Remove the installed copy of the helper. Do not remove a repository checkout that
+    # you ran the script from.
     if INSTALL_PATH.exists() and os.path.abspath(__file__) != str(INSTALL_PATH):
         try:
             INSTALL_PATH.unlink()
@@ -546,9 +554,9 @@ def action_status(pre: Preflight) -> None:
 
 
 def offer_meshterm_profile() -> None:
-    """Optionally add a MeshTerm TCP profile so bare `meshterm` connects here."""
+    """Offer to add a MeshTerm TCP profile, so that a bare `meshterm` connects here."""
     if MESHTERM_CONFIG.exists() and "[profiles.bridge]" in MESHTERM_CONFIG.read_text(errors="replace"):
-        return  # already there
+        return  # the profile is already there
     if not confirm(
         f"\nAdd a 'bridge' profile to {MESHTERM_CONFIG} so you can just run "
         "`meshterm`?",
@@ -612,15 +620,15 @@ def menu() -> int:
 
 
 # --------------------------------------------------------------------------- #
-# The bridge itself (runs under the pymc_core interpreter via --run-bridge)
+# The bridge itself (runs under the pymc_core interpreter, through --run-bridge)
 # --------------------------------------------------------------------------- #
 
 
 def _import_runtime():
-    """Import the node runtime this interpreter has: `(module_name, module)`.
+    """Import the node runtime that this interpreter has: `(module_name, module)`.
 
-    RUNTIMES order, so `openhop_core` wins over a `pymc_core` sitting beside it.
-    Raises ImportError when neither is importable.
+    The function uses the order of RUNTIMES. Thus `openhop_core` wins over a `pymc_core`
+    that is installed next to it. It raises ImportError when neither is importable.
     """
     import importlib
 
@@ -633,7 +641,7 @@ def _import_runtime():
 
 
 def _rt_import(rt: str, dotted: str, attr: str | None = None):
-    """`from {rt}.{dotted} import {attr}` for whichever runtime is loaded."""
+    """`from {rt}.{dotted} import {attr}` for the runtime that is loaded."""
     import importlib
 
     module = importlib.import_module(f"{rt}.{dotted}")
@@ -641,24 +649,24 @@ def _rt_import(rt: str, dotted: str, attr: str | None = None):
 
 
 def _patch_pymc_ack_compat(rt: str, log) -> None:
-    """Accept modern MeshCore ACKs that carry extra bytes after the CRC.
+    """Accept modern MeshCore ACKs that have extra bytes after the CRC.
 
-    Newer firmware sends discrete ACK payloads longer than 4 bytes (the 4-byte
-    CRC first, then extras). pymc_core's AckHandler requires exactly 4 bytes
-    and drops the rest, so delivery confirmations never reach MeshTerm.
-    Override it to take the leading 4 bytes as the CRC — the same tolerant
-    parse pymc_core already uses for path-bundled ACKs.
+    Newer firmware sends discrete ACK payloads that are longer than 4 bytes (the 4-byte CRC
+    first, then extra bytes). The AckHandler of pymc_core needs exactly 4 bytes and drops the
+    rest. Thus delivery confirmations never reach MeshTerm. This function overrides the
+    handler to use the first 4 bytes as the CRC. This is the same tolerant parse that
+    pymc_core already uses for ACKs that are bundled in a path.
 
-    openhop_core carries this upstream (its `process_discrete_ack` takes the
-    first four bytes of anything four bytes or longer), so under that runtime
-    the shim stands down rather than re-stating what the library already does.
+    openhop_core has this change upstream. Its `process_discrete_ack` uses the first four
+    bytes of any payload of four bytes or more. Thus, under that runtime, the shim does
+    nothing, because the library already does the same thing.
     """
     if rt != "pymc_core":
         log.info("compat: %s accepts >4-byte ACK payloads itself; ack shim not needed", rt)
         return
     try:
         AckHandler = _rt_import(rt, "node.handlers.ack", "AckHandler")
-    except Exception as exc:  # package layout changed — leave it alone
+    except Exception as exc:  # the package layout changed, so do not change the package
         log.warning("ack compat shim not applied (%s)", exc)
         return
 
@@ -680,11 +688,12 @@ def _patch_pymc_ack_compat(rt: str, log) -> None:
 
 
 def _wire_contact_persistence(companion, log) -> None:
-    """Keep the node's contact list across bridge restarts.
+    """Keep the contact list of the node when the bridge restarts.
 
-    pymc_core's ContactStore is memory-only, so a restart forgot every contact
-    and DMs failed with ERR_CODE_NOT_FOUND until the peer was heard again.
-    Reload the last snapshot at startup and re-snapshot after every mutation.
+    The ContactStore of pymc_core keeps data in memory only. Thus a restart forgot each
+    contact, and DMs failed with ERR_CODE_NOT_FOUND until the node heard the peer again.
+    This function loads the last snapshot at startup and saves a new snapshot after each
+    change.
     """
     import json
 
@@ -747,13 +756,13 @@ def _wire_contact_persistence(companion, log) -> None:
 
 
 def _wire_channel_persistence(companion, log) -> None:
-    """Keep the node's channel table across bridge restarts.
+    """Keep the channel table of the node when the bridge restarts.
 
-    The runtime's ChannelStore is memory-only, like its contacts: every restart
-    came up with no channels, and MeshTerm's Channels page was empty until each
-    one was added again. Reload the last snapshot at startup and re-snapshot
-    after every set or clear, which the frame server makes through
-    ``set_channel`` / ``remove_channel`` on the companion.
+    The ChannelStore of the runtime keeps data in memory only, as it does for contacts. Each
+    restart started with no channels, and the Channels page of MeshTerm was empty until the
+    user added each channel again. This function loads the last snapshot at startup and
+    saves a new snapshot after each set or clear. The frame server does a set or a clear
+    through ``set_channel`` and ``remove_channel`` on the companion.
     """
     import json
 
@@ -811,61 +820,61 @@ def _wire_channel_persistence(companion, log) -> None:
 def _wire_trace_push(rt: str, companion, server, log) -> None:
     """Forward over-the-air trace replies to the client as PUSH_CODE_TRACE_DATA.
 
-    pymc_core parses received TRACE packets but never hands them to the
-    companion client: its frame server registers every push callback *except*
-    ``on_trace_received``, and nothing in the library ever fires the
-    ``trace_received`` event — so the whole path is dead code. The only
-    ``push_trace_data`` call is the self-hop shortcut in ``_cmd_send_trace_path``.
-    The upshot is that MeshTerm's ``run_trace`` sends the trace, gets
-    ``RESP_CODE_SENT``, then waits on ``TRACE_DATA`` and times out while the node
-    quietly drops the reply.
+    pymc_core parses the TRACE packets that it receives, but it never gives them to the
+    companion client. Its frame server registers each push callback except
+    ``on_trace_received``, and nothing in the library fires the ``trace_received`` event.
+    Thus the whole path is dead code. The only ``push_trace_data`` call is the self-hop
+    shortcut in ``_cmd_send_trace_path``. As a result, ``run_trace`` of MeshTerm sends the
+    trace and gets ``RESP_CODE_SENT``. Then it waits for ``TRACE_DATA`` and times out,
+    while the node drops the reply with no message.
 
-    Bridge it at the one seam that sees every received packet with its measured
-    SNR — the dispatcher's packet-received callback (``CompanionRadio`` already
-    installs ``_on_packet_received`` there and only acts on group data). Wrap it:
-    run the original, then, for a TRACE payload, re-slice the on-air bytes into
-    the hash/SNR blocks ``push_trace_data`` wants and push the standard 0x89
-    frame — exactly what the ``meshcore`` client on MeshTerm's side decodes.
+    This function bridges the gap at the one place that sees each received packet with its
+    measured SNR. This is the packet-received callback of the dispatcher (``CompanionRadio``
+    already installs ``_on_packet_received`` there, and it acts only on group data). The
+    function wraps the callback. It runs the original callback. Then, for a TRACE payload,
+    it cuts the on-air bytes again into the hash and SNR blocks that ``push_trace_data``
+    needs, and it pushes the standard 0x89 frame. The ``meshcore`` client on the side of
+    MeshTerm decodes exactly this frame.
 
-    Reading the SNRs is the subtle part. A TRACE packet keeps the *route* (the
-    hop hashes) in its payload, unchanged as it travels; the per-hop SNRs ride in
-    the packet **header's path field** instead — one signed byte (SNR × 4) appended
-    by each hop, which is where ``push_trace_data``'s SNR block and MeshTerm's
-    decoder both source them. So the payload never grows, and an earlier attempt
-    that waited for SNRs to appear *in the payload* never fired.
+    The SNR values are the difficult part. A TRACE packet keeps the route (the hop hashes)
+    in its payload, and the payload does not change while the packet travels. The SNR of
+    each hop is in the **path field of the packet header** instead. Each hop appends one
+    signed byte (SNR × 4). The SNR block of ``push_trace_data`` and the decoder of MeshTerm
+    both take the SNR values from this field. Thus the payload never grows. An earlier
+    attempt waited for SNR values to appear in the payload, and it never fired.
 
-    A received TRACE packet is also not a reply just because it exists. The
-    dispatcher is promiscuous — it runs the trace handler and this callback for
-    every non-duplicate TRACE frame it overhears, including third parties' traces
-    and our own outbound echoed back by the first repeater (same tag, header path
-    still filling). Pushing on those makes MeshTerm's tag-filtered wait resolve
-    instantly against a half-walked trace, so *every* trace reads as success. So
-    we gate hard: remember the tag and route of every trace we originate
-    (``send_trace_path_raw`` is the one send seam the frame server calls), and push
-    only a received TRACE whose tag we sent *and* whose header has accumulated an
-    SNR for every hop of that route — the completed reply.
+    A received TRACE packet is not a reply only because it exists. The dispatcher is
+    promiscuous. It runs the trace handler and this callback for each TRACE frame that it
+    overhears and that is not a duplicate. This includes the traces of third parties. It
+    also includes our own outbound trace that the first repeater echoes back (the same
+    tag, and the header path is still filling). If the function pushes these packets, the
+    wait of MeshTerm, which filters by tag, resolves at once against a trace that is half
+    complete. Then each trace reads as a success. Thus the function uses a strict gate. It
+    remembers the tag and the route of each trace that we originate (``send_trace_path_raw``
+    is the one send point that the frame server calls). It pushes only a received TRACE that
+    has a tag that we sent and a header that has an SNR for each hop of that route. This is
+    the completed reply.
 
-    Upstream, the clean fix is the mirror of every other push: have
-    ``_on_packet_received`` fire ``trace_received`` for a completed trace and have
-    ``frame_server._setup_push_callbacks`` register ``on_trace_received`` →
-    ``push_trace_data``. Until a pymc_core release carries that, this shim stands
-    (same spirit as :func:`_patch_pymc_ack_compat`).
+    Upstream, the clean repair is the same as for each other push. ``_on_packet_received``
+    fires ``trace_received`` for a completed trace, and
+    ``frame_server._setup_push_callbacks`` registers ``on_trace_received`` for
+    ``push_trace_data``. Until a pymc_core release has this, this shim stays (it has the
+    same purpose as :func:`_patch_pymc_ack_compat`).
     """
     import struct
     import time
 
-    # openhop_core carries this upstream: its CompanionRadio fires
-    # ``trace_received`` for a completed trace and its frame server registers
-    # ``_on_trace_received`` → ``push_trace_data``. Bridging it a second time
-    # would push every reply twice, so where the server has the handler, the
-    # shim stands down.
+    # openhop_core has this upstream. Its CompanionRadio fires ``trace_received`` for a
+    # completed trace, and its frame server registers ``_on_trace_received`` for
+    # ``push_trace_data``. A second bridge pushes each reply two
+    # times. Thus, where the server has the handler, the shim does nothing.
     if hasattr(server, "_on_trace_received"):
         log.info("compat: %s pushes completed TRACE replies itself; trace shim not needed", rt)
         return
 
     try:
         PAYLOAD_TYPE_TRACE = _rt_import(rt, "protocol.constants", "PAYLOAD_TYPE_TRACE")
-    except Exception as exc:  # package layout changed — leave it alone
+    except Exception as exc:  # the package layout changed, so do not change the package
         log.warning("trace push not wired (%s)", exc)
         return
 
@@ -879,9 +888,9 @@ def _wire_trace_push(rt: str, companion, server, log) -> None:
         log.warning("trace push not wired (no send_trace_path_raw)")
         return
 
-    # tag -> (flags, path_bytes, deadline). Only a trace WE originated, walked in
-    # full, becomes a push. Entries expire so a never-answered trace can't later
-    # match a recycled tag.
+    # tag -> (flags, path_bytes, deadline). Only a trace that we originated, and that walked
+    # the full route, becomes a push. The entries expire. Thus a trace that nobody answered
+    # cannot match a tag that the node uses again later.
     SENT_TTL_S = 90.0
     sent: dict = {}
 
@@ -911,12 +920,12 @@ def _wire_trace_push(rt: str, companion, server, log) -> None:
         tag, auth_code, flags = struct.unpack_from("<IIB", payload, 0)
         rec = sent.get(tag & 0xFFFFFFFF)
         if rec is None:
-            return  # a trace we didn't send — overheard third party, ignore
+            return  # a trace that we did not send (a third party that we overheard): ignore it
         _sent_flags, _sent_path, _dl = rec
         hw = 1 << (flags & 0x03)
-        route = payload[9:]                 # the hop hashes, unchanged in flight
+        route = payload[9:]                 # the hop hashes, which do not change in flight
         hops = len(route) // hw if hw else 0
-        # Per-hop SNRs live in the header path: one signed byte (SNR*4) per hop.
+        # The SNR of each hop is in the header path: one signed byte (SNR*4) for each hop.
         header_path = bytes(getattr(pkt, "path", b"") or b"")
         snr_count = getattr(pkt, "path_len", 0) & 0x3F
         header_snrs = header_path[:snr_count]
@@ -925,11 +934,11 @@ def _wire_trace_push(rt: str, companion, server, log) -> None:
             tag, hops, len(header_snrs), payload.hex().upper(), header_path.hex().upper(),
         )
         if hops == 0 or len(header_snrs) < hops:
-            return  # still in flight: not every hop has reported an SNR yet
+            return  # the trace is still in flight: not all hops have reported an SNR
         path_snrs = header_snrs[:hops]
         snr = pkt.get_snr() if hasattr(pkt, "get_snr") else getattr(pkt, "_snr", 0.0)
         final_snr_byte = max(-128, min(127, int(round((snr or 0.0) * 4)))) & 0xFF
-        sent.pop(tag & 0xFFFFFFFF, None)  # one reply per trace
+        sent.pop(tag & 0xFFFFFFFF, None)  # one reply for each trace
         server.push_trace_data(
             hops * hw, flags, tag, auth_code, route, path_snrs, final_snr_byte
         )
@@ -953,24 +962,25 @@ def _wire_trace_push(rt: str, companion, server, log) -> None:
 
 
 def _wire_rx_log_push(companion, server, log) -> None:
-    """Forward the promiscuous RX packet log to the client (PUSH_CODE_LOG_RX_DATA).
+    """Send the promiscuous RX packet log to the client (PUSH_CODE_LOG_RX_DATA).
 
-    The same missing-wiring gap as the trace push, one seam over. MeshTerm's live
-    feed is built from RX_LOG_DATA events — every overheard frame with its SNR/RSSI.
-    pymc_core's frame server has ``push_rx_raw`` (which builds the 0x88 push) but its
-    ``_setup_push_callbacks`` never registers ``on_rx_log_data``, so it is never
-    called. Adverts still show because they carry their *own* decoded push
-    (``advert_received``, which is wired); everything else we overhear — requests,
-    channel text we can't decrypt, acks — travels only via this raw log and is
-    dropped. So the feed looks advert-only.
+    This is the same gap in the wiring as the trace push, in a place next to it. The live
+    feed of MeshTerm comes from RX_LOG_DATA events. Each overheard frame has its SNR and
+    RSSI. The frame server of pymc_core has ``push_rx_raw`` (which builds the 0x88 push),
+    but its ``_setup_push_callbacks`` never registers ``on_rx_log_data``, so nothing calls
+    it. Adverts still show, because they have their own decoded push (``advert_received``,
+    which is wired). Everything else that we overhear travels only through this raw log, and
+    it is dropped. This includes requests, channel text that we cannot decrypt, and acks.
+    Thus the feed looks as if it has only adverts.
 
-    Subscribe to the dispatcher's raw-packet feed directly and push each frame.
-    Going through the dispatcher (not ``on_rx_log_data``) keeps it clear of the
-    frame server's per-connection ``clear_push_callbacks()``, and that feed fires
-    before dedup, so the client sees every repeat — exactly what a live feed wants.
+    This function subscribes to the raw-packet feed of the dispatcher directly, and it
+    pushes each frame. The path through the dispatcher (not ``on_rx_log_data``) does not
+    meet the ``clear_push_callbacks()`` that the frame server calls for each connection.
+    That feed fires before the removal of duplicates, so the client sees each repeat. A
+    live feed needs this.
 
-    Upstream, the fix is again the mirror of the wired pushes: register
-    ``on_rx_log_data`` → ``push_rx_raw`` in ``frame_server._setup_push_callbacks``.
+    Upstream, the repair is again the same as for the wired pushes: register
+    ``on_rx_log_data`` for ``push_rx_raw`` in ``frame_server._setup_push_callbacks``.
     """
     dispatcher = getattr(getattr(companion, "node", None), "dispatcher", None)
     if dispatcher is None or not hasattr(dispatcher, "add_raw_packet_subscriber"):
@@ -1022,10 +1032,10 @@ def run_bridge(host: str, port: int, node_name: str) -> int:
     CompanionFrameServer = _rt_import(rt, "companion", "CompanionFrameServer")
     CompanionRadio = _rt_import(rt, "companion", "CompanionRadio")
 
-    # Prefer the hackergadgets meshcore_console helpers (correct board pins +
-    # the SAME node identity the GUI uses). Fall back to a direct setup for a
-    # generic install (a Waveshare HAT with a pip'd runtime), or for the
-    # bridge's own venv on a host whose GUI package is behind the runtime.
+    # Prefer the hackergadgets meshcore_console helpers. They have the correct board pins and
+    # the same node identity that the GUI uses. Fall back to a direct setup for a generic
+    # install (a Waveshare HAT with a runtime from pip), or for the own venv of the bridge on
+    # a host where the GUI package is older than the runtime.
     identity = None
     radio = None
     try:
@@ -1033,8 +1043,8 @@ def run_bridge(host: str, port: int, node_name: str) -> int:
         from meshcore_console.meshcore.config import load_hardware_config_from_env
         from meshcore_console.meshcore.paths import identity_key_path
 
-        # The helper is named for the runtime the GUI was built against; either
-        # spelling hands back the same five-tuple.
+        # The name of the helper comes from the runtime that the GUI was built against.
+        # Each spelling returns the same five-tuple.
         _import_stack = getattr(_mc_runtime, "import_openhop_core", None) or getattr(
             _mc_runtime, "import_pymc_core"
         )
@@ -1043,9 +1053,9 @@ def run_bridge(host: str, port: int, node_name: str) -> int:
         hw = load_hardware_config_from_env()
         log.info("radio config %s", hw.to_log_string())
         radio = create_radio(SX1262Radio, hw, log.info)
-        # The same preamble rule as the direct path below: unless the environment
-        # names one, follow MeshCore (32 symbols up to SF8, 16 above) so the radio
-        # hears the mesh; begin() reads it, so this is in time.
+        # This is the same preamble rule as the direct path below. Unless the environment
+        # names a preamble, follow MeshCore (32 symbols up to SF8, 16 above). Thus the radio
+        # hears the mesh. begin() reads the value, so the change is in time.
         if "MESHCORE_PREAMBLE_LENGTH" not in os.environ and hasattr(radio, "preamble_length"):
             radio.preamble_length = 32 if hw.spreading_factor <= 8 else 16
         key_path = identity_key_path()
@@ -1064,11 +1074,11 @@ def run_bridge(host: str, port: int, node_name: str) -> int:
         SX1262Radio = _rt_import(rt, "hardware.sx1262_wrapper", "SX1262Radio")
         LocalIdentity = _rt_import(rt, "protocol.identity", "LocalIdentity")
 
-        # The uConsole AIO preset, knob for knob what meshcore_console's own
-        # HardwareRadioConfig defaults to — because the runtime's *own* defaults
-        # are a Waveshare HAT's (TX-enable on pin 6, no DIO2 RF switch, no DIO3
-        # TCXO, 868 MHz), and on the AIO those leave the radio deaf. Every knob is
-        # env-overridable under the same MESHCORE_* names the GUI reads.
+        # The uConsole AIO preset. Each value is the same as the default of the
+        # HardwareRadioConfig of meshcore_console. The defaults of the runtime itself are
+        # the defaults of a Waveshare HAT (TX-enable on pin 6, no DIO2 RF switch, no DIO3
+        # TCXO, 868 MHz), and on the AIO they make the radio deaf. The environment can
+        # override each value, with the same MESHCORE_* names that the GUI reads.
         env = os.environ.get
 
         def _int(name: str, default: int) -> int:
@@ -1099,10 +1109,11 @@ def run_bridge(host: str, port: int, node_name: str) -> int:
             "spreading_factor": _int("MESHCORE_SPREADING_FACTOR", 7),
             "bandwidth": _int("MESHCORE_BANDWIDTH", 62_500),
             "coding_rate": _int("MESHCORE_CODING_RATE", 5),
-            # MeshCore's own rule (RadioLibWrapper::preambleLengthForSF): 32 symbols up
-            # to SF8, 16 above. The receiver must match it, not just the sender — the
-            # SX1262 waits for the sync word only about as long as the preamble it expects,
-            # so the old fixed 12 against a mesh sending 32 decoded almost nothing.
+            # The rule of MeshCore (RadioLibWrapper::preambleLengthForSF): 32 symbols up
+            # to SF8, 16 above. The receiver must use the same value as the sender. The
+            # SX1262 waits for the sync word only for approximately the length of the
+            # preamble that it expects. Thus the old fixed value of 12, against a mesh that
+            # sent 32, decoded almost nothing.
             "preamble_length": _int(
                 "MESHCORE_PREAMBLE_LENGTH",
                 32 if _int("MESHCORE_SPREADING_FACTOR", 7) <= 8 else 16,
@@ -1111,8 +1122,8 @@ def run_bridge(host: str, port: int, node_name: str) -> int:
             "use_dio2_rf": _bool("MESHCORE_USE_DIO2_RF", True),
             "use_dio3_tcxo": _bool("MESHCORE_USE_DIO3_TCXO", True),
         }
-        # Pass only what this runtime's constructor knows: pymc_core 1.0.x lacks
-        # some of these (en_pins, the gpiod backend) and would refuse the call.
+        # Pass only the arguments that the constructor of this runtime knows. pymc_core 1.0.x
+        # does not have some of them (en_pins, the gpiod backend) and refuses the call.
         accepted = inspect.signature(SX1262Radio.__init__).parameters
         kwargs = {k: v for k, v in wanted.items() if k in accepted and v is not None}
         log.info("radio config %s", " ".join(f"{k}={v}" for k, v in kwargs.items()))
@@ -1122,9 +1133,9 @@ def run_bridge(host: str, port: int, node_name: str) -> int:
             "spreading_factor": kwargs["spreading_factor"],
             "coding_rate": kwargs["coding_rate"], "tx_power": kwargs["tx_power"],
         }
-        # The GUI's identity first, where the meshcore-uconsole stack keeps one, so
-        # a bridge running from its own venv is still the same node the GUI is; then
-        # the bridge's own.
+        # Use the identity of the GUI first, in the place where the meshcore-uconsole stack
+        # keeps it. Thus a bridge that runs from its own venv is the same node as the GUI.
+        # Then use the own identity of the bridge.
         xdg = Path(env("XDG_DATA_HOME") or (HOME / ".local" / "share"))
         for key_path in (
             xdg / "meshcore-uconsole" / "identity.key",
@@ -1136,8 +1147,8 @@ def run_bridge(host: str, port: int, node_name: str) -> int:
                 break
 
     if identity is None:
-        # No persisted identity anywhere — mint one and save it so the node
-        # keeps a stable identity across restarts.
+        # There is no stored identity anywhere. Make one and save it. Thus the node keeps a
+        # stable identity when it restarts.
         _LI = _rt_import(rt, "protocol.identity", "LocalIdentity")
 
         tmp = _LI()
@@ -1149,8 +1160,8 @@ def run_bridge(host: str, port: int, node_name: str) -> int:
         log.info("generated a new node identity at %s", save_path)
 
     async def _main() -> int:
-        # radio.begin() with backoff — GPIO lines may still be held briefly by
-        # a just-closed session.
+        # radio.begin() with backoff. A session that just closed can still hold the GPIO
+        # lines for a short time.
         import time
 
         for attempt in range(4):
@@ -1213,7 +1224,7 @@ def run_bridge(host: str, port: int, node_name: str) -> int:
         return asyncio.run(_main())
     except KeyboardInterrupt:
         return 0
-    except Exception as exc:  # surface a clean message, not a traceback wall
+    except Exception as exc:  # show a clean message, not a long traceback
         log.error("bridge failed: %s", exc)
         return 1
 
@@ -1235,7 +1246,7 @@ def main() -> int:
     ap.add_argument("--name", default=DEFAULT_NODE_NAME)
     args = ap.parse_args()
 
-    # Internal: we've already been re-execed under the node runtime's interpreter.
+    # Internal: the script already ran again under the interpreter of the node runtime.
     if args.run_bridge:
         return run_bridge(args.host, args.port, args.name)
 

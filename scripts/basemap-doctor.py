@@ -1,27 +1,30 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Diagnose why MeshTerm's map has no basemap, on the machine that has the problem.
+"""Find why the map of MeshTerm has no basemap, on the machine that has the problem.
 
-The map is the only networked part of MeshTerm: it fetches OpenStreetMap vector tiles over
-HTTPS from the source named by the ``basemap_tilejson_url`` preference. Every failure on
-that path — a missing certificate store, DNS, a timeout, a middlebox — is swallowed and
-logged at DEBUG (:mod:`meshterm.services.basemap`), and ``log_level`` defaults to WARNING,
-so a reader whose tiles never arrive sees a blank ground and no explanation anywhere.
+The map is the only part of MeshTerm that uses the network. It downloads OpenStreetMap
+vector tiles over HTTPS from the source that the ``basemap_tilejson_url`` preference names.
+MeshTerm catches each failure on that path and logs it at DEBUG
+(:mod:`meshterm.services.basemap`). The failures include a missing certificate store, DNS,
+a timeout, and a middlebox. The default of ``log_level`` is WARNING. Thus a user whose tiles
+never arrive sees a blank ground and no explanation anywhere.
 
-This script is that explanation. It is standalone and stdlib-only so it can be pasted onto
-any machine running any version of MeshTerm, and it prints one verdict with the fix.
+This script gives that explanation. It is standalone and uses only the standard library, so
+the user can paste it onto any machine that runs any version of MeshTerm. It prints one
+verdict with the fix.
 
-It runs under MeshTerm's *own* interpreter, which is the one thing that matters here: a Mac
-routinely has three Pythons, only one of them is the app's, and only that one's certificate
-store is the one the map actually uses. Started under any other, it finds the installed
-``meshterm`` command, reads the interpreter out of its shebang and hands itself over — so
-the user needs no idea which Python they installed into. Save it to a file rather than
-piping it into ``python3 -``: with no file on disk there is nothing to hand over.
+The script must run under the own interpreter of MeshTerm. This is the important point. A
+Mac usually has three Pythons, and only one of them is the Python of the app. Only the
+certificate store of that Python is the store that the map uses. If another Python starts
+the script, the script finds the installed ``meshterm`` command and reads the interpreter
+from its shebang. Then it hands itself over to that interpreter. Thus the user does not
+need to know the Python that they installed into. Save the script to a file. Do not pipe it
+into ``python3 -``, because with no file on disk the script has nothing to hand over.
 
-The decisive test is an A/B. ``curl`` verifies against the operating system's trust store
-and Python verifies against its own, so curl succeeding where Python fails means the
-certificates are at fault and nothing about the network is — the one comparison that
-separates the two causes that look identical from inside the app.
+The decisive test is an A/B. ``curl`` verifies against the trust store of the operating
+system, and Python verifies against its own store. If curl succeeds where Python fails, the
+certificates are the fault and the network is not. This is the only comparison that
+separates two causes that look the same from inside the app.
 """
 
 from __future__ import annotations
@@ -40,21 +43,23 @@ import urllib.request
 from pathlib import Path
 from typing import NamedTuple
 
-#: Where tiles come from unless the preference says otherwise. Kept in step with
-#: ``basemap.DEFAULT_TILEJSON_URL`` by hand: this script may run against an install whose
-#: ``meshterm`` it cannot import, so it cannot read the constant it is mirroring.
+#: The place that tiles come from, unless the preference says otherwise. Change it by hand
+#: when ``basemap.DEFAULT_TILEJSON_URL`` changes. This script can run for an install whose
+#: ``meshterm`` it cannot import, so it cannot read the constant that it copies.
 FALLBACK_TILEJSON_URL = "https://tiles.openfreemap.org/planet"
 
-#: Per-request timeout, matching ``BasemapSource``'s own so that a link which is merely
-#: slow fails here for the same reason it fails in the app rather than for a stricter one.
+#: The timeout of each request. It is the same as the timeout of ``BasemapSource``. Thus a
+#: link that is only slow fails here for the same reason that it fails in the app, and not
+#: for a stricter reason.
 TIMEOUT = 12.0
 
-#: What the app sends, so a source that filters by agent treats this run the same way.
+#: The user agent that the app sends. Thus a source that filters by agent treats this run
+#: in the same way.
 USER_AGENT = "MeshTerm-basemap-doctor (+https://github.com/jpmartineau/MeshTerm)"
 
-#: A tile that exists: zoom 9 over central Poland. The TileJSON resolving is only half the
-#: path — the tiles themselves are often a different host — so the check fetches real
-#: geometry before it reports success.
+#: A tile that exists: zoom 9 over central Poland. A TileJSON that resolves is only half
+#: of the path, because the tiles are often on a different host. Thus the check downloads
+#: real geometry before it reports success.
 SAMPLE_TILE = (9, 285, 167)
 
 
@@ -69,39 +74,40 @@ def line(label: str, value: object) -> None:
 
 
 def find_meshterm() -> tuple[str | None, str | None, str | None]:
-    """Report MeshTerm's version, tile URL and config dir, if this interpreter has them.
+    """Report the MeshTerm version, tile URL, and config directory, if this interpreter has them.
 
     Returns:
-        ``(version, tilejson_url, config_dir)``, each ``None`` where it could not be read.
+        ``(version, tilejson_url, config_dir)``. Each value is ``None`` when it cannot be read.
     """
     try:
         import meshterm
         from meshterm.core.config import default_config_dir
         from meshterm.core.preferences import Preferences
-    except Exception:  # noqa: BLE001 - any import failure means "not this interpreter"
+    except Exception:  # noqa: BLE001 - an import failure means that this is not the interpreter
         return None, None, None
     config_dir = default_config_dir()
     url = None
     try:
         url = Preferences.load(config_dir / "preferences.toml").basemap_tilejson_url
-    except Exception:  # noqa: BLE001 - an unreadable preferences file is itself a finding
+    except Exception:  # noqa: BLE001 - a preferences file that MeshTerm cannot read is a finding
         pass
     return getattr(meshterm, "__version__", "?"), url, str(config_dir)
 
 
-#: Set on the re-executed child, so a second interpreter that still cannot import MeshTerm
-#: gets on with the diagnosis instead of handing itself on forever.
+#: The script sets this on the child that it runs again. Thus a second interpreter that
+#: still cannot import MeshTerm continues with the diagnosis. It does not hand itself over
+#: again and again.
 REEXEC_ENV = "MESHTERM_DOCTOR_REEXEC"
 
 
 def meshterm_interpreter() -> str | None:
-    """The interpreter the installed ``meshterm`` command runs under, if it can be read.
+    """The interpreter that runs the installed ``meshterm`` command, if the script can read it.
 
-    A console script on Unix is a text file whose shebang names the exact interpreter the
-    app was installed into — and that interpreter's certificate store is the one the map
-    actually uses, which no other Python on the machine can speak for. On Windows the
-    console script is a binary launcher with no shebang, so this finds nothing and the
-    diagnosis proceeds with a banner saying which interpreter it did use.
+    On Unix, a console script is a text file. Its shebang names the exact interpreter that
+    the app was installed into. The certificate store of that interpreter is the store that
+    the map uses, and no other Python on the machine can answer for it. On Windows, the
+    console script is a binary launcher with no shebang. Thus this function finds nothing,
+    and the diagnosis continues with a banner that names the interpreter that it used.
     """
     script = shutil.which("meshterm")
     if script is None:
@@ -113,24 +119,24 @@ def meshterm_interpreter() -> str | None:
         return None
     if not first.startswith(b"#!"):
         return None
-    # A shebang may carry arguments (``#!/usr/bin/env python3``); the interpreter is the
-    # first word, and an ``env`` line names no absolute path worth re-execing.
+    # A shebang can have arguments (``#!/usr/bin/env python3``). The interpreter is the
+    # first word. An ``env`` line does not name an absolute path that is worth a second run.
     interpreter = first[2:].decode("utf-8", "replace").strip().split(" ")[0]
     return interpreter if interpreter and Path(interpreter).is_file() else None
 
 
 def reexec_under_meshterm() -> None:
-    """Hand this script to MeshTerm's own interpreter when it is not the one running it.
+    """Hand this script to the interpreter of MeshTerm, if another interpreter runs it.
 
-    The user should not have to know which of their three Pythons the app was installed
-    into — that detail is exactly what the failure is made of.
+    The user does not need to know which of the three Pythons the app was installed into.
+    This detail is the cause of the failure.
     """
     if os.environ.get(REEXEC_ENV):
         return
     try:
         if importlib.util.find_spec("meshterm") is not None:
             return
-    except (ImportError, ValueError):  # a broken or shadowed package: keep looking
+    except (ImportError, ValueError):  # a broken or hidden package: continue the search
         pass
     target = meshterm_interpreter()
     here = Path(globals().get("__file__", "")).resolve() if globals().get("__file__") else None
@@ -139,33 +145,39 @@ def reexec_under_meshterm() -> None:
     if Path(target).resolve() == Path(sys.executable).resolve():
         return
     print(f"  (handing over to MeshTerm's own interpreter: {target})")
-    # The child inherits this stdout, so the parent's buffer has to go out first or the
-    # banner lands after the report it introduces. Block buffering makes that certain the
-    # moment the output is piped into a file or a paste, which is how it is meant to
-    # travel. (``os.execve`` would avoid the extra process, but on Windows it is not a
-    # real exec: it spawns and exits, and segfaults outright under a redirect.)
+    # The child uses the same stdout as this process. Thus the buffer of the parent must go
+    # out first. If it does not, the banner appears after the report that it introduces.
+    # Block buffering makes this certain when the output goes into a file or a paste, and
+    # this is the intended use. (``os.execve`` avoids the extra process, but on Windows it
+    # is not a real exec. It starts a new process and exits, and it crashes with a segfault
+    # under a redirect.)
     sys.stdout.flush()
     child = subprocess.run([target, str(here), *sys.argv[1:]], env={**os.environ, REEXEC_ENV: "1"})
     sys.exit(child.returncode)
 
 
 def exists_marker(path: str) -> str:
-    """Return a marker saying whether ``path`` is actually on disk."""
+    """Return a marker that shows whether ``path`` is on the disk."""
     return "" if Path(path).exists() else "   <- MISSING"
 
 
 def describe_env() -> tuple[str | None, str | None]:
-    """Print interpreter, platform and MeshTerm facts; return the tile URL and config dir."""
+    """Print facts about the interpreter, the platform, and MeshTerm.
+
+    Returns:
+        The tile URL and the config directory.
+    """
     heading("This machine")
     line("Python", sys.version.split()[0])
     line("Interpreter", sys.executable)
     line("OS", f"{platform.system()} {platform.release()} ({platform.machine()})")
     line("TERM", os.environ.get("TERM", "(unset)"))
-    # Not a tile question, but it is the other thing that makes a map look wrong and it
-    # costs nothing to answer in the same round trip: no COLORTERM means 256 colours, and
-    # the basemap's greens and blues are what collide when they are quantized.
-    # Windows is exempt: prompt_toolkit's Windows output reports 24-bit outright, so an
-    # unset COLORTERM there says nothing. Everywhere else it is the whole of the evidence.
+    # This is not a question about tiles. But it is the other cause that makes a map look
+    # wrong, and the answer costs nothing in the same round trip. No COLORTERM means 256
+    # colours, and the greens and blues of the basemap collide when they are quantized.
+    # Windows is an exception. The Windows output of prompt_toolkit reports 24-bit colour
+    # directly, so an unset COLORTERM there shows nothing. On all other platforms, it is
+    # all of the evidence.
     unset = "(unset)" if os.name == "nt" else "(unset)   <- only 256 colours"
     line("COLORTERM", os.environ.get("COLORTERM") or unset)
 
@@ -179,7 +191,7 @@ def describe_env() -> tuple[str | None, str | None]:
 
 
 def describe_trust() -> None:
-    """Print the certificate store this Python would verify a tile server against."""
+    """Print the certificate store that this Python uses to verify a tile server."""
     heading("Certificate store")
     line("OpenSSL", ssl.OPENSSL_VERSION)
     paths = ssl.get_default_verify_paths()
@@ -205,20 +217,20 @@ def describe_trust() -> None:
     line("Certs loaded", loaded if loaded else "0   <- nothing to verify against")
 
 
-#: ``curl`` exit codes that mean TLS, as opposed to never getting that far. The whole
-#: value of asking curl is that it verifies against the *operating system's* trust store,
-#: so "curl got a certificate it disliked" and "curl could not reach the host" are
-#: opposite answers and must not be collapsed into "curl failed".
+#: The ``curl`` exit codes that mean a TLS failure, not a failure before TLS. The reason to
+#: ask curl is that it verifies against the trust store of the operating system. Thus
+#: "curl got a certificate that it rejected" and "curl could not reach the host" are
+#: opposite answers. Do not combine them into "curl failed".
 CURL_TLS_CODES = frozenset({35, 51, 58, 59, 60, 66, 77, 83, 90, 91})
 
 
 class Curl(NamedTuple):
-    """What the system ``curl`` made of the same URL.
+    """The result that the system ``curl`` gave for the same URL.
 
     Attributes:
-        verdict: ``ok`` (the server answered, whatever its status), ``tls`` (a certificate
-            or handshake failure), ``unreachable`` (never got that far), or ``absent``
-            (no ``curl`` on this machine to ask).
+        verdict: ``ok`` (the server answered, with any status), ``tls`` (a certificate or
+            handshake failure), ``unreachable`` (curl did not reach the server), or
+            ``absent`` (this machine has no ``curl`` to ask).
         detail: The status or error, for the transcript.
     """
 
@@ -227,7 +239,7 @@ class Curl(NamedTuple):
 
 
 def curl_says(url: str) -> Curl:
-    """Fetch ``url`` with the system ``curl``, which verifies against the OS trust store."""
+    """Download ``url`` with the system ``curl``, which uses the trust store of the OS."""
     curl = shutil.which("curl")
     if curl is None:
         return Curl("absent", "no curl on this machine to compare against")
@@ -247,26 +259,26 @@ def curl_says(url: str) -> Curl:
     except (subprocess.TimeoutExpired, OSError):
         return Curl("unreachable", "timed out")
     if proc.returncode == 0:
-        # Any HTTP status at all means the transport worked, which is the only thing this
-        # comparison is asking about - a 301 or a 404 still proves TLS and the route.
+        # Each HTTP status shows that the transport worked. This is the only thing that this
+        # comparison asks. A 301 or a 404 also proves TLS and the route.
         return Curl("ok", f"HTTP {proc.stdout.strip()}")
     kind = "tls" if proc.returncode in CURL_TLS_CODES else "unreachable"
     return Curl(kind, f"exit {proc.returncode}: {proc.stderr.strip() or 'no detail'}")
 
 
 def fetch(url: str) -> tuple[bool, object]:
-    """GET ``url`` exactly the way the app does. Returns ``(ok, body-or-exception)``."""
+    """GET ``url`` in the same way as the app. Returns ``(ok, body-or-exception)``."""
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
             return True, resp.read()
-    except Exception as exc:  # noqa: BLE001 - classifying the failure is the whole job
+    except Exception as exc:  # noqa: BLE001 - this function must classify the failure
         return False, exc
 
 
-#: What to do about a certificate store this Python cannot verify with. The macOS case is
-#: first because it is the one that reaches a user who did nothing wrong: a python.org
-#: install ships with an empty store until its own installer command is run.
+#: What to do when this Python cannot verify with its certificate store. The macOS case is
+#: first, because it affects a user who did nothing wrong. A python.org install has an
+#: empty store until the user runs its own installer command.
 CERT_FIX = (
     "Give this Python a certificate store. On macOS a python.org install ships\n"
     "    without one until you run its own command:\n"
@@ -276,7 +288,7 @@ CERT_FIX = (
     '        export SSL_CERT_FILE="$(python3 -m certifi)"      # then relaunch MeshTerm'
 )
 
-#: What to do when TLS is being terminated in the middle rather than at the tile server.
+#: What to do when TLS ends in the middle of the path and not at the tile server.
 INTERCEPT_FIX = (
     "Trust the interceptor's root certificate in this Python (SSL_CERT_FILE can\n"
     "    point at a bundle that includes it), or exempt the tile host from HTTPS\n"
@@ -285,11 +297,10 @@ INTERCEPT_FIX = (
 
 
 def classify(exc: BaseException) -> tuple[str, str, str]:
-    """Turn a fetch exception into ``(kind, what happened, what to do about it)``.
+    """Change an exception from a download to ``(kind, what happened, what to do about it)``.
 
-    The *kind* is what the verdict reasons with: a certificate failure and a timeout point
-    at opposite halves of the world, and the ``curl`` comparison means something different
-    for each.
+    The verdict uses the kind in its reasoning. A certificate failure and a timeout point to
+    opposite causes, and the ``curl`` comparison has a different meaning for each.
     """
     reason = getattr(exc, "reason", exc)
     if isinstance(exc, urllib.error.HTTPError):
@@ -328,12 +339,12 @@ def classify(exc: BaseException) -> tuple[str, str, str]:
 
 
 def verdict(kind: str, cause: str, fix: str, curl: Curl) -> None:
-    """Print one coherent story from what Python saw and what ``curl`` saw.
+    """Print one coherent story from the result of Python and the result of ``curl``.
 
-    The two readings have to be reconciled rather than printed side by side: a certificate
-    Python rejects *and curl accepts* is MeshTerm's own trust store, while one they both
-    reject is the network re-signing traffic or a genuinely bad server - the same Python
-    exception, opposite causes, opposite fixes.
+    The function must reconcile the two results. It must not print them side by side. If
+    Python rejects a certificate and curl accepts it, the fault is the trust store of
+    MeshTerm. If both reject it, the network signs the traffic again, or the server is bad.
+    The Python exception is the same, but the causes and the fixes are opposite.
     """
     print(f"  The map cannot fetch tiles because {cause}.")
     if kind in ("cert", "tls"):
@@ -364,7 +375,10 @@ def verdict(kind: str, cause: str, fix: str, curl: Curl) -> None:
 
 
 def count_cached(config_dir: str | None) -> None:
-    """Print how many tiles are already on disk, which the map can draw with no network."""
+    """Print the number of tiles that are already on the disk.
+
+    The map can draw these tiles with no network.
+    """
     if not config_dir:
         return
     tiles = Path(config_dir) / "tilecache" / "tiles"
@@ -375,7 +389,7 @@ def count_cached(config_dir: str | None) -> None:
 
 
 def main() -> int:
-    """Run every check and print one verdict. Returns a process exit status."""
+    """Run each check and print one verdict. Returns an exit status for the process."""
     print("MeshTerm basemap doctor")
     reexec_under_meshterm()
     url, config_dir = describe_env()
