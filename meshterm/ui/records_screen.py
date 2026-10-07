@@ -38,7 +38,7 @@ Nothing here transmits: this screen reads the boards that the trace tools filled
 from __future__ import annotations
 
 import textwrap
-from collections.abc import Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -71,6 +71,7 @@ from .widgets import (
 
 if TYPE_CHECKING:
     from ..context import AppContext
+    from ..core.models import Contact, HeardNode
 
 #: The width at which the descriptions of the disciplines wrap. It is well inside 72
 #: cells, so that the text is the same at each terminal width.
@@ -789,6 +790,75 @@ class RecordScreen(Screen):
         return lines
 
 
+#: The position and the node type of a route node. Each one can be unknown.
+NodeGeo = tuple[tuple[float, float] | None, int | None]
+
+
+def node_geo_lookup(
+    heard: Iterable[HeardNode], contacts: Iterable[Contact]
+) -> Callable[[str], NodeGeo]:
+    """A lookup of the best-known position and node type of a route node.
+
+    The area drawing of a record must use the positions that the score measured. The
+    trace tools score a walk with the adverts that we heard, and with the contacts put
+    over them (``build_positions`` in :mod:`~meshterm.ui.trace_screen`). The name resolver
+    also puts the contacts first (:func:`~meshterm.services.trace_runner.make_node_resolver`).
+    Thus the contacts are first in the list here too, and the first entry that matches
+    wins. A contact with no position, or at 0,0, does not hide the heard position.
+
+    A record stores canonical ids. Thus the lookup matches them the same as the resolver
+    does: a prefix on either side.
+
+    Args:
+        heard: The heard nodes of the history (:meth:`Repository.heard_nodes`).
+        contacts: The contacts of the device.
+
+    Returns:
+        A function from a node id to ``(position, node type)``. The function caches each
+        answer, because the boards ask for the same route nodes many times (each hop of
+        each record, and records that share hops).
+    """
+    entries: list[tuple[str, tuple[float, float] | None, int | None]] = []
+    for contact in contacts:
+        ident = (contact.public_key or contact.key_prefix or "").lower().removeprefix("0x")
+        if not ident:
+            continue
+        pos = (
+            (contact.lat, contact.lon)
+            if (contact.has_location and (contact.lat or contact.lon))
+            else None
+        )
+        entries.append((ident, pos, contact.node_type))
+    for node in heard:
+        if not node.node:
+            continue
+        pos = (node.lat, node.lon) if node.has_location else None
+        entries.append((node.node.lower().removeprefix("0x"), pos, node.node_type))
+
+    cache: dict[str, NodeGeo] = {}
+
+    def lookup(node_id: str) -> NodeGeo:
+        cached = cache.get(node_id)
+        if cached is not None:
+            return cached
+        needle = node_id.lower().removeprefix("0x")
+        pos: tuple[float, float] | None = None
+        ntype: int | None = None
+        for ident, epos, etype in entries:
+            if not (ident.startswith(needle) or needle.startswith(ident)):
+                continue
+            if pos is None:
+                pos = epos
+            if ntype is None:
+                ntype = etype
+            if pos is not None and ntype is not None:
+                break
+        cache[node_id] = (pos, ntype)
+        return pos, ntype
+
+    return lookup
+
+
 async def open_records(ctx: AppContext) -> dict:
     """Open the Trophy case browser and run it until the user leaves it.
 
@@ -841,50 +911,9 @@ async def open_records(ctx: AppContext) -> dict:
     mark_lane = discipline_lane()
 
     # The node positions and types for the area drawing of a record. They are collected
-    # live, the same as the trace tools collect them to score a walk: the adverts that we
-    # heard, with the contacts put over them. A record stores canonical ids, so match them
-    # the same as the resolver does (a prefix on either side).
-    node_entries: list[tuple[str, tuple[float, float] | None, int | None]] = []
-    for heard in ctx.repo.heard_nodes():
-        if not heard.node:
-            continue
-        pos = (heard.lat, heard.lon) if heard.has_location else None
-        node_entries.append((heard.node.lower().removeprefix("0x"), pos, heard.node_type))
-    for contact in contacts:
-        ident = (contact.public_key or contact.key_prefix or "").lower().removeprefix("0x")
-        if not ident:
-            continue
-        pos = (
-            (contact.lat, contact.lon)
-            if (contact.has_location and (contact.lat or contact.lon))
-            else None
-        )
-        node_entries.append((ident, pos, contact.node_type))
-
-    # Cached: the boards ask for the same route nodes many times (each hop of each record,
-    # and records that share hops). The entry list does not change while the screen is
-    # open. Thus the prefix scan occurs only once for each different id.
-    geo_memo: dict[str, tuple[tuple[float, float] | None, int | None]] = {}
-
-    def node_geo(node_id: str) -> tuple[tuple[float, float] | None, int | None]:
-        """The best-known position and type of a route node, from the heard and contact data."""
-        cached = geo_memo.get(node_id)
-        if cached is not None:
-            return cached
-        needle = node_id.lower().removeprefix("0x")
-        pos: tuple[float, float] | None = None
-        ntype: int | None = None
-        for ident, epos, etype in node_entries:
-            if not (ident.startswith(needle) or needle.startswith(ident)):
-                continue
-            if pos is None:
-                pos = epos
-            if ntype is None:
-                ntype = etype
-            if pos is not None and ntype is not None:
-                break
-        geo_memo[node_id] = (pos, ntype)
-        return pos, ntype
+    # live, the same as the trace tools collect them to score a walk (refer to
+    # node_geo_lookup). The entry list does not change while the screen is open.
+    node_geo = node_geo_lookup(ctx.repo.heard_nodes(), contacts)
 
     def walk_drawing(
         record: DiscoveredPath,

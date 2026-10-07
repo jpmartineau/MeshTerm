@@ -22,6 +22,7 @@ from meshterm.context import AppContext
 from meshterm.core.admin_store import AdminStore
 from meshterm.core.config import Settings
 from meshterm.core.device_store import DeviceStore
+from meshterm.core.models import NODE_TYPE_REPEATER, Contact, HeardNode
 from meshterm.persistence.repository import DiscoveredPath, Repository
 from meshterm.services.records import CATEGORIES, CATEGORY_BY_ID
 from meshterm.ui.records_screen import (
@@ -29,6 +30,7 @@ from meshterm.ui.records_screen import (
     WalkVertex,
     discipline_label,
     discipline_lane,
+    node_geo_lookup,
     open_records,
 )
 from meshterm.ui.surface import TuiUi
@@ -494,6 +496,43 @@ def test_record_area_tab_says_so_when_too_narrow_to_draw() -> None:
     body = _plain(screen.render_body(12))
     assert not any(_is_braille(ch) for ch in body)
     assert "no room" in body  # cut at the edge like each row, but it is there
+
+
+_SEEN = datetime(2026, 10, 1, tzinfo=timezone.utc)
+
+
+def _heard(node: str, lat: float | None, lon: float | None) -> HeardNode:
+    return HeardNode(
+        node=node, name=None, count=1, median_snr=None, best_snr=None, last_rssi=None,
+        last_seen=_SEEN, lat=lat, lon=lon, node_type=NODE_TYPE_REPEATER,
+    )  # fmt: skip
+
+
+def test_the_area_drawing_puts_a_contact_position_over_a_heard_one() -> None:
+    """A contact's position wins over a heard advert's position.
+
+    The trace tools score a walk with the contacts put over the heard adverts, and the name
+    resolver also puts the contacts first. The area drawing once took the heard position
+    first. Thus a node whose heard advert and contact disagreed was drawn at a place that
+    the score did not measure.
+    """
+    heard = [_heard(HUB_ID, 45.40, -73.90)]
+    contacts = [Contact(name="Hub", public_key=HUB_ID + "0" * 52, lat=45.55, lon=-73.60)]
+    pos, _ = node_geo_lookup(heard, contacts)(HUB_ID)
+    assert pos == (45.55, -73.60)
+
+
+def test_the_area_drawing_falls_back_to_the_heard_position() -> None:
+    """A contact with no position, or at 0,0, leaves the heard position in use."""
+    heard = [_heard(HUB_ID, 45.40, -73.90), _heard(FAR_ID, 46.10, -74.20)]
+    contacts = [
+        Contact(name="Hub", public_key=HUB_ID + "0" * 52),
+        Contact(name="Far", key_prefix=FAR_ID, lat=0.0, lon=0.0),
+    ]
+    lookup = node_geo_lookup(heard, contacts)
+    assert lookup(HUB_ID) == ((45.40, -73.90), NODE_TYPE_REPEATER)
+    assert lookup(FAR_ID)[0] == (46.10, -74.20)
+    assert lookup("0123456789ab") == (None, None)
 
 
 def test_record_without_a_shape_has_no_area_tab() -> None:
