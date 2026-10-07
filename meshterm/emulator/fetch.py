@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Download the Terminus 12-pixel fonts that the emulator draws in: one time, only on request.
 
-Terminus has the SIL Open Font License. Thus MeshTerm never ships it. This module
+Terminus has the SIL Open Font License. Thus the repository and the wheel never carry it.
+The Debian package for the Cardputer Zero carries it next to its licence, because an app
+from the launcher has no terminal in which to run this download. That build also uses
+this module (refer to ``scripts/cardputer-zero/build-deb.sh``). This module
 downloads the upstream release and checks that it is the correct archive. Then it
 extracts ``ter-u12n.bdf``, ``ter-u12b.bdf``, and the licence next to them into the
 directory that the emulator reads (:func:`~.font.font_dir`). ``meshterm emulate

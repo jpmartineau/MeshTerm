@@ -36,7 +36,7 @@ import builtins
 import platform
 import sys
 from dataclasses import dataclass
-from importlib.metadata import Distribution, PackagePath, distribution
+from importlib.metadata import Distribution, PackagePath, distribution, distributions
 from pathlib import Path
 
 from packaging.markers import default_environment
@@ -318,16 +318,41 @@ def dependency_closure(root: str = ROOT_DISTRIBUTION) -> list[Distribution]:
     return sorted(seen.values(), key=lambda d: canonicalize_name(d.metadata["Name"]))
 
 
-def collect_notices(root: str = ROOT_DISTRIBUTION) -> list[Notice]:
+def installed_in(site: str | Path, root: str = ROOT_DISTRIBUTION) -> list[Distribution]:
+    """Each distribution installed in the directory ``site``, except ``root``.
+
+    The Debian package for the Cardputer Zero installs MeshTerm with ``pip install
+    --target`` (refer to ``scripts/cardputer-zero/build-deb.sh``). Thus that directory holds
+    exactly the distributions that the package bundles. They include the ``spi`` extra,
+    which :func:`dependency_closure` does not follow, because it asks for no extras. The
+    directory is the true list, so this function reads it and does not walk requirements.
+
+    Returns:
+        The distributions, in the order of their canonical (PEP 503) name, as
+        :func:`dependency_closure` returns them.
+    """
+    found = {canonicalize_name(d.metadata["Name"]): d for d in distributions(path=[str(site)])}
+    found.pop(canonicalize_name(root), None)
+    return [found[key] for key in sorted(found)]
+
+
+def collect_notices(root: str = ROOT_DISTRIBUTION, site: str | Path | None = None) -> list[Notice]:
     """All the notices that ``THIRD-PARTY-NOTICES.txt`` of this build must carry.
 
     The PSF notice of Python is always first. Python is not a PyPI distribution that
     ``Requires-Dist`` can name, so it can never appear in :func:`dependency_closure`. Each
     dependency follows it, in the order of its name. Thus the difference between the notices
     file of one build and the next is stable, and a person can examine it.
+
+    Args:
+        root: The distribution that the build ships.
+        site: A directory that ``pip install --target`` filled. If it is given, the
+            dependencies are the distributions in it (:func:`installed_in`). If it is
+            ``None``, they are the closure of ``root`` in this interpreter.
     """
     notices = [_python_notice()]
-    for dist in dependency_closure(root):
+    bundled = dependency_closure(root) if site is None else installed_in(site, root)
+    for dist in bundled:
         canonical = canonicalize_name(dist.metadata["Name"])
         notices.append(
             Notice(
@@ -364,29 +389,32 @@ def render(notices: list[Notice]) -> str:
     return "\n".join(blocks).rstrip("\n") + "\n"
 
 
-def write_third_party_notices(path: str | Path, root: str = ROOT_DISTRIBUTION) -> Path:
+def write_third_party_notices(
+    path: str | Path, root: str = ROOT_DISTRIBUTION, site: str | Path | None = None
+) -> Path:
     r"""Generate ``THIRD-PARTY-NOTICES.txt`` and write it to ``path``.
 
     The function writes raw UTF-8 bytes. It does not use text mode. Thus a Windows build
     does not change the ``\n`` line endings to ``\r\n``. The content of the file must be the
-    same, byte for byte, on each platform that builds it.
+    same, byte for byte, on each platform that builds it. ``site`` has the meaning that
+    :func:`collect_notices` gives it.
 
     Returns:
         ``path``, as a :class:`~pathlib.Path`, for the convenience of the caller.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(render(collect_notices(root)).encode("utf-8"))
+    path.write_bytes(render(collect_notices(root, site)).encode("utf-8"))
     return path
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entry point: ``python packaging/notices.py OUTPUT_PATH``."""
+    """CLI entry point: ``python packaging/notices.py OUTPUT_PATH [SITE_DIR]``."""
     args = sys.argv[1:] if argv is None else argv
-    if len(args) != 1:
-        print("usage: notices.py OUTPUT_PATH", file=sys.stderr)
+    if len(args) not in (1, 2):
+        print("usage: notices.py OUTPUT_PATH [SITE_DIR]", file=sys.stderr)
         return 2
-    written = write_third_party_notices(args[0])
+    written = write_third_party_notices(args[0], site=args[1] if len(args) == 2 else None)
     print(f"wrote {written}")
     return 0
 

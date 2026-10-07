@@ -165,3 +165,34 @@ def test_every_vendored_license_gap_has_its_file() -> None:
             path = Path(notices.__file__).parent / rel
             assert path.is_file(), f"{name}: {rel} is missing"
             assert path.read_text(encoding="utf-8").strip(), f"{name}: {rel} is empty"
+
+
+def _fake_dist(site: Path, name: str, version: str) -> None:
+    """Write a minimal installed distribution with a licence file into ``site``."""
+    info = site / f"{name.replace('-', '_')}-{version}.dist-info"
+    info.mkdir(parents=True)
+    (info / "METADATA").write_text(
+        f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\nLicense-Expression: MIT\n",
+        encoding="utf-8",
+    )
+    (info / "LICENSE").write_text(f"The licence of {name}.\n", encoding="utf-8")
+    (info / "RECORD").write_text(
+        f"{info.name}/METADATA,,\n{info.name}/LICENSE,,\n{info.name}/RECORD,,\n",
+        encoding="utf-8",
+    )
+
+
+def test_site_mode_lists_the_directory_and_not_the_closure(tmp_path: Path) -> None:
+    """With ``site``, the notices are the distributions in that directory, less MeshTerm.
+
+    The Debian package for the Cardputer Zero bundles the ``spi`` extra. The walk of the
+    closure asks for no extras, so the package reads its ``pip install --target``
+    directory instead. The Python notice stays first in this mode too.
+    """
+    _fake_dist(tmp_path, "mesh-term", "1.0")
+    _fake_dist(tmp_path, "zeta-lib", "2.0")
+    _fake_dist(tmp_path, "alpha-lib", "3.0")
+    got = notices.collect_notices(site=tmp_path)
+    assert [n.name for n in got] == ["Python", "alpha-lib", "zeta-lib"]
+    assert got[1].summary == "MIT"
+    assert "The licence of alpha-lib." in got[1].text

@@ -1,0 +1,35 @@
+{
+  "package_name": "meshterm",
+  "app_name": "MeshTerm",
+  "bin_name": "meshterm",
+  "store": {
+    "summary": "A full-featured MeshCore client. Uses the Cap LoRa-1262 or a companion.",
+    "description": "MeshTerm is a full-featured MeshCore client. On the Cardputer Zero, it runs the Cap LoRa-1262 as its own radio, or it connects to a MeshCore companion over USB, Bluetooth, or TCP. Chat on channels and in direct messages, see the mesh on a map, trace paths, manage repeaters and rooms, and keep a record of every node heard. Fn+4 to Fn+8 drive the row of labels at the bottom of the display. Hold Esc to quit.",
+    "categories": [
+      "Radio & Comms"
+    ],
+    "screenshots": [
+      "screenshots/menu.png",
+      "screenshots/chat.png",
+      "screenshots/map.png",
+      "screenshots/contacts.png"
+    ],
+    "icon": "icon.png",
+    "license": "Apache-2.0",
+    "source_repo": "https://github.com/jpmartineau/MeshTerm",
+    "author": {
+      "github": "jpmartineau",
+      "display_name": "Jean-Pierre Martineau"
+    },
+    "share_code": "MTRM",
+    "permissions": {
+      "camera": false,
+      "microphone": false,
+      "imu": false,
+      "network": true,
+      "additional_hardware": true,
+      "background_service": false,
+      "external_display": false
+    }
+  }
+}

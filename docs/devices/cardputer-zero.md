@@ -63,7 +63,8 @@ draws each character on the display itself and reads the keys directly.
 
 **Not done:**
 
-- A package for M5Stack's app store. Until there is one, you install MeshTerm
+- MeshTerm in M5Stack's app store. `scripts/cardputer-zero/build-deb.sh` builds the
+  package, but the store does not have it yet. Until it does, you install MeshTerm
   yourself (refer to the next section).
 - Typing on the real keyboard. Key events for the arrows, Enter, Esc, Fn+4 to Fn+8, and
   Shift were sent to the keyboard from another computer. They worked. The symbols on the
@@ -93,8 +94,9 @@ python3 -m venv .venv
 scripts/cardputer-zero/launcher-entry.sh
 ```
 
-MeshTerm now has an icon in the launcher. To remove the icon, run
-`scripts/cardputer-zero/launcher-entry.sh remove`.
+MeshTerm now has an icon in the launcher. The icon is a negative of the MeshTerm logo. Thus
+it is different from the icon of MeshTerm from the app store, and you can have both. To
+remove the icon, run `scripts/cardputer-zero/launcher-entry.sh remove`.
 
 ### Typing long text from your computer
 

@@ -781,8 +781,10 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   (`emulator/framebuffer.py`, written ahead of the hardware), a Tk window on the desktop
   (`emulator/window.py`). The window is the **emulator** for both handhelds —
   `meshterm emulate cardputer-zero|picocalc-lyra --mock`, after `meshterm emulate
-  --fetch-fonts` once (Terminus is OFL, so it is fetched and digest-checked, never
-  shipped). An `EmulatedDevice` (`emulator/devices.py`) is everything that differs per
+  --fetch-fonts` once (Terminus is OFL, so it is fetched and digest-checked, never in the
+  repo or the wheel; the store `.deb`, `scripts/cardputer-zero/build-deb.sh`, carries it
+  beside `OFL.TXT`, since a launcher app has no terminal to fetch it from — JP,
+  2026-10-07: "minimize potential problems"). An `EmulatedDevice` (`emulator/devices.py`) is everything that differs per
   handheld: the panel, a Linux console's top-left grid and bold-as-bright 4-bit palette
   (the PicoCalc), the lane keys drawn under the panel (the Cardputer's 4–8), and how its
   keyboard spells Shift+F-keys. It is **not a strict emulator** — it mimics the display's
