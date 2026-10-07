@@ -16,6 +16,20 @@ Commit directly on `main` — do not create topic branches unless explicitly ask
 is a solo repo; branches just create divergence to merge back later). Commit freely, but
 never `git push` unless explicitly asked in that moment.
 
+## Writing standard: ASD-STE100
+
+Docstrings, code comments, documents, guides, and the changelog are written in ASD-STE100
+Simplified Technical English (STE), with Canadian spelling. The rules, the bends that we
+permit, and the glossary are in `docs/development/writing-style.md`. Read that file
+before you write or change such text, and keep all new text in this style. The glossary
+adds to the lexicon below. If a concept has no word in the glossary, choose one word, use
+it each time, and add it to the glossary. `tests/test_writing_style.py` finds the marks
+that STE does not use (dashes, semicolons, contractions, Latin abbreviations).
+
+These texts are not in STE: the legal text, the written pages in `meshterm/assets/pages/`,
+the code of conduct, the fixed description of MeshTerm, the UX strings (they follow the UX
+standards below), and this file.
+
 ## Licensing — what every file and every build carries
 
 - **Every Python file opens with `# SPDX-License-Identifier: Apache-2.0`** (line 2 after a

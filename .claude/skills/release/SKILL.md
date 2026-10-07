@@ -87,14 +87,16 @@ write **what changed for someone using MeshTerm**, in the changelog's existing v
 - **A commit that changes nothing a user can see does not appear.** Refactors that move
   code behind an unchanged surface, test-only commits, skill and tooling commits: leave
   them out. The changelog is not a shadow git log.
-- Wrap at the file's width (~95 columns) and match its em-dash-and-clause rhythm.
+- **Write it in ASD-STE100**, as the rest of the changelog is (since 2026-10-06): short
+  sentences, simple verb tenses, no dashes or semicolons, and the words of the glossary in
+  `docs/development/writing-style.md`. Wrap at the file's width (~95 columns).
 
 Insert the section directly under the HTML comment at the top of `CHANGELOG.md`:
 
 ```markdown
 ## [Unreleased]
 
-## [X.Y.Z] — YYYY-MM-DD
+## [X.Y.Z] - YYYY-MM-DD
 ```
 
 A fresh empty `[Unreleased]` heading goes back in above it — that is what makes the *next*
