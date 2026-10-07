@@ -1,23 +1,23 @@
 # The MeshTerm command line
 
-MeshTerm has two front ends over one codebase. The **menu** — what you get by running
-`meshterm` with no arguments — is a full-screen session meant to be read by a person. The
-**command line** is the other one, and this is its manual: what it prints, what it
-returns, and every command it answers to.
+MeshTerm has two front ends on one codebase. The **menu** is a full-screen session for a
+person to read. You get the menu when you run `meshterm` with no arguments. The **command
+line** is the other front end, and this is its manual. It tells you what the command line
+prints, what it returns, and each command that it accepts.
 
-It prints two ways, and the difference is who is reading.
+The command line prints in two ways. The way depends on who reads the output.
 
-- The **plain face** is for somebody at a prompt who typed a command to find something
-  out. It is a Unix utility's output — one record per line, no colour, no frames — and it
-  is allowed to be *comfortable*: names are bare, times read `5m` rather than
+- The **plain face** is for a person at a prompt who typed a command to find something
+  out. It is the output of a Unix utility: one record on each line, no colour, and no
+  frames. It is easy to read. Names are bare, times read `5m` instead of
   `2026-09-08T04:26:00-04:00`, and a route is drawn with arrows.
-- The **JSON face** (`--json`) is for a program, often on another machine and often later.
-  It is the contract: typed values, absent spelled `null`, timestamps in UTC, keys that do
-  not move. It works on **every** command.
+- The **JSON face** (`--json`) is for a program, often on another machine and often
+  later. It is the contract: it has typed values, it spells absent as `null`, its
+  timestamps are in UTC, and its keys do not change. It works on **each** command.
 
-The promise to be read by a program belongs to `--json`. The plain face makes no such
-promise. If you are splitting output on whitespace to feed a script, stop: `--json` exists
-so you do not have to, and the plain face may change between releases.
+Only `--json` promises that a program can read the output. The plain face does not make
+this promise. If you split the output on whitespace to feed a script, stop. Use `--json`
+instead, because the plain face can change between releases.
 
 - [Running it](#running-it)
 - [Where MeshTerm keeps its state](#where-meshterm-keeps-its-state)
@@ -45,129 +45,137 @@ so you do not have to, and the plain face may change between releases.
 meshterm [GLOBAL OPTIONS] COMMAND [ARGS]
 ```
 
-With no command, MeshTerm launches the interactive menu instead.
+If you give no command, MeshTerm starts the interactive menu.
 
 | Option | What it does |
 | --- | --- |
-| `--version` | Print `meshterm <version>` and exit `0`, before anything else is opened. |
+| `--version` | Print `meshterm <version>` and exit `0`, before MeshTerm opens anything else. |
 | `-p`, `--profile NAME` | Use a named device profile from `config.toml`. |
-| `--port PORT` | Serial port to connect to (`COM5`, `/dev/ttyACM0`), overriding the profile. |
-| `--ble ADDRESS` | Bluetooth address of a companion; selects the Bluetooth transport. |
-| `--ble-pin PIN` | Pairing PIN, if the Bluetooth companion asks for one. MeshTerm pairs with it itself on Windows and Linux; on macOS the system asks for the code in its own dialog, and this option has no effect. See [When a companion won't connect](../guide/connecting.md#bluetooth). |
-| `--tcp HOST[:PORT]` | Network address of a TCP companion; selects the TCP transport. Default port 5000. |
-| `--spi` | The LoRa radio on this machine's own SPI bus; selects the SPI transport. MeshTerm runs the node for the length of the command. With one radio attached, that's the one, profile or not; with none attached, the one SPI profile, else the uConsole AIO's wiring. With two, it refuses (exit `3`) and lists them — pick one with `-p`. See [Adding a radio on the SPI bus](../guide/configuration.md#adding-a-radio-on-the-spi-bus). Linux only. |
-| `--mock` | Use the built-in simulator instead of real hardware. Nothing transmits, and the run records to `meshterm-mock.db` rather than your real history. |
-| `--db PATH` | Use this SQLite database instead of `~/.meshterm/meshterm.db` (or `meshterm-mock.db`, under `--mock`). **It moves the database and nothing else** — see [Where MeshTerm keeps its state](#where-meshterm-keeps-its-state). |
+| `--port PORT` | The serial port to connect to (`COM5`, `/dev/ttyACM0`). It overrides the profile. |
+| `--ble ADDRESS` | The Bluetooth address of a companion. It selects the Bluetooth transport. |
+| `--ble-pin PIN` | The pairing PIN, if the Bluetooth companion asks for one. On Windows and Linux, MeshTerm pairs with the PIN itself. On macOS, the system asks for the code in its own dialog, and this option has no effect. Refer to [When a companion does not connect](../guide/connecting.md#bluetooth). |
+| `--tcp HOST[:PORT]` | The network address of a TCP companion. It selects the TCP transport. The default port is 5000. |
+| `--spi` | The LoRa radio on the SPI bus of this machine. It selects the SPI transport. MeshTerm runs the node for the length of the command. If one radio is attached, MeshTerm uses that radio, with a profile or without one. If no radio is attached, MeshTerm uses the one SPI profile, or else the wiring of the uConsole AIO. If two radios are attached, MeshTerm refuses (exit `3`) and lists them. Select one with `-p`. Refer to [Adding a radio on the SPI bus](../guide/configuration.md#adding-a-radio-on-the-spi-bus). Linux only. |
+| `--mock` | Use the built-in simulator instead of real hardware. Nothing transmits, and the run records to `meshterm-mock.db` instead of your real history. |
+| `--db PATH` | Use this SQLite database instead of `~/.meshterm/meshterm.db` (or `meshterm-mock.db`, with `--mock`). **It moves the database and nothing else.** Refer to [Where MeshTerm keeps its state](#where-meshterm-keeps-its-state). |
 | `--json` | Print the answer as JSON instead of aligned text. |
-| `--absolute` | Print times as ISO-8601 instants rather than relative ages, for this run. |
-| `-q`, `--quiet` | Suppress console logging entirely (the log file still records). |
+| `--absolute` | For this run, print times as ISO-8601 instants instead of relative ages. |
+| `-q`, `--quiet` | Do not print the log on the console. The log file still records it. |
 | `--platform NAME` | Force the UI flavour (`regular`\|`picocalc-lyra`\|`cardputer-zero`) instead of detecting it. |
 
-**A global option may be typed anywhere** — before the command or after it. `meshterm
---json contacts` and `meshterm contacts --json` are the same run, because `-o json` goes
-after the verb in every tool that has one and `--json` is the first thing anyone reaches
-for. A bare `--` stops the lifting, the standard way to say the rest is data, and
-`--help` is never lifted: `meshterm contacts --help` stays the *contacts* help.
+**You can type a global option anywhere.** You can type it before the command or after it.
+`meshterm --json contacts` and `meshterm contacts --json` are the same run. The reason is
+that `-o json` goes after the verb in each tool that has one, and `--json` is the first
+option that most users try. MeshTerm does not move an option that follows a bare `--`.
+The bare `--` is the standard way to say that the rest is data. MeshTerm also never moves
+`--help`, so `meshterm contacts --help` stays the help of `contacts`.
 
-Commands that need a radio open one, do their work, and close it. Commands that only read
-stored history (`records`) or MeshTerm's own state (`preferences`, `platform`, `specimen`,
-the written pages) need no device at all and work with nothing attached.
+A command that needs a radio opens the radio, does its work, and closes the radio. Some
+commands only read stored history (`records`) or the state of MeshTerm itself
+(`preferences`, `platform`, `specimen`, and the written pages). These commands need no
+device. They work with nothing attached.
 
-> **One transmission per invocation.** A trace transmits exactly once — repeaters
-> penalise, and can blacklist, nodes that burst traffic. To sample more, run the command
-> again with your own pacing between runs. `tx-optimize` is the one deliberate exception,
-> and it paces itself.
+> **One transmission for each run.** A trace transmits exactly one time. Repeaters
+> penalise nodes that send bursts of traffic, and they can blacklist these nodes. To get
+> more samples, run the command again, with your own wait between the runs. `tx-optimize`
+> is the one deliberate exception, and it paces itself.
 
 ---
 
 ## Where MeshTerm keeps its state
 
-Everything MeshTerm remembers lives in one directory. On Linux and macOS that is
-`~/.meshterm`; on Windows it is `%USERPROFILE%\.meshterm`. **`$MESHTERM_HOME` overrides
-it**, and it is the only thing that moves the *whole* of it:
+MeshTerm keeps all that it remembers in one directory. On Linux and macOS, the directory
+is `~/.meshterm`. On Windows, it is `%USERPROFILE%\.meshterm`. **`$MESHTERM_HOME`
+overrides it.** It is the only setting that moves the whole directory:
 
 ```bash
 MESHTERM_HOME=/tmp/mesh-scratch meshterm contacts
 ```
 
-The directory is read fresh on every run rather than cached, so two radios can be run out
-of two directories from the same shell.
+MeshTerm reads the directory again on each run and does not cache it. Thus you can run two
+radios from two directories in the same shell.
 
 | File | What it holds |
 | --- | --- |
-| `meshterm.db` | The history: every packet overheard, every trace walked, every message. **The one file `--db` moves.** |
-| `meshterm-mock.db` | The same, for the simulator: where a `--mock` run records when it doesn't name a database itself. Absent until you run one. |
-| `config.toml` | Machine setup — device profiles, where the database lives. Yours to write; MeshTerm only reads it. |
-| `preferences.toml` | Your overrides of MeshTerm's own behaviour. Lists only what you changed. |
-| `courier.json` | The outbox — queued messages, waiting and finished. |
-| `admin.json` | Remembered repeater-admin passwords. |
-| `devices.json` | The remembered default companion, and every device proven to speak the protocol. |
-| `contacts.json`, `channels.json`, `settings.json` | Per-device caches of what the radio last told us, so a screen opens without a round-trip. |
-| `adverts.json` | The weekly flood advert's clock: when it was switched on, and when each device's week began. |
-| `mutes.json`, `watchtower.json`, `remote.json` | Muted channels; watched nodes and their alerts; per-node remote-admin cache and CLI history. |
-| `regions.json` | The regions known by name — and which repeaters carry each — plus every channel's send scope and each repeater's last answer to "which regions do you carry?". What a scoped packet's region is named against. |
-| `radio/<spidev>/` | An SPI radio's node, one folder per device node (`radio/spidev1.0/`): its identity key, settings, channels, and contacts, and its log, `node.log`. What firmware would keep in flash. |
-| `tilecache/` | Downloaded basemap tiles. |
+| `meshterm.db` | The history: each packet that MeshTerm heard, each trace that it walked, and each message. **This is the one file that `--db` moves.** |
+| `meshterm-mock.db` | The same history for the simulator. A `--mock` run records here when the run does not name a database. The file is absent until you do a `--mock` run. |
+| `config.toml` | The setup of the machine: device profiles, and where the database is. You write this file. MeshTerm only reads it. |
+| `preferences.toml` | Your overrides of the behaviour of MeshTerm. It lists only what you changed. |
+| `courier.json` | The outbox: queued messages, both waiting and finished. |
+| `admin.json` | The repeater-admin passwords that MeshTerm remembers. |
+| `devices.json` | The default companion that MeshTerm remembers, and each device that spoke the protocol correctly. |
+| `contacts.json`, `channels.json`, `settings.json` | The caches of each device. They hold what the radio last told MeshTerm, so a screen opens without a round trip to the radio. |
+| `adverts.json` | The clock of the weekly flood advert: when the advert was switched on, and when the week of each device began. |
+| `mutes.json`, `watchtower.json`, `remote.json` | The muted channels. The watched nodes and their alerts. The remote-admin cache of each node, and the CLI history. |
+| `regions.json` | The regions that MeshTerm knows by name, and the repeaters that carry each region. Also the send scope of each channel, and the last answer of each repeater to "which regions do you carry?". MeshTerm uses this file to name the region of a scoped packet. |
+| `radio/<spidev>/` | The node of an SPI radio. There is one folder for each device file (`radio/spidev1.0/`). It holds the identity key, the settings, the channels, the contacts, and the log (`node.log`). It is what the firmware keeps in flash. |
+| `tilecache/` | The basemap tiles that MeshTerm downloaded. |
 | `meshterm.log` | The log file. |
-| `.lock` | The single-instance lock. |
+| `.lock` | The lock for a single instance. |
 
-**`--db` alone does not isolate a run.** It moves the database, which is most of the
-weight but none of the identity: the contact and channel caches, the outbox, the stored
-admin passwords, and the remembered device all live beside it in the config directory and
-would still be the ones you use every day. To run against a scratch state — a test, a
-demo, a second radio — set `MESHTERM_HOME`, and set `--db` inside it if you want the
-database somewhere else again. The same holds for the database `--mock` picks for itself:
-it keeps the simulator's invented mesh out of your history, not out of the caches.
+**`--db` alone does not isolate a run.** It moves the database. The database is most of
+the data, but it does not hold the identity. The contact caches, the channel caches, the
+outbox, the stored admin passwords, and the remembered device are all in the config
+directory. They stay the same as the ones that you use each day. To run with a scratch
+state (a test, a demo, or a second radio), set `MESHTERM_HOME`. If you want the database
+in another place, set `--db` inside it. The same is true for the database that `--mock`
+selects. It keeps the invented mesh of the simulator out of your history, but not out of
+the caches.
 
 ---
 
 ## About the examples
 
-**Every sample below was captured from a real run against the built-in simulator**
-(`--mock`), in a throwaway `MESHTERM_HOME`, except the `diagnostics` sample, which says so
-where it appears. None of it is typed out by hand. The simulator
-answers as a companion would — it has four contacts (`Alice`, `Yagi-Repeater`,
-`Local-Repeater`, `Observer-Bot`), it adverts, it replies to traces — so the shapes are
-real even where the numbers are invented.
+**Each sample below is the output of a real run against the built-in simulator**
+(`--mock`), in a temporary `MESHTERM_HOME`. The one exception is the `diagnostics`
+sample, which says so where it appears. Nobody typed any of the output by hand. The
+simulator answers as a companion does. It has four contacts (`Alice`, `Yagi-Repeater`,
+`Local-Repeater`, `Observer-Bot`), it sends adverts, and it replies to traces. Thus the
+shapes are real, but some numbers are invented.
 
-Three things the simulator does that a radio does not, all visible in the samples:
+The simulator does three things that a radio does not. You can see all three in the
+samples:
 
-- **Each invocation opens a fresh radio.** A setting written by one command, or a channel
-  slot filled by one, is not there for the next — so `config show` always reports the
-  defaults and `channels list` always answers `5`. On real hardware the radio remembers.
-- **`PKTS` in `contacts` stays `-`.** The overheard tally is keyed by the node id passive
-  monitoring stores (four bytes here) and the contact row is addressed at the device's
-  path-hash width (one byte), so the two do not meet. Against real hardware at a matching
-  width they do.
-- **A device-routed `trace` invents its hop names.** `trace --target NAME` with no
-  `--path` comes back through the simulator's router carrying placeholder hops; a
-  *forced* path (`--path "a1,d4"`) resolves properly. The forced form is what the samples
-  use, and what to build a golden file from.
+- **Each run opens a new radio.** If one command writes a setting or fills a channel
+  slot, the next command does not have it. Thus `config show` always reports the
+  defaults, and `channels list` always answers `5`. On real hardware, the radio keeps
+  the values.
+- **`PKTS` in `contacts` stays `-`.** The tally of heard packets uses the node id that
+  passive monitoring stores (four bytes here). The contact row uses the path hash width
+  of the device (one byte). Thus the two do not match. Against real hardware with a
+  matching width, they match.
+- **A `trace` that the device routes invents its hop names.** If you give
+  `trace --target NAME` with no `--path`, the simulator router returns placeholder hops.
+  A forced path (`--path "a1,d4"`) resolves correctly. The samples use the forced form.
+  Use the forced form also to build a golden file.
 
-> **`--mock` records into its own history, not yours — but it still writes the caches.**
-> The simulator is a fake radio, not a fake MeshTerm: what it adverts is written down like
-> anything else. The database it writes is `meshterm-mock.db`, so its invented nodes stay
-> out of your mesh walk, dashboard, and map; naming a database with `--db` overrides that
-> choice. The contact and channel caches, the outbox, and the remembered devices are still
-> the ones you use every day, so a demo that should touch nothing at all gets a home of
-> its own: `MESHTERM_HOME=... meshterm --mock …`.
+> **`--mock` records into its own history, not yours, but it still writes the caches.**
+> The simulator is a fake radio. It is not a fake MeshTerm. MeshTerm stores what the
+> simulator sends as adverts, in the same way as other data. The database that it writes
+> is `meshterm-mock.db`. Thus the invented nodes stay out of your mesh walk, your
+> dashboard, and your map. If you name a database with `--db`, that choice wins. The
+> contact caches, the channel caches, the outbox, and the remembered devices are still
+> the ones that you use each day. For a demo that must not touch anything, give the demo
+> its own home: `MESHTERM_HOME=... meshterm --mock …`.
 
 ---
 
 ## The plain face
 
-Still a Unix utility's output: one record per line, nothing folds, stdout carries the
-answer and nothing else. What has gone is every rule that existed *only* to make splitting
-safe, because splitting is `--json`'s job now.
+The plain face is the output of a Unix utility. It has one record on each line, nothing
+folds, and stdout carries the answer and nothing else. The plain face has no rule that
+exists only to make the output safe to split, because `--json` now does that job.
 
-**No colour.** Not a hue, not a bold, not a dim — stdout carries no escape sequence at
-all, whether or not it is a terminal. A colour that survives into a file is noise in it.
+**No colour.** There is no hue, no bold, and no dim. Stdout has no escape sequence at
+all, also when stdout is not a terminal. A colour that goes into a file is noise in the
+file.
 
-**No frames.** No borders, no boxes, no rules, no titles, no legends. The command you
-typed is the title.
+**No frames.** There are no borders, boxes, rules, titles, or legends. The command that
+you typed is the title.
 
 **Alignment is the delimiter, and names are bare.** A listing is an uppercase header line
-and space-aligned records, the shape `ps` and `df` print. Numeric columns right-align.
+and records that are aligned with spaces. This is the shape that `ps` and `df` print.
+Numeric columns align to the right.
 
 ```console
 $ meshterm contacts
@@ -178,16 +186,19 @@ Yagi-Repeater   repeater     7m     -  a1    45.50190,-73.56740  a1b2c3d40000000
 Alice           node         7m     -  d4    -                   d4e5f6a700000000000000000000000000000000000000000000000000000000
 ```
 
-Names are not quoted. Quoting would give a script a delimiter and give every person a
-line full of punctuation. Names **are escaped**: a node broadcasts its own name and a
-stranger fills in a message body, so neither may hold a raw control character or end the
-record it sits in.
+Names are not in quotation marks. Quotation marks would give a script a delimiter, and
+they would fill each line with punctuation for the person who reads it. Names **are
+escaped**. A node broadcasts its own name, and a stranger writes the body of a message.
+Thus a name or a body must not hold a raw control character, and it must not end the
+record that it is in.
 
-**A time is an age**, because "recently?" is the question a listing is opened to answer:
-`now`, `5m`, `3h`, `never`. An absolute instant survives where the instant *is* the fact —
-the device clock, an appointment set with `--at`, a live capture's own `TIME` column.
+**A time is an age**, because a person opens a listing to find out "what is recent?".
+Examples are `now`, `5m`, `3h`, and `never`. An absolute instant stays where the instant
+is the fact itself: the device clock, an appointment that you set with `--at`, and the
+`TIME` column of a live capture.
 
-**`--absolute` turns every age back into an instant**, local ISO-8601 to the second:
+**`--absolute` changes each age back to an instant.** The instant is local ISO-8601, to
+the second:
 
 ```console
 $ meshterm --absolute contacts
@@ -198,34 +209,38 @@ Yagi-Repeater   repeater   2026-09-08T04:30:49-04:00     -  a1    45.50190,-73.5
 Alice           companion  2026-09-08T04:30:48-04:00     -  d4    -                   d4e5f6a700000000000000000000000000000000000000000000000000000000
 ```
 
-The flag is an **override of a preference**, not a switch beside one: `cli_time_format` is
-`relative` or `absolute`, and `meshterm preferences set cli_time_format absolute` makes it
-the default for every run. `--absolute` sets it for this run and never saves it. (How
-MeshTerm behaves is a preference by this project's own rule; a flag that bypassed the
-registry would be a behaviour nobody could find.)
+The flag **overrides a preference**. It is not a second switch that works beside the
+preference. The preference `cli_time_format` is `relative` or `absolute`. The command
+`meshterm preferences set cli_time_format absolute` makes `absolute` the default for each
+run. `--absolute` sets it for one run and never saves it. A value of the behaviour of
+MeshTerm is a preference, by the rule of this project. A flag that bypassed the registry
+would be a behaviour that nobody can find.
 
-**A route is drawn and a path is typed.** They are different things and they now look
-different. Two lines out of a trace's facts block:
+**A route is drawn and a path is typed.** They are different things, and they look
+different. These are two lines from the facts block of a trace:
 
 ```
 path        a1,d4
 route       MockCompanion (00) → Yagi-Repeater (a1) → Alice (d4) → MockCompanion (00)
 ```
 
-A **path** is a *spec* — the hop list you compose and force, and the one line on either
-face that round-trips, so it stays comma-separated hex and nothing creeps into it. Paste
-it straight back into `--path`. A **route** is the concrete sequence a walk actually took;
-it is read, not typed, so it reads like what it is. A hop is `Name (hash)`, or whichever
-half is known, never an empty `()`.
+A **path** is a spec. It is the list of hops that you write and force. It is the one line
+on each face that you can send back as input, thus it stays as comma-separated hex, and
+nothing else goes into it. Paste it into `--path` as it is. A **route** is the sequence
+of nodes that a walk really took. You read a route and you do not type it, thus it is
+drawn to be read. A hop is `Name (hash)`, or the one half that MeshTerm knows. It is never
+an empty `()`.
 
-**Our own node is a hop like any other**, named and hashed — never the menu's star. The
-star says "you already know who this is", which is true of the person watching and false
-of whoever opens the file afterwards. The hash is there because the CLI has no colour: on
-screen a route's hops are told apart by their key-derived hues, and in plain text the hash
-is what carries that identity, and what joins a route line to the per-hop table under it.
+**Our node is a hop like each other hop.** It has a name and a hash. It is never the
+star of the menu. The star means "you already know who this is". This is true for the
+person who watches, but it is not true for a person who opens the file later. The hash is
+there because the CLI has no colour. On the screen, the hues that come from the keys show
+which hop is which. In plain text, the hash carries that identity. The hash also joins a
+route line to the table of hops under it.
 
-**Key/value blocks** are a key, the gutter, and the rest of the line as its value — the
-shape `sysctl -a` prints. No header; the value is whatever follows the key.
+**Key/value blocks** have a key, a gutter, and the rest of the line as the value. This is
+the shape that `sysctl -a` prints. There is no header. The value is all the text that
+follows the key.
 
 ```console
 $ meshterm info
@@ -237,9 +252,10 @@ uptime_s          93784  (1d 2h)
 noise_floor_dbm   -110
 ```
 
-A reading whose raw number is the fact but whose *meaning* is a duration carries a gloss
-in parentheses. `93784` is what the key promises and what a caller wants; `(1d 2h)` is
-what a person actually asked. Neither has to be parsed out of the other.
+A reading can have a raw number as its fact, and a duration as its meaning. Then the
+reading has an explanation in parentheses. `93784` is what the key promises and what a
+caller wants. `(1d 2h)` is what a person wants to know. You do not have to parse one out
+of the other.
 
 A `get` prints the bare value alone, ready for `$(...)`, because the caller named the key:
 
@@ -248,25 +264,28 @@ $ meshterm config get tx_power
 20
 ```
 
-**`-` is the one token for absent** — unknown, or not applicable. You learn it once; there
-is no em dash, no `n/a`, no empty cell. **`never` is different**: it is a *value*, the fact
-that a node has not been heard yet. And a node type stays the word `repeater` — a
-monochrome glyph would need a legend, and the CLI has no legends.
+**`-` is the one token for absent.** It means that the value is unknown, or that it does
+not apply. You learn one token, and there is no em dash, no `n/a`, and no empty cell.
+**`never` is different.** It is a value. It means that MeshTerm has not heard the node
+yet. A node type stays the word `repeater`, because a monochrome glyph would need a
+legend, and the CLI has no legends.
 
-**A live stream pins its lanes.** `monitor` and `chat listen` cannot measure a column they
-have not seen yet, so their headings are fixed in advance. A value wider than its lane
-overruns and pushes the row right; nothing is elided, and the one unbounded field goes
-last so it can push nothing.
+**A live stream fixes its lanes.** `monitor` and `chat listen` cannot measure a column
+that they have not seen yet, thus their headings are fixed in advance. If a value is
+wider than its lane, the value runs over the lane and pushes the rest of the row to the
+right. MeshTerm does not cut anything. The one field that has no limit on its width is
+the last field, so it pushes nothing.
 
-**No wrapping, with one exception.** A record is a line; wrapping would put half a
-record's fields under the wrong headings, so nothing folds and a long line runs off the
-right. The exception is the four written pages (`about`, `about-author`, `discord`,
-`support`), which wrap at 72 cells. The no-wrap rule exists to protect a record's
-fields; a paragraph has no fields, and unwrapped it is a 600-cell line no terminal can
-read.
+**No wrapping, with one exception.** A record is one line. Wrapping would put half of the
+fields of a record under the wrong headings. Thus nothing folds, and a long line runs off
+the right edge. The exception is the four written pages (`about`, `about-author`,
+`discord`, `support`). These wrap at 72 cells. The no-wrap rule protects the fields of a
+record. A paragraph has no fields, and without wrapping it is a line of 600 cells that
+no terminal can read.
 
-**stdout is the answer; everything else is stderr** — errors (`meshterm: what went
-wrong`), progress bars, log records, acknowledgements, and closing messages:
+**Stdout is the answer. Everything else goes to stderr.** This includes errors
+(`meshterm: what went wrong`), progress bars, log records, acknowledgements, and closing
+messages:
 
 ```console
 $ meshterm config set radio_sf 9
@@ -275,19 +294,19 @@ $ meshterm config set radio_sf 9 2>&1
 ✓ applied 1 change
 ```
 
-An **acknowledgement** ("✓ device clock set") and a command's closing **message** ("0
-records stored") are reassurance a person needs and a script does not. Sending them to
-stderr means `meshterm contacts > contacts.txt` puts contacts in the file and nothing
-else, while the person at the prompt still sees their tick and their count.
+An **acknowledgement** ("✓ device clock set") and the closing **message** of a command
+("0 records stored") are for a person, and a script does not need them. They go to
+stderr. Thus `meshterm contacts > contacts.txt` puts the contacts in the file and nothing
+else, and the person at the prompt still sees the tick and the count.
 
 ---
 
 ## The JSON face
 
-`--json` prints **the answer itself**, and the report a caller needs is still `$?`.
+`--json` prints **the answer itself**. The caller still gets the report in `$?`.
 
-**No envelope.** An array for a listing, an object for a set of facts. So this reads like
-what it looks like:
+**No envelope.** A listing is an array. A set of facts is an object. Thus the command
+reads like the data that it returns:
 
 ```console
 $ meshterm contacts --json | jq -r '.[] | select(.node.type == "repeater") | .node.key'
@@ -295,46 +314,52 @@ b2c3d4e500000000000000000000000000000000000000000000000000000000
 a1b2c3d400000000000000000000000000000000000000000000000000000000
 ```
 
-A command whose plain face prints two blocks (`trace`, `tx-optimize`) is one object, each
-listing under its own key (`edges`, `levels`) and the facts merged at the top level.
+A command whose plain face prints two blocks (`trace`, `tx-optimize`) gives one object.
+Each listing is under its own key (`edges`, `levels`), and the facts are merged at the top
+level.
 
-**One compact line, newline-terminated.** UTF-8 with no ASCII escaping, so a name in
-Cyrillic stays a name. Keys come in the order the report declares them, never sorted — a
-document reads down the page in the order its plain sibling does. `jq .` re-indents at no
-cost; nothing can un-stream a document pretty-printed across 400 lines.
+**One compact line, ended with a newline.** The text is UTF-8 with no ASCII escaping, so a
+name in Cyrillic stays a name. Keys are in the order that the report declares them, and
+MeshTerm never sorts them. Thus a document reads from the top down in the same order as
+its plain face. `jq .` changes the indentation at no cost. Nothing can change a document
+that is pretty-printed across 400 lines back into a stream.
 
-**A stream is one document per record, all the same shape.** `monitor` and `chat listen`
-emit newline-delimited JSON as it arrives, flushed. There is no `begin` or `end` line and
-no discriminator field: every reader would pay for one and only a stream would use it. A
-capture survives truncation — you lose the last line, not the file — and a run ended by
-Ctrl-C, which is how `--seconds 0` is *designed* to end, still leaves everything it heard.
+**A stream is one document for each record, and all have the same shape.** `monitor` and
+`chat listen` print newline-delimited JSON when each record arrives, and they flush the
+output. There is no `begin` line, no `end` line, and no discriminator field. Each reader
+would pay for a discriminator, and only a stream would use it. A capture survives
+truncation: you lose the last line and not the file. Ctrl-C ends a run, and this is how
+`--seconds 0` is designed to end. Such a run still keeps all that it heard.
 
-**Absent is `null`, never an omitted key.** Every field a command declares appears in
-every document, carrying `null` when the value is absent, unknown, or does not apply.
-`null` is the counterpart of the plain face's `-` and, like it, is learned once. An empty
-collection is `[]` or `{}`. An empty string is `""` and is a *value*, distinct from
-`null`. A whole object is `null` where its parts are meaningless apart: `"position":
-null`, not `{"lat": null, "lon": null}`. And `unknown` becomes `null` — a consumer already
-has one spelling for "nothing here".
+**Absent is `null`, never an omitted key.** Each field that a command declares is in each
+document. The field has `null` when the value is absent, unknown, or not applicable.
+`null` is the counterpart of the `-` of the plain face, and you learn it once in the same
+way. An empty collection is `[]` or `{}`. An empty string is `""`. It is a value, and it
+is not the same as `null`. A whole object is `null` when its parts have no meaning apart:
+`"position": null`, not `{"lat": null, "lon": null}`. Also, `unknown` becomes `null`. A
+consumer already has one spelling for "nothing here".
 
-**Values are typed.** `9`, not `"9"`. `false`, not `"false"`. `yes`/`no` in plain
-(`acked`, `applied`, `success`, `active`) is `true`/`false` here. A message body is raw
-and unescaped, newlines and all, because a JSON string is not a line.
+**Values are typed.** Use `9`, not `"9"`. Use `false`, not `"false"`. The `yes` and `no`
+of the plain face (`acked`, `applied`, `success`, `active`) are `true` and `false` here.
+A message body is raw and not escaped, with its newlines, because a JSON string is not a
+line.
 
-**Timestamps are UTC, RFC 3339, `Z`, to the second** — `"2026-09-08T08:30:50Z"`, twenty
-characters, so string comparison is time comparison. A field holding one is named
-`<something>_at`: `heard_at`, `observed_at`, `created_at`, `scheduled_at`. **`--absolute`
-does not touch this.** A local offset is a fact about the machine that ran the command,
-not about the event, and two hosts asking the same radio the same question must produce
-the same document.
+**Timestamps are UTC, RFC 3339, `Z`, to the second.** An example is
+`"2026-09-08T08:30:50Z"`. It has twenty characters, so a comparison of strings is a
+comparison of times. The name of a field that holds a timestamp is `<something>_at`:
+`heard_at`, `observed_at`, `created_at`, `scheduled_at`. **`--absolute` does not change
+this.** A local offset is a fact about the machine that ran the command, and not about the
+event. Two hosts that ask the same radio the same question must get the same document.
 
-**A numeric field carries its unit in its key** — `snr_db`, `rssi_dbm`, `uptime_s`,
-`rtt_ms`, `battery_v` — never in its value, and a number carries its own sign (`5.1` and
-`-1.5`, never the plain column's `+5.1`). **A key is never truncated**: a truncated key
-cannot go back into `--to` or `--path`, so a short id is a `hash` and says so.
+**A numeric field has its unit in its key.** Examples are `snr_db`, `rssi_dbm`,
+`uptime_s`, `rtt_ms`, and `battery_v`. The unit is never in the value. A number has its
+own sign (`5.1` and `-1.5`, never the `+5.1` of the plain column). **A key is never
+truncated.** A truncated key cannot go back into `--to` or `--path`. Thus a short id is a
+`hash` and has that name.
 
-**`--json` changes the rendering, never the report.** Same exit status, same records. An
-empty result prints its empty document and **still exits 5**:
+**`--json` changes the rendering and never the report.** The exit status is the same, and
+the records are the same. An empty result prints its empty document and **still exits
+5**:
 
 ```console
 $ meshterm channels list --json
@@ -343,8 +368,8 @@ $ echo $?
 5
 ```
 
-**"Prints nothing" is never a legitimate JSON answer.** A command whose plain face is
-silent still says what it did:
+**"Prints nothing" is never a correct JSON answer.** A command whose plain face is silent
+still says what it did:
 
 ```console
 $ meshterm channels join 3 brigade 4ed883aaded6433c6606c9930a65044c
@@ -352,21 +377,24 @@ $ meshterm channels join 3 brigade 4ed883aaded6433c6606c9930a65044c --json
 {"channel":{"slot":3,"name":"brigade","public":false,"hash":"5a"},"secret":"4ed883aaded6433c6606c9930a65044c","url":"meshcore://channel/add?name=brigade&secret=4ed883aaded6433c6606c9930a65044c"}
 ```
 
-**A failure prints nothing on stdout.** The sentence stays on stderr and the
-classification stays in `$?`. There is no error document to tell apart from a result, and
-`--json 2>/dev/null` still behaves — see [When it goes wrong](#when-it-goes-wrong).
+**A failure prints nothing on stdout.** The sentence stays on stderr, and the
+classification stays in `$?`. There is no error document that you must tell apart from a
+result. Also, `--json 2>/dev/null` still works correctly. Refer to
+[When it goes wrong](#when-it-goes-wrong).
 
-**A command with no data face refuses, loudly.** `meshterm specimen --json` is a usage
-error (exit 2): its output *is* the colour, and a document of it would be a lie or an
-empty gesture. `meshterm emulate --json` is refused the same way, since it opens a window. So is `--json` with no subcommand — there is no document an interactive
-session can emit.
+**A command with no data face refuses, and says so clearly.** `meshterm specimen --json`
+is a usage error (exit 2). The output of `specimen` is the colour, and a document of it
+would be false or without use. `meshterm emulate --json` is refused in the same way,
+because `emulate` opens a window. `--json` with no subcommand is also refused, because an
+interactive session cannot emit a document.
 
 ### The shapes that repeat
 
-Defined once here; the per-command tables below name them rather than restating them.
+This section defines each shape one time. The tables for each command below use the names
+and do not repeat the definitions.
 
-**`node`** — a mesh participant's identity, and nothing else. All five keys always
-present.
+**`node`** is the identity of a mesh participant, and nothing else. All five keys are
+always present.
 
 ```json
 {"name":"Yagi-Repeater","key":"a1b2c3d400000000000000000000000000000000000000000000000000000000","hash":"a1","type":"repeater","self":false}
@@ -374,77 +402,84 @@ present.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `name` | string \| null | The name the node advertises. Never quoted, never truncated. |
-| `key` | string \| null | The full public key, lowercase hex, 64 characters. `null` where only a hash was ever heard. |
-| `hash` | string \| null | The short derived id, at the width the surrounding surface addressed the node by. Never `key` cut short. |
+| `name` | string \| null | The name that the node advertises. It is never in quotation marks and never truncated. |
+| `key` | string \| null | The full public key, in lowercase hex, 64 characters. `null` when MeshTerm heard only a hash. |
+| `hash` | string \| null | The short id that comes from the key. Its width is the width that the command used to address the node. It is never a `key` that is cut short. |
 | `type` | string \| null | `"companion"` \| `"repeater"` \| `"room server"` \| `"sensor"` \| `null`. |
-| `self` | boolean | `true` for our own node. What the menu's star says and the plain face deliberately does not. |
+| `self` | boolean | `true` for our node. This is what the star of the menu shows. The plain face deliberately does not show it. |
 
-Reception facts — when heard, how strong, where — belong to the **row**, not to the node:
-they differ per surface, and a node object carrying them would mean something different in
-each one. So a row embeds `node` under its own key rather than flattening it, and
-`jq '.[].node.key'` reads the same on contacts, courier and monitor.
+Reception facts belong to the **row** and not to the node. These facts are when MeshTerm
+heard the node, how strong the signal was, and where the node is. They are different for
+each command. A node object that carried them would mean a different thing in each
+command. Thus a row holds `node` under its own key and does not flatten it. Then
+`jq '.[].node.key'` reads the same on `contacts`, `courier`, and `monitor`.
 
-> **Identity is thin where it comes from history.** A node MeshTerm only ever overheard
-> has `key: null` and `type: null`, and `name` is whatever the resolver could find. To
-> correlate across commands, join on `hash` **plus** the width it was addressed at, not on
-> `key`.
+> **Identity is thin when it comes from history.** A node that MeshTerm only overheard
+> has `key: null` and `type: null`. Its `name` is what the resolver could find. To match
+> nodes across commands, join on `hash` **and** the width that the command used to
+> address it. Do not join on `key`.
 
-**`position`** — `{"lat":45.5019,"lon":-73.5674}`, decimal degrees as stored (unrounded;
-the plain face's five decimals are a column-width concession). The whole object is `null`
-where the node has shared no location.
+**`position`** is `{"lat":45.5019,"lon":-73.5674}`. The values are decimal degrees as
+stored, and they are not rounded. The five decimals of the plain face are a concession to
+the width of the column. The whole object is `null` when the node has not shared a
+location.
 
-**`channel`** — `{"slot":0,"name":"Public","public":true,"hash":"11"}`. `slot` is what
-every `channels` subcommand's `INDEX` takes; `public` is the plain face's `TYPE` column as
-a boolean. **The secret is never in a `channel` object** — it appears only where the
-caller asked for it, under its own key.
+**`channel`** is `{"slot":0,"name":"Public","public":true,"hash":"11"}`. `slot` is the
+value that the `INDEX` of each `channels` subcommand takes. `public` is the `TYPE` column
+of the plain face as a boolean. **The secret is never in a `channel` object.** It appears
+only when the caller asked for it, and then it has its own key.
 
-**`setting`** — one device setting or preference, the same shape `show` and `get` both
-use.
+**`setting`** is one device setting or one preference. `show` and `get` both use the
+same shape.
 
 ```json
 {"key":"radio_sf","value":8,"type":"int","label":null,"redacted":false}
 ```
 
 `type` is `"int"` \| `"float"` \| `"bool"` \| `"str"` \| `"enum"`. `value` is the typed
-current value — an enum is its **number**, so `.value | tostring` is what `set` takes
-back. `label` is the reader's word for an enum's number, else `null`. `redacted` is `true`
-where the value is deliberately withheld, and a redacted row's `value` is `null` — a mask
-string is not a value. Preference rows add `default` and `overridden`.
+current value. The value of an enum is its **number**, so `.value | tostring` is what
+`set` takes as input. `label` is the word for a person for the number of an enum. For
+other types, `label` is `null`. `redacted` is `true` when MeshTerm deliberately keeps the
+value back. The `value` of a redacted row is `null`, because a mask string is not a
+value. The rows of preferences also have `default` and `overridden`.
 
-**`route` and `edges`** — a `route` is an array of `node` objects in propagation order,
-our own node a hop like any other; `null` when nothing came home, never `[]`. An `edge` is
-one directed link, `{"index":0,"from":{node},"to":{node},"snr_db":6.0}`, with the SNR
-measured arriving at `to`. Where the plain face names an edge's ends by hash so the reader
-can join the hop table to the route line above it, JSON embeds the whole node at both
-ends: the join is structural here, and each edge should be readable on its own.
+**`route` and `edges`**: a `route` is an array of `node` objects in the order of
+propagation. Our node is a hop like each other hop. A `route` is `null` when nothing
+came home, and never `[]`. An `edge` is one directed link,
+`{"index":0,"from":{node},"to":{node},"snr_db":6.0}`. The SNR is the value that was
+measured when the packet arrived at `to`. The plain face names the two ends of an edge by
+hash, so that you can join the table of hops to the route line above it. JSON holds the
+whole node at both ends. The join is part of the structure here, and each edge must be
+readable on its own.
 
 ---
 
 ## Exit status
 
-The return value is half the report, on both faces.
+The exit status is half of the report, on both faces.
 
 | Code | Meaning |
 | --- | --- |
 | `0` | Success. |
-| `1` | Failure with no more specific code — an unreadable file, an unknown setting or preference key (`config set`, `preferences set`), an unhandled fault. |
-| `2` | Usage error: an unknown flag, a missing argument, a value the parser rejected, a confirmation not given. |
-| `3` | No companion device could be selected: none attached, the named one could not be opened, or the choice was ambiguous. **Nothing was transmitted.** |
-| `4` | A device was reached but the operation failed — a command error, a timeout, a link lost mid-run. Retrying is reasonable. |
-| `5` | The command completed and there was **nothing to report**: an empty list, a target that never answered, a conversation with no messages. This is not an error. |
+| `1` | A failure that has no more specific code. Examples are an unreadable file, an unknown setting key or preference key (`config set`, `preferences set`), and an unhandled fault. |
+| `2` | Usage error: an unknown flag, a missing argument, a value that the parser rejected, or a confirmation that you did not give. |
+| `3` | MeshTerm could not select a companion device. None is attached, MeshTerm could not open the device that you named, or the choice was ambiguous. **Nothing was transmitted.** |
+| `4` | MeshTerm reached a device, but the operation failed. Examples are a command error, a timeout, and a link that was lost during the run. It is reasonable to try again. |
+| `5` | The command completed and there was **nothing to report**. Examples are an empty list, a target that never answered, and a conversation with no messages. This is not an error. |
 
-The table is printed under `meshterm --help` as well.
+`meshterm --help` also prints this table.
 
-Two boundaries need stating. **Nothing transmitted is not a device failure**: a value
-the tool refuses before it opens the radio is a usage error, so a missing `--yes`, a bad `--sort` or `--category`, an unknown
-`--profile`, an outbox id that does not exist, and `tx-optimize` with no password
-available are all `2`. And **a named connection that will not open is `3`, not `4`**: a
-`--port` that is not there means no device was selected, and nothing went out.
+Two boundaries need an explanation. **When nothing was transmitted, the failure is not a
+device failure.** If the tool refuses a value before it opens the radio, the error is a
+usage error. Thus these cases are all `2`: a missing `--yes`, a bad `--sort` or
+`--category`, an unknown `--profile`, an outbox id that does not exist, and `tx-optimize`
+with no password available. Also, **a named connection that does not open gives `3`, not
+`4`**. A `--port` that is not there means that MeshTerm selected no device, and nothing
+went out.
 
-`5` is the one worth building on. `grep` conflates "found nothing" with "worked", and a
-caller that has to count output lines to tell an empty mesh from a full one is parsing
-when it could be branching:
+Build your scripts on `5`. `grep` gives the same status for "found nothing" and for
+"worked". A caller that must count the lines of the output to tell an empty mesh from a
+full mesh parses the text when it can branch on the status:
 
 ```bash
 if meshterm contacts > contacts.txt; then
@@ -456,7 +491,8 @@ else
 fi
 ```
 
-`3` and `4` split the failures a retry might fix from the ones it never will:
+`3` and `4` separate the failures that a new try can repair from the failures that it
+cannot repair:
 
 ```bash
 meshterm trace --target Alice
@@ -473,12 +509,14 @@ esac
 
 ## When it goes wrong
 
-A failure is **raised, never returned**: nothing lands on stdout, one sentence lands on
-stderr, and the classification lands in `$?`. That holds on both faces — `--json` does not
-wrap a failure in a document, because a consumer that can see `$?` does not need one and a
-consumer that cannot would have to tell an error document from a result.
+MeshTerm **raises** a failure and never returns it. Nothing goes to stdout, one sentence
+goes to stderr, and the classification goes to `$?`. This is the same on both faces.
+`--json` does not put a failure in a document. A consumer that can see `$?` does not need
+a document. A consumer that cannot see `$?` would have to tell an error document from a
+result.
 
-**No radio.** Nothing was transmitted; the exit is `3` whichever way the device was named.
+**No radio.** Nothing was transmitted. The exit status is `3` for each way to name the
+device.
 
 ```console
 $ meshterm --port NOSUCHPORT99 info
@@ -487,13 +525,14 @@ $ echo $?
 3
 ```
 
-The sentence names the cause and the remedy: a port that is missing, in use by another
-program, or not yours to open, and for Bluetooth a link that never opened, a pairing that is
-out of date, or a PIN that was wrong. [When a companion won't connect](../guide/connecting.md) lists
-every one of them.
+The sentence names the cause and the remedy. For a serial port, the cause can be a port
+that is missing, a port that another program uses, or a port that you cannot open. For
+Bluetooth, the cause can be a link that never opened, a pairing that is out of date, or a
+wrong PIN. [When a companion does not connect](../guide/connecting.md) lists all of these
+causes.
 
-With nothing named and more than one candidate attached, the same `3` arrives as a list
-and the way out of it:
+If you name no device and more than one candidate is attached, the same `3` arrives with
+a list and the way to correct the problem:
 
 ```console
 $ meshterm info
@@ -505,8 +544,8 @@ meshterm: Multiple companion devices detected and no default to fall back on.
 Choose one with --port <PORT> or --ble <ADDRESS> (or run 'meshterm devices' to inspect them). The chosen device is remembered as the default after it connects.
 ```
 
-**A value the parser rejects** is `2`, and it names the choices rather than making you
-find them:
+**A value that the parser rejects** gives `2`. The message names the choices, so you do
+not have to find them:
 
 ```console
 $ meshterm contacts --sort bogus
@@ -516,7 +555,8 @@ Try 'meshterm contacts --help' for help.
 Error: Invalid value: --sort must be one of: name, heard, packets (got 'bogus')
 ```
 
-**A confirmation not given** is the same class, because nothing has happened yet:
+**A confirmation that you did not give** is in the same class, because nothing has
+happened yet:
 
 ```console
 $ meshterm config reboot
@@ -528,10 +568,11 @@ $ echo $?
 2
 ```
 
-Destructive operations gate behind `--yes` rather than a prompt, so nothing surprising
-happens in a script.
+A destructive operation needs `--yes` and does not ask in a prompt. Thus nothing
+unexpected happens in a script.
 
-**A refusal** is also `2` — the caller asked for something the command does not have:
+**A refusal** also gives `2`. The caller asked for something that the command does not
+have:
 
 ```console
 $ meshterm specimen --json
@@ -541,7 +582,8 @@ Try 'meshterm specimen --help' for help.
 Error: Invalid value: specimen has no machine-readable output — its output is the colour
 ```
 
-**The radio answered and the operation failed** is `4`, and it says what to do next:
+**The radio answered and the operation failed** gives `4`. The message says what to do
+next:
 
 ```console
 $ meshterm tx-optimize --path "Yagi-Repeater,Alice" --password wrong
@@ -551,9 +593,9 @@ $ echo $?
 4
 ```
 
-**Nothing to report** is `5` and is not a failure at all. stdout is empty on the plain
-face and carries the empty document under `--json`; anything MeshTerm wants to say about
-it — `0 records stored` — goes to stderr like every other acknowledgement.
+**Nothing to report** gives `5`, and it is not a failure. Stdout is empty on the plain
+face. With `--json`, stdout has the empty document. A message from MeshTerm about the
+result (`0 records stored`) goes to stderr, like each other acknowledgement.
 
 ```console
 $ meshterm records
@@ -563,8 +605,8 @@ $ meshterm records --json
 []
 ```
 
-Under `--json`, none of this changes: same statuses, same stderr, and stdout carries the
-document on `0` and `5` and nothing at all on `1` through `4`.
+With `--json`, none of this changes. The statuses are the same, and stderr is the same.
+Stdout has the document for `0` and `5`, and it has nothing for `1` through `4`.
 
 ```console
 $ meshterm contacts --sort bogus --json
@@ -576,33 +618,33 @@ $ echo $?
 2
 ```
 
-An **unhandled fault** exits `1` with its traceback in the log file. Everything above is
-an expected failure, reported once.
+An **unhandled fault** exits with `1`, and its traceback is in the log file. Each case
+above is an expected failure, and MeshTerm reports it one time.
 
 ---
 
 ## Command reference
 
-Each entry gives what the command does, its options, what the plain face prints, and what
-`--json` returns. Where a JSON field is one of the [shapes that
-repeat](#the-shapes-that-repeat), the table names the shape rather than restating it.
+Each entry says what the command does, gives its options, and shows what the plain face
+prints and what `--json` returns. If a JSON field is one of the [shapes that
+repeat](#the-shapes-that-repeat), the table names the shape and does not define it again.
 
 ### Finding a device
 
 #### `meshterm devices`
 
-List every attached serial device, every radio on this machine's SPI bus, and every
-in-range Bluetooth companion. Opens no radio — it only enumerates what is attached or
-advertising. An SPI radio is listed when its `/dev/spidev*` node exists, exactly as the
-device screen lists it: one per SPI profile, plus the uConsole AIO's `/dev/spidev1.0` when
-no profile covers it. Under `--mock` it enumerates nothing at
-all: the simulator is the one device, listed with `--mock` as its target, and neither the
-serial ports nor the Bluetooth radio are touched — a session that promised no real
-hardware keeps the promise here too.
+List each attached serial device, each radio on the SPI bus of this machine, and each
+Bluetooth companion in range. The command opens no radio. It only lists what is attached
+or what advertises. MeshTerm lists an SPI radio when its `/dev/spidev*` device file
+exists. The device screen lists radios in the same way: one for each SPI profile, and
+also the `/dev/spidev1.0` of the uConsole AIO when no profile covers it. With `--mock`,
+the command finds no real device. The simulator is the one device, and the list shows it
+with `--mock` as its target. MeshTerm does not touch the serial ports or the Bluetooth
+adapter. A session that promised to use no real hardware keeps the promise here also.
 
 | Option | What it does |
 | --- | --- |
-| `--ble` / `--no-ble` | Include a Bluetooth LE scan. On by default; skipping it saves a few seconds. Moot under `--mock`. |
+| `--ble` / `--no-ble` | Include a Bluetooth LE scan. It is on by default. If you skip it, the command is faster by a few seconds. It has no effect with `--mock`. |
 
 ```console
 $ meshterm devices --no-ble
@@ -613,14 +655,15 @@ COM26   serial     USB Serial Device (COM26)   Espressif              maybe     
 COM1    serial     Communications Port (COM1)  (Standard port types)  no        -                 no
 ```
 
-`TARGET` is what `--port` and `--ble` take, verbatim; an SPI radio's is its device node,
-reached with `--spi` or its profile's `-p`. `MESHCORE` is three-valued and stays
-that way: `yes` only once a connection has proved the device speaks the protocol, `maybe`
-for a USB vendor ID that suggests a LoRa board or a bridge chip, `no` for anything else —
-a vendor ID is a hint, and the column would be lying if it rounded one up.
+`TARGET` is the value that `--port` and `--ble` take, exactly as shown. For an SPI radio,
+`TARGET` is its device file. Reach the radio with `--spi` or with `-p` and its profile.
+`MESHCORE` has three values and stays that way. `yes` is only for a device that a
+connection proved to speak the protocol. `maybe` is for a USB vendor ID that suggests a
+LoRa board or a bridge chip. `no` is for all other devices. A vendor ID is a hint, and
+the column would be false if it changed a hint to a certain `yes`.
 
-**`--json`** is an array of targets in discovery order, carrying five facts the plain
-table has no room for.
+**`--json`** is an array of targets in the order of discovery. It has five facts that the
+plain table has no room for.
 
 ```json
 {"target":"COM12","transport":"serial","port":"COM12","address":null,"label":"USB Serial Device (COM12)","hardware":"Adafruit","meshcore":"maybe","confidence":"board","serial_number":"D030D2CCD00F08EB","stable_id":"sn:D030D2CCD00F08EB","confirmed":false,"remembered":false,"active":false}
@@ -628,24 +671,24 @@ table has no room for.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `target` | string | What `--port` / `--ble` take, verbatim. |
+| `target` | string | The value that `--port` and `--ble` take, exactly as shown. |
 | `transport` | string | `"serial"` \| `"ble"` \| `"tcp"`, or `"mock"` under `--mock`. |
 | `port` | string \| null | The serial port, for a serial device. `""` on the `--mock` row. |
 | `address` | string \| null | The Bluetooth address, for a Bluetooth device. |
-| `label` | string | The OS's name for the device, or the confirmed node name where we have one. |
-| `hardware` | string \| null | The confirmed hardware model, else the USB vendor label. `""` on the `--mock` row. |
-| `meshcore` | string | `"yes"` \| `"maybe"` \| `"no"`. Not a boolean — rounding a hint up to `true` would be a lie. |
-| `confidence` | string | `"board"` \| `"bridge"` \| `"unknown"` — what a `"maybe"` was derived from. |
+| `label` | string | The name that the operating system gives to the device, or the confirmed node name when MeshTerm has one. |
+| `hardware` | string \| null | The confirmed hardware model, or else the USB vendor label. `""` on the `--mock` row. |
+| `meshcore` | string | `"yes"` \| `"maybe"` \| `"no"`. It is not a boolean, because a change of a hint to `true` would be false. |
+| `confidence` | string | `"board"` \| `"bridge"` \| `"unknown"`. It shows the source of a `"maybe"`. |
 | `serial_number` | string \| null | |
-| `stable_id` | string | The identity the device store keys on (`"sn:D030…"`, `"port:COM1"`). |
-| `confirmed` | boolean | Whether this device is stored as a proven companion. |
+| `stable_id` | string | The identity that the device store uses as its key (`"sn:D030…"`, `"port:COM1"`). |
+| `confirmed` | boolean | Whether MeshTerm stored this device as a proven companion. |
 | `remembered` | boolean | Whether it is the remembered default. |
-| `active` | boolean | Whether this invocation is (or would be) using it. |
+| `active` | boolean | Whether this run uses the device, or will use it. |
 
-Under `--mock` there is no scan. The list is one row for the simulator: `target`
+With `--mock`, there is no scan. The list is one row for the simulator: `target`
 `"--mock"`, `transport` `"mock"`, `stable_id` `"mock:simulator"`.
 
-Returns `5` when nothing is found.
+The command returns `5` when it finds nothing.
 
 ---
 
@@ -653,7 +696,7 @@ Returns `5` when nothing is found.
 
 #### `meshterm info`
 
-The connected companion's live status: which radio this is, and how it is doing.
+The connected companion's live status: which radio it is, and how it works.
 
 ```console
 $ meshterm info
@@ -678,55 +721,57 @@ packets_received  1234
 receive_errors    3
 ```
 
-The unit is in the key, so nothing has to be pulled back out of prose. A reading whose
-number is a **duration** carries a gloss beside it: `93784  (1d 2h)`. The number is what
-the key promises and what a caller wants; the parenthesis is what a person actually asked.
+The unit is in the key, so you do not have to find it in a sentence. A reading whose
+number is a **duration** has an explanation beside it: `93784  (1d 2h)`. The number is
+what the key promises and what a caller wants. The text in parentheses is what a person
+wants to know.
 
-`clock_at` is the *device's* clock and `clock_drift_s` is device minus host, signed. On the
-plain face `clock_at` is one of the instants that survives a relative-age default, because
-a clock reading whose whole point is what time the device thinks it is would say nothing
-as `now`.
+`clock_at` is the device's clock. `clock_drift_s` is the device's clock minus the host's
+clock, with a sign. On the plain face, `clock_at` is one of the instants
+that stay as instants when the default is a relative age. A clock reading shows the time
+that the device thinks it is, so the value `now` would tell nothing.
 
-A reading the firmware does not answer for is **absent** rather than `-`: a missing key
-says "this device does not report it", where a dash would claim it reported nothing.
+If the firmware does not answer for a reading, the reading is **absent**, and the plain
+face does not print `-`. A missing key means that this device does not report the value.
+A dash would mean that the device reported nothing.
 
-**`--json`** is one object with the same keys, minus the glosses, and with every key
-always present:
+**`--json`** is one object with the same keys, without the explanations in parentheses.
+Each key is always present:
 
 ```json
 {"name":"MockCompanion","public_key":"0000000000000000000000000000000000000000000000000000000000000000","role":"companion","model":"MeshCore Simulator","firmware":"mock mock","battery_v":4.1,"storage_used_kb":128,"storage_total_kb":1024,"clock_at":"2026-09-08T08:24:42Z","clock_drift_s":-125,"uptime_s":93784,"noise_floor_dbm":-110,"last_rssi_dbm":-62,"last_snr_db":9.5,"tx_air_s":42,"rx_air_s":360,"packets_sent":210,"packets_received":1234,"receive_errors":3}
 ```
 
 `role` is `"companion"` \| `"repeater"` \| `"room server"` \| `"sensor"` \| `null`, or
-`"type N"` for an advert type MeshTerm does not know. This is the one place the two faces
-disagree about absence on purpose: plain omits a key the firmware never answered for, JSON
-writes `null`, because a variable key set costs every consumer a lookup guard on every
-field.
+`"type N"` for an advert type that MeshTerm does not know. This is the one place where
+the two faces deliberately disagree about absence. The plain face omits a key that the
+firmware never answered for. JSON writes `null`, because a set of keys that changes would
+force each consumer to add a check before each field.
 
-`info` does not embed a `node` object — it is our own node in far more detail than the
-shape carries, and `name` / `public_key` here are its whole identity. What the radio is
-*set to* is `config show`'s answer, not this one. Never returns `5`.
+`info` does not hold a `node` object. This is our node, and `info` shows it in more
+detail than the shape holds. `name` and `public_key` are its whole identity here. To find
+what the radio is set to, use `config show`, not `info`. `info` never returns `5`.
 
 #### `meshterm config`
 
-View and change every device setting. With no subcommand it runs `show`.
+Show and change each device setting. If you give no subcommand, it runs `show`.
 
 | Subcommand | What it does |
 | --- | --- |
-| `show` | Print every setting as `key value`. |
-| `get KEY` | Print one setting's value, bare. |
+| `show` | Print each setting as `key value`. |
+| `get KEY` | Print the value of one setting, bare. |
 | `set KEY VALUE` | Change one setting. |
-| `backup PATH` | Write every setting to a TOML file. |
-| `restore PATH [--dry-run]` | Apply settings from a TOML backup. `--dry-run` prints the plan and changes nothing. |
+| `backup PATH` | Write each setting to a TOML file. |
+| `restore PATH [--dry-run]` | Apply the settings from a TOML backup. `--dry-run` prints the plan and changes nothing. |
 | `custom KEY VALUE` | Set an experimental custom variable. |
-| `channel INDEX NAME [--secret HEX]` | Configure a channel slot (see also the `channels` group). |
-| `advert [--flood]` | Broadcast an advertisement. Zero-hop unless `--flood`. |
+| `channel INDEX NAME [--secret HEX]` | Configure a channel slot (refer also to the `channels` group). |
+| `advert [--flood]` | Broadcast an advert. It is zero-hop unless you give `--flood`. |
 | `share` | Print this node's contact card as a `meshcore://` URI. |
 | `sync-clock` | Set the device clock from this computer. |
 | `export-key [--out PATH]` | Export the private key. **Sensitive.** |
-| `import-key KEY_HEX --yes` | Import a private key, overwriting this node's identity. |
+| `import-key KEY_HEX --yes` | Import a private key. It overwrites this node's identity. |
 | `reboot --yes` | Reboot the device. |
-| `factory-reset --yes` | Erase all data and reset to defaults. |
+| `factory-reset --yes` | Erase all data and reset the settings to the defaults. |
 
 ```console
 $ meshterm config show
@@ -754,10 +799,10 @@ telemetry_mode_env   0
 path_hash_mode       0
 ```
 
-`show` names each setting by the key `get` and `set` take, and prints a value they will
-take back — an enum's **number**, not the reader's label; `""` for an empty string; `-`
-for something the firmware never reported. So a line read out of `show` can be typed
-straight back in, and the write says what it replaced:
+`show` names each setting with the key that `get` and `set` take. It prints a value that
+they accept as input: the **number** of an enum, not its label for a person, `""` for an
+empty string, and `-` for a value that the firmware never reported. Thus you can type a
+line from `show` back as input, and the write says what it replaced:
 
 ```console
 $ meshterm config get radio_sf
@@ -766,30 +811,32 @@ $ meshterm config set radio_sf 9 --json
 {"changes":1,"applied":[{"key":"radio_sf","previous":8,"value":9}]}
 ```
 
-(Read back with `config get` against real hardware and it answers `9`. The simulator these
-examples run against opens a fresh radio per invocation, so a setting written by one
-command is not there for the next.)
+(If you read the value back with `config get` against real hardware, it answers `9`. The
+simulator that these examples use opens a new radio for each run, so a setting that one
+command writes is not there for the next command.)
 
-The pairing PIN stays masked here, because this is the whole-device dump — the thing that
-gets redirected into a file and pasted into a bug report. Name it deliberately with
-`meshterm config get device_pin`, which is the one place it is not withheld.
+The pairing PIN stays masked here, because `show` is the dump of the whole device. A
+person can send this output to a file or paste it into a bug report. To get the PIN, ask
+for it by name with `meshterm config get device_pin`. This is the one place where
+MeshTerm does not withhold it.
 
-Custom variables are namespaced `custom.*` in the output, since they have no spec and
-`config set` will not take them (use `config custom`).
+Custom variables have the namespace `custom.*` in the output, because they have no spec
+and `config set` does not accept them. Use `config custom`.
 
-**`--json`.** `show` is an array of `setting` objects in the same order; `get` is one.
+**`--json`.** `show` is an array of `setting` objects in the same order. `get` is one
+`setting` object.
 
 ```console
 $ meshterm config get tx_power --json
 {"key":"tx_power","value":20,"type":"int","label":null,"redacted":false}
 ```
 
-Three shapes are kept apart: `flood_scope` is `""` (an empty *value*), `device_pin` is
-`null` with `"redacted":true` (withheld on purpose — a mask string is not a value), and a
-setting the firmware never reported is `null` with `"redacted":false`.
+Three cases are separate. `flood_scope` is `""` (an empty value). `device_pin` is `null`
+with `"redacted":true` (MeshTerm withholds it on purpose, and a mask string is not a
+value). A setting that the firmware never reported is `null` with `"redacted":false`.
 
-Every write emits what it did, where the plain face is silent and only the stderr
-acknowledgement says so:
+Each write prints what it did. The plain face is silent, and only the acknowledgement on
+stderr says what happened:
 
 ```console
 $ meshterm config set radio_sf 10 --json
@@ -814,15 +861,16 @@ $ meshterm config share --json
 {"url":"meshcore://contact/add?name=MockCompanion&public_key=0000000000000000000000000000000000000000000000000000000000000000&type=1","name":"MockCompanion","public_key":"0000000000000000000000000000000000000000000000000000000000000000","type":1}
 ```
 
-`previous` is `null` where the snapshot held no prior value; `changes` is `0` and
-`applied` is `[]` where the value already was what was asked for, and the exit stays `0`
-because the command did what it was asked. `backup`'s `path` is the file written, as you
-named it (the plain face prints it bare, so a caller can keep it). `export-key` carries a private
-key, exactly as the plain face does — that is what the command was asked for, and no extra
-gate is introduced here. `factory-reset --yes` answers `{"factory_reset":true}`.
+`previous` is `null` when the snapshot held no earlier value. If the value already was the
+value that you asked for, `changes` is `0` and `applied` is `[]`. The exit status stays
+`0`, because the command did what you asked. The `path` of `backup` is the file that
+MeshTerm wrote, as you named it. The plain face prints it bare, so a caller can keep it.
+`export-key` has a private key, in the same way as the plain face. This is what you asked
+the command to do, and MeshTerm adds no more gate here. `factory-reset --yes` answers
+`{"factory_reset":true}`.
 
-The QR code the menu draws beside `share` has no JSON face and never will: it is a second
-rendering of `url`.
+The menu draws a QR code beside `share`. This QR code has no JSON face and never will,
+because it is a second rendering of `url`.
 
 ---
 
@@ -830,7 +878,7 @@ rendering of `url`.
 
 #### `meshterm contacts`
 
-The contacts your device knows.
+The contacts that your device knows.
 
 | Option | What it does |
 | --- | --- |
@@ -845,21 +893,22 @@ Observer-Bot    companion     7m     -  c3    45.48800,-73.58100  c3d4e5f6000000
 Yagi-Repeater   repeater      7m     -  a1    45.50190,-73.56740  a1b2c3d400000000000000000000000000000000000000000000000000000000
 ```
 
-`TYPE` is the node's advertised role in words — `companion`, `repeater`, `room server`,
-`sensor`, or `unknown`. `HEARD` is a relative age, because "recently?" is what this listing
-is opened to answer; `--absolute` turns it into an instant. `PKTS` is how many packets passive
-monitoring has overheard.
+`TYPE` is the node's advertised role in words: `companion`, `repeater`, `room server`,
+`sensor`, or `unknown`. `HEARD` is a relative age, because a person opens this listing to
+find out "what is recent?". `--absolute` changes it to an instant. `PKTS` is the number of
+packets that passive monitoring heard.
 
-**`HASH` is the token `--path` and `--to` take**, so it never has to be sliced out of `KEY`
-by hand, where getting the width wrong would address a different node. It is exactly the
-device's path-hash width. **`LOCATION`** is a fact the model always carried and no column
-had room for. `KEY` stays full and last, so it runs off the right harmlessly and is never
-elided: a truncated key is not something a caller can hand back.
+**`HASH` is the token that `--path` and `--to` take.** Thus you do not have to cut it out
+of `KEY` by hand. If you use the wrong width, you address a different node. `HASH` has
+exactly the device's path hash width. **`LOCATION`** is a fact that the data always had,
+but no column had room for it before. `KEY` stays complete and is the last column, so it
+runs off the right edge without harm, and MeshTerm never cuts it. A caller cannot use a
+truncated key as input.
 
-This lists *contacts only*. Your own node is not a contact — `meshterm info` reports it, in
-far more detail than a row could hold.
+This lists *contacts only*. Your node is not a contact. `meshterm info` reports it,
+in more detail than a row can hold.
 
-**`--json`** is an array of rows, each embedding the `node` shape.
+**`--json`** is an array of rows. Each row holds the `node` shape.
 
 ```json
 {"node":{"name":"Observer-Bot","key":"c3d4e5f600000000000000000000000000000000000000000000000000000000","hash":"c3","type":"companion","self":false},"heard_at":"2026-09-08T08:30:50Z","packets":null,"position":{"lat":45.488,"lon":-73.581}}
@@ -867,18 +916,18 @@ far more detail than a row could hold.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `node` | object | The `node` shape. `hash` is at the device's path-hash width. |
-| `heard_at` | timestamp \| null | When the contact was last heard. `null` is the plain face's `never`. |
-| `packets` | integer \| null | Packets passive monitoring has overheard. `null` where none were, which is distinct from `0`. |
+| `node` | object | The `node` shape. `hash` has the device's path hash width. |
+| `heard_at` | timestamp \| null | When MeshTerm last heard the contact. `null` is the `never` of the plain face. |
+| `packets` | integer \| null | The number of packets that passive monitoring heard. `null` when it heard none. This is not the same as `0`. |
 | `position` | object \| null | The `position` shape. |
 
-Returns `5` and `[]` when the device knows no contacts yet.
+The command returns `5` and `[]` when the device does not know a contact yet.
 
 #### `meshterm monitor`
 
-Capture overheard packets in the foreground for a bounded window, then summarise it.
-Transmits nothing; it only listens. Recording to history is always on anyway — this adds
-the live view.
+Capture the packets that MeshTerm hears in the foreground, for a limited time. Then
+summarize the capture. The command transmits nothing. It only listens. MeshTerm always
+records to the history, with or without this command. This command adds the live view.
 
 | Option | What it does |
 | --- | --- |
@@ -898,15 +947,17 @@ b2c3d4e5  Local-Repeater   132           +6.7        +14.9      -102    now  45.
 a1b2c3d4  Yagi-Repeater    132           +6.0        +13.6       -90    now  45.50190,-73.56740
 ```
 
-Two blocks, one straight after the other: the summary starts at its own `NODE` header
-line, with no blank line before it. The sample shows only the first four stream records.
-The **stream** is a header and then a record per packet as it arrives; its lanes are
-pinned in advance, because a capture cannot measure a column it has not seen yet, and `TIME` is an absolute instant rather than an age — on a
-live tail every row would otherwise read `now`. The **summary** is the aggregate the
-stream cannot give: a count, a median, a best per node, most recently heard first.
+The output has two blocks, one directly after the other. The summary starts at its own
+`NODE` header line, and there is no blank line before it. The sample shows only the first
+four stream records. The **stream** is a header and then one record for each packet when
+the packet arrives. Its lanes are fixed in advance, because a capture cannot measure a
+column that it has not seen yet. `TIME` is an absolute instant and not an age, because
+each row of a live tail would read `now` otherwise. The **summary** gives the totals that
+the stream cannot give: a count, a median, and a best value for each node. The node that
+MeshTerm heard most recently is first.
 
-**`--json` is the stream and only the stream.** One document per packet, every line the
-same shape, and **no summary document at the end**:
+**`--json` is the stream and only the stream.** It has one document for each packet, each
+line has the same shape, and there is **no summary document at the end**:
 
 ```json
 {"observed_at":"2026-09-08T08:30:40Z","node":{"name":"Yagi-Repeater","key":"a1b2c3d400000000000000000000000000000000000000000000000000000000","hash":"a1b2c3d4","type":"repeater","self":false},"kind":"advert","snr_db":7.0,"rssi_dbm":-101.3,"position":{"lat":45.5019,"lon":-73.5674},"scope":null,"path":null}
@@ -916,19 +967,20 @@ same shape, and **no summary document at the end**:
 | --- | --- | --- |
 | `observed_at` | timestamp | When the packet arrived. |
 | `node` | object | The `node` shape. `hash` is the stored node id, four bytes wide. |
-| `kind` | string | The packet class — `"advert"`, `"telemetry"`, `"packet"`, `"message"`, `"ack"`. |
+| `kind` | string | The packet class: `"advert"`, `"telemetry"`, `"packet"`, `"message"`, or `"ack"`. |
 | `snr_db` | number \| null | |
 | `rssi_dbm` | number \| null | |
 | `position` | object \| null | The `position` shape. |
-| `scope` | object \| null | The region a flood was sent into: `{"state", "region", "code"}`. `state` is `"scoped"` (`region` names it), `"unknown"` (scoped, but no region known here reproduces `code`) or `"unscoped"` (a plain flood). `code` is the frame's transport code as lowercase hex, kept even when unresolved so two packets can be seen to share a region. `null` for a direct packet, or a class whose route was never reported — a repeater never region-filters those. The plain `SCOPE` lane prints the region, `unknown`, `unscoped` or `-`. |
-| `path` | array of strings \| null | The relay chain the packet arrived by, one lowercase-hex hash per hop, in propagation order. `[]` is a direct reception; `null` means the packet class carries no path at all. This is the one place `path` is an array — it is a *received* relay chain rather than a composed spec. |
+| `scope` | object \| null | The region that the flood was sent into: `{"state", "region", "code"}`. `state` is `"scoped"` (`region` names it), `"unknown"` (the flood is scoped, but no region that MeshTerm knows produces `code`), or `"unscoped"` (a plain flood). `code` is the frame's transport code in lowercase hex. MeshTerm keeps it also when it cannot find the region, so you can see that two packets share a region. `null` for a direct packet, or for a class whose route was never reported. A repeater never filters these by region. The plain `SCOPE` lane prints the region, `unknown`, `unscoped`, or `-`. |
+| `path` | array of strings \| null | The relay chain that the packet arrived through. It has one lowercase-hex hash for each hop, in the order of propagation. `[]` is a direct reception. `null` means that the packet class has no path at all. This is the one place where `path` is an array, because it is a *received* relay chain and not a spec that you composed. |
 
-**This is the one place a whole block appears on one face and not the other, and it is
-deliberate.** The per-node summary is a convenience for a person watching a capture end.
-Every figure in it is computable from the records that scrolled past above it, and emitting
-it as a second *shape* of line in the middle of an otherwise homogeneous stream would cost
-every consumer a discriminator it would never otherwise need. So the aggregate stays on the
-plain face, and JSON hands you what it was derived from:
+**This is the one place where a whole block appears on one face and not on the other. It
+is deliberate.** The summary of each node helps a person who watches a capture end. You
+can calculate each figure in it from the records that scrolled past above it. If MeshTerm
+emitted the summary as a second *shape* of line in the middle of a stream where all lines
+are the same, each consumer would need a discriminator that it does not need otherwise.
+Thus the totals stay on the plain face, and JSON gives you the records that the totals
+come from:
 
 ```console
 $ meshterm monitor --seconds 60 --json > capture.ndjson
@@ -944,24 +996,24 @@ $ jq -s -c 'group_by(.node.hash)[]
 ```
 
 The "monitoring for 2s" announcement and the closing count go to stderr on both faces.
-Returns `5` when the window heard nothing.
+The command returns `5` when the window heard nothing.
 
 #### `meshterm records`
 
-The record-setting walks every trace has been scored against. Reads the database; needs no
-device and never transmits.
+The record-setting walks that MeshTerm scores each trace against. The command reads the
+database. It needs no device and never transmits.
 
 | Option | What it does |
 | --- | --- |
 | `-c`, `--category ID` | One discipline: `long_haul`, `far_point`, `long_leg`, `grand_tour`, `clean_trail`, `thin_thread`, `big_loop`. |
-| `-w`, `--width N` | Only records set at this per-hop hash width (`1`, `2`, or `4`). |
+| `-w`, `--width N` | Only records that were set at this per-hop hash width (`1`, `2`, or `4`). |
 
 The listing is `CATEGORY WIDTH SCORE UNIT RECORDED VERSION ROUTE`. `SCORE` is a bare
-number and `UNIT` is its own column, so the scores in a column are comparable; a score
-prefixed `>=` is a **lower bound**, meaning some hop on that walk has no known position and
-the distance is a floor rather than a measurement. Records are kept per hash width, because
-the width bounds both a walk's maximum length and its collision odds — boards at different
-widths are measuring different games.
+number, and `UNIT` is its own column, so you can compare the scores in a column. A score
+with the prefix `>=` is a **lower bound**. This means that a hop on that walk has no known
+position, so the distance is a minimum and not a measurement. MeshTerm keeps records for
+each hash width. The width limits the maximum length of a walk and the chance of a
+collision. Thus boards with different widths measure different games.
 
 ```console
 $ meshterm records
@@ -969,25 +1021,25 @@ $ echo $?
 5
 ```
 
-Records are discovered by the menu's walking, so a database that has only ever been driven
-from the command line has none — which is what the simulator these examples run against
-prints, honestly.
+The walks in the menu find the records. Thus a database that only the command line used
+has no records. This is what the simulator that these examples use prints, and it is
+correct.
 
-**`--json`** is an array carrying two facts the columns cannot hold.
+**`--json`** is an array that has two facts that the columns cannot hold.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `category` | string | The discipline id, as `--category` takes it. |
-| `hash_bytes` | integer | The per-hop hash width the walk was transmitted at — the plain `WIDTH`, under the contract's word for the concept. |
-| `score` | number | The bare score, unqualified. |
+| `hash_bytes` | integer | The per-hop hash width at which MeshTerm transmitted the walk. It is the `WIDTH` of the plain face, with the contract's word for the concept. |
+| `score` | number | The bare score, without a qualifier. |
 | `unit` | string | `"km"` \| `"nodes"` \| `"dB"` \| `"km²"`. |
-| `lower_bound` | boolean | **JSON only.** `true` where the score is a floor — the plain face's `>=` prefix, extracted, so a consumer comparing scores need not string-match a qualifier off the front of its own data. |
+| `lower_bound` | boolean | **JSON only.** `true` when the score is a minimum. It is the `>=` prefix of the plain face, extracted. Thus a consumer that compares scores does not have to remove a qualifier from the front of its own data. |
 | `recorded_at` | timestamp | |
-| `version` | string | The MeshTerm version that discovered it. |
-| `path` | string \| null | **JSON only.** The transmitted spec, comma-separated hex — what a caller re-walks with. It has no column because a route line already runs off the right. `null` where the record stored no spec. |
-| `route` | array | The `route` shape, hop-aligned with `path`. |
+| `version` | string | The MeshTerm version that found the record. |
+| `path` | string \| null | **JSON only.** The spec that MeshTerm transmitted, in comma-separated hex. A caller uses it to walk the path again. It has no column, because a route line already runs off the right edge. `null` when the record has no stored spec. |
+| `route` | array | The `route` shape, with hops that match `path`. |
 
-Returns `5` and `[]` when no records match.
+The command returns `5` and `[]` when no records match.
 
 ---
 
@@ -995,28 +1047,28 @@ Returns `5` and `[]` when no records match.
 
 #### `meshterm chat`
 
-`meshterm chat` on its own is not interactive — it prints this group's help and exits `2`.
-The live transcript is a menu screen; from the command line, pick a subcommand.
+`meshterm chat` on its own is not interactive. It prints the help of this group and exits
+with `2`. The live transcript is a menu screen. On the command line, select a subcommand.
 
 | Subcommand | What it does |
 | --- | --- |
 | `send TEXT --to NAME` | Send a direct message, or post to a room. |
-| `send TEXT --channel N [--scope REGION]` | Broadcast on a channel slot, under the channel's scope — or under `REGION` for this one message, `*` for unscoped. |
-| `history [--to NAME \| --channel N] [--limit N]` | Print a conversation's stored transcript. Default limit 50. |
-| `list` | Every channel, room and contact with its unread count and last message. |
-| `listen [-s SECONDS] [--debug]` | Tail inbound messages live. `-s 0` (the default) runs until Ctrl-C. |
+| `send TEXT --channel N [--scope REGION]` | Broadcast on a channel slot, with the channel's scope. For this one message, you can use `REGION` as the scope, or `*` for unscoped. |
+| `history [--to NAME \| --channel N] [--limit N]` | Print the stored transcript of a conversation. The default limit is 50. |
+| `list` | Each channel, room, and contact, with its unread count and last message. |
+| `listen [-s SECONDS] [--debug]` | Tail the inbound messages live. `-s 0` (the default) runs until Ctrl-C. |
 
-Exactly one of `--to` and `--channel` is required on `send` and `history`.
+`send` and `history` need exactly one of `--to` and `--channel`.
 
 ```console
 $ meshterm chat send "on my way" --to Alice
 acked  yes
 ```
 
-A direct message prints its `acked` state, which is the one thing the send does not
-already tell you — the radio accepted it either way, and whether the peer answered is a
-separate fact. A **channel** broadcast prints nothing: there is no acknowledgement on a
-channel, so the exit status is the whole answer.
+A direct message prints its `acked` state. This is the one fact that the send does not
+already tell you. The radio accepts the message in each case, and whether the peer
+answered is a separate fact. A **channel** broadcast prints nothing. There is no
+acknowledgement on a channel, so the exit status is the whole answer.
 
 ```console
 $ meshterm chat history --to Alice
@@ -1030,15 +1082,15 @@ $ meshterm --absolute chat history --to Alice
 2026-09-08T04:27:38-04:00  out  Alice       -  see you there
 ```
 
-`DIR` is `in` or `out`; `PEER` is always the *other* party. `TEXT` is last and is the rest
-of the line — a message body is the one field that can hold absolutely anything, so
-nothing may follow it.
+`DIR` is `in` or `out`. `PEER` is always the *other* party. `TEXT` is the last column and
+takes the rest of the line. A message body is the one field that can hold any text, so no
+column can follow it.
 
-**Rooms.** A room server is a message board that lives on a radio. Join one first with
-[`meshterm rooms join`](#meshterm-rooms); after that, post with `send --to`, exactly like a
-direct message. `acked yes` means the room stored the
-post, not that anyone has read it. A room's `history` names who wrote each post, where a
-direct conversation names the peer:
+**Rooms.** A room server is a message board that lives on a radio. First, join the room
+with [`meshterm rooms join`](#meshterm-rooms). After that, post with `send --to`, in the
+same way as a direct message. `acked yes` means that the room stored the post. It does
+not mean that a person read it. The `history` of a room names the author of each post.
+The `history` of a direct conversation names the peer:
 
 ```console
 $ meshterm chat history --to "Lakeside BBS"
@@ -1048,8 +1100,8 @@ TIME  DIR  AUTHOR                    SNR_DB  TEXT
  now  out  MockCompanion (00000000)       -  I'll check it tonight
 ```
 
-An author is a name with its key's hash, or just the hash when nothing you've heard names
-that key. Your own posts name your own node.
+An author is a name with the hash of its key. If nothing that you heard names that key,
+the author is only the hash. Your own posts name your node.
 
 ```console
 $ meshterm chat list
@@ -1070,11 +1122,11 @@ TIME                       PEER              SNR_DB  TEXT
 2026-09-08T04:30:45-04:00  d4e5f6a7            +3.9  hello from Alice #3
 ```
 
-`listen` pins its lanes and stamps each row with an instant, the same shape `monitor`'s
-stream takes and for the same reason. `--debug` routes the message-pull logging to stderr,
-for working out whether messages are being pulled from the companion at all.
+`listen` fixes its lanes and puts an instant on each row. The stream of `monitor` has the
+same shape, for the same reason. `--debug` sends the log of the message pull to stderr.
+Use it to find out if MeshTerm pulls messages from the companion at all.
 
-**`--json`.** `send` reports what it sent and to whom:
+**`--json`.** `send` reports what it sent, and to whom:
 
 ```console
 $ meshterm chat send "see you there" --to Alice --json
@@ -1084,30 +1136,34 @@ $ meshterm chat send "net in 5" --channel 0 --json
 {"kind":"channel","node":null,"channel":{"slot":0,"name":"#0","public":true,"hash":null},"sent":true,"acked":null}
 ```
 
-`kind` is `"direct"` \| `"room"` \| `"channel"` and says which of `node` / `channel` is
-populated (a room is a `node`).
-A channel send also carries `scope`, in the same shape `monitor` gives a received packet's:
-`{"state":"scoped","region":"harbour","code":null}` for a region, `"unscoped"` for a plain
-flood, and `null` where it isn't known (a direct message, or a channel with no scope of its
-own whose device default couldn't be read). `code` is `null` on a send: the code is a hash
-of the packet, and the radio builds the packet.
+`kind` is `"direct"` \| `"room"` \| `"channel"`. It shows which of `node` and `channel`
+has a value (a room is a `node`).
 
-`--scope` applies to a channel send only. A direct message has no scope of its own to give
-— the radio floods it under the device default like anything else — so `--scope` with
-`--to` is a usage error (exit `2`), as is a name the firmware would refuse. A radio that
-can't send under the scope (firmware older than 1.10, or `*` before 1.16 with a default
-scope set) refuses before anything is transmitted, and that is a failure (exit `1`),
-never a quiet unscoped send. Quote the `*` so the shell leaves it alone:
+A channel send also has `scope`, in the same shape that `monitor` gives for a received
+packet. For a region, it is `{"state":"scoped","region":"harbour","code":null}`. For a
+plain flood, it is `"unscoped"`. When the scope is not known, it is `null`. This happens
+for a direct message, and for a channel that has no scope of its own when MeshTerm could
+not read the device's default. `code` is `null` on a send, because the code is a hash of
+the packet, and the radio builds the packet.
+
+`--scope` applies to a channel send only. A direct message has no scope of its own. The
+radio floods it with the device's default, in the same way as other messages. Thus
+`--scope` with `--to` is a usage error (exit `2`). A name that the firmware would refuse
+is also a usage error. A radio that cannot send with the scope (firmware older than
+1.10, or `*` before 1.16 with a default scope set) refuses before it transmits anything.
+This is a failure (exit `1`). MeshTerm never sends the message unscoped without telling
+you. Put the `*` in quotation marks, so that the shell does not change it:
 
 ```console
 $ meshterm chat send "all clear" --channel 0 --scope '*' --json
 {"kind":"channel","node":null,"channel":{"slot":0,"name":"#0","public":true,"hash":null},"sent":true,"acked":null,"scope":{"state":"unscoped","region":null,"code":null}}
 ```
-`acked` is `null` on a channel, not `false`: there is no acknowledgement to have, and that
-is exactly what one absence token is for — it is also why the plain face prints nothing
-there, having no way to say it.
 
-`history` is an array, oldest first:
+`acked` is `null` on a channel, not `false`. A channel has no acknowledgement, and this is
+the purpose of the one absence token. It is also the reason why the plain face prints
+nothing there: it has no way to say it.
+
+`history` is an array, with the oldest message first:
 
 ```json
 {"created_at":"2026-09-08T08:27:37Z","direction":"out","node":{"name":"Alice","key":null,"hash":"d4e5f6a7","type":null,"self":false},"channel":null,"author":null,"snr_db":null,"text":"on my way","acked":true}
@@ -1119,41 +1175,42 @@ there, having no way to say it.
 | `direction` | string | `"in"` \| `"out"`. |
 | `node` | object \| null | The *other* party, for a direct conversation. |
 | `channel` | object \| null | The `channel` shape, for a channel conversation. |
-| `author` | object \| null | Who wrote a room post, as a `node`; on your own posts, your node. `null` outside a room. |
-| `snr_db` | number \| null | Reception SNR; `null` on an outbound message. |
-| `text` | string | The body, raw and unescaped. |
-| `acked` | boolean \| null | Delivery state of an outbound direct message; `null` inbound and on a channel. |
+| `author` | object \| null | The author of a room post, as a `node`. On your own posts, it is your node. `null` outside a room. |
+| `snr_db` | number \| null | The SNR at reception. `null` on an outbound message. |
+| `text` | string | The body, raw and not escaped. |
+| `acked` | boolean \| null | The delivery state of an outbound direct message. `null` for an inbound message and for a channel. |
 
-`list` is an array of conversations, channels first, each carrying `kind`, `channel`,
-`node`, `unread`, `last_message_at` and `last_text`. `listen` is a stream of the same row
-shape as `history`, with **`received_at`** in place of `created_at`:
+`list` is an array of conversations, with the channels first. Each conversation has
+`kind`, `channel`, `node`, `unread`, `last_message_at`, and `last_text`. `listen` is a
+stream that has the same row shape as `history`, but it has **`received_at`** instead of
+`created_at`:
 
 ```json
 {"received_at":"2026-09-08T08:30:47Z","node":{"name":null,"key":null,"hash":"b2c3d4e5","type":null,"self":false},"channel":null,"author":null,"snr_db":4.9,"text":"hello from Local-Repeater #1","direction":"in","acked":null}
 ```
 
-A room post arrives from the room, so its `node` is the room and its `author` carries the
-writer's hash.
+A room post arrives from the room, so its `node` is the room. Its `author` has the
+author's hash.
 
-An inbound message carries only the sender's key prefix, so its `node` is thinner than the
-same node in `contacts` — `name` is whatever the resolver could find and `key` is `null`.
+An inbound message has only the sender's key prefix. Thus its `node` has less data than
+the same node in `contacts`. `name` is what the resolver could find, and `key` is `null`.
 Join on `hash`.
 
-`history`, `list` and `listen` return `5` when there is nothing to report.
+`history`, `list`, and `listen` return `5` when there is nothing to report.
 
 #### `meshterm rooms`
 
-A room server is a message board that lives on a radio. It keeps the latest posts, and once
-you have logged in it sends you every post you missed, then each new one as people write it.
-Joining a room is logging in with its password, which you get from whoever runs it. On its
-own, `meshterm rooms` prints this group's help; the Rooms page in the menu does the same
-jobs with dialogs.
+A room server is a message board that lives on a radio. It keeps the latest posts. After
+you log in, it sends you each post that you missed, and then each new post when a person
+writes it. To join a room, you log in with its password. You get the password from the
+person who runs the room. `meshterm rooms` on its own prints the help of this group. The
+Rooms page in the menu does the same jobs with dialogs.
 
 | Subcommand | What it does |
 | --- | --- |
-| `list` | Every room server your radio knows, joined or not. |
+| `list` | Each room server that your radio knows, joined or not. |
 | `join ROOM [--password PASSWORD] [--flood]` | Log in, and print what the room lets you do. |
-| `forget ROOM` | Stop logging in to a room, and forget its password. |
+| `forget ROOM` | Stop the login to a room, and forget its password. |
 
 ```console
 $ meshterm rooms list
@@ -1164,15 +1221,16 @@ $ meshterm rooms join "Lakeside BBS" --password hello
 member
 ```
 
-`join` prints what the room let you do: `member` (read and post), `admin` (the room's
-owner), or `read-only` (the room won't keep anything you post). A password that works is
-remembered, so the next `join` needs no `--password`. An empty one (`--password ""`) asks
-the room whether it already knows you. MeshCore sends at most 15 characters of a password,
-so a longer one is refused before anything goes out (exit `2`).
+`join` prints what the room let you do. `member` means that you can read and post.
+`admin` means that you are the room's owner. `read-only` means that the room does not
+keep what you post. MeshTerm remembers a password that works, so the next `join` does not
+need `--password`. An empty password (`--password ""`) asks the room if it already knows
+you. MeshCore sends a maximum of 15 characters of a password. MeshTerm refuses a longer
+password before it sends anything (exit `2`).
 
-A room never says a password is wrong. It just doesn't answer. So a `join` that hears
-nothing fails with exit `4`, and the message says what is known: how the login went out,
-when the room was last heard, and whether this password has worked before:
+A room never says that a password is wrong. It does not answer. Thus a `join` that hears
+nothing fails with exit `4`. The message says what MeshTerm knows: how the login went
+out, when MeshTerm last heard the room, and if this password worked before:
 
 ```console
 $ meshterm rooms join "Lakeside BBS" --password nope
@@ -1182,17 +1240,20 @@ room doesn't answer a wrong password — it stays silent — so either it didn't
 the password is wrong. Try --flood.
 ```
 
-Your radio sends a login along the route it learned the last time the room answered. When
-that route has gone stale, the login vanishes on the way. `--flood` makes the radio forget
-the route first, so the login goes to the whole mesh instead, and the room's answer teaches
-it a fresh route. Forgetting the route sends nothing; the login is still one transmission.
+Your radio sends a login along the route that it learned the last time that the room
+answered. If that route is stale, the login is lost on the way. `--flood` makes the radio
+forget the route first. Then the login goes to the whole mesh, and the room's answer
+teaches the radio a new route. When the radio forgets the route, it sends nothing. The
+login is still one transmission.
 
-The posts a room sends after a login wait on your radio until something collects them:
-`chat listen`, or Chat in the menu. `chat history --to ROOM` reads them by author.
+The posts that a room sends after a login wait on your radio until something collects
+them. `chat listen` or Chat in the menu collects them. `chat history --to ROOM` reads
+them by author.
 
-`forget` is local and prints nothing. MeshCore has no way to leave a room, so the room may
-keep sending your radio new posts until it restarts, or until it needs your seat for a new
-member (it holds 20, and drops the least active). `forget` exits `5` if you hadn't joined.
+`forget` is local and prints nothing. MeshCore has no way to leave a room. Thus the room
+can continue to send new posts to your radio until the room restarts, or until it needs
+your seat for a new member (it holds 20 members, and it removes the least active member).
+`forget` exits with `5` if you did not join the room.
 
 **`--json`.** `list` is an array, one object per room:
 
@@ -1200,65 +1261,70 @@ member (it holds 20, and drops the least active). `forget` exits `5` if you hadn
 {"node":{"name":"Lakeside BBS","key":"f6a7b8c900000000000000000000000000000000000000000000000000000000","hash":"f6a7b8c9","type":"room server","self":false},"joined":true,"access":"member","heard_at":null,"last_post_at":null,"unread":0}
 ```
 
-`access` is `null` for a room you haven't joined, and `heard_at` is `null` for one never
-heard. `join` answers with the room, the access, and how the login went out (`route` is
-`"flood"`, `"direct"`, or `null` if the radio never confirmed sending it):
+`access` is `null` for a room that you did not join. `heard_at` is `null` for a room that
+MeshTerm never heard. `join` answers with the room, the access, and how the login went
+out. `route` is `"flood"`, `"direct"`, or `null` if the radio never confirmed that it
+sent the login:
 
 ```json
 {"room":{"name":"Lakeside BBS","key":"f6a7b8c900000000000000000000000000000000000000000000000000000000","hash":"f6a7b8c9","type":"room server","self":false},"access":"member","route":"flood"}
 ```
 
-`forget` answers with the room and `forgotten` (`true`, or `false` when you hadn't joined).
+`forget` answers with the room and `forgotten` (`true`, or `false` when you did not join
+the room).
 
 #### `meshterm channels`
 
 | Subcommand | What it does |
 | --- | --- |
 | `list` | The configured channel slots. |
-| `add INDEX NAME [--secret HEX]` | Add a channel. A leading `#` makes it public (the firmware derives the key from the name); otherwise it is private, with a random key unless you give one. |
-| `join INDEX NAME SECRET` | Join a channel from its name and 32-hex-character key. |
+| `add INDEX NAME [--secret HEX]` | Add a channel. A `#` at the start of the name makes the channel public (the firmware derives the key from the name). Otherwise the channel is private, with a random key unless you give a key. |
+| `join INDEX NAME SECRET` | Join a channel from its name and its key of 32 hex characters. |
 | `import INDEX URL` | Import a `meshcore://channel/add` link. |
-| `share INDEX` | Print a slot's share link. |
-| `clear INDEX --yes` | Clear a slot, removing the channel from the device. |
-| `scope INDEX [REGION] [--clear]` | Show or set the region the channel's messages are flooded into. |
+| `share INDEX` | Print the share link of a slot. |
+| `clear INDEX --yes` | Clear a slot. This removes the channel from the device. |
+| `scope INDEX [REGION] [--clear]` | Show or set the region into which the channel's messages are flooded. |
 
-`list` prints `SLOT NAME TYPE HASH SCOPE`, one record per configured slot, and returns `5` when
-the device has none. (The simulator these examples run against has none, so there is no
-captured listing to show; each `--mock` invocation opens a fresh radio, and a slot written
-by one run is not there for the next.)
+`list` prints `SLOT NAME TYPE HASH SCOPE`, with one record for each configured slot. It
+returns `5` when the device has no configured slot. The simulator that these examples use
+has none, so there is no captured listing to show. Each `--mock` run opens a new radio,
+and a slot that one run writes is not there for the next run.
 
 ```console
 $ meshterm channels add 1 brigade
 meshcore://channel/add?name=brigade&secret=2c70ca416304d520b60a28d9db35d6b3
 ```
 
-`add` and `share` print the `meshcore://` URI alone, because the caller asked to be given
-something to pass on. `join` and `import` print nothing: those two were *handed* the key,
-and reading it back to them is not an answer. (The menu draws a QR code beside the link;
-redirected into a file that is a block of block characters wrapped around the one thing
-that is actually the answer.)
+`add` and `share` print the `meshcore://` URI alone, because the caller asked for
+something to pass on. `join` and `import` print nothing. You gave these two commands the
+key, so it is not an answer to print it back to you. The menu draws a QR code beside the
+link. If you send that output to a file, the file has a block of block characters around
+the one thing that is the answer.
 
-`clear` is gated behind `--yes`, because a private channel's key is lost with the slot
-unless it is saved elsewhere.
+`clear` needs `--yes`, because MeshTerm loses the key of a private channel with the slot,
+unless you saved the key somewhere else.
 
-`scope` is MeshTerm's to keep, not the radio's: the firmware has no per-channel scope, so
-MeshTerm sets the companion's scope around each message it sends on the channel. Setting
-one therefore writes nothing to the device, and it follows the channel to any slot it moves
-to. With no `REGION`, `scope` prints the channel's region alone, the way `config get` prints
-one value — and a channel with none prints `-` (`null` in `--json`) and exits `0`: it sends
-under the device default, which is an answer. Setting (`scope 1 harbour`) or clearing
-(`scope 1 --clear`) prints nothing plain. Reading an empty slot exits
-`5`, like `share`; writing to one is a usage error (exit `2`), since there is no channel to
-scope. `SCOPE` in `list` is `-` for a channel that sends under the device default.
+MeshTerm keeps `scope`, not the radio. The firmware has no scope for each channel, so
+MeshTerm sets the companion's scope around each message that it sends on the channel.
+Thus a `scope` that you set writes nothing to the device, and it follows the channel to
+each slot that the channel moves to. If you give no `REGION`, `scope` prints only the
+channel's region, in the same way that `config get` prints one value. A channel that has
+no scope prints `-` (`null` in `--json`) and exits with `0`. This is an answer: the
+channel sends with the device's default. To set a scope (`scope 1 harbour`) or to clear
+it (`scope 1 --clear`), the plain face prints nothing. If you read an empty slot, the
+exit status is `5`, as for `share`. If you write to an empty slot, it is a usage error
+(exit `2`), because there is no channel to scope. `SCOPE` in `list` is `-` for a channel
+that sends with the device's default.
 
-**`--json`.** `list` is an array whose rows are **flat** — this is the one listing whose
-record *is* the shared shape rather than carrying one, so a row is
-`{"slot":0,"name":"Public","type":"public","hash":"11","scope":null}`, with `type` the plain column's
-word rather than the `channel` shape's `public` boolean. Nesting a `channel` key under
-every row would make `jq '.[].channel.name'` out of a listing whose every column is
-already the channel.
+**`--json`.** `list` is an array with **flat** rows. This is the one listing whose record
+*is* the shared shape, and does not contain it. A row is
+`{"slot":0,"name":"Public","type":"public","hash":"11","scope":null}`. `type` is the word
+of the plain column, and it is not the `public` boolean of the `channel` shape. If each
+row had a `channel` key, `jq '.[].channel.name'` would be necessary for a listing in
+which each column is already the channel.
 
-All four writing subcommands emit the same document, each knowing the key it wrote:
+All four writing subcommands emit the same document, and each one has the key that it
+wrote:
 
 ```console
 $ meshterm channels add 2 "#news" --json
@@ -1271,21 +1337,21 @@ $ meshterm channels share 1 --json
 {"channel":null,"secret":null,"url":null}
 ```
 
-`share` on an empty slot, and `clear` on one already empty, are exit `5` with the nulls
-and `"cleared":false` — nothing to report, not a failure.
+`share` on an empty slot, and `clear` on a slot that is already empty, give exit `5` with
+the nulls and `"cleared":false`. There is nothing to report, and it is not a failure.
 
 #### `meshterm courier`
 
-A store-and-forward outbox: queue a message for a contact that is not reachable right now,
-and it goes out the moment the contact is next heard — or at a time you name.
+A store-and-forward outbox. Queue a message for a contact that you cannot reach now. The
+message goes out when MeshTerm next hears the contact, or at a time that you name.
 
 | Subcommand | What it does |
 | --- | --- |
-| `queue CONTACT TEXT… [--at HH:MM]` | Queue a message. `--at` holds it until the next occurrence of that local time. |
-| `list` | The outbox: waiting entries then finished ones. |
-| `send ID` | Force one delivery attempt now, skipping the "wait until heard" check. |
+| `queue CONTACT TEXT… [--at HH:MM]` | Queue a message. `--at` holds it until the next time that the local clock shows that time. |
+| `list` | The outbox: the waiting entries, then the finished entries. |
+| `send ID` | Force one delivery attempt now. It skips the "wait until heard" check. |
 | `cancel ID` | Remove a waiting entry. |
-| `clear` | Drop every finished (delivered / given-up) entry. |
+| `clear` | Remove each finished entry (delivered or given up). |
 
 ```console
 $ meshterm courier queue Alice "call me when you land" --at 18:30
@@ -1296,16 +1362,17 @@ ID  STATE    NODE   SCHEDULED                  FINISHED  TEXT
  1  waiting  Alice  2026-09-08T18:30:00-04:00         -  call me when you land
 ```
 
-`queue` prints the entry's **id**, which is the one fact you have to keep: it is what
-`send` and `cancel` take. An entry with no `SCHEDULED` time goes as soon as the contact is
-heard.
+`queue` prints the entry's **id**. This is the one fact that you must keep, because
+`send` and `cancel` take it. An entry with no `SCHEDULED` time goes when MeshTerm hears
+the contact.
 
-`SCHEDULED` and `FINISHED` stay **absolute even without `--absolute`**. An appointment is
-one of the places the instant *is* the fact: "18:30" is what you asked for and what will
-happen, where "in 14h" is a restatement that goes stale while you read it.
+`SCHEDULED` and `FINISHED` stay **absolute, also without `--absolute`**. An appointment is
+one of the places where the instant is the fact. "18:30" is what you asked for and what
+will happen. "In 14h" says the same thing again, and it is wrong after a short time.
 
-The *sending* is done by a running interactive session's courier; a queued message sits in
-the outbox until one runs. `courier send ID` is the way to force an attempt from a script.
+The courier of a running interactive session does the *sending*. A queued message stays
+in the outbox until such a session runs. `courier send ID` is the way to force an attempt
+from a script.
 
 **`--json`.**
 
@@ -1321,14 +1388,14 @@ $ meshterm courier clear --json
 ```
 
 `state` is `"waiting"` \| `"delivered"` \| `"gave up"`. `queue` answers with `id`, `node`,
-`scheduled_at` and `text`; `send ID` answers `{"id":…,"outcome":…}`, where `outcome` is one
-of `delivered`, `no ack`, `gave up`, `unknown contact`, `busy`, `gone` — kept verbatim,
-spaces and all, so the two faces say the same word.
+`scheduled_at`, and `text`. `send ID` answers `{"id":…,"outcome":…}`. `outcome` is one of
+`delivered`, `no ack`, `gave up`, `unknown contact`, `busy`, or `gone`. MeshTerm keeps
+each value exactly as it is, with the spaces, so the two faces use the same word.
 
-`list` returns `5` on an empty outbox; `cancel` and `clear` return `5` when there was
-nothing to act on. A contact the device does not know, a contact with no key to address,
-and an `--at` that is not a clock time are all **usage errors** (`2`): the argument is
-wrong, nothing was queued, and nothing went out over the air.
+`list` returns `5` for an empty outbox. `cancel` and `clear` return `5` when there was
+nothing to act on. These cases are **usage errors** (`2`): a contact that the device does
+not know, a contact with no key to address, and an `--at` that is not a clock time. The
+argument is wrong, nothing was queued, and nothing went out over the air.
 
 ---
 
@@ -1336,15 +1403,15 @@ wrong, nothing was queued, and nothing went out over the air.
 
 #### `meshterm trace`
 
-Walk the path to a target once and report what came back.
+Walk the path to a target one time and report what came back.
 
 | Option | What it does |
 | --- | --- |
-| `-t`, `--target NAME` | **Required.** Target node name or key prefix. |
-| `--path SPEC` | Force a route: comma-separated contact names and/or hex hashes, mixed freely (`3d,f2,3d`). Omit it and the device routes. |
+| `-t`, `--target NAME` | **Required.** The name or the key prefix of the target node. |
+| `--path SPEC` | Force a path. Give comma-separated contact names or hex hashes, in any mix (`3d,f2,3d`). If you omit it, the device routes. |
 
-`--target` is required, so `meshterm trace --path …` alone is a usage error — the
-target-free form is [`trace-path`](#meshterm-trace-path).
+`--target` is required, so `meshterm trace --path …` alone is a usage error. The form
+without a target is [`trace-path`](#meshterm-trace-path).
 
 ```console
 $ meshterm trace --target Alice --path "a1,d4"
@@ -1362,19 +1429,20 @@ HOP  FROM  TO  SNR_DB
   2  d4    00    +6.0
 ```
 
-Two blocks. The first is what the walk did, with the drawn `route` among the facts and the
-typed `path` beside it — `path` reads `auto` when the device routed, and every other value
-there is the comma-separated hex you can paste straight back into `--path`. The second is a
-record per hop, naming its two ends by **hash** rather than repeating the names: the route
-line above is where the names are, and the hash is what joins the two blocks.
+The output has two blocks. The first block shows what the walk did. It has the drawn
+`route` among the facts, and the typed `path` beside it. `path` reads `auto` when the
+device routed. Each other value there is the comma-separated hex that you can paste into
+`--path` as it is. The second block has one record for each hop. It names the two ends of
+the hop by **hash** and does not repeat the names. The names are in the route line above,
+and the hash joins the two blocks.
 
-A trace that never came home is **not** a failure of the command: the radio transmitted and
-the walk ran. It reports `success no` and returns `5`.
+A trace that never came home is **not** a failure of the command. The radio transmitted,
+and the walk ran. The command reports `success no` and returns `5`.
 
 #### `meshterm trace-path`
 
-The other half of tracing: no target, just a route you compose by hand — out and back
-whichever way you choose. It only has to end within earshot of this node.
+The other half of tracing. It has no target. You compose a path by hand, out and back, in
+any way that you choose. The path only has to end where this node can hear it.
 
 | Option | What it does |
 | --- | --- |
@@ -1397,24 +1465,24 @@ HOP  FROM  TO  SNR_DB
   3  a1    00    +6.0
 ```
 
-`target` is `-` because a path walk has none. Walks record under a sentinel so they stay
-out of the target picker's history.
+`target` is `-` because a path walk has none. MeshTerm records these walks under a
+placeholder target, so they stay out of the history of the target picker.
 
-**`--json`** is one object for both commands, the facts at the top level and the hop table
-under `edges`.
+**`--json`** is one object for both commands. The facts are at the top level, and the
+table of hops is under `edges`.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `target` | string \| null | The label the trace was addressed to. `null` for a path walk. |
-| `path` | string \| null | The forced spec as hex, or `null` when the device routed (the plain face's `auto`). |
+| `target` | string \| null | The label that the trace was addressed to. `null` for a path walk. |
+| `path` | string \| null | The forced spec as hex, or `null` when the device routed (the `auto` of the plain face). |
 | `success` | boolean | Whether a reply came home. |
 | `hops` | integer \| null | |
-| `min_snr_db` | number \| null | The bottleneck hop's SNR. |
+| `min_snr_db` | number \| null | The SNR of the bottleneck hop. |
 | `rtt_ms` | number \| null | |
-| `tx_dbm` | integer \| null | TX power in effect when the trace ran, if known. **No plain column** — the facts block has no room. |
-| `hash_bytes` | integer \| null | The per-hop hash width the walk addressed nodes at. Present when a path was forced. |
+| `tx_dbm` | integer \| null | The TX power when the trace ran, if known. **No plain column**, because the facts block has no room. |
+| `hash_bytes` | integer \| null | The per-hop hash width that the walk used to address nodes. Present when the path was forced. |
 | `route` | array \| null | The `route` shape. `null` when nothing came home. |
-| `edges` | array | The `edge` shape, one per hop, in walk order. `[]` when nothing came home. |
+| `edges` | array | The `edge` shape, one for each hop, in the order of the walk. `[]` when nothing came home. |
 
 ```console
 $ meshterm trace-path --path "a1,d4" --json | jq -r '.edges | min_by(.snr_db) | "\(.from.hash) -> \(.to.hash)  \(.snr_db) dB"'
@@ -1423,17 +1491,17 @@ a1 -> d4  2.0 dB
 
 #### `meshterm tx-optimize`
 
-Sweep a remote node's transmit power against a target and pick the lowest level that still
-gets through reliably.
+Sweep the transmit power of a remote node against a target. Then select the lowest level
+that still gets through reliably.
 
 | Option | What it does |
 | --- | --- |
-| `--path SPEC` | **Required.** Forced path ending at the target (`Repeater,Target`, or `3d,f2`). The hop before the target is the node being tuned. |
-| `-n`, `--samples N` | Traces per TX level. Default 3. |
-| `--step N` | Coarse sweep step. Default 3. |
-| `--min N` / `--max N` | Bound the sweep (else the `tx_opt_min` / `tx_opt_max` preferences). |
-| `--password TEXT` | Admin password for the tuned node; else the remembered one, else prompted. |
-| `--apply` / `--no-apply` | Set the winner on the node. On by default. |
+| `--path SPEC` | **Required.** A forced path that ends at the target (`Repeater,Target`, or `3d,f2`). The hop before the target is the node that MeshTerm tunes. |
+| `-n`, `--samples N` | The number of traces for each TX level. The default is 3. |
+| `--step N` | The step of the coarse sweep. The default is 3. |
+| `--min N` / `--max N` | Set the limits of the sweep. If you omit them, MeshTerm uses the `tx_opt_min` and `tx_opt_max` preferences. |
+| `--password TEXT` | The admin password of the tuned node. If you omit it, MeshTerm uses the remembered password, or else asks for it. |
+| `--apply` / `--no-apply` | Set the winner on the node. It is on by default. |
 
 ```console
 $ meshterm tx-optimize --path "Yagi-Repeater,Alice" --samples 2 --password admin
@@ -1456,26 +1524,28 @@ TX_DBM  TARGET_SNR_DB  SUCCESSES  SAMPLES
     28          -15.1          1        2
 ```
 
-The winner comes first because it is what you asked for; the per-level records follow so
-the choice can be checked against the measurements it was made from. This transmits many
-times (paced by the `trace_cooldown_s` preference) — it is the one command that is not a
-single transmission.
+The winner is first, because it is what you asked for. The records for each level follow,
+so that you can check the choice against the measurements that it came from. This command
+transmits many times, with the wait that the `trace_cooldown_s` preference sets. It is the
+one command that is not a single transmission.
 
-**`--json`** puts the levels under `levels` and upgrades the two bare names to `node`
-objects, which matters most here: the two nodes are told apart by nothing else on the line.
+**`--json`** puts the levels under `levels`. It also changes the two bare names to `node`
+objects. This is most important here, because nothing else on the line shows which node
+is which.
 
 ```json
 {"tuning_node":{"name":"Yagi-Repeater","key":"a1b2c3d400000000000000000000000000000000000000000000000000000000","hash":"a1b2c3d4","type":"repeater","self":false},"target":{"name":"Alice","key":"d4e5f6a700000000000000000000000000000000000000000000000000000000","hash":"d4e5f6a7","type":"companion","self":false},"path":"a1b2c3d4,d4e5f6a7","optimal_tx_dbm":19,"target_snr_db":8.7,"reliability":1.0,"previous_tx_dbm":20,"applied":true,"levels":[{"tx_dbm":18,"target_snr_db":6.6,"successes":2,"samples":2},{"tx_dbm":19,"target_snr_db":8.7,"successes":4,"samples":4},{"tx_dbm":20,"target_snr_db":9.1,"successes":2,"samples":2},{"tx_dbm":21,"target_snr_db":7.6,"successes":2,"samples":2},{"tx_dbm":24,"target_snr_db":4.0,"successes":2,"samples":2},{"tx_dbm":27,"target_snr_db":-9.9,"successes":2,"samples":2},{"tx_dbm":28,"target_snr_db":-15.1,"successes":1,"samples":2}]}
 ```
 
-`reliability` is a fraction in `[0, 1]`, not a formatted `"1.00"`. `levels` is ordered by
-`tx_dbm` ascending, as the plain table is; the menu's star on the winning row has no column
-here, because `optimal_tx_dbm` names it.
+`reliability` is a fraction in `[0, 1]`, not a formatted `"1.00"`. `levels` is in
+ascending order of `tx_dbm`, as the plain table is. The star of the menu on the winning
+row has no column here, because `optimal_tx_dbm` names the winner.
 
-With no password available and nowhere to ask for one, this is a **usage error** (`2`) —
-nothing was transmitted. A password that is refused is a device error (`4`), and the saved
-one is cleared. Returns `5` when no trace reached the target at any level: nothing was
-measured, and the node was left at its original power.
+If no password is available and MeshTerm cannot ask for one, this is a **usage error**
+(`2`), and nothing was transmitted. If the node refuses the password, this is a device
+error (`4`), and MeshTerm clears the saved password. The command returns `5` when no
+trace reached the target at any level. In this case MeshTerm measured nothing, and the
+node stays at its original power.
 
 ---
 
@@ -1483,7 +1553,7 @@ measured, and the node was left at its original power.
 
 #### `meshterm repeater-admin`
 
-Send one command to a remote repeater or room server over the mesh and print its reply.
+Send one command to a remote repeater or room server over the mesh, and print its reply.
 
 ```
 meshterm repeater-admin NODE COMMAND... [--password TEXT]
@@ -1491,24 +1561,25 @@ meshterm repeater-admin NODE COMMAND... [--password TEXT]
 
 | Argument / option | What it does |
 | --- | --- |
-| `NODE` | The remote contact's name. |
-| `COMMAND...` | The text command to send, as the node's own CLI spells it. |
-| `--password TEXT` | Admin password; else the one remembered from an interactive login. |
+| `NODE` | The name of the remote contact. |
+| `COMMAND...` | The text command to send, spelled as the node's own CLI spells it. |
+| `--password TEXT` | The admin password. If you omit it, MeshTerm uses the password that it remembers from an interactive login. |
 
 ```console
 $ meshterm repeater-admin Yagi-Repeater get name --password admin
 > Yagi-Repeater
 ```
 
-The reply is printed as the node sent it — its own text, and the whole answer, echoed
-prompt and all. A node that does not answer is not a failure (the command may well have
-landed), but there is nothing to report, so it returns `5`.
+The command prints the reply as the node sent it: the node's own text, the whole answer,
+with the echoed prompt. A node that does not answer is not a failure, because the command
+can have arrived. But there is nothing to report, so the command returns `5`.
 
-Logging in happens automatically from the remembered password; run the interactive flow
-once to store one, or pass `--password`. A refused login clears the saved password and
-fails with `4` — the node answered, and answered no. An **absent** password, and a node
-name no contact matches, are usage errors (`2`): nothing was transmitted in either case,
-which is the line `3` and `4` are drawn on.
+MeshTerm logs in automatically with the remembered password. To store a password, run
+the interactive flow one time, or give `--password`. If the node refuses the login,
+MeshTerm clears the saved password, and the command fails with `4`. The node answered,
+and the answer was no. A password that is **absent**, and a node name that no contact
+matches, are usage errors (`2`). In both cases nothing was transmitted. This is the line
+between these errors and the errors `3` and `4`.
 
 **`--json`:**
 
@@ -1516,14 +1587,15 @@ which is the line `3` and `4` are drawn on.
 {"node":{"name":"Yagi-Repeater","key":"a1b2c3d400000000000000000000000000000000000000000000000000000000","hash":"a1b2c3d4","type":"repeater","self":false},"command":"get name","reply":"> Yagi-Repeater"}
 ```
 
-`reply` is the node's own text, whole and verbatim — raw, unescaped, multi-line where the
-node sent multiple lines. It is **not** parsed: MeshTerm does not know the remote node's
-CLI grammar, and a document that pretended to would be inventing structure. `reply` is
-`null` on the exit-`5` no-answer path.
+`reply` is the node's own text, whole and exactly as received. It is raw and not escaped,
+and it has more than one line when the node sent more than one line. MeshTerm does **not**
+parse it. MeshTerm does not know the grammar of the remote node's CLI, and a document that
+pretended to know it would invent a structure. `reply` is `null` when the node gives no
+answer (exit `5`).
 
 #### `meshterm regions`
 
-Ask a repeater which regions it relays floods for (firmware 1.12 or newer).
+Ask a repeater for which regions it relays floods (firmware 1.12 or newer).
 
 ```
 meshterm regions NODE
@@ -1531,7 +1603,7 @@ meshterm regions NODE
 
 | Argument / option | What it does |
 | --- | --- |
-| `NODE` | The repeater's contact name. |
+| `NODE` | The contact name of the repeater. |
 
 ```console
 $ meshterm regions Yagi-Repeater
@@ -1540,15 +1612,17 @@ unscoped  yes
 regions   lakeside, lakeside-north, harbour
 ```
 
-One anonymous request — no login — and one transmission. A repeater answers it only when it
-arrives direct: from a neighbour, or over a route the companion has learned. It also
-rate-limits the question, so nothing here retries it. `unscoped` says whether it relays plain
-floods too; `regions` lists the regions it relays *scoped* floods for. The answer is
-remembered, so the node page and the packet views know it afterwards.
+The command sends one anonymous request, with no login, and it is one transmission. A
+repeater answers the request only when the request arrives direct, from a neighbour or
+over a route that the companion learned. The repeater also limits the rate of this
+question, so the command does not try again. `unscoped` says if the repeater also relays
+plain floods. `regions` lists the regions for which it relays *scoped* floods. MeshTerm
+remembers the answer, so the node page and the packet views know it afterwards.
 
-A repeater that answered and named nothing at all relays no floods, and returns `5`. One that
-never answered is a device error (`4`). A name no contact matches, and a contact known to be
-something other than a repeater, are usage errors (`2`): nothing was sent.
+A repeater that answered and named no region relays no floods, and the command returns
+`5`. A repeater that never answered gives a device error (`4`). These cases are usage
+errors (`2`) and MeshTerm sent nothing: a name that no contact matches, and a contact that
+is known to be something other than a repeater.
 
 **`--json`:**
 
@@ -1556,7 +1630,7 @@ something other than a repeater, are usage errors (`2`): nothing was sent.
 {"node":{"name":"Yagi-Repeater","key":"a1b2c3d400000000000000000000000000000000000000000000000000000000","hash":"a1b2c3d4","type":"repeater","self":false},"unscoped":true,"regions":["lakeside","lakeside-north","harbour"]}
 ```
 
-`regions` never holds the wildcard `*` — that is `unscoped`, since it names no region.
+`regions` never holds the wildcard `*`. That is `unscoped`, because it names no region.
 
 ---
 
@@ -1564,16 +1638,16 @@ something other than a repeater, are usage errors (`2`): nothing was sent.
 
 #### `meshterm preferences`
 
-How MeshTerm behaves, as opposed to how the radio is configured. Reads nothing from the
-companion, transmits nothing, and works with no device attached. With no subcommand it
-runs `show`.
+How MeshTerm behaves. This is different from how the radio is configured. The command
+reads nothing from the companion, transmits nothing, and works with no device attached.
+If you give no subcommand, it runs `show`.
 
 | Subcommand | What it does |
 | --- | --- |
-| `show` | Every preference, its value, its built-in default, and what it does. |
-| `get KEY` | One preference's value, bare. |
+| `show` | Each preference, with its value, its built-in default, and what it does. |
+| `get KEY` | The value of one preference, bare. |
 | `set KEY VALUE` | Change one preference. |
-| `reset --yes` | Return every preference to its default. |
+| `reset --yes` | Return each preference to its default. |
 
 ```console
 $ meshterm preferences show
@@ -1603,36 +1677,37 @@ console_font                 6x12                                  6x12         
 log_level                    WARNING                               WARNING                               How much MeshTerm writes to its log file (next launch)
 ```
 
-**`DESCRIPTION`** says what each preference does, because a key's name is not its
-meaning. Values print in the form `preferences set` accepts back — no unit suffix on a
-number, `on`/`off` for a boolean. Where `VALUE` differs from `DEFAULT`, this install has an
-override.
+**`DESCRIPTION`** says what each preference does, because the name of a key does not give
+its full meaning. Values print in the form that `preferences set` accepts as input. A
+number has no unit suffix, and a boolean is `on` or `off`. If `VALUE` is different from
+`DEFAULT`, this install has an override.
 
-Overrides live in `preferences.toml` in [MeshTerm's state
-directory](#where-meshterm-keeps-its-state), which lists only what you have changed; delete
-a line and the default takes over again.
+The overrides are in `preferences.toml` in [MeshTerm's state
+directory](#where-meshterm-keeps-its-state). This file lists only what you changed. If you
+delete a line, the default is in effect again.
 
-**`--json`** is an array of `setting` objects carrying `default` and `overridden`:
+**`--json`** is an array of `setting` objects that have `default` and `overridden`:
 
 ```console
 $ meshterm preferences get trace_cooldown_s --json
 {"key":"trace_cooldown_s","value":5.0,"type":"float","label":null,"redacted":false,"default":5.0,"overridden":false}
 ```
 
-`overridden` is what the plain face makes the reader derive by comparing two columns.
-`DESCRIPTION` has no JSON counterpart — it is prose for a person, and a consumer that
-wanted it would be rendering a settings screen. A boolean prints `on`/`off` plain and is
-`true`/`false` here, which is the one type whose round-trip through `preferences set` needs
-a mapping; every other `.value | tostring` goes straight back in.
+`overridden` gives the answer that the plain face makes you find by a comparison of two
+columns. `DESCRIPTION` has no JSON counterpart. It is text for a person, and a consumer
+that wanted it would render a settings screen. A boolean prints `on` or `off` on the plain
+face and is `true` or `false` here. This is the one type for which a round trip through
+`preferences set` needs a mapping. For each other type, `.value | tostring` goes back in
+as it is.
 
-`set` and `reset --yes` answer `{"changes":…,"applied":[…],"path":…}`, `path` being the
-`preferences.toml` that was written.
+`set` and `reset --yes` answer `{"changes":…,"applied":[…],"path":…}`. `path` is the
+`preferences.toml` that MeshTerm wrote.
 
 #### `meshterm about`, `about-author`, `discord`, `support`
 
-The four written pages, printed as plain text. `about` is what MeshTerm is and the terms it
-ships under; `about-author` is who wrote it; `discord` is the community invite; `support`
-is what keeps it going.
+The four written pages, printed as plain text. `about` says what MeshTerm is and under
+which terms it ships. `about-author` says who wrote it. `discord` is the community
+invitation. `support` says what keeps MeshTerm going.
 
 ```console
 $ meshterm discord
@@ -1642,8 +1717,8 @@ Join the Discord
   • https://discord.gg/AZwe5Uvb3S
 ```
 
-These four are the one place the CLI wraps, at 72 cells. The menu draws a QR code beside
-each link; the scripted face prints the link alone.
+These four pages are the one place where the CLI wraps, at 72 cells. The menu draws a QR
+code beside each link. The scripted face prints only the link.
 
 **`--json`:**
 
@@ -1655,26 +1730,27 @@ each link; the scripted face prints the link alone.
 | --- | --- | --- |
 | `page` | string | `"about"` \| `"about-author"` \| `"discord"` \| `"support"`. |
 | `title` | string | The page's own title. |
-| `version` | string | The version the page's `{version}` placeholder resolved to. |
-| `text` | string | The whole page as the plain face prints it, newlines and all, raw. |
-| `links` | array of strings | Every URL the page carries, in document order. |
+| `version` | string | The version that the `{version}` placeholder of the page resolved to. |
+| `text` | string | The whole page as the plain face prints it, raw, with the newlines. |
+| `links` | array of strings | Each URL on the page, in the order of the document. |
 
-`links` is the one machine-actionable thing on a prose page, and the one thing the menu
-bothers to draw a QR of. `text` is the page's plain rendering, not a fold of the markdown
-into nested JSON — a structured markdown tree would be a second rendering rather than data,
-and nothing would consume it.
+`links` is the one thing on a page of prose that a program can use. It is also the one
+thing for which the menu draws a QR code. `text` is the plain rendering of the page. It is
+not the markdown changed into nested JSON. A structured markdown tree would be a second
+rendering and not data, and no program would use it.
 
 #### `meshterm diagnostics`
 
-Everything a bug report opens with, in one block: which MeshTerm, on which host, in which
-terminal, talking to which radio, over how much stored history. It is the answer to the
-three or four questions that otherwise get asked one at a time in an issue thread, and the
-person who hit the bug is usually the one least able to answer them — half of it is
-resolved at boot and shown on no screen.
+All the facts that a bug report starts with, in one block: which MeshTerm, on which host,
+in which terminal, with which radio, and with how much stored history. It answers the
+three or four questions that people otherwise ask one at a time in an issue thread. The
+person who found the bug is usually the person who can least answer them, because
+MeshTerm resolves half of these facts at boot and shows them on no screen.
 
-This sample is the one exception to [About the examples](#about-the-examples): it is an
-illustrative report from a real radio over Bluetooth, because the simulator's report says
-little. The field names and layout are what the command prints; the values are examples.
+This sample is the one exception to [About the examples](#about-the-examples). It is an
+example report from a real radio over Bluetooth, because the report of the simulator says
+little. The field names and the layout are what the command prints. The values are
+examples.
 
 ```console
 $ meshterm diagnostics
@@ -1736,38 +1812,42 @@ log_level     DEBUG
 history_days  730
 ```
 
-The seven groups are the page's seven sections — build, host, terminal, radio, storage,
-stored rows, changed preferences. The command line shows them as blank-line-separated
-records, because that face is a stream to grep; the page and the saved file show them as
-markdown headings, because that one is a document to read.
+The seven groups are the seven sections of the page: build, host, terminal, radio,
+storage, stored rows, and changed preferences. The command line shows them as records
+that blank lines separate, because that face is a stream for `grep`. The page and the
+saved file show them as markdown headings, because that face is a document to read.
 
-**The radio is asked but never required.** A report about a companion that will not connect
-is exactly the report most worth filing, so a failure to reach it becomes `connected no`
-with the radio's own words in `error`, and every other fact still arrives.
+**MeshTerm asks the radio, but it does not need the radio.** A report about a companion
+that does not connect is the most useful report to file. Thus if MeshTerm cannot reach the
+radio, the report has `connected no` and the radio's own words in `error`, and each other
+fact still arrives.
 
-**Only overridden preferences are listed.** The defaults are in the source and identical for
-everyone; the two the reporter changed are the two that can explain anything.
+**Only overridden preferences are in the list.** The defaults are in the source and are the
+same for all users. The preferences that the reporter changed are the ones that can
+explain a problem.
 
-**The mesh is described in aggregate and only in aggregate** — a row count per table, and
-the span of time the observations cover. The counts come off the schema rather than a list
-written down somewhere, so a table added later starts being reported the day it lands.
+**The report describes the mesh only in totals.** It gives a count of rows for each table,
+and the span of time that the observations cover. The counts come from the schema and not
+from a list that a person wrote. Thus a table that someone adds later is in the report on
+the day that it arrives.
 
-**Nothing in the block is private.** No pairing PIN, no admin password, no channel secret,
-no private key, no position, and no contact's name or key. That is a property of the
-feature and not a habit: the block is designed to be pasted in public by somebody who has
-not read it, and `tests/test_diagnostics.py` plants real secrets in every store that holds
-one and fails if any of them — or a field merely *named* like one — reaches either face.
+**Nothing in the block is private.** It has no pairing PIN, no admin password, no channel
+secret, no private key, no position, and no name or key of a contact. This is a property
+of the feature and not a habit. The block is designed so that a person can paste it in
+public without reading it. `tests/test_diagnostics.py` plants real secrets in each store
+that holds one. It fails if one of them, or a field that is only *named* like one,
+reaches either face.
 
-Under `--json`, the five fact blocks merge into one flat object and the two listings keep
-a key of their own:
+With `--json`, the five blocks of facts merge into one flat object, and the two listings
+keep a key of their own:
 
 ```json
 {"meshterm":"0.9.0","install":"frozen","os":"Windows 11","…":"…","tables":[{"table":"app_state","rows":4},"…"],"preferences":[{"preference":"log_level","value":"DEBUG"},{"preference":"history_days","value":"730"}]}
 ```
 
-**`--out PATH` writes it to a file instead of printing it**, and the answer becomes the
-path — the same trade `config export-key --out` makes, since a caller who asked for a file
-wants to be told where it is rather than handed the contents they just redirected into it.
+**`--out PATH` writes the report to a file and does not print it.** The answer is then the
+path. `config export-key --out` does the same. A caller who asked for a file wants to know
+where the file is, and does not want the contents that went into the file.
 
 ```console
 $ meshterm diagnostics --out meshterm-diagnostics.md
@@ -1775,28 +1855,28 @@ $ meshterm diagnostics --out meshterm-diagnostics.md
 meshterm-diagnostics.md
 ```
 
-**The file is markdown**, whichever face the run was printing, because an issue tracker
-renders markdown as written — no fence, no apology. Every value is a code span, so a
-Windows path's backslashes and a firmware error's asterisks arrive as themselves rather
-than as markdown. Redirection still works and is not replaced; `--out` is what gives you
-the document rather than the record stream.
+**The file is markdown**, for each face that the run printed, because an issue tracker
+renders markdown as it is written. The file needs no fence. Each value is a code span.
+Thus the backslashes of a Windows path and the asterisks of a firmware error arrive as
+they are, and not as markdown. Redirection still works, and `--out` does not replace it.
+`--out` gives you the document, and redirection gives you the stream of records.
 
-In the menu this is the **Diagnostics** page under *This app*, and it is one of the app's
-**written pages** — the same markdown renderer behind the About pages, drawing the same
-document the file holds. That buys what a long block most needs: its `##` headings are
-landmarks, so each pins to the top row while its own section scrolls under it and
-`^PgUp`/`^PgDn` step section by section.
+In the menu, this is the **Diagnostics** page under *This app*. It is one of the app's
+**written pages**. It uses the same markdown renderer as the About pages, and it draws the
+same document that the file holds. This helps a long block in the way that it needs most.
+The `##` headings are landmarks. Each one stays at the top row while its own section
+scrolls under it, and `^PgUp` and `^PgDn` step from section to section.
 
-`s` saves, advertised in the footer hint on a desktop and on the lane's free **F3** slot on
-the PicoCalc — never in the page's body, which belongs to the report. It writes
-`meshterm-diagnostics.md` into the config directory beside the log, and answers in a popup
-naming the path. A write that fails says so in the same popup, in red, and leaves the page
-readable.
+`s` saves. The footer hint names the key on a desktop. On the PicoCalc, the free **F3**
+slot of the lane names it. The body of the page never names it, because the body belongs
+to the report. The save writes `meshterm-diagnostics.md` into the config directory beside
+the log, and it answers in a dialog that names the path. If the write fails, the same
+dialog says so, in red, and the page stays readable.
 
 #### `meshterm platform`
 
-The narrow sibling of `diagnostics`: which UI flavour a given invocation resolves to, and
-why, without asking the radio anything.
+A smaller command than `diagnostics`. It shows which UI flavour a run resolves to, and
+why. It does not ask the radio anything.
 
 ```console
 $ meshterm platform
@@ -1809,8 +1889,9 @@ icons              yes
 icons_source       no-console
 ```
 
-`icons` is a separate question from the flavour, and the usual reason a Windows session
-looks plainer than the screenshots. Under `--json` the same keys, with `icons` a boolean:
+`icons` is a separate question from the flavour. It is the usual reason why a Windows
+session looks plainer than the screenshots. With `--json`, the keys are the same, and
+`icons` is a boolean:
 
 ```json
 {"platform":"regular","platform_source":"default","flag":null,"env":null,"device_tree_model":null,"icons":true,"icons_source":"no-console"}
@@ -1818,63 +1899,66 @@ looks plainer than the screenshots. Under `--json` the same keys, with `icons` a
 
 #### `meshterm specimen`
 
-Print the visual-language specimen — every mark, icon, colour scale and fold on one card.
+Print the specimen of the visual language: each mark, icon, colour scale, and fold on one
+card.
 
-**This is the one command that keeps its colour**, and it builds its own themed console to
-do it. That is deliberate: the colour *is* the output. It is the font-and-palette
-acceptance card on the PicoCalc console, and with `--platform picocalc-lyra` it previews that
-flavour from a desktop. A monochrome specimen would test nothing.
+**This is the one command that keeps its colour.** It builds its own themed console to do
+this. This is deliberate, because the colour *is* the output. On the PicoCalc console, it
+is the acceptance card for the font and the palette. With `--platform picocalc-lyra`, it
+shows a preview of that flavour from a desktop. A monochrome specimen would test nothing.
 
-It also **refuses `--json`**, as a usage error (exit `2`). There is no data face behind a
-colour card, and a document of it would be a lie or an empty gesture.
+The command also **refuses `--json`**, as a usage error (exit `2`). A colour card has no
+data face, and a document of it would be false or without use.
 
 #### `meshterm emulate`
 
-Open a window showing MeshTerm as a handheld's screen draws it: `cardputer-zero` or
-`picocalc-lyra`.
+Open a window that shows MeshTerm as the screen of a handheld draws it: `cardputer-zero`
+or `picocalc-lyra`.
 
 ```console
 $ meshterm emulate --fetch-fonts
 $ meshterm emulate picocalc-lyra --mock --scale 2
 ```
 
-It isn't a strict emulator. MeshTerm runs on this machine as itself; the window copies the
-device's display constraints — the panel's size in pixels, its grid, its font, the colours
-it can show — and the keys that drive its F-key lane. Every global option (`--mock`,
-`--port`, `--ble`, `--db`…) goes to the MeshTerm in the window. [The
-emulator](../devices/README.md#the-emulator) covers the keys and the font.
+It is not a strict emulator. MeshTerm runs on this machine as itself. The window copies
+the limits of the handheld's display: the size of the display in pixels, its grid, its
+font, and the colours that it can show. It also copies the keys that drive its F-key
+lane. Each global option (`--mock`, `--port`, `--ble`, `--db`…) goes to the MeshTerm in
+the window. [The emulator](../devices/README.md#the-emulator) describes the keys and the
+font.
 
 | Option | |
 | --- | --- |
 | `DEVICE` | `cardputer-zero` or `picocalc-lyra` |
-| `--scale N` | the window's zoom, in whole pixels (default `3`) |
-| `--fetch-fonts` | download the Terminus font the screens are drawn in, then stop. Needed once |
-| `--archive FILE` | install the font from a release archive downloaded some other way |
+| `--scale N` | the zoom of the window, in whole pixels (default `3`) |
+| `--fetch-fonts` | download the Terminus font in which MeshTerm draws the screens, then stop. You need this one time |
+| `--archive FILE` | install the font from a release archive that you downloaded in some other way |
 
-It needs a pip or pipx install, since the one-file downloads leave out Tk. Like
-`specimen`, it refuses `--json` (exit `2`): a window is no document. A window that can't
-open — no font yet, no Tk — exits `1` with the reason on stderr.
+The command needs an install with pip or pipx, because the one-file downloads do not
+include Tk. In the same way as `specimen`, it refuses `--json` (exit `2`), because a
+window is not a document. If the window cannot open, because there is no font yet or no
+Tk, the command exits with `1` and prints the reason on stderr.
 
 ---
 
 ## Recipes
 
-Structure goes through `--json` and `jq`; the plain face is for looking at.
+Use `--json` and `jq` for structured data. The plain face is for you to look at.
 
-**Every repeater's key.**
+**The key of each repeater.**
 
 ```bash
 meshterm contacts --json | jq -r '.[] | select(.node.type == "repeater") | .node.key'
 ```
 
-**Name and last-heard, tab-separated**, for a spreadsheet or `column -t`:
+**The name and the last-heard time, separated by a tab**, for a spreadsheet or `column -t`:
 
 ```bash
 meshterm contacts --json | jq -r '.[] | [.node.name, .heard_at] | @tsv'
 ```
 
-**Watch a node and shout if it goes quiet.** `trace` returning `5` means the walk ran and
-nothing came home.
+**Watch a node and send an alert if it goes quiet.** When `trace` returns `5`, the walk
+ran and nothing came home.
 
 ```bash
 #!/usr/bin/env bash
@@ -1886,22 +1970,24 @@ if [ "$status" -eq 5 ]; then
 fi
 ```
 
-**The bottleneck hop of a walk**, which is the number a route argument is usually about:
+**The bottleneck hop of a walk.** This is the number that most discussions about a route
+are about:
 
 ```bash
 meshterm trace-path --path "a1,d4" --json \
   | jq -r '.edges | min_by(.snr_db) | "\(.from.hash) -> \(.to.hash)  \(.snr_db) dB"'
 ```
 
-**A route as one line**, our own node included, the way the plain face draws it:
+**A route as one line**, with our node, as the plain face draws it:
 
 ```bash
 meshterm trace-path --path "a1,d4,a1" --json \
   | jq -r '.route | map(.name // .hash) | join(" -> ")'
 ```
 
-**Capture a window of traffic and aggregate it yourself.** The plain face's summary block
-has no JSON counterpart on purpose; the records it was computed from are all there.
+**Capture a time window of traffic and make the totals yourself.** The summary block of
+the plain face has no JSON counterpart. This is deliberate. The records that it comes from
+are all there.
 
 ```bash
 meshterm monitor --seconds 300 --json > capture.ndjson
@@ -1912,20 +1998,20 @@ jq -s -c 'group_by(.node.hash)[]
        best_snr_db: (map(.snr_db) | max)}' capture.ndjson
 ```
 
-**One value into a variable.** `get` prints the bare value because you named the key:
+**One value into a variable.** `get` prints the bare value, because you named the key:
 
 ```bash
 sf=$(meshterm config get radio_sf)
 [ "$sf" -lt 9 ] && meshterm config set radio_sf 9
 ```
 
-**Nightly config archive**, keeping the path the command actually wrote:
+**A nightly archive of the config.** Keep the path that the command wrote:
 
 ```bash
 out=$(meshterm config backup "$HOME/mesh/$(date +%F).toml") && echo "archived $out"
 ```
 
-**Queue for someone who is offline**, then chase it later:
+**Queue a message for a contact who is offline.** Then send it again later:
 
 ```bash
 id=$(meshterm courier queue Alice "call me" --json | jq -r .id)
@@ -1933,8 +2019,8 @@ id=$(meshterm courier queue Alice "call me" --json | jq -r .id)
 meshterm courier send "$id"
 ```
 
-**Sample a trace politely.** A trace transmits exactly once per invocation by design; pace
-the repeats yourself:
+**Sample a trace with a wait between runs.** By design, a trace transmits exactly one time
+in each run. Set the wait between the runs yourself:
 
 ```bash
 for i in $(seq 5); do
@@ -1943,23 +2029,25 @@ for i in $(seq 5); do
 done
 ```
 
-**Let MeshTerm advertise, rather than cron.** A companion never advertises by itself, so
-MeshTerm can do it for you — once a week, and only when the air is quiet:
+**Let MeshTerm advertise instead of cron.** A companion never advertises by itself, so
+MeshTerm can do it for you. It advertises one time each week, and only when the air is
+quiet:
 
 ```bash
 meshterm preferences set weekly_flood_advert on   # starts the week; sends nothing now
 meshterm preferences set advert_quiet_s 60         # wait for a minute of silence first
 ```
 
-A running MeshTerm session then floods one advert from a device once it has gone a full
-week without one — a flood advert you send by hand restarts that device's week — and only
-after it has heard the mesh and then heard nothing for the quiet spell plus a random 0–5 s.
-**Do not put `config advert --flood` in a cron slot instead**: every repeater in range
-rebroadcasts a flood advert, and a repeater that decides you are bursting can blacklist
+A running MeshTerm session then floods one advert from a device when the device has gone
+a full week without one. A flood advert that you send by hand starts that device's week
+again. MeshTerm sends the advert only after it has heard the mesh, and then heard nothing
+for the quiet time plus a random 0 to 5 s.
+**Do not put `config advert --flood` in a cron slot instead.** Each repeater in range
+rebroadcasts a flood advert. A repeater that decides that you send bursts can blacklist
 you.
 
-**Cron-friendly quiet.** `--quiet` suppresses console logging entirely, leaving only the
-command's own output and any error line. Cron's `PATH` is nearly empty, so give it the
+**Quiet output for cron.** `--quiet` removes all console logging. Only the command's own
+output and each error line remain. The `PATH` of cron is almost empty, so give the
 absolute path:
 
 ```cron
@@ -1970,18 +2058,19 @@ absolute path:
 
 ## What has no command
 
-Some features have no scripted face, and that is the honest answer rather than a degraded
-one. Each of these is a *live picture* — its meaning is where things sit on a grid, how
-they move, and what colour they are — and none of that survives being turned into records.
+Some features have no scripted face. This is the correct answer, and it is not a worse
+version of the feature. Each of these features is a *live picture*. Its meaning is where
+things are on a grid, how they move, and what colour they are. None of this stays when
+MeshTerm changes the picture to records.
 
-| Feature | Why not, and what to use instead |
+| Feature | Why there is no command, and what to use instead |
 | --- | --- |
-| **Map** | A drawing of braille cells whose nodes are told apart by colour. Stripped of colour to match the rest of the CLI it would be unreadable; left coloured it could not be piped anywhere useful. `meshterm contacts` lists the same nodes, coordinates and all. |
-| **Dashboard** | A live overview that repaints every second. `meshterm monitor` captures the same traffic as records. |
-| **Live feed** | Every packet as it arrives, newest first, with a viewer behind each row. `meshterm monitor` is the scripted tail. |
-| **Watchtower** | A background sentinel over starred nodes; it exists to *interrupt* a session. Build the same alarm from `meshterm trace`'s exit status (see [Recipes](#recipes)). |
-| **Time machine** | Braille charts over a switchable window. The underlying history is in the database `--db` points at. |
-| **Mesh walk** | An evidence graph walked one node at a time. `meshterm records` and `meshterm trace` cover the walks it is built from. |
+| **Map** | A drawing of braille cells in which colour shows which node is which. If MeshTerm removed the colour, as in the rest of the CLI, the map would be unreadable. If it kept the colour, you could not pipe the map to a useful place. `meshterm contacts` lists the same nodes, with the coordinates. |
+| **Dashboard** | A live overview that MeshTerm paints again each second. `meshterm monitor` captures the same traffic as records. |
+| **Live feed** | Each packet when it arrives, with the newest first, and a viewer behind each row. `meshterm monitor` is the scripted tail. |
+| **Watchtower** | A background sentinel for starred nodes. It exists to *interrupt* a session. Build the same alarm from the exit status of `meshterm trace` (refer to [Recipes](#recipes)). |
+| **Time machine** | Braille charts over a time window that you can switch. The history under them is in the database that `--db` points at. |
+| **Mesh walk** | An evidence graph that you walk one node at a time. `meshterm records` and `meshterm trace` cover the walks that it is built from. |
 
-Everything else in the menu has a command, listed above — and every one of them answers to
-`--json`.
+Each other part of the menu has a command, in the list above, and each of these commands
+accepts `--json`.
