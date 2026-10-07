@@ -582,7 +582,7 @@ def render_path_graph(
 
     # When one path has more emphasis than the rest, all that is not on it is dim. The nodes
     # of the emphasized path keep their hue, and each other marker and label draws in the
-    # :data:`_OFF_ROUTE` grey. The membership test uses the own id space of the graph (after
+    # :data:`_OFF_ROUTE` grey. The membership test uses the graph's own id space (after
     # the prefix coalesce, the identical-path collapse, and the revisit split). Thus a relay
     # that the selected route reaches by a short hash still counts as on the route, after it
     # is folded into the wide marker that is drawn for it.

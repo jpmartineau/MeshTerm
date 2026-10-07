@@ -23,8 +23,8 @@ have to repeat the rules of the firmware to know that it works. For these reason
 action sends its one command, and the tree is drawn again from the reply
 (:meth:`~meshterm.core.region_admin.RegionTable.after`). The title counts the edits that are
 not yet saved. The page ends with the same Apply/discard pair that the editors use
-(:func:`~meshterm.ui.menus.exit_rows`), with words that fit this case: *Save n changes to
-the repeater* over *Back — a reboot undoes them*. If the user leaves with unsaved edits, the
+(:func:`~meshterm.ui.menus.exit_rows`), with words that fit this case: ``Save n changes to
+the repeater`` over ``Back — a reboot undoes them``. If the user leaves with unsaved edits, the
 page asks first. On firmware that has it, ``region default`` saves the whole table itself
 (:func:`~meshterm.core.region_admin.saves_table`), so the count also goes to zero there.
 
@@ -125,7 +125,7 @@ class RegionMenu(SelectScreen):
     """The list of the region editor, with ``^R`` to read the table again.
 
     This is a full-screen page and not a dialog. The user works in it for some time, and it
-    is the own view of the tool for one repeater. Each question that it asks (the actions of
+    is the tool's own view for one repeater. Each question that it asks (the actions of
     a region, a new name, a confirm) floats over it. ``^R`` is the *read again* chord of
     the admin page, and it is here for the same reason: the mesh gets the same question
     again. Here it reads the whole table again, which is the only read that exists.

@@ -803,7 +803,7 @@ async def _menu_loop(ctx: AppContext, session: TuiSession) -> None:
     it for all of the session. Thus the highlight, a typed filter, and the scroll offset
     are still there when a tool closes. No ``default=`` restore is necessary, and such a
     restore could only recover the highlight. The menu is also where the pop-all key goes:
-    ^W raises :class:`~meshterm.ui.tui.screen.PopToMenu` through each stack frame that the
+    ^W raises :class:`~meshterm.ui.tui.screen.PopToMenu` through each screen on the stack that the
     user opened, and this is the one place that catches it.
 
     The menu is still popped while a full-screen tool runs (only a ``popup`` tool shows
@@ -811,7 +811,7 @@ async def _menu_loop(ctx: AppContext, session: TuiSession) -> None:
     all cases. The screen object stays after the pop, and that is why a return feels like
     a pop and not like a rebuild. The screen object is also what the lead-in question of
     a tool shows over. The menu is declared as the root of the session, so it is the base
-    that is pushed under a dialog that is otherwise the only stack frame
+    that is pushed under a dialog that is otherwise the only screen on the stack
     (``TuiSession._floated``). Thus a dialog always shows around it the page from which
     the user opened it. For the same reason, the root stays declared while the loop
     exits, because the reconnect dialog draws over it. The next menu declares itself.
@@ -843,7 +843,7 @@ async def _menu_loop(ctx: AppContext, session: TuiSession) -> None:
         except _Quit:
             return
         except PopToMenu:
-            # ^W from a deep screen. Each stack frame between there and here has already
+            # ^W from a deep screen. Each screen on the stack between there and here has already
             # popped itself. The only remaining step is to disarm and paint the menu that
             # the user asked for.
             session.unwound()

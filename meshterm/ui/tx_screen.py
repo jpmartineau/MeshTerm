@@ -643,8 +643,8 @@ async def open_tx_optimize(
     session = ctx.ui.session
     device = await ctx.device()
     # The contacts, the self-info, and the routing width come from the session cache (refer
-    # to DeviceState). The code still keeps the live ``device`` for the own transmissions of
-    # the sweep below.
+    # to DeviceState). The code still keeps the live ``device`` for the transmissions of
+    # the sweep itself below.
     contacts = await ctx.devstate.contacts()
     resolve = trace_runner.make_node_resolver(contacts)
     self_info = await ctx.devstate.self_info()

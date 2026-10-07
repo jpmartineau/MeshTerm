@@ -109,7 +109,7 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201 - a cl
 
     ``--db`` moves only the history. The contact cache, the outbox, the channel cache, the
     stored admin passwords, and the device profiles stay in the config directory. Thus a
-    suite that set only ``--db`` read the files in the own ``~/.meshterm`` of the developer.
+    suite that set only ``--db`` read the files in the developer's own ``~/.meshterm``.
     For this reason, a contact named ``[/]Bob``, which a person added by hand on one
     machine, could make this suite crash on that machine and pass on all other machines.
     ``$MESHTERM_HOME`` moves the whole directory, and a test must use it.

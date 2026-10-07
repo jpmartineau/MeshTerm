@@ -441,7 +441,7 @@ def _lookup(name: str, *, source: str) -> Platform:
         return _BY_NAME[name.strip().lower()]
     except KeyError:
         choices = ", ".join(sorted(_BY_NAME))
-        # Plain ASCII. This error can come through the own error path of Typer and Click.
+        # Plain ASCII. This error can come through the error path of Typer and Click themselves.
         # They raise it before make_console() sets stdout and stderr to UTF-8. On a legacy
         # Windows console, this damages non-ASCII text, as the docstring of make_console
         # warns.

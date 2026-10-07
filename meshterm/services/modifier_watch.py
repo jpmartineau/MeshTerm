@@ -98,7 +98,7 @@ def report_shift(down: bool) -> None:
     if callback is not None:
         try:
             callback()
-        except Exception:  # noqa: BLE001 - a repaint hiccup must not break the host's input
+        except Exception:  # noqa: BLE001 - a paint problem must not break the input of the host
             pass
 
 
@@ -169,7 +169,7 @@ def start(on_change: Callable[[], None], keyboard: str) -> bool:
                 _shift_down = now
                 try:
                     on_change()
-                except Exception:  # noqa: BLE001 - a repaint hiccup must not kill the watch
+                except Exception:  # noqa: BLE001 - a paint problem must not stop the watch
                     pass
 
     _thread = threading.Thread(target=_watch, name="modifier-watch", daemon=True)

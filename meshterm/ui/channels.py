@@ -338,7 +338,7 @@ async def write_channel(
     edit, reorder, and clear all come here. Thus the channel store is a true record of what
     MeshTerm wrote (refer to :mod:`meshterm.core.channel_store`). If the user clears a slot
     (an empty ``name``), the store forgets it. Any other write makes the store remember the
-    channel under the own public key of the device. For a channel whose key comes from its
+    channel under the device's own public key. For a channel whose key comes from its
     name, the store keeps that derived key, so that it can be sent again as it is. The
     remembering is a best effort. It never blocks the real write to the device, and it never
     makes the write fail.
@@ -449,8 +449,8 @@ class _LiveStats:
     arrives while the manager is open, the counts, the age, and the sparkline of that
     channel update in place. But the code queries the repository at most one time for each
     ``ttl`` seconds, and not one time for each row at each paint. Thus a full slot table
-    stays cheap at the repaint of the session, which is approximately 1 Hz. The TTL is
-    *higher* than that repaint period on purpose. If the TTL was exactly the tick rate,
+    stays cheap at the paint rate of the session, which is approximately 1 Hz. The TTL is
+    *higher* than that paint period on purpose. If the TTL was exactly the tick rate,
     each idle frame would still cause one repository query, and the throttle would limit
     nothing.
     """

@@ -124,7 +124,7 @@ from .theme import DIM_TWIN, active_theme, node_style, slot_hex
 POWERLINE_SEP = "\ue0b0"
 
 #: The thin right-pointing chevron (U+E0B1). It is the outline sibling of the solid point,
-#: in the same core set. It is the own mark of powerline for a join *inside* one colour. It
+#: in the same core set. It is powerline's own mark for a join *inside* one colour. It
 #: draws the seam between two chips whose fills the eye cannot tell apart
 #: (:meth:`PathLine._seam`). It is the previous fill, shaded, and drawn on the next chip,
 #: where a solid point disappears.
@@ -138,7 +138,7 @@ POWERLINE_ROUND_OPEN = ""
 POWERLINE_ROUND_CLOSE = ""
 
 #: Our node, where a surface asks for it without its name and hash (``bare_self``): the
-#: ``★`` of the app. It is the own marker of the map, taken from
+#: ``★`` of the app. It is the map's own marker, taken from
 #: :data:`~meshterm.ui.marks.SELF_MARK`. Thus the star in a route and the star on the map
 #: can never be different, in glyph or in hue.
 SELF_GLYPH, _SELF_INK = SELF_MARK
@@ -249,7 +249,7 @@ _ELLIPSIS = "…"
 ACTION_MARK = " …"
 
 #: What a *chip* line uses to cut instead (JP, 2026-08-09): the half block. It is drawn in
-#: the own fill of the cut chip, with no background. Thus the cell is half segment and
+#: the cut chip's own fill, with no background. Thus the cell is half segment and
 #: half bare page. The chip breaks off in the middle of its body, and the crack says that
 #: it is incomplete. An ellipsis says the opposite: that a *word* was made shorter, when
 #: what ran out is the lane. :data:`CRACK_TAIL` closes a line past which the path runs on
@@ -358,7 +358,7 @@ def _style_hex(style: str) -> str | None:
 #: across the greens and ``0.165`` across the cyans. The wheel is not uniform to the eye.
 #: Thus a gap of hue blurred too little there and too much here. An sRGB distance only
 #: restates the hue gap (a fixed step of one byte is a near-constant ``55`` to ``60`` of 8-bit
-#: RGB all the way round). Then JP set the value by eye, on a ladder of the own pairs of the
+#: RGB all the way round). Then JP set the value by eye, on a ladder of pairs from the
 #: spectrum, drawn in both ways (JP, 2026-09-16). The value is where the solid point is not
 #: only visible at one cell, but the user *finds* it without a search: ``0.06``, which is
 #: three differences that the user can see. A tighter value (``0.035``) left wedges that
@@ -510,7 +510,7 @@ def hops_atom(count: int) -> Text:
     2026-08-10). The picture above encodes this number but never states it. Users often
     compare two routes by this number, and without it the user must count the chips. The
     text is ``direct`` where there are no hops. A path with no relays is not "0 hops". It
-    is the own word of the app for a packet that went straight there (the ``empty`` note
+    is the app's own word for a packet that went straight there (the ``empty`` note
     of :class:`PathLine` says the same).
 
     Args:
@@ -641,7 +641,7 @@ class PathLine:
         Each continuation starts with ``indent`` spaces, plus :data:`WRAP_OFFSET`. This step
         makes a fold clear as a fold. Each line fits in ``width``.
 
-        Plain-mode lines that continue end with the own mark of the separator: a trailing
+        Plain-mode lines that continue end with the separator's own mark: a trailing
         ``→`` for a path that arrows join, or the bare ``,`` for a wire spec that commas
         join. This is the cue "the path goes on". Chip lines always close with their pointed
         edge. From the second line down, they open when they draw again the seam that the
@@ -667,7 +667,7 @@ class PathLine:
             return [Text(self._empty, style="muted")]
         budget = max(1, width - indent)
         plain = self._resolved_mode() != "powerline"
-        # The continuation cue is the own mark of the separator, without the space where the
+        # The continuation cue is the separator's own mark, without the space where the
         # next hop sat: " → " reads " →", and the "," of a wire spec stays ",".
         cue = self._separator.rstrip() if plain else ""
         groups = self._flow(self._hops, budget, plain, len(cue), 0)
@@ -912,8 +912,8 @@ class PathLine:
         answered it fold in the same place, the two readings of one route look like one
         route. In both cases, the fold needs real legs on both sides, with at least two hops
         each. Thus a path whose only faded tail is the automatic return to us never leaves
-        that hop as a widow on a line of its own. That single hop marks no turn, and the own
-        mirror of the walk can still name one.
+        that hop as a widow on a line of its own. That single hop marks no turn, and the walk's
+        own mirror can still name one.
         """
         seam: int | None = len(self._hops)
         while seam and self._hops[seam - 1].dim:
@@ -1039,8 +1039,8 @@ class PathLine:
         closes on the point. This is the same cue "goes on" that arrow mode spells with a
         trailing ``→``.
 
-        An end that really is the own end of the route opens or closes **rounded**. Where the
-        font has no rounded caps, it is **square**: the own pad of the chip is the edge, and
+        An end that really is the route's own end opens or closes **rounded**. Where the
+        font has no rounded caps, it is **square**: the chip's own pad is the edge, and
         the function appends nothing. A square end is not a degraded cap. It is the one shape
         that is left that says *stop*. The point is the continuation cue. Thus, when a
         finished path closed on a point, it claimed that a hop was cut off (JP, 2026-09-09).
@@ -1113,8 +1113,8 @@ class PathLine:
         equality, and it is not a gap of hue.
 
         There the seam is the **thin** chevron, :data:`POWERLINE_THIN`. It is drawn on the
-        fill ahead, in the colour of the label of the previous chip. It is the own mark of
-        powerline for a join inside one colour, and the chip to which it belongs draws a line
+        fill ahead, in the colour of the label of the previous chip. It is powerline's
+        own mark for a join inside one colour, and the chip to which it belongs draws a line
         on itself. Thus the ribbon continues without a break, and nothing on it is a colour
         that is not a colour of a chip. Before, the solid point that was drawn bare cut a
         wedge of page out of the route here. (A run of near hues read as dashes, and on a
@@ -1139,7 +1139,7 @@ class PathLine:
     def _notch(fill: str) -> Text:
         """The left edge of a chip: the point, cut inward out of its own fill.
 
-        Reverse video paints the notch in the own background of the terminal. This is the
+        Reverse video paints the notch in the terminal's own background. This is the
         only way to name the colour of the page without knowing it. Thus nothing that is on
         the left of the chip (the taper of the previous chip, the line above a wrapped break)
         bleeds into it, and the point still faces the direction in which the path flows.
@@ -1159,7 +1159,7 @@ class PathLine:
         """One chip: the same words as in arrow mode, in the ink of the chip on its fill.
 
         Each chip has padding on both sides, also the ``★`` (JP, 2026-08-09). The pads are
-        not there to make room for a long *word*. They are the own shape of the chip. A star
+        not there to make room for a long *word*. They are the chip's own shape. A star
         that is squeezed between two chevrons reads as a glyph that is wedged into the seam,
         and not as a segment of the route. The ink of our chip is the yellow of the map on
         the neutral dark grey :data:`_YOU_BG`. Thus the star in the line and the star on the

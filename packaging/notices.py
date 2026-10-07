@@ -196,7 +196,7 @@ def _license_summary(dist: Distribution) -> str:
 
 
 def _dist_info_files(dist: Distribution) -> list[PackagePath]:
-    """Each file that RECORD lists under the own ``.dist-info`` directory of this distribution.
+    """Each file that RECORD lists under this distribution's own ``.dist-info`` directory.
 
     The function uses :attr:`Distribution.files`. It does not use the private
     ``Distribution._path`` that some tools use. Thus the function stays correct if a future

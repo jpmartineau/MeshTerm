@@ -225,7 +225,7 @@ def test_fkey_lane_resolution_and_banks() -> None:
     """The shared lane has some slots, and it leaves the other slots free.
 
     The pager takes F4 and F5. Each jump is on the Shift half of the pager that goes toward
-    it. F1 to F3 stay free for the own verbs of the screen. Neither Enter nor Esc takes a
+    it. F1 to F3 stay free for the screen's own verbs. Neither Enter nor Esc takes a
     slot.
     """
     lane = DEFAULT_LANE

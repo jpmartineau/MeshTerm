@@ -450,7 +450,7 @@ async def test_a_popup_with_nothing_under_it_floats_over_the_menu() -> None:
     screen on the stack, and the app drew it full-frame. The blank base that corrected this
     showed nothing behind the box. A dialog is smaller than the frame, so the page that the
     user came from must show around it. The root that the menu declared is the base that is
-    pushed under the dialog and popped with it. Thus the own page of the tool opens over
+    pushed under the dialog and popped with it. Thus the tool's own page opens over
     nothing.
     """
     menu = SelectScreen("What would you like to do?", [Choice("TX optimize", "tx")])

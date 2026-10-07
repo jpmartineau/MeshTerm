@@ -141,8 +141,8 @@ def test_a_time_is_an_age_unless_the_instant_is_itself_the_fact() -> None:
     A person at a prompt who reads ``2026-09-07T19:58:53-04:00`` does arithmetic to answer
     "recently?". This is the question that the person typed the command to ask. Thus an age
     is now the default. :func:`~meshterm.ui.script.stamp` stays for three places where the
-    instant is the answer: the device clock, an appointment that ``--at`` sets, and the own
-    ``TIME`` column of a live capture (an age shows ``now`` in each row). It
+    instant is the answer: the device clock, an appointment that ``--at`` sets, and the
+    ``TIME`` column of a live capture itself (an age shows ``now`` in each row). It
     also stays for each column under ``--absolute``.
     """
     fresh = datetime.now(timezone.utc) - timedelta(seconds=5)

@@ -431,7 +431,7 @@ def test_routes_view_tags_every_relay_with_its_hash_byte_alone() -> None:
 
 
 def test_routes_view_target_wears_its_node_type_glyph() -> None:
-    """The left end shows the own map mark of the target (a repeater ▲), not a plain dot."""
+    """The left end shows the target's own map mark (a repeater ▲), not a plain dot."""
     from meshterm.persistence.repository import TracedPath
 
     leaf = Contact(name="Leaf", public_key="27d4396a2967" + "0" * 52, key_prefix="27d4396a2967")
@@ -658,7 +658,7 @@ def test_node_detail_screen_renders_its_sections() -> None:
     body = _plain(screen.render_body(72))
     assert "Hub" in body and "repeater" in body  # the pinned identity header
     assert "│  Info  │" in body and "42" in body  # the vitals are in the Info tab, which has a box
-    assert "Time machine" in body  # the own action of the Info tab
+    assert "Time machine" in body  # the Info tab's own action
     assert "Back" not in body  # no exit row anywhere: Esc leaves
     assert "────────" in body  # the faint rule that closes the stage
     assert "no route observed yet" not in body  # the Routes stage is only on its own tab

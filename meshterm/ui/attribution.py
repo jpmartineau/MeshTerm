@@ -187,7 +187,7 @@ def rule_caption(*, full: bool) -> str:
     A bordered frame already has a rule under the body, and the rule only closes the box. A
     caption in it is the cheapest place for the credit. It uses no cell of the drawing and
     no cell of a line that the app used for other content. The frame renders the caption
-    right-justified through the own subtitle machinery of Rich
+    right-justified through Rich's own subtitle machinery
     (:func:`~meshterm.ui.tui.frame._panel_box`). Thus it lands as
     ``──── © OpenStreetMap ─╯``: one rule cell before the corner, as a title sits in the top
     rule.

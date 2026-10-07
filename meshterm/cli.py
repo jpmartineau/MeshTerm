@@ -74,7 +74,7 @@ class _GlobalOptionsAnywhere(TyperGroup):
 
 
 def _globals_first(group: TyperGroup, args: list[str]) -> list[str]:
-    """``args`` with the own options of ``group`` moved ahead of the subcommand.
+    """``args`` with the options of ``group`` itself moved ahead of the subcommand.
 
     The function finds an option, and tells it from an argument, because the option has
     ``is_flag``. Typer includes its own copy of Click, so there is no ``click.Option`` that
@@ -219,7 +219,7 @@ def main_callback(
         spi: Select the radio on the SPI bus of this machine. MeshTerm itself runs the node.
         mock: Whether to use the simulator instead of real hardware.
         db_path: Override the location of the database. If it is not set, a ``--mock`` run
-            stores to the own database of the simulator and not to the real history.
+            stores to the simulator's own database and not to the real history.
         json_output: Print the answer as JSON instead of aligned text.
         absolute: Print times as ISO-8601 instants instead of relative ages, for this run.
         quiet: Suppress console logging (logging to the file continues).

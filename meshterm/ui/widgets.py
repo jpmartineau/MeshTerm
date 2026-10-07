@@ -432,7 +432,7 @@ def revisit_note(
     The function takes the repeated hops and not the path itself. Thus the caller decides
     what "repeated" means for its surface. One path asks
     :func:`~meshterm.ui.pathgraph.revisited_hops`. A surface that draws a *fan* of paths
-    must join the own revisits of each path. A hop that two different routes share is not
+    must join each path's own revisits. A hop that two different routes share is not
     a revisit. If the surface pools their hops, it wrongly calls that hop a revisit.
 
     Args:
@@ -953,7 +953,7 @@ def node_marker(node_type: int | None) -> tuple[str, RGB]:
     """The glyph and colour from the map palette for a node type, as a ``(glyph, rgb)`` pair.
 
     These are the shared node-type marks (``▲`` repeater, ``■`` room, ``◉`` sensor, ``●``
-    plain node) in the own colours of the map. This function makes them for a braille
+    plain node) in the map's own colours. This function makes them for a braille
     raster, as :data:`NODE_GLYPHS` makes them for a Rich row. Thus a spatial drawing pins
     its nodes with the same glyphs and hues that the map and the list of nodes use. Both
     read the same ``type.*`` entry of the theme (here through

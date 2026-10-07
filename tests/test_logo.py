@@ -80,8 +80,8 @@ def test_bright_after_a_reset_is_white() -> None:
 
     After `0m`, the colour in force is the default grey of the console, so `1m` means
     white. The letters of the splash say white in exactly this way (`0m` then `1m`). When
-    the code read this as "no colour to state again", the run used the own default of the
-    terminal, and a white row was drawn grey.
+    the code read this as "no colour to state again", the run used the terminal's own
+    default, and a white row was drawn grey.
     """
     out = _state_intensity("\x1b[0;36mcyan\x1b[0m\x1b[1mwhite")
     tail = out.split("white")[0].split("\x1b[0m")[-1]

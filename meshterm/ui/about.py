@@ -9,7 +9,7 @@ touches the radio or the database. Thus a page reads the same when no device is 
 
 Unlike each other screen in the app, these pages are **written** and not composed. Their
 content is markdown. It is in ``meshterm/assets/pages``, beside the wordmark.
-:mod:`meshterm.ui.markdown` draws it in the own visual language of the app (refer to that
+:mod:`meshterm.ui.markdown` draws it in the app's own visual language (refer to that
 module for what each construct becomes). To fill in a page, edit its ``.md`` file. No
 screen, menu row, or CLI face must follow. Everything that markdown offers is available:
 sections, sub-headings, lists, quotes, links, and tables.

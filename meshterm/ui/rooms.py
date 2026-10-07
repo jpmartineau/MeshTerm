@@ -320,7 +320,7 @@ async def _outcome(ctx: AppContext, room: Contact, login: RoomLogin, password: s
 async def _restore(ctx: AppContext, room: Contact, *, asked: bool = False) -> bool:
     """Put a room that the radio forgot back in its contacts. Return ``True`` when it is there.
 
-    MeshTerm addresses a login through the own contact entry of the radio. Thus if MeshTerm
+    MeshTerm addresses a login through the radio's own contact entry. Thus if MeshTerm
     still lists a room but the radio dropped it, the user cannot log in to the room until
     MeshTerm writes it back. This is the same one write that "add it back" makes for a
     direct message.

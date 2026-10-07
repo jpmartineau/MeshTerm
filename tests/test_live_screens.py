@@ -648,7 +648,7 @@ def test_every_action_row_starts_its_words_in_one_cell_in_both_modes(platform_na
 async def test_trace_screen_action_cursor_commits_the_selected_row() -> None:
     """↑↓ move over the action rows. Enter commits the row that has the highlight.
 
-    The rows are only the own verbs of the screen. No exit row ends them, so Trace is the
+    The rows are only the screen's own verbs. No exit row ends them, so Trace is the
     last stop.
     """
     opened: list[str] = []

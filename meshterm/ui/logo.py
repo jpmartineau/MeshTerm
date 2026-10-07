@@ -216,7 +216,7 @@ def _state_intensity(row: str) -> str:
         fg = next((p for p in parts if _DIM_FG.fullmatch(p)), None)
         if fg is None:
             # A bare "1" has nothing more to say when brightness travels as a colour. If
-            # the code removes it, bold stays off the glyphs that a terminal can redraw at
+            # the code removes it, bold stays off the glyphs that a terminal can draw again at
             # another weight.
             kept = [p for p in parts if p != "1"]
             # But the brightness that it announced applies to the colour that is in force

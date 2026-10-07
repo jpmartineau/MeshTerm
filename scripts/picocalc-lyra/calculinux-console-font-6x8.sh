@@ -3,8 +3,8 @@
 # calculinux-console-font-6x8.sh -- build and install meshterm8.psf.gz, the 6x8 (53x40)
 # console font for the PicoCalc display.
 #
-# LICENCE -- READ THIS FIRST. The base bitmap that is embedded below is the own font_6x8
-# of the Linux kernel (lib/fonts/font_6x8.c), which is GPL-2.0. Thus this script is
+# LICENCE -- READ THIS FIRST. The base bitmap that is embedded below is the font_6x8
+# of the Linux kernel itself (lib/fonts/font_6x8.c), which is GPL-2.0. Thus this script is
 # GPL-2.0-only, and the PSF that it produces is GPL-2.0-only too. The full licence text is
 # beside this script, as scripts/picocalc-lyra/LICENSE.GPL-2.0. The rest of MeshTerm is
 # Apache-2.0, and it stays Apache-2.0. The file meshterm8.psf.gz that this script produces

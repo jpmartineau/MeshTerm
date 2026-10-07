@@ -93,7 +93,7 @@ class DeviceInfoScreen(ScrollScreen):
 
     @property
     def picocalc_lyra_lane(self):
-        """The shared pager, and the reveal on F3, which is the own verb slot of this screen.
+        """The shared pager, and the reveal on F3, which is this screen's own verb slot.
 
         The chip is the only place where the user of a PicoCalc can learn that the key
         exists. It names the action and not its object: ``Reveal`` while the PIN is masked,

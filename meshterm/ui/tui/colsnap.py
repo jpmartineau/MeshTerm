@@ -115,7 +115,7 @@ from .emoji_width import clusters
 _TEXT_GLYPHS: tuple[tuple[str, str], ...] = (
     ("\x00", "\x7f"),  # ASCII: each letter, digit, and escape byte in a composed row
     (" ", "ſ"),  # Latin-1 + Latin Extended-A: an accented name, °, ·, ±
-    ("‐", "‧"),  # General Punctuation: – — ‘ ’ “ ” • …
+    ("‐", "‧"),  # General Punctuation: `– — ‘ ’ “ ” • …`
     ("←", "↓"),  # ← ↑ → ↓: the arrow atoms at the start of each footer hint
     ("─", "╿"),  # Box Drawing: each panel border and each rule
     ("▀", "▟"),  # Block Elements: the half blocks of the path line, and the splash art

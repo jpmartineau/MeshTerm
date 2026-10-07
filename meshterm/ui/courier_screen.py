@@ -506,7 +506,7 @@ async def _pick_schedule(ctx: AppContext, name: str):
     """Float the picker for when to send. Return an aware UTC time, ``None``, or a cancel.
 
     ``None`` means "no schedule, send on the next sign of life" (the explicit
-    *When it's next heard* row). An aware UTC datetime means that the message waits until
+    ``When it's next heard`` row). An aware UTC datetime means that the message waits until
     that time. :data:`CANCEL_SCHEDULE` means that the user went back, and the code must not
     queue anything.
 

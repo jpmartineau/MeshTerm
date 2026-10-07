@@ -221,7 +221,7 @@ def test_reading_the_console_font_never_raises() -> None:
 
 
 def test_the_user_font_directory_is_under_the_users_own_profile() -> None:
-    """The font directory of the user is in the own profile of the user.
+    """The font directory of the user is in the user's own profile.
 
     This is the purpose of the location for each user: no administrator rights are
     necessary.

@@ -451,7 +451,7 @@ MESH_THEME_16 = Theme(
         # partner of slot 6 is the brand). Links use the bright blue. The chrome (bullets,
         # rails, a struck-out run) uses the two greys. Thus a page reads as text with
         # landmarks and not as a colour chart. There is no underline anywhere. The VT
-        # renders it with the own underline colour of the console, and this removes the hue
+        # renders it with the console's own underline colour, and this removes the hue
         # of the link.
         "md.strong": "bold color(7)",
         "md.em": "not bold color(7)",
@@ -480,7 +480,7 @@ def mark_rgb(colour: str) -> tuple[int, int, int]:
     is a theme style name (the node-type marks, which have names so that each platform
     chooses its own colour, refer to ``type.*`` of the theme).
 
-    On the 16-slot theme, a ``color(N)`` entry gives the own :data:`_VT_SLOTS` RGB of that
+    On the 16-slot theme, a ``color(N)`` entry gives the :data:`_VT_SLOTS` RGB of that
     slot, and not the stock triple of Rich. The palette of Rich is a shade different from
     ours, and the quantizer of the fold matches against ours. If the function used the
     stock triple, the round trip would put the marker on a neighbouring slot. The
@@ -586,7 +586,7 @@ _NODE_HUE_VAL = 0.95
 #: The same wheel at the resolution of the PicoCalc console: the six *chromatic bright*
 #: palette slots. They are in hue order, from red. Thus the index ``round(byte / 256 * 6)
 #: % 6`` is the sector in which the hue of the byte is. The sectors are 60° apart, and
-#: each is an equal sixth of the wheel. They are written as the own :data:`_VT_SLOTS` RGB
+#: each is an equal sixth of the wheel. They are written as the :data:`_VT_SLOTS` RGB
 #: values of the slots and not as ``color(N)``. Thus the value is still a hex that a
 #: caller can parse into an RGB (the map canvas and the mesh walk read the hue from the
 #: style string). Also, each downsample on the way out (the downsample of Rich, and

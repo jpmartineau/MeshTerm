@@ -100,7 +100,7 @@ def test_plain_mode_matches_the_app_wide_arrow_presentation() -> None:
 
 
 def test_plain_mode_annotation_dim_and_custom_separator() -> None:
-    """Annotations, dimming, and the own separator of a caller all stay in plain mode.
+    """Annotations, dimming, and a caller's own separator all stay in plain mode.
 
     The ``(3d)`` note of a trace is muted. A dim hop (and the arrow into it) fades. The own
     separator of a surface passes through without a change. An example is the ``›`` of the
@@ -131,12 +131,12 @@ def test_empty_path_reads_as_the_callers_word() -> None:
 
 
 def test_chips_are_joined_by_one_interlocked_chevron() -> None:
-    """A seam is one cell and not two, and the own end of the path is not a seam at all.
+    """A seam is one cell and not two, and the path's own end is not a seam at all.
 
     The point of the previous chip is laid *on* the fill of the next chip. Thus the route
     reads as a ribbon whose segments meet on a chevron. The point has a meaning: it says
-    that the route continues, so a finished path never has one. It ends square on the own
-    pad of the last chip, and the only chevrons in the line are the joins.
+    that the route continues, so a finished path never has one. It ends square on the last
+    chip's own pad, and the only chevrons in the line are the joins.
     """
     alice_fill = _fill("aa")
     line = PathLine([PathHop("Alice", key="aa"), PathHop("you", you=True)], mode="powerline")
@@ -590,7 +590,7 @@ def test_wrapped_lines_always_fit_their_width() -> None:
 
 
 def test_wrapped_continuation_cue_follows_the_separator() -> None:
-    """The continuation cue is the own mark of the separator, and it is not always an arrow.
+    """The continuation cue is the separator's own mark, and it is not always an arrow.
 
     A line that commas join (the wire spec of the trace screen) continues on a comma. Thus
     the spec stays exactly as it is.
@@ -691,7 +691,7 @@ def test_wrapped_chip_lines_open_on_the_break_they_continue() -> None:
     assert lines[0].plain.startswith(" AAAA")  # the square edge: this is the start
     step = 2 + WRAP_OFFSET
     assert lines[1].plain[:step].isspace() and lines[1].plain[step] == POWERLINE_SEP
-    # …past the own PATH_INK stamp of the line, which covers the whole body from the same
+    # …past the line's own PATH_INK stamp, which covers the whole body from the same
     # cell (it marks the run as a path line for the cursor fold, and it draws nothing).
     carried = next(s for s in lines[1].spans if s.start == step and str(s.style) != PATH_INK)
     assert str(carried.style) == f"{_fill('3d')} reverse"
@@ -704,8 +704,8 @@ def test_rounded_caps_finish_a_path_only_where_the_font_has_them(monkeypatch) ->
     """Rounded caps finish a path only where the font really has them.
 
     A full Nerd Font rounds the two *outer* ends of the path into a lozenge. A terminal that
-    has only the core glyphs makes *both* of them square. It appends nothing, and the own
-    pads of the outer chips are the edges. It never draws tofu. Interior breaks stay angled
+    has only the core glyphs makes *both* of them square. It appends nothing, and the
+    own pads of the outer chips are the edges. It never draws tofu. Interior breaks stay angled
     in both cases. A rounded end reads as the path that stops. A pointed end at the finish
     reads as the opposite: a route that is cut off in the middle of a walk.
     """
@@ -828,9 +828,9 @@ def test_a_seam_between_two_of_one_colour_is_the_thin_chevron_in_its_label() -> 
     """Where two chips have the same fill, the seam is the thin chevron in the label colour.
 
     The interlock cannot draw a solid point in its own background. Thus MeshTerm draws the
-    join *on* the shared fill instead (the own mark of powerline for a join inside one
+    join *on* the shared fill instead (powerline's own mark for a join inside one
     colour), and the ribbon continues without a break. Its colour is the label of the
-    previous chip. It is the light half of the own pair of the chip, so it is visible on the
+    previous chip. It is the light half of the chip's own pair, so it is visible on the
     fill, and nothing on the line has a colour that is not a colour of a chip. The faded
     slate draws it in its muted text.
 
@@ -1005,7 +1005,7 @@ def test_action_mark_leaves_a_chip_path_closed_rather_than_cracked() -> None:
 def test_hops_atom_counts_relays_and_says_direct_for_none() -> None:
     """The atom of the statistics line: ``direct`` for a route with no hops, else ``n hop(s)``.
 
-    A path with no relays is not "0 hops". ``direct`` is the own word of the app for a
+    A path with no relays is not "0 hops". ``direct`` is the app's own word for a
     packet that went straight there, and :class:`PathLine` says it for an empty path also.
     """
     assert hops_atom(0).plain == "direct"

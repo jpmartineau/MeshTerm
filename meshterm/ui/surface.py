@@ -409,7 +409,7 @@ class PlainUi(Ui):
     (:func:`meshterm.ui.script.console`). Everything that a tool gives to it passes through
     :func:`~meshterm.ui.script.flatten` on the way out. Thus no border, no box, and no
     hoisted title reaches stdout. That fold is a safety net and not the design. The output
-    that a script must read is *written* in the own vocabulary of the CLI (refer to
+    that a script must read is *written* in the CLI's own vocabulary (refer to
     :mod:`meshterm.ui.script`).
     """
 

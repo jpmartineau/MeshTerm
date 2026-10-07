@@ -11,7 +11,7 @@ Windows Terminal (both can draw chips) or in a bare CI shell (which cannot). The
 assertions must not change with the terminal of the developer. ``MESHTERM_POWERLINE=0``
 is the supported way to fix the verdict. The suite clears the cached verdict around each
 test, so that the order of the tests has no effect. The tests that are specific to
-powerline pass explicit modes, or they patch the own switch of the widget with
+powerline pass explicit modes, or they patch the widget's own switch with
 ``monkeypatch``.
 
 ``NO_COLOR`` depends on the environment in the same way. Rich obeys it: it removes colour
@@ -94,7 +94,7 @@ def _reset_transmit_gate() -> Iterator[None]:
 
 @pytest.fixture(autouse=True)
 def _isolate_config_dir(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
-    """No test can reach the own ``~/.meshterm`` of the developer.
+    """No test can reach the developer's own ``~/.meshterm``.
 
     ``$MESHTERM_HOME`` moves the whole directory: the history, the caches of contacts and
     channels, the outbox, the stored admin passwords, the device profiles, the preferences,

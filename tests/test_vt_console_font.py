@@ -58,7 +58,7 @@ class _Recorder:
 
 @pytest.fixture
 def device(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
-    """Make the process look like MeshTerm that runs on the own VT of the handheld."""
+    """Make the process look like MeshTerm that runs on the handheld's own VT."""
     set_platform(PICOCALC_LYRA)
     monkeypatch.setattr(os, "ttyname", lambda fd: "/dev/tty1", raising=False)
     monkeypatch.setattr(consolefont.shutil, "which", lambda name: "/usr/bin/setfont")

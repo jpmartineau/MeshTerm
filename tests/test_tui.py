@@ -3872,7 +3872,7 @@ def test_the_splash_hint_stays_inside_the_box_it_is_drawn_in() -> None:
     from meshterm.ui.device_picker import _shortcut_hint
     from meshterm.ui.tui.select import splice_hint
 
-    base = "↑↓ move · Enter select · Esc bye"  # This is the own farewell of the splash.
+    base = "↑↓ move · Enter select · Esc bye"  # This is the splash's own farewell.
     radio = serial_device("COM7", name="A Radio")
     common = splice_hint(base, _shortcut_hint(0)(radio))
     for platform in (REGULAR, PICOCALC_LYRA):

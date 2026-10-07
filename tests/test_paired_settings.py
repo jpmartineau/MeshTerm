@@ -243,7 +243,7 @@ def test_self_info_wins_where_the_two_frames_overlap() -> None:
 
 
 def test_the_device_pin_row_reads_the_firmware_s_own_name() -> None:
-    """The Device PIN row reads the own name of the firmware.
+    """The Device PIN row reads the firmware's own name.
 
     The row showed "?" on each real companion. The code wrote the key as ``device_pin``,
     but the firmware reports it as ``ble_pin``.

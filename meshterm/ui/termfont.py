@@ -475,8 +475,8 @@ def _vscode_default_face() -> str:
 def _vscode_face(environ: Mapping[str, str], start: Path | None = None) -> str:
     """The face that the integrated terminal of VS Code uses to render.
 
-    ``terminal.integrated.fontFamily`` wins over ``editor.fontFamily`` (the own fallback
-    of VS Code). For each key, the workspace file wins over the user file. The stored
+    ``terminal.integrated.fontFamily`` wins over ``editor.fontFamily`` (VS Code's own
+    fallback). For each key, the workspace file wins over the user file. The stored
     value is a comma list in the CSS style, and MeshTerm judges the first family.
     """
     paths = _vscode_settings_paths(environ, start)
@@ -636,8 +636,8 @@ def _powerline_support(
             the process).
         conhost_probe: The function that reads the face of the classic console (a
             parameter, so that tests can replace it).
-        handheld: The name and the glyph inventory of the platform, where the own font of
-            a handheld draws the screen. ``None`` on a terminal.
+        handheld: The name and the glyph inventory of the platform, where the font of
+            a handheld itself draws the screen. ``None`` on a terminal.
     """
     env = os.environ if environ is None else environ
     override = (env.get("MESHTERM_POWERLINE") or "").strip().lower()

@@ -13,7 +13,7 @@ This script gives that explanation. It is standalone and uses only the standard 
 the user can paste it onto any machine that runs any version of MeshTerm. It prints one
 verdict with the fix.
 
-The script must run under the own interpreter of MeshTerm. This is the important point. A
+The script must run under MeshTerm's own interpreter. This is the important point. A
 Mac usually has three Pythons, and only one of them is the Python of the app. Only the
 certificate store of that Python is the store that the map uses. If another Python starts
 the script, the script finds the installed ``meshterm`` command and reads the interpreter

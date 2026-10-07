@@ -31,7 +31,7 @@ count that is worth a lane. What it does have, the time that it left, has no col
 To remove *one* named contact for good belongs to that contact and not to the list. It is
 the last action on the Node detail page of the contact, where the user already looks at
 the node that the user wants to remove. That action is a real deletion. It goes to both
-halves of what the list shows: the own table of the device and the store that lasts
+halves of what the list shows: the device's own table and the store that lasts
 between sessions (refer to :mod:`~meshterm.core.contact_store`). Thus a bridge with no
 firmware does not merge the contact back. In both cases, only the *contact* goes. MeshTerm
 does not change the reception history and the overheard traffic of each node.

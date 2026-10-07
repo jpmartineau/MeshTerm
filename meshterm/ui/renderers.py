@@ -257,7 +257,7 @@ class PlainRenderer(Renderer):
                 # output where the exit status is the whole report.
                 return None
             # Use a Text and not a markup string. The value can be a private key, a share
-            # URL, or the own reply of a remote node. Rich would read a bracket in these
+            # URL, or the reply of a remote node itself. Rich would read a bracket in these
             # values as a style tag.
             return Text(column.lanes[0].render(value))
         return script.pairs(facts_pairs(block))

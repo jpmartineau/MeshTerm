@@ -51,7 +51,7 @@ def test_every_palette_slot_comes_from_the_theme() -> None:
     """Each palette slot comes from the theme.
 
     The window cannot differ from the screen that it holds. The profile has sixteen keys,
-    in the order that Terminal needs (dim, then bright). Each key has the own hex value of
+    in the order that Terminal needs (dim, then bright). Each key has its own hex value in
     the theme. A change to a slot in :data:`~meshterm.ui.theme._VT_SLOTS` appears here at
     the next write. This is the reason that the code generates the profile, and does not
     ship it.
@@ -228,7 +228,7 @@ def test_nothing_happens_off_macos(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_the_profile_is_written_under_meshterm_home(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The profile is in the own directory of MeshTerm.
+    """The profile is in MeshTerm's own directory.
 
     It follows ``MESHTERM_HOME`` when that is set.
     """
@@ -258,7 +258,7 @@ def test_the_readers_preferences_are_never_named(tmp_path, monkeypatch) -> None:
 
 
 def test_the_font_goes_to_the_users_own_library() -> None:
-    """The font goes to the own library of the user.
+    """The font goes to the user's own library.
 
     No administrator rights are necessary, and the user can undo it from Font Book.
     """

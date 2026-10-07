@@ -755,7 +755,7 @@ def test_an_author_is_named_by_key_or_stands_as_a_grey_hash() -> None:
 
 
 def test_the_board_draws_each_post_under_its_author() -> None:
-    """A contact, a stranger, the own notice of the room, and us: each has its own chip."""
+    """A contact, a stranger, the room's own notice, and us: each has its own chip."""
     screen, _ = _view(_board())
     text = plain("\n".join(screen.render_body(72)))
     for expected in ("Alice", STRANGER_KEY, ROOM.name, "Anyone driving Saturday?", "I'll check it"):

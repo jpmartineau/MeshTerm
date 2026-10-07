@@ -764,7 +764,7 @@ async def test_three_byte_route_appends_destination_hash() -> None:
 
     Two things are important for a region that is not a power of two (hashes of 3 bytes).
     First, each routing hash of 3 bytes becomes its first 2 bytes (the widest trace width
-    that the protocol can represent). Second, the own hash of the destination is added as
+    that the protocol can represent). Second, the destination's own hash is added as
     the last outbound hop, because a trace replies only when its destination is the last
     outbound hop. The trace protocol has no separate return-path field, so the code
     mirrors the same repeaters back afterwards. If it does not, no node relays the reply
@@ -789,7 +789,7 @@ async def test_three_byte_route_appends_destination_hash() -> None:
     resolved = await device._trace_path_to_contact(mc, "Repeater")
     assert resolved is not None
     path_bytes, flags = resolved
-    # Two repeater hops cut to 2 bytes, the own hash of the target (2 bytes), then the same
+    # Two repeater hops cut to 2 bytes, the target's own hash (2 bytes), then the same
     # two repeaters mirrored back to us.
     assert path_bytes == bytes.fromhex("11224455aabb44551122")
     assert flags == trace_runner.path_hash_flags(2)  # a width of 2 bytes
@@ -823,7 +823,7 @@ async def test_direct_neighbor_resolves_to_destination_hash() -> None:
     resolved = await device._trace_path_to_contact(mc, "Neighbor")
     assert resolved is not None
     path_bytes, flags = resolved
-    # Only the own hash of the target. The region width of 3 is cut to a trace hop of 2 bytes.
+    # Only the target's own hash. The region width of 3 is cut to a trace hop of 2 bytes.
     assert path_bytes == bytes.fromhex("3d63")
     assert flags == trace_runner.path_hash_flags(2)
 

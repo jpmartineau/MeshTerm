@@ -256,7 +256,7 @@ def test_name_chip_wears_the_hue_as_its_label_padded_like_every_chip(powerline) 
 
 
 def test_name_chip_draws_us_as_the_star_never_as_our_name(powerline) -> None:
-    """Our end of a route is the own marker of the map, and a sender label is the same."""
+    """Our end of a route is the map's own marker, and a sender label is the same."""
     powerline(True)
     chip = name_chip("you", you=True)
 

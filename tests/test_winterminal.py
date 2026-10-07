@@ -108,7 +108,7 @@ def test_the_bundles_own_bookkeeping_never_reaches_the_new_process(
 
     assert not [key for key in environment if key.startswith("_PYI")]
     assert "_MEIPASS2" not in environment
-    assert environment["MESHTERM_HOME"] == r"C:\mine"  # the own settings of the user stay
+    assert environment["MESHTERM_HOME"] == r"C:\mine"  # the user's own settings stay
     assert environment[winterminal.REOPENED_ENV] == "1"
 
 

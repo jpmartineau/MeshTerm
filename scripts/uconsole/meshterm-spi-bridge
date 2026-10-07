@@ -1034,7 +1034,7 @@ def run_bridge(host: str, port: int, node_name: str) -> int:
 
     # Prefer the hackergadgets meshcore_console helpers. They have the correct board pins and
     # the same node identity that the GUI uses. Fall back to a direct setup for a generic
-    # install (a Waveshare HAT with a runtime from pip), or for the own venv of the bridge on
+    # install (a Waveshare HAT with a runtime from pip), or for the bridge's own venv on
     # a host where the GUI package is older than the runtime.
     identity = None
     radio = None
@@ -1135,7 +1135,7 @@ def run_bridge(host: str, port: int, node_name: str) -> int:
         }
         # Use the identity of the GUI first, in the place where the meshcore-uconsole stack
         # keeps it. Thus a bridge that runs from its own venv is the same node as the GUI.
-        # Then use the own identity of the bridge.
+        # Then use the bridge's own identity.
         xdg = Path(env("XDG_DATA_HOME") or (HOME / ".local" / "share"))
         for key_path in (
             xdg / "meshcore-uconsole" / "identity.key",

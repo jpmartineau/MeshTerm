@@ -270,7 +270,7 @@ class _Tty:
     It obeys what the differential renderer of prompt_toolkit and :class:`colsnap.PinnedOutput`
     send: carriage return, newline, backspace, cursor save and restore, and the CSI cursor
     moves. It ignores colour and mode sequences. For column arithmetic, a real terminal does
-    the same. Glyph widths come from the own measurement of prompt_toolkit, unless ``draws``
+    the same. Glyph widths come from prompt_toolkit's own measurement, unless ``draws``
     names a glyph that this terminal disagrees about.
     """
 

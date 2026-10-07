@@ -3789,7 +3789,7 @@ class MeshCoreDevice(Device):
             path_bytes = bytes.fromhex("".join(hops))
             flags = path_hash_flags(len(bytes.fromhex(hops[0]))) or 0
         else:
-            # No forced path: build a path that ends at the own hash of the target (with
+            # No forced path: build a path that ends at the target's own hash (with
             # any learned ``out_path`` repeaters before it), because a trace replies only
             # when its destination is the last hop. It is ``None`` only when the contact
             # is unknown, and then the trace runs without a path.
@@ -3888,7 +3888,7 @@ class MeshCoreDevice(Device):
           repeaters to mirror, so the outbound leg is the full path).
         * learned multi-hop route → ``[repeater…, destination, repeater… (reversed)]``.
 
-        Each hash is encoded again at the own width of the trace (``1 << flags``, only
+        Each hash is encoded again at the trace's own width (``1 << flags``, only
         1/2/4/8 bytes). This changes the routing width of a region (for example 3) to the
         widest value that the trace can represent (2). The firmware matches by hash
         prefix, so a narrower prefix still addresses the same node.
@@ -3931,7 +3931,7 @@ class MeshCoreDevice(Device):
                 route = bytes.fromhex(out_path)[: out_path_len * size]
                 repeaters = [route[i * size : i * size + trace_size] for i in range(out_path_len)]
             dest = bytes.fromhex(pub)[:trace_size]
-            # The outbound leg always ends at the own hash of the destination, so the
+            # The outbound leg always ends at the destination's own hash, so the
             # destination recognizes the trace and replies. The return leg mirrors the same
             # repeaters back to us, because nothing sends the packet back automatically.
             path_bytes = b"".join(repeaters) + dest + b"".join(reversed(repeaters))

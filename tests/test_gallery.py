@@ -244,7 +244,7 @@ def _archive_ranked():  # noqa: ANN201
     """A ranked contact table for the screens of the sweep. The real function scores it.
 
     The percentiles are not written by hand, on purpose. The purpose of the gallery is that
-    a specimen comes from the own funnels of the app. A percentile is the one number on
+    a specimen comes from the app's own funnels. A percentile is the one number on
     these screens that cannot be written by hand and still be true. It is the rank of a
     contact against the other contacts in the same list. If the test makes it up, the
     screen is not consistent in itself: three contacts show 2, 7, and 11 out of a field of
@@ -338,7 +338,7 @@ def _archived(cols: int, rows: int) -> Screen:
 
 
 def _node_detail_mark() -> Text:
-    # The code uses the own marker and name styles of the app, not a hex colour that is
+    # The code uses the app's own marker and name styles, not a hex colour that is
     # written by hand. The gallery is a specimen of what the platform draws, so a colour in a
     # stub can hide a bug in the palette.
     glyph, glyph_style = NODE_GLYPHS[NODE_TYPE_REPEATER]
@@ -797,7 +797,7 @@ class _PickerRepo:
 
 
 def _chat_picker(cols: int, rows: int) -> Screen:
-    """The conversation picker, built through the own row funnel of the tool.
+    """The conversation picker, built through the tool's own row funnel.
 
     This is its widest case. It has a name at the maximum of the lane, an unread badge that
     can have three digits, and a last message that is much longer than any terminal. The
@@ -851,7 +851,7 @@ def _chat_picker(cols: int, rows: int) -> Screen:
 def _channels_manager(cols: int, rows: int) -> Screen:
     """The channel manager when it is widest: each lane has data, and each action row is drawn.
 
-    The test builds it through the own row funnel of the feature. Thus the code that the app
+    The test builds it through the feature's own row funnel. Thus the code that the app
     runs lays out the header line, the glyph lane, the unread badge, the counts, the ages,
     and the sparkline. The cases that matter are here. There is a name at the maximum of the
     lane. There is a send scope at the maximum of its lane (cut with an ellipsis), next to a
@@ -1579,7 +1579,7 @@ def _join_discord(cols: int, rows: int) -> Screen:
 def _diagnostics(cols: int, rows: int) -> Screen:
     """The Diagnostics page, with the widest values that a real page can have.
 
-    A deep Windows config directory and a connection error in the own words of the radio
+    A deep Windows config directory and a connection error in the radio's own words
     are the two fields that have no natural limit. Both are here on purpose. A markdown list
     item hangs its wrapped text under itself at any width, and this must work in 53
     columns.
@@ -1936,7 +1936,7 @@ def test_gallery_map_shows_the_basemap_credit_where_its_frame_puts_it(
     if platform.frame_border:
         assert "OpenStreetMap" not in body, "the credit reached the drawing on a bordered frame"
         # The corners are rounded, or square where Rich decides that the console is legacy
-        # Windows (a pytest run with captured output there). Both are the own bottom rule of
+        # Windows (a pytest run with captured output there). Both are the bottom rule of
         # the frame.
         rule = next(ln for ln in reversed(lines) if "╰" in ln or "└" in ln)
         assert rule[-1] in "╯┘" and rule[:-1].endswith(f" {expected} ─"), rule

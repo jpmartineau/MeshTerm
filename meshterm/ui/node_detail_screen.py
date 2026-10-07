@@ -1245,7 +1245,7 @@ def _located(lat: float | None, lon: float | None) -> bool:
 async def open_node_detail(
     ctx: AppContext, contact: Contact | None, *, manage: bool = True
 ) -> bool:
-    """Open the Node detail page for a contact (or our own node) and run its action loop.
+    """Open the Node detail page for a contact (or our node) and run its action loop.
 
     The function assembles the page from the stored history, the contacts of the device,
     and the observed topology: the identity, the reception statistics, a location preview,
@@ -1277,7 +1277,7 @@ async def open_node_detail(
 
     Args:
         ctx: The shared application context (the interactive TUI must be running).
-        contact: The contact to show, or ``None`` for our own node (a page of identity and
+        contact: The contact to show, or ``None`` for our node (a page of identity and
             ledger only, because our node never overhears itself, so there is no reception
             history to show).
         manage: Whether to show the contact-management actions (lock, archive, restore,
@@ -1313,7 +1313,7 @@ async def open_node_detail(
 
     you = contact is None
 
-    # -- our own node, for the "us" label, the centre of the location preview, and the range
+    # -- our node, for the "us" label, the centre of the location preview, and the range
     # and bearing.
     try:
         info = await ctx.devstate.self_info()
@@ -1526,7 +1526,7 @@ async def open_node_detail(
         info_actions.append(_Action("regions", "🔖", "", "Ask which regions it carries"))
     # -- contact management: the last group of the page, and the only actions that end the
     # visit. None of them shows when the caller opened the page to look, not to act (refer
-    # to ``manage``). They never show for our own node, or for a contact with no key at
+    # to ``manage``). They never show for our node, or for a contact with no key at
     # all, because the write has nothing to use as its address.
     archived = manage and _is_archived(ctx, contact, self_key)
     manageable = (

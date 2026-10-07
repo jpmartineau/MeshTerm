@@ -166,7 +166,7 @@ def test_every_glyph_map_target_stays_inside_the_bmp() -> None:
     a character above U+FFFF with U+FFFD before it uses the font. This is the reason that
     MeshTerm sends icons through this table there too (refer to
     :func:`meshterm.ui.termfont.emoji_support`). Someone can change a substitute to an
-    emoji. The emoji draws correctly in the own font of the PicoCalc, but it breaks each
+    emoji. The emoji draws correctly in the PicoCalc's own font, but it breaks each
     Windows console without a warning. Thus this test asserts the plane. It does not
     depend on the font whitelist for the same result.
     """
@@ -274,7 +274,7 @@ def test_fold_quantizes_a_colour_that_shares_its_sequence_with_another() -> None
 
 
 def test_the_qr_style_is_white_on_black_on_both_themes() -> None:
-    """A code is white ink on a black field on each platform, with the own slots of the PicoCalc."""
+    """A code is white ink on a black field on each platform, with the PicoCalc's own slots."""
     from rich.style import Style
 
     regular = (
@@ -316,7 +316,7 @@ def test_names_colour_by_key_on_both_platforms() -> None:
 def test_picocalc_node_hues_land_on_their_own_palette_slots() -> None:
     """The quantized wheel uses only the six chromatic bright slots, in equal parts.
 
-    Each hex that the code returns is the own RGB of a slot. Thus each later downsample (the
+    Each hex that the code returns is the RGB of a slot itself. Thus each later downsample (the
     downsample of Rich and the downsample of the fold) gives that exact slot. It does not
     guess a neighbour slot.
     """

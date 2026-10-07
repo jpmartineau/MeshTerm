@@ -144,8 +144,8 @@ def test_livefeed_class_lane_names_the_payload_class_once() -> None:
 
     ``packet`` is only the name of the event family that the frame arrived in. Thus the
     class lane shows the parsed payload class. This is the same label as the heading of
-    the card in the viewer. The subject lane is then free for the own subject of the
-    packet. If the class has no subject, the lane shows a dash. It does not show the class
+    the card in the viewer. The subject lane is then free for the packet's own
+    subject. If the class has no subject, the lane shows a dash. It does not show the class
     a second time.
     """
     screen = _screen()
@@ -156,7 +156,7 @@ def test_livefeed_class_lane_names_the_payload_class_once() -> None:
         )
     )
     row = _rows(screen, 100)[0]
-    assert "🧩 multipart" in row  # the class lane, with the own icon of the payload class
+    assert "🧩 multipart" in row  # the class lane, with the payload class's own icon
     assert row.count("multipart") == 1  # one time, not one time for each lane
     assert "packet" not in row  # and never as the generic event family
     assert "—" in row  # the subject lane: the class has no subject
@@ -321,7 +321,7 @@ def test_livefeed_opens_pinned_and_the_pin_rides_the_newest_packet() -> None:
     """
     screen = _screen(seed=[_obs(node="n0", age_s=1)])
     assert screen._pinned and screen._selected == 0
-    assert _rows(screen, 100)[0].startswith("^ ")  # the own mark of the pin
+    assert _rows(screen, 100)[0].startswith("^ ")  # the pin's own mark
 
     screen.on_event(MeshEvent.observation_event(_obs(node="a1b2")))
     assert screen._selected == 0, "the pin let go of the top"

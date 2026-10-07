@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for the own BlueZ pairing of MeshTerm (PIN pairing on Linux through a D-Bus agent).
+"""Tests for MeshTerm's own BlueZ pairing (PIN pairing on Linux through a D-Bus agent).
 
 The ``pair()`` of bleak for BlueZ never gives a PIN. BlueZ asks a pairing agent for the
 PIN, and bleak registers no agent. Thus a companion that has a PIN could not bond on Linux
@@ -52,7 +52,7 @@ def test_status_names_read_as_words() -> None:
     assert bluez.status_name("org.bluez.Error.ConnectionAttemptFailed") == (
         "connection attempt failed"
     )
-    # The bare Failed gives no information, so the own detail of BlueZ is added.
+    # The bare Failed gives no information, so the detail of BlueZ itself is added.
     assert bluez.status_name("org.bluez.Error.Failed", ["le-connection-abort-by-local"]) == (
         "failed: le-connection-abort-by-local"
     )
