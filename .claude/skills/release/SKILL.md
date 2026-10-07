@@ -10,8 +10,9 @@ point of keeping an `[Unreleased]` section. The one part that takes real work is
 the entry, because the changelog is prose someone reads, not a list of commit subjects.
 
 Pushing the tag fires [github-release.yml](../../../.github/workflows/github-release.yml),
-which calls `installers.yml`, builds all five platforms, attaches them with a combined
-`SHA256SUMS`, and takes the release notes **from that version's changelog section**. So the
+which calls `installers.yml`, builds all five platforms and the Cardputer Zero's `.deb`,
+attaches them with a combined `SHA256SUMS`, sends the `.deb` to M5Stack's app store (the
+`store` job), and takes the release notes **from that version's changelog section**. So the
 changelog is not documentation of the release; it *is* the release notes. An empty section
 publishes "No changelog entry for X.Y.Z."
 
@@ -171,6 +172,22 @@ the release itself is fine (it runs after publishing); the usual cause is the
 `SITE_DEPLOY_KEY` secret, and once that is fixed `gh run rerun <run-id> --failed` finishes
 it.
 
+`store` also runs after publishing, so its failure leaves the release fine too. It opens a
+pull request on `CardputerZero/packages` (from JP's fork), and the store merges an update
+by itself once its own check passes — no video after the first release. Confirm the PR
+exists and its check passed:
+
+```
+gh pr list -R CardputerZero/packages --author jpmartineau --state all --limit 3
+```
+
+If `store` failed, the usual causes are the `CARDPUTER_STORE_TOKEN` secret (missing, or the
+token revoked) or a change in czdev: the job pins AppBuilder to one commit because
+`scripts/cardputer-zero/store-publish.py` corrects two of its functions, and the script
+refuses a czdev without them. A rerun is safe — the script publishes nothing when the store
+already has the version or a PR for it is open. The manifest's email must be
+`johnputer@meshterm.net`; the script sets it, so check it once on the PR's files.
+
 The notes open with an install block the workflow writes from the tag — the same commands
 as the README, but pinned to *this* release's own assets — and the changelog follows under
 `## What changed`. **Check that second half actually came out of the changelog**, because a
@@ -184,8 +201,9 @@ If that reads "No changelog entry for X.Y.Z.", the extraction failed rather than
 changelog being empty. Fix the workflow, then repair the published notes in place with
 `gh release edit vX.Y.Z --notes-file` — the binaries are fine and the tag does not move.
 
-Fourteen assets is the right count — five version-stamped binaries, five version-less
-copies of them, `SHA256SUMS`, and the three licence files:
+Fifteen assets is the right count — five version-stamped binaries, five version-less
+copies of them, the Cardputer Zero's `meshterm_X.Y.Z-1_arm64.deb`, `SHA256SUMS`, and the
+three licence files:
 
 ```
 gh release view vX.Y.Z --json assets --jq '.assets | length'

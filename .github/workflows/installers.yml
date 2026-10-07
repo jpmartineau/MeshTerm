@@ -198,3 +198,39 @@ jobs:
           path: |
             meshterm-*
           if-no-files-found: error
+
+  # The Debian package for the Cardputer Zero's app store. It holds compiled code for arm64
+  # and Python 3.13, so it is built in Debian 13 on an arm64 runner: the same system as the
+  # Cardputer. The release attaches it with the binaries above, and its `store` job sends it
+  # to M5Stack's app store.
+  cardputer-zero:
+    name: cardputer-zero-deb
+    runs-on: ubuntu-24.04-arm
+    container: debian:trixie
+    timeout-minutes: 30
+    steps:
+      # gcc and the headers compile spidev, which has no arm64 wheel on PyPI.
+      - name: Install the build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            python3 python3-venv python3-dev gcc libc6-dev ca-certificates
+
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: sh scripts/cardputer-zero/build-deb.sh
+
+      - name: Checksum it
+        working-directory: dist
+        run: |
+          for deb in meshterm_*_arm64.deb; do sha256sum "$deb" > "$deb.sha256"; done
+          cat ./*.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: meshterm-cardputer-zero
+          path: |
+            dist/meshterm_*_arm64.deb
+            dist/meshterm_*_arm64.deb.sha256
+          if-no-files-found: error
