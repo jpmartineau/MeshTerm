@@ -1,37 +1,41 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The repeater-admin screens: configure a remote node over the mesh, editor-style.
+"""The repeater-admin screens: edit the settings of a remote node over the mesh, in an editor.
 
-The interactive face of the ``repeater-admin`` tool. Picking a node (the shared
-credentialed-first picker) and logging in (remembered passwords, the one-time prompt
-otherwise) opens an editor deliberately shaped like the local device-configuration
-screen — the same setting / value / description lanes, staged ``current → new`` values,
-Apply — but speaking the repeater's text CLI (see :mod:`meshterm.core.remote_config`)
-instead of the companion's binary protocol, which brings the repeater-only knobs the
-local editor never had: TX delay, Direct TX delay, duty cycle, flood caps, the bridge.
+These screens are the interactive side of the ``repeater-admin`` tool. First the user
+selects a node (in the shared node picker, which shows the nodes with credentials first)
+and logs in (with a remembered password, or else with a one-time prompt). Then an editor
+opens. Its shape is the same as the Device config screen, on purpose: the same setting,
+value, and description lanes, staged ``current → new`` values, and Apply. But it uses the
+text CLI of the repeater (refer to :mod:`meshterm.core.remote_config`) instead of the
+binary protocol of the companion. Thus it has the settings that only a repeater has, which
+the local editor never had: TX delay, Direct TX delay, duty cycle, flood caps, and the
+bridge.
 
-Because every read is one paced mesh round trip, the editor never bulk-reads on open:
-values show what the last read (or the last applied set) said, from the per-node cache
-(:class:`~meshterm.core.remote_store.RemoteStore`). The *Read settings* action refreshes
-every one of them under an abortable progress dialog, one paced read at a time, and
-``^R`` (``Read`` on the F-key lane) re-reads just the highlighted row. A setting the node's
-firmware doesn't have reads as ``n/a`` — kept apart from ``?``, never read. Apply sends the
-staged values the same way and folds each confirmed value straight back into the cache.
+Each read is one paced round trip over the mesh. Thus the editor does not read all the
+values when it opens. Each value shows what the last read (or the last applied ``set``)
+said, from the cache for each node (:class:`~meshterm.core.remote_store.RemoteStore`).
+The "Read settings" action refreshes all of them under a progress dialog that the user can
+abort, one paced read at a time. ``^R`` (``Read`` on the F-key lane) reads only the
+highlighted row again. A setting that the firmware of the node does not have shows as
+``n/a``. That is different from ``?``, which means never read. Apply sends the staged
+values in the same way, and puts each confirmed value immediately back into the cache.
 
-Beyond the settings, the action rows cover the box itself — advert, clock sync, change
-admin password, reboot, each behind its own floating confirmation — **Regions** opens the
-region editor (:mod:`meshterm.ui.region_editor`), which floods it relays region by region,
-and the **Command line** opens the readline-style remote CLI (:mod:`meshterm.ui.remote_cli`)
-for anything the catalog doesn't spell.
+Other than the settings, the action rows are for the node itself: advert, clock sync,
+change of the admin password, and reboot, each behind its own floating confirm dialog.
+**Regions** opens the region editor (:mod:`meshterm.ui.region_editor`), which sets the
+floods that the node relays, region by region. **Command line** opens the readline-style
+remote CLI (:mod:`meshterm.ui.remote_cli`) for all that the catalog does not include.
 
-That command line is also where the page *grows*. Third-party builds carry settings the
-catalog has never heard of, and MeshTerm can't know which build a node is running without
-asking it — every question being one paced round trip, and every guessed row a dead ``n/a``
-on everyone else's page. So nothing is probed speculatively: a ``get``/``set`` the reader
-ran here, which *this node* answered, earns a row on *this node's* page under **Extra**
-(:func:`learn_from_cli`). The round trip was one the reader was spending anyway, the catalog
-doesn't grow, and no other node's page changes. A row is only ever removed by hand
-(``Del``): a key that stops answering reads ``n/a`` like any other, because a misread reply
-would otherwise delete the one thing about this node nobody else can restore.
+That command line is also where the page gets more rows. Third-party builds have settings
+that the catalog does not know. MeshTerm cannot know which build a node runs unless it
+asks the node. Each question is one paced round trip, and each guessed row is a useless
+``n/a`` on the page of each other node. Thus MeshTerm probes nothing on speculation. When
+the user runs a ``get`` or ``set`` here, and this node answers it, the setting key gets a
+row on the page of this node, under **Extra** (:func:`learn_from_cli`). The user used that
+round trip anyway, the catalog does not grow, and the page of no other node changes. Only
+the user can remove a row, by hand (``Del``). A setting key that stops answering shows
+``n/a``, like any other setting key. If it did not, a misread reply would delete the one
+thing about this node that nobody else can restore.
 """
 
 from __future__ import annotations
@@ -88,11 +92,13 @@ if TYPE_CHECKING:
     from ..context import AppContext
     from ..core.connection import Device
 
-#: Seconds to wait for one remote reply. Repeaters answer over the mesh — multi-hop
-#: routes take seconds — so this is deliberately more patient than a local command.
+#: The time in seconds to wait for one remote reply. Repeaters answer over the mesh, and a
+#: route of more than one hop takes seconds. Thus this value is longer on purpose than the
+#: value for a local command.
 _REPLY_TIMEOUT_S = 10.0
 
-# Menu action sentinels (distinct from setting keys, which are CLI parameter names).
+# The sentinels of the menu actions. They are different from the setting keys (CLI
+# parameter names).
 _CLI = "__cli__"
 _LOCATION = "__location__"
 _READ = "__read__"
@@ -104,32 +110,33 @@ _REGIONS = "__regions__"
 _APPLY = "__apply__"
 _CANCEL = "__cancel__"
 
-#: The footer atom naming the chord that re-reads the highlighted setting.
+#: The footer atom that names the chord that reads the highlighted setting again.
 READ_ONE_HINT = "^R read"
 
-#: The footer atom naming the key that drops a discovered row (surfaced on those rows only).
+#: The footer atom for the keyboard key that removes a discovered row (only on those rows).
 FORGET_HINT = "Del forget"
 
-#: The narrowest the value lane may be squeezed to for a discovered setting — a floor, so a
-#: page whose catalog rows are all ``?`` still shows something of what the node answered.
+#: The minimum width of the value lane for a discovered setting. Thus a page whose catalog
+#: rows are all ``?`` still shows a part of what the node answered.
 _EXTRA_VALUE_MIN = 14
 
 
 def _extra_value(text: str, width: int) -> str:
-    """One discovered value, fitted for the lane: whitespace collapsed, a long reply cut.
+    """One discovered value, fitted to the lane: whitespace collapsed, and a long reply cut.
 
-    A discovered setting's value is whatever the node said, and a build that answers a whole
-    diagnostic line (``desired=off effective=off supported=yes …``) would otherwise set the
-    value lane's width — one width, for every row on the page — and push each setting's
-    description off the edge. The row is cut here instead of the page being reshaped around
-    it; the command line is where the whole reply is read.
+    The value of a discovered setting is whatever the node said. A build can answer with a
+    full diagnostic line (``desired=off effective=off supported=yes …``). Without this cut,
+    that line would set the width of the value lane (one width for all the rows on the
+    page), and push the description of each setting off the edge. Thus the function cuts
+    the row here, and the page keeps its shape. The user reads the full reply on the
+    command line.
     """
     flat = " ".join(text.split())
     return fit_cells(flat, width) if cell_len(flat) > width else flat
 
 
 def _spec_for(key: str, cache: dict) -> RemoteSetting | None:
-    """The setting ``key`` names on this node: the catalog's, or its own discovered one."""
+    """The setting that ``key`` names on this node: from the catalog, or discovered there."""
     spec = get_setting(key)
     if spec is not None:
         return spec
@@ -138,64 +145,68 @@ def _spec_for(key: str, cache: dict) -> RemoteSetting | None:
 
 
 def _discovered_specs(cache: dict) -> list[RemoteSetting]:
-    """This node's discovered settings, in key order — rows the catalog knows nothing about."""
+    """The discovered settings of this node, sorted by setting key: rows the catalog lacks."""
     return [discovered_setting(key) for key, cached in sorted(cache.items()) if cached.discovered]
 
 
 def _all_specs(cache: dict) -> list[RemoteSetting]:
-    """Every setting this node's page draws: the catalog, plus what it taught us itself."""
+    """All the settings on the page of this node: the catalog, and what the node told us."""
     return [*REPEATER_SETTINGS, *_discovered_specs(cache)]
 
 
 def _extra_keys(cache: dict) -> frozenset[str]:
-    """The keys on this node's page that came from the node rather than from the catalog."""
+    """The setting keys on the page of this node that came from the node, not the catalog."""
     return frozenset(key for key, cached in cache.items() if cached.discovered)
 
 
 @dataclass(frozen=True, slots=True)
 class ReadOne:
-    """What the admin menu resolves with when ``^R`` asks for one setting's value again.
+    """The result of the admin menu when ``^R`` asks for the value of one setting again.
 
     Attributes:
-        key: The highlighted setting's catalog key.
+        key: The catalog key of the highlighted setting.
     """
 
     key: str
 
 
 class AdminMenu(SelectScreen):
-    """The admin editor's list, plus a key that re-reads the highlighted setting alone.
+    """The admin editor's list, with a keyboard key that reads the highlighted setting again.
 
-    A full read is one paced round trip per setting — minutes, on a node with every
-    section — so checking whether one value took, or refreshing the one row that timed
-    out, must not cost all of them. The key is ``^R``, the chord the app already spends on
-    *retry* (chat re-sends an unacknowledged message with it): here too it asks the mesh
-    the same question again, for the one thing under the cursor. It has to be a chord,
-    because this list filters as you type and every bare letter is spoken for.
+    A full read is one paced round trip for each setting. On a node with all the sections,
+    that takes minutes. Thus, to check whether one value was accepted, or to refresh the
+    one row that timed out, the user must not have to read all of them. The keyboard key is
+    ``^R``, the chord that the app already uses for "retry" (the chat sends an
+    unacknowledged message again with it). Here too, it asks the mesh the same question
+    again, for the one highlighted row. It must be a chord, because this list filters as
+    you type, and each bare letter already has a use.
 
-    The footer names it, and the F-key lane lights its ``Read`` chip, only on a readable
-    setting row — never on an action row, where there is nothing to read.
+    The footer names this keyboard key, and the F-key lane draws its ``Read`` chip live,
+    only on a setting row that can be read. They never do this on an action row, where
+    there is nothing to read.
 
-    It is a full-screen page, not a floating popup: a node's whole catalog is a place the
-    reader works in for a while, like the local Device config editor it mirrors, and a
-    content-sized box over the node picker spent the frame's width on a backdrop. The
-    picker, the value prompts, the confirms and the progress dialogs still float over it.
+    It is a full-screen page, not a floating dialog. The full catalog of a node is a place
+    where the user works for some time, like the Device config editor that it copies. A box
+    that fitted its content, over the node picker, left most of the width of the frame to
+    the backdrop. The node picker still floats, and the value prompts, the confirm dialogs,
+    and the progress dialogs float over this page.
     """
 
     floating = False
 
-    #: The keys on this node's page that the catalog hasn't got, refreshed with the rows.
+    #: The setting keys on the page of this node that are not in the catalog. They are
+    #: refreshed with the rows.
     extra_keys: frozenset[str] = frozenset()
 
     def __init__(self, title: str, items: list, **kwargs: Any) -> None:
-        """Build the page's list, its rows ending at the edge rather than sliding under ←→.
+        """Build the list of the page. Its rows end at the edge, and ←→ does not scroll them.
 
-        The Device config page's handling, kept here on purpose. The Actions rows pin a head
-        block (:func:`~meshterm.ui.menus.menu_rows`), which on its own turns ←→ scrolling on
-        for the whole list — and a setting row, pinning nothing, then slid its label out of
-        view along with its description, under a footer that grew a ``←→ scroll`` atom.
-        ``hscroll=False`` keeps every row whole and cut with the ellipsis, as every other
-        editor lane is.
+        This is the same as on the Device config page, on purpose. The Actions rows pin a
+        head block (:func:`~meshterm.ui.menus.menu_rows`). That alone turns on the ←→
+        scroll for the full list. Then a setting row, which pins nothing, moved its label
+        off the screen with its description, and the footer got a ``←→ scroll`` atom.
+        ``hscroll=False`` keeps each row complete and cut with the ellipsis, like each other
+        editor lane.
         """
         kwargs.setdefault("hscroll", False)
         super().__init__(title, items, **kwargs)
@@ -208,36 +219,36 @@ class AdminMenu(SelectScreen):
         return current.value
 
     def _readable_key(self) -> str | None:
-        """The highlighted row's setting key, when it is a setting the node can be asked."""
+        """The setting key of the highlighted row, if the node can be asked for that setting."""
         key = self._row_key()
         if key is None:
             return None
         if key in self.extra_keys:
-            return key  # a discovered row is a string setting, and always re-readable
+            return key  # a discovered row is a string setting, and can always be read again
         spec = get_setting(key)
         return spec.key if spec is not None and spec.readable else None
 
     def _forgettable_key(self) -> str | None:
-        """The highlighted row's key, when it is a discovered row Del can drop."""
+        """The setting key of the highlighted row, if it is a discovered row that Del removes."""
         key = self._row_key()
         return key if key is not None and key in self.extra_keys else None
 
     @property
     def footer_hint(self) -> str:  # type: ignore[override]
-        """The list's own hint, plus the read atom while a readable setting is highlighted."""
+        """The list's own hint, plus the read atom while the highlight is on a readable setting."""
         base = super().footer_hint
         return splice_hint(base, READ_ONE_HINT) if self._readable_key() else base
 
     @property
     def picocalc_lyra_lane(self):
-        """The list's lane with ``Read`` on F3 and ``Forget`` behind it — dim where inert.
+        """The list's lane, with ``Read`` on F3 and ``Forget`` behind it: dim where inactive.
 
-        F1/F2 are this grouped list's section jumps and F4/F5 the pager; F3 is the slot a
-        select list spends on its own verb. Read and Forget are the same slot's two halves
-        because they are the same subject — *this row* — and they are never both live: a
-        catalog row can be read and not forgotten, and only a discovered row can be dropped.
-        Dim rather than empty on an action row: both are things on this screen, just not for
-        the row the cursor is on.
+        F1/F2 are the section jumps of this grouped list, and F4/F5 are the pager. F3 is the
+        slot that a select list uses for its own verb. Read and Forget are the two halves of
+        the same slot, because they have the same subject (this row). They are never both
+        live: a catalog row can be read but not forgotten, and only a discovered row can be
+        removed. On an action row, they are dim, not empty: the two actions exist on this
+        screen, but not for the highlighted row.
         """
         from .tui.fkeys import FPair
 
@@ -253,7 +264,7 @@ class AdminMenu(SelectScreen):
         return lane
 
     def handle(self, action: str, data: str = "") -> None:
-        """Ask for the highlighted setting's value, or behave as any select list does."""
+        """Ask for the value of the highlighted setting, or act as each select list does."""
         if action == "retry":
             key = self._readable_key()
             if key is not None:
@@ -263,36 +274,38 @@ class AdminMenu(SelectScreen):
 
 
 async def open_repeater_admin(ctx: AppContext) -> dict[str, Any] | None:
-    """Run the repeater-admin flow: pick a node, log in, and administer it.
+    """Run the repeater-admin flow: select a node, log in, and administer it.
 
-    The pick is a popup — a question on the way in, gone once answered — so the admin page
-    opens over the main menu and Esc from it lands there: the page is the whole visit. A
-    login the node refuses (or never answers) re-asks the question with the same node
-    highlighted, so a mistyped password is one Enter and a retry, not a round trip. The
-    list used to stay pushed under the page as a hub, which read as two places where
-    there is one.
+    The node picker is a dialog: a question before the user goes in, which closes when it
+    is answered. Thus the admin page opens over the main menu, and Esc on the page goes
+    back there: the page is the full visit. If the node refuses the login (or never
+    answers), the picker asks again, with the same node highlighted. Thus a mistyped
+    password costs one Enter and a retry, not a new start of the flow. The list once
+    stayed pushed below the page as a hub. That looked like two places where there is only
+    one.
 
     Args:
-        ctx: The shared application context (must be running the interactive TUI surface).
+        ctx: The shared application context (it must run the interactive TUI surface).
 
     Returns:
-        A summary of the node administered (for the tool's log), or ``None`` if the reader
-        left the picker without ever getting into a session.
+        A summary of the administered node (for the log of the tool), or ``None`` if the
+        user left the picker and never started a session.
 
     Raises:
-        RuntimeError: If called outside the interactive menu (no full-screen session).
+        RuntimeError: If it is called outside the interactive menu (no full-screen
+            session).
     """
     from .admin_picker import pick_admin_node
     from .surface import TuiUi
 
-    if not isinstance(ctx.ui, TuiUi):  # pragma: no cover - guarded by the menu-only caller
+    if not isinstance(ctx.ui, TuiUi):  # pragma: no cover - the menu-only caller prevents this
         raise RuntimeError("repeater admin is only available in the menu")
 
     device = await ctx.device()
-    # Through the session cache — opening this screen shouldn't re-read the (slow) contacts
-    # table when another screen already has (see
-    # :class:`~meshterm.services.device_state.DeviceState`); the device handle below is still
-    # needed for the admin login and the CLI session that follow.
+    # Through the session cache: when this screen opens, it must not read the (slow)
+    # contacts table again if another screen already read it (refer to
+    # :class:`~meshterm.services.device_state.DeviceState`). The device handle above is
+    # still necessary for the admin login and for the CLI session that come after.
     contacts = await ctx.devstate.contacts()
     node: Contact | None = None
     while True:
@@ -310,12 +323,13 @@ async def open_repeater_admin(ctx: AppContext) -> dict[str, Any] | None:
 
 
 async def _login(ctx: AppContext, device: Device, node: Contact) -> bool:
-    """Log in to ``node``: remembered password silently, else one floating prompt.
+    """Log in to ``node``: with a remembered password silently, or else one floating prompt.
 
-    A working password is remembered. A *rejected* one is forgotten so the next attempt
-    asks fresh (the app-wide remote-admin convention) — but only rejected: a node that
-    never answered has said nothing about the password, so silence keeps it. Administering
-    a repeater that happened to be down used to erase its credential on the way past.
+    MeshTerm remembers a password that works. It forgets a rejected password, so that the
+    next try asks for a new one (the convention for remote admin in all the app). But it
+    forgets only a rejected password. A node that never answered said nothing about the
+    password, so when there is no answer, MeshTerm keeps the password. Before, if the user
+    administered a repeater that was down at that time, MeshTerm erased its credential.
     """
     from ..core.models import LoginResult
 
@@ -327,8 +341,8 @@ async def _login(ctx: AppContext, device: Device, node: Contact) -> bool:
             f"Admin password for {node.name}",
             prompt="The node ignores admin commands without a login.",
             password=True,
-            # The picker popup is gone by now, so this is the only frame: the flag is what
-            # keeps it a box over a blank base rather than a full-frame prompt.
+            # The picker dialog is closed now, so this prompt is the only screen on the stack.
+            # The flag keeps it a box over a blank base, not a full-frame prompt.
             floating=True,
         )
         if not password:
@@ -362,12 +376,13 @@ async def _login(ctx: AppContext, device: Device, node: Contact) -> bool:
 
 
 async def _admin_session(ctx: AppContext, device: Device, node: Contact) -> dict[str, Any]:
-    """Run the editor loop for one logged-in node.
+    """Run the editor loop for one node that the user is logged in to.
 
-    One screen for the whole session, its rows refreshed in place after every action: they
-    carry the cache's ``current → new`` values, and the title counts what is staged, so the
-    content moves under a highlight that stays where the reader put it — typed filter
-    included. Every sub-prompt floats over it, and Esc leaves the node.
+    One screen for the full session. Its rows refresh in place after each action: they
+    hold the ``current → new`` values of the cache, and the title counts the staged values.
+    Thus the content changes below a highlight that stays where the user put it, and the
+    typed filter stays too. Each sub-prompt floats over the screen, and Esc leaves the
+    node.
     """
     from .tui import CANCEL
 
@@ -404,8 +419,9 @@ async def _admin_session(ctx: AppContext, device: Device, node: Contact) -> dict
             elif choice == _APPLY:
                 applied += await _apply(ctx, device, node, pending)
             elif choice == _READ:
-                # This node's page, not the catalog: a discovered row is refreshed by the
-                # same sweep as everything else, and reads n/a if it stops answering.
+                # The page of this node, not the catalog: the same sweep refreshes a
+                # discovered row and all the other rows, and the row shows n/a if the node
+                # stops answering.
                 await read_settings(ctx, device, node, _all_specs(cache))
             elif choice == _LOCATION:
                 await _stage_location(ctx, cache, pending)
@@ -451,12 +467,12 @@ async def _admin_session(ctx: AppContext, device: Device, node: Contact) -> dict
             else:  # a setting key
                 spec = _spec_for(str(choice), cache)
                 if spec is not None and not spec.writable:
-                    # A read-only fact has nothing to stage; asking again is all Enter can do.
+                    # A read-only fact has nothing to stage. Enter can only ask for it again.
                     await read_settings(ctx, device, node, [spec])
                 else:
                     await _stage_setting(ctx, node, str(choice), cache, pending)
-            # A read or an apply rewrites the cache the rows are drawn from; re-read it so
-            # the values are the ones the action just produced.
+            # A read or an apply writes the cache that the rows come from again. Read the
+            # cache again, so that the values are the values that the action produced.
             cache = ctx.remote_store.settings(node)
             title, items = _menu_items(node, cache, pending)
             menu.extra_keys = _extra_keys(cache)
@@ -467,32 +483,33 @@ async def _admin_session(ctx: AppContext, device: Device, node: Contact) -> dict
 
 
 def _menu_items(node: Contact, cache: dict, pending: dict[str, str]) -> tuple[str, list]:
-    """Build the editor menu's title and rows for the cache + staged state.
+    """Build the title and the rows of the editor menu from the cache and the staged values.
 
-    The same lane layout as the local device-configuration editor — setting, value
-    (with any staged ``→ new``), description under one header line — so administering
-    a remote node reads exactly like configuring the local one.
+    The lane layout is the same as on the Device config editor: setting, value (with any
+    staged ``→ new``), and description, below one header line. Thus the administration of
+    a remote node looks exactly like the edit of the settings of the local one.
     """
     sections: list[tuple[str, list[tuple[str, Text, str, Any]]]] = []
     for category, specs in settings_by_category():
         rows: list[tuple[str, Text, str, Any]] = []
         for spec in specs:
-            # In the words of the node it is open on — a room server's guest password is
-            # the room's own (RemoteSetting.for_node).
+            # In the words of the node that the page is open on: on a room server, the
+            # guest password is the room password (RemoteSetting.for_node).
             spec = spec.for_node(node.node_type)
             if spec.key == "lat":
-                # The map pick sets both coordinates at once, so it heads the pair it fills —
-                # the same row, in the same place, as on the Device config page.
+                # A position selected on the map sets the two coordinates at the same time.
+                # Thus its row is first, above the pair that it fills: the same row, at the
+                # same place, as on the Device config page.
                 rows.append((PICK_LOCATION_LABEL, Text(), PICK_LOCATION_HELP, _LOCATION))
             rows.append((spec.label, _value_text(spec, cache, pending), spec.help, spec.key))
         sections.append((category, rows))
 
-    # What this node taught us itself, last and in its own section — absent entirely on a
-    # node that has taught us nothing, which is every node until someone asks it something.
-    # Its values are fitted to the lane the catalog's rows already need: the value lane is
-    # one width for the whole page, so an unbounded reply here would push every setting's
-    # description right, off the edge of a 72-column screen, and reshape a page the reader
-    # opened to read the catalog.
+    # What this node told us itself, at the end and in its own section. The section is not
+    # there on a node that told us nothing, which is each node until a user asks it
+    # something. Its values fit in the lane that the catalog rows already need. The value
+    # lane has one width for the full page. Thus a reply with no limit here would push the
+    # description of each setting to the right, off the edge of a 72-cell screen. It would
+    # also change the shape of a page that the user opened to read the catalog.
     extra = _discovered_specs(cache)
     if extra:
         budget = max(
@@ -509,9 +526,10 @@ def _menu_items(node: Contact, cache: dict, pending: dict[str, str]) -> tuple[st
     label_w = max(cell_len(label) for _, rows in sections for label, _, _, _ in rows)
     value_w = max(cell_len(value.plain) for _, rows in sections for _, value, _, _ in rows)
 
-    # The same pinned, self-fitting header the local editor heads its lanes with: it stays
-    # on screen under the category headings for the whole list, and abbreviates instead of
-    # wrapping when a long cached value leaves the last label no room (menus.lane_header).
+    # The same pinned header, which fits itself, as the header above the lanes of the local
+    # editor. It stays on the screen with the category headings for the full list. When a
+    # long cached value leaves no space for the last label, the header abbreviates, and it
+    # does not wrap (menus.lane_header).
     items: list = [Separator(lambda w: lane_header(label_w, value_w, w), pinned=True)]
     for category, rows in sections:
         items.append(section_heading(category))
@@ -520,15 +538,15 @@ def _menu_items(node: Contact, cache: dict, pending: dict[str, str]) -> tuple[st
                 Choice(
                     title=lane_row(label, value, help_text, label_w, value_w),
                     value=key,
-                    # Only a discovered row can be dropped: a catalog row that goes away
-                    # would come straight back on the next paint, the catalog still naming it.
+                    # Only a discovered row can be removed. A catalog row that goes away
+                    # would come back at the next paint, because the catalog still names it.
                     deletable=category == DISCOVERED_CATEGORY,
                 )
             )
 
-    # ↻ and ⌨ are one cell where 📡 🕒 🔐 🔄 are two, so the column is measured once and
-    # every mark padded out to it — otherwise Read settings and Command line start their
-    # labels a column left of the rows under them.
+    # ↻ and ⌨ are one cell wide, but 📡 🕒 🔐 🔄 are two. Thus the icon lane is measured one
+    # time, and each icon is padded to that width. If not, the labels of Read settings and
+    # Command line would start one cell to the left of the rows below them.
     actions = [
         ("↻", "Read settings", "Fetch every value from the node, one paced read", _READ),
         ("⌨", "Command line…", "Talk to the node's CLI directly", _CLI),
@@ -557,12 +575,18 @@ def _menu_items(node: Contact, cache: dict, pending: dict[str, str]) -> tuple[st
 def _value_text(
     spec: RemoteSetting, cache: dict, pending: dict[str, str], width: int = _EXTRA_VALUE_MIN
 ) -> Text:
-    """One setting's VALUE lane: what the node last said, and any staged arrow.
+    """The VALUE lane of one setting: what the node said last, and any staged arrow.
 
-    Four states, each its own word: the value; ``empty`` for a string the node holds blank;
-    ``n/a`` when the node answered with something that can't be this setting's value — its
-    firmware has no such setting; ``?`` when it was never read (or never answered). No age:
-    the lane is the value, and a stamp beside it only crowded it.
+    There are five states, each with its own word:
+
+    - The value.
+    - ``empty``, for a string that the node holds blank.
+    - ``n/a``, when the node answered with something that cannot be the value of this
+      setting (its firmware has no such setting).
+    - ``?``, when the setting was never read (or the node never answered).
+    - ``write-only``, for a setting that the node cannot be asked for.
+
+    No age: the lane is the value, and a time stamp beside it only made the lane too full.
     """
     cached = cache.get(spec.key)
     if not spec.readable:
@@ -590,12 +614,12 @@ def _value_text(
 async def _stage_setting(
     ctx: AppContext, node: Contact, key: str, cache: dict, pending: dict[str, str]
 ) -> None:
-    """Prompt for one setting's new value and stage it (nothing is sent yet).
+    """Prompt for the new value of one setting, and stage it (MeshTerm sends nothing yet).
 
-    The prompt names the setting as its row does, in the words of the node it is for.
+    The prompt names the setting as its row does, in the words of the node that it is for.
     """
     spec = _spec_for(key, cache)
-    if spec is None or not spec.writable:  # pragma: no cover - menu offers only real keys
+    if spec is None or not spec.writable:  # pragma: no cover - the menu offers only real settings
         return
     spec = spec.for_node(node.node_type)
     cached = cache.get(key)
@@ -645,7 +669,7 @@ async def _stage_setting(
         value = normalize_value(spec, raw)
 
     if value == known:
-        pending.pop(key, None)  # back to what the node last said — nothing to send
+        pending.pop(key, None)  # the same as what the node said last, so nothing to send
     else:
         pending[key] = value
 
@@ -653,18 +677,20 @@ async def _stage_setting(
 async def _forget_discovered(
     ctx: AppContext, node: Contact, key: str, pending: dict[str, str]
 ) -> None:
-    """Drop one discovered row from this node's page, behind a confirm.
+    """Remove one discovered row from the page of this node, after a confirm dialog.
 
-    This is the *only* way a discovered row is removed. Letting a read drop one — a key the
-    node no longer answers is real enough, after a board swap onto a reused identity — would
-    mean a single misread reply silently deleting the row: a truncated line, a node answering
-    mid-reboot, a stray frame correlated to the wrong command. A catalog row costs an ``n/a``
-    when that happens and nothing is lost, because the catalog still names the key; a
-    discovered row's key is known only here, and the reader may not remember what it was. So
-    the same ``n/a`` is all a read may do, and removing is a decision.
+    This is the only way to remove a discovered row. A read could remove one, because a
+    setting key that the node no longer answers can be real (after a reused identity moves
+    to a different board). But then one misread reply would silently delete the row: a
+    truncated line, a node that answers during a reboot, or a stray reply that MeshTerm
+    matched to the wrong command. When that occurs on a catalog row, the cost is an
+    ``n/a``, and nothing is lost, because the catalog still names the setting key. But
+    only this page knows the setting key of a discovered row, and the user may not remember
+    it. Thus a read can only show the same ``n/a``, and a removal is a decision.
 
-    It is a red confirm like any other single-record delete, though nothing on the node
-    changes: what goes is what MeshTerm remembers, and asking the key again brings it back.
+    It is a red confirm dialog, like each other delete of one record, but nothing changes
+    on the node. What goes is what MeshTerm remembers. If the user asks for the setting key
+    again, the row comes back.
     """
     from .tui import CANCEL
 
@@ -683,12 +709,14 @@ async def _forget_discovered(
 
 
 async def _stage_location(ctx: AppContext, cache: dict, pending: dict[str, str]) -> None:
-    """Pick the node's advertised location on the map and stage both coordinates it sets.
+    """Select the advertised location of the node on the map, and stage the two coordinates.
 
-    The Device config page's row, speaking this node's CLI: the map opens on the position
-    as staged (or as the node last said), and on the mesh where there is none. Each picked
-    coordinate is stored the way a read of it would be, so picking the spot the node
-    already holds unstages rather than queueing a no-op ``set``. Nothing is sent until Apply.
+    This is the row of the Device config page, but it uses the CLI of this node. The map
+    opens on the staged position (or on the position that the node said last), or on the
+    mesh if there is no position. Each selected coordinate is put in the same format as a
+    read of it. Thus, if the user selects the position that the node already holds, the
+    staged value is removed, and no ``set`` that does nothing goes in the queue. MeshTerm
+    sends nothing until Apply.
     """
     from .map_screen import coords_or_none, pick_location
 
@@ -705,16 +733,16 @@ async def _stage_location(ctx: AppContext, cache: dict, pending: dict[str, str])
         spec = get_setting(key)
         if spec is None:  # pragma: no cover - both keys are in the catalog
             continue
-        # Six decimals ≈ 0.1 m — beyond the map's own precision, plenty for an advert.
+        # Six decimals ≈ 0.1 m: more than the precision of the map, and enough for an advert.
         text = normalize_value(spec, f"{value:.6f}")
         if text == known(key):
-            pending.pop(key, None)  # what the node already says — nothing to send
+            pending.pop(key, None)  # what the node already says, so nothing to send
         else:
             pending[key] = text
 
 
 def _known_values(ctx: AppContext, node: Contact) -> dict[str, str]:
-    """The node's last-read values, for restating a composite's unstaged fields."""
+    """The last values read from the node, to state the unstaged fields of a composite again."""
     return {
         key: cached.value
         for key, cached in ctx.remote_store.settings(node).items()
@@ -723,25 +751,26 @@ def _known_values(ctx: AppContext, node: Contact) -> dict[str, str]:
 
 
 def _remark(reply: str, value: str) -> str:
-    """What a successful write's reply adds beyond ``OK`` (``reboot to apply``), or ``""``."""
+    """What the reply to a successful write adds after ``OK`` (``reboot to apply``), or ``""``."""
     remark = re.sub(r"^ok\b[\s,:-]*", "", reply.strip(), flags=re.IGNORECASE)
     return "" if remark.lower() in ("", value.lower()) else remark
 
 
 async def _apply(ctx: AppContext, device: Device, node: Contact, pending: dict[str, str]) -> int:
-    """Send every staged value, paced, under an abortable progress dialog.
+    """Send all the staged values, paced, under a progress dialog that the user can abort.
 
-    Staged values go out as :func:`~meshterm.core.remote_config.write_plan` groups them:
-    one command per setting, except the radio's four fields, which travel as one
-    ``set radio``. That command restates every field, so a radio field staged while its
-    siblings were never read first reads them — one paced ``get radio`` — rather than
-    guessing a frequency. Each confirmed value folds straight into the per-node cache (and
-    stales any other spelling of the same firmware value); a rejected or unanswered write
-    stays staged so it can be retried (or unstaged) rather than being silently dropped.
-    Records one ``runs`` row for the batch.
+    MeshTerm sends the staged values in the groups of
+    :func:`~meshterm.core.remote_config.write_plan`: one command for each setting, but the
+    four fields of the radio go together as one ``set radio``. That command states each
+    field again. Thus, if a radio field is staged and its sibling fields were never read,
+    MeshTerm reads them first (one paced ``get radio``), and does not guess a frequency.
+    Each confirmed value goes immediately into the cache for the node, and MeshTerm forgets
+    each other spelling of the same firmware value. A write that the node rejects or does
+    not answer stays staged, so that the user can try it again (or unstage it). It is not
+    silently removed. The function stores one ``runs`` row for the batch.
 
     Returns:
-        How many settings the node accepted.
+        The number of settings that the node accepted.
     """
     session = ctx.ui.session
     run_id = ctx.repo.start_run(
@@ -758,7 +787,7 @@ async def _apply(ctx: AppContext, device: Device, node: Contact, pending: dict[s
 
         async def send(command: str, status: str) -> str | None:
             nonlocal first
-            if not first:  # every transmission after the first waits out the cooldown
+            if not first:  # each transmission after the first waits for the cooldown
                 await asyncio.sleep(ctx.preferences.trace_cooldown_s)
             first = False
             dialog.status = status
@@ -772,8 +801,9 @@ async def _apply(ctx: AppContext, device: Device, node: Contact, pending: dict[s
                 remember_reply(ctx, node, fills, reply)
 
         writes = write_plan(pending, _known_values(ctx, node))
-        # The catalog plus this node's own discovered rows: a staged key that only this node
-        # has is still a row with a label to name in the outcome, and a write to count.
+        # The catalog, plus the discovered rows of this node. A staged setting key that only
+        # this node has is still a row, with a label to name in the outcome and a write to
+        # count.
         specs = _all_specs(ctx.remote_store.settings(node))
         for i, write in enumerate(writes, start=1):
             staged = [s for s in specs if s.key in write.values and s.key in pending]
@@ -786,7 +816,7 @@ async def _apply(ctx: AppContext, device: Device, node: Contact, pending: dict[s
                     )
                 )
                 continue
-            verb = " ".join(write.command.split()[:2])  # never a secret's value on screen
+            verb = " ".join(write.command.split()[:2])  # never the value of a secret on screen
             reply = await send(write.command, f"{verb} · {i}/{len(writes)}")
             if reply is not None and not reply_is_error(reply):
                 for key, value in write.values.items():
@@ -827,23 +857,24 @@ async def _apply(ctx: AppContext, device: Device, node: Contact, pending: dict[s
 
 
 def remember_reply(ctx: AppContext, node: Contact, fills: list[RemoteSetting], reply: str) -> int:
-    """Fold one read's reply into the cache for every setting it answers.
+    """Put the reply of one read into the cache, for each setting that it answers.
 
-    A reply that can't be the setting's value is the node saying it has no such setting,
-    and is remembered as that (the row reads ``n/a``) — an error (``??: key``, ``Error:
-    unsupported``) and an answer to some other question alike. The second is how older
-    firmware says it: ``get`` matches its keys by *prefix*, so on v1.15 a key it lacks
-    falls into a shorter sibling's branch — ``get radio.fem.rxgain`` answers with
-    ``get radio``'s ``> 910.525,62.5,7,5`` — and ``gps`` on a board whose receiver is
-    absent answers ``Can't find GPS``. Leaving those rows alone left them on ``?``, which
-    says *never asked*; only a read that got no reply at all (not passed here) keeps that.
+    A reply that cannot be the value of the setting means that the node has no such
+    setting. MeshTerm remembers it as that (the row shows ``n/a``). This applies to an error
+    (``??: key``, ``Error: unsupported``) and also to an answer to a different question. The
+    second type is how older firmware says it. ``get`` matches its setting keys by prefix.
+    Thus, on v1.15, a setting key that the firmware does not have goes into the branch of a
+    shorter sibling key: ``get radio.fem.rxgain`` answers with the ``> 910.525,62.5,7,5``
+    of ``get radio``. Also, ``gps`` on a board with no GPS receiver answers
+    ``Can't find GPS``. Before, these rows stayed on ``?``, which means never asked. Now
+    only a read that got no reply at all (which this function does not get) keeps ``?``.
 
     Returns:
-        How many settings got a value.
+        The number of settings that got a value.
     """
     got = 0
     for spec in fills:
-        value = parse_reply_value(spec, reply)  # None for an error reply, too
+        value = parse_reply_value(spec, reply)  # None for an error reply too
         if value is None:
             ctx.remote_store.remember_unsupported(node, spec.key)
         else:
@@ -853,29 +884,32 @@ def remember_reply(ctx: AppContext, node: Contact, fills: list[RemoteSetting], r
 
 
 def learn_from_cli(ctx: AppContext, node: Contact, command: str, reply: str) -> None:
-    """Fold what one command-line exchange proved about ``node`` into its page.
+    """Put what one exchange on the command line proved about ``node`` into its page.
 
-    The command line is the only place a setting outside the catalog can be reached, so it
-    is also the only place one can be *found*: a ``get``/``set`` this node answered is proof
-    the key is there, and the row it earns costs no round trip nobody asked for. The catalog
-    doesn't grow — a key learned here belongs to this node alone (see
-    :func:`~meshterm.core.remote_config.discovered_setting`), and every other node's page is
-    what it always was.
+    The command line is the only place where the user can reach a setting outside the
+    catalog. Thus it is also the only place where MeshTerm can find one. A ``get`` or
+    ``set`` that this node answered proves that the setting key exists. The row that the
+    setting key gets costs no round trip that the user did not ask for. The catalog does not
+    grow: a setting key learned here belongs only to this node (refer to
+    :func:`~meshterm.core.remote_config.discovered_setting`), and the page of each other
+    node stays as it was.
 
-    Three cases, in the order they are tested:
+    There are three cases, in the order of the tests:
 
-    * A **composite's own key** (``get radio``) fills all four of its fields, exactly as a
-      read of any one of them does.
-    * A **catalog key** folds into the cache the way the sweep or an Apply would — which is
-      also how ``get tx`` at the command line stopped leaving the TX power row stale.
-    * Anything else is **discovered**, and the two verbs are not equally good evidence.
-      ``handleSetCmd`` matches a key with its trailing space and refuses an unknown one
-      outright, so an accepted write is proof. ``handleGetCmd`` matches on a bare prefix and
-      will answer a key it hasn't got out of a shorter key's branch, so a read is proof only
-      when the reply cannot be that shorter key's
+    * The **own key of a composite** (``get radio``) fills all four of its fields, exactly
+      as a read of any one of them does.
+    * A **catalog key** goes into the cache in the same way as from the sweep or an Apply.
+      That is also why ``get tx`` on the command line no longer leaves the TX power row out
+      of date.
+    * Each other setting key is **discovered**, and the two verbs are not equally good
+      evidence. ``handleSetCmd`` matches a setting key with its trailing space, and refuses
+      an unknown setting key immediately. Thus an accepted write is proof. ``handleGetCmd``
+      matches on a bare prefix, and can answer a setting key that it does not have from the
+      branch of a shorter setting key. Thus a read is proof only when the reply cannot be
+      the reply for that shorter setting key
       (:func:`~meshterm.core.remote_config.learnable_from_get`).
 
-    ``prv.key`` is never stored, whichever way it was asked
+    MeshTerm never stores ``prv.key``, however the user asked for it
     (:data:`~meshterm.core.remote_config.NEVER_STORED`).
     """
     parsed = parse_setting_command(command)
@@ -899,7 +933,7 @@ def learn_from_cli(ctx: AppContext, node: Contact, command: str, reply: str) -> 
         return
 
     if reply_is_error(reply):
-        return  # a refused write says nothing about the key, and nothing about its value
+        return  # a refused write tells nothing about the setting key or its value
     if members:
         for member in members:
             value = parse_reply_value(member, parsed.value)
@@ -909,7 +943,7 @@ def learn_from_cli(ctx: AppContext, node: Contact, command: str, reply: str) -> 
     if spec is not None and not spec.discovered:
         value = parse_reply_value(spec, parsed.value)
         if value is None:
-            return  # sent in words the catalog can't read back; leave the row as it was
+            return  # the catalog cannot read back these words, so keep the row as it was
         ctx.remote_store.remember_setting(node, spec.key, value)
         for other in spec.overlaps:
             ctx.remote_store.forget_setting(node, other)
@@ -922,12 +956,12 @@ async def read_settings(
 ) -> None:
     """Refresh ``specs`` from the node, one paced read at a time.
 
-    The four radio fields share one ``get radio`` (see
-    :func:`~meshterm.core.remote_config.read_plan`), so a full read asks each question once.
-    Values that parse land in the cache (and on screen), a setting the firmware lacks reads
-    ``n/a``, and abort keeps everything already read. Reads the node never answered are
-    listed afterwards, because their rows go on showing what they last said and would
-    otherwise pass for fresh.
+    The four radio fields share one ``get radio`` (refer to
+    :func:`~meshterm.core.remote_config.read_plan`), so a full read asks each question one
+    time. Values that parse go into the cache (and onto the screen). A setting that the
+    firmware does not have shows ``n/a``. An abort keeps all the values that were already
+    read. After the reads, a dialog lists the reads that the node never answered. Their
+    rows continue to show what they said last, and without the list, they would look new.
     """
     session = ctx.ui.session
     plan = read_plan(specs)
@@ -973,11 +1007,11 @@ async def _run_under_dialog(ctx: AppContext, title: str, work) -> bool:
 
     Args:
         ctx: The shared application context.
-        title: The dialog's heading.
-        work: ``async work(dialog)`` performing the batch, updating ``dialog.status``.
+        title: The heading of the dialog.
+        work: ``async work(dialog)``, which does the batch and updates ``dialog.status``.
 
     Returns:
-        ``True`` if the user aborted, ``False`` if the batch ran to completion.
+        ``True`` if the user aborted, ``False`` if the batch ran to the end.
     """
     session = ctx.ui.session
     spinner = Spinner()
@@ -1000,7 +1034,7 @@ async def _run_under_dialog(ctx: AppContext, title: str, work) -> bool:
         await task
     except asyncio.CancelledError:
         aborted = True
-    except Exception as exc:  # noqa: BLE001 - surface in a dialog, keep the screen
+    except Exception as exc:  # noqa: BLE001 - show it in a dialog, and keep the screen
         await session.message_dialog(Text(str(exc), style="err"), title=title)
     finally:
         ticker.cancel()
@@ -1008,7 +1042,7 @@ async def _run_under_dialog(ctx: AppContext, title: str, work) -> bool:
             await ticker
         except asyncio.CancelledError:
             pass
-        except Exception:  # noqa: BLE001 - a spinner hiccup must never break the batch
+        except Exception:  # noqa: BLE001 - a small spinner fault must never stop the batch
             pass
         session.pop(dialog)
     return aborted
@@ -1028,7 +1062,7 @@ async def _simple_action(
     commit: str,
     danger: bool = False,
 ) -> None:
-    """Confirm and send one fixed CLI command, showing the node's reply."""
+    """Confirm and send one fixed CLI command, then show the reply of the node."""
     choice = await ctx.ui.dialog(
         prompt,
         [("Cancel", None), (commit, "go")],
@@ -1048,7 +1082,7 @@ async def _simple_action(
 
 
 async def _change_password(ctx: AppContext, device: Device, node: Contact) -> None:
-    """Change the node's admin password (and re-remember it on success)."""
+    """Change the admin password of the node (and remember the new password if it succeeds)."""
     new = await ctx.ui.text(
         f"New admin password for {node.name}",
         prompt="Sent over the mesh; the node applies it immediately.",
@@ -1068,7 +1102,7 @@ async def _change_password(ctx: AppContext, device: Device, node: Contact) -> No
     async with ctx.ui.busy_overlay():
         reply = await device.send_remote_command(node, f"password {new}", timeout=_REPLY_TIMEOUT_S)
     if reply is not None and not reply_is_error(reply):
-        ctx.admin_store.remember(node, new)  # the working password just changed
+        ctx.admin_store.remember(node, new)  # the password that works is now the new one
         body = Text("✓ password changed and remembered", style="ok")
     elif reply is None:
         body = Text(
@@ -1085,7 +1119,7 @@ async def _change_password(ctx: AppContext, device: Device, node: Contact) -> No
 
 
 async def _command_line(ctx: AppContext, device: Device, node: Contact) -> None:
-    """Open the readline-style remote CLI for ``node`` (history persists per node)."""
+    """Open the readline-style remote CLI for ``node`` (the history is stored for each node)."""
     from .remote_cli import RemoteCliScreen
 
     session = ctx.ui.session
@@ -1095,7 +1129,7 @@ async def _command_line(ctx: AppContext, device: Device, node: Contact) -> None:
     def send(command: str) -> None:
         nonlocal worker
         if worker is not None and not worker.done():
-            return  # one command in flight at a time — every send is a transmission
+            return  # one command at a time, because each send is a transmission
         screen.sent(command)
         ctx.remote_store.append_history(node, command)
         worker = asyncio.ensure_future(roundtrip(command))
@@ -1106,7 +1140,7 @@ async def _command_line(ctx: AppContext, device: Device, node: Contact) -> None:
         except asyncio.CancelledError:
             screen.failed("cancelled", error=False)
             raise
-        except Exception as exc:  # noqa: BLE001 - shown inline, the screen stays up
+        except Exception as exc:  # noqa: BLE001 - shown inline, and the screen stays open
             screen.failed(str(exc), error=True)
             return
         if reply is None:
@@ -1143,5 +1177,5 @@ async def _command_line(ctx: AppContext, device: Device, node: Contact) -> None:
                     await task
                 except asyncio.CancelledError:
                     pass
-                except Exception:  # noqa: BLE001 - the screen is closed; nothing to surface
+                except Exception:  # noqa: BLE001 - the screen is closed, so nothing to show
                     pass

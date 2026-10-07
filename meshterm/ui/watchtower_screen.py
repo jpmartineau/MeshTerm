@@ -1,17 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 """The Watchtower screens: the alert log, the watchlist, and per-node rules.
 
-The interactive face of the ``watchtower`` tool. One select-list screen carries the
-whole feature (the persistent-backdrop pattern the config editors use): the alert log
-newest-first — unacknowledged alerts lead with the header badge's red marker, Enter
-acknowledges one — followed by the watchlist (Enter opens a node's rule popover) and
-the actions: star another node, toggle the mesh-wide new-node rule, acknowledge or
-clear in bulk.
+This is the interactive face of the ``watchtower`` tool. One select-list screen has the
+whole feature (the pattern of the persistent backdrop that the config editors use). First
+is the alert log, with the newest alert first. An alert that nobody acknowledged starts
+with the red marker of the header badge, and Enter acknowledges one alert. After the log is
+the watchlist (Enter opens the rule dialog of a node). Last are the actions: star another
+node, toggle the rule for new nodes on the whole mesh, and acknowledge or clear alerts in
+bulk.
 
-Everything here reads and writes the :class:`~meshterm.core.watch_store.WatchStore`;
-the rules themselves run in :mod:`meshterm.services.watchtower`, which the menu starts
-with the other always-on services (and this screen nudges, idempotently, in case it
-is opened before that ever happened). Nothing transmits.
+All the code here reads and writes the :class:`~meshterm.core.watch_store.WatchStore`. The
+rules themselves run in :mod:`meshterm.services.watchtower`. The menu starts that service
+with the other services that always run. This screen also starts it, with no effect if it
+already runs, in case the user opens the screen before the menu started it. Nothing
+transmits.
 """
 
 from __future__ import annotations
@@ -33,19 +35,22 @@ from .widgets import DEFAULT_GLYPH, NODE_GLYPHS, age_seconds, format_age
 if TYPE_CHECKING:
     from ..context import AppContext
 
-#: Alert-kind display styles: alarms red, warnings amber, notes calm.
+#: The display styles for the kinds of alert: alarms are red, warnings are amber, and notes
+#: are calm.
 _KIND_STYLES = {
     "silence": "err",
     "snr": "warn",
     "new-node": "brand",
     "recovered": "ok",
-    "courier": "accent",  # outbox outcomes (see services.courier) share the log
+    "courier": "accent",  # the results of the outbox (refer to services.courier) share the log
 }
 
-#: How many alerts the screen lists (the store keeps more; the tail rarely matters).
+#: The number of alerts that the screen lists. The store keeps more, but the older ones
+#: rarely matter.
 _SHOWN_ALERTS = 40
 
-# Menu action sentinels (tuples so they never collide with alert ids or node keys).
+# The sentinels of the menu actions. They are tuples, so that they never collide with
+# alert ids or node keys.
 _WATCH = ("watch",)
 _TOGGLE_NEW = ("toggle-new",)
 _ACK_ALL = ("ack-all",)
@@ -53,41 +58,42 @@ _CLEAR = ("clear",)
 
 
 def contact_watch_key(contact: Contact) -> str | None:
-    """The watch-store key for a contact: the 12-hex id observations carry."""
+    """The key of a contact in the watch store: the id of 12 hex digits that observations carry."""
     ident = (contact.public_key or contact.key_prefix or "").lower().removeprefix("0x")
     return ident[:12] or None
 
 
 async def open_watchtower(ctx: AppContext) -> dict[str, Any] | None:
-    """Run the Watchtower screen until dismissed.
+    """Run the Watchtower screen until the user dismisses it.
 
     Args:
-        ctx: The shared application context (must be running the interactive TUI).
+        ctx: The shared application context (it must run the interactive TUI).
 
     Returns:
-        A summary of what happened (for the tool's log), or ``None`` on plain exit.
+        A summary of what happened (for the log of the tool), or ``None`` for a plain exit.
 
     Raises:
-        RuntimeError: If called outside the interactive menu (no full-screen session).
+        RuntimeError: If the caller is outside the interactive menu (no full-screen
+            session).
     """
     from .surface import TuiUi
     from .tui import CANCEL, SelectScreen
 
-    if not isinstance(ctx.ui, TuiUi):  # pragma: no cover - guarded by the menu-only caller
+    if not isinstance(ctx.ui, TuiUi):  # pragma: no cover - the caller is for the menu only
         raise RuntimeError("the watchtower is only available in the menu")
     session = ctx.ui.session
-    await ctx.watchtower.start()  # idempotent; normally already running
+    await ctx.watchtower.start()  # no effect if it runs already, and it normally does
 
     contacts: list[Contact] = []
     try:
         if ctx.is_connected or ctx.settings.connect_on_start:
             contacts = await ctx.devstate.contacts()
-    except Exception:  # noqa: BLE001 - the log and rules render fine without contacts
+    except Exception:  # noqa: BLE001 - the log and the rules render correctly with no contacts
         contacts = []
 
     store = ctx.watch_store
-    # Legacy watched entries (starred before types were stored) fall back to the
-    # contact table's advertised type; alert labels resolve back to keys for their hue.
+    # An old watched entry (starred before MeshTerm stored types) uses the advertised type
+    # from the contact table. The labels of alerts resolve back to keys, for their hue.
     type_by_key = {
         key: c.node_type
         for c in contacts
@@ -96,11 +102,12 @@ async def open_watchtower(ctx: AppContext) -> dict[str, Any] | None:
     contact_key_of = make_name_key_resolver(contacts)
 
     def rows() -> list:
-        """The current alert log and watch list, as menu rows.
+        """The current alert log and watchlist, as menu rows.
 
-        An alert's node type comes by its label — the contact table's advertised type wins
-        (freshest), a watched entry's stored type backfills — so an alert's name gets its
-        glyph even for a node no longer in the device's contacts.
+        The node type of an alert comes from its label. The advertised type in the contact
+        table has priority, because it is the newest. The stored type of a watched entry
+        fills the gaps. Thus the name of an alert gets its glyph also for a node that is no
+        longer in the contacts of the device.
         """
         type_by_name: dict[str, int] = {
             entry.name.casefold(): entry.node_type
@@ -119,19 +126,20 @@ async def open_watchtower(ctx: AppContext) -> dict[str, Any] | None:
             alert_type_of=lambda label: type_by_name.get(label.casefold()),
         )
 
-    # One screen for the whole visit, its rows refreshed in place after each action — every
-    # one of them changes the list it was chosen from (an ack rewrites its row, a star adds
-    # one, Clear takes several away), and the highlight rides along to wherever its row went.
+    # One screen for the whole visit. MeshTerm refreshes its rows in place after each
+    # action. Each action changes the list from which the user selected it: an ack changes
+    # its row, a star adds a row, and Clear removes several rows. The highlight goes with
+    # its row to the new place.
     menu = SelectScreen(
         "Watchtower — alerts & watched nodes",
         rows(),
         hscroll=True,
-        # ←→ scroll is surfaced by the list itself, but only while the highlighted
-        # alert actually overflows the width (see SelectScreen.hscroll_hint) — and it
-        # slides the *message* alone: each row pins its own lanes (see _alert_lanes).
-        # The two section headings below earn the list its ^PgUp/^PgDn jumps and their
-        # F1/F2 chips for free (SelectScreen.picocalc_lyra_lane); the hint has no room to name
-        # them beside the ←→ atom, and no other grouped list spells them out either.
+        # The list itself shows the ←→ scroll, but only while the highlighted alert is
+        # wider than the screen (refer to SelectScreen.hscroll_hint). It slides only the
+        # *message*, because each row pins its own lanes (refer to _alert_lanes). The two
+        # section headings below give the list its ^PgUp/^PgDn jumps and their F1/F2 chips
+        # with no extra code (SelectScreen.picocalc_lyra_lane). The hint has no room to name
+        # them beside the ←→ atom, and no other grouped list names them either.
         footer_hint="↑↓ move · Enter select/acknowledge · Esc back",
     )
     async with session.stay(menu) as visit:
@@ -166,19 +174,19 @@ def _menu_items(
     key_of: Callable[[str], str | None] = lambda name: None,
     alert_type_of: Callable[[str], int | None] = lambda label: None,
 ) -> list:
-    """Build the screen's rows: alerts, then the watchlist, then the actions.
+    """Build the rows of the screen: alerts, then the watchlist, then the actions.
 
     Args:
         alerts: The alert log, newest first.
-        watched: The watchlist by canonical id.
-        new_node_alerts: Whether the mesh-wide new-node rule is on.
-        type_of: Maps a watch key to a node type, for entries starred before types
-            were stored.
-        key_of: Maps an alert's node label back to a key, for its hue; layered here
-            with the watchlist's own names so a starred node's alerts colour even
-            when the device (and its contact table) is offline.
-        alert_type_of: Maps an alert's node label to that node's type, for the type
-            glyph that leads its name (the plain-node ``●`` when unknown).
+        watched: The watchlist, by canonical id.
+        new_node_alerts: Whether the rule for new nodes on the whole mesh is on.
+        type_of: Gives a node type for a watch key, for entries that were starred before
+            MeshTerm stored types.
+        key_of: Gives a key for the node label of an alert, for its hue. The function adds
+            the names of the watchlist to this. Thus the alerts of a starred node have a
+            colour also when the device (and its contact table) is offline.
+        alert_type_of: Gives the type of the node for the node label of an alert, for the
+            type glyph before its name (the plain-node ``●`` when the type is unknown).
     """
     watched_keys = {entry.name.casefold(): entry.key for entry in watched.values()}
 
@@ -197,11 +205,12 @@ def _menu_items(
                 hscroll_from=lanes.cell_len,
             )
         )
-    # One measured icon column for every action row on this screen, across its headings: the
-    # terminal draws ✓ and 🗑 in one cell and ⭐ and 🔔 in two, so the bulk actions used to
-    # start their words a column left of Watch a node… and the new-node toggle below them.
-    # Declared whole rather than from the rows present, so the column holds still as the
-    # conditional rows come and go; empty where the platform draws no icons.
+    # One measured icon column for each action row on this screen, across its headings. The
+    # terminal draws ✓ and 🗑 in one cell, and ⭐ and 🔔 in two cells. Thus the bulk
+    # actions once started their words one column to the left of Watch a node… and of the
+    # toggle for new nodes below them. The set of icons is declared whole and not found from
+    # the rows that are present. Thus the column does not move when the conditional rows
+    # appear and disappear. It is empty where the platform draws no icons.
     lane = icon_lane(("✓", "🗑", "⭐", "🔔"))
     unacked = sum(1 for a in alerts if not a.acked)
     acked = len(alerts) - unacked
@@ -234,21 +243,22 @@ def _alert_lanes(
     key_of: Callable[[str], str | None],
     type_of: Callable[[str], int | None] = lambda label: None,
 ) -> Text:
-    """An alert's fixed head: marker, age, kind, type glyph, node — and the ``—`` lead-in.
+    """The fixed head of an alert: marker, age, kind, type glyph, node, and the ``—`` lead-in.
 
-    The leading ``●``/``○`` is the *acknowledgement* state, so the node's own type marker
-    (``▲`` repeater, ``●`` node, …) leads the node name instead — the map's shared marker
-    palette in its own type colour, resolved from the node's key through ``type_of`` (the
-    plain-node ``●`` when the type is unknown, matching the watchlist rows). An unacked
-    alert's node label takes its key-derived hue (resolved through ``key_of``, muted when
-    no key is known); an acked row recedes to muted throughout — the type glyph included —
-    with the rest of its history.
+    The first ``●`` or ``○`` is the *acknowledgement* state. Thus the type marker of the
+    node itself (``▲`` repeater, ``●`` node, and other markers) is before the node name
+    instead. It is the marker from the shared palette of the map, in its own type colour.
+    The function resolves it from the key of the node through ``type_of``. The plain-node
+    ``●`` is for an unknown type, the same as in the watchlist rows. The node label of an
+    alert that nobody acknowledged has the hue that comes from its key (resolved through
+    ``key_of``, and muted when no key is known). An acknowledged row is muted in all its
+    parts, with the type glyph, the same as the rest of its history.
 
-    Split from the message so the row can measure what it pins out of the ←→ scroll (see
-    :attr:`~meshterm.ui.tui.select.Choice.hscroll_from`): these lanes are *which alert this
-    is*, and reading a long message to its end is no reason to lose the row's identity.
-    The ``—`` stays with the head so the message still arrives introduced, whatever it is
-    slid to.
+    The head is separate from the message. Thus the row can measure what it pins out of the
+    ←→ scroll (refer to :attr:`~meshterm.ui.tui.select.Choice.hscroll_from`). These lanes
+    show *which alert this is*, and the user who reads a long message to its end must not
+    lose the identity of the row. The ``—`` stays with the head, so the message always has
+    its lead-in, at each scroll position.
     """
     row = Text()
     if alert.acked:
@@ -269,18 +279,19 @@ def _alert_lanes(
 
 
 def _alert_row(lanes: Text, alert: Alert) -> Text:
-    """One alert as a row: its fixed lanes, then the message ``←→`` scrolls."""
+    """One alert as a row: its fixed lanes, then the message that ``←→`` scrolls."""
     row = lanes.copy()
     row.append(alert.message, style="muted")
     return row
 
 
 def _watched_row(entry: WatchedNode, type_of: Callable[[str], int | None]) -> Text:
-    """One watched node as a row: type glyph, hued name, its rules, and last heard.
+    """One watched node as a row: type glyph, name with its hue, its rules, and last heard.
 
-    The leading glyph is the node's shared type marker (``▲`` repeater, ``●`` node, …)
-    in its own type colour — silence is signalled by the trailing ``⚠ silent``, not the
-    glyph — and the name takes its key-derived hue (the entry's 12-hex watch key).
+    The first glyph is the shared type marker of the node (``▲`` repeater, ``●`` node, and
+    other markers) in its own type colour. The ``⚠ silent`` at the end signals silence, not
+    the glyph. The name has the hue that comes from its key (the watch key of the entry, 12
+    hex digits).
     """
     node_type = entry.node_type if entry.node_type is not None else type_of(entry.key)
     glyph, glyph_style = NODE_GLYPHS.get(node_type, DEFAULT_GLYPH)
@@ -301,7 +312,7 @@ def _watched_row(entry: WatchedNode, type_of: Callable[[str], int | None]) -> Te
 
 
 async def _pick_node(ctx: AppContext, contacts: list[Contact]) -> None:
-    """Float the star-a-node picker: unwatched contacts, most recently heard first."""
+    """Float the dialog to star a node: contacts that are not watched, most recently heard first."""
     session = ctx.ui.session
     store = ctx.watch_store
     candidates = [
@@ -345,7 +356,7 @@ async def _pick_node(ctx: AppContext, contacts: list[Contact]) -> None:
 
 
 async def _node_rules(ctx: AppContext, key: str) -> None:
-    """Float one watched node's rule editor until dismissed (or the node is unstarred)."""
+    """Float the rule editor of one watched node until the user dismisses it or removes the star."""
     session = ctx.ui.session
     store = ctx.watch_store
     while True:
@@ -369,24 +380,26 @@ async def _node_rules(ctx: AppContext, key: str) -> None:
             return
 
 
-#: Cells between the widest rule name and its value in the rule popover.
+#: The number of cells between the widest rule name and its value in the rule dialog.
 _RULE_VALUE_GAP = 6
 
 
 def _rule_items(entry: WatchedNode) -> list:
-    """One watched node's rule popover rows: its two rules with their values, then Stop.
+    """The rows of the rule dialog of one watched node: its two rules with their values, then Stop.
 
-    The terminal draws ``🕒`` and ``📶`` in two cells and ``✗`` in one, so the rows share one
-    measured icon column — the Stop row used to start its words a column left of the rules
-    above it. The value lane is measured too, in cells from the rule names, rather than
-    padded by hand with spaces: it then sits in one column whatever the icon column comes
-    to, including nothing at all where the platform draws no icons.
+    The terminal draws ``🕒`` and ``📶`` in two cells and ``✗`` in one cell. Thus the rows
+    share one measured icon column. The Stop row once started its words one column to the
+    left of the rules above it. MeshTerm also measures the value lane, in cells from the
+    rule names, and does not pad it by hand with spaces. Thus it is in one column for each
+    width of the icon column, also when the width is nothing, where the platform draws no
+    icons.
 
     Args:
         entry: The watched node whose rules the rows show.
 
     Returns:
-        The popover's rows, ``"silence"``/``"snr"``/``"unwatch"`` as their values.
+        The rows of the dialog, with ``"silence"``, ``"snr"``, and ``"unwatch"`` as their
+        values.
     """
     lane = icon_lane(("🕒", "📶", "✗"))
     silence = "off" if entry.silence_hours == OFF else f"after {entry.silence_hours} h"
@@ -411,7 +424,7 @@ def _rule_items(entry: WatchedNode) -> list:
 
 
 async def _pick_silence(ctx: AppContext, key: str, entry: WatchedNode) -> None:
-    """Float the silence-threshold picker for one watched node."""
+    """Float the dialog to select the silence threshold for one watched node."""
     session = ctx.ui.session
     items = [Choice("Off — never alarm on silence", OFF)]
     for hours in SILENCE_CHOICES_H:

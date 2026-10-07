@@ -1,26 +1,31 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The Rooms page: the room servers your radio knows, and joining them.
+"""The Rooms page: the room servers that your radio knows, and how to join them.
 
-The Channels page's counterpart for rooms (see :mod:`meshterm.ui.channels`). A channel is
-something the radio holds in a slot; a room is somewhere you log in to — so where Channels
-creates and keys slots, this page lists every room server the radio knows, joined ones
-first, and joins them: a password, one login, and what the room let us do. Once joined, a
-room is in Chat, the way a channel is once it has a slot, and its board is read and posted
-to there (:mod:`meshterm.ui.room`).
+This page is the counterpart of the Channels page for rooms (refer to
+:mod:`meshterm.ui.channels`). A channel is something that the radio holds in a slot. A room
+is a place where you log in. Channels creates slots and gives them keys. This page lists
+each room server that the radio knows, with the joined rooms first, and it joins them. To
+join a room, the user gives a password, MeshTerm makes one login, and the room says what it
+lets us do. After the user joins a room, the room is in Chat, the same as a channel after
+it has a slot. The user reads the board of the room, and posts to it, there
+(:mod:`meshterm.ui.room`).
 
-Joining is also where a room is hardest to understand, because a room never says *no*. A
-wrong password gets no reply at all; so does a room out of reach, and so does a login sent
-along a route the radio learned that has since gone stale. "No reply" alone is no help, so
-the outcome is explained from what is actually known — how the login went out, when the
-room was last heard, whether this password has worked before — and the way on is offered as
-buttons: try by flood (which forgets the stale route first), try again, or try another
-password. Each of those is one more login the reader asked for; none is ever sent on its own.
+Joining is also the place where a room is hardest to understand, because a room never says
+*no*. A wrong password gets no reply at all. A room that is out of reach gives no reply.
+A login that goes along a route that the radio learned, and that is now stale, gives no
+reply. "No reply" alone does not help. Thus the page explains the result from what MeshTerm
+really knows: how the login went out, when the room was last heard, and whether this
+password worked before. The page then offers the next step as buttons: try by flood (which
+first forgets the stale route), try again, or try another password. Each of these is one
+more login that the user asked for. MeshTerm never sends one on its own.
 
-That flow — :func:`join_room` — is shared: the board's ^L runs it too, and the command
-line's ``rooms join`` explains a silent room in the same words (:func:`silence_explanation`).
+This flow (:func:`join_room`) is shared. The ^L key of the board also runs it. The
+``rooms join`` command of the command line explains a silent room in the same words
+(:func:`silence_explanation`).
 
-The page follows the Channels page's shape: one list kept pushed for the whole visit, each
-room a detail page with its vital signs over its actions, every prompt floating over it.
+The page has the shape of the Channels page. One list stays pushed for the whole visit.
+Each room has a detail page, with its vital signs above its actions. Each prompt floats
+over the page.
 """
 
 from __future__ import annotations
@@ -59,15 +64,16 @@ from .widgets import NODE_GLYPHS, age_seconds, format_age, format_ago
 if TYPE_CHECKING:
     from ..context import AppContext
 
-#: The page's footer sentence: navigation, then the filter, then the action, Esc last.
+#: The footer sentence of the page: navigation, then the filter, then the action, and Esc
+#: last.
 _PAGE_HINT = "↑↓ move · type to filter · Enter open · Esc back"
 
-#: MeshCore copies at most this many bytes of a login password into the request
-#: (``BaseChatMesh::sendLogin``) and drops the rest without a word, so a longer password
-#: could never work — it is refused at the prompt instead of meeting silence on the air.
+#: MeshCore copies a maximum of this number of bytes of a login password into the request
+#: (``BaseChatMesh::sendLogin``). It drops the rest with no message. Thus a longer password
+#: can never work. The prompt refuses it, so that the user does not get silence on the air.
 PASSWORD_BYTES = 15
 
-# Detail-page action sentinels.
+# The sentinels of the actions of the detail page.
 _OPEN = "open"
 _JOIN = "join"
 _RELOGIN = "relogin"
@@ -75,14 +81,14 @@ _PASSWORD = "password"
 _FORGET = "forget"
 _DELETE = "delete"
 
-# What an outcome dialog's buttons answer with.
+# The values that the buttons of a result dialog return.
 _RETRY_FLOOD = "flood"
 _RETRY_PASSWORD = "password"
 _RETRY = "again"
 _RESTORE = "restore"
 
-#: A room row's marker: the room server's ``■``, in its type colour (the map's, the
-#: contact list's, the chat picker's).
+#: The marker of a room row: the ``■`` of the room server, in its type colour (the same as
+#: on the map, in the contact list, and in the chat picker).
 _ROOM_MARK = NODE_GLYPHS[NODE_TYPE_ROOM]
 
 
@@ -90,19 +96,19 @@ _ROOM_MARK = NODE_GLYPHS[NODE_TYPE_ROOM]
 
 
 def valid_password(text: str) -> bool | str:
-    """A password a login can carry whole: :data:`PASSWORD_BYTES` bytes at most."""
+    """Check that a login can carry the whole password: :data:`PASSWORD_BYTES` bytes at most."""
     if len(text.encode("utf-8")) > PASSWORD_BYTES:
         return f"MeshCore sends at most {PASSWORD_BYTES} characters of a password"
     return True
 
 
 async def ask_password(ctx: AppContext, room: Contact, default: str = "") -> str | None:
-    """Ask for ``room``'s password; ``None`` when the reader backs out.
+    """Ask for the password of ``room``. Return ``None`` if the user backs out.
 
-    A blank answer is a real one: it asks the room whether it already knows us, which it
-    does for its admins and for anyone who has logged in since it last restarted.
-    ``default`` fills the field (masked) with the password just tried, so trying it again
-    is Enter and trying another is typing over it.
+    A blank answer is a real answer. It asks the room if it already knows us. A room knows
+    its admins, and each user who logged in after the room last restarted. ``default``
+    fills the field (masked) with the password that the user just tried. Thus to try it
+    again, the user presses Enter, and to try another password, the user types over it.
     """
     verb = "Log in" if ctx.rooms.joined(room) else "Join"
     return await ctx.ui.text(
@@ -119,21 +125,21 @@ async def ask_password(ctx: AppContext, room: Contact, default: str = "") -> str
 def silence_explanation(
     ctx: AppContext, room: Contact, login: RoomLogin, password: str
 ) -> list[str]:
-    """Why a login met silence, in what is actually known — one sentence each.
+    """The reason why a login got no answer, from what MeshTerm knows, in one sentence each.
 
-    THE explanation, shared by the join dialogs and the command line. A room that doesn't
-    answer could have missed the login, or heard it with the wrong password, and it says
-    nothing either way; so instead of a guess, the facts that tell the two apart: how the
-    radio sent it (a stale learned route is the commonest silent failure, and a flood is
-    the way round it), when the room was last heard, and whether this password has ever
-    worked here.
+    This is the only explanation. The join dialogs and the command line share it. A room
+    that does not answer can have missed the login, or can have heard it with the wrong
+    password. It says nothing in both cases. Thus the function gives the facts that show the
+    difference, and not a guess. The facts are: how the radio sent the login (a stale
+    learned route is the most common silent failure, and a flood is the way around it),
+    when the room was last heard, and whether this password ever worked here.
 
     Args:
-        ctx: Shared application context.
-        room: The room, as the session's contact cache holds it (its ``last_seen`` is the
-            later of its own advert and our last reception of it).
-        login: The login that met silence.
-        password: The password it carried.
+        ctx: The shared application context.
+        room: The room, as the contact cache of the session holds it (its ``last_seen`` is
+            the later of its own advert and our last reception of it).
+        login: The login that got no answer.
+        password: The password that the login carried.
 
     Returns:
         The sentences, in reading order.
@@ -169,22 +175,25 @@ def silence_explanation(
 
 
 async def join_room(ctx: AppContext, room: Contact, *, ask: bool = False) -> RoomLogin | None:
-    """Join ``room``, or log in to it again — THE explicit flow, explained to the end.
+    """Join ``room``, or log in to it again, with a full explanation.
 
-    The password remembered for the room is used unless ``ask`` (or there is none), in
-    which case the reader is asked. The login runs under a modal card counting the seconds,
-    since a room several hops out can take fifteen to answer. A login that lets the reader
-    post ends the flow quietly — the page or board it was started from shows the access.
-    Anything else is explained (:func:`_outcome`), and the reader picks what to try next;
-    every retry is one more login they chose to send.
+    This is the only explicit flow. The flow uses the password that is remembered for the
+    room, unless ``ask`` is true or there is no remembered password. In these cases, the
+    flow asks the user. The login runs
+    under a modal card that counts the seconds, because a room that is several hops away can
+    take fifteen seconds to answer. If the login lets the user post, the flow ends quietly.
+    The page or the board from which the flow started shows the access. For each other
+    result, the flow gives an explanation (:func:`_outcome`), and the user selects what to
+    try next. Each retry is one more login that the user chose to send.
 
     Args:
-        ctx: Shared application context (running the interactive TUI surface).
-        room: The room server, as the session's contact cache holds it.
-        ask: Ask for the password even when one is remembered.
+        ctx: The shared application context (which runs the interactive TUI surface).
+        room: The room server, as the contact cache of the session holds it.
+        ask: Ask for the password also when one is remembered.
 
     Returns:
-        The last login's outcome, or ``None`` when the reader backed out before sending one.
+        The result of the last login, or ``None`` if the user backed out before MeshTerm
+        sent a login.
     """
     password = None if ask else ctx.rooms.password(room)
     tried = ""
@@ -201,7 +210,7 @@ async def join_room(ctx: AppContext, room: Contact, *, ask: bool = False) -> Roo
             if await _restore(ctx, room):
                 continue
             return last
-        except Exception as exc:  # noqa: BLE001 - every failure is said, none is fatal
+        except Exception as exc:  # noqa: BLE001 - the flow says each failure. None is fatal.
             await ctx.ui.dialog(
                 Text(f"The login to {room.name} failed: {exc}", style="err"),
                 [("OK", None)],
@@ -225,16 +234,17 @@ async def join_room(ctx: AppContext, room: Contact, *, ask: bool = False) -> Roo
 
 
 def _title(ctx: AppContext, room: Contact) -> str:
-    """The flow's dialog title: ``Join — Room``, or ``Log in — Room`` once joined."""
+    """The title of the dialogs of the flow: ``Join — Room``, or ``Log in — Room`` if joined."""
     return f"{'Log in' if ctx.rooms.joined(room) else 'Join'} — {room.name}"
 
 
 async def _log_in(ctx: AppContext, room: Contact, password: str, *, flood: bool) -> RoomLogin:
     """Send one login under a modal card that says how it went out and counts the wait.
 
-    Two lines, by design: which room on the first, and how the login went out with the
-    seconds it has been waiting on the second — so a long name never pushes the count off
-    the end of the box, and the count ticks in the same place every second.
+    The card has two lines, on purpose. The first line has the room. The second line has
+    how the login went out and the seconds that it has waited. Thus a long name never
+    pushes the count off the end of the box, and the count changes in the same place each
+    second.
     """
     if flood or room.route_hops is None:
         how = "by flood"
@@ -263,18 +273,18 @@ async def _log_in(ctx: AppContext, room: Contact, password: str, *, flood: bool)
 
 
 async def _outcome(ctx: AppContext, room: Contact, login: RoomLogin, password: str) -> object:
-    """Explain a login that didn't let us post, and ask what to try next.
+    """Explain a login that did not let us post, and ask what to try next.
 
-    Two buttons at most — the safe way out and the one next step the evidence points at —
-    so the row fits the handhelds' 45-cell dialog whole. A stale route is the first thing
-    to rule out (its silence is the commonest, and the cheapest to test: the same password
-    by flood); only once a flood has met silence is the password in question, and *Try
-    again…* then reopens the prompt with it filled in, so Enter resends it and typing
-    replaces it.
+    The dialog has a maximum of two buttons: the safe way out, and the one next step that
+    the evidence shows. Thus the row fits the 45-cell dialog of the handhelds whole. A stale
+    route is the first thing to rule out. Its silence is the most common, and it costs the
+    least to test: the same password by flood. The password is in question only after a
+    flood got no answer. Then *Try again…* opens the prompt again with the password filled
+    in, so Enter sends it again and typing replaces it.
 
     Returns:
-        The chosen button's value: one of the ``_RETRY*`` / ``_RESTORE`` sentinels, or
-        ``None`` to stop.
+        The value of the button that the user selected: one of the ``_RETRY*`` or
+        ``_RESTORE`` sentinels, or ``None`` to stop.
     """
     title = _title(ctx, room)
     if login.access is RoomAccess.READ_ONLY:
@@ -298,7 +308,7 @@ async def _outcome(ctx: AppContext, room: Contact, login: RoomLogin, password: s
         missing = bool(login.radio_error) and "contacts" in login.radio_error
         step = ("Add it & try again", _RESTORE) if missing else ("Try again", _RETRY)
     elif not login.flood:
-        # A learned route that worked before can fail silently; a flood goes round it.
+        # A learned route that worked before can fail silently. A flood goes around it.
         step = ("Try by flood", _RETRY_FLOOD)
     elif ctx.rooms.worked_before(room, password):
         step = ("Try again", _RETRY)
@@ -308,11 +318,12 @@ async def _outcome(ctx: AppContext, room: Contact, login: RoomLogin, password: s
 
 
 async def _restore(ctx: AppContext, room: Contact, *, asked: bool = False) -> bool:
-    """Put a room the radio has forgotten back in its contacts; ``True`` once it is there.
+    """Put a room that the radio forgot back in its contacts. Return ``True`` when it is there.
 
-    A login is addressed through the radio's own contact entry, so a room MeshTerm still
-    lists but the radio has dropped can't be logged in to until it is written back — the
-    same one write a direct message's "add it back" makes.
+    MeshTerm addresses a login through the own contact entry of the radio. Thus if MeshTerm
+    still lists a room but the radio dropped it, the user cannot log in to the room until
+    MeshTerm writes it back. This is the same one write that "add it back" makes for a
+    direct message.
     """
     if not asked:
         add = await ctx.ui.dialog(
@@ -333,25 +344,27 @@ async def _restore(ctx: AppContext, room: Contact, *, asked: bool = False) -> bo
 # --- the page --------------------------------------------------------------------------
 
 
-#: Width of the access lane (fits ``read-only``).
+#: The width of the access lane (it fits ``read-only``).
 _ACCESS_WIDTH = 9
-#: Width of the unread-badge lane (fits ``● 999``).
+#: The width of the lane of the unread badge (it fits ``● 999``).
 _BADGE_WIDTH = 5
-#: Width of the age lanes (right-aligned; fits ``now`` and ``59m``).
+#: The width of the age lanes (aligned to the right, and they fit ``now`` and ``59m``).
 _AGE_WIDTH = 5
-#: The room name lane's floor and ceiling: as wide as the names in it, within these.
+#: The minimum and the maximum width of the lane of the room name. The lane is as wide as
+#: the names in it, within these limits.
 _NAME_MIN = 8
 _NAME_MAX = 16
 
 
 async def manage_rooms(ctx: AppContext) -> int:
-    """Run the Rooms page until the reader backs out.
+    """Run the Rooms page until the user backs out.
 
     Args:
-        ctx: Shared application context (running the interactive TUI surface).
+        ctx: The shared application context (which runs the interactive TUI surface).
 
     Returns:
-        How many logins the visit accepted — the run log's record, not anything shown.
+        The number of logins that the rooms accepted in the visit. This is for the run log.
+        MeshTerm does not show it.
     """
     joins = 0
 
@@ -372,11 +385,12 @@ async def manage_rooms(ctx: AppContext) -> int:
 
 
 def _page_items(ctx: AppContext, rooms: list[Contact]) -> tuple[str, list]:
-    """The page's title and rows: the lane names, then Joined, then Not joined."""
+    """The title and the rows of the page: the lane names, then Joined, then Not joined."""
     joined = sorted((r for r in rooms if ctx.rooms.joined(r)), key=lambda r: r.name.casefold())
     others = sorted(
         (r for r in rooms if not ctx.rooms.joined(r)),
-        # Heard most recently first: the rooms in reach lead the ones long gone.
+        # The room that was heard most recently is first. Thus the rooms in reach are before
+        # the rooms that went away long ago.
         key=lambda r: (r.last_seen is None, -(r.last_seen.timestamp() if r.last_seen else 0)),
     )
     peers = [_peer(r) for r in rooms]
@@ -400,12 +414,12 @@ def _page_items(ctx: AppContext, rooms: list[Contact]) -> tuple[str, list]:
 
 
 def _peer(room: Contact) -> str:
-    """The room's key as its conversation stores it."""
+    """The key of the room as its conversation stores it."""
     return (room.key_prefix or room.public_key[:12] or "").lower()
 
 
 def _header(marker_w: int, name_w: int, width: int) -> str:
-    """Column headings over the page's lanes."""
+    """The column headings above the lanes of the page."""
     return column_header(
         [
             Lane("ROOM", name_w + 2),
@@ -420,7 +434,7 @@ def _header(marker_w: int, name_w: int, width: int) -> str:
 
 
 def _row(ctx: AppContext, room: Contact, lasts: dict, marker_w: int, name_w: int) -> Choice:
-    """One room as fixed lanes: mark, name, access, unread, last post, and last heard."""
+    """One room as fixed lanes: mark, name, access, unread, last post, and last heard time."""
 
     def title() -> Text:
         conversation = Conversation(label=room.name, is_channel=False, contact=room)
@@ -452,7 +466,7 @@ def _row(ctx: AppContext, room: Contact, lasts: dict, marker_w: int, name_w: int
 
 
 async def _room_detail(ctx: AppContext, key: str) -> int:
-    """One room's page: its vital signs over its actions; returns logins accepted."""
+    """The page of one room: its vital signs above its actions. Return the logins accepted."""
     joins = 0
 
     async def current() -> Contact | None:
@@ -460,7 +474,7 @@ async def _room_detail(ctx: AppContext, key: str) -> int:
         return next((c for c in contacts if (c.public_key or c.key_prefix) == key), None)
 
     room = await current()
-    if room is None:  # pragma: no cover - the row came from this very cache
+    if room is None:  # pragma: no cover - the row came from this cache
         return 0
     menu = SelectScreen(
         f"Room — {room.name}",
@@ -492,7 +506,7 @@ async def _room_detail(ctx: AppContext, key: str) -> int:
 
 
 def _summary(ctx: AppContext, room: Contact) -> str:
-    """One line of vital signs, shed from the right until it fits the platform."""
+    """One line of vital signs. MeshTerm removes atoms from the right until it fits the platform."""
     joined = ctx.rooms.joined(room)
     access = ctx.rooms.access(room) if joined else None
     parts = [access.value if access else ("joined" if joined else "not joined")]
@@ -508,7 +522,7 @@ def _summary(ctx: AppContext, room: Contact) -> str:
         parts.append(f"{hops}-hop route" if hops else "a neighbour")
     posts = len(ctx.repo.recent_chat_messages(is_channel=False, peer=_peer(room), posts_only=True))
     parts.append(f"{posts} post{'' if posts == 1 else 's'} stored" if posts else "no posts stored")
-    # The page floats as a box, its border and padding eight cells inside the screen.
+    # The page floats as a box. Its border and padding take eight cells of the screen.
     width = get_platform().readable_cols - 8
     while len(parts) > 1 and cell_len(" · ".join(parts)) > width:
         parts.pop()
@@ -516,7 +530,7 @@ def _summary(ctx: AppContext, room: Contact) -> str:
 
 
 def _detail_items(ctx: AppContext, room: Contact) -> list:
-    """The detail page's action rows, for a joined room or one not joined yet."""
+    """The action rows of the detail page, for a joined room or a room that is not joined."""
     joined = ctx.rooms.joined(room)
     peer = _peer(room)
     stored = bool(
@@ -572,7 +586,10 @@ def _detail_items(ctx: AppContext, room: Contact) -> list:
 
 
 async def _forget(ctx: AppContext, room: Contact) -> None:
-    """Confirm, then leave a room as far as MeshTerm can (see ``RoomService.forget``)."""
+    """Ask for a confirmation, then leave a room as far as MeshTerm can.
+
+    Refer to ``RoomService.forget``.
+    """
     if await ctx.ui.dialog(
         f"Forget {room.name}? MeshTerm stops logging in to it and forgets its password. "
         "The room may go on sending your radio new posts until it restarts; the posts "
@@ -586,7 +603,10 @@ async def _forget(ctx: AppContext, room: Contact) -> None:
 
 
 async def _delete_posts(ctx: AppContext, room: Contact) -> None:
-    """Confirm, then delete the room's stored posts (irreversible: the reserved red)."""
+    """Ask for a confirmation, then delete the stored posts of the room.
+
+    This cannot be undone, so the dialog has the reserved red.
+    """
     if await ctx.ui.dialog(
         f"Delete the posts stored from {room.name}? They are removed from this machine, "
         "and the room won't send them again.",

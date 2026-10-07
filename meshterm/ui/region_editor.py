@@ -1,46 +1,50 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The region editor: which floods a repeater relays, region by region, over the mesh.
+"""The region editor: the floods that a repeater relays, region by region, over the mesh.
 
-Reached from a repeater-admin session's *Regions* row (see :mod:`meshterm.ui.repeater_admin`)
-once logged in. A repeater keeps a small table of regions in a tree under the wildcard
-``*`` and relays a scoped flood only when that flood's region is one it allows; the
-wildcard's own flag says whether it relays plain, unscoped floods at all. This page reads
-the table over the remote CLI (``region``, parsed by
-:func:`~meshterm.core.region_admin.parse_region_dump`), draws it as a tree — region, whether
-floods are allowed, and a note for the unscoped wildcard, the home region and the default
-scope — and edits it one command at a time.
+The user reaches it from the *Regions* row of a repeater-admin session, after the log in
+(refer to :mod:`meshterm.ui.repeater_admin`). A repeater keeps a small table of regions in
+a tree under the wildcard ``*``. It relays a scoped flood only when the region of that flood
+is a region that the repeater allows. The flag of the wildcard says whether the repeater
+relays plain, unscoped floods at all. This page reads the table over the remote CLI
+(``region``, parsed by :func:`~meshterm.core.region_admin.parse_region_dump`). It draws the
+table as a tree with these items: the region, whether floods are allowed, and a note for the
+unscoped wildcard, the home region, and the default scope. The user edits the table one
+command at a time.
 
-**Edits apply at once; saving is the commit.** The settings editor next door stages values
-and sends them on Apply, because a staged value costs nothing and a sent one is final. A
-region edit is the other way round: the repeater itself is the staging area. Every command
-changes the table in its RAM and nothing reaches flash until ``region save``, so a reboot
-undoes whatever was not saved. Staging a second time on this side would only add a second
-list of pending changes that could disagree with the first — and region edits depend on
-each other (a region must exist before it can be allowed, emptied before it is removed),
-so a staged batch would have to replay the firmware's rules to know it would work. So each
-action sends its one command and the tree redraws from the reply
-(:meth:`~meshterm.core.region_admin.RegionTable.after`), the title counts the edits not yet
-saved, and the page ends on the same Apply/discard pair the editors use
-(:func:`~meshterm.ui.menus.exit_rows`) — worded for what it is here: *Save n changes to the
-repeater* over *Back — a reboot undoes them*. Leaving with edits unsaved asks first.
-``region default`` saves the whole table itself on firmware that has it
-(:func:`~meshterm.core.region_admin.saves_table`), so the count drops to zero there too.
+**Edits apply at once, and the save is the commit.** The settings editor next to this one
+stages values and sends them at Apply. A staged value costs nothing, and a value that
+MeshTerm sent is final. A region edit is the opposite. The repeater itself is the staging
+area. Each command changes the table in the RAM of the repeater, and nothing goes to flash
+until ``region save``. Thus a reboot undoes each edit that was not saved. A second staging
+on this side would only add a second list of pending changes, and the two lists could
+disagree. Also, region edits depend on each other. A region must exist before the user can
+allow it, and it must be empty before the user can remove it. Thus a staged batch would
+have to repeat the rules of the firmware to know that it works. For these reasons each
+action sends its one command, and the tree is drawn again from the reply
+(:meth:`~meshterm.core.region_admin.RegionTable.after`). The title counts the edits that are
+not yet saved. The page ends with the same Apply/discard pair that the editors use
+(:func:`~meshterm.ui.menus.exit_rows`), with words that fit this case: *Save n changes to
+the repeater* over *Back — a reboot undoes them*. If the user leaves with unsaved edits, the
+page asks first. On firmware that has it, ``region default`` saves the whole table itself
+(:func:`~meshterm.core.region_admin.saves_table`), so the count also goes to zero there.
 
-**A dump the reply cap cut is said to be cut.** Every CLI reply fits in 160 bytes and a
-real tree does not, so a dump near the cap is read as possibly cut, its half-line dropped,
-and the flat ``region list allowed``/``denied`` read to recover the rest — shown under
-*Beyond the cut*, their place in the tree unknown, and still editable by name. A list near
-its own cap may have skipped a name, and the page says so rather than claiming a complete
-table.
+**The page says when the reply cap cut a dump.** Each CLI reply fits in 160 bytes, and a real
+tree does not fit. Thus MeshTerm reads a dump that is near the cap as possibly cut. It
+removes the half line at the end. Then it reads the flat lists ``region list allowed`` and
+``region list denied`` to recover the rest. The page shows these regions under *Beyond the
+cut*. Their place in the tree is not known, and the user can still edit them by name. A
+list that is near its own cap may have skipped a name. The page says this, and it does not
+claim a complete table.
 
-Whatever the table says the repeater relays is learned into the region store
-(:meth:`~meshterm.core.region_store.RegionStore.learn_carried`), so the node page and scope
-resolution know it without asking again — replacing its previous answer only when the table
-is known whole, and only adding to it when it may not be.
+MeshTerm learns what the table says that the repeater relays into the region store
+(:meth:`~meshterm.core.region_store.RegionStore.learn_carried`). Thus the node page and the
+scope resolution know it without a new request. The new table replaces the previous answer
+only when the table is known to be whole. When the table can be incomplete, the new table
+only adds to the previous answer.
 
-Every command is one paced transmission the reader asked for: the read is two to four
-commands under an abortable progress dialog with the trace cooldown between them, and each
-edit is one command under the busy overlay. Nothing polls.
+Each command is one paced transmission that the user asked for. The read is two to four
+commands, under a progress dialog that the user can abort, with the trace cooldown between
+the commands. Each edit is one command under the busy overlay. Nothing polls.
 """
 
 from __future__ import annotations
@@ -90,15 +94,16 @@ if TYPE_CHECKING:
     from ..context import AppContext
     from ..core.connection import Device
 
-#: Seconds to wait for one reply — the admin page's own patience (multi-hop takes seconds).
+#: The seconds to wait for one reply. This is the same wait as on the admin page (a reply
+#: over many hops takes seconds).
 _REPLY_TIMEOUT_S = 10.0
 
-#: The page's key hint. ``Del remove`` is spliced in on the rows it would act on.
+#: The key hint of the page. The code adds ``Del remove`` on the rows where it acts.
 REGION_HINT = "↑↓ move · type to filter · Enter open · ^R read · Esc back"
 REMOVE_HINT = "Del remove"
 
-# Action sentinels. Region rows carry a :class:`RegionPick` instead, so no region name —
-# which may hold underscores — can ever be mistaken for one of these.
+# The action sentinels. Region rows have a :class:`RegionPick` instead. Thus the code can
+# never take a region name (which can have underscores) for one of these.
 _ADD = "__add__"
 _READ = "__read__"
 _SAVE = "__save__"
@@ -107,46 +112,46 @@ _BACK = "__back__"
 
 @dataclass(frozen=True, slots=True)
 class RegionPick:
-    """A region row's value: the region it names.
+    """The value of a region row: the region that the row names.
 
     Attributes:
-        name: The region's name, ``*`` for the wildcard row.
+        name: The name of the region. It is ``*`` for the wildcard row.
     """
 
     name: str
 
 
 class RegionMenu(SelectScreen):
-    """The region editor's list, plus ``^R`` to read the table again.
+    """The list of the region editor, with ``^R`` to read the table again.
 
-    A full-screen page, not a popup: the reader works in it for a while, it is the tool's
-    own view of one repeater, and every question it asks (a region's actions, a new name, a
-    confirm) floats over it. ``^R`` is the admin page's *read again* chord for the same
-    reason it is there — the mesh is asked the same question again — and here it re-reads
-    the whole table, which is the only read there is.
+    This is a full-screen page and not a dialog. The user works in it for some time, and it
+    is the own view of the tool for one repeater. Each question that it asks (the actions of
+    a region, a new name, a confirm) floats over it. ``^R`` is the *read again* chord of
+    the admin page, and it is here for the same reason: the mesh gets the same question
+    again. Here it reads the whole table again, which is the only read that exists.
 
-    On the F-key lane ``Read`` takes F3, with ``Remove`` as its Shift half, lit only on a
-    region the firmware would let go (no sub-regions, never the wildcard) — the same pair of
-    this-row verbs the admin page puts on that slot.
+    On the F-key lane, ``Read`` is on F3, and ``Remove`` is its Shift half. ``Remove`` is lit
+    only on a region that the firmware lets go (no sub-regions, and never the wildcard). The
+    admin page puts the same pair of verbs for the row on that slot.
     """
 
     floating = False
 
     def __init__(self, title: str, items: list, **kwargs: Any) -> None:
-        """Build the page; rows end at the edge, as every editor lane does."""
+        """Build the page. The rows end at the edge, as each editor lane does."""
         kwargs.setdefault("hscroll", False)
         kwargs.setdefault("footer_hint", REGION_HINT)
         kwargs.setdefault("delete_hint", REMOVE_HINT)
         super().__init__(title, items, **kwargs)
 
     def _removable(self) -> bool:
-        """Whether the highlighted row is a region Del would offer to remove."""
+        """Whether the highlighted row is a region that Del offers to remove."""
         current = self._current_choice()
         return current is not None and current.deletable
 
     @property
     def picocalc_lyra_lane(self):
-        """The list's lane with ``Read`` on F3 and ``Remove`` behind it."""
+        """The lane of the list, with ``Read`` on F3 and ``Remove`` behind it."""
         from .tui.fkeys import FPair
 
         lane = list(super().picocalc_lyra_lane)
@@ -160,7 +165,7 @@ class RegionMenu(SelectScreen):
         return lane
 
     def handle(self, action: str, data: str = "") -> None:
-        """Read the table again on ``^R``, or behave as any select list does."""
+        """Read the table again on ``^R``. Other keys act as in each select list."""
         if action == "retry":
             self.resolve(_READ)
             return
@@ -171,18 +176,22 @@ class RegionMenu(SelectScreen):
 
 
 def node_id_of(node: Contact) -> str:
-    """The 12-hex id the region store files a repeater under."""
+    """The 12-hex id under which the region store files a repeater."""
     return (node.public_key or node.key_prefix or "").lower().removeprefix("0x")[:12]
 
 
 def region_items(node: Contact, table: RegionTable, unsaved: int) -> tuple[str, list]:
-    """The editor's title and rows for one table and its count of unsaved edits.
+    """The title and the rows of the editor for one table and its count of unsaved edits.
 
-    The tree first — the wildcard, then every region indented one step per level — in the
-    same REGION / FLOOD / NOTE lanes the other editors draw their settings in, headed by a
-    pinned column header. Then, when the dump was cut, a note saying where, and the regions
-    recovered from the flat lists under their own heading. Then the page's actions, and
-    last the save/leave pair while anything is unsaved.
+    The order of the page is:
+
+    1. The tree: the wildcard, then each region with one indent step for each level. The
+       lanes are REGION, FLOOD, and NOTE, as the lanes in which the other editors draw their
+       settings. A pinned column header is above them.
+    2. If the dump was cut, a note that says where. Then the regions that the code recovered
+       from the flat lists, under their own heading.
+    3. The actions of the page.
+    4. Last, the save and leave pair, while anything is unsaved.
     """
     placed = [row for row in table.rows if row.placed]
     unplaced = [row for row in table.rows if not row.placed]
@@ -225,9 +234,10 @@ def region_items(node: Contact, table: RegionTable, unsaved: int) -> tuple[str, 
         ("↻", "Read regions", "Ask the repeater for its table again", _READ),
     ]
     lane = icon_lane(icon for icon, _, _, _ in actions)
-    # A blank line between the table and the page's commands: two lists, not one. The tree's
-    # first row is the wildcard, whose name ``*`` reads as a leading mark to anything that
-    # measures icon columns — it is data, and it answers to no column the actions keep.
+    # A blank line between the table and the commands of the page, because they are two lists
+    # and not one. The first row of the tree is the wildcard. Code that measures icon
+    # columns reads its name ``*`` as a leading mark. But the name is data, and it does not
+    # belong to a column that the actions keep.
     items.append(Separator(" "))
     items.append(section_heading("Actions"))
     items.extend(
@@ -251,7 +261,7 @@ def _region_choice(
     label_w: int,
     value_w: int,
 ) -> Choice:
-    """One region row; Del removes it only where the firmware would let it go."""
+    """One region row. Del removes it only where the firmware lets it go."""
     return Choice(
         title=lane_row(label, value, note, label_w, value_w),
         value=RegionPick(row.name),
@@ -260,22 +270,22 @@ def _region_choice(
 
 
 def _row_label(row: RegionRow) -> str:
-    """The REGION lane: the name, indented two cells per level below the top."""
+    """The REGION lane: the name, with an indent of two cells for each level below the top."""
     return "  " * max(0, row.depth - 1) + row.name if row.placed else row.name
 
 
 def _flood_text(row: RegionRow) -> Text:
-    """The FLOOD lane: the firmware's own two words (``allowf``/``denyf``)."""
+    """The FLOOD lane: the two words of the firmware itself (``allowf`` and ``denyf``)."""
     return Text("allowed", style="ok") if row.flood else Text("denied", style="muted")
 
 
 def _row_note(row: RegionRow, table: RegionTable) -> str:
-    """The NOTE lane: what the row *is* beyond its flag — unscoped, home, default.
+    """The NOTE lane: what the row is, besides its flag: unscoped, home, or default.
 
-    The wildcard's ``^`` is not a home: the firmware parks the home mark on ``*`` when no
-    region has been made home, so ``*^`` reads *no home region set*, and the note says so
-    (``unscoped · no home``, short enough to stay whole in the 72-column lane) rather than
-    leaving the mark's one meaning there unsaid.
+    The ``^`` of the wildcard is not a home. When no region is the home, the firmware puts the
+    home mark on ``*``. Thus ``*^`` means *no home region set*, and the note says this
+    (``unscoped · no home``, which is short enough to stay whole in the lane of 72 columns).
+    The note does not leave the one meaning of the mark unsaid.
     """
     if row.wildcard:
         return "unscoped · no home" if row.home else "unscoped floods"
@@ -288,12 +298,12 @@ def _row_note(row: RegionRow, table: RegionTable) -> str:
 
 
 def _save_rows(unsaved: int) -> list:
-    """The editors' Apply/discard pair, worded for a table that is live but not saved.
+    """The Apply/discard pair of the editors, with words for a table that is live but not saved.
 
-    Same shape as :func:`~meshterm.ui.menus.exit_rows` — nothing while clean, then a blank
-    line and the pair — with its words changed, because here nothing is discarded by
-    leaving: the edits are already live on the repeater, and it is the next reboot that
-    undoes them.
+    The shape is the same as :func:`~meshterm.ui.menus.exit_rows`: nothing while the page is
+    clean, then a blank line and the pair. The words are different, because here the user
+    does not discard anything when the user leaves. The edits are already live on the
+    repeater, and the next reboot undoes them.
     """
     if not unsaved:
         return []
@@ -312,16 +322,17 @@ def _save_rows(unsaved: int) -> list:
 
 
 async def open_region_editor(ctx: AppContext, device: Device, node: Contact) -> None:
-    """Read ``node``'s region table and run the editor over it until the reader leaves.
+    """Read the region table of ``node`` and run the editor over it until the user leaves.
 
-    The node must already be logged in (the admin session's caller did that). A table that
-    cannot be read at all — no reply, or firmware without the ``region`` command — is said
-    in a popup and the page never opens: there would be nothing on it to edit.
+    The user must already be logged in to the node (the caller of the admin session did
+    that). If MeshTerm cannot read the table at all (no reply, or firmware without the
+    ``region`` command), a dialog says so, and the page never opens, because there is
+    nothing on it to edit.
 
     Args:
         ctx: The shared application context (interactive TUI).
         device: The connected companion.
-        node: The repeater being administered.
+        node: The repeater that the user administers.
     """
     from .tui import CANCEL
 
@@ -358,16 +369,21 @@ async def open_region_editor(ctx: AppContext, device: Device, node: Contact) -> 
 
 
 async def read_table(ctx: AppContext, device: Device, node: Contact) -> RegionTable | None:
-    """Read the whole table, paced, under an abortable progress dialog.
+    """Read the whole table, paced, under a progress dialog that the user can abort.
 
-    ``region`` for the tree, then ``region default`` for the default scope (firmware 1.15+;
-    older firmware's refusal just leaves it unknown), then — only when the tree came back
-    cut — the two flat lists that recover what the cut hid. What was read is learned into
-    the region store.
+    The function sends these commands in order:
+
+    1. ``region`` for the tree.
+    2. ``region default`` for the default scope (firmware 1.15 and later). Older firmware
+       refuses it, and then the default scope stays unknown.
+    3. The two flat lists that recover what the cut hid. The function sends them only when
+       the tree came back cut.
+
+    MeshTerm learns what the function read into the region store.
 
     Returns:
-        The table, or ``None`` when the dump never came (no reply, the firmware has no
-        ``region`` command, or the reader aborted) — after saying which.
+        The table. It returns ``None`` when the dump never came (no reply, the firmware has
+        no ``region`` command, or the user aborted), after it says which case it was.
     """
     from .repeater_admin import _run_under_dialog
 
@@ -387,7 +403,7 @@ async def read_table(ctx: AppContext, device: Device, node: Contact) -> RegionTa
             replies[command] = reply
             if command == DUMP_COMMAND:
                 if reply is None or region_refused(reply):
-                    return  # nothing else is worth asking without the tree
+                    return  # without the tree, no other command has a use
                 if parse_region_dump(reply).cut:
                     plan += [LIST_ALLOWED, LIST_DENIED]
             i += 1
@@ -424,11 +440,11 @@ async def read_table(ctx: AppContext, device: Device, node: Contact) -> RegionTa
 
 
 def learn_table(ctx: AppContext, node: Contact, table: RegionTable) -> None:
-    """Tell the region store what this repeater relays, as far as the table can say.
+    """Tell the region store what this repeater relays, as far as the table can show.
 
-    A table known whole replaces the repeater's previous answer, exactly as the anonymous
-    regions request would; one that may be missing names only adds what it shows, so a cut
-    never makes the store forget a region the repeater still carries.
+    A table that is known to be whole replaces the previous answer of the repeater, as the
+    anonymous regions request does. A table that can miss names only adds what it shows.
+    Thus a cut never makes the store forget a region that the repeater still carries.
     """
     store = getattr(ctx, "region_store", None)
     node_id = node_id_of(node)
@@ -450,15 +466,16 @@ async def _edit(
     unsaved: int,
     command: str,
 ) -> tuple[RegionTable, int]:
-    """Send one region command and fold an accepted reply into the table.
+    """Send one region command and put an accepted reply into the table.
 
-    A refused command shows the repeater's own words; a silent one says the change may
-    still have landed and points at ``^R``, since only a read can tell. An accepted edit
-    counts as unsaved unless it saved the table itself (``region save``, and ``region
-    default`` on firmware that auto-saves it).
+    If the repeater refuses the command, the dialog shows the words of the repeater. If the
+    repeater does not reply, the dialog says that the change may still have happened, and it
+    refers to ``^R``, because only a read can tell. An accepted edit counts as unsaved,
+    except when it saved the table itself (``region save``, and ``region default`` on
+    firmware that saves it automatically).
 
     Returns:
-        The table and the unsaved count, after the command.
+        The table and the count of unsaved edits, after the command.
     """
     async with ctx.ui.busy_overlay():
         reply = await device.send_remote_command(node, command, timeout=_REPLY_TIMEOUT_S)
@@ -491,11 +508,12 @@ async def _region_actions(
     unsaved: int,
     name: str,
 ) -> tuple[RegionTable, int]:
-    """What can be done to one region — a question asked in a popup, then done.
+    """The actions for one region: a question in a dialog, then the action.
 
-    Every row is one command except *Add region under it…*, which asks a name, and
-    *Remove…*, which asks first. Denying the wildcard asks too: it stops every plain flood
-    at this repeater, which is most of the mesh's traffic.
+    Each row is one command, except *Add region under it…*, which asks for a name, and
+    *Remove…*, which asks for a confirm first. The code also asks before it denies the
+    wildcard. A deny of the wildcard stops each plain flood at this repeater, which is most
+    of the traffic of the mesh.
     """
     row = table.get(name)
     if row is None:
@@ -560,7 +578,7 @@ async def _region_actions(
 
 
 def _state_line(row: RegionRow, table: RegionTable) -> str:
-    """The popup's one-line summary of a region: its flag, its place, its notes."""
+    """The one-line summary of a region for the dialog: its flag, its place, and its notes."""
     atoms = ["floods allowed" if row.flood else "floods denied"]
     if row.wildcard:
         atoms.append("the unscoped case")
@@ -582,12 +600,13 @@ async def _add_region(
     unsaved: int,
     parent: str | None,
 ) -> tuple[RegionTable, int]:
-    """Add a region: where (unless the row it was asked from already said), then its name.
+    """Add a region: where (unless the row from which the user started already said), then its name.
 
-    Two steps through :func:`~meshterm.ui.menus.run_steps`, so Esc on the name goes back to
-    the parent picker with its answer highlighted. The name is checked against the
-    firmware's own rules and against the table: ``region put`` of a name already there
-    *moves* that region, which is never what *Add* means.
+    The function has two steps through :func:`~meshterm.ui.menus.run_steps`. Thus Esc on the
+    name goes back to the parent picker, with its answer highlighted. The function checks
+    the name against the rules of the firmware and against the table. A ``region put`` of a
+    name that is already in the table *moves* that region, and this is never what *Add*
+    means.
     """
     taken = [row.name for row in table.rows]
 
@@ -609,8 +628,8 @@ async def _add_region(
             floating=True,
         )
 
-    # The name is the last step either way; where it sits in the answers is the only
-    # difference between being asked from a row (one step) and from Actions (two).
+    # The name is the last step in both cases. The only difference between a start from a row
+    # (one step) and a start from Actions (two steps) is the place of the name in the answers.
     slot = 0 if parent is not None else 1
 
     async def ask_name(values: list) -> str | None:
@@ -641,7 +660,7 @@ async def _add_region(
     name = answers[slot]
     try:
         bare = validate_new_name(name, taken)
-    except RegionNameError:  # pragma: no cover - the prompt's validator already refused it
+    except RegionNameError:  # pragma: no cover - the validator of the prompt already refused it
         return table, unsaved
     return await _edit(ctx, device, node, table, unsaved, put_command(bare, where))
 
@@ -654,7 +673,7 @@ async def _remove(
     unsaved: int,
     name: str,
 ) -> tuple[RegionTable, int]:
-    """Remove one region behind the red single-record confirm."""
+    """Remove one region, after the red confirm for a single record."""
     from .tui import CANCEL
 
     row = table.get(name)
@@ -674,7 +693,7 @@ async def _remove(
 
 
 async def _confirm_deny_unscoped(ctx: AppContext, node: Contact) -> bool:
-    """Ask before a repeater stops relaying plain floods — most of the mesh's traffic."""
+    """Ask before a repeater stops relaying plain floods, which are most of the mesh traffic."""
     choice = await ctx.ui.dialog(
         f"Stop {node.name} relaying unscoped floods? Every plain flood — adverts and most "
         "messages today — would stop here, and only scoped floods would pass.",
@@ -687,7 +706,7 @@ async def _confirm_deny_unscoped(ctx: AppContext, node: Contact) -> bool:
 
 
 async def _confirm_leave(ctx: AppContext, node: Contact, unsaved: int) -> bool:
-    """Ask before leaving edits live but unsaved; ``True`` means leave anyway."""
+    """Ask before the user leaves edits that are live but not saved. ``True`` means leave."""
     noun = "change is" if unsaved == 1 else "changes are"
     choice = await ctx.ui.dialog(
         f"{unsaved} {noun} live on {node.name} but not saved — its next reboot undoes "

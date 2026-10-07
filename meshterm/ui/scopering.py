@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The scope ring: the views a screen of recorded traffic can narrow to, and their words.
+"""The scope ring: the scope views that a screen of stored traffic can narrow to, and their words.
 
-A flood is either unscoped or scoped into a region, and a screen that counts floods can
-show all of them or only one scope's. The dashboard and the Time Machine's mesh page both
-cycle those views on ``s`` (F2/F3 on the PicoCalc), so the ring's order, the title atom a
-view is named by, and the chip that names the next one are defined once, here.
+A flood is unscoped or it is scoped to a region. A screen that counts floods can show all
+of them or only the floods of one scope. The dashboard and the mesh page of the Time
+Machine both cycle those scope views on ``s`` (F2/F3 on the PicoCalc). Thus the order of
+the ring, the title atom that names a scope view, and the chip that names the next scope
+view are defined one time, here.
 
-A view is a :data:`ScopeKey` — ``("unscoped",)``, ``("region", name)`` or ``("unknown",)``
-— and ``None`` is the unnarrowed view, every packet heard. A direct frame has no scope, so
-it belongs to no view but that one.
+A scope view is a :data:`ScopeKey`: ``("unscoped",)``, ``("region", name)``, or
+``("unknown",)``. ``None`` is the scope view that is not narrowed: each packet heard. A
+direct packet has no scope, so it belongs only to that scope view.
 """
 
 from __future__ import annotations
@@ -23,12 +24,13 @@ ScopeKey = tuple[str, ...]
 
 
 def scope_key(scope: Scope | None) -> ScopeKey | None:
-    """The view a frame counts in, or ``None`` for one with no scope to state.
+    """The scope view in which a packet counts, or ``None`` for a packet with no scope to state.
 
-    A direct frame has none, and neither does one stored before its route type was kept;
-    both are counted only in the unnarrowed view. Every scoped frame no known region name
-    reproduces shares one ``unknown`` view: its code changes with each packet, so it
-    cannot tell two unnamed regions apart.
+    A direct packet has no scope. A packet that MeshTerm stored before it kept the route
+    type has no scope, too. MeshTerm counts both only in the scope view that is not
+    narrowed. A scoped packet that no known region name reproduces goes in one ``unknown``
+    scope view. Its code changes with each packet, so the code cannot show that two
+    unnamed regions are different.
     """
     if scope is None:
         return None
@@ -40,10 +42,11 @@ def scope_key(scope: Scope | None) -> ScopeKey | None:
 
 
 def _ring_order(key: ScopeKey) -> tuple[int, str]:
-    """Where a view sits in the cycle: unscoped, the regions A–Z, then unknown.
+    """The place of a scope view in the cycle: unscoped, the regions A to Z, then unknown.
 
-    Alphabetical rather than busiest-first so the ring holds still while the counts move:
-    a cycle whose order shifted under the reader's thumb would skip or repeat a view.
+    The order is alphabetical, not busiest first, so that the ring does not move while the
+    counts change. If the order of the cycle changed under the thumb of the user, the cycle
+    would skip a scope view or repeat one.
     """
     if key[0] == "unscoped":
         return (0, "")
@@ -53,11 +56,11 @@ def _ring_order(key: ScopeKey) -> tuple[int, str]:
 
 
 def ring(heard: Iterable[ScopeKey], current: ScopeKey | None) -> list[ScopeKey | None]:
-    """Every view on offer: all, then each scope heard, in cycle order.
+    """All the scope views on offer: all packets, then each scope heard, in cycle order.
 
-    The view on screen stays in the ring even once nothing in it is left to count (its
-    last frame aged out, or a narrower window holds none), so the cycle never loses the
-    reader's place; it simply leaves on the next press.
+    The scope view on the screen stays in the ring when nothing is left in it to count (its
+    last packet aged out, or a narrower time window has none). Thus the cycle does not
+    lose the place of the user. The scope view leaves the ring on the next key press.
     """
     keys = set(heard)
     if current is not None:
@@ -66,19 +69,19 @@ def ring(heard: Iterable[ScopeKey], current: ScopeKey | None) -> list[ScopeKey |
 
 
 def step(views: list[ScopeKey | None], current: ScopeKey | None) -> ScopeKey | None:
-    """The view after ``current``.
+    """The scope view after ``current``.
 
-    The cycle wraps: ``s`` is forward-only, with no reverse key of its own, so a ring
-    that stopped at its end would strand the reader there.
+    The cycle wraps. The ``s`` key goes only forward and has no reverse key. If the ring
+    stopped at its end, the user could not leave the end.
     """
     return views[(views.index(current) + 1) % len(views)]
 
 
 def scope_atom(key: ScopeKey, *, bare: bool = False) -> str:
-    """A view's title atom: ``scope yul``, ``unscoped`` or ``unknown scope``.
+    """The title atom of a scope view: ``scope yul``, ``unscoped``, or ``unknown scope``.
 
-    ``bare`` drops the ``scope`` lead-in before a region's name, for a title too narrow
-    to spend the word on (the lexicon's region is shown bare anyway).
+    ``bare`` removes the ``scope`` word before the name of a region. It is for a title
+    that is too narrow for the word. (The lexicon already shows a region without a prefix.)
     """
     if key[0] == "region":
         return key[1] if bare else f"scope {key[1]}"
@@ -86,10 +89,11 @@ def scope_atom(key: ScopeKey, *, bare: bool = False) -> str:
 
 
 def scope_chip(key: ScopeKey | None) -> str:
-    """The F-lane chip naming the view a press goes *to*: the word alone, in all 6 cells.
+    """The F-key lane chip that names the scope view that a key press goes *to*.
 
-    No ``▸`` lead-in (JP, 2026-10-04): it took two of the chip's six cells to say what the
-    chip's place on the lane already says, and cut a region's name to four.
+    The chip has the word alone, in all 6 cells. It has no ``▸`` lead-in (JP, 2026-10-04):
+    the lead-in took two of the six cells of the chip to say what the place of the chip on
+    the lane already says, and it cut the name of a region to four cells.
     """
     word = "all" if key is None else key[-1]
     return fit_cells(word, 6).rstrip()

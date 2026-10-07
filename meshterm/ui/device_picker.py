@@ -1,30 +1,38 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Interactive companion-device picker: the startup splash shown before the menu.
+"""Interactive picker for the companion device: the startup splash before the menu.
 
-Shown once at the start of the interactive menu when no port was given explicitly. Unlike the
-in-menu prompts, it is drawn as a chromeless splash — the MeshTerm wordmark centered above a
-content-sized box, with no header/footer status bars. It lists the discovered devices in
-aligned columns — name, a TYPE glyph (wired serial vs Bluetooth), a HARDWARE column (the
-confirmed device's firmware model, else the USB vendor), and the connection target last —
-tags the ones already confirmed as MeshCore companions, marks the remembered "last known
-good" one, and preselects it as the default. No field is ever shortened to fit: a row wider
-than the box runs off its edge, and ←→ slide the highlighted row to read the rest.
+The picker shows one time, at the start of the interactive menu, when no port was given
+explicitly. It is different from the prompts in the menu: it is drawn as a chromeless
+splash. That is, the MeshTerm wordmark is centred above a box that has the size of its
+content, and there are no status bars in a header or a footer.
 
-Confirmed companions are sorted to the top, most-recently-used first, and shown by the mesh
-node name we learned when we last talked to them (in white, so they stand out from ports we've
-merely detected). Everything else follows in discovery order.
+The splash lists the discovered devices in aligned columns: a TYPE glyph (serial,
+Bluetooth, network, or SPI), the name, a HARDWARE column (the firmware model of the
+confirmed device, else the USB vendor), and the connection target last. It tags the
+devices that are already confirmed as MeshCore companions. It marks the remembered "last
+known good" device, and it preselects that device as the default. The splash never
+shortens a field to make it fit: a row that is wider than the box goes past its edge, and
+the ←→ keys pan all the rows together to show the rest.
 
-Selecting a device runs an immediate smoke test (via the ``verify`` callback): a genuine
-MeshCore companion is remembered — forever — as confirmed and becomes the session's active
-device; anything else sends the user back to the list to choose another.
+Confirmed companions are at the top, the most recently used first. Each one shows the mesh
+node name that MeshTerm learned when it last talked to the companion. This name is white,
+so that it is different from the ports that MeshTerm only detected. The other devices
+follow: first the devices that look like companions, then the rest, each group in
+discovery order.
 
-A machine with things permanently plugged into it that are not companions — a debug probe, a
-programmer, a serial adapter — shows them here every single time, in front of the one device
-the user actually wants. So a row can be **hidden**: ``h`` drops the highlighted device from
-this list and remembers that (see :meth:`~meshterm.core.device_store.DeviceStore.hide`), and
-``⇧H`` brings every hidden one back. It is a *listing* choice and nothing more: a hidden
-device is still remembered, still reachable by ``--port``, and un-hides itself the moment it
-is connected to again.
+When the user selects a device, a smoke test runs immediately (through the ``verify``
+callback). If the device is a real MeshCore companion, MeshTerm remembers it as confirmed,
+permanently, and it becomes the active device of the session. If not, the user goes back
+to the list to select another device.
+
+Some machines have devices that are always connected and are not companions: a debug
+probe, a programmer, a serial adapter. The splash shows them each time, in front of the one
+device that the user wants. Thus a row can be **hidden**: ``h`` removes the highlighted
+device from this list and remembers that choice (refer to
+:meth:`~meshterm.core.device_store.DeviceStore.hide`), and ``⇧H`` shows all the hidden
+devices again. This choice is about the list only. A hidden device is still remembered,
+you can still reach it with ``--port``, and it is not hidden any more as soon as MeshTerm
+connects to it again.
 """
 
 from __future__ import annotations
@@ -63,62 +71,71 @@ from .tui import Choice, DeleteRequest, KeyRequest, Separator
 if TYPE_CHECKING:
     from .surface import Ui
 
-#: A smoke test: probe a chosen device with an optional Bluetooth PIN and return its self-info
-#: dict if it is a MeshCore companion, else ``None``. Supplied by the caller so this UI module
-#: stays free of the connection *logic*. It may raise :class:`DeviceAuthenticationError` when
-#: the device needs a PIN (the picker then collects one and retries with it), or another
-#: :class:`DeviceCommandError` for a different actionable failure (shown verbatim). The second
-#: argument is the PIN to try, or ``None`` to use whatever default the caller holds.
+#: A smoke test. It probes a selected device, with an optional Bluetooth PIN. It returns the
+#: self-info dict of the device if it is a MeshCore companion, else ``None``. The caller
+#: supplies it, so that this UI module has no connection logic. It can raise
+#: :class:`DeviceAuthenticationError` when the device must have a PIN (then the picker asks
+#: for one and tries again with it). It can also raise another :class:`DeviceCommandError`
+#: for a different failure that the user can act on (the picker shows it word for word).
+#: The second argument is the PIN to try, or ``None`` to use the default that the caller
+#: has.
 Verify = Callable[[DiscoveredDevice, str | None], Awaitable[dict | None]]
 
-#: The Quit row's value. Selecting it — like pressing Esc — leaves the splash without a
-#: device, which the caller treats as "exit the program".
+#: The value of the Quit row. When the user selects it, the user leaves the splash without
+#: a device, the same as with the Esc key. The caller treats this result as "exit the
+#: program".
 _QUIT = object()
 
-#: The "add a network device" row's value. Selecting it opens a host:port prompt (TCP
-#: companions aren't discoverable, so they're named by hand) and smoke-tests the result.
+#: The value of the "add a network device" row. When the user selects it, a host:port
+#: prompt opens (discovery cannot find TCP companions, so the user types their address),
+#: and a smoke test examines the result.
 _ADD_TCP = object()
 
-#: The two shortcut tokens the splash declares, and the keys that raise them. ``h`` acts on
-#: the highlighted row; ``⇧H`` is screen-wide, because a hidden row is not there to press a
-#: key on — the way back has to be reachable from anywhere in the list.
+#: The two shortcut tokens that the splash declares, and the keys that send them. ``h`` acts
+#: on the highlighted row. ``⇧H`` acts on the full screen, because a hidden row is not there
+#: for a key press. The user must be able to show the hidden rows again from any row in the
+#: list.
 _HIDE = object()
 _SHOW_ALL = object()
 _SHORTCUTS = {"h": _HIDE, "H": _SHOW_ALL}
 
-#: TYPE-column glyphs marking how a device connects. Kept as module constants so the splash's
-#: look can be retuned without touching the row-building logic. ``ᛒ`` is the *Bjarkan* rune the
-#: Bluetooth logo is drawn from — rendered white on the Bluetooth blue (see the ``bluetooth``
-#: theme style), flanked by the half-blocks below so it reads as a slim rounded badge — and
-#: ``🔌`` is a plain plug for a wired serial link.
+#: Glyphs for the TYPE column, which show how a device connects. They are module constants,
+#: so that you can change the appearance of the splash without a change to the code that
+#: builds the rows. ``ᛒ`` is the Bjarkan rune, from which the Bluetooth logo is made. It is
+#: rendered white on the Bluetooth blue (refer to the ``bluetooth`` theme style), with the
+#: half-blocks below on its two sides, so that it looks like a narrow badge with round ends.
+#: ``🔌`` is a plain plug, for a wired serial link.
 _BLE_ICON = "ᛒ"
 _SERIAL_ICON = "🔌"
 
-#: TYPE-column glyph for a TCP companion — a globe, marking a device reached over the network
-#: rather than a wired or Bluetooth link. Two cells like the serial plug, so it aligns the same.
+#: The TYPE-column glyph for a TCP companion: a globe. It shows a device that MeshTerm
+#: reaches over the network, not over a wired or Bluetooth link. It is two cells wide, the
+#: same as the serial plug, so it aligns the same way.
 _TCP_ICON = "🌐"
 
-#: TYPE-column glyph for a radio on the host's own SPI bus — a pin, because the radio is
-#: right here, on this machine. Two cells, aligning with the plug and the globe.
+#: The TYPE-column glyph for a radio on the SPI bus of the host: a pin, because the radio is
+#: here, on this machine. It is two cells wide, so it aligns with the plug and the globe.
 _SPI_ICON = "📍"
 
-#: Half-block glyphs that taper the Bluetooth badge: ``▐`` fills a cell's right half (so it
-#: hugs the rune's left edge) and ``▌`` its left half (hugging the right edge). Drawn in the
-#: badge's blue over the terminal background, they widen the blue by half a cell on each side.
+#: Half-block glyphs that make the ends of the Bluetooth badge narrower. ``▐`` fills the
+#: right half of a cell, so it touches the left edge of the rune. ``▌`` fills the left half,
+#: so it touches the right edge. They are drawn in the blue of the badge on the terminal
+#: background, and they make the blue half a cell wider on each side.
 _BADGE_LEFT = "▐"
 _BADGE_RIGHT = "▌"
 
 
 def _type_cell(device: DiscoveredDevice) -> Text:
-    """The transport badge that leads ``device``'s row, as a styled fragment.
+    """The transport badge at the start of the row of ``device``, as a styled fragment.
 
-    Serial is a bare plug emoji (two cells, its own colour). Bluetooth is the rune on its blue
-    badge, flanked by half-block slivers in the same blue so the fill reads as a slightly
-    rounded chip a touch wider than the lone rune rather than a single hard-edged cell.
+    Serial is a bare plug emoji (two cells, in its own colour). Bluetooth is the rune on its
+    blue badge, with a narrow half-block on each side in the same blue. Thus the fill looks
+    like a chip with slightly round ends, a little wider than the rune alone, instead of one
+    cell with hard edges.
 
-    The plug carries a leading space so its two cells sit centred on the Bluetooth rune
-    (which the badge's left half-block already nudges in a cell) rather than hugging the
-    column's left edge.
+    The plug has a space before it, so that its two cells are centred on the Bluetooth rune
+    (which the left half-block of the badge already moves one cell to the right), instead
+    of at the left edge of the column.
     """
     if device.is_tcp:
         return Text(" " + _TCP_ICON)
@@ -134,12 +151,18 @@ def _type_cell(device: DiscoveredDevice) -> Text:
 
 
 def _pad(text: str, width: int) -> str:
-    """Right-pad ``text`` with spaces to ``width`` display cells (wide-char aware)."""
+    """Pad ``text`` on the right with spaces to ``width`` cells.
+
+    The function counts the true width of a wide character.
+    """
     return text + " " * max(0, width - cell_len(text))
 
 
 def _hardware_name(device: DiscoveredDevice) -> str:
-    """The device's product name without its trailing ``(port)`` (that is its own column)."""
+    """The product name of the device, without the ``(port)`` at its end.
+
+    The port has its own column.
+    """
     if device.is_tcp:
         return device.name or device.product or device.description or "Network device"
     if device.is_ble:
@@ -156,10 +179,11 @@ def _hardware_name(device: DiscoveredDevice) -> str:
 def _display_name(device: DiscoveredDevice, registry: dict[str, RememberedDevice]) -> str:
     """The name to show for ``device``: its remembered mesh node name, else the hardware name.
 
-    Any device we've confirmed before — not just the single most-recent one — is shown by the
-    mesh node name we learned at connect time, so a known ``COM11`` reads as "BaseStation"
-    rather than the OS's generic "USB Serial Device". Devices with no record (or an empty
-    remembered name) fall back to their hardware/product name.
+    Each device that MeshTerm confirmed before (not only the most recent one) shows the
+    mesh node name that MeshTerm learned when it connected. Thus a known ``COM11`` shows as
+    "BaseStation", instead of the generic "USB Serial Device" of the operating system. A
+    device with no record (or with an empty remembered name) shows its hardware or product
+    name instead.
     """
     record = registry.get(device.stable_id)
     if record is not None and record.node_name:
@@ -168,17 +192,19 @@ def _display_name(device: DiscoveredDevice, registry: dict[str, RememberedDevice
 
 
 def _where(device: DiscoveredDevice) -> str:
-    """The connection target shown in the last column: serial port, BLE address, host:port."""
+    """The connection target in the last column: a serial port, a BLE address, or a host:port."""
     return device.target
 
 
 def _hardware_label(device: DiscoveredDevice, registry: dict[str, RememberedDevice]) -> str:
-    """The HARDWARE column text: the remembered firmware model, else the USB vendor.
+    """The text of the HARDWARE column: the remembered firmware model, else the USB vendor.
 
-    A confirmed device shows what it actually is ("Seeed Tracker T1000-E", learned from the
-    device-query at connect time) — the only reliable source, since a BLE companion advertises
-    no maker. A device we've never connected has no model on file, so it falls back to the USB
-    vendor name (blank for an unconnected BLE advert, which genuinely tells us nothing yet).
+    A confirmed device shows what it is ("Seeed Tracker T1000-E", from the device query when
+    MeshTerm connected). This source is the only reliable one, because the BLE
+    advertisement of a companion does not name its maker. A device that MeshTerm never
+    connected to has no stored model, so it shows the USB vendor name instead. For a BLE
+    advertisement from a device that MeshTerm did not connect to, this name is blank,
+    because the advertisement does not tell anything yet.
     """
     record = registry.get(device.stable_id)
     if record is not None and record.hardware_model:
@@ -187,42 +213,44 @@ def _hardware_label(device: DiscoveredDevice, registry: dict[str, RememberedDevi
 
 
 def _node_name_from(info: dict) -> str:
-    """Return a device's own mesh node name from its self-info payload, or ``""``."""
+    """Return the mesh node name of a device from its self-info payload, or ``""``."""
     return str(info.get("adv_name") or info.get("name") or "")
 
 
 def _model_from(info: dict) -> str:
-    """Return the firmware's hardware model from the probe payload, or ``""``.
+    """Return the hardware model that the firmware tells, from the probe payload, or ``""``.
 
-    The smoke-test probe folds the device-query's ``model`` into the identity dict, so this
-    is the one chance to learn (and then remember) what the box actually is.
+    The probe of the smoke test puts the ``model`` of the device query into the identity
+    dict. Thus this payload is the only chance to learn (and then remember) what the
+    hardware is.
     """
     return str(info.get("model") or "")
 
 
-#: A connect failure's sentence starts lowercase, written for the command line's
-#: ``meshterm: …``. A dialog shows it as a sentence, so a plain leading word is capitalised —
-#: and only a plain word: a port, an address, or a host name opening it keeps its spelling.
+#: The sentence of a connection failure starts in lower case, because it is written for the
+#: ``meshterm: …`` of the command line. A dialog shows it as a sentence, so a plain first
+#: word gets a capital letter. Only a plain word changes: a port, an address, or a host
+#: name at the start keeps its spelling.
 _LEADING_WORD = re.compile(r"^[a-z][a-z']*(?=\s)")
 
 
 def connect_failure_text(exc: BaseException) -> Text:
-    """The reason a connection failed, as a dialog shows it.
+    """The reason why a connection failed, as a dialog shows it.
 
-    The sentence is the connection's own: the first
-    :class:`~meshterm.core.connection.DeviceCommandError` in the chain, under whatever wraps
-    it (the context's ``could not open …`` only repeats the endpoint the sentence names). It
-    is plain text in the ``warn`` tone, so brackets in a library's words are shown rather
-    than read as markup. Where MeshTerm had no name for the failure
-    (:class:`~meshterm.core.connection.UnrecognisedConnectError`), a muted line follows
-    saying where the log is, since the log holds the traceback; a named failure gets none,
-    because there the dialog already says everything the log does.
+    The sentence comes from the connection itself: it is the first
+    :class:`~meshterm.core.connection.DeviceCommandError` in the chain, below the errors that
+    wrap it. (The ``could not open …`` of the context only repeats the endpoint that the
+    sentence names.) It is plain text in the ``warn`` style, so that brackets in the words
+    of a library show as brackets and are not parsed as markup. When MeshTerm had no name for
+    the failure (:class:`~meshterm.core.connection.UnrecognisedConnectError`), a muted line
+    follows that tells where the log is, because the log has the traceback. A failure with a
+    name gets no such line, because then the dialog already tells all that the log tells.
 
     Args:
-        exc: What the connection attempt raised.
+        exc: The exception that the connection attempt raised.
 
     Returns:
-        The dialog's lines.
+        The lines of the dialog.
     """
     named: DeviceCommandError | None = None
     seen: set[int] = set()
@@ -236,7 +264,7 @@ def connect_failure_text(exc: BaseException) -> Text:
     sentence = str(named or exc).strip() or type(exc).__name__
     sentence = _LEADING_WORD.sub(lambda word: word.group().capitalize(), sentence, count=1)
     text = Text()
-    text.append(sentence, style="warn")  # a span, not the base: what callers add stays plain
+    text.append(sentence, style="warn")  # a span, not the base: text added later stays plain
     if isinstance(named, UnrecognisedConnectError):
         log = log_file_for(logging.WARNING)
         if log is not None:
@@ -251,29 +279,33 @@ async def _smoke_test(
     where: str,
     verify: Verify,
 ) -> dict | None:
-    """Smoke-test ``chosen`` behind the splash spinner, collecting a Bluetooth PIN if needed.
+    """Smoke-test ``chosen`` behind the splash spinner, and get a Bluetooth PIN if necessary.
 
-    Runs the ``verify`` probe on the chromeless splash (its wordmark and box unchanged, only an
-    animated spinner where the device list was). If the device answers but demands a pairing
-    PIN, opens the :class:`~meshterm.ui.tui.prompt.PinDialog` popup and retries with what the
-    user enters — re-opening it with a "rejected" note on a wrong code — until the device
-    connects or the user presses Esc.
+    Run the ``verify`` probe on the chromeless splash. The wordmark and the box of the splash
+    do not change, and an animated spinner replaces the device list. If the device answers
+    but asks for a pairing PIN, open the :class:`~meshterm.ui.tui.prompt.PinDialog` dialog
+    and try again with the PIN that the user types. If the device refuses again, open the
+    dialog again with the hint of the new error. Continue until the device connects or the
+    user presses Esc.
 
     Args:
-        ui: The interactive surface used for the spinner, PIN dialog, and failure notices.
-        chosen: The device being tested.
-        name: Its display name, woven into the spinner line and the PIN prompt.
-        where: A human phrase for its transport ("over Bluetooth" / "on COM5").
-        verify: The smoke-test callback (see :data:`Verify`); called with the PIN to try.
+        ui: The interactive surface for the spinner, the PIN dialog, and the failure notices.
+        chosen: The device to test.
+        name: Its display name, which goes into the spinner line and the PIN prompt.
+        where: A plain phrase that names its transport ("over Bluetooth" / "on COM5").
+        verify: The smoke-test callback (refer to :data:`Verify`). The function calls it
+            with the PIN to try.
 
     Returns:
-        The device's self-info dict once it answers, or ``None`` — after showing the relevant
-        notice — to send the user back to the device list (not a MeshCore endpoint, an
-        unrecoverable failure, or a cancelled PIN prompt).
+        The self-info dict of the device when it answers. Or ``None``, after the related
+        notice shows, to send the user back to the device list (when the device is not a
+        MeshCore endpoint, when the failure is not recoverable, or when the user cancelled
+        the PIN prompt).
     """
     pin: str | None = None
     while True:
-        # BLE connect and service discovery take a few seconds, so the spinner matters most here.
+        # A BLE connection and service discovery take a few seconds, so the spinner is most
+        # important here.
         try:
             info = await ui.busy_startup(
                 f"Talking to {name} {where}…",
@@ -282,11 +314,12 @@ async def _smoke_test(
                 banner=load_logo(),
             )
         except DeviceAuthenticationError as exc:
-            # The device answered the scan but won't connect until it's bonded (or the last PIN
-            # was wrong). Collect one in the popup and loop to retry; Esc returns to the list.
-            # The error says *which* refusal it was — a stale bond, a wrong PIN, a device that
-            # turned the pairing down — and the dialog carries that line under its question,
-            # rather than calling every refusal a rejected PIN.
+            # The device answered the scan, but it will not connect until it is bonded (or the
+            # last PIN was wrong). Get a PIN in the dialog, and go through the loop again to
+            # try again. The Esc key goes back to the list. The error tells which refusal
+            # occurred: a stale bond, a wrong PIN, or a device that refused the pairing. The
+            # dialog shows that line below its question, instead of a "rejected PIN" for
+            # each refusal.
             entered = await ui.prompt_pin_startup(
                 name,
                 error=exc.hint,
@@ -294,11 +327,12 @@ async def _smoke_test(
                 banner=load_logo(),
             )
             if entered is None:
-                return None  # the user gave up → back to the device list
+                return None  # the user cancelled → back to the device list
             pin = entered
             continue
         except DeviceCommandError as exc:
-            # A different actionable failure (not a PIN): show its remedy, then back to the list.
+            # A different failure that the user can act on (not a PIN). Show its remedy, then
+            # go back to the list.
             notice = connect_failure_text(exc)
             notice.append("\nChoose another device.")
             await ui.notify_startup(notice, title="Can't connect yet", banner=load_logo())
@@ -335,24 +369,25 @@ async def _smoke_test(
         return info
 
 
-#: How often the splash re-enumerates serial ports. `comports()` is a SetupAPI/sysfs
-#: walk rather than a free read, so it runs off the event loop -- but it is cheap enough
-#: to repeat at this rate without anyone noticing, and it covers the common case: a USB
-#: radio plugged in after the splash appeared.
+#: How often the splash enumerates the serial ports again. `comports()` walks SetupAPI or
+#: sysfs, and it is not a free read, so it runs outside the event loop. But its cost is low
+#: enough to repeat it at this rate, and nobody sees a difference. It covers the usual
+#: case: a USB radio that the user connects after the splash opened.
 _POLL_S = 2.0
 
-#: Bluetooth is not cheap in the same way. Each scan is a bounded listen, so keeping one
-#: running means keeping the radio listening for as long as this screen is open -- and
-#: this screen is the one a reader leaves up while they go and find a cable, on a handheld,
-#: on a battery. So it gets a duty cycle rather than a loop: a window this often, and only
-#: while it is still plausible somebody is waiting on one.
+#: The cost of Bluetooth is not low in the same way. Each scan is a listen with a time
+#: limit. If a scan always runs, the Bluetooth adapter listens for as long as this screen is
+#: open. And this screen is the one that a user leaves open while they go to find a cable,
+#: on a handheld, on a battery. Thus Bluetooth gets a duty cycle instead of a loop: one
+#: time window of scanning at this interval, and only while it is still probable that
+#: somebody waits for one.
 _BLE_EVERY_S = 15.0
 _BLE_WINDOW_S = 4.0
 
-#: How many windows to run before giving up on finding a companion nobody has turned on.
-#: Once something *is* listed the reader has what they came for; while the list is still
-#: empty the count is ignored, because an empty splash is exactly where somebody is
-#: waiting and the cost of another listen is the cost of being useful.
+#: How many time windows to run before MeshTerm stops the search for a companion that
+#: nobody turned on. When the list has a device, the user has what they came for. While
+#: the list is still empty, the count is ignored, because an empty splash is exactly where
+#: somebody waits. There, one more listen is worth its cost.
 _BLE_WINDOWS = 8
 
 
@@ -363,85 +398,94 @@ async def prompt_device(
     verify: Verify,
     profiles: Mapping[str, DeviceProfile] | None = None,
 ) -> DiscoveredDevice | None:
-    """Prompt the user to choose a companion device on the startup splash.
+    """Ask the user to select a companion device on the startup splash.
 
-    The chosen device is smoke-tested before it is accepted: only a device that answers the
-    MeshCore identity query is returned (and recorded as confirmed). A device that fails the
-    test re-opens the picker with a message asking the user to choose another.
+    MeshTerm runs a smoke test on the selected device before it accepts the device. Only a
+    device that answers the MeshCore identity query is returned (and stored as confirmed).
+    If a device fails the test, the picker opens again with a message that asks the user to
+    select another device.
 
     Args:
-        ui: The interactive UI surface used to render the picker.
-        devices: Discovered devices (likely-LoRa first).
-        store: The confirmed-device registry, used to tag/preselect known devices and to
-            record a device once its smoke test passes.
-        verify: Async smoke test returning a device's self-info dict, or ``None`` if it is
-            not a reachable MeshCore companion.
+        ui: The interactive UI surface that renders the picker.
+        devices: The discovered devices (the likely LoRa devices first).
+        store: The registry of confirmed devices. The picker uses it to tag and preselect
+            the known devices, and to store a device when its smoke test passes.
+        verify: An async smoke test. It returns the self-info dict of a device, or ``None``
+            if the device is not a MeshCore companion that MeshTerm can reach.
         profiles: The configured device profiles (``config.toml`` ``[profiles.*]``). Their TCP
-            entries are folded into the list so a hand-authored network companion appears here
-            without having to be connected to first (see :func:`_profile_tcp_devices`).
+            and serial entries are added to the list. Thus a network companion that the user
+            wrote by hand shows here, and the user does not have to connect to it first
+            (refer to :func:`_profile_tcp_devices` and :func:`_profile_serial_devices`).
 
     Returns:
-        The chosen, confirmed :class:`DiscoveredDevice`, or ``None`` if the user chose to
-        leave the picker without selecting one — by pressing Esc or choosing the Quit row —
-        which the caller treats as a request to exit.
+        The selected and confirmed :class:`DiscoveredDevice`, or ``None`` if the user left
+        the picker without a selection (with the Esc key or the Quit row). The caller treats
+        ``None`` as a request to exit.
     """
-    # Serial and Bluetooth are kept apart because they are refreshed on different clocks:
-    # a poll replaces everything attached, a Bluetooth window replaces everything in range,
-    # and one must not wipe the other's findings.
+    # Serial and Bluetooth devices are in different lists, because MeshTerm refreshes them
+    # at different intervals. A poll replaces all the attached devices, and a Bluetooth time
+    # window replaces all the devices in range. One must not erase the results of the other.
     wired = [d for d in devices if not d.is_ble]
     wireless = [d for d in devices if d.is_ble]
-    #: The row the *next* redraw should open on, when the pass just finished moved the list
-    #: under the reader (see :func:`_after_hiding`). Cleared as soon as it is spent.
+    #: The row that the list must open on the next time that it shows, when the last pass
+    #: moved the list under the user (refer to :func:`_after_hiding`). The loop clears it as
+    #: soon as it uses it.
     focus: DiscoveredDevice | None = None
 
     def assemble() -> tuple[
         list[DiscoveredDevice], list, RememberedDevice | None, dict[str, RememberedDevice]
     ]:
-        """The list as it stands this instant: what is there, less what is hidden.
+        """The list as it is now: the devices that are there, without the hidden devices.
 
-        Built in one place because two callers need it now -- the loop below, and the
-        rescan that redraws the rows under the reader while the splash is open.
+        One function builds it, because two callers use it now: the loop below, and the
+        rescan that draws the rows again under the user while the splash is open.
         """
-        # A port a radio on the SPI bus owns (the Cap's GPS) is that radio's, not a companion.
+        # A port that a radio on the SPI bus owns (the GPS of the Cap) belongs to that radio.
+        # It is not a companion.
         scanned = without_radio_ports(wired, profiles) + wireless
         remembered = store.load()
-        # The full registry (not just the single last device) so *every* confirmed companion
-        # can be named, highlighted, and sorted to the top — keyed by stable_id. Reloaded each
-        # pass so an add or a removal is reflected the next time the list is drawn.
+        # The full registry (not only the last device), keyed by stable_id. With it, each
+        # confirmed companion can get its name, its white colour, and its place at the top.
+        # The registry is read again on each pass, so that an addition or a removal shows
+        # the next time that the list is drawn.
         registry = store.load_all()
-        # A TCP companion isn't discoverable, so a previously confirmed one only reappears if we
-        # rebuild it from its remembered endpoint and fold it into the list alongside the
-        # scanned devices (the scan never produces it). Configured TCP profiles are folded in
-        # the same way, after the scanned/remembered set so an already-known endpoint keeps its
-        # richer remembered row rather than being shadowed by the profile.
+        # Discovery cannot find a TCP companion. Thus a TCP companion that was confirmed
+        # before shows again only if the code builds it again from its remembered endpoint
+        # and adds it to the list with the scanned devices (the scan never finds it). The
+        # configured TCP profiles are added in the same way, after the scanned and remembered
+        # devices. Thus an endpoint that is already known keeps its remembered row, which
+        # has more data, and the profile does not hide it.
         listed = scanned + _remembered_tcp_devices(scanned, registry)
         listed += _profile_tcp_devices(listed, profiles)
-        # A serial profile on a soldered platform UART (e.g. /dev/ttyS1) is likewise not
-        # produced by the scan, so fold those in too — after the scanned set, so a port
-        # pyserial *does* enumerate keeps its richer scanned row rather than the bare profile.
+        # The scan also does not find a serial profile on a soldered platform UART (for
+        # example /dev/ttyS1), so add those profiles too. Add them after the scanned
+        # devices, so that a port that pyserial does enumerate keeps its scanned row, which
+        # has more data, instead of the bare profile.
         listed += _profile_serial_devices(listed, profiles)
-        # A radio on the SPI bus answers nothing until MeshTerm starts its node, so it is
-        # listed from the device node's presence, the way a serial port is.
+        # A radio on the SPI bus does not answer until MeshTerm starts its node. Thus the
+        # list shows it when its device file is present, the same as a serial port.
         listed += spi_radios(profiles, listed)
-        # Devices the user has told this splash to stop showing (h). Read each pass, so a
-        # row hidden a moment ago is gone the next time the list is drawn — which is the
-        # only feedback hiding needs.
+        # The devices that the user told this splash not to show (h). They are read on each
+        # pass, so a row that the user hid a moment ago is gone the next time that the list
+        # is drawn. No other feedback is necessary for a hide.
         hidden = store.hidden_ids()
-        # In display order, so a shortcut acting on a row can say what the row *after* it is.
+        # In display order, so that a shortcut on a row can tell which row comes after it.
         order = _order([d for d in listed if d.stable_id not in hidden], registry)
         items = _build_items(order, remembered, registry, hidden=len(hidden))
         return order, items, remembered, registry
 
     async def keep_looking(redraw: Callable[[list], None]) -> None:
-        """Re-enumerate while the splash is up, and redraw when the answer changes.
+        """Enumerate the devices again while the splash is open, and draw again on a change.
 
-        The screen used to scan once on the way in and never again, so a radio plugged in
-        ten seconds late was invisible until MeshTerm was restarted -- and the screen that
-        said so offered only a network address typed by hand, or quitting. Fetching the
-        cable is the obvious thing to do and it was the one thing that did not work.
+        The screen once scanned only one time, when it opened. Thus a radio that the user
+        connected ten seconds late did not show until MeshTerm started again. And the screen
+        that told the user so offered only a network address to type by hand, or to quit.
+        To go and get the cable is the obvious thing to do, and it was the only thing that
+        did not work.
 
-        Only a change redraws. A poll that finds the same ports is silence, which matters
-        because the reader may be part-way through arrowing down the list.
+        Only a change draws the rows again. A poll that finds the same ports does nothing.
+        This is important, because the user may be in the middle of a move down the list
+        with the arrow keys.
         """
         windows = 0
         waited = 0.0
@@ -449,7 +493,7 @@ async def prompt_device(
             await asyncio.sleep(_POLL_S)
             before = {d.stable_id for d in wired + wireless}
 
-            # ``comports()`` blocks; off the event loop so the splash stays live.
+            # ``comports()`` blocks, so it runs outside the event loop and the splash stays live.
             wired[:] = await asyncio.to_thread(discover_devices)
 
             waited += _POLL_S
@@ -464,9 +508,10 @@ async def prompt_device(
 
     while True:
         ordered, items, remembered, registry = assemble()
-        # Preselect the remembered "last known good" device when it is currently attached/in
-        # range — unless the last pass asked for a particular row, which a hide does so the
-        # highlight lands where the vanished row was rather than jumping back to the default.
+        # Preselect the remembered "last known good" device when it is attached or in range
+        # now. But if the last pass asked for a specific row, use that row. A hide does this,
+        # so that the highlight goes to the place of the removed row, instead of back to the
+        # default.
         default = next((d for d in ordered if remembered and remembered.matches(d)), None)
         if focus is not None:
             default = focus if focus in ordered else default
@@ -481,8 +526,9 @@ async def prompt_device(
             key_hint=_shortcut_hint(len(store.hidden_ids())),
             live=keep_looking,
         )
-        # Esc (``None``) and the Quit row both mean "leave the picker" — surface that to the
-        # caller as ``None`` so it can exit the program instead of continuing device-less.
+        # The Esc key (``None``) and the Quit row both mean "leave the picker". Return
+        # ``None`` to the caller for both, so that it can exit the program, and not continue
+        # without a device.
         if chosen is None or chosen is _QUIT:
             return None
 
@@ -491,31 +537,36 @@ async def prompt_device(
             continue
 
         if chosen is _ADD_TCP:
-            # Name a network companion by hand and smoke-test it. On success it's returned like
-            # any picked device; on cancel/failure we loop back to the list.
+            # The user types the address of a network companion, and a smoke test examines
+            # it. If the test passes, the device is returned like any selected device. If the
+            # user cancels or the test fails, the loop goes back to the list.
             added = await _add_network_device(ui, store, registry, verify)
             if added is not None:
                 return added
             continue
 
         if isinstance(chosen, DeleteRequest):
-            # Delete was pressed on a removable (network) row: confirm, forget, and re-draw
-            # the list — the row's disappearance is the visible feedback. The list is passed
-            # through so the confirm floats over it (the row it removes stays highlighted).
+            # The user pressed Delete on a row that can be removed (a network row). Confirm,
+            # forget the device, and draw the list again. The removed row is the visible
+            # feedback. The list goes to the confirm, so that the confirm floats over it (and
+            # the row that it removes keeps the highlight).
             await _remove_network_device(ui, store, registry, chosen.value, backdrop_items=items)
             continue
 
         name = _display_name(chosen, registry)
-        # A human phrase for the transport: an address/endpoint reads worse than a plain word.
+        # A plain phrase for the transport, because an address or an endpoint is less clear
+        # than a plain word.
         where = _where_phrase(chosen)
-        # Smoke-test the choice in place (prompting for a PIN and retrying if it needs one).
-        # ``None`` means the smoke test failed and already showed the user why — pick again.
+        # Smoke-test the selected device here (ask for a PIN and try again if it must have
+        # one).
+        # ``None`` means that the smoke test failed and already told the user why. Select
+        # again.
         info = await _smoke_test(ui, chosen, name, where, verify)
         if info is None:
             continue
 
-        # Confirmed: remember it forever. We return straight away, so there's no need to
-        # fold it back into the local registry for a re-render.
+        # Confirmed: remember it permanently. The function returns immediately, so it is
+        # not necessary to add the device to the local registry for another render.
         store.remember(chosen, node_name=_node_name_from(info), hardware_model=_model_from(info))
         return chosen
 
@@ -523,29 +574,31 @@ async def prompt_device(
 def _run_shortcut(
     store: DeviceStore, request: KeyRequest, listed: list[DiscoveredDevice]
 ) -> DiscoveredDevice | None:
-    """Act on ``h`` / ``⇧H``, and say which row the redrawn list should open on.
+    """Act on ``h`` or ``⇧H``, and tell which row the list must open on when it shows again.
 
-    Nothing is *said* about either: after a hide the row is gone, after a show-all the hidden
-    rows are back, and a dialog acknowledging a change the reader is looking straight at is
-    the acknowledgement this app takes out of screens rather than adding to them. What the
-    redraw does owe them is their place — see :func:`_after_hiding`.
+    No message tells about either key. After a hide, the row is gone. After a show-all, the
+    hidden rows are back. A dialog that acknowledges a change that the user sees directly is
+    the type of acknowledgement that this app removes from screens, and does not add. But
+    when the list shows again, it must keep the place of the user (refer to
+    :func:`_after_hiding`).
 
     Args:
-        store: The registry the hidden set lives in.
-        request: The shortcut the splash resolved with.
-        listed: The devices as displayed, in display order.
+        store: The registry that holds the hidden set.
+        request: The shortcut that the splash returned.
+        listed: The devices as shown, in display order.
 
     Returns:
-        The device to highlight when the list is redrawn, or ``None`` to let the remembered
-        default decide (which is what a show-all wants: the list it restores is a different
-        list, and the reader's place in the old one means nothing in it).
+        The device that gets the highlight when the list shows again, or ``None`` to let the
+        remembered default decide. A show-all wants ``None``, because the list that it
+        restores is a different list, and the place of the user in the old list has no
+        meaning in it.
     """
     if request.action is _SHOW_ALL:
         store.show_all()
         return None
     if request.action is _HIDE and isinstance(request.value, DiscoveredDevice):
-        # Only a device row can be hidden — ``h`` on Add a network device or Quit is inert,
-        # the way Delete is on a row that never opted into removal.
+        # Only a device row can be hidden. ``h`` on Add a network device or on Quit does
+        # nothing, the same as Delete on a row that did not opt into removal.
         store.hide(request.value.stable_id)
         return _after_hiding(listed, request.value)
     return None
@@ -554,12 +607,13 @@ def _run_shortcut(
 def _after_hiding(
     listed: list[DiscoveredDevice], hidden: DiscoveredDevice
 ) -> DiscoveredDevice | None:
-    """The row the highlight should land on once ``hidden`` leaves the list.
+    """The row that gets the highlight after ``hidden`` leaves the list.
 
-    The next device down, so a run of adapters can be cleared with a run of presses without
-    the hand moving; the one above where there is no next, because the highlight has reached
-    the end and there is nowhere further down to go. Neither ever rolls round to the top —
-    nothing in the app does — and an emptied list has nothing to land on at all.
+    It is the next device down, so that the user can hide a series of adapters with a series
+    of key presses, and the hand does not move. If there is no next device, it is the device
+    above, because the highlight is at the end and it cannot go further down. The highlight
+    never rolls over to the top (nothing in the app does that). An empty list has no row for
+    the highlight.
     """
     remaining = [d for d in listed if d.stable_id != hidden.stable_id]
     if not remaining:
@@ -569,18 +623,19 @@ def _after_hiding(
 
 
 def _shortcut_hint(hidden: int) -> Callable[[object], str]:
-    """Name the hide shortcuts that would actually do something right here, right now.
+    """Name the hide shortcuts that have an effect here, at this time.
 
-    Asked of the highlighted row on every paint (see ``key_hint`` on
-    :class:`~meshterm.ui.tui.select.SelectScreen`), so the footer follows the same rule
-    ``Del remove`` does: a key is named where it acts and nowhere else.
+    The select screen asks this function about the highlighted row at each paint (refer to
+    ``key_hint`` on :class:`~meshterm.ui.tui.select.SelectScreen`). Thus the footer follows
+    the same rule as ``Del remove``: the hint names a key where the key acts, and nowhere
+    else.
 
-    * ``h hide`` only on a device row — on *Add a network device* or *Quit* there is nothing
-      to hide, and the key is inert there.
-    * ``⇧H show all`` only while something is actually hidden. It is screen-wide rather than
-      per-row (a hidden row is not there to press a key on), so it rides whichever row the
-      reader is standing on — but it stays off the line entirely while it would do nothing,
-      which is also what keeps the splash from ever naming a key nobody could act on.
+    * ``h hide`` shows only on a device row. On *Add a network device* or *Quit*, there is
+      nothing to hide, and the key does nothing there.
+    * ``⇧H show all`` shows only while a device is hidden. It acts on the full screen, not on
+      one row (a hidden row is not there for a key press). Thus it shows with the highlight,
+      on each row. But it is not on the line at all while it has no effect. That rule also
+      makes sure that the splash never names a key that nobody can use.
     """
 
     def atoms_for(value: object) -> str:
@@ -595,12 +650,12 @@ def _shortcut_hint(hidden: int) -> Callable[[object], str]:
 
 
 def _hidden_note(hidden: int) -> Separator:
-    """The muted row that stands in for a list hiding has emptied.
+    """The muted row that replaces a list that the hide shortcut made empty.
 
-    Only then. With devices still listed, the footer already names ``⇧H`` on every row and a
-    standing line saying the same thing is a row of the box spent on chrome. With *nothing*
-    listed there is no footer atom to read it off — and "no companion devices detected" would
-    be a lie about a machine with a radio plugged into it.
+    The row shows only in that case. While the list still has devices, the footer already
+    names ``⇧H`` on each row. A permanent line with the same information uses a row of the
+    box for chrome. When the list has no devices, there is no footer atom that tells it. And
+    "no companion devices detected" is false on a machine that has a radio connected to it.
     """
     it = "it" if hidden == 1 else "them"
     device = "device" if hidden == 1 else "devices"
@@ -608,7 +663,7 @@ def _hidden_note(hidden: int) -> Separator:
 
 
 def _where_phrase(device: DiscoveredDevice) -> str:
-    """A human phrase for a device's transport, woven into the smoke-test spinner line."""
+    """A plain phrase for the transport of a device, for the spinner line of the smoke test."""
     if device.is_tcp:
         return f"at {device.target}"
     if device.is_ble:
@@ -621,10 +676,11 @@ def _remembered_tcp_devices(
 ) -> list[DiscoveredDevice]:
     """Rebuild the confirmed TCP companions from the registry as :class:`DiscoveredDevice`.
 
-    TCP companions don't advertise, so the scan never finds them; this reconstructs each
-    remembered one from its stored ``host:port`` (carrying its known node name for the DEVICE
-    column) so it reappears in the picker. Any that happen to already be in ``discovered``
-    (e.g. re-run within a session) are skipped so they aren't listed twice.
+    TCP companions do not announce themselves, so the scan never finds them. This function
+    builds each remembered TCP companion again from its stored ``host:port`` (with its known
+    node name for the DEVICE column), so that it shows in the picker again. If one of them
+    is already in ``discovered`` (for example, when the function runs again in the same
+    session), the function skips it, so that the list does not show it two times.
     """
     seen = {d.stable_id for d in discovered}
     rebuilt: list[DiscoveredDevice] = []
@@ -641,23 +697,27 @@ def _profile_tcp_devices(
     listed: list[DiscoveredDevice],
     profiles: Mapping[str, DeviceProfile] | None,
 ) -> list[DiscoveredDevice]:
-    """Rebuild configured TCP profiles as :class:`DiscoveredDevice` rows for the picker.
+    """Rebuild the configured TCP profiles as :class:`DiscoveredDevice` picker rows.
 
-    A ``[profiles.<alias>]`` block with ``transport = "tcp"`` names a network companion the
-    user wants to reach — but a TCP endpoint isn't discoverable, so without this it would only
-    ever surface via ``meshterm -p <alias>`` on the command line, never in the interactive
-    splash. Each such profile is turned into a device carrying its alias as the DEVICE-column
-    name (that is how the user addresses it), so it lists like a hand-added network device and
-    smoke-tests the same way. Any profile whose endpoint is already present — scanned, or a
-    remembered companion carrying its real node name — is skipped so the richer existing row
-    wins rather than being duplicated by the bare profile.
+    A ``[profiles.<alias>]`` block with ``transport = "tcp"`` names a network companion that
+    the user wants to reach. But discovery cannot find a TCP endpoint. Without this
+    function, the companion shows only through ``meshterm -p <alias>`` on the command line,
+    and never on the interactive splash. Each such profile becomes a device with its
+    alias as the name in the DEVICE column (the user uses this alias for it). Thus it shows
+    in the list like a network device that the user added by hand, and its smoke test is the
+    same.
+
+    If the endpoint of a profile is already in the list (scanned, or a remembered companion
+    with its real node name), the function skips the profile. Thus the existing row, which
+    has more data, stays, and the bare profile does not make a second copy of it.
 
     Args:
-        listed: The devices already gathered (scanned + remembered), for de-duplication.
-        profiles: The configured profiles, or ``None`` when none are loaded.
+        listed: The devices already in the list (scanned and remembered), to find duplicates.
+        profiles: The configured profiles, or ``None`` when there are no profiles.
 
     Returns:
-        One TCP :class:`DiscoveredDevice` per not-yet-listed TCP profile, in profile order.
+        One TCP :class:`DiscoveredDevice` for each TCP profile that is not yet in the list,
+        in profile order.
     """
     if not profiles:
         return []
@@ -679,25 +739,31 @@ def _profile_serial_devices(
     listed: list[DiscoveredDevice],
     profiles: Mapping[str, DeviceProfile] | None,
 ) -> list[DiscoveredDevice]:
-    """Rebuild configured serial profiles as :class:`DiscoveredDevice` rows for the picker.
+    """Rebuild the configured serial profiles as :class:`DiscoveredDevice` picker rows.
 
-    A ``[profiles.<alias>]`` serial block names a companion on a fixed port. A soldered
-    platform-bus UART (e.g. ``/dev/ttyS1`` on the Luckfox Lyra) is invisible to pyserial's scan,
-    so without this it would only ever surface via ``meshterm --port``/``-p`` on the command
-    line, never in the interactive splash. Each such profile becomes a device carrying its alias
-    as the DEVICE-column name, listed like a scanned port and smoke-tested the same way —
-    mirroring :func:`_profile_tcp_devices` for network companions. De-duplication is by **port**
-    (a scanned USB device keys on its serial/VID:PID, not its port name): a profile whose port is
-    already present — pyserial *does* enumerate it, or it is remembered — is skipped so the
-    richer existing row wins rather than being duplicated by the bare profile.
+    A ``[profiles.<alias>]`` serial block names a companion on a fixed port. The scan of
+    pyserial cannot find a UART that is soldered to the bus of the platform (for example
+    ``/dev/ttyS1`` on the Luckfox Lyra). Without this function, the companion shows
+    only through ``meshterm --port``/``-p`` on the command line, and never on the
+    interactive splash. Each such profile becomes a device with its alias as the name in the
+    DEVICE column. It shows in the list like a scanned port, and its smoke test is the same.
+    This function does for serial companions what :func:`_profile_tcp_devices` does for
+    network companions.
+
+    The function finds duplicates by **port**, because a scanned USB device uses its serial
+    number or its VID:PID as its key, not its port name. If the port of a profile is already
+    in the list (because pyserial does enumerate it, or because it is remembered), the
+    function skips the profile. Thus the existing row, which has more data, stays, and the
+    bare profile does not make a second copy of it.
 
     Args:
-        listed: The devices already gathered (scanned + remembered + TCP profiles), for
-            de-duplication by port.
-        profiles: The configured profiles, or ``None`` when none are loaded.
+        listed: The devices already in the list (scanned, remembered, and TCP profiles), to
+            find duplicates by port.
+        profiles: The configured profiles, or ``None`` when there are no profiles.
 
     Returns:
-        One serial :class:`DiscoveredDevice` per not-yet-listed serial profile, in profile order.
+        One serial :class:`DiscoveredDevice` for each serial profile that is not yet in the
+        list, in profile order.
     """
     if not profiles:
         return []
@@ -719,22 +785,25 @@ async def _add_network_device(
     registry: dict[str, RememberedDevice],
     verify: Verify,
 ) -> DiscoveredDevice | None:
-    """Collect a ``host:port``, smoke-test the network companion there, and remember it.
+    """Get a ``host:port``, smoke-test the network companion there, and remember it.
 
-    A network (TCP) companion is named by hand — it isn't attached and doesn't advertise — so
-    this opens a text prompt on the splash, parses the endpoint (a bare host defaults its
-    port), and runs the same smoke test the discovered transports use. On success the device
-    is remembered forever and returned; on a cancelled prompt or a failed test the caller
-    re-opens the device list.
+    The user must type the address of a network (TCP) companion, because it is not attached
+    and it does not announce itself. Thus this function opens a text prompt on the splash,
+    and parses the endpoint (a bare host gets the default port). Then it runs the same smoke
+    test as the discovered transports. If the test passes, the function remembers the device
+    permanently and returns it. If the user cancels the prompt or the test fails, the caller
+    opens the device list again.
 
     Args:
-        ui: The interactive surface for the prompt, spinner, and notices.
-        store: The confirmed-device registry, updated once the device answers.
-        registry: The current registry, for naming the smoke-test spinner line.
-        verify: The smoke-test callback (see :data:`Verify`).
+        ui: The interactive surface for the prompt, the spinner, and the notices.
+        store: The registry of confirmed devices. The function updates it when the device
+            answers.
+        registry: The current registry, for the name in the spinner line of the smoke test.
+        verify: The smoke-test callback (refer to :data:`Verify`).
 
     Returns:
-        The confirmed TCP :class:`DiscoveredDevice`, or ``None`` to return to the device list.
+        The confirmed TCP :class:`DiscoveredDevice`, or ``None`` to go back to the device
+        list.
     """
 
     def _validate(text: str) -> object:
@@ -758,7 +827,7 @@ async def _add_network_device(
     name = _display_name(device, registry)
     info = await _smoke_test(ui, device, name, _where_phrase(device), verify)
     if info is None:
-        return None  # not a reachable companion — the smoke test already explained why
+        return None  # not a reachable companion: the smoke test already told the user why
     store.remember(device, node_name=_node_name_from(info), hardware_model=_model_from(info))
     return device
 
@@ -771,26 +840,28 @@ async def _remove_network_device(
     *,
     backdrop_items: list,
 ) -> None:
-    """Confirm and forget a remembered network (TCP) device, dropping it from the picker.
+    """Confirm, then forget a remembered network (TCP) device, and remove it from the picker.
 
-    Removal is offered only on network rows: a TCP companion is listed solely from its
-    remembered endpoint, so forgetting it is what makes it leave the picker — a scanned serial
-    or BLE device would just reappear on the next scan. Opens the reserved-red Cancel/Remove
-    confirm as a modal popup floating over the device list (``backdrop_items``, with the row
-    being removed left highlighted), so it reads as a dialog on top of the picker rather than a
-    splash that replaces it. On Remove the record is pruned from the store, on Cancel/Esc
-    nothing changes. Either way the caller re-opens the list, so the row's absence is the
+    Only network rows offer removal. The list gets a TCP companion only from its remembered
+    endpoint, so to forget it is what removes it from the picker. A scanned serial or BLE
+    device shows again at the next scan. This function opens the Cancel/Remove confirm
+    in the reserved red, as a modal dialog that floats over the device list
+    (``backdrop_items``, and the row to remove keeps the highlight). Thus it looks like a
+    dialog on top of the picker, not like a splash that replaces it.
+
+    On Remove, the function deletes the record from the store. On Cancel or Esc, nothing
+    changes. In both cases the caller opens the list again, so the missing row is the
     feedback.
 
     Args:
         ui: The interactive surface for the confirm dialog.
-        store: The confirmed-device registry to prune.
-        registry: The current registry, for naming the device in the prompt.
-        device: The network device the user asked to remove.
-        backdrop_items: The picker's rows, redrawn behind the floating confirm.
+        store: The registry of confirmed devices, from which to delete the record.
+        registry: The current registry, for the name of the device in the prompt.
+        device: The network device that the user asked to remove.
+        backdrop_items: The rows of the picker, drawn again behind the floating confirm.
     """
     if not device.is_tcp:
-        return  # defensive: only network rows opt into deletion (see _build_items)
+        return  # defensive: only network rows opt into deletion (refer to _build_items)
     name = _display_name(device, registry)
     confirmed = await ui.confirm_startup(
         f"Remove {name} ({device.target}) from the device list?",
@@ -805,11 +876,12 @@ async def _remove_network_device(
 
 
 def _tag(device: DiscoveredDevice, is_known: bool) -> tuple[str, str]:
-    """The muted qualifier after HARDWARE, and its style — ``("", "")`` for a row with none.
+    """The muted qualifier after HARDWARE and its style, or ``("", "")`` for no qualifier.
 
-    Only devices we've actually confirmed are billed as MeshCore companions; a USB vendor ID
-    (or a BLE advert) is a sort hint, not a claim. A bare serial bridge earns an honest
-    label; a MeshCore-named BLE advert is flagged as a likely companion.
+    Only the devices that MeshTerm confirmed get the label of a MeshCore companion. A USB
+    vendor ID (or a BLE advertisement) is a hint for the sort, not a claim. A bare serial
+    bridge gets an honest label. A BLE advertisement with a MeshCore name gets the label of
+    a likely companion.
     """
     if is_known:
         return "· MeshCore device", "ok"
@@ -825,15 +897,19 @@ def _tag(device: DiscoveredDevice, is_known: bool) -> tuple[str, str]:
 def _order(
     devices: list[DiscoveredDevice], registry: dict[str, RememberedDevice]
 ) -> list[DiscoveredDevice]:
-    """Confirmed companions first (most-recently-used first), then likely ones, then the rest.
+    """Confirmed companions (most recently used first), then likely companions, then the rest.
 
-    The devices we've actually spoken to are the ones the user almost always wants, so they
-    rise to the top ordered by their last-connected timestamp (newest first). Below them,
-    anything that looks like a companion — a MeshCore advert, a known board, a radio on the
-    SPI bus — comes before a port nothing vouches for, *across* transports: serial is listed
-    first as found, so a board's bare UART (a Cardputer Zero's ``/dev/ttyS0``, wired to its
-    Cap's GPS) used to open the splash with the highlight on it, above the Cap itself. Ties
-    keep their discovery order — the sort is stable.
+    The devices that MeshTerm talked to before are almost always the ones that the user
+    wants. Thus they go to the top, in the order of their last-connected timestamp (the
+    newest first).
+
+    Below the confirmed companions, each device that looks like a companion (a BLE
+    advertisement with a MeshCore name, a known board, a radio on the SPI bus) comes before a
+    port that nothing confirms, across all the transports. The scan lists serial devices
+    first, in the order that it finds them. Thus the bare UART of a board (the
+    ``/dev/ttyS0`` of a Cardputer Zero, connected to the GPS of its Cap) once opened the
+    splash with the highlight on it, above the Cap itself. Equal devices keep their
+    discovery order, because the sort is stable.
     """
     known = [d for d in devices if d.stable_id in registry]
     others = [d for d in devices if d.stable_id not in registry]
@@ -849,38 +925,42 @@ def _build_items(
     *,
     hidden: int = 0,
 ) -> list:
-    """Build the aligned splash rows (a muted header + one :class:`Choice` per device).
+    """Build the aligned splash rows (a muted header and one :class:`Choice` for each device).
 
-    The row for each device leads with a badge marking the transport, then its display name
-    (the remembered node's name when known, else the hardware name), the HARDWARE column
-    (the remembered firmware model, else the USB vendor) with its tag, and the connection
-    target last; columns are padded to a shared width so they align. Confirmed
-    companions sort to the top (most-recent first), wear their name in white and a bright tag;
-    the remembered default is starred. Trailing rows let the user name a network device by hand
-    and quit here.
+    The row of each device starts with a badge that shows the transport. Then come its
+    display name (the name of the remembered node when it is known, else the hardware name),
+    the HARDWARE column (the remembered firmware model, else the USB vendor) with its tag,
+    and the connection target last. The columns are padded to a shared width, so that they
+    align. Confirmed companions go to the top (the most recent first), with their name in
+    white and a bright tag. The remembered default has a star. The rows at the end let the
+    user type the address of a network device, or quit here.
 
-    Every lane is sized to its longest value and nothing is shortened to fit — not a name, not
-    a model string, not a heading. Each lane used to be squeezed against a budget so the row
-    fitted the box, and on a narrow terminal (or beside a 36-cell CoreBluetooth UUID) that cut
-    the name the reader came to read down to its first five letters. A row wider than the box
-    now runs off its edge instead, and ←→ pan the whole table — header and every device row
-    together (:attr:`~meshterm.ui.tui.select.Choice.pans`), so each lane stays under its
-    label wherever the reader has panned to, and stays panned as the highlight moves. The
-    address goes last because it is the lane the reader needs least: it tells two similar
-    rows apart, which the name and the hardware usually already have.
+    Each lane has the width of its longest value, and nothing is shortened to make it fit:
+    not a name, not a model string, not a heading. Each lane was once made narrower to fit a
+    budget, so that the row fitted the box. On a narrow terminal (or next to a 36-cell
+    CoreBluetooth UUID), that cut the name that the user wanted to read to its first five
+    letters. Now a row that is wider than the box goes past its edge instead.
+
+    The ←→ keys pan the full table: the header and all the device rows together
+    (:attr:`~meshterm.ui.tui.select.Choice.pans`). Thus each lane stays below its label at
+    each pan position, and the pan stays when the highlight moves. The address goes last,
+    because the user has the least use for this lane. It tells two similar rows apart, and
+    the name and the hardware usually do that already.
 
     Args:
-        devices: The devices to list — already less anything hidden.
-        remembered: The last-connected device, starred and preselected when present.
-        registry: Every confirmed companion, keyed by stable id.
-        hidden: How many devices were left out for being hidden. Only the empty state uses
-            it, to tell "nothing is plugged in" apart from "you hid all of it".
+        devices: The devices to list, without the hidden devices.
+        remembered: The last connected device. When it is present, it gets a star and it is
+            preselected.
+        registry: All the confirmed companions, keyed by stable id.
+        hidden: How many devices are not in the list because they are hidden. Only the empty
+            state uses it, to tell "nothing is plugged in" apart from "you hid all of it".
     """
     if not devices:
-        # Nothing attached or in range — but a TCP companion can still be reached by hand, so
-        # show a muted note over the same action rows rather than a dead-end. When the list is
-        # empty *because everything in it is hidden*, say that instead: "nothing detected"
-        # would be a lie, and the way back is a key the reader has to be told about.
+        # Nothing is attached or in range. But the user can still type the address of a TCP
+        # companion, so show a muted note above the same action rows, not a dead end. When
+        # the list is empty because all of its devices are hidden, tell that instead:
+        # "nothing detected" is false, and the user must be told about the key that shows
+        # them again.
         note = (
             _hidden_note(hidden)
             if hidden
@@ -890,16 +970,18 @@ def _build_items(
     devices = _order(devices, registry)
     known: set[str] = set(registry)
 
-    # The last column holds a serial port, a BLE address, or a TCP host:port; label it for
-    # whichever kinds are present so a non-serial endpoint never sits under a bare "PORT"
-    # heading (a BLE address and a network host:port both read as an "address").
+    # The last column holds a serial port, a BLE address, or a TCP host:port. Its label
+    # names the types that are present, so that an endpoint that is not serial is never
+    # under a bare "PORT" heading (a BLE address and a network host:port are both an
+    # "address").
     has_serial = any(not d.is_ble and not d.is_tcp for d in devices)
     has_address = any(d.is_ble or d.is_tcp for d in devices)
     port_label = (
         "PORT / ADDRESS" if has_serial and has_address else "ADDRESS" if has_address else "PORT"
     )
-    # The badge column leads, unlabelled: a plug or a Bluetooth rune says what it is, and a
-    # heading over three cells of picture would only push the name a lane further right.
+    # The badge column is first, with no label: a plug or a Bluetooth rune shows what it
+    # is, and a heading over three cells of picture only moves the name further to the
+    # right.
     type_w = max(_type_cell(d).cell_len for d in devices)
     names = {d.stable_id: _display_name(d, registry) for d in devices}
     name_w = max(len("DEVICE"), *(cell_len(name) for name in names.values()))
@@ -907,13 +989,14 @@ def _build_items(
     tags = {d.stable_id: _tag(d, d.stable_id in known) for d in devices}
     tag_w = max(cell_len(text) for text, _ in tags.values())
 
-    # A muted, aligned header that leads the device rows as their landmark, so a long
-    # detection list keeps the lane names overhead as it scrolls. Every label is the one form,
-    # in full, and it pans with the rows, so a label is always over its lane. The indent
-    # mirrors the row pointer (2) and the star column (2) so each label sits over its own lane.
+    # A muted, aligned header above the device rows, as their landmark. Thus a long list of
+    # detected devices keeps the lane names at the top when it scrolls. Each label has only
+    # one form, in full, and it pans with the rows, so a label is always above its lane. The
+    # indent is the same as the row pointer (2) and the star column (2), so that each label
+    # is above its own lane.
     lanes = [Lane("", type_w + 2), Lane("DEVICE", name_w + 2), Lane("HARDWARE", hardware_w + 2)]
     if tag_w:
-        lanes.append(Lane("", tag_w + 2))  # the tag rides under HARDWARE's heading
+        lanes.append(Lane("", tag_w + 2))  # the tag is under the heading of HARDWARE
     lanes.append(Lane(port_label))
     header = Separator(lambda width: column_header(lanes, width, indent=4), heading=True, pans=True)
 
@@ -924,15 +1007,16 @@ def _build_items(
         row = Text()
         row.append("★" if is_remembered else " ", style="warn" if is_remembered else "")
         row.append(" ")
-        # The badge marks the transport: a plug emoji for serial, or the Bluetooth rune on its
-        # blue badge for BLE. It's built with its own colours, then the column is padded with
-        # plain spaces — so the blue fill hugs just the badge, and the differing badge widths
-        # still line up.
+        # The badge shows the transport: a plug emoji for serial, or the Bluetooth rune on its
+        # blue badge for BLE. The badge has its own colours, and then plain spaces pad the
+        # column. Thus the blue fill covers only the badge, and badges of different widths
+        # still align.
         cell = _type_cell(device)
         row.append_text(cell)
         row.append(" " * max(0, type_w - cell.cell_len))
         row.append("  ")
-        # A confirmed companion wears its name in white so it stands out from mere detections.
+        # A confirmed companion shows its name in white, so that it is different from the
+        # devices that MeshTerm only detected.
         row.append(_pad(names[device.stable_id], name_w), style="device.known" if is_known else "")
         row.append("  ")
         row.append(_pad(_hardware_label(device, registry), hardware_w), style="muted")
@@ -941,29 +1025,31 @@ def _build_items(
             tag, tag_style = tags[device.stable_id]
             row.append(_pad(tag, tag_w), style=tag_style)
             row.append("  ")
-        # Nothing is pinned here, so ←→ pan the whole row. The Trophy case pins its
-        # rank/date/score lanes because those always fit and only the walk overflows, which
-        # makes them the reader's place in a long list. This list inverts that: every lane is
-        # drawn whole, so on a narrow terminal any of them may run past the edge, and pinning
-        # the head would leave part of a long name the one thing ←→ could not reach.
+        # Nothing is pinned here, so the ←→ keys pan the full row. The Trophy case pins its
+        # rank, date, and score lanes, because those lanes always fit and only the walk is
+        # too wide. Thus those lanes keep the place of the user in a long list. This list is
+        # the opposite: each lane is drawn in full, so on a narrow terminal, any lane can go
+        # past the edge. If the code pinned the start of the row, part of a long name would
+        # be the only thing that the ←→ keys could not reach.
         row.append(_where(device), style="muted")
-        # Only a network device opts into Delete-to-remove: it's listed solely from its
-        # remembered endpoint, so forgetting it is the only way it leaves the picker. A scanned
-        # serial/BLE device would just reappear, so Delete stays inert on those rows.
+        # Only a network device opts into Delete-to-remove. The list gets it only from its
+        # remembered endpoint, so to forget it is the only way to remove it from the picker.
+        # A scanned serial or BLE device shows again, so Delete does nothing on those rows.
         items.append(Choice(title=row, value=device, deletable=device.is_tcp, pans=True))
     items.extend(_action_rows())
     return items
 
 
 def _action_rows() -> list:
-    """The trailing splash rows: name a network device by hand, then quit.
+    """The last rows of the splash: type the address of a network device, then quit.
 
-    A network (TCP) companion doesn't advertise and isn't attached, so it can't be scanned
-    for — the "add a network device" row opens a host:port prompt to name one. The Quit row
-    mirrors the main menu. The leading spaces line both up under the device-name column, and
-    the icons share one measured column (:func:`~meshterm.ui.menus.align_icons`): ``🌐`` and
-    ``🚪`` happen to be the same width today, and the words stay aligned if one changes. Where
-    the platform draws no icon lane the icons go, padding and all, like every command row's.
+    A network (TCP) companion does not announce itself and is not attached, so a scan cannot
+    find it. Thus the "add a network device" row opens a host:port prompt, where the user
+    types the address of one. The Quit row is the same as on the main menu. The spaces at the
+    start align the two rows below the device-name column. The icons share one measured
+    column (:func:`~meshterm.ui.menus.align_icons`): today ``🌐`` and ``🚪`` have the same
+    width, and the words stay aligned if one of them changes. When the platform draws no icon
+    lane, the icons and their padding are removed, the same as on each command row.
     """
     add_label, quit_label = align_icons([f"{_TCP_ICON} Add a network device…", "🚪 Quit"])
     return [

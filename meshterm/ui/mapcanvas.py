@@ -1,16 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
-"""A colored Unicode-braille canvas for the terminal map.
+"""A coloured Unicode-braille canvas for the terminal map.
 
-Each character cell holds a 2×4 grid of braille dots, so the drawable resolution is twice
-the columns by four times the rows. Streets, rivers and water are rasterized as braille
-*dots*; place names, street names and node labels are written as *text* over whole cells;
-node markers are single glyphs on top.
+Each cell holds a 2×4 grid of braille dots. Thus the resolution that the canvas can draw is
+two times the columns by four times the rows. The canvas rasterizes streets, rivers, and
+water as braille dots. It writes place names, street names, and node labels as text over
+whole cells. Node markers are single glyphs on top.
 
-A terminal cell can only show one colour, so each cell keeps the colour of the
-highest-**priority** feature whose dots fall in it (a river drawn over water keeps the river's
-blue). Text and markers form a separate overlay that always wins the cell, with greedy
-collision avoidance so labels never overprint each other. The canvas renders straight to
-truecolour ANSI lines, which is exactly what the TUI frame consumes.
+A terminal cell can show only one colour. Thus each cell keeps the colour of the feature
+that has the highest priority and has dots in the cell (a river drawn over water keeps the
+blue of the river). The text and the markers are a separate overlay that always wins the
+cell. A greedy collision check makes sure that labels never overprint each other. The canvas
+renders directly to truecolour ANSI lines, which is the format that the TUI frame uses.
 """
 
 from __future__ import annotations
@@ -21,20 +21,21 @@ from dataclasses import dataclass
 from itertools import pairwise
 
 from ..platforms import Platform, on_platform
-from .marks import RGB, parse_hex  # noqa: F401 - canonical home; re-exported for importers
+from .marks import RGB, parse_hex  # noqa: F401 - exported again for importers
 
-#: Unicode braille pattern base; add a dot bitmask to get the glyph.
+#: The base of the Unicode braille patterns. Add a dot bitmask to get the glyph.
 _BRAILLE_BASE = 0x2800
 
-#: What an emboldened run emits — nothing on a 16-slot console, where the kernel VT draws
-#: bold as brightness and would recolour the run rather than weight it (see
-#: :meth:`MapCanvas.to_ansi_lines`). Bound at platform-switch time.
+#: The text that a bold run emits. It is empty on a 16-slot console, because the kernel VT
+#: draws bold as brightness, and then bold changes the colour of the run instead of its
+#: weight (refer to :meth:`MapCanvas.to_ansi_lines`). It is bound when the platform
+#: switches.
 _BOLD = "\x1b[1m"
 
 
 @on_platform
 def _bind(platform: Platform) -> None:
-    """Bind the canvas's emphasis to what the platform can express (now and on switches)."""
+    """Bind the bold of the canvas to what the platform can show, now and at each switch."""
     global _BOLD
     _BOLD = "\x1b[1m" if platform.truecolor else ""
 
@@ -42,14 +43,19 @@ def _bind(platform: Platform) -> None:
 def single_cell(text: str) -> str:
     """Reduce ``text`` to characters that render in exactly one fixed-width cell.
 
-    The map is a fixed-width grid drawn with whatever font the terminal happens to have, and
-    the layout assumes every label character advances exactly one column. Three kinds of
-    character break that: control/format codes, combining marks (which stack onto the previous
-    cell), and East-Asian *wide*/*fullwidth* glyphs and emoji (which take two columns and so
-    shove the rest of the row out of alignment). Those are also the characters least likely to
-    exist in a typical monospace font, so they surface as tofu. Dropping them keeps labels
-    legible in the Latin/Cyrillic/Greek range fonts reliably cover; a label that is *only*
-    such characters (e.g. an all-emoji node name) collapses to empty and is simply not drawn.
+    The map is a fixed-width grid. The terminal draws it with its own font. The layout
+    assumes that each character of a label is one column wide. Three types of character break
+    this assumption:
+
+    - Control codes and format codes.
+    - Combining marks, which stack onto the previous cell.
+    - East-Asian wide and fullwidth glyphs, and emoji. These take two columns, so they move
+      the rest of the row out of alignment.
+
+    A typical monospace font is also least likely to have these characters, so they show as
+    tofu. When the function removes them, the labels stay legible in the Latin, Cyrillic, and
+    Greek ranges that fonts reliably have. A label that has only such characters (for example
+    a node name of only emoji) becomes empty, and the canvas does not draw it.
     """
     out: list[str] = []
     for ch in text:
@@ -66,38 +72,38 @@ def single_cell(text: str) -> str:
     return "".join(out).strip()
 
 
-#: Dot bit for each (col, row) within a cell — the Unicode braille standard layout.
+#: The dot bit for each (column, row) in a cell. This is the standard Unicode braille layout.
 _DOT_BITS = (
     (0x01, 0x02, 0x04, 0x40),  # left column, rows 0..3
     (0x08, 0x10, 0x20, 0x80),  # right column, rows 0..3
 )
 
-#: Magnification tables, by factor — see :func:`_magnified`.
+#: The magnification tables, by factor (refer to :func:`_magnified`).
 _MAGNIFIED: dict[int, tuple[tuple[int, ...], ...]] = {}
 
 
 def _magnified(factor: int) -> tuple[tuple[int, ...], ...]:
     """How one source cell's dots land in each cell of the ``factor``x block it becomes.
 
-    A braille cell is 2x4 dots, so magnifying a raster by *n* turns every source cell into
-    an ``n`` by ``n`` block of cells — and the only thing that makes the result a *picture*
-    rather than a smear is that each of those cells shows its own quarter (or sixteenth) of
-    the source, enlarged. Stamping the whole source glyph into all of them instead is
-    double vision: the same 2x4 pattern repeated, which reads as a rendering fault rather
-    than as a coarse preview (JP, 2026-08-18).
+    A braille cell is 2x4 dots. If a raster is magnified by *n*, each source cell becomes a
+    block of ``n`` by ``n`` cells. The result is a picture, and not a smear, only when each
+    of these cells shows its own quarter (or sixteenth) of the source, enlarged. The other
+    method is to stamp the whole source glyph into all the cells. That method gives double
+    vision: the same 2x4 pattern repeats, and it looks like a rendering fault and not like a
+    coarse preview (JP, 2026-08-18).
 
-    None of that arithmetic belongs on the paint path, and it doesn't have to be there: a
+    This arithmetic does not belong on the paint path, and it does not have to be there. A
     cell holds one byte, so the whole mapping is 256 source patterns by ``factor * factor``
-    sub-positions, and it is the same table every time. Built once per factor, on first
-    use, and read with a single index per cell — the cost of the honest picture is one
-    list lookup over the naive one.
+    sub-positions, and the table is the same each time. The function builds the table one
+    time for each factor, at the first use. Then the paint path reads it with one index for
+    each cell. Thus the picture costs one list lookup more than the naive method.
 
     Args:
-        factor: Magnification, a power of two (``1`` yields the identity table).
+        factor: The magnification, a power of two (``1`` gives the identity table).
 
     Returns:
-        ``table[source_byte][sub_y * factor + sub_x]`` — the dots that sub-position of the
-        magnified source cell shows.
+        ``table[source_byte][sub_y * factor + sub_x]``, which is the dots that this
+        sub-position of the magnified source cell shows.
     """
     ready = _MAGNIFIED.get(factor)
     if ready is not None:
@@ -109,8 +115,9 @@ def _magnified(factor: int) -> tuple[tuple[int, ...], ...]:
             for sub_x in range(factor):
                 dots = 0
                 for dx in range(2):
-                    # Which source dot this destination dot magnifies. Integer division is
-                    # exact here: the block spans 2*factor by 4*factor destination dots.
+                    # The source dot that this destination dot magnifies. Integer division
+                    # is exact here, because the block has 2*factor by 4*factor
+                    # destination dots.
                     src_x = (sub_x * 2 + dx) // factor
                     for dy in range(4):
                         src_y = (sub_y * 4 + dy) // factor
@@ -124,12 +131,13 @@ def _magnified(factor: int) -> tuple[tuple[int, ...], ...]:
 
 @dataclass(frozen=True, slots=True)
 class Raster:
-    """A finished canvas's braille layer alone — its dots and their cell colours.
+    """The braille layer of a finished canvas: its dots and their cell colours.
 
-    The text overlay is deliberately *not* here: the labels and markers a frame carries are
-    tied to where things were when it was drawn, so a caller reusing an old raster over a
-    moved view (:meth:`MapCanvas.paste_raster`) wants the ground and draws its own overlay
-    on top. Taken with :meth:`MapCanvas.raster`, kept with :meth:`MapCanvas.paste_raster`.
+    The text overlay is not in a ``Raster``, on purpose. The labels and markers of a frame
+    belong to the places where things were when MeshTerm drew the frame. A caller that uses
+    an old raster over a moved viewport (:meth:`MapCanvas.paste_raster`) needs only the
+    ground, and it draws its own overlay on top. Get a ``Raster`` with
+    :meth:`MapCanvas.raster`. Use it with :meth:`MapCanvas.paste_raster`.
     """
 
     cell_w: int
@@ -139,7 +147,7 @@ class Raster:
 
 
 class MapCanvas:
-    """A colored braille raster with a text/marker overlay and label collision tracking."""
+    """A coloured braille raster with a text and marker overlay, and label collision tracking."""
 
     def __init__(self, cell_w: int, cell_h: int) -> None:
         """Create a blank canvas.
@@ -155,10 +163,10 @@ class MapCanvas:
         self._bits = [[0] * self.cell_w for _ in range(self.cell_h)]
         self._color: list[list[RGB | None]] = [[None] * self.cell_w for _ in range(self.cell_h)]
         self._prio = [[-1] * self.cell_w for _ in range(self.cell_h)]
-        # Overlay: (cx, cy) -> (char, rgb, bold). Occupied tracks cells claimed by labels /
-        # markers so later labels can avoid them; label_cells is the labels alone, so the
-        # anti-stacking margin can guard against text piling up without also forbidding a
-        # label from sitting immediately above or below a (single-glyph) marker.
+        # Overlay: (cx, cy) -> (char, rgb, bold). Occupied has the cells that labels and
+        # markers claimed, so that later labels can avoid them. Label_cells has only the
+        # labels. Thus the anti-stacking margin can stop text from piling up, and it does
+        # not also forbid a label directly above or below a (single-glyph) marker.
         self._overlay: dict[tuple[int, int], tuple[str, RGB, bool]] = {}
         self._occupied: set[tuple[int, int]] = set()
         self._label_cells: set[tuple[int, int]] = set()
@@ -183,8 +191,8 @@ class MapCanvas:
     def _segment(
         self, x0: float, y0: float, x1: float, y1: float, color: RGB, priority: int
     ) -> None:
-        """Bresenham a single segment, skipping ones wholly off the canvas."""
-        # Quick reject: both endpoints beyond the same edge → nothing visible.
+        """Draw one segment with the Bresenham method. Skip a segment that is off the canvas."""
+        # Quick reject: if both endpoints are beyond the same edge, nothing is visible.
         if (x0 < 0 and x1 < 0) or (x0 >= self.dot_w and x1 >= self.dot_w):
             return
         if (y0 < 0 and y1 < 0) or (y0 >= self.dot_h and y1 >= self.dot_h):
@@ -214,26 +222,28 @@ class MapCanvas:
         *,
         stipple: int = 1,
     ) -> None:
-        """Even-odd scanline fill of a polygon (with holes) in dot space.
+        """Fill a polygon (with holes) in dot space with the even-odd scanline method.
 
         Args:
-            rings: The polygon's rings in dot coordinates — one outer ring, then any
-                holes; a multipolygon may pass all its parts at once, since even-odd
-                gives the same answer for footprints that don't overlap.
-            color: Fill colour.
-            priority: Cell-colour priority; a higher one drawn later wins the cell.
-            stipple: Draw every *n*-th dot on both axes instead of every one, so the
-                fill reads as a texture rather than a solid. A braille dot is one bit,
-                so a solid fill doesn't shade a region — it *erases* what shares those
-                cells. ``2`` lights a quarter of the dots, enough to read as tone while
-                leaving room for a road to stay a legible line through it. ``1``, the
-                default, is the ordinary solid fill.
+            rings: The rings of the polygon in dot coordinates: one outer ring, then the
+                holes. A multipolygon can pass all its parts at once, because the even-odd
+                rule gives the same answer for footprints that do not overlap.
+            color: The fill colour.
+            priority: The cell-colour priority. If a polygon with a higher priority is
+                drawn later, it wins the cell.
+            stipple: Draw each *n*-th dot on both axes, instead of each dot, so that the
+                fill looks like a texture and not like a solid. A braille dot is one bit,
+                so a solid fill does not shade a region. It erases what shares those
+                cells. ``2`` lights a quarter of the dots. This is enough to look like a
+                tone, and a road can stay a legible line through it. ``1`` is the
+                default. It is the ordinary solid fill.
 
-        Each edge is filed under the scanlines it actually crosses, rather than every
-        scanline testing every edge. The two give the same dots, but the second costs rows
-        times edges, and a zoomed-out view is exactly where a polygon is a coastline or a
-        province with tens of thousands of edges: on the PicoCalc a z7 frame spent 6.8 of
-        its 7.8 s here, almost all of it asking edges about rows they come nowhere near.
+        The function files each edge under the scanlines that the edge crosses. The other
+        method is to test each edge on each scanline. The two methods give the same dots,
+        but the second method costs rows times edges. A zoomed-out viewport is where a
+        polygon is a coastline or a province with tens of thousands of edges. On the
+        PicoCalc, a z7 frame spent 6.8 of its 7.8 s in this function, almost all of it to
+        test edges against rows that they do not come near.
         """
         last_row = self.dot_h - 1
         crossings: dict[int, list[float]] = {}
@@ -241,9 +251,10 @@ class MapCanvas:
             for (x0, y0), (x1, y1) in pairwise(ring):
                 if y0 == y1:
                     continue
-                # The scanline through a row's middle, yc = y + 0.5, crosses this edge when
-                # it lies in [low, high) — half-open, so a vertex shared by two edges is
-                # counted once. Solved for the row, clipped to the canvas.
+                # The scanline through the middle of a row, yc = y + 0.5, crosses this edge
+                # when yc is in [low, high). The interval is half-open, so a vertex that
+                # two edges share is counted one time. The code solves this for the row
+                # and clips it to the canvas.
                 low, high = (y0, y1) if y0 < y1 else (y1, y0)
                 first = max(0, math.ceil(low - 0.5))
                 last = min(last_row, math.ceil(high - 0.5) - 1)
@@ -272,9 +283,9 @@ class MapCanvas:
     def raster(self) -> Raster:
         """Take a copy of the braille layer, for a later frame to paste back in.
 
-        Copied rather than shared: the caller keeps this for as long as it is the newest
-        ground it has, and a canvas that is still being drawn on must not be able to
-        change it underneath them.
+        The raster is a copy and is not shared. The caller keeps it for as long as it is the
+        newest ground that the caller has. A canvas that is still in use for drawing must
+        not be able to change the raster while the caller holds it.
         """
         return Raster(
             self.cell_w,
@@ -292,37 +303,39 @@ class MapCanvas:
         magnify: int = 1,
         fade: float = 1.0,
     ) -> None:
-        """Fill this canvas's braille layer from ``src``, one cell at a time.
+        """Fill the braille layer of this canvas from ``src``, one cell at a time.
 
-        Cell ``(cx, cy)`` here takes cell ``(cols[cx][0], rows[cy][0])`` of ``src``; a
-        ``-1`` for either is a cell with no source (the ground the view has moved onto,
-        which nothing has ever drawn) and is left blank. The caller owns the projection —
-        it is the one that knows what the two rasters *mean* geographically — and this end
-        is a copy loop, deliberately: it runs on the paint path, between a pan keystroke
-        and the frame that answers it.
+        Cell ``(cx, cy)`` of this canvas takes cell ``(cols[cx][0], rows[cy][0])`` of
+        ``src``. A ``-1`` for either is a cell with no source. It is ground that the
+        viewport moved onto, and that nothing drew before. The function leaves it blank.
+        The caller owns the projection, because only the caller knows what the two rasters
+        mean geographically. This function is a copy loop, on purpose. It runs on the paint
+        path, between a pan key press and the frame that answers it.
 
-        Under ``magnify`` a source cell covers an ``n`` by ``n`` block of cells here, and
-        the second half of each axis entry says *which* cell of that block this one is, so
-        each shows its own enlarged share of the source's dots rather than the whole glyph
-        over again (see :func:`_magnified`). One list lookup per cell either way.
+        If ``magnify`` is more than 1, a source cell covers a block of ``n`` by ``n`` cells
+        here. The second half of each axis entry says which cell of that block this cell
+        is. Thus each cell shows its own enlarged share of the dots of the source, and not
+        the whole glyph again (refer to :func:`_magnified`). The cost is one list lookup for
+        each cell in both cases.
 
-        Cell granularity is the whole point of the shape: within a source cell the paste
-        lands where the *dots* say, but the two rasters' cell grids are only aligned to
-        the nearest cell, so a pan settles within half a cell of true and the real raster
-        corrects it a moment later. Reduction (a view that zoomed *out*) keeps the whole
-        source glyph in the one cell it shrank to, deliberately: dropping three quarters
-        of its dots would break every thin line into dashes just as it gets smaller.
+        The cell granularity is the purpose of this design. In a source cell, the paste
+        lands where the dots say. But the cell grids of the two rasters are aligned only to
+        the nearest cell. Thus a pan is correct to within half a cell, and the real raster
+        corrects it a moment later. For a reduction (a viewport that zoomed out), the
+        function keeps the whole source glyph in the one cell that it shrank to, on
+        purpose. If the function removed three quarters of the dots, each thin line would
+        break into dashes as it gets smaller.
 
         Args:
             src: The raster to sample.
-            cols: ``(source cell x, sub-cell x)`` per canvas column (``(-1, 0)`` = none),
-                length ``cell_w``.
-            rows: ``(source cell y, sub-cell y)`` per canvas row (``(-1, 0)`` = none),
-                length ``cell_h``.
-            magnify: How many cells across a source cell covers here — a power of two,
-                ``1`` for a paste at or below the source's own scale.
-            fade: Multiplier on every pasted colour, for a caller marking the ground as
-                provisional. ``1.0`` pastes the colours untouched.
+            cols: ``(source cell x, sub-cell x)`` for each canvas column (``(-1, 0)`` means
+                none). The length is ``cell_w``.
+            rows: ``(source cell y, sub-cell y)`` for each canvas row (``(-1, 0)`` means
+                none). The length is ``cell_h``.
+            magnify: The number of cells across that a source cell covers here. It is a
+                power of two. Use ``1`` for a paste at the scale of the source or below it.
+            fade: The multiplier for each pasted colour, for a caller that marks the
+                ground as provisional. ``1.0`` pastes the colours without a change.
         """
         faded: dict[RGB, RGB] = {}
         block = _magnified(magnify)
@@ -350,8 +363,8 @@ class MapCanvas:
                         )
                     rgb = dim
                 color[cx] = rgb
-                # Left at the empty-cell priority so anything drawn afterwards wins the
-                # cell outright: pasted ground is a stand-in, never evidence.
+                # Keep the priority of an empty cell, so that anything drawn afterwards
+                # wins the cell. Pasted ground is a stand-in and never evidence.
                 prio[cx] = -1
 
     # -- overlay (markers + labels) --------------------------------------------
@@ -359,9 +372,10 @@ class MapCanvas:
     def marker(self, x: int, y: int, glyph: str, color: RGB) -> None:
         """Place a marker glyph at dot ``(x, y)``.
 
-        Markers always draw (they are the point of the map) and reserve their cell so
-        labels route around them. The label, if any, is placed separately via
-        :meth:`marker_label` so it can be dropped (bare glyph) when the map is crowded.
+        Markers always draw, because they are the purpose of the map. They reserve their
+        cell, so that labels go around them. A separate call to :meth:`marker_label` places
+        the label, if there is one. Thus the label can be removed (a bare glyph) when the map
+        is crowded.
         """
         cx, cy = x >> 1, y >> 2
         if not (0 <= cx < self.cell_w and 0 <= cy < self.cell_h):
@@ -381,13 +395,13 @@ class MapCanvas:
     ) -> bool:
         """Place a label beside the marker at dot ``(x, y)``, only if it fits cleanly.
 
-        The label goes to the right of the marker (one blank cell gap) when there's room,
-        else to the left — but never over another marker or label. When neither side is
-        free the label is dropped and just the marker glyph shows, so a crowded map stays
-        legible. With ``avoid_dots`` a spot is also rejected when braille dots already sit
-        under it, so a caller can first sweep for placements clear of the drawn lines and
-        only then settle for one that overprints them. Returns whether the label was
-        placed.
+        The label goes to the right of the marker (with a gap of one blank cell) when there
+        is room. If not, it goes to the left. It never goes over another marker or label.
+        When neither side is free, the function removes the label and only the marker glyph
+        shows. Thus a crowded map stays legible. If ``avoid_dots`` is true, the function
+        also rejects a spot that has braille dots under it. Thus a caller can first search
+        for placements that are clear of the drawn lines, and then accept a placement that
+        overprints them. The function returns whether it placed the label.
         """
         text = single_cell(text)
         if not text:
@@ -404,7 +418,7 @@ class MapCanvas:
         return False
 
     def _dot_free(self, start_cx: int, cy: int, length: int) -> bool:
-        """Whether the run of cells at ``(start_cx…, cy)`` holds no braille dots."""
+        """Whether the run of cells at ``(start_cx…, cy)`` has no braille dots."""
         if not (0 <= cy < self.cell_h):
             return False
         if start_cx < 0 or start_cx + length > self.cell_w:
@@ -421,21 +435,22 @@ class MapCanvas:
         bold: bool = False,
         avoid_dots: bool = False,
     ) -> bool:
-        """Write a centered basemap label at dot ``(x, y)`` if it fits without collision.
+        """Write a centred basemap label at dot ``(x, y)`` if it fits without a collision.
 
         Args:
-            x: Anchor dot x.
-            y: Anchor dot y.
-            text: Label text.
-            color: Text colour.
-            bold: Whether to embolden (used for the most important places).
-            avoid_dots: Also reject the spot when braille dots already sit under the
-                run, so a caller can sweep for a placement clear of the drawn lines
-                before settling for one that overprints them (as :meth:`marker_label`
-                does for its side placements).
+            x: The anchor dot x.
+            y: The anchor dot y.
+            text: The label text.
+            color: The text colour.
+            bold: Whether to make the label bold (used for the most important places).
+            avoid_dots: Also reject the spot when braille dots are under the run. Thus a
+                caller can search for a placement that is clear of the drawn lines, and
+                then accept one that overprints them (:meth:`marker_label` does the same
+                for its side placements).
 
         Returns:
-            ``True`` if placed, ``False`` if it fell off-canvas or overlapped existing text.
+            ``True`` if the label is placed. ``False`` if it is off the canvas or overlaps
+            existing text.
         """
         text = single_cell(text)
         if not text:
@@ -459,13 +474,17 @@ class MapCanvas:
     ) -> bool:
         """Write ``text`` starting at cell ``(start_cx, cy)``.
 
-        With ``checked`` the run is skipped entirely if it would run off-canvas, overprint
-        or touch any claimed cell on its own row, or stack flush against another label on
-        the row directly above or below; otherwise it is forced and simply clipped to the
-        canvas. The same-row margin keeps a label off its neighbours (markers included);
-        the vertical margin guards only against *label* stacking — which is what otherwise
-        lets dense areas silt up into a solid block of text — so a label may still sit
-        immediately above or below a single-glyph marker. Returns whether anything was placed.
+        If ``checked`` is true, the function skips the run completely in these cases:
+
+        - The run goes off the canvas.
+        - The run overprints or touches a claimed cell on its own row.
+        - The run stacks flush against another label on the row directly above or below.
+
+        If ``checked`` is false, the function forces the run and clips it to the canvas. The
+        margin on the same row keeps a label away from its neighbours (markers included).
+        The vertical margin stops only the stacking of labels. Without it, dense areas fill
+        up and become a solid block of text. Thus a label can still sit directly above or
+        below a single-glyph marker. The function returns whether it placed anything.
         """
         if not (0 <= cy < self.cell_h):
             return False
@@ -492,18 +511,19 @@ class MapCanvas:
     def to_ansi_lines(self) -> list[str]:
         """Render the canvas to one truecolour ANSI string per row.
 
-        The canvas is a rasterizer of its own — it emits escape codes directly rather
-        than going through the themed Rich console — so, like
+        The canvas is a rasterizer of its own. It emits escape codes directly and does not
+        use the themed Rich console. Thus, like
         :func:`meshterm.ui.tui.render.render_to_ansi`, its output leaves through the
-        platform's render-boundary fold: on PicoCalc the truecolour SGR quantizes to
-        the 16 palette slots (and any stray glyph folds to the console font) right
-        here, wherever the lines end up embedded.
+        render-boundary fold of the platform. On the PicoCalc, the truecolour SGR is
+        quantized to the 16 palette slots (and each stray glyph folds to the console font)
+        in this function, wherever the lines go afterwards.
 
-        Emphasis is dropped on a platform that has no truecolour (see :data:`_BOLD`): the
-        kernel VT draws ``bold`` as *brightness*, so a bold run whose colour just quantized
-        into the dim bank would be promoted to that slot's bright partner — a light-grey
-        unknown label arriving as white "you", a purple repeater as pink. The colour a
-        marker was given is the load-bearing part; the emboldening is not.
+        On a platform that has no truecolour, the function removes the bold (refer to
+        :data:`_BOLD`). The kernel VT draws ``bold`` as brightness. If a bold run has a
+        colour that was just quantized into the dim bank, the VT changes it to the bright
+        partner of that slot. A light-grey unknown label then shows as the white "you", and a
+        purple repeater shows as pink. The colour that a marker has is the important part.
+        The bold is not.
         """
         from .theme import fold_text
 

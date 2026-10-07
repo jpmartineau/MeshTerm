@@ -1,46 +1,49 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Braille charts: the one way MeshTerm draws a value-over-time row or a meter.
+"""Braille charts: the only way that MeshTerm draws a row of values over time, or a meter.
 
-Every timeline in the app — the header's activity pulse, the channel manager's
-per-channel sparklines, the dashboard's tall packet chart, the Time Machine's
-histories — renders through this module, so they all share the same three rules:
+All the timelines in the app render through this module: the activity pulse in the
+header, the sparkline of each channel in the channel manager, the tall packet chart on
+the dashboard, and the histories of the Time Machine. Thus they all obey the same three
+rules:
 
-* **Time flows left → right.** The rightmost column is *now*; history trails away
-  to the left. Chronological (oldest-first) series feed :func:`timeline_rows`
-  directly; the newest-first histograms the monitor and repository keep are passed
-  as-is to :func:`activity_sparkline`, which reverses them into place.
-* **Grey is zero.** Every chart draws a faint one-dot baseline at value zero and
-  bars grow *from that line*, so a silent stretch reads as a flatline, never a
-  hole. When a series carries negative values (an SNR history, say) the baseline
-  sits at zero's height inside the chart — positive readings rise above it,
-  negative ones hang below — rather than being nailed to the chart floor. The one
-  deliberate break in the line is :data:`GAP`, a column that renders *fully blank*
-  down to the axis, used to notch adjacent bars apart (the Time Machine's per-day
-  charts space one day from the next this way).
-* **Two readings per cell.** Braille offers two dot columns per character cell;
-  every chart uses both, so each cell shows two consecutive readings and the
-  chart draws at twice the horizontal resolution of the cells it occupies.
+* **Time goes from left to right.** The rightmost column is now. The history goes
+  back to the left. A chronological series (oldest first) goes directly to
+  :func:`timeline_rows`. The monitor and the repository keep histograms with the
+  newest bucket first. These histograms go to :func:`activity_sparkline` as they are,
+  and that function reverses them.
+* **Grey is zero.** Each chart draws a faint baseline, one dot high, at the value
+  zero. The bars grow from that line. Thus a period with no traffic shows as a flat
+  line, never as a hole. When a series has negative values (for example, an SNR
+  history), the baseline is at the height of zero in the chart, not at the bottom of
+  the chart. Positive values go up from the baseline, and negative values go down
+  from it. The only intentional break in the line is :data:`GAP`. It is a column
+  that renders fully blank, down to the axis. It puts a notch between two bars that
+  are next to each other (the per-day charts of the Time Machine use it to put a
+  space between two days).
+* **Two values in each cell.** Braille gives two dot columns in each character cell.
+  Each chart uses the two columns. Thus each cell shows two sequential values, and
+  the horizontal resolution of the chart is two times the number of its cells.
 
-The low-level cell assembly is shared: bars are expressed as inclusive dot-row
-spans anchored on the baseline, and each character cell takes the bar style when
-any bar dot falls in it, the faint baseline style when only the zero line does,
-and stays blank braille otherwise (blank braille, not a space, so the grid stays
-monospace under fonts with slightly odd braille metrics).
+All the charts use the same low-level assembly of cells. A bar is an inclusive span
+of dot rows, with one end on the baseline. Each character cell gets the bar style
+when a dot of a bar is in it, and the faint baseline style when only the zero line
+is in it. All other cells stay blank braille. (Blank braille, not a space, keeps the
+grid monospace with fonts whose braille metrics are a little unusual.)
 
-Beyond timelines, the module owns the app's two other braille conventions:
+Also, this module has the three other braille conventions of the app:
 
-* :func:`meter` — the single-value horizontal bar (the dashboard's traffic
-  tallies, the SNR quality bars), always packing two fill steps per cell so a
-  ``width``-cell meter resolves ``2 × width`` levels.
-* :func:`axis_caption` — the ``oldest → now`` line under a timeline, which
-  fills in intermediate marks whenever the chart is wide enough to fit them.
-* :func:`axis_chart` — frames :func:`timeline_rows` output in a numeric y-axis
-  (the dashboard's activity chart, the Time Machine's per-day and rhythm
-  charts). Marks tick both edges; whether the right edge also *prints* its
-  mark follows the platform (see :func:`axis_chrome`) — the desktop mirrors
-  it, the 53-column console keeps the tick alone and gives the cells to the
-  chart. Each mark compacts through :func:`compact_label` so the gutter never
-  outgrows three cells however deep the tallies run.
+* :func:`meter`: the horizontal bar for one value (the traffic counts on the
+  dashboard, the SNR quality bars). It always puts two fill steps in each cell.
+  Thus a meter of ``width`` cells shows ``2 × width`` levels.
+* :func:`axis_caption`: the ``oldest → now`` line under a timeline. When the chart
+  is wide enough, the line also gets the intermediate marks that fit.
+* :func:`axis_chart`: adds a numeric y-axis to the output of :func:`timeline_rows`
+  (the activity chart on the dashboard, and the per-day and rhythm charts of the
+  Time Machine). Ticks mark the two edges. The platform decides if the right edge
+  also prints its mark (refer to :func:`axis_chrome`). The desktop shows the mark
+  on the two sides. The 53-column console keeps only the tick, and gives the cells
+  to the chart. Each mark goes through :func:`compact_label`. Thus the gutter is
+  never wider than three cells, also for very large counts.
 """
 
 from __future__ import annotations
@@ -51,82 +54,92 @@ from rich.text import Text
 
 from ..platforms import Platform, on_platform
 
-#: Whether :func:`axis_chart` mirrors each mark on the right gutter too. The marks are
-#: redundant but nice (JP, 2026-08-09: keep them where space allows), so the roomy
-#: desktop frame mirrors them and the 53-column console spends those cells on the chart
-#: instead. The right-edge ``├`` tick stays on *both* platforms — dropping the label
-#: never drops the tick. Bound at platform-switch time, like every platform-derived
-#: constant; :func:`axis_chrome` is how callers size their chart to whichever shape is
-#: bound.
+#: ``True`` if :func:`axis_chart` also shows each mark in the right gutter. These marks
+#: repeat the left marks, but they help the user (JP, 2026-08-09: keep them where space
+#: allows). Thus the wide desktop frame shows them, and the 53-column console uses those
+#: cells for the chart instead. The ``├`` tick on the right edge stays on the two
+#: platforms: when the label is removed, the tick stays. The value is bound when the
+#: platform changes, the same as each constant that comes from the platform. Callers use
+#: :func:`axis_chrome` to fit their chart to the shape that is bound.
 _MIRROR_LABELS = True
 
 
 @on_platform
 def _bind_axis_chrome(platform: Platform) -> None:
-    """Bind the right-gutter mirror to the platform (runs now and on every switch)."""
+    """Bind the mirror marks of the right gutter to the platform (now, and at each change)."""
     global _MIRROR_LABELS
     _MIRROR_LABELS = platform.frame_border
 
 
 def axis_chrome(label_w: int) -> int:
-    """Cells one framed chart row spends beside its chart cells, on this platform.
+    """The number of cells next to the chart cells in one chart row with axes, on this platform.
 
-    The left gutter (``label_w`` + the space + the ``┤`` tick), the right ``├`` tick,
-    and — where the platform mirrors its marks — the right gutter's space + label. THE
-    number a caller subtracts from its render width to size ``chars``, so the layout
-    can never disagree with what :func:`axis_chart` actually draws.
+    These cells are the left gutter (``label_w``, the space, and the ``┤`` tick), the
+    ``├`` tick on the right, and, where the platform shows the marks on the two sides,
+    the space and the label of the right gutter. This is the only number that a caller
+    subtracts from its render width to find ``chars``. Thus the layout always agrees
+    with what :func:`axis_chart` draws.
     """
     return label_w + 3 + (label_w + 1 if _MIRROR_LABELS else 0)
 
 
-#: Braille dot bit for each dot row counted from the *bottom* of a cell (row 0 is
-#: the cell's lowest dot), left and right columns. The Unicode braille block
-#: numbers its rows top-down (dots 1,2,3,7 left / 4,5,6,8 right); these tables
-#: flip that so chart math can stay in bottom-up "height" space throughout.
+#: The braille dot bit for each dot row, counted from the bottom of a cell (row 0 is
+#: the lowest dot of the cell), for the left and the right columns. The Unicode
+#: braille block numbers its rows from the top down (dots 1,2,3,7 on the left, and
+#: 4,5,6,8 on the right). These tables reverse that order, so that all the chart
+#: calculations can stay in a "height" space that goes from the bottom up.
 _LEFT_BITS = (0x40, 0x04, 0x02, 0x01)
 _RIGHT_BITS = (0x80, 0x20, 0x10, 0x08)
 
-#: How a lit cell is styled: a fixed Rich style name, or a callable given the
-#: cell's present readings (one or two values) returning the style — the hook the
-#: Time Machine uses to colour an SNR band by each slice's quality.
+#: The style of a lit cell: a fixed Rich style name, or a callable. The callable gets
+#: the values that are present in the cell (one or two values) and returns the style.
+#: The Time Machine uses this hook to colour an SNR band by the quality of each slice.
 CellStyle = str | Callable[[list[float]], str]
 
 
 class _Gap:
-    """The type of :data:`GAP`; a private singleton, so ``value is GAP`` identifies it."""
+    """The type of :data:`GAP`. A private singleton lets ``value is GAP`` identify it."""
 
     __slots__ = ()
 
-    def __repr__(self) -> str:  # pragma: no cover - a debugging aid only
+    def __repr__(self) -> str:  # pragma: no cover - only an aid for debugging
         return "GAP"
 
 
-#: A timeline value marking a hard gap: the column renders *fully blank* — no bar and
-#: no zero baseline — so it breaks the "grey is zero" flatline on purpose. ``None`` and
-#: ``0`` still draw the faint zero line (a silent reading is still a reading); only
-#: ``GAP`` punches a hole in it, used to notch adjacent day bars apart in the Time
-#: Machine's per-day charts so same-height neighbours never fuse into one solid block.
+#: A timeline value that marks a hard gap. The column renders fully blank, with no bar
+#: and no zero baseline. Thus it breaks the flat line of "grey is zero" on purpose.
+#: ``None`` and ``0`` still draw the faint zero line (a value of no traffic is still a
+#: value). Only ``GAP`` makes a hole in the line. The per-day charts of the Time Machine
+#: use it to put a notch between two day bars that are next to each other. Thus two
+#: neighbours of the same height never join into one solid block.
 GAP = _Gap()
 
 
 def chart_span(
     values: Sequence[float | None], span: tuple[float, float] | None = None
 ) -> tuple[float, float]:
-    """The vertical range a chart of ``values`` draws over, zero always included.
+    """The vertical range of a chart of ``values``. The range always includes zero.
 
-    The grey baseline *is* zero, so the span is the data's extent folded around it:
-    all-positive data spans ``0 → peak`` (the baseline on the floor), all-negative
-    data ``floor → 0`` (the baseline on the ceiling, bars hanging), mixed data both.
-    Callers that caption their chart's scale should quote this same span so the
-    label and the drawing can never disagree.
+    The grey baseline is zero. Thus the span is the extent of the data, extended to
+    include zero:
+
+    - Data with only positive values spans ``0 → peak`` (the baseline is at the bottom).
+    - Data with only negative values spans ``floor → 0`` (the baseline is at the top,
+      and the bars go down from it).
+    - Mixed data spans the two.
+
+    A caller that shows the scale of its chart in a caption must use this same span.
+    Thus the label and the chart always agree.
 
     Args:
-        values: The chart's readings (``None`` marks an empty slot; :data:`GAP` a
-            hard gap — neither carries a magnitude, so both sit out the span).
-        span: An optional wider range to honour (it too is folded around zero).
+        values: The values of the chart. ``None`` marks an empty slot, and :data:`GAP`
+            marks a hard gap. These two have no magnitude, so they are not part of the
+            span.
+        span: An optional wider range to include (it is also extended to include
+            zero).
 
     Returns:
-        ``(lo, hi)`` with ``lo <= 0 <= hi``; ``(0.0, 0.0)`` for an empty series.
+        ``(lo, hi)`` with ``lo <= 0 <= hi``. ``(0.0, 0.0)`` for an empty series.
     """
     present = [v for v in values if v is not None and v is not GAP]
     if span is not None:
@@ -145,29 +158,31 @@ def timeline_rows(
     baseline_style: str = "faint",
     column_styles: Sequence[str] | None = None,
 ) -> list[Text]:
-    """Render a chronological series as a braille bar chart, newest at the right.
+    """Render a chronological series as a braille bar chart, with the newest value at the right.
 
-    ``values`` is oldest-first, one reading per dot column (two per character
-    cell), scaled onto :func:`chart_span`'s zero-folded range: the series' peak
-    fills the space above the baseline, its floor the space below, and any
-    non-zero reading lights at least one dot so a lone packet never vanishes.
-    ``None`` (no reading) and ``0`` alike draw only the faint zero baseline;
-    :data:`GAP` draws nothing at all, breaking the baseline into a clean notch.
+    ``values`` is in order oldest first, with one value for each dot column (two for
+    each character cell). The values are scaled onto the range of :func:`chart_span`,
+    which includes zero. The peak of the series fills the space above the baseline, and
+    its floor fills the space below. Each value that is not zero lights at least one
+    dot. Thus a single packet never disappears. ``None`` (no value) and ``0`` both draw
+    only the faint zero baseline. :data:`GAP` draws nothing, and breaks the baseline
+    with a clean notch.
 
     Args:
-        values: Per-slot readings, oldest first (the rightmost is "now"). An odd
-            count is padded with one silent column so whole cells always render.
-            A :data:`GAP` slot renders fully blank (bar and baseline both).
-        rows: How many braille rows tall the chart is (four dot rows each).
-        span: A wider range to scale against (see :func:`chart_span`), so several
-            charts — or a chart and its caption — can share one scale.
-        style: Style for lit cells: a Rich style name, or a callable given each
-            cell's present readings (for per-slice colouring).
-        baseline_style: Style for the zero line where nothing covers it.
-        column_styles: Optional per-column styles, aligned with ``values``,
-            overriding ``style`` — how the activity charts dim history recorded by
-            an earlier session. A cell straddling two styles takes its newer
-            (right) lit column's.
+        values: The value for each slot, oldest first (the rightmost is "now"). If the
+            number of values is odd, one silent column is added, so that only whole
+            cells render. A :data:`GAP` slot renders fully blank (no bar and no
+            baseline).
+        rows: The height of the chart in braille rows (each has four dot rows).
+        span: A wider range for the scale (refer to :func:`chart_span`). Thus some
+            charts, or a chart and its caption, can use the same scale.
+        style: The style of the lit cells: a Rich style name, or a callable that gets
+            the values that are present in each cell (to colour each slice).
+        baseline_style: The style of the zero line where nothing covers it.
+        column_styles: Optional styles for each column, aligned with ``values``. They
+            override ``style``. The activity charts use them to dim the history that
+            an earlier session stored. A cell with two styles takes the style of its
+            newer (right) column when that column is lit.
 
     Returns:
         ``rows`` :class:`Text` lines, top row first, ``ceil(len(values)/2)``
@@ -176,13 +191,14 @@ def timeline_rows(
     lo, hi = chart_span(values, span)
     total = rows * 4
     base = _baseline_row(lo, hi, total)
-    up = total - base  # dot rows available to a full-scale positive bar
-    down = base + 1  # …and to a full-scale negative one (baseline row included)
+    up = total - base  # the dot rows for a positive bar at full scale
+    down = base + 1  # the dot rows for a negative bar at full scale (with the baseline row)
 
     bars: list[tuple[int, int] | None] = []
     for value in values:
-        # GAP must short-circuit ahead of the numeric tests — it has no magnitude,
-        # so ``value == 0`` / ``value > 0`` would misfire (or raise) on the sentinel.
+        # Test for GAP before the numeric tests. GAP has no magnitude, thus
+        # ``value == 0`` or ``value > 0`` on the sentinel can give a wrong result (or
+        # raise an error).
         if value is GAP or value is None or value == 0:
             bars.append(None)
         elif value > 0:
@@ -202,45 +218,58 @@ def activity_sparkline(
     style: str = "ok",
     column_styles: Sequence[str] | None = None,
 ) -> Text:
-    """A one-row activity sparkline over a newest-first histogram, "now" rightmost.
+    """A one-row activity sparkline of a newest-first histogram, with "now" at the right.
 
-    Bar heights scale to a *peak* the way :func:`timeline_rows` scales a chart: the
-    peak bucket fills all four dot rows and the rest draw in proportion, so the
-    sparkline reads its shape against a ceiling rather than a fixed threshold ladder.
-    Any non-zero bucket still lights at least one dot, so a lone packet never
-    vanishes; a silent bucket (and an all-silent window) draws only the faint zero
-    baseline. The histogram arrives newest-first — the natural order the monitor and
-    repository keep — and is reversed here, so the current bucket lands on the right
-    edge and traffic slides *left* as it ages, like every other MeshTerm timeline.
+    The bar heights are scaled to a peak, the same as :func:`timeline_rows` scales a
+    chart. The peak bucket fills all four dot rows, and the other buckets draw in
+    proportion. Thus the sparkline shows its shape against a ceiling, not against a
+    fixed ladder of thresholds. Each bucket that is not zero still lights at least one
+    dot. Thus a single packet never disappears. A silent bucket (and a time window that
+    is all silent) draws only the faint zero baseline.
 
-    ``peak`` is the scaling ceiling. Left ``None``, each sparkline self-scales to *its
-    own* drawn window's busiest bucket — the plain, jumpy relative scale. Passed a
-    value, that value is the ceiling, which does two things: it lets several sparklines
-    handed the *same* one share a scale so their bar heights are directly comparable
-    (a whole column of per-channel rows against the busiest channel on screen), and it
-    lets the caller substitute a *steadier* ceiling than the bare window maximum.
-    :func:`activity_peak` builds that steady, shared ceiling — an outlier-robust,
-    floored peak over a deeper history than is drawn — and both the
-    header pulse and the channel manager pass its result here. The scale is otherwise a
-    pure function of what each call is given: no hidden cross-instance state lives here.
+    The histogram comes newest first, which is the usual order of the monitor and the
+    repository. This function reverses it. Thus the current bucket is at the right
+    edge, and the traffic moves to the left as it gets older, the same as in each
+    other MeshTerm timeline.
+
+    ``peak`` is the ceiling of the scale. If it is ``None``, each sparkline scales
+    itself to the busiest bucket of its own drawn time window. This is the plain
+    relative scale, and it jumps. If ``peak`` has a value, that value is the ceiling.
+    This has two results:
+
+    - Some sparklines that get the same ``peak`` use the same scale. Thus you can
+      compare their bar heights directly (a full column of channel rows, against the
+      busiest channel on the screen).
+    - The caller can give a ceiling that is more steady than the maximum of the time
+      window.
+
+    :func:`activity_peak` makes that steady, shared ceiling: a peak that outliers do
+    not change much, with a floor, from a longer history than the history that is
+    drawn. The header pulse and the channel manager both give its result to this
+    function. In all other ways, the scale is a pure function of the arguments of each
+    call. No hidden state is shared between instances.
 
     Args:
-        histogram: Per-bucket counts, newest first; padded/cropped to ``buckets``.
-        buckets: How many buckets to draw (half this many characters).
-        peak: The bucket count that fills the column; ``None`` self-scales to the
-            drawn window's busiest bucket. Zero (or an all-silent window) is a
-            flatline. A shared peak below a bucket's own count clamps to full height.
-        style: Style for lit cells.
-        column_styles: Optional per-bucket styles aligned with ``histogram``
-            (newest first, reversed here alongside it), overriding ``style`` —
-            how the header pulse dims buckets recorded by an earlier session.
+        histogram: The count for each bucket, newest first. It is padded or cut to
+            ``buckets``.
+        buckets: The number of buckets to draw (the number of characters is half of
+            this number).
+        peak: The bucket count that fills the column. ``None`` scales to the busiest
+            bucket of the drawn time window. Zero (or a time window that is all silent)
+            gives a flat line. If a shared peak is less than the count of a bucket,
+            that bucket is clamped to full height.
+        style: The style of the lit cells.
+        column_styles: Optional styles for each bucket, aligned with ``histogram``
+            (newest first, and reversed here with it). They override ``style``. The
+            header pulse uses them to dim the buckets that an earlier session stored.
 
     Returns:
         A styled Rich :class:`Text` of ``buckets / 2`` braille characters.
     """
     window = (tuple(histogram) + (0,) * buckets)[:buckets]
-    # The window's own peak when the caller names none; a one-row chart is four dot
-    # rows tall, so a bucket at the peak fills all four (see timeline_rows' up=total).
+    # If the caller gives no peak, use the peak of the time window. A one-row chart is
+    # four dot rows high. Thus a bucket at the peak fills all four rows (refer to
+    # ``up=total`` in timeline_rows).
     scale = peak if peak is not None else max(window, default=0)
     per_column: list[str] | None = None
     if column_styles is not None:
@@ -257,19 +286,20 @@ def activity_sparkline(
     return rows[0]
 
 
-#: Default percentile :func:`activity_peak` reads its ceiling at, in place of the raw
-#: maximum: a lone freak-busy bucket sits *above* this and clips to full height instead
-#: of redefining the whole scale, so one outlier minute doesn't flatten every other bar.
-#: High enough that ordinary sustained traffic still reaches the top.
+#: The default percentile at which :func:`activity_peak` reads its ceiling, instead of
+#: the raw maximum. A single bucket that is unusually busy is above this percentile. It
+#: is clipped to full height, and it does not change the full scale. Thus one outlier
+#: minute does not make all the other bars flat. The value is high enough that usual,
+#: continuous traffic still gets to the top.
 ACTIVITY_PERCENTILE = 90.0
 
 
 def _percentile(values: Sequence[float], p: float) -> float:
-    """The linear-interpolated ``p``-th percentile of ``values`` (``0.0`` when empty).
+    """The ``p``-th percentile of ``values``, with linear interpolation (``0.0`` when empty).
 
-    The two ranks either side of the fractional position blended together — NumPy's
-    default convention — so a small sample moves the mark smoothly instead of in
-    whole-element jumps.
+    The result is a blend of the two ranks on each side of the fractional position.
+    This is the default convention of NumPy. Thus with a small sample, the mark moves
+    smoothly, not in jumps of a full element.
     """
     if not values:
         return 0.0
@@ -287,59 +317,67 @@ def activity_peak(
     percentile: float = ACTIVITY_PERCENTILE,
     floor: float = 0.0,
 ) -> float:
-    """A steady scaling ceiling for :func:`activity_sparkline`, from newest-first counts.
+    """A steady ceiling for the scale of :func:`activity_sparkline`, from newest-first counts.
 
-    Relative-to-peak scaling reads its shape well but is jumpy: the plain window
-    maximum lurches whenever the busiest bucket enters or ages out of view, and a lone
-    packet in a quiet window fills the column because it *is* the maximum. This folds
-    two dampers into one ceiling so a whole column of sparklines — or one that slides
-    bucket by bucket — stays legible:
+    A scale relative to the peak shows the shape well, but it jumps. The plain maximum
+    of the time window jumps each time that the busiest bucket comes into the time
+    window, or goes out of it because of its age. Also, a single packet in a quiet
+    time window fills the column, because it is the maximum. This function puts two
+    dampers into one ceiling. Thus a full column of sparklines, or one sparkline that
+    moves bucket by bucket, stays easy to read:
 
     * **Robustness.** The ceiling is a high ``percentile`` of the counts, not their
-      maximum, so a single freak-busy bucket sits above it and clips to full height
-      instead of shrinking every other bar to redefine the scale. Handing this a deeper
-      history than is drawn (the header's six hours, the channel pool's) steadies it
-      further: the percentile of a wide pool barely stirs as one bucket scrolls off the
-      drawn window, so the ceiling *glides* rather than snapping.
-    * **Floor.** The result never drops below ``floor``, so a stray packet in a
-      long-silent window draws a small nub against a meaningful scale instead of
-      shouting at full height. It is also the scale when everything is silent.
+      maximum. Thus a single bucket that is unusually busy is above the ceiling, and
+      it is clipped to full height. It does not make all the other bars smaller to
+      change the scale. If you give this function a longer history than the history
+      that is drawn (the six hours of the header, the pool of the channels), the
+      ceiling is more steady. The percentile of a wide pool changes very little when
+      one bucket scrolls out of the drawn time window. Thus the ceiling moves smoothly
+      instead of in jumps.
+    * **Floor.** The result is never less than ``floor``. Thus a stray packet in a
+      time window that was silent for a long time draws a small bar against a scale
+      that has a meaning, not a bar at full height. ``floor`` is also the scale when
+      all the buckets are silent.
 
-    A third damper — **recency**, discounting each bucket by ``decay ** age`` — was
-    tried and removed. Decaying the *counts* before taking the percentile, then scaling
-    the *undecayed* bars drawn against that ceiling, is a unit mismatch: the two only
-    agree at age zero. With a half-life far shorter than the pooled window it starved
-    the ceiling to the floor (most traffic mass sits older than one half-life, so the
-    weighted percentile collapsed), and a genuinely busy earlier stretch still on screen
-    then saturated wholesale. The pool depth already supplies the steadiness recency was
-    reaching for, without the collapse — so age no longer enters the ceiling at all.
+    We tried a third damper and removed it: **recency**, which reduced each bucket by
+    ``decay ** age``. That damper decayed the counts before it took the percentile,
+    but the bars that the chart draws against that ceiling were not decayed. Thus the
+    units did not agree: the two agree only at age zero. With a half-life much shorter
+    than the pooled time window, the damper pushed the ceiling down to the floor. (Most
+    of the traffic is older than one half-life, thus the weighted percentile
+    collapsed.) Then a busy earlier period that was still on the screen saturated
+    completely. The depth of the pool already gives the steadiness that recency tried
+    to get, and without the collapse. Thus age is not part of the ceiling now.
 
-    Several histograms pool into one ceiling — every visible channel's, say — so a
-    column of rows shares one scale and their bars stay directly comparable. The result
-    is a pure function of the counts handed in: no hidden cross-frame state, so it is
-    deterministic and eases on its own as the data does. Pass it to each sparkline's
-    ``peak``.
+    Some histograms (for example, the histogram of each visible channel) go into one
+    pool for one ceiling. Thus a column of rows uses one scale, and you can compare
+    their bars directly. The result is a pure function of the counts that the caller
+    gives. No hidden state is kept from one frame to the next. Thus the result is
+    deterministic, and it changes smoothly when the data changes smoothly. Give the
+    result to the ``peak`` of each sparkline.
 
     Args:
-        histograms: One or more newest-first count series (bucket 0 is "now"); their
-            non-zero buckets pool into the ceiling. Order carries no weight — a bucket
-            counts the same however old it is in the window.
-        percentile: The percentile of counts the ceiling reads (0–100).
-        floor: The lowest the ceiling may fall to (also the all-silent scale).
+        histograms: One or more count series, newest first (bucket 0 is "now"). Their
+            buckets that are not zero go into the pool for the ceiling. The order has
+            no weight: a bucket counts the same at each age in the time window.
+        percentile: The percentile of the counts that gives the ceiling (0–100).
+        floor: The lowest value of the ceiling (also the scale when all the buckets
+            are silent).
 
     Returns:
-        The scaling ceiling, ``>= floor``.
+        The ceiling of the scale, ``>= floor``.
     """
     counts = [count for histogram in histograms for count in histogram if count > 0]
     return max(float(floor), _percentile(counts, percentile))
 
 
-#: The meter's fill glyphs, ``(full step, half step)``, by profile. A *full-height*
-#: meter lights the top three dot rows and leaves the bottom row blank (``⠿`` both
-#: columns, ``⠇`` the left column alone), reading as a solid tally bar that lifts a
-#: hair off the cell floor so it doesn't fuse with the row beneath it. A *slim* meter
-#: lights only the middle two rows (``⠶`` / ``⠆``), so the bar floats mid-cell and can
-#: sit over an unlit track of the same glyph without turning into a solid block.
+#: The fill glyphs of the meter, ``(full step, half step)``, for each profile. A
+#: full-height meter lights the top three dot rows and keeps the bottom row blank
+#: (``⠿`` for the two columns, ``⠇`` for the left column only). It shows as a solid
+#: count bar that is a little above the bottom of the cell, so that it does not join
+#: the row below it. A slim meter lights only the two middle rows (``⠶`` / ``⠆``).
+#: Thus the bar floats in the middle of the cell. It can be on an unlit track of the
+#: same glyph, and it does not become a solid block.
 _METER_FULL = ("⠿", "⠇")
 _METER_SLIM = ("⠶", "⠆")
 
@@ -352,34 +390,37 @@ def meter(
     slim: bool = False,
     track: str | None = None,
 ) -> Text:
-    """Render a single value as a horizontal braille meter, two fill steps per cell.
+    """Render one value as a horizontal braille meter, with two fill steps in each cell.
 
-    The one way MeshTerm draws a proportion as a bar. Both dot columns of every cell
-    are always exploited — a ``width``-cell meter resolves ``2 × width`` levels — and
-    any *reading* lights at least one half step, even one clamped to the floor of its
-    scale: a measured bottom is still a measurement, so it never vanishes (``None``
-    is how a truly empty meter is asked for). Two profiles cover the app's two cases:
+    This is the only way that MeshTerm draws a proportion as a bar. The meter always
+    uses the two dot columns of each cell: a meter of ``width`` cells shows
+    ``2 × width`` levels. Each value lights at least one half step, also a value that
+    is clamped to the bottom of its scale. A measured bottom is still a measurement, so
+    it never disappears. (To get a meter that is fully empty, give ``None``.) Two
+    profiles cover the two cases of the app:
 
-    * **full-height, no track** (the default): the top three dot rows (the bottom
-      row left blank so the bar lifts off the cell floor), unlit cells left blank —
-      a tally bar whose length *is* the reading (the dashboard's traffic lanes).
-    * **slim, on a track** (``slim=True, track="track"``): only the middle two dot
-      rows, with the unlit remainder drawn in the same glyph dimmed to ``track`` — a
-      gauge whose reading fills in a visible background (the SNR quality bars). The
-      boundary half-step keeps the reading's colour, not the track's: it is still
-      part of what was measured.
+    * **Full height, no track** (the default): the top three dot rows. The bottom row
+      stays blank, so that the bar is above the bottom of the cell. Unlit cells stay
+      blank. This is a count bar whose length is the value (the traffic lanes on the
+      dashboard).
+    * **Slim, on a track** (``slim=True, track="track"``): only the two middle dot
+      rows. The unlit remainder is drawn in the same glyph, dimmed to ``track``. This
+      is a gauge whose value fills a visible background (the SNR quality bars). The
+      half step at the boundary keeps the colour of the value, not of the track,
+      because it is still part of the measurement.
 
     Args:
-        fraction: The fill as a fraction of full scale, clamped to ``0 .. 1``;
-            ``None`` draws an entirely unlit meter (just the track, if any).
-        width: The meter's full-scale span in character cells.
-        style: Style for the lit fill.
-        slim: Light only the middle two dot rows instead of all four.
-        track: Style for the unlit remainder, drawn in the full-step glyph; ``None``
-            pads with spaces instead, so the meter still occupies ``width`` cells.
+        fraction: The fill as a fraction of full scale, clamped to ``0 .. 1``.
+            ``None`` draws a meter with no lit part (only the track, if there is one).
+        width: The full-scale span of the meter, in character cells.
+        style: The style of the lit fill.
+        slim: Light only the two middle dot rows, not the top three.
+        track: The style of the unlit remainder, drawn in the full-step glyph.
+            ``None`` pads with spaces instead, so that the meter still has ``width``
+            cells.
 
     Returns:
-        A :class:`Text` exactly ``width`` cells wide.
+        A :class:`Text` of exactly ``width`` cells.
     """
     full_glyph, half_glyph = _METER_SLIM if slim else _METER_FULL
     if fraction is None:
@@ -403,33 +444,36 @@ def axis_caption(
     *,
     style: str = "faint",
 ) -> tuple[Text, list[int]]:
-    """The caption line under a timeline: edge labels plus whatever marks fit between.
+    """The caption line under a timeline: the edge labels, and the marks that fit between.
 
-    Every chart used to caption only its ends (``oldest … now``); this asks
-    ``label_at`` for the labels at the quarter points too and keeps the densest set
-    that fits — quarters, else the midpoint, else just the two ends — so a wide chart
-    reads its timescale without counting cells. The first label is left-aligned on the
-    chart's left edge, the last right-aligned on its right edge, and interior labels
-    are centred on the fraction they describe, each separated by at least two blank
-    cells so they never run together.
+    Each chart once had a caption only at its ends (``oldest … now``). This function
+    also asks ``label_at`` for the labels at the quarter points. It keeps the densest
+    set that fits: the quarters, else the midpoint, else only the two ends. Thus the
+    user can read the timescale of a wide chart, and does not have to count cells. The
+    first label is aligned left on the left edge of the chart. The last label is
+    aligned right on the right edge. The labels between them are centred on the
+    fraction that they describe. At least two blank cells separate each label from the
+    next, so that they never touch.
 
     Args:
-        chars: The chart's width in character cells (the caption matches it).
-        label_at: Maps a position fraction (``0.0`` = the oldest column, ``1.0`` =
+        chars: The width of the chart in character cells (the caption has the same
+            width).
+        label_at: Changes a position fraction (``0.0`` = the oldest column, ``1.0`` =
             now) to its label.
-        style: Style the whole caption is drawn in.
+        style: The style of the full caption.
 
     Returns:
-        ``(caption, tick_cells)`` — the caption :class:`Text` exactly ``chars`` cells
-        wide, and the chart column each placed label points at, so the axis border can
-        notch a ``┬`` under it (see :func:`axis_chart`).
+        ``(caption, tick_cells)``: the caption :class:`Text`, exactly ``chars`` cells
+        wide, and the chart column to which each placed label points. The axis border
+        uses these columns to put a ``┬`` notch under each label (refer to
+        :func:`axis_chart`).
     """
     for segments in (4, 2, 1):
         fractions = [i / segments for i in range(segments + 1)]
         labels = [label_at(f) for f in fractions]
         cells: list[str] = [" "] * chars
-        taken: list[tuple[int, int]] = []  # placed [start, end) spans, in order
-        ticks: list[int] = []  # the chart column each label points at
+        taken: list[tuple[int, int]] = []  # the [start, end) spans of placed labels, in order
+        ticks: list[int] = []  # the chart column to which each label points
         ok = True
         for frac, label in zip(fractions, labels, strict=True):
             if frac == 0.0:
@@ -451,19 +495,21 @@ def axis_caption(
             cells[start:end] = label
         if ok:
             return Text("".join(cells), style=style), ticks
-    # Even the two edge labels collide: keep the left one and let it stand alone.
+    # The two edge labels also collide. Keep only the left label.
     label = label_at(0.0)[:chars]
     return Text(label.ljust(chars), style=style), [0]
 
 
 def compact_label(value: float) -> str:
-    """A y-axis mark that stays gutter-sized however deep the tally: ``999``, ``12k``, ``2M``.
+    """A y-axis mark that stays the size of the gutter for all counts: ``999``, ``12k``, ``2M``.
 
-    Counts above 999 compact to a rounded ``k``/``M`` (JP, 2026-08-08) so a gutter mark
-    always fits three cells for any tally a mesh realistically produces, instead of a
-    five-digit day widening every chart's gutter. A signed value keeps its minus (the SNR
-    band's depths). Rounding suits the gutter's job — a tick quotes roughly what a bar
-    peaking at its dot means, not an exact ledger; the headings still carry exact counts.
+    A count above 999 becomes a rounded ``k`` or ``M`` value (JP, 2026-08-08). Thus a
+    gutter mark always fits in three cells, for each count that a mesh can produce in
+    practice. Without this, a day with a five-digit count makes the gutter of each chart
+    wider. A signed value keeps its minus sign (the depths of the SNR band). A rounded
+    value is correct for the job of the gutter: a tick shows approximately the value of
+    a bar whose peak is at its dot. It is not an exact account. The headings still show
+    the exact counts.
     """
     if abs(value) < 1000:
         return str(round(value))
@@ -473,54 +519,58 @@ def compact_label(value: float) -> str:
     return f"{round(value / 1_000_000)}M"
 
 
-#: The fewest cells a chart's y-axis labels are given, however small its peak (JP,
-#: 2026-10-04). Sized to the widest mark alone, the gutter grew as a busy minute pushed the
-#: peak from ``9`` to ``10`` to ``100``, sliding the whole chart sideways under the reader;
-#: three cells hold every mark :func:`compact_label` prints below a thousand (``563``) and
-#: every compacted one (``1k``, ``-12``), so the gutter stays put.
+#: The minimum number of cells for the y-axis labels of a chart, also when its peak is
+#: small (JP, 2026-10-04). When the width of the gutter came only from the widest mark,
+#: the gutter grew when a busy minute changed the peak from ``9`` to ``10`` to ``100``.
+#: Then the full chart moved to the side while the user looked at it. Three cells hold
+#: each mark that :func:`compact_label` prints below a thousand (``563``), and each
+#: compacted mark (``1k``, ``-12``). Thus the gutter does not move.
 AXIS_LABEL_MIN = 3
 
 
 def axis_label_w(peak: float, rows: int, *, lo: float = 0.0) -> int:
-    """The gutter width a chart of this scale needs: its widest printed mark, at least 3.
+    """The gutter width for a chart of this scale: its widest printed mark, at least 3.
 
-    Sizing from the compacted *peak* alone under-measures: a ``1.5k`` peak prints as the
-    two-cell ``1k`` while a lower tick can still land at ``563`` — three cells. Callers
-    sharing one gutter across stacked charts take the max of this over each chart's
-    scale (and the default :func:`axis_chart` gutter is computed the same way). Never
-    narrower than :data:`AXIS_LABEL_MIN`.
+    If the width comes only from the compacted peak, it is too small. A ``1.5k`` peak
+    compacts to ``2k``, which has two cells. But a lower tick can still be at ``563``,
+    which has three cells. When stacked charts share one gutter, the callers
+    take the maximum of this value for the scale of each chart. (The default gutter of
+    :func:`axis_chart` is calculated in the same way.) The width is never less than
+    :data:`AXIS_LABEL_MIN`.
     """
     return max([AXIS_LABEL_MIN, *(len(mark) for mark in y_axis_labels(peak, rows, lo=lo))])
 
 
 def y_axis_labels(peak: float, rows: int, *, lo: float = 0.0) -> list[str]:
-    """Each chart row's ticked-dot value, top row first, dupes and zeros blanked.
+    """The ticked-dot value of each chart row, top row first, with repeats and zeros blank.
 
-    The gutter's ``┤`` tick crosses a braille row at the third dot up from the
-    row's bottom, so each mark quotes the value of a bar peaking *at that dot* —
-    the reading the tick visibly points at, not the row's top edge — using the
-    same zero-folded scaling :func:`timeline_rows` draws bars with (baseline row
-    and all), compacted through :func:`compact_label` so it never outgrows the
-    gutter. A mark that would repeat the one above (a low peak makes
-    neighbouring dots round to the same value — or to the same ``1k``) or read
-    zero is left blank, so the scale never shows the same number twice. A signed
-    chart passes its floor as ``lo`` (``< 0``): marks above the grey zero line
-    quote rise heights, marks below it hang depths, so the gutter shows both
-    signs of a zero-crossing series (an SNR band's ``+5 … −10 dB``) instead of
-    only the positive peak.
+    The ``┤`` tick of the gutter crosses a braille row at the third dot from the bottom
+    of the row. Thus each mark shows the value of a bar whose peak is at that dot. This
+    is the value to which the tick visibly points, not the value at the top edge of the
+    row. The mark uses the same scale (with zero included, and with the baseline row)
+    that :func:`timeline_rows` uses to draw bars. The mark goes through
+    :func:`compact_label`, so that it is never wider than the gutter.
+
+    A mark is blank if it repeats the mark above it, or if it is zero. (With a low peak,
+    neighbouring dots can round to the same value, or to the same ``1k``.) Thus the
+    scale never shows the same number two times. A signed chart gives its floor as
+    ``lo`` (``< 0``). Then the marks above the grey zero line show the heights of the
+    bars that go up, and the marks below it show the depths of the bars that go down.
+    Thus the gutter shows the two signs of a series that crosses zero (``+5 … −10 dB``
+    for an SNR band), not only the positive peak.
     """
     total = rows * 4
     base = _baseline_row(lo, peak, total)
     labels: list[str] = []
     seen: set[str] = set()
     for i in range(rows):
-        dot = (rows - 1 - i) * 4 + 2  # the dot row this row's ┤ tick crosses
+        dot = (rows - 1 - i) * 4 + 2  # the dot row that the ┤ tick of this row crosses
         if dot > base:
             value = round(peak * (dot - base + 1) / (total - base))
         elif dot < base:
             value = round(lo * (base - dot + 1) / (base + 1))
         else:
-            value = 0  # the tick sits on the zero baseline itself
+            value = 0  # the tick is on the zero baseline
         mark = compact_label(value)
         if peak != lo and value and mark not in seen:
             labels.append(mark)
@@ -530,8 +580,8 @@ def y_axis_labels(peak: float, rows: int, *, lo: float = 0.0) -> list[str]:
     return labels
 
 
-#: Minimum blank cells kept between two column-axis labels, so a thinned tick row
-#: reads as separate marks rather than a run of touching text.
+#: The minimum number of blank cells between two labels of the column axis. Thus a tick
+#: row with fewer labels shows separate marks, not a line of text where the labels touch.
 _TICK_GAP = 2
 
 
@@ -541,23 +591,26 @@ def _tick_axis(
     ticks: Sequence[tuple[int, str]],
     style: str,
 ) -> tuple[Text, str]:
-    """Build the boxed border and its caption for a column chart with explicit ticks.
+    """Make the boxed border and its caption for a column chart with explicit ticks.
 
-    Each tick is a ``(cell, label)`` pointing at a chart column: the border draws a
-    ``┬`` at that column and the label sits centred beneath it. Labels are placed
-    left to right and any that would land within :data:`_TICK_GAP` cells of the one
-    before it is dropped — tick and all — so a crowded axis thins to what fits
-    instead of overprinting. Callers pre-thin to roughly the right count (see the
-    Time Machine's ``_day_ticks``); this is the collision backstop.
+    Each tick is a ``(cell, label)`` that points at a chart column. The border draws a
+    ``┬`` at that column, and the label is centred below it. The labels are placed from
+    left to right. A label that is less than :data:`_TICK_GAP` cells from the label
+    before it is removed, with its tick. Thus a crowded axis shows only the labels that
+    fit, and no label prints on top of another label. The callers first reduce the
+    ticks to approximately the correct number (refer to ``_day_ticks`` in the Time
+    Machine). This function is the last protection against a collision.
 
     Args:
-        chars: The chart's width in character cells.
-        label_w: The y-axis gutter width the border and caption indent past.
-        ticks: ``(cell, label)`` marks, any order; ``cell`` is a 0-based chart column.
-        style: Style for the border (and its ticks).
+        chars: The width of the chart in character cells.
+        label_w: The width of the y-axis gutter. The border and the caption are
+            indented past it.
+        ticks: The ``(cell, label)`` marks, in any order. ``cell`` is a chart column,
+            counted from 0.
+        style: The style of the border (and its ticks).
 
     Returns:
-        ``(border, caption_text)`` — the border :class:`Text` and the plain caption
+        ``(border, caption_text)``: the border :class:`Text`, and the plain caption
         string, ready to indent under the gutter.
     """
     cells = [" "] * chars
@@ -567,7 +620,7 @@ def _tick_axis(
         cell = max(0, min(chars - 1, cell))
         start = max(0, min(chars - len(label), cell - len(label) // 2))
         if start < last_end + _TICK_GAP:
-            continue  # would crowd the label before it — drop this mark
+            continue  # too near the label before it: remove this mark
         cells[start : start + len(label)] = list(label)
         marked.append(cell)
         last_end = start + len(label)
@@ -575,7 +628,7 @@ def _tick_axis(
 
 
 def _tick_border(chars: int, label_w: int, tick_cells: Sequence[int], style: str) -> Text:
-    """The boxed bottom border, notched with a ``┬`` at each charted tick column."""
+    """The boxed bottom border, with a ``┬`` notch at each tick column of the chart."""
     marked = {max(0, min(chars - 1, c)) for c in tick_cells}
     bar = "".join("┬" if i in marked else "─" for i in range(chars))
     return Text(" " * label_w + " └" + bar + "┘", style=style)
@@ -592,44 +645,46 @@ def axis_chart(
     floor: float = 0.0,
     ticks: Sequence[tuple[int, str]] | None = None,
 ) -> list[Text]:
-    """Frame :func:`timeline_rows` output with a mirrored y-axis and an x-axis caption.
+    """Add a mirrored y-axis and an x-axis caption to the output of :func:`timeline_rows`.
 
-    Each row's ticked-dot value marks the left gutter (blank where it would repeat
-    the mark above or read zero), compacted through :func:`compact_label`. The right
-    edge always carries the matching ``├`` tick; whether the mark itself is printed
-    after it follows the platform (see :func:`axis_chrome`) — the desktop mirrors it,
-    the console keeps the tick alone. A boxed bottom border and an x-axis caption
-    indented to clear the gutter close the frame.
+    The value at the ticked dot of each row is the mark in the left gutter, compacted
+    through :func:`compact_label`. The mark is blank if it repeats the mark above it,
+    or if it is zero. The right edge always has the matching ``├`` tick. The platform
+    decides if the mark is also printed after this tick (refer to :func:`axis_chrome`):
+    the desktop shows the mark again, and the console keeps only the tick. A boxed
+    bottom border and an x-axis caption complete the box. The caption is indented past
+    the gutter.
 
-    The caption comes one of two ways. A *continuous* chart passes ``label_at`` and
-    the ends-plus-quarters marks of :func:`axis_caption` fill in whatever fits. A
-    *columnar* chart — bars of a fixed width apiece, a day or a slot each — instead
-    passes ``ticks``: explicit ``(cell, label)`` marks that centre a label under its
-    own column and notch the border with a ``┬`` beneath it (see :func:`_tick_axis`),
-    so a date sits under the bar it names rather than at an arbitrary fraction.
+    The caption comes from one of two sources. A continuous chart gives ``label_at``,
+    and the marks of :func:`axis_caption` (the ends and the quarters) fill the space
+    that is available. A columnar chart (bars of a fixed width, one for each day or
+    slot) gives ``ticks`` instead. These are explicit ``(cell, label)`` marks. Each mark
+    centres a label under its column, and puts a ``┬`` notch in the border below it
+    (refer to :func:`_tick_axis`). Thus a date is under the bar that it names, not at a
+    fraction that has no relation to the bar.
 
     Args:
-        chart_rows: The chart's rows, as returned by :func:`timeline_rows`.
-        peak: The chart's full-scale ceiling (its tallest bar's value); each
-            row's gutter mark quotes the value at the dot its tick points at
-            (see :func:`y_axis_labels`), so the peak itself sizes the gutter
-            but is not necessarily printed.
-        chars: The chart's width in character cells.
-        label_at: Maps a position fraction to the x-axis caption at that point
-            (a continuous chart); ignored when ``ticks`` is given.
-        label_w: The gutter's digit width, when several stacked charts must
-            share one width so their gutters line up; sized from ``peak`` (and
-            ``floor``) by default.
-        style: Style for the gutters, ticks, marks, and border.
-        floor: The value the bottom edge reads on a signed chart (``< 0``), so
-            the gutter quotes both extremes of a zero-crossing series (the Time
-            Machine's SNR band). Defaults to ``0`` — an all-positive chart whose
-            baseline sits on the floor, the common case.
-        ticks: Explicit ``(cell, label)`` column marks for a columnar chart; when
-            given they drive the border and caption instead of ``label_at``.
+        chart_rows: The rows of the chart, as :func:`timeline_rows` returns them.
+        peak: The full-scale ceiling of the chart (the value of its tallest bar). The
+            gutter mark of each row shows the value at the dot to which its tick
+            points (refer to :func:`y_axis_labels`). Thus the peak sets the size of
+            the gutter, but the peak itself is not always printed.
+        chars: The width of the chart in character cells.
+        label_at: Changes a position fraction to the x-axis caption at that point (a
+            continuous chart). It is ignored when ``ticks`` is given.
+        label_w: The digit width of the gutter, when some stacked charts must use the
+            same width so that their gutters align. By default, it comes from ``peak``
+            (and ``floor``).
+        style: The style of the gutters, the ticks, the marks, and the border.
+        floor: The value at the bottom edge of a signed chart (``< 0``). Thus the
+            gutter shows the two extremes of a series that crosses zero (the SNR band
+            of the Time Machine). The default is ``0``: a chart with only positive
+            values, with its baseline at the bottom. This is the usual case.
+        ticks: Explicit ``(cell, label)`` column marks for a columnar chart. When they
+            are given, they make the border and the caption instead of ``label_at``.
 
     Returns:
-        ``len(chart_rows) + 2`` :class:`Text` lines: the decorated rows, the
+        ``len(chart_rows) + 2`` :class:`Text` lines: the rows with their axes, the
         bottom border, and the caption.
     """
     marks = y_axis_labels(peak, len(chart_rows), lo=floor)
@@ -648,8 +703,9 @@ def axis_chart(
         caption.append(caption_text, style="faint")
     else:
         assert label_at is not None, "axis_chart needs label_at or ticks"
-        # A continuous axis notches the same ┬ ticks under its ends-and-quarters
-        # labels as a columnar one does under its bars — one axis grammar everywhere.
+        # A continuous axis puts the same ┬ notches under its labels (the ends and the
+        # quarters) as a columnar axis puts under its bars. All the axes use the same
+        # conventions.
         caption_body, tick_cells = axis_caption(chars, label_at)
         border = _tick_border(chars, label_w, tick_cells, style)
         caption = Text(" " * (label_w + 2))
@@ -660,19 +716,20 @@ def axis_chart(
 
 
 def _baseline_row(lo: float, hi: float, total: int) -> int:
-    """The dot row (from the chart bottom) the zero baseline sits on.
+    """The dot row (counted from the bottom of the chart) of the zero baseline.
 
-    All-positive data pins it to the floor, all-negative to the ceiling; a mixed
-    span places it proportionally, clamped one row in from either edge so both
-    directions keep at least one dot row to draw in.
+    If all the data is positive, the baseline is at the bottom. If all the data is
+    negative, the baseline is at the top. In a mixed span, its position is
+    proportional, and it is clamped one row in from each edge. Thus the two directions
+    each keep at least one dot row to draw in.
 
     Args:
-        lo: The span's floor (``<= 0``).
-        hi: The span's ceiling (``>= 0``).
-        total: The chart's height in dot rows.
+        lo: The floor of the span (``<= 0``).
+        hi: The ceiling of the span (``>= 0``).
+        total: The height of the chart in dot rows.
 
     Returns:
-        The baseline's dot row, ``0 .. total - 1``.
+        The dot row of the baseline, ``0 .. total - 1``.
     """
     if lo == 0:
         return 0
@@ -682,15 +739,17 @@ def _baseline_row(lo: float, hi: float, total: int) -> int:
 
 
 def _column_bits(bar: tuple[int, int] | None, floor: int, table: tuple[int, ...]) -> int:
-    """The braille bits one column's bar lights within a cell row.
+    """The braille bits that the bar of one column lights in a cell row.
 
     Args:
-        bar: The bar's inclusive dot-row span (chart coordinates), or ``None``.
-        floor: The cell row's bottom dot row in chart coordinates.
+        bar: The inclusive span of dot rows of the bar (chart coordinates), or
+            ``None``.
+        floor: The bottom dot row of the cell row, in chart coordinates.
         table: :data:`_LEFT_BITS` or :data:`_RIGHT_BITS`.
 
     Returns:
-        The OR of the covered dots' bits (0 when the bar misses this cell row).
+        The OR of the bits of the covered dots (0 when the bar is not in this cell
+        row).
     """
     if bar is None:
         return 0
@@ -710,27 +769,29 @@ def _assemble(
     baseline_style: str,
     column_styles: Sequence[str] | None = None,
 ) -> list[Text]:
-    """Assemble bar spans into styled braille rows (the shared cell walk).
+    """Assemble the bar spans into styled braille rows (the shared walk through the cells).
 
-    Every bar span includes the baseline row by construction, so a half-silent
-    cell keeps the zero line continuous inside the lit character; a fully silent
-    cell shows just the faint baseline dots on whichever row holds them; anything
-    else stays blank braille to keep the grid monospace. The baseline is decided
-    per *dot column*, not per cell, so a :data:`GAP` column can go fully blank —
-    breaking the zero line into a notch — while its cell-mate keeps its own.
+    By construction, each bar span includes the baseline row. Thus in a cell with one
+    silent column, the zero line continues through the lit character. A cell with two
+    silent columns shows only the faint baseline dots, on the row that has them. All
+    other cells stay blank braille, to keep the grid monospace. The baseline is set for
+    each dot column, not for each cell. Thus a :data:`GAP` column can be fully blank,
+    and break the zero line with a notch, while the other column of its cell keeps its
+    baseline.
 
     Args:
-        bars: Per-column inclusive dot-row spans (``None`` = no bar).
-        values: The readings behind the columns, aligned with ``bars`` (fed to a
-            callable ``style`` two at a time, per cell); a :data:`GAP` reading
-            suppresses that column's baseline so the notch reaches the axis.
-        rows: Chart height in braille rows.
-        base: The zero baseline's dot row.
-        style: Fixed style, or per-cell callable (see :data:`CellStyle`).
-        baseline_style: Style for baseline-only cells.
-        column_styles: Per-column style overrides aligned with ``bars``; a cell
-            takes its right column's style when that column is lit, else its
-            left's (the newer reading wins the shared cell).
+        bars: The inclusive span of dot rows for each column (``None`` = no bar).
+        values: The values of the columns, aligned with ``bars``. A callable ``style``
+            gets them two at a time, for each cell. A :data:`GAP` value removes the
+            baseline of that column, so that the notch goes down to the axis.
+        rows: The height of the chart in braille rows.
+        base: The dot row of the zero baseline.
+        style: A fixed style, or a callable for each cell (refer to
+            :data:`CellStyle`).
+        baseline_style: The style of the cells that have only the baseline.
+        column_styles: Style overrides for each column, aligned with ``bars``. A cell
+            takes the style of its right column when that column is lit, else the
+            style of its left column (the newer value gets the shared cell).
 
     Returns:
         ``rows`` :class:`Text` lines, top row first.
@@ -745,8 +806,8 @@ def _assemble(
         base_bit_right = _RIGHT_BITS[base - floor] if floor <= base <= floor + 3 else 0
         line = Text()
         for i in range(0, len(bars), 2):
-            # A GAP column carries no baseline, so the zero line breaks there and the
-            # notch runs clean from the top edge down to the axis border.
+            # A GAP column has no baseline. Thus the zero line breaks there, and the
+            # notch goes cleanly from the top edge down to the axis border.
             bl = 0 if values[i] is GAP else base_bit_left
             br = 0 if values[i + 1] is GAP else base_bit_right
             left = _column_bits(bars[i], floor, _LEFT_BITS)

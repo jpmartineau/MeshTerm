@@ -1,32 +1,34 @@
 # SPDX-License-Identifier: Apache-2.0
-"""A small, static, non-interactive map region embeddable inside any screen.
+"""A small, static map region that any screen can embed. It has no controls.
 
-The full-screen :class:`~meshterm.ui.map_screen.MapScreen` is a whole layer of its own —
-it pans, zooms, finds nodes, and persists its view. Some screens only want a *glance*: a
-few rows of basemap fixed on one place, with the mesh's markers on it, no controls. The
-Node detail screen's "Location" preview is the first such caller — it shows where a node
-sits without leaving for the big map (which its *Open full map* action still reaches).
+The full-screen :class:`~meshterm.ui.map_screen.MapScreen` is a complete layer of its own.
+It pans, zooms, finds nodes, and stores its view. Some screens only need a short look: a
+few rows of basemap fixed on one place, with the markers of the mesh on it, and no
+controls. The "Location" preview of the Node detail screen is the first such caller. It
+shows where a node is, and the user does not need to leave for the big map. The action
+"Open full map" of that screen still goes to the big map.
 
-This is the map's tile plumbing distilled to that job: a fixed centre and zoom, its own
-little tile cache, background fetches off the event loop (so the host screen never blocks
-on the network), and a synchronous :meth:`render` that draws whatever tiles have landed —
-refining in place as more arrive, exactly like the big map. With no network and no cached
-tiles the basemap is simply absent and the markers plot on a blank grid, so the preview is
-always *something*. It owns no keys and resolves nothing; the screen that embeds it just
-calls :meth:`render` from its own ``render_body`` and forwards nothing back.
+This class is the tile code of the map, reduced to that job. It has a fixed centre and
+zoom, and its own small tile cache. It gets tiles in the background, off the event loop,
+so the host screen never waits for the network. Its :meth:`render` method is synchronous
+and draws the tiles that have arrived. The picture gets better in place when more tiles
+arrive, the same as on the big map. If there is no network and no cached tiles, there is
+no basemap, and the markers are plotted on a blank grid. Thus the preview always shows
+something. It owns no keys and resolves nothing. The screen that embeds it calls
+:meth:`render` from its own ``render_body`` and gets nothing back from it.
 
-It is a produced work like the big map, so it carries the basemap credit too — but only
-ever the remnant form (:data:`~meshterm.ui.attribution.CREDIT_SHORT`), never the whole
-line. Two reasons, and the guideline supports both. A preview is five to thirteen rows of
-somebody's *node page*, not a map they went to look at, so forty cells of credit across
-the bottom of it would be the loudest thing on the row; and the remnant is not a
-concession in the first place — "© OpenStreetMap" is one of the two forms OSMF names as
-acceptable outright, so nothing here leans on the collapse permission the big map spends.
-The preview is also not interactive, which is what makes that distinction matter: there is
-no pan or zoom here for a collapse to trigger on, so the mark it draws has to be one that
-is complete standing still. OpenMapTiles and the ODbL are named on the About page, which
-is the guideline's own worked example of where a credit's licence information may be
-found.
+It is a produced work, the same as the big map, so it also carries the basemap credit.
+But it carries only the short form (:data:`~meshterm.ui.attribution.CREDIT_SHORT`) and
+never the full line. There are two reasons, and the guideline supports both. First, a
+preview is five to thirteen rows of the node page of the user, not a map that the user
+went to look at. Thus forty cells of credit across the bottom of it would be the most
+noticeable item on the row. Second, the short form is not a concession. "© OpenStreetMap"
+is one of the two forms that OSMF accepts without conditions, so this code does not use
+the permission to collapse the credit that the big map uses. The preview is also not
+interactive, and this makes the difference important. There is no pan or zoom here that
+can cause a collapse, so the mark that the preview draws must be complete when nothing
+moves. OpenMapTiles and the ODbL are named on the About page. The guideline gives that
+page as its own example of where the licence information of a credit can be found.
 """
 
 from __future__ import annotations
@@ -44,19 +46,20 @@ from .map_render import MapMarker, render_map
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..services.basemap import BasemapSource
 
-#: How far past the tile source's max zoom a preview may sit — the lower-zoom tiles are
-#: magnified to fill it. Matches the big map's overzoom so a close preview still has a
-#: (blurred) basemap rather than blank tiles.
+#: The number of zoom levels above the maximum zoom of the tile source that a preview can
+#: use. The tiles of a lower zoom are magnified to fill it. The value is the same as the
+#: overzoom of the big map, so a close preview has a (blurred) basemap instead of blank
+#: tiles.
 _OVERZOOM = 2
 
 
 def _loop_running() -> bool:
-    """Whether there is an event loop to hand background work to.
+    """Whether there is an event loop that can take background work.
 
-    Asked *before* building a coroutine, not after: ``ensure_future`` without a loop
-    raises, but by then the coroutine exists and never gets awaited, which Python reports
-    as a resource warning on a path that is otherwise perfectly correct (a screen rendered
-    in a test, or a one-shot CLI draw).
+    The caller must ask this before it builds a coroutine, not after. Without a loop,
+    ``ensure_future`` raises an error. But at that time the coroutine exists and nothing
+    awaits it. Python then reports a resource warning on a path that is correct in all
+    other ways (a screen rendered in a test, or a one-shot CLI draw).
     """
     try:
         asyncio.get_running_loop()
@@ -66,13 +69,13 @@ def _loop_running() -> bool:
 
 
 class MiniMap:
-    """A fixed, non-interactive slippy-map region drawn into a host screen's body.
+    """A fixed slippy-map region, with no controls, that is drawn in the body of a host screen.
 
     Build one with the resolved tile source (as :func:`~meshterm.ui.map_screen.open_map`
-    resolves it) plus the centre, zoom, and markers to plot, then call :meth:`render`
-    from the host's ``render_body`` with the cell width and row height the region should
-    take. Tiles fetch in the background and the region redraws as they arrive; nothing
-    here transmits over the radio.
+    resolves it), and with the centre, the zoom, and the markers to plot. Then call
+    :meth:`render` from the ``render_body`` of the host. Give it the width in cells and
+    the height in rows that the region must have. The tiles download in the background,
+    and the region is drawn again when they arrive. Nothing here transmits over the radio.
     """
 
     def __init__(
@@ -86,18 +89,21 @@ class MiniMap:
         zoom: int,
         markers: list[MapMarker],
     ) -> None:
-        """Create the preview over a fixed view.
+        """Create the preview over a fixed area of the map.
 
         Args:
-            session: The running TUI session — used only to repaint the host screen when
-                a background tile lands (:meth:`_load`).
-            source: The vector-tile source, already resolved/warmed by the caller.
-            max_tile_zoom: The source's max zoom, captured off the event loop at open time
-                (reading it can touch the network, so the host resolves it once up front).
-            center_lat: Latitude the preview centres on.
-            center_lon: Longitude the preview centres on.
-            zoom: Display zoom; clamped to a sane range against the source's max.
-            markers: The located mesh nodes to overlay (may be empty).
+            session: The running TUI session. The preview uses it only to paint the host
+                screen again when a background tile arrives (:meth:`_load`).
+            source: The vector-tile source. The caller has already resolved and warmed it.
+            max_tile_zoom: The maximum zoom of the source. The host gets it off the event
+                loop when it opens the screen. Reading it can use the network, so the host
+                resolves it one time at the start.
+            center_lat: The latitude at the centre of the preview.
+            center_lon: The longitude at the centre of the preview.
+            zoom: The display zoom. It is limited to a reasonable range, with the
+                maximum zoom of the source as the upper limit.
+            markers: The nodes with a location that the preview puts on the map. The list
+                can be empty.
         """
         self._session = session
         self._source = source
@@ -106,42 +112,46 @@ class MiniMap:
         self._center_lon = center_lon
         self._zoom = max(2, min(int(zoom), max_tile_zoom + _OVERZOOM))
         self._markers = markers
-        # Decoded tiles keyed by (z, x, y); a stored ``None`` is the source's own word that
-        # there is no tile there. Silence is not that answer and is not stored here.
+        # The decoded tiles, with (z, x, y) as the key. A stored ``None`` is the answer of
+        # the source that there is no tile there. No answer at all is not this answer, and
+        # this dict does not store it.
         self._tiles: dict[tuple[int, int, int], list[Layer] | None] = {}
         self._pending: set[tuple[int, int, int]] = set()
-        # Tiles we got no answer about, and when each may be asked for again.
+        # The tiles with no answer, and the time at which each can be requested again.
         self._unanswered: dict[tuple[int, int, int], float] = {}
 
     @property
     def has_basemap(self) -> bool:
-        """Whether the source has resolved a basemap to draw from — not yet is not never.
+        """Whether the source has resolved a basemap to draw from.
 
-        The preview keeps asking either way (see :meth:`_ensure_tiles`); this is for a
-        host that wants to caption the wait.
+        "Not yet" does not mean "never". The preview requests tiles in both cases (refer
+        to :meth:`_ensure_tiles`). This property is for a host that wants to put a caption
+        on the wait.
         """
         return self._source.available
 
     @property
     def pending(self) -> int:
-        """How many visible tiles are still in flight — for a host's loading note."""
+        """The number of visible tiles that have not arrived yet, for a loading note of a host."""
         return len(self._pending)
 
     def render(self, width: int, rows: int) -> list[str]:
-        """Render the preview at ``width`` cells by ``rows`` rows, scheduling tile loads.
+        """Render the preview at ``width`` cells by ``rows`` rows, and schedule tile loads.
 
-        Builds a :class:`~meshterm.core.geo.Viewport` sized to this region (each cell is
-        two braille dots wide, each row four tall) fixed on the preview's centre and zoom,
-        kicks off background fetches for any not-yet-loaded tiles, and draws the frame from
-        whatever has landed. Called every paint; the viewport is cheap to rebuild, so a
-        resize just re-sizes it.
+        This method builds a :class:`~meshterm.core.geo.Viewport` for the size of this
+        region (each cell is two braille dots wide and each row is four dots tall). The
+        viewport is fixed on the centre and the zoom of the preview. The method starts
+        background downloads for the tiles that are not loaded yet. Then it draws the frame
+        from the tiles that have arrived. A paint calls it each time. The viewport is
+        cheap to build again, so a resize only gives it a new size.
 
         Args:
-            width: Region width in character cells.
-            rows: Region height in character cells.
+            width: The width of the region in cells.
+            rows: The height of the region in rows of cells.
 
         Returns:
-            One ANSI string per row (exactly ``rows`` of them, as the canvas fills its box).
+            One ANSI string for each row. The number is exactly ``rows``, because the
+            canvas fills its box.
         """
         viewport = Viewport(
             self._center_lat, self._center_lon, self._zoom, max(2, width) * 2, max(1, rows) * 4
@@ -152,16 +162,17 @@ class MiniMap:
         return attribution.stamp(lines, width, full=False)
 
     def _ensure_tiles(self, viewport: Viewport) -> None:
-        """Schedule background fetches for any visible tile we don't have and aren't owed.
+        """Schedule background downloads for each visible tile that is not here and not due.
 
-        Not gated on :attr:`~meshterm.services.basemap.BasemapSource.available`, and a
-        tile the source gave no answer about is asked for again once its cooldown runs
-        out — the big map's rules, and for its reasons (see
+        The method does not depend on
+        :attr:`~meshterm.services.basemap.BasemapSource.available`. If the source gave no
+        answer about a tile, the method requests the tile again when its cooldown ends.
+        These are the rules of the big map, and they have the same reasons (refer to
         :meth:`meshterm.ui.map_screen.MapScreen._ensure_tiles`).
         """
-        if not _loop_running():  # nothing to fetch onto — draw whatever is already here
+        if not _loop_running():  # no loop to download on, so draw the tiles that are here
             return
-        if self._unanswered:  # the silences that have served their time
+        if self._unanswered:  # the tiles with no answer whose cooldown has ended
             now = monotonic()
             self._unanswered = {t: at for t, at in self._unanswered.items() if at > now}
         for t in viewport.tiles(self._max_tile_zoom):
@@ -171,14 +182,14 @@ class MiniMap:
             asyncio.ensure_future(self._load(t))
 
     async def _load(self, t: tuple[int, int, int]) -> None:
-        """Fetch+decode one tile off the event loop, then repaint the host screen."""
+        """Download and decode one tile off the event loop, then paint the host screen again."""
         try:
             layers = await asyncio.to_thread(self._source.load_tile, *t)
-        except Exception:  # noqa: BLE001 - a failed tile is just an absent one
+        except Exception:  # noqa: BLE001 - a tile that failed is the same as an absent tile
             layers = None
         self._pending.discard(t)
         if layers is not None or self._source.answered_empty(*t):
-            self._tiles[t] = layers  # an answer, settled for the session
+            self._tiles[t] = layers  # an answer, final for the session
         else:
-            self._unanswered[t] = monotonic() + TILE_RETRY_SECONDS  # silence — ask again
+            self._unanswered[t] = monotonic() + TILE_RETRY_SECONDS  # no answer, so request again
         self._session.invalidate()

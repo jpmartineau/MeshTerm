@@ -1,22 +1,27 @@
 # SPDX-License-Identifier: Apache-2.0
 """The Courier screens: the outbox, queueing flow, and per-message actions.
 
-The interactive face of the ``courier`` tool. One select-list screen carries the whole
-feature (the persistent-backdrop pattern): the waiting outbox — each entry with its
-live state (waiting to hear the contact, scheduled for a time, backing off between
-retries) — the finished history (delivered / given-up), and the queueing flow: pick a
-contact, write the message, choose when. Enter on a waiting entry offers *Send now*
-(one forced attempt, outcome in a dialog) and *Cancel*.
+The interactive face of the ``courier`` tool. One select-list screen holds the whole
+feature (the persistent-backdrop pattern). It has these parts:
 
-The outbox is **live** while it sits open: every row is a callable title recomputed on
-each repaint (so "retry in ~N m" counts down for real), and a once-a-second ticker
-compares the store's shape — entry set and statuses — rebuilding the sections in place
-when something moved (a delivery lands its row in *Finished* within a second, no
-keypress needed), keeping the highlight on its entry.
+- The waiting outbox. Each entry shows its live state: it waits to hear the contact, it is
+  scheduled for a time, or it backs off between retries.
+- The finished history (delivered or given up).
+- The queueing flow: select a contact, write the message, choose when to send it.
 
-Delivery itself happens in the background service (:mod:`meshterm.services.courier`),
-which the menu starts with the other always-on services — this screen never needs to
-stay open for a queued message to go out.
+Enter on a waiting entry offers *Send now* (one forced attempt, and the outcome is in a
+dialog) and *Cancel*.
+
+The outbox is **live** while it is open. Each row is a callable title that the code
+computes again at each paint, so "retry in ~N m" counts down in real time. A ticker
+compares the shape of the store (the set of entries and their statuses) once each second.
+When something changed, the ticker builds the sections again in place, and the highlight
+stays on its entry. For example, a delivery puts its row in *Finished* within one second,
+with no key press.
+
+The background service (:mod:`meshterm.services.courier`) does the delivery. The menu
+starts this service with the other services that are always on. Thus this screen does not
+need to stay open for a queued message to go out.
 """
 
 from __future__ import annotations
@@ -40,31 +45,34 @@ from .widgets import ContactsSort, age_seconds, contact_packets, format_ago
 if TYPE_CHECKING:
     from ..context import AppContext
 
-# Menu action sentinels (tuples so they never collide with entry ids).
+# The sentinels of the menu actions (tuples, so that they never collide with entry ids).
 _QUEUE = ("queue",)
 _CLEAR = ("clear",)
 
-#: The status marks an outbox entry leads with: waiting, delivered, gave up. They are the
-#: row's outcome rather than decoration, so unlike a command row's icon they are drawn on
-#: every platform — and measured raw, since the PicoCalc's render fold pads a folded mark
-#: back out to the width the emoji measured.
+#: The status marks that an outbox entry starts with: waiting, delivered, gave up. They are
+#: the outcome of the row and not decoration. Thus, unlike the icon of a command row, they
+#: are drawn on each platform. The code measures them raw, because the render fold of the
+#: PicoCalc pads a folded mark again to the width that the emoji measured.
 _ENTRY_MARKS = ("⏳", "✓", "✗")
 
-#: The widest entry mark in cells: the part of the outbox's icon column no platform drops.
+#: The width of the widest entry mark in cells. This is the part of the icon column of the
+#: outbox that no platform removes.
 _MARK_LANE = max(cell_len(mark) for mark in _ENTRY_MARKS)
 
-#: The outbox's decorative command icons — queue a message, clear the finished history.
+#: The decorative command icons of the outbox: queue a message, and clear the finished
+#: history.
 _COMMAND_ICONS = ("📨", "🗑")
 
-#: Seconds between the open outbox's refresh ticks (shape check + repaint).
+#: The seconds between the refresh ticks of the open outbox (shape check and paint).
 _REFRESH_S = 1.0
 
-#: The widest a message body renders in a row before it is ellipsized.
+#: The maximum width at which a message body renders in a row, before the row gets an
+#: ellipsis.
 _TEXT_W = 36
 
 
 def _shorten(text: str, width: int = _TEXT_W) -> str:
-    """The message body shortened for row display."""
+    """The message body, shortened for the display in a row."""
     return text if len(text) <= width else text[: width - 1] + "…"
 
 
@@ -76,12 +84,13 @@ def _local_stamp(when: datetime) -> str:
 def parse_clock(text: str, now: datetime | None = None) -> datetime | None:
     """Parse a local ``HH:MM`` into its *next* occurrence, as aware UTC.
 
-    ``07:00`` typed at 23:40 means tomorrow morning; typed at 06:00 it means an hour
-    from now. Returns ``None`` for anything that isn't a plausible clock time.
+    If the user types ``07:00`` at 23:40, it means tomorrow morning. If the user types it at
+    06:00, it means one hour from now. The function returns ``None`` for text that is not a
+    plausible clock time.
 
     Args:
         text: The typed time.
-        now: The reference time (defaults to the current time; tests inject).
+        now: The reference time (the default is the current time, and tests give a value).
 
     Returns:
         The next occurrence as an aware UTC datetime, or ``None``.
@@ -101,42 +110,44 @@ def parse_clock(text: str, now: datetime | None = None) -> datetime | None:
 
 
 async def open_courier(ctx: AppContext) -> dict[str, Any] | None:
-    """Run the Courier screen until dismissed.
+    """Run the Courier screen until the user leaves it.
 
     Args:
-        ctx: The shared application context (must be running the interactive TUI).
+        ctx: The shared application context (the interactive TUI must run).
 
     Returns:
-        A summary of what happened (for the tool's log), or ``None`` on plain exit.
+        A summary of what happened (for the log of the tool), or ``None`` when the user
+        leaves with no action.
 
     Raises:
-        RuntimeError: If called outside the interactive menu (no full-screen session).
+        RuntimeError: If the caller is outside the interactive menu (no full-screen session).
     """
     from .surface import TuiUi
 
     if not isinstance(ctx.ui, TuiUi):  # pragma: no cover - guarded by the menu-only caller
         raise RuntimeError("the courier is only available in the menu")
     session = ctx.ui.session
-    await ctx.courier.start()  # idempotent; normally already running
+    await ctx.courier.start()  # idempotent. Normally it already runs.
 
     contacts: list[Contact] = []
     try:
         if ctx.is_connected or ctx.settings.connect_on_start:
             contacts = await ctx.devstate.contacts()
-    except Exception:  # noqa: BLE001 - the outbox renders fine without contacts
+    except Exception:  # noqa: BLE001 - the outbox renders without contacts without a problem
         contacts = []
 
     store = ctx.courier_store
-    # One screen for the whole visit, refreshed in place: the outbox already knows how to
-    # recompose its sections around the highlight (:meth:`CourierOutboxScreen.refresh`), which
-    # is what the once-a-second ticker calls while the list is open. Driving it through a
-    # visit means every sub-flow — queueing a message, an entry's actions, the clear confirm —
-    # floats over the list and lands back on the row it was opened from, and the ticker is
-    # started once rather than per round.
+    # One screen for the whole visit, and it refreshes in place. The outbox already knows
+    # how to compose its sections again around the highlight
+    # (:meth:`CourierOutboxScreen.refresh`). The ticker calls this method once each second
+    # while the list is open. The code runs the screen through a visit. Thus each sub-flow
+    # (queue a message, the actions of an entry, the clear confirm) floats over the list and
+    # returns to the row from which it opened. Also, the code starts the ticker one time,
+    # and not for each round.
     menu = CourierOutboxScreen(ctx)
 
     async def tick() -> None:
-        """Fold store changes in and repaint, once a second, while the list is open."""
+        """Take in the store changes and paint, once each second, while the list is open."""
         while True:
             await asyncio.sleep(_REFRESH_S)
             menu.refresh()
@@ -164,8 +175,8 @@ async def open_courier(ctx: AppContext) -> dict[str, Any] | None:
                         store.clear_done()
                 elif isinstance(choice, tuple) and choice[0] == "msg":
                     await _entry_actions(ctx, int(choice[1]))
-                # Fold the flow's effect in straight away rather than waiting for a tick,
-                # so the list the reader lands back on already shows what they just did.
+                # Take in the effect of the flow at once, and do not wait for a tick. Thus
+                # the list to which the user returns already shows what the user did.
                 menu.refresh()
         finally:
             ticker.cancel()
@@ -173,7 +184,7 @@ async def open_courier(ctx: AppContext) -> dict[str, Any] | None:
                 await ticker
             except asyncio.CancelledError:
                 pass
-            except Exception:  # noqa: BLE001 - teardown must never surface a tick hiccup
+            except Exception:  # noqa: BLE001 - teardown must never show a fault of the tick
                 pass
 
 
@@ -181,23 +192,24 @@ async def open_courier(ctx: AppContext) -> dict[str, Any] | None:
 
 
 class CourierOutboxScreen(SelectScreen):
-    """The live outbox list: row text recomputes per repaint, sections per tick.
+    """The live outbox list: the row text is computed at each paint, the sections at each tick.
 
-    Rows are callable titles (see :attr:`~meshterm.ui.tui.select.Choice.title`), so
-    every repaint re-reads each entry's live state — the retry countdown, the fresh/
-    waiting note, a finished row's age. Structure changes (an entry moving waiting →
-    finished, a new queue, a cleared history) can't be expressed by a row re-rendering
-    itself, so the opener's ticker calls :meth:`refresh`: it fingerprints the store's
-    shape and recomposes the sections in place only when that changed, keeping the
-    highlight on its entry (the :class:`~meshterm.ui.contactlist.ContactListScreen` rebuild
-    idiom).
+    The rows are callable titles (refer to :attr:`~meshterm.ui.tui.select.Choice.title`).
+    Thus each paint reads the live state of each entry again: the retry countdown, the note
+    that the contact is fresh or that the entry waits, and the age of a finished row. A row
+    cannot show a change of structure by a new render of itself. Examples are an entry that
+    moves from waiting to finished, a new queue, and a cleared history. Thus the ticker of
+    the opener calls :meth:`refresh`. This method makes a fingerprint of the shape of the
+    store. It composes the sections again in place only when the fingerprint changed, and
+    the highlight stays on its entry (the rebuild idiom of
+    :class:`~meshterm.ui.contactlist.ContactListScreen`).
     """
 
     def __init__(self, ctx: AppContext, *, default: Any = None) -> None:
-        """Open the outbox on the store's current entries, remembering their shape.
+        """Open the outbox on the current entries of the store, and keep their shape.
 
-        The remembered shape is what :meth:`refresh` compares against, so a tick that
-        changed nothing leaves the highlight exactly where the reader put it.
+        :meth:`refresh` compares against the kept shape. Thus a tick that changed nothing
+        leaves the highlight in the place where the user put it.
         """
         self._ctx = ctx
         self._shape = self._fingerprint()
@@ -209,11 +221,11 @@ class CourierOutboxScreen(SelectScreen):
         )
 
     def _fingerprint(self) -> tuple:
-        """The store's shape: which entries exist and what status each is in."""
+        """The shape of the store: which entries exist and the status of each."""
         return tuple((m.ident, m.status) for m in self._ctx.courier_store.entries())
 
     def refresh(self) -> None:
-        """Recompose the sections if the store's shape changed, keeping the highlight."""
+        """Compose the sections again if the shape of the store changed. Keep the highlight."""
         shape = self._fingerprint()
         if shape == self._shape:
             return
@@ -224,7 +236,7 @@ class CourierOutboxScreen(SelectScreen):
         self._reselect(keep)
 
     def _reselect(self, value: Any) -> None:
-        """Move the highlight back onto the choice with ``value`` (else clamp in range)."""
+        """Move the highlight back onto the choice with ``value``. If none has it, clamp."""
         choices = self._choices()
         for i, choice in enumerate(choices):
             if choice.value == value:
@@ -234,20 +246,21 @@ class CourierOutboxScreen(SelectScreen):
 
 
 def _menu_items(ctx: AppContext, entries: list[QueuedMessage]) -> list:
-    """Build the screen's rows: the waiting outbox, then the finished history.
+    """Build the rows of the screen: the waiting outbox, then the finished history.
 
-    Entry rows are zero-arg callables so their live state re-renders every repaint;
-    the fixed action rows stay plain strings.
+    The entry rows are callables with no argument, so that their live state renders again at
+    each paint. The fixed action rows stay plain strings.
     """
     waiting = [m for m in entries if m.status == QUEUED]
     done = [m for m in entries if m.status != QUEUED]
 
     # One icon column for the whole list, across both sections. The terminal draws ⏳ and
-    # 📨 in two cells but ✓ ✗ 🗑 in one, so rows written ``mark + " "`` started a finished
-    # entry's recipient a column left of a waiting one's, and *Clear finished* a column left
-    # of *Queue a message…*. The entry marks always keep their share of the column; the
+    # 📨 in two cells, but ✓ ✗ 🗑 in one cell. Thus rows that were written as
+    # ``mark + " "`` started the recipient of a finished entry one column to the left of the
+    # recipient of a waiting entry. They also started *Clear finished* one column to the left
+    # of *Queue a message…*. The entry marks always keep their share of the column. The
     # command icons go where the platform draws no icon lane, and marked_label leaves those
-    # two labels bare rather than padded out to a mark that isn't there.
+    # two labels bare. It does not pad them for a mark that is not there.
     lane = max(icon_lane(_COMMAND_ICONS), _MARK_LANE)
 
     items: list = [section_heading("Outbox")]
@@ -255,7 +268,7 @@ def _menu_items(ctx: AppContext, entries: list[QueuedMessage]) -> list:
         items.append(Separator("  empty — queued messages wait here for their moment"))
     for message in waiting:
         items.append(Choice(lambda m=message: _waiting_row(ctx, m, lane), ("msg", message.ident)))
-    items.append(Separator(" "))  # space the action off the outbox rows above it
+    items.append(Separator(" "))  # put space between the action and the outbox rows above it
     items.append(Choice(marked_label("📨", "Queue a message…", "", lane=lane), _QUEUE))
 
     if done:
@@ -269,19 +282,19 @@ def _menu_items(ctx: AppContext, entries: list[QueuedMessage]) -> list:
 
 
 def _entry_mark(mark: str, style: str, lane: int) -> Text:
-    """An entry's status mark, tinted and padded out to the outbox's icon column.
+    """The status mark of an entry, with a tint, and padded to the icon column of the outbox.
 
-    The entry-row twin of :func:`~meshterm.ui.menus.icon_mark`, which cannot serve here:
-    that one drops its icon where the platform draws no icon lane, and an entry's mark is
-    its outcome (waiting, delivered, gave up), which every platform must still show.
+    This is the twin of :func:`~meshterm.ui.menus.icon_mark` for entry rows. That function
+    cannot serve here. It removes its icon where the platform draws no icon lane. The mark
+    of an entry is its outcome (waiting, delivered, gave up), and each platform must show it.
 
     Args:
         mark: One of :data:`_ENTRY_MARKS`.
-        style: The theme style the mark is drawn in.
-        lane: The list's icon column in cells (see :func:`_menu_items`).
+        style: The theme style in which the mark is drawn.
+        lane: The icon column of the list in cells (refer to :func:`_menu_items`).
 
     Returns:
-        The mark followed by enough spaces to start the words in the column after it.
+        The mark, followed by enough spaces to start the words in the column after it.
     """
     text = Text(mark, style=style)
     text.append(" " * (lane - cell_len(mark) + 1))
@@ -289,7 +302,7 @@ def _entry_mark(mark: str, style: str, lane: int) -> Text:
 
 
 def _waiting_row(ctx: AppContext, message: QueuedMessage, lane: int = _MARK_LANE) -> Text:
-    """One waiting entry: recipient, body, and what it is waiting for."""
+    """One waiting entry: the recipient, the body, and what the entry waits for."""
     row = _entry_mark("⏳", "warn", lane)
     row.append(message.node_name)
     row.append(f"  “{_shorten(message.text)}”", style="muted")
@@ -314,7 +327,7 @@ def _waiting_row(ctx: AppContext, message: QueuedMessage, lane: int = _MARK_LANE
 
 
 def _done_row(message: QueuedMessage, lane: int = _MARK_LANE) -> Text:
-    """One finished entry: outcome marker, recipient, body, and when it settled."""
+    """One finished entry: the outcome mark, the recipient, the body, and when it ended."""
     if message.status == DELIVERED:
         row = _entry_mark("✓", "ok", lane)
     else:
@@ -334,24 +347,25 @@ def _done_row(message: QueuedMessage, lane: int = _MARK_LANE) -> Text:
 # --- the flows --------------------------------------------------------------------------
 
 
-#: The recipient picker's footer: the shared contact-list grammar with a committing Enter,
-#: Esc cancelling the queueing step it sits in.
+#: The footer of the recipient picker. It uses the grammar of the shared contact list, with
+#: an Enter that commits. Esc cancels the queueing step in which the picker is.
 _PICK_HINT = "↑↓ move · ^←→↑↓ sort · type to filter · Enter select · Esc cancel"
 
 
 class CourierRecipientScreen(ContactListScreen):
     """The recipient picker on the shared contact list.
 
-    The full ``NAME · HEARD · PKTS · KEY`` lanes, the Ctrl+arrow sort ring, and
-    type-to-filter, exactly as the Contacts screen and the Time Machine picker draw
-    contacts — names in their key-derived hue, heard ages in recency heat. Unlike the
-    Contacts screen, Enter *commits*: the shared list's Enter resolves the highlighted
-    row's value, which is the :class:`~meshterm.core.models.Contact` itself.
+    It has the full ``NAME · HEARD · PKTS · KEY`` lanes, the Ctrl+arrow sort ring, and
+    type-to-filter. These are the same as in the Contacts screen and the Time Machine
+    picker. Names have their hue from their key, and heard ages have the recency heat.
+    Unlike the Contacts screen, Enter *commits*. The Enter of the shared list resolves the
+    value of the highlighted row, which is the :class:`~meshterm.core.models.Contact`
+    itself.
 
-    Only companion contacts are ever passed in — a courier message is a direct message,
-    and direct messages go to companions only (see
-    :func:`~meshterm.core.models.is_direct_messageable`); the caller filters before
-    building the picker.
+    The caller passes only companion contacts. A courier message is a direct message, and
+    direct messages go only to companions (refer to
+    :func:`~meshterm.core.models.is_direct_messageable`). The caller filters the contacts
+    before it builds the picker.
     """
 
     def __init__(
@@ -362,14 +376,15 @@ class CourierRecipientScreen(ContactListScreen):
         counts: dict[str, int],
         sort: ContactsSort,
     ) -> None:
-        """Build the picker over the device's companion contacts.
+        """Build the picker over the companion contacts of the device.
 
         Args:
-            contacts: The candidate recipients — companion contacts only (the caller
-                filters non-companions out).
-            prefix_bytes: The hash width in bytes to light at the head of each key.
-            counts: Overheard-packet tallies keyed by lowercased 12-hex node id.
-            sort: The sort state (defaults open on ``name``, A→Z).
+            contacts: The candidate recipients: companion contacts only (the caller
+                removes the contacts that are not companions).
+            prefix_bytes: The hash width in bytes to light at the start of each key.
+            counts: The tallies of overheard packets, with the lowercase 12-hex node id as
+                the key.
+            sort: The sort state (by default it opens on ``name``, A→Z).
         """
         rows = [
             ContactRow(
@@ -393,18 +408,20 @@ class CourierRecipientScreen(ContactListScreen):
 
 
 async def _queue_flow(ctx: AppContext, contacts: list[Contact]) -> None:
-    """Float the queueing flow: recipient, message, schedule — as a stack.
+    """Float the queueing flow (recipient, message, schedule) as a stack.
 
-    Three prompts, so Esc means "back one step", not "throw the whole thing away": from the
-    schedule to the message with what was written still in the field, from the message to
-    the recipient list (which stays pushed the whole time, so it is still on the row the
-    message was being written to), and from there out to the outbox. Nothing typed is lost
-    to a single keypress — see :func:`~meshterm.ui.menus.run_steps`.
+    The flow has three prompts. Thus Esc means "go back one step" and does not mean "throw
+    away all of it". Esc goes from the schedule to the message, and the text that the user
+    wrote is still in the field. It goes from the message to the recipient list. The list
+    stays pushed all the time, so it is still on the row for which the user wrote the
+    message. From the list, Esc goes out to the outbox. One key press does not lose
+    anything that the user typed (refer to :func:`~meshterm.ui.menus.run_steps`).
     """
     session = ctx.ui.session
-    # A courier message is a direct message, so only companions can receive one — a
-    # repeater, room, or sensor is never a recipient (the app-wide DM rule, see
-    # is_direct_messageable). Filter before the picker so non-companions never appear.
+    # A courier message is a direct message, so only companions can receive one. A
+    # repeater, a room, or a sensor is never a recipient (the DM rule of the whole app, refer
+    # to is_direct_messageable). Filter before the picker, so that nodes that are not
+    # companions never appear.
     companions = [c for c in contacts if is_direct_messageable(c.node_type)]
     if not companions:
         await session.message_dialog(
@@ -417,8 +434,9 @@ async def _queue_flow(ctx: AppContext, contacts: list[Contact]) -> None:
         )
         return
 
-    # The shared contact-list presentation (see CourierRecipientScreen), opened A→Z by
-    # name — the default of a re-sortable list, with heard/packets/key a Ctrl+arrow away.
+    # The shared contact-list presentation (refer to CourierRecipientScreen). It opens A→Z by
+    # name, which is the default of a list that the user can sort again. The heard, packets,
+    # and key sorts are one Ctrl+arrow away.
     counts = {n.node: n.count for n in ctx.repo.heard_nodes() if n.node}
     prefix_bytes = await ctx.devstate.routing_prefix_bytes()
     picker = CourierRecipientScreen(
@@ -440,7 +458,7 @@ async def _queue_flow(ctx: AppContext, contacts: list[Contact]) -> None:
                 lambda vals: _schedule_step(ctx, vals[0].name),
             ]
         )
-    if answers is None:  # Esc off the recipient list — out to the outbox
+    if answers is None:  # Esc on the recipient list: out to the outbox
         return
     contact, text, when = answers
     not_before = None if when is WHEN_HEARD else when
@@ -455,18 +473,18 @@ async def _queue_flow(ctx: AppContext, contacts: list[Contact]) -> None:
 
 
 async def _next_recipient(visit: Any) -> Contact | None:
-    """One round of the visited recipient list: the picked contact, or ``None`` on Esc."""
+    """One round of the visited recipient list: the selected contact, or ``None`` on Esc."""
     chosen = await visit.result()
     return chosen if isinstance(chosen, Contact) else None
 
 
 async def _schedule_step(ctx: AppContext, name: str) -> object | None:
-    """The schedule step, in the shape :func:`~meshterm.ui.menus.run_steps` reads.
+    """The schedule step, in the shape that :func:`~meshterm.ui.menus.run_steps` reads.
 
-    A chain step signals *step back* with ``None``, which is exactly what
-    :func:`_pick_schedule` returns for the real answer "no schedule — send on the next sign
-    of life". So the two are swapped here: that answer travels as :data:`WHEN_HEARD` (its
-    own row's value) and the cancel becomes the ``None``.
+    A step of the chain uses ``None`` as the signal to *step back*. But :func:`_pick_schedule`
+    also returns ``None`` for the real answer "no schedule, send on the next sign of life".
+    Thus this function swaps the two. That answer goes on as :data:`WHEN_HEARD` (the value
+    of its own row), and the cancel becomes the ``None``.
     """
     picked = await _pick_schedule(ctx, name)
     if picked is CANCEL_SCHEDULE:
@@ -474,25 +492,26 @@ async def _schedule_step(ctx: AppContext, name: str) -> object | None:
     return WHEN_HEARD if picked is None else picked
 
 
-#: Sentinel: the schedule picker was cancelled (distinct from "no schedule").
+#: The sentinel for a schedule picker that the user cancelled (this is not "no schedule").
 CANCEL_SCHEDULE = object()
 
-#: Sentinel: "send when it's next heard" — the no-schedule choice. It carries its own
-#: value (never ``None``) because :meth:`session.select` already returns ``None`` for a
-#: cancel; sharing that value made picking this row read as a cancel and silently drop the
-#: message instead of queueing it.
+#: The sentinel for "send when it is next heard", the choice for no schedule. It has its own
+#: value (never ``None``), because :meth:`session.select` already returns ``None`` for a
+#: cancel. When the two choices shared that value, a user who selected this row caused a
+#: cancel, and the code dropped the message without a word and did not queue it.
 WHEN_HEARD = object()
 
 
 async def _pick_schedule(ctx: AppContext, name: str):
-    """Float the when-to-send picker; return an aware UTC time, ``None``, or cancel.
+    """Float the picker for when to send. Return an aware UTC time, ``None``, or a cancel.
 
-    ``None`` means "no schedule — send on the next sign of life" (the explicit
-    *When it's next heard* row); an aware UTC datetime holds until then;
-    :data:`CANCEL_SCHEDULE` means the user backed out and nothing should queue.
+    ``None`` means "no schedule, send on the next sign of life" (the explicit
+    *When it's next heard* row). An aware UTC datetime means that the message waits until
+    that time. :data:`CANCEL_SCHEDULE` means that the user went back, and the code must not
+    queue anything.
 
-    The *At a time…* row opens a second prompt, and Esc there steps back to these rungs
-    rather than out of the queueing flow — the chain rule one level down (see
+    The *At a time…* row opens a second prompt. Esc there goes back to these choices and
+    not out of the queueing flow. This is the chain rule, one level lower (refer to
     :func:`~meshterm.ui.menus.run_steps`).
     """
     session = ctx.ui.session
@@ -514,11 +533,12 @@ async def _pick_schedule(ctx: AppContext, name: str):
             footer_hint="↑↓ move · Enter select · Esc cancel",
         )
         if picked is None:
-            # Esc on the picker steps back out of the schedule; "when next heard" is its
-            # own explicit row (WHEN_HEARD), so backing out never silently queues anything.
+            # Esc on the picker steps back out of the schedule. "When next heard" is its
+            # own explicit row (WHEN_HEARD), so going back never queues anything without
+            # a word.
             return CANCEL_SCHEDULE
         if picked is WHEN_HEARD:
-            return None  # no schedule constraint — delivered on the next pass
+            return None  # no schedule limit: the courier delivers on the next pass
         if picked != "custom":
             return picked
         while True:
@@ -527,21 +547,21 @@ async def _pick_schedule(ctx: AppContext, name: str):
                 prompt="A time already past today means tomorrow.",
             )
             if not typed:
-                break  # Esc on the time: back to the rungs it was reached from
+                break  # Esc on the time: back to the choices from which the user came
             when = parse_clock(typed)
             if when is not None:
                 return when
 
 
 async def _entry_actions(ctx: AppContext, ident: int) -> None:
-    """Float one entry's action menu: send now, cancel, or just look at it."""
+    """Float the action menu of one entry: send now, cancel, or only look at it."""
     session = ctx.ui.session
     store = ctx.courier_store
     message = store.get(ident)
     if message is None:
         return
     if message.status != QUEUED:
-        # A finished entry has no actions; show its full text instead.
+        # A finished entry has no actions. Show its full text instead.
         body = Text(message.text)
         body.append(
             f"\n\n{message.status} · {message.attempts} attempt"
@@ -550,9 +570,10 @@ async def _entry_actions(ctx: AppContext, ident: int) -> None:
         )
         await session.message_dialog(body, title=message.node_name)
         return
-    # One measured column for both rows: 📤 draws two cells and ✗ one, and the Cancel row
-    # measuring only its own mark started its words a column left of Send now's. Where the
-    # platform draws no icon lane both go bare, Cancel's err tint moving onto its words.
+    # One measured column for both rows. 📤 draws two cells and ✗ draws one cell. The Cancel
+    # row measured only its own mark, so its words started one column to the left of the
+    # words of Send now. Where the platform draws no icon lane, both rows have no icon, and
+    # the err tint of Cancel moves onto its words.
     lane = icon_lane(("📤", "✗"))
     items = [
         Choice(marked_label("📤", "Send now — one forced attempt", "", lane=lane), "send"),
@@ -570,7 +591,7 @@ async def _entry_actions(ctx: AppContext, ident: int) -> None:
         try:
             async with ctx.ui.busy_overlay(f"sending to {message.node_name}…"):
                 outcome = await ctx.courier.attempt_now(ident)
-        except Exception as exc:  # noqa: BLE001 - surface the failure, keep the queue
+        except Exception as exc:  # noqa: BLE001 - show the failure, and keep the queue
             await session.message_dialog(Text(f"send failed: {exc}", style="err"), title="Courier")
             return
         notes = {

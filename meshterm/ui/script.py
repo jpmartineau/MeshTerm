@@ -1,58 +1,64 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The plain CLI's output language — text for a person at a prompt, aligned and unadorned.
+"""The output language of the plain CLI: aligned text without decoration, for a prompt.
 
-MeshTerm has two front ends and a third face. The menu is read by a person sitting in
-front of it, and everything else in ``meshterm/ui/`` is built for that reader: colour that
-carries meaning, glyphs that stand for concepts, frames that group. ``--json`` is read by
-a program, often somewhere else and often later. This module is the third: **someone at a
-prompt who typed a command to find something out, and wants the answer legible in one
-glance.**
+MeshTerm has two front ends and a third face. A person who sits in front of the menu
+reads the menu. All the other code in ``meshterm/ui/`` is made for that user: colour that
+has a meaning, glyphs for concepts, and frames that make groups. A program reads
+``--json``, often on a different machine and often later. This module is the third face:
+**a person at a prompt who typed a command to find a fact, and who wants to read the
+answer in one look.**
 
-That is a change of premise. The plain face used to be a serialisation format a person
-could squint at, and several of its rules existed only to make *splitting* safe — quoted
-names, absolute timestamps, a comma between path hops. Splitting is the machine face's job
-now (see :mod:`meshterm.ui.report` and :mod:`meshterm.ui.renderers`), so those rules were
-paying rent they could not afford. What survives is everything that makes the output a
-Unix utility's output, and one new rule in place of the quoting.
+This is a change of premise. Before, the plain face was a serialization format that a
+person could read only with effort. Several of its rules were there only to make it safe
+to *split* the output into fields: quoted names, absolute timestamps, and a comma between
+the hops of a path. Now a program that splits the output reads the machine face instead
+(refer to :mod:`meshterm.ui.report` and :mod:`meshterm.ui.renderers`). Thus those rules
+had a cost and no longer had a purpose. The rules that stay are the rules that make the
+output the output of a Unix utility, and one new rule that replaces the quotes.
 
-* **Alignment is the delimiter.** A column that lines up is already one field to the eye,
-  so a name is bare (:func:`name`). The *escaping* under the quoting is not gone and never
-  can be (:func:`_escaped`): a name is broadcast by its own node and a message body is
-  filled in by a stranger, and neither may end the record it sits in.
-* **No colour.** ``stdout`` is a pipe more often than a terminal, and a colour that
-  survives into a file is noise in it. The console this module builds has
-  ``color_system=None``, so Rich emits no escape sequence at all — not a dim, not a bold.
-  That is stricter than ``no_color``, which keeps the attributes and drops only the hues.
-* **No wrapping.** A record is a line. Wrapping turns one record into two and puts the
-  second one's fields under the wrong headings, so the console is made :data:`WIDTH` cells
-  wide — far past any real line — and every column is ``no_wrap``. The one deliberate
-  exception is a *written page* (``about``, ``support``), which is drawn on a console
-  :data:`PAGE_WIDTH` cells wide instead: a paragraph is not a record, it has no headings
-  to land under, and unwrapped it is a single 600-cell line no terminal can read.
-* **No frames.** No panel borders, no table boxes, no rules, no titles. The command the
-  reader typed is the title; a box around the answer is a second one.
-* **Aligned columns, one header line.** ``ps`` and ``df``'s shape: an uppercase header
-  row, then records, fields padded apart by :data:`GUTTER` spaces. See :func:`columns`.
-* **A time is an age.** ``5m``, ``3h``, ``never`` — the same ladder the menu's columns use
-  (:func:`age`), because "how long ago" is the question a person is actually asking. An
-  absolute instant survives where the instant *is* the fact: the device clock, a scheduled
-  appointment, a live capture's own clock (:func:`stamp`). ``--absolute`` swaps the whole
-  language back for anyone who wants it, and the machine face is absolute UTC regardless.
-* **A route is drawn, a path is typed.** The lexicon already splits these: a *path* is an
-  ordered hop spec you compose or force, a *route* is the concrete node sequence a walk
-  took. So a path keeps its commas (:func:`spec`) because it round-trips into ``--path``,
-  and a route takes arrows (:func:`route`) because it is a picture and visibly is not a
-  spec. Rendering both with commas promised a round trip only one of them has.
-* **One token for "nothing".** :data:`NONE` — a lone ``-`` — in every column, so an absent
-  value never has to be told apart from an empty one, an ``—``, an ``n/a`` or a blank.
-  ``never`` is a *value*, not an absence: a node that has never been heard is a fact.
-* **No trailing whitespace.** Padding the last column to its width would put invisible
-  spaces at the end of every line; the console trims them on the way out
+* **Alignment is the delimiter.** The eye already sees an aligned column as one field.
+  Thus a name has no quotes (:func:`name`). The *escapes* under the quotes stay, and they
+  must always stay (:func:`_escaped`). A node broadcasts its own name, and a stranger
+  writes the body of a message. Neither value can end the record that contains it.
+* **No colour.** ``stdout`` is more often a pipe than a terminal. A colour that goes into
+  a file is noise in that file. The console that this module builds has
+  ``color_system=None``, thus Rich writes no escape sequence at all: no dim and no bold.
+  This is stricter than ``no_color``, which keeps the attributes and removes only the
+  colours.
+* **No wrapping.** A record is a line. If the console wraps a record, the record becomes
+  two lines, and the fields of the second line are under the wrong headings. Thus the
+  console is :data:`WIDTH` cells wide, much wider than any real line, and each column is
+  ``no_wrap``. The only intentional exception is a *written page* (``about``,
+  ``support``). It is drawn on a console that is :data:`PAGE_WIDTH` cells wide instead.
+  A paragraph is not a record, and it has no headings to align under. If it does not
+  wrap, it is one line of 600 cells, and a person cannot read that line in any terminal.
+* **No frames.** No panel borders, no table boxes, no rules, and no titles. The command
+  that the person typed is the title. A box around the answer is a second title.
+* **Aligned columns, one header line.** The shape of ``ps`` and ``df``: a header row in
+  upper case, then the records. :data:`GUTTER` spaces separate the padded fields. Refer to
+  :func:`columns`.
+* **A time is an age.** ``5m``, ``3h``, ``never``: the same scale that the columns of the
+  menu use (:func:`age`). The reason is that "how long ago" is the question that a person
+  asks. An absolute instant stays where the instant is the fact: the device clock, a
+  scheduled appointment, and the clock of a live capture (:func:`stamp`). ``--absolute``
+  changes all the output back to absolute times for a person who wants them. The machine
+  face always uses absolute UTC times.
+* **A route is drawn, a path is typed.** The lexicon already makes these two concepts
+  different. A *path* is an ordered list of hops that you write or force. A *route* is
+  the sequence of nodes that a walk went through. Thus a path keeps its commas
+  (:func:`spec`), because you can type it back into ``--path`` (a round trip). A route
+  gets arrows (:func:`route`), because it is a picture and clearly not a spec. Before,
+  both had commas, and thus both seemed to make a round trip. Only one of them does.
+* **One token for "nothing".** :data:`NONE` (a ``-`` alone) in each column. Thus a person
+  never has to tell an absent value from an empty value, an ``—``, an ``n/a``, or a blank.
+  ``never`` is a *value*, not an absence: a node that was never heard is a fact.
+* **No trailing whitespace.** If the last column is padded to its width, each line ends
+  with invisible spaces. The console removes them when it writes the line
   (:class:`_Trimmed`).
 
-Nothing here is reachable from the menu, and nothing in the menu is reachable from here:
-:class:`~meshterm.ui.surface.PlainUi` is the seam, chosen in
-:func:`~meshterm.cli.main_callback` by whether a subcommand was named.
+The menu cannot get to this module, and this module cannot get to the menu.
+:class:`~meshterm.ui.surface.PlainUi` is the seam. :func:`~meshterm.cli.main_callback`
+chooses it when the command line names a subcommand.
 """
 
 from __future__ import annotations
@@ -67,58 +73,63 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-#: The scripted console's width. Wide enough that Rich never wraps or truncates anything
-#: MeshTerm can produce (a 64-hex key, a full route, a preference description), leaving
-#: the reader's own terminal to deal with a line longer than itself. Not ``sys.maxsize``:
-#: Rich sizes a few structures against the width, and a merely enormous number costs
-#: nothing where an astronomical one does.
+#: The width of the scripted console. It is wide enough that Rich never wraps or cuts any
+#: text that MeshTerm can make (a key of 64 hex digits, a full route, the description of a
+#: preference). If a line is longer than the terminal of the person, that terminal deals
+#: with it. The value is not ``sys.maxsize``, because Rich sizes some structures from the
+#: width. A very large number costs nothing, but an astronomically large number has a cost.
 WIDTH = 1 << 14
 
-#: Spaces between columns. Two, so a padded column and its neighbour never touch and a
-#: lone space is never mistaken for a separator inside an unquoted field.
+#: The number of spaces between columns. It is two, so that a padded column never touches
+#: the next column. Also, a person never reads a single space in a field without quotes as
+#: a separator.
 GUTTER = 2
 
-#: The one token for a value that is absent, unknown, or does not apply. A reader (and a
-#: parser) learns it once. Never ``—``, ``n/a``, ``never``, or an empty cell.
+#: The only token for a value that is absent, unknown, or not applicable. A person (and a
+#: parser) learns it one time. It is never ``—``, ``n/a``, ``never``, or an empty cell.
 NONE = "-"
 
-#: The separator between a route's hops, spaced — the same ``→`` the menu's path lines
-#: draw with (:data:`meshterm.ui.pathline._ARROW`), and device-verified present in the
-#: PicoCalc console font. It carries the direction the packet travelled, and it is what
-#: makes the quoting unnecessary: a comma inside a node's name can no longer be read as a
-#: hop boundary.
+#: The separator between the hops of a route, with a space on each side. It is the same
+#: ``→`` that the path lines of the menu use (:data:`meshterm.ui.pathline._ARROW`). The
+#: PicoCalc console font has this glyph (we checked it on the handheld). The arrow shows
+#: the direction in which the packet went. Also, it makes the quotes unnecessary: a person
+#: can no longer read a comma in the name of a node as a boundary between hops.
 ARROW = " → "
 
-#: How wide a *written page* wraps. Not the terminal's width: the same paragraph must read
-#: the same when it is piped, redirected, or shipped as the machine face's ``text`` field,
-#: and 72 is the width every screen in this app is already held to.
+#: The width at which a *written page* wraps. It is not the width of the terminal, because
+#: the same paragraph must look the same in a pipe, in a redirected file, or in the
+#: ``text`` field of the machine face. Also, 72 is already the width limit of each screen
+#: in this app.
 PAGE_WIDTH = 72
 
 
-#: The characters with a readable escape of their own. Everything else that cannot travel
-#: in a record falls through to ``\xNN``/``\uNNNN`` below.
+#: The characters that have a readable escape of their own. All other characters that
+#: cannot go in a record get the ``\xNN``/``\uNNNN`` escape below.
 _BREAKS = {"\\": "\\\\", "\n": "\\n", "\r": "\\r", "\t": "\\t"}
 
-#: Codepoints that must never reach stdout unescaped, as a *category* rather than a list:
-#: every C0 and C1 control, plus the two Unicode separators a terminal also breaks a line
-#: on. A four-entry table caught the newline and the tab and let ESC through — and an ESC
-#: inside a node name is a live colour run written into the caller's file, which is the
-#: one thing "no colour, not a single escape sequence" exists to prevent. A BEL was worse:
-#: silently dropped, so the printed name was not the advertised one.
+#: The code points that must never go to stdout without an escape. This is a *category*,
+#: not a list: each C0 and C1 control character, and the two Unicode separators at which a
+#: terminal also breaks a line. Before, a table of four entries caught the newline and the
+#: tab, but let ESC through. An ESC in a node name starts a live colour run in the file of
+#: the caller. The rule "no colour, not a single escape sequence" is there to prevent
+#: exactly this. A BEL was worse: it disappeared without a warning, so the printed name was
+#: not the name in the advert.
 _UNPRINTABLE = frozenset([*range(0x00, 0x20), 0x7F, *range(0x80, 0xA0), 0x2028, 0x2029])
 
 
 def _escaped(text: str) -> str:
-    r"""``text`` with everything that cannot travel inside one record folded into an escape.
+    r"""``text``, with an escape for each character that cannot go in one record.
 
-    A record is a line and a field is a run of printable cells; this is what makes both
-    true of a value that arrived over the air. Named escapes where one reads (``\n``),
-    numeric escapes everywhere else, and the backslash doubled so the whole thing reads
-    back unambiguously.
+    A record is a line, and a field is a sequence of printable cells. This function makes
+    both statements true for a value that came over the radio. It uses a named escape
+    where one is readable (``\n``), and a numeric escape for all other characters. It
+    doubles the backslash, so that the result has only one meaning when a person reads it
+    back.
 
-    This is what survived the retirement of the quoting. The quotes made a name *one
-    field* for a splitter, and alignment does that now; nothing else can stop a name
-    holding a newline from ending its own record early.
+    This function is the part of the quoting that stayed when we removed the quotes. The
+    quotes made a name *one field* for a program that splits the line, and now the
+    alignment does that. But nothing else can stop a newline in a name: without the
+    escape, the newline ends the record of the name too early.
     """
     out: list[str] = []
     for ch in text:
@@ -132,21 +143,21 @@ def _escaped(text: str) -> str:
 
 
 def name(value: str | None) -> str:
-    r"""A node's name as a field: bare and escaped, or :data:`NONE` when it has none.
+    r"""The name of a node as a field: without quotes and with escapes, or :data:`NONE`.
 
-    The quotes are gone. They existed so a name holding a space or a comma stayed one
-    field for whatever was splitting the line; the splitter reads JSON now, and in plain
-    text the column alignment already says where a field ends. What survives is the
-    escaping — a node broadcasts its own name, so every name here is remote data, and a
-    newline in one must still not end the record it sits in.
+    The quotes are gone. They were there so that a name with a space or a comma stayed one
+    field for the program that split the line. Now that program reads JSON, and in plain
+    text the alignment of the columns already shows where a field ends. The escapes stay.
+    A node broadcasts its own name, so each name here is remote data, and a newline in a
+    name must still not end the record that contains it.
 
-    An empty name is still :data:`NONE` rather than an empty cell: ``""`` says *called
-    nothing* where the token says *never said*, and those are different facts. It is also
-    the distinction the machine face needs — an absent name is ``null``, an empty one is
-    ``""`` — and it cannot be recovered from a field that flattened both.
+    An empty name is still :data:`NONE`, not an empty cell. ``""`` means *called
+    nothing*, and the token means *never said*. These are different facts. The machine
+    face also needs this difference (an absent name is ``null``, an empty name is
+    ``""``), and a field that shows both in the same way cannot give the difference back.
 
     Args:
-        value: The name, or ``None``/empty where the node never supplied one.
+        value: The name, or ``None`` or empty when the node did not give a name.
 
     Returns:
         The escaped name, or :data:`NONE`.
@@ -155,41 +166,41 @@ def name(value: str | None) -> str:
 
 
 def text(value: str | None) -> str:
-    r"""Free text as a field that can end a record without breaking it.
+    r"""Free text as a field that can end a record without a break in the record.
 
-    For the field a listing puts last because it *is* the rest of the line — a message
-    body, a preference's description. "The rest of the line" and "anything at all" are not
-    compatible: a body holding a newline ended its record early and left the remainder
-    indented under the other columns, reading as a second record with an empty ``TIME``.
-    A body is also the field a stranger fills in, so that is not a hypothetical shape of
-    message.
+    Use it for the field that a listing puts last, because that field is the rest of the
+    line: the body of a message, or the description of a preference. "The rest of the
+    line" and "any text at all" are not compatible. Before, a body that contained a
+    newline ended its record too early. The rest of the text was indented under the other
+    columns, and it looked like a second record with an empty ``TIME``. Also, a stranger
+    writes the body, so such a message is a real possibility.
 
     Args:
         value: The free text. ``None`` gives :data:`NONE`.
 
     Returns:
-        The text with its line breaks and tabs escaped.
+        The text, with escapes for its line breaks and tabs.
     """
     return NONE if value is None else _escaped(value)
 
 
 def stamp(when: datetime | None) -> str:
-    """Format a timestamp as local ISO-8601 to the second, or :data:`NONE`.
+    """Format a timestamp as local ISO-8601 to the second, or as :data:`NONE`.
 
-    Kept for the times where the instant *is* the fact rather than a way of saying how
-    long ago something was: the device's own clock, an appointment set with ``--at``, a
-    live capture's per-row time (every row of which would otherwise read ``now``), and
-    every column under ``--absolute``.
+    Use it where the instant is the fact, and not a way to say how long ago something
+    occurred: the clock of the device, an appointment set with ``--at``, the time of each
+    row in a live capture (without it, each row shows ``now``), and each column under
+    ``--absolute``.
 
-    Stored times are timezone-aware UTC; a naive one is a time whose offset we do not
-    actually know, which is not a fact and so reads as absent — the same rule
-    :func:`~meshterm.ui.widgets.age_seconds` applies to ages.
+    Stored times are UTC and have a timezone. A naive time has an offset that we do not
+    know. Thus it is not a fact, and the function shows it as absent.
+    :func:`~meshterm.ui.widgets.age_seconds` uses the same rule for ages.
 
     Args:
         when: The instant to format.
 
     Returns:
-        e.g. ``2026-09-07T18:22:41-04:00``, or :data:`NONE`.
+        For example ``2026-09-07T18:22:41-04:00``, or :data:`NONE`.
     """
     if when is None or when.tzinfo is None:
         return NONE
@@ -199,18 +210,20 @@ def stamp(when: datetime | None) -> str:
 def age(when: datetime | None, *, absent: str = NONE) -> str:
     """How long ago ``when`` was: ``now``, ``5m``, ``3h``, ``2d``, ``4w``.
 
-    The default time form, and the reason is the premise change: a person at a prompt
-    reading ``2026-09-07T19:58:53-04:00`` is doing arithmetic to answer "recently?", which
-    is the question they typed the command to ask. Delegates to
-    :func:`~meshterm.ui.widgets.format_age` so the two faces cannot drift apart.
+    This is the default form of a time, because of the change of premise. A person at a
+    prompt who reads ``2026-09-07T19:58:53-04:00`` must do arithmetic to answer
+    "recently?", and that is the question for which the person typed the command. The
+    function calls :func:`~meshterm.ui.widgets.format_age`, so that the two faces always
+    agree.
 
     Args:
-        when: The instant to age. A naive datetime has no offset we know, so it reads as
-            absent, exactly as :func:`stamp` treats it.
-        absent: What an unknown time reads as. A heard-age passes ``"never"`` — a node
-            that has never been heard is a fact, not a missing field — and everything else
-            takes the default token, which says this row has no such time at all. The same
-            distinction :func:`name` draws between ``-`` and an empty name, one axis over.
+        when: The instant to show as an age. A naive datetime has no offset that we know,
+            thus it shows as absent, the same as in :func:`stamp`.
+        absent: The text for an unknown time. A heard age gives ``"never"``, because a
+            node that was never heard is a fact, not an absent field. All other callers
+            use the default token, which says that this row has no such time at all.
+            :func:`name` makes the same difference between ``-`` and an empty name, for a
+            different value.
 
     Returns:
         The age, or ``absent``.
@@ -225,8 +238,8 @@ def number(value: Any, spec: str = "") -> str:
     """Format a number, or :data:`NONE` when it is absent.
 
     Args:
-        value: The number to format; ``None`` reads as absent.
-        spec: An optional :func:`format` spec, e.g. ``"+.1f"``.
+        value: The number to format. ``None`` shows as absent.
+        spec: An optional :func:`format` spec, for example ``"+.1f"``.
 
     Returns:
         The formatted number, or :data:`NONE`.
@@ -236,21 +249,23 @@ def number(value: Any, spec: str = "") -> str:
     return format(value, spec) if spec else str(value)
 
 
-#: The units :func:`duration` counts in, largest first.
+#: The units that :func:`duration` uses, the largest first.
 _UNITS: tuple[tuple[int, str], ...] = ((86400, "d"), (3600, "h"), (60, "m"), (1, "s"))
 
 
 def duration(seconds: float | None) -> str:
-    """A span of seconds as something readable: ``93784`` → ``1d 2h``, ``360`` → ``6m``.
+    """A span of seconds in a readable form: ``93784`` → ``1d 2h``, ``360`` → ``6m``.
 
-    Two units at most and always adjacent, so the magnitude arrives at a glance and the
-    precision never outruns what anyone would act on. Used only as a *gloss* beside the
-    raw figure (``uptime_s  93784  (1d 2h)``), never in place of it — the key says what
-    the number counts, and a caller reading the key must still find a number under it.
+    It has a maximum of two units, and the two units are always next to each other. Thus
+    a person sees the magnitude immediately, and the precision is never more than a person
+    uses to make a decision. Use it only as a *gloss* next to the raw number
+    (``uptime_s  93784  (1d 2h)``), never instead of the number. The key tells what the
+    number counts, and a caller that reads the key must still find a number under it.
 
     Args:
-        seconds: The span. ``None`` reads as absent; the sign is dropped, since a caller
-            glossing a signed reading says which way in its own words.
+        seconds: The span. ``None`` shows as absent. The function removes the sign,
+            because a caller that adds a gloss to a signed value gives the direction in its
+            own words.
 
     Returns:
         The span in one or two units, or :data:`NONE`.
@@ -272,16 +287,17 @@ def duration(seconds: float | None) -> str:
 def location(lat: float | None, lon: float | None) -> str:
     """A shared position as one field: ``45.50190,-73.56740``, or :data:`NONE`.
 
-    One column rather than two. A coordinate pair is one fact to a reader, it is what goes
-    into a map's search box verbatim, and two columns of ``-`` for every contact that has
-    never shared a position is worse than one.
+    One column, not two. For a person, a pair of coordinates is one fact, and it goes
+    unchanged into the search box of a map. Also, two columns of ``-`` for each contact
+    that never shared a position are worse than one column.
 
     Args:
         lat: Latitude in decimal degrees.
         lon: Longitude in decimal degrees.
 
     Returns:
-        The pair to five decimals, or :data:`NONE` when either half is missing.
+        The pair, to five decimal places, or :data:`NONE` when one of the two values is
+        absent.
     """
     if lat is None or lon is None:
         return NONE
@@ -289,27 +305,28 @@ def location(lat: float | None, lon: float | None) -> str:
 
 
 def route(hops: Iterable[tuple[str | None, str | None]]) -> str:
-    """A walked hop sequence, drawn: ``Yagi-Repeater (a1) → Alice (d4) → Yagi (a1)``.
+    """The route of a walk, drawn: ``Yagi-Repeater (a1) → Alice (d4) → Yagi (a1)``.
 
-    A *route* is what a walk actually did, so it is a picture and not a spec — which is
-    why it takes :data:`ARROW` and not the comma ``--path`` accepts. Rendering it with
-    commas made it look pasteable, which it is not: the names are in it, and it is a
-    round trip nothing has.
+    A *route* is what a walk did. Thus it is a picture and not a spec, and for this reason
+    it uses :data:`ARROW` and not the comma that ``--path`` accepts. When a route had
+    commas, it looked as if a person could paste it, but a person cannot. The route
+    contains the names, and nothing can read it back (no round trip).
 
-    The hash rides on every hop and always. It is the join key to the per-hop table below
-    a trace, the token ``--path`` takes, and the disambiguator for two contacts sharing a
-    name. Dropping it "where the name is unique" would make one line's grammar depend on
-    another line's content.
+    Each hop always shows its hash. The hash is the join key to the table of hops under a
+    trace, and it is the token that ``--path`` accepts. It also makes two contacts with
+    the same name different. If the hash is removed "where the name is unique", the
+    grammar of one line depends on the content of a different line.
 
-    Our own node is a hop like any other — named and hashed. The menu draws it as ``★``
-    because a reader never has to be told which node is theirs; here the line is as often
-    read out of a file by someone who was not at the prompt when it ran.
+    Our node is a hop like all other hops, with a name and a hash. The menu draws it as
+    ``★``, because the user never has to be told which node is theirs. But here, the
+    person who reads the line often reads it from a file, and was not at the prompt when
+    the command ran.
 
     Args:
-        hops: ``(label, hash)`` pairs in propagation order. A hop with both halves reads
-            ``Name (hash)``; a hop with one half is that half alone, never an empty
-            ``()`` — which is how the menu's :class:`~meshterm.ui.pathline.PathLine`
-            labels an unresolved hop too.
+        hops: ``(label, hash)`` pairs, in the order of propagation. A hop with both values
+            shows as ``Name (hash)``. A hop with one value shows only that value, never an
+            empty ``()``. The menu's :class:`~meshterm.ui.pathline.PathLine` also labels an
+            unresolved hop in this way.
 
     Returns:
         The joined route, or :data:`NONE` when there are no hops.
@@ -324,45 +341,47 @@ def route(hops: Iterable[tuple[str | None, str | None]]) -> str:
 
 
 def spec(hops: Iterable[str]) -> str:
-    """A forced path as the radio was given it: ``a1,d4,a1``.
+    """A forced path in the form that the device got it: ``a1,d4,a1``.
 
-    The other half of the split :func:`route` names. This is the *spec* — comma-separated
-    hashes, exactly what ``--path`` takes back — so it is the one line on either face that
-    round-trips, and it must never grow a name, an arrow or a space.
+    This is the other half of the split that :func:`route` names. It is the *spec*: hashes
+    with commas between them, exactly what ``--path`` accepts back. Thus it is the only
+    line on the two faces that makes a round trip, and it must never get a name, an
+    arrow, or a space.
 
     Args:
-        hops: The hop hashes in propagation order.
+        hops: The hashes of the hops, in the order of propagation.
 
     Returns:
-        The comma-joined spec, or :data:`NONE` when there are no hops.
+        The spec, joined with commas, or :data:`NONE` when there are no hops.
     """
     parts = [hop for hop in hops if hop]
     return ",".join(parts) if parts else NONE
 
 
 def columns(*headers: str, right: Sequence[str] = ()) -> Table:
-    """Build the scripted table: an uppercase header line, then padded records.
+    """Build the scripted table: a header line in upper case, then padded records.
 
-    The shape ``ps`` and ``df`` print — no box, no title, no edge padding, every column
-    sized to its widest value and separated by :data:`GUTTER` spaces, nothing wrapped and
-    nothing elided. Numeric lanes right-align, which is what makes a column of magnitudes
-    comparable by eye without changing what splitting it yields; an *age* lane aligns the
-    same way, so the ladder from ``now`` to ``4w`` reads down the column.
+    The shape that ``ps`` and ``df`` print: no box, no title, and no padding at the edges.
+    Each column has the width of its widest value, and :data:`GUTTER` spaces separate the
+    columns. Nothing is wrapped, and nothing is cut with an ellipsis. Numeric lanes align
+    to the right. Thus the eye can compare the magnitudes in a column, and the result of a
+    split of the column does not change. An *age* lane aligns in the same way, so that the
+    scale from ``now`` to ``4w`` reads down the column.
 
     Args:
-        *headers: The column headings, already uppercase.
-        right: The headings (drawn from ``headers``) whose values right-align.
+        *headers: The column headings, already in upper case.
+        right: The headings (from ``headers``) whose values align to the right.
 
     Returns:
-        A Rich :class:`Table` ready for ``ctx.ui.show``.
+        A Rich :class:`Table` that is ready for ``ctx.ui.show``.
     """
     table = Table(
         box=None,
         show_edge=False,
         pad_edge=False,
         expand=False,
-        # (top, right, bottom, left): the whole gutter hangs to the right of each cell, so
-        # no line opens with an indent and the last column ends where its value does.
+        # (top, right, bottom, left): all of the gutter is on the right of each cell. Thus
+        # no line starts with an indent, and the last column ends where its value ends.
         padding=(0, GUTTER, 0, 0),
     )
     wanted = set(right)
@@ -371,28 +390,30 @@ def columns(*headers: str, right: Sequence[str] = ()) -> Table:
             header,
             justify="right" if header in wanted else "left",
             no_wrap=True,
-            # "crop", not "ignore". Both refuse to elide — neither ever writes the "…"
-            # that would make a key or a route unusable to the caller — but Rich's
-            # ``Text.wrap`` returns early on "ignore" (text.py: ``if overflow ==
-            # "ignore": lines.append(line); continue``) and that early return is *above*
-            # the justify step, so "ignore" silently discards ``justify="right"``. The
-            # two settings differ only past the console's 16384 cells, where "crop" cuts
-            # and "ignore" also cuts; they differ on every line before that, where only
-            # "crop" aligns.
+            # "crop", not "ignore". Neither one cuts text with an ellipsis: neither one
+            # ever writes the "…" that makes a key or a route unusable to the caller. But
+            # Rich's ``Text.wrap`` returns early on "ignore" (text.py: ``if overflow ==
+            # "ignore": lines.append(line); continue``), and that early return is *above*
+            # the justify step. Thus "ignore" discards ``justify="right"`` without a
+            # warning. You can think that the two settings are different only past the
+            # 16384 cells of the console. But there, "crop" cuts and "ignore" also cuts.
+            # They are different on each line before that point, where only "crop"
+            # aligns.
             overflow="crop",
         )
     return table
 
 
 def pairs(rows: Iterable[tuple[str, str]]) -> Table:
-    """Build the scripted key/value listing: key then value, aligned, no header line.
+    """Build the scripted key/value listing: the key, then the value, aligned, no header.
 
-    What a set of facts about one thing prints as (``meshterm info``, ``config show``,
-    ``trace``) — the ``sysctl -a`` shape. Keys are the ones the matching ``get``/``set``
-    subcommand takes, so a line read out of ``show`` can be typed back in.
+    A set of facts about one thing prints in this form (``meshterm info``, ``config
+    show``, ``trace``), the shape of ``sysctl -a``. The keys are the keys that the related
+    ``get``/``set`` subcommand accepts. Thus a person can type a line from ``show`` back
+    in.
 
     Args:
-        rows: ``(key, value)`` pairs in display order.
+        rows: ``(key, value)`` pairs, in the order of display.
 
     Returns:
         A Rich :class:`Table` with no header line.
@@ -414,22 +435,24 @@ def pairs(rows: Iterable[tuple[str, str]]) -> Table:
 
 @dataclass(frozen=True, slots=True)
 class Lanes:
-    """A fixed-width column layout for output whose widths arrive with the data.
+    """A column layout with fixed widths, for output whose widths come with the data.
 
-    :func:`columns` sizes each lane to its widest value, which it can only do once it has
-    seen every record. A live capture has no "once": ``monitor`` prints a row the instant
-    a packet lands, and the row after it may be twice as wide. Those two streams used to
-    be gutter-joined with no alignment at all, which is why a name in one still carried
-    its quotes — nothing else said where the field ended.
+    :func:`columns` sizes each lane to its widest value. It can do this only after it has
+    all the records. A live capture never has all the records: ``monitor`` prints a row
+    when a packet arrives, and the next row can be two times as wide. Before, those two
+    streams joined their fields with the gutter and had no alignment at all. For this
+    reason, a name in one of them still had its quotes: nothing else showed where the
+    field ended.
 
-    Pinning the lanes up front fixes it properly. A value wider than its lane **overruns
-    and pushes the rest of that row right** rather than being elided: one row out of many
-    is simply wider, and nothing lies about what it holds. Put the one unbounded field
-    (a node's name, a message body) last and it cannot push anything at all.
+    Lanes that are fixed at the start correct this problem fully. A value that is wider
+    than its lane **goes past its lane and pushes the rest of that row to the right**. It
+    is not cut with an ellipsis. One row of many is wider, and nothing gives false
+    information about what the row contains. Put the one field that has no width limit
+    (the name of a node, the body of a message) last. Then it pushes nothing at all.
 
     Attributes:
-        widths: ``(header, width)`` per lane, in order.
-        right: The headers whose cells right-align.
+        widths: ``(header, width)`` for each lane, in order.
+        right: The headers whose cells align to the right.
     """
 
     widths: tuple[tuple[str, int], ...]
@@ -437,11 +460,11 @@ class Lanes:
 
     @property
     def header(self) -> str:
-        """The one header line, printed before the first record."""
+        """The header line, printed before the first record."""
         return self.record(*(header for header, _ in self.widths))
 
     def record(self, *cells: str) -> str:
-        """One record, padded into the lanes and joined by the gutter."""
+        """One record, padded into the lanes and joined with the gutter."""
         out: list[str] = []
         for (header, width), cell in zip(self.widths, cells, strict=True):
             out.append(cell.rjust(width) if header in self.right else cell.ljust(width))
@@ -449,14 +472,14 @@ class Lanes:
 
 
 def stream(*widths: tuple[str, int], right: Sequence[str] = ()) -> Lanes:
-    """Build a fixed-lane layout for a live stream (see :class:`Lanes`).
+    """Build a layout with fixed lanes for a live stream (refer to :class:`Lanes`).
 
     Args:
-        *widths: ``(header, width)`` per lane, in order.
-        right: The headings whose values right-align.
+        *widths: ``(header, width)`` for each lane, in order.
+        right: The headings whose values align to the right.
 
     Returns:
-        The layout, which prints its own header and formats each record.
+        The layout, which makes its own header line and formats each record.
     """
     return Lanes(widths=widths, right=frozenset(right))
 
@@ -465,30 +488,32 @@ def stream(*widths: tuple[str, int], right: Sequence[str] = ()) -> Lanes:
 
 
 class _Trimmed:
-    """A text stream that drops trailing whitespace from every line passing through it.
+    """A text stream that removes the trailing whitespace from each line that goes through.
 
-    Rich pads a table's cells to their column width, the last column's included, which
-    would leave invisible spaces at the end of every record. Trimming at the stream is the
-    one place that catches all of it — table padding, a justified :class:`Text`, a blank
-    line Rich decided to pad — without any renderable having to know.
+    Rich pads the cells of a table to the width of their column, also the cells of the
+    last column. Without this stream, each record ends with invisible spaces. The stream
+    is the only place that catches all of them (table padding, a justified :class:`Text`,
+    a blank line that Rich padded), and no renderable has to know about it.
 
-    What it holds back is only the *trailing whitespace run*, never a whole line. Rich
-    writes a rendered row segment by segment and, on Windows, flushes after each one, so a
-    wrapper that waited for the newline before deciding would be asked to decide dozens of
-    times a row — and one that trimmed at flush would throw away the very padding that
-    separates two columns. Everything up to the last non-space character goes straight
-    through; the spaces after it wait to find out whether a newline or another column
-    follows. At end of stream nothing follows, and trailing whitespace is exactly what it
-    is then, so the held run is simply dropped.
+    The stream holds back only the *trailing run of whitespace*, never a full line. Rich
+    writes a rendered row one segment at a time, and on Windows it flushes after each
+    segment. Thus a wrapper that waits for the newline before it decides must decide
+    dozens of times in each row. And a wrapper that trims at each flush removes the
+    padding that separates two columns.
+
+    All the text up to the last character that is not a space goes through immediately.
+    The spaces after it wait until the stream knows if a newline or another column
+    follows. At the end of the stream, nothing follows, and the held spaces are truly
+    trailing whitespace. Thus the stream removes them.
     """
 
     def __init__(self, stream: Any) -> None:
-        """Wrap ``stream``, holding back whatever trailing whitespace has arrived."""
+        """Wrap ``stream``, and hold back the trailing whitespace that arrives."""
         self._stream = stream
         self._held = ""
 
     def write(self, text: str) -> int:
-        """Write ``text``, emitting whitespace only once something follows it on the line."""
+        """Write ``text``, but write whitespace only after something follows it on the line."""
         pending = self._held + text
         if "\n" in pending:
             *lines, pending = pending.split("\n")
@@ -500,15 +525,15 @@ class _Trimmed:
         return len(text)
 
     def flush(self) -> None:
-        """Flush the wrapped stream, keeping the held whitespace held.
+        """Flush the wrapped stream, but keep the held whitespace.
 
-        Deliberately *not* a place that emits: a flush lands between two columns as often
-        as at the end of a line, and it carries no information about which.
+        This method intentionally writes nothing. A flush comes between two columns as
+        often as at the end of a line, and it does not tell which of the two it is.
         """
         self._stream.flush()
 
     def __getattr__(self, name: str) -> Any:
-        """Delegate everything else (``isatty``, ``encoding``, ...) to the real stream."""
+        """Delegate all other attributes (``isatty``, ``encoding``, ...) to the real stream."""
         return getattr(self._stream, name)
 
 
@@ -516,57 +541,57 @@ def console(stream: Any = None) -> Console:
     """Build the scripted console: no colour, no wrapping, no trailing whitespace.
 
     Args:
-        stream: The file to write to; defaults to ``sys.stdout``.
+        stream: The file to write to. The default is ``sys.stdout``.
 
     Returns:
-        A :class:`~rich.console.Console` that emits plain text and nothing else.
+        A :class:`~rich.console.Console` that writes plain text and nothing else.
     """
     import sys
 
     target = sys.stdout if stream is None else stream
     reconfigure = getattr(target, "reconfigure", None)
     if reconfigure is not None:
-        try:  # a name or mark outside cp1252 must not raise on a legacy Windows console
+        try:  # a name or mark that is not in cp1252 must not raise on an old Windows console
             reconfigure(encoding="utf-8")
-        except (ValueError, OSError):  # pragma: no cover - stream not reconfigurable
+        except (ValueError, OSError):  # pragma: no cover - the stream cannot be reconfigured
             pass
     return Console(
         file=_Trimmed(target),
-        # Not `no_color`, which keeps bold, dim, reverse and the rest and drops only the
-        # hues. `color_system=None` is the one setting under which Rich emits no escape
-        # sequence at all.
+        # Not `no_color`, which keeps bold, dim, reverse, and the other attributes, and
+        # removes only the colours. `color_system=None` is the only setting with which
+        # Rich writes no escape sequence at all.
         color_system=None,
         width=WIDTH,
-        # Rich would otherwise notice a real terminal and soft-wrap to its width.
+        # Without this, Rich finds a real terminal and soft-wraps to its width.
         soft_wrap=True,
         highlight=False,
         emoji=False,
-        # A node broadcasts its own name, so every name on this console is remote data.
-        # Rich reads `[...]` as a style tag: `[bold]Loud` printed as `Loud` — silently
-        # corrupted, and no longer the string that identifies the node — while `[/]Bob`
-        # raised MarkupError and took the whole command down with it. Nothing the scripted
-        # CLI prints is ever marked up, so the parser has nothing to do here but misfire.
+        # A node broadcasts its own name, so each name on this console is remote data.
+        # Rich reads `[...]` as a style tag. Before, `[bold]Loud` printed as `Loud`: the
+        # name changed without a warning, and it was no longer the string that identifies
+        # the node. Also, `[/]Bob` raised MarkupError, and the full command stopped. The
+        # scripted CLI never prints markup, so here the parser can only cause errors.
         markup=False,
     )
 
 
 def stderr_console() -> Console:
-    """The console for everything that is *about* the run rather than part of its answer.
+    """The console for all the output that is *about* the run, and not part of its answer.
 
-    stdout carries what the command was asked for and nothing else, so a progress bar, a
-    log line, an acknowledgement and an error message all go here instead — visible in a
-    terminal, absent from ``meshterm contacts > contacts.txt``. This one keeps its colour,
-    because a terminal is usually the only thing that reads it.
+    stdout contains only the answer to the command. Thus a progress bar, a log line, an
+    acknowledgement, and an error message all go to this console instead. They are
+    visible in a terminal, but they are not in ``meshterm contacts > contacts.txt``. This
+    console keeps its colour, because usually only a terminal reads it.
 
-    **Off a terminal it stops wrapping**, and that is the point of the width below. Rich
-    falls back to 80 cells when it cannot measure the destination, so ``2> errors.log``
-    used to hard-wrap every message at 80 — and ``grep 'not already connected'`` then
-    found nothing, because the sentence it was looking for had been broken across three
-    lines by the logger. In a real terminal the width is left alone: a progress bar sized
-    to 16384 cells is not a progress bar.
+    **When it does not write to a terminal, it does not wrap.** That is the purpose of the
+    width below. When Rich cannot measure the destination, it uses 80 cells. Thus
+    ``2> errors.log`` wrapped each message at 80 cells, and then
+    ``grep 'not already connected'`` found nothing, because the logger broke the sentence
+    across three lines. In a real terminal, the console does not change the width: a
+    progress bar that is 16384 cells wide is useless as a progress bar.
 
     Returns:
-        A themed :class:`~rich.console.Console` writing to ``sys.stderr``.
+        A :class:`~rich.console.Console` with the theme, that writes to ``sys.stderr``.
     """
     import sys
 
@@ -574,13 +599,13 @@ def stderr_console() -> Console:
 
     reconfigure = getattr(sys.stderr, "reconfigure", None)
     if reconfigure is not None:
-        try:  # the ✓ on an acknowledgement must not depend on the machine's code page
+        try:  # the ✓ of an acknowledgement must not depend on the code page of the machine
             reconfigure(encoding="utf-8")
-        except (ValueError, OSError):  # pragma: no cover - stream not reconfigurable
+        except (ValueError, OSError):  # pragma: no cover - the stream cannot be reconfigured
             pass
     try:
         wraps = bool(sys.stderr.isatty())
-    except (AttributeError, ValueError):  # pragma: no cover - a closed or exotic stream
+    except (AttributeError, ValueError):  # pragma: no cover - a closed or unusual stream
         wraps = False
     return Console(
         file=sys.stderr,
@@ -591,27 +616,30 @@ def stderr_console() -> Console:
     )
 
 
-# -- the safety net ------------------------------------------------------------------
+# -- the fallback --------------------------------------------------------------------
 
 
 def flatten(renderable: RenderableType) -> list[RenderableType]:
-    """Strip framing from anything reaching the scripted console still wearing it.
+    """Remove the frames from a renderable that comes to the scripted console with them.
 
-    Every CLI surface is *written* plain — a tool states its answer as a
-    :mod:`~meshterm.ui.report` and the plain renderer builds it through :func:`columns`
-    and :func:`pairs`. This is the net under that, for a renderable shared with the menu
-    that still arrives boxed: a :class:`Panel` gives up its border and title and yields
-    its body, a :class:`Table` gives up its box, title and expansion, and a :class:`Group`
-    is flattened member by member.
+    Each CLI surface is *written* plain: a tool gives its answer as a
+    :mod:`~meshterm.ui.report`, and the plain renderer builds it through :func:`columns`
+    and :func:`pairs`. This function is the fallback under that rule. It is for a
+    renderable that the menu also uses and that still comes in a box. A :class:`Panel`
+    loses its border and title, and the function returns its body. A :class:`Table`
+    loses its box, its title, and its expansion. The function flattens a :class:`Group`
+    one member at a time.
 
-    It is deliberately not a *design*: a screen's table has the menu's columns, not the
-    CLI's, so passing it through here makes it printable, not right.
+    It is intentionally not a *design*. The table of a screen has the columns of the
+    menu, not the columns of the CLI. Thus this function makes such a table printable,
+    not correct.
 
     Args:
-        renderable: What a tool handed to :meth:`~meshterm.ui.surface.PlainUi.show`.
+        renderable: The renderable that a tool gave to
+            :meth:`~meshterm.ui.surface.PlainUi.show`.
 
     Returns:
-        The unframed renderables to print, in order.
+        The renderables without frames, to print in order.
     """
     if isinstance(renderable, Panel):
         return flatten(renderable.renderable)
@@ -637,5 +665,5 @@ def flatten(renderable: RenderableType) -> list[RenderableType]:
 
 
 def blank() -> Text:
-    """One empty line, for separating a listing from the block after it."""
+    """One empty line, to separate a listing from the block after it."""
     return Text("")

@@ -1,27 +1,28 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The remote command line: talk to a repeater's CLI over the mesh, readline-style.
+"""The remote command line: talk to the CLI of a repeater over the mesh, like readline.
 
-A full-screen terminal onto a logged-in remote node (part of the repeater-admin
-feature): type a command, watch it fly, read the reply in a growing transcript. Every
-command is one mesh transmission, so the screen sends exactly what you commit and one
-at a time — a command in flight parks the prompt until the reply lands (or times out;
-repeaters answer tersely and sometimes not at all).
+This is a full-screen terminal onto a remote node that the user logged in to (it is part
+of the repeater-admin feature). The user types a command, watches it go, and reads the
+reply in a transcript that grows. Each command is one mesh transmission. Thus the screen
+sends exactly what you commit, one command at a time. While a command is in flight, the
+prompt is parked until the reply arrives or the wait times out. Repeaters answer tersely,
+and sometimes they do not answer.
 
 The input line behaves like a shell:
 
-* **↑/↓** recall the node's command history, which persists per node (see
-  :class:`~meshterm.core.remote_store.RemoteStore`) so last week's incantation is one
-  keystroke away next session.
-* **Tab** completes the current text against the known repeater commands — the fixed
-  verbs, every ``get``/``set`` spelling in the settings catalog, and any key *this node*
-  taught us here on an earlier visit — and the best match previews muted, ghost-text
-  style, after the cursor.
-* **Enter** sends. The transcript keeps every exchange of the session, newest at the
-  bottom, and the view follows the prompt as it grows.
+* **↑/↓** recall the command history of the node. It is stored for each node (refer to
+  :class:`~meshterm.core.remote_store.RemoteStore`), so a command from last week is one
+  key press away in the next session.
+* **Tab** completes the current text against the known repeater commands. These are the
+  fixed verbs, each ``get`` and ``set`` spelling in the settings catalog, and each key that
+  *this node* taught us here on an earlier visit. The best match shows as muted ghost text
+  after the cursor.
+* **Enter** sends. The transcript keeps each exchange of the session, with the newest at
+  the bottom, and the viewport follows the prompt as the transcript grows.
 
-The screen renders state and routes keys; the owning flow injects ``send`` (which owns
-the radio, the history store, and the reply plumbing) and feeds replies back through
-:meth:`reply` / :meth:`failed`.
+The screen renders the state and routes the keys. The owning flow gives the screen
+``send``, which owns the radio, the history store, and the reply plumbing. The flow gives
+replies back through :meth:`reply` and :meth:`failed`.
 """
 
 from __future__ import annotations
@@ -37,27 +38,29 @@ from .tui.render import render_lines
 from .tui.screen import Screen
 from .tui.spinner import Spinner
 
-#: The transcript's history depth in exchanges (the body scrolls; this caps memory).
+#: The depth of the history of the transcript, in exchanges. The body scrolls, and this
+#: limit caps the memory.
 _LOG_CAP = 400
 
 
 class RemoteCliScreen(Screen):
-    """A shell-like screen onto one remote node's CLI. The owner does the radio work."""
+    """A screen like a shell, onto the CLI of one remote node. The owner does the radio work."""
 
     floating = False
-    #: The line kept in view is the prompt, not a highlight: ↑↓ recall history as a shell's
-    #: do, and the transcript scrolls by the page keys alone — so no edge scroll here.
+    #: The line that stays visible is the prompt, not a highlight. ↑↓ recall the history as
+    #: they do in a shell, and the transcript scrolls only with the page keys. Thus this
+    #: screen has no edge scroll.
     edge_scrolls = False
 
     @property
     def picocalc_lyra_lane(self):
         """The pager over the transcript, with no jumps behind it.
 
-        Home and End never reach the transcript here: they fall through to the compose
-        line's editor, where they move the text cursor to either end of what is being
-        typed (see :meth:`handle`). That is the ordinary behaviour of a command line and
-        both keys are on the keyboard, so the Shift companions stay blank rather than
-        promising a jump the transcript would not make.
+        Home and End never reach the transcript here. They go to the editor of the compose
+        line, where they move the text cursor to the start or the end of the typed text
+        (refer to :meth:`handle`). This is the normal behaviour of a command line, and both
+        keys are on the keyboard. Thus the Shift companions stay blank. They do not promise
+        a jump that the transcript does not make.
         """
         from .tui.fkeys import FPair, default_lane
 
@@ -76,16 +79,18 @@ class RemoteCliScreen(Screen):
         session: object,
         extra_keys: Iterable[str] = (),
     ) -> None:
-        """Create the command line over a node's persisted history.
+        """Create the command line over the stored history of a node.
 
         Args:
-            node_label: The remote node's display name (title and prompt chrome).
-            history: The node's prior commands, oldest first (recalled with ↑).
-            send: Commits one command (owner-guarded; no-op while one is flying).
-            session: The running TUI session (for repaints).
-            extra_keys: Settings *this node* has that the catalog hasn't, found here on an
-                earlier visit. They complete like any other key: the prompt is where they
-                were learned, so it is where they should be one Tab away.
+            node_label: The display name of the remote node (for the title and the prompt).
+            history: The earlier commands of the node, oldest first (↑ recalls them).
+            send: Commits one command. The owner guards it, and it does nothing while a
+                command is in flight.
+            session: The running TUI session (for paints).
+            extra_keys: The settings that *this node* has and the catalog does not have,
+                found here on an earlier visit. They complete like each other key. The
+                prompt is where MeshTerm learned them, so it is where they must be one Tab
+                away.
         """
         super().__init__()
         self.title = f"Command line — {node_label}"
@@ -95,8 +100,8 @@ class RemoteCliScreen(Screen):
         self._editor = LineEditor()
         self._log: list[Text] = []
         self._history = list(history)
-        self._recall: int | None = None  # index into history while ↑/↓ browse it
-        self._draft = ""  # what was typed before recall began, restored on ↓ past the end
+        self._recall: int | None = None  # the index in the history while ↑/↓ browse it
+        self._draft = ""  # the text typed before the recall started. ↓ past the end restores it
         self._completions = sorted(
             {
                 *known_commands(),
@@ -106,12 +111,12 @@ class RemoteCliScreen(Screen):
         )
         self.busy = False
         self._spinner = Spinner()
-        self._prompt_line = 0  # body index of the input line (pinned into view)
+        self._prompt_line = 0  # the body index of the input line (pinned so that it is visible)
 
     # --- owner feed ------------------------------------------------------------------
 
     def sent(self, command: str) -> None:
-        """Echo a just-sent command into the transcript and park the prompt."""
+        """Echo a command that MeshTerm just sent into the transcript, and park the prompt."""
         row = Text("❯ ", style="brand")
         row.append(command)
         self._append(row)
@@ -122,20 +127,23 @@ class RemoteCliScreen(Screen):
         self._session.invalidate()
 
     def reply(self, text: str) -> None:
-        """Land the node's reply (possibly multi-line) and free the prompt."""
+        """Add the reply of the node (it can have more than one line) and free the prompt."""
         for line in text.splitlines() or [""]:
             self._append(Text(f"  {line}"))
         self.busy = False
         self._session.invalidate()
 
     def failed(self, note: str, *, error: bool = False) -> None:
-        """Land a timeout/error note and free the prompt."""
+        """Add a note about a timeout or an error, and free the prompt."""
         self._append(Text(f"  {note}", style="err" if error else "muted"))
         self.busy = False
         self._session.invalidate()
 
     def tick(self) -> None:
-        """Advance the in-flight spinner (driven by the owner's animation timer)."""
+        """Advance the spinner while a command is in flight.
+
+        The animation timer of the owner calls this.
+        """
         self._spinner.tick()
 
     def _append(self, row: Text) -> None:
@@ -147,7 +155,7 @@ class RemoteCliScreen(Screen):
 
     @property
     def footer_hint(self) -> str:  # type: ignore[override]
-        """The footer keys, tracking whether a command is in flight."""
+        """The footer keys. They change when a command is in flight."""
         if self.busy:
             return "waiting for the reply… · PgUp/PgDn scroll · Esc back"
         return "↑↓ history · PgUp/PgDn scroll · Enter send · Tab complete · Esc back"
@@ -174,16 +182,16 @@ class RemoteCliScreen(Screen):
         elif action == "escape":
             self.resolve(None)
         elif self._editor.edit(action, data):
-            self._recall = None  # typing leaves the history walk; the buffer is a draft
+            self._recall = None  # typing ends the history walk. The buffer is a draft.
         self._session.invalidate()
 
     def _recall_step(self, direction: int) -> None:
-        """Walk the history with ↑/↓, keeping the un-sent draft safe at the new end."""
+        """Walk the history with ↑/↓, and keep the draft that was not sent safe at the new end."""
         if not self._history:
             return
         if self._recall is None:
             if direction > 0:
-                return  # nothing newer than the draft
+                return  # nothing is newer than the draft
             self._draft = self._editor.text
             self._recall = len(self._history) - 1
         else:
@@ -196,7 +204,7 @@ class RemoteCliScreen(Screen):
         self._editor = LineEditor(self._history[self._recall])
 
     def _completion(self) -> str | None:
-        """The first known command extending the current text, or ``None``."""
+        """The first known command that extends the current text, or ``None``."""
         prefix = self._editor.text.lstrip()
         if not prefix:
             return None
@@ -217,11 +225,11 @@ class RemoteCliScreen(Screen):
         return lines
 
     def cursor_line(self) -> int | None:
-        """Pin the prompt into view, so the transcript follows itself as it grows."""
+        """Pin the prompt so that it is visible. The transcript thus follows itself as it grows."""
         return self._prompt_line
 
     def _prompt(self) -> Text:
-        """The input line: spinner while waiting, else the editor and its ghost text."""
+        """The input line: the spinner while MeshTerm waits, or the editor and its ghost text."""
         if self.busy:
             line = self._spinner.text()
             line.append("  waiting for the reply…", style="muted")

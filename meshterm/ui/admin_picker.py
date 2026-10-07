@@ -1,17 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The admin-node picker: choose a remote node you hold (or will enter) credentials for.
+"""The admin-node picker: select a remote node for which you have (or will enter) credentials.
 
-Shared by the tools that administer remote nodes over the mesh — TX optimize and the
-repeater admin screen — so "pick the node to manage" reads identically everywhere.
-Credentialed nodes lead the list in their own 🔑 section (those are the nodes previously
-administered, the likeliest picks), repeaters and room servers follow, then everything
-else; each section orders by how recently the node was heard. Any contact with a public
-key is offerable, since holding a password is a fact about the *user*, not the node.
+The tools that administer remote nodes over the mesh share this picker: TX optimize and
+the repeater admin screen. Thus "select the node to manage" reads the same everywhere.
+The nodes that have credentials are first in the list, in their own 🔑 section. These are
+the nodes that the user administered before, so they are the most probable selections.
+Repeaters and room servers follow, then all the other nodes. Each section is in order of
+how recently the node was heard. MeshTerm offers each contact that has a public key,
+because a password is a fact about the *user* and not about the node.
 
-The pick is a **popup**: a question asked on the way into a tool, drawn as a box and gone
-the moment it is answered — never a frame kept under the tool's own page for Esc to land
-back on. It used to be held pushed as a hub for the whole visit, so leaving the admin page
-landed on the list it was picked from; that read as two places where there is one.
+The picker is a **dialog**: a question that MeshTerm asks when the user goes into a tool.
+It is drawn as a box, and it is gone when the user answers it. It is never a screen on the
+stack under the page of the tool, where Esc would land. It was once kept pushed as a hub
+for the whole visit. Then, when the user left the admin page, Esc landed on the list from
+which the user selected the node. This looked like two places where there is one.
 """
 
 from __future__ import annotations
@@ -27,21 +29,22 @@ if TYPE_CHECKING:
 
 
 def admin_picker_rows(ctx: AppContext, contacts: list[Contact]) -> tuple[list, list[Contact]]:
-    """Build the admin-node picker's grouped rows and the contacts they map to.
+    """Build the grouped rows of the admin-node picker and the contacts that they map to.
 
-    Shared so every surface that offers the pick draws the same list: :func:`pick_admin_node`
-    runs these rows as a one-shot popup, and TX optimize turns them as the first page of its
-    stepped dialog. Rows carry ``value = contact.name``, so a picked name (or a ``default``)
-    resolves through ``candidates``.
+    The function is shared so that each screen that offers the selection draws the same
+    list. :func:`pick_admin_node` runs these rows as a one-shot dialog. TX optimize turns
+    them as the first page of its dialog with steps. Each row has ``value = contact.name``,
+    so a name that the user selects (or a ``default``) resolves through ``candidates``.
 
     Args:
-        ctx: Shared application context (for the admin store, which sorts remembered nodes up).
-        contacts: The device's known contacts.
+        ctx: The shared application context (for the admin store, which sorts the
+            remembered nodes to the top).
+        contacts: The contacts that the device knows.
 
     Returns:
-        ``(rows, candidates)`` — the grouped select rows and the offerable contacts
-        (those holding a key). Both are empty when nothing is offerable; the caller
-        notes that and never opens a list at all.
+        ``(rows, candidates)``: the grouped select rows and the contacts that MeshTerm can
+        offer (those that have a key). Both are empty when MeshTerm can offer nothing.
+        The caller shows a note about this and does not open a list.
     """
     from .menus import section_heading
     from .theme import name_style
@@ -53,9 +56,10 @@ def admin_picker_rows(ctx: AppContext, contacts: list[Contact]) -> tuple[list, l
         return [], candidates
 
     def row(contact: Contact) -> Choice:
-        # The type mark keeps its own fixed hue; the *name* takes the node's key-derived
-        # colour like every other list of nodes (a style on the Text itself would be the
-        # row's base and would paint the name the type's colour too).
+        # The type mark keeps its own fixed hue. The *name* takes the hue that comes from
+        # the key of the node, like each other list of nodes. (A style on the Text itself
+        # would be the base of the row, and it would paint the name in the colour of the
+        # type too.)
         glyph, glyph_style = NODE_GLYPHS.get(contact.node_type, DEFAULT_GLYPH)
         label = Text()
         label.append(f"{glyph} ", style=glyph_style)
@@ -97,22 +101,24 @@ async def pick_admin_node(
     prompt: str,
     default: Contact | None = None,
 ) -> Contact | None:
-    """Pick a remote node to administer, credentialed and infrastructure nodes first.
+    """Select a remote node to administer.
 
-    A floating popup that comes down as soon as a node is picked. A caller that asks again
-    — the login it tried was refused — hands the last pick back as ``default`` so the list
-    reopens on it, the way a step of :func:`~meshterm.ui.menus.run_steps` offers its
-    previous answer.
+    Nodes that have credentials, and infrastructure nodes, are first in the list. The
+    picker is a floating dialog that closes when the user selects a node. A caller can ask
+    again, for example when the login that it tried was refused. Then the caller
+    returns the last selection as ``default``, so that the list opens on it again. A step
+    of :func:`~meshterm.ui.menus.run_steps` offers its previous answer in the same way.
 
     Args:
-        ctx: Shared application context (for the UI surface and the admin store).
-        contacts: The device's known contacts.
-        title: The select screen's heading (names the calling feature).
-        prompt: One line above the list saying what the pick is for.
-        default: The node to open highlighted on, if any.
+        ctx: The shared application context (for the UI surface and the admin store).
+        contacts: The contacts that the device knows.
+        title: The heading of the select screen (it names the feature that calls it).
+        prompt: One line above the list that says what the selection is for.
+        default: The node on which the list opens highlighted, if any.
 
     Returns:
-        The chosen contact, or ``None`` if cancelled (or there is nothing to pick).
+        The contact that the user selected, or ``None`` if the user cancels (or if there is
+        nothing to select).
     """
     items, candidates = admin_picker_rows(ctx, contacts)
     if not candidates:
@@ -130,13 +136,13 @@ async def pick_admin_node(
 
 
 async def _note_nothing_to_pick(ctx: AppContext, title: str) -> None:
-    """Say there is no offerable node and show it — no list is opened at all."""
+    """Say that no node can be offered, and show this. MeshTerm opens no list."""
     ctx.ui.note("[err]no contacts with a key — receive an advert first[/err]")
     await ctx.ui.present(title=title)
 
 
 def _resolve(candidates: list[Contact], choice: Any) -> Contact | None:
-    """The contact a picked row's name stands for, or ``None`` when nothing was picked."""
+    """The contact for the name of a selected row, or ``None`` if the user selected nothing."""
     if choice is None:
         return None
     return next((c for c in candidates if c.name == choice), None)

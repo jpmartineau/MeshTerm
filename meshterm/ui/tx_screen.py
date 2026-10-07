@@ -1,31 +1,37 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The live TX-optimization screen: pick the link, arm the sweep, watch levels land.
+"""The live TX-optimization screen: select the link, arm the sweep, and watch the levels arrive.
 
-The interactive face of the ``tx-optimize`` tool (the scripted CLI keeps its one-shot
-table and HTML chart), rebuilt on the trace screen's armed-but-idle pattern. One stepped
-dialog in the tool chooses the *link* — the admin node whose transmit power is tuned,
-then the target whose reception is optimized — and the screen opens idle over the main
-menu: the route, the sweep parameters, and the login state read across the top, an
-action list drives everything, and nothing transmits until Sweep is committed.
+This is the interactive face of the ``tx-optimize`` tool. The scripted CLI keeps its
+one-shot table and HTML chart. The screen is built again on the armed-but-idle pattern of
+the trace screen. One dialog with steps in the tool selects the *link*. First it asks for
+the admin node whose transmit power the sweep tunes, then for the target whose reception
+the sweep optimizes. The screen then opens idle over the main menu. The route, the sweep
+parameters, and the login state are across the top. A list of actions controls
+everything, and nothing transmits until the user commits Sweep.
 
-* **Route** opens the trace screen's hop-by-hop path composer, pinned at the tuned
-  node: compose how the measurement reaches it, each step suggested from observed
-  links; the target hop is appended automatically. The default is the direct shot.
-* **Range / Step / Samples** float small dialogs adjusting the sweep: the TX window,
-  the coarse grid spacing, and the traces measured per level. The Sweep row always
-  shows the resulting worst-case transmission count, so the cost of a commit is on
-  screen before it happens (every run is paced, like the trace tool's sampling).
-* **Sweep** logs in first when it must — the password prompt floats only when nothing
-  is remembered, and a working password is remembered for next time — then runs the
-  optimizer under a floating in-flight dialog with Abort: coarse → refine → verify,
-  every measured level landing in the bar chart behind it, the current best starred.
-  Aborting mid-sweep restores the node's original power.
-* **Apply winner** joins the actions once a sweep found one (the cursor lands on it),
-  the same offer as the after-sweep dialog for whenever that was first declined.
+* **Route** opens the path composer of the trace screen, which goes hop by hop and is
+  pinned at the tuned node. The user composes how the measurement reaches that node, and
+  each step is suggested from the links that MeshTerm observed. The code adds the target
+  hop automatically. The default is the direct shot.
+* **Range / Step / Samples** float small dialogs that adjust the sweep: the TX range, the
+  spacing of the coarse grid, and the traces that are measured for each level. The Sweep
+  row always shows the resulting worst-case number of transmissions. Thus the cost of a
+  commit is on the screen before it occurs (each run is paced, like the sampling of the
+  trace tool).
+* **Sweep** first logs in, if it must. The password prompt floats only if no password is
+  remembered, and MeshTerm remembers a password that works for the next time. Then it
+  runs the optimizer under a floating in-flight dialog that has Abort. The phases are
+  coarse, refine, and verify. Each measured level goes into the bar chart behind the
+  dialog, and the current best level has a star. If the user aborts in the middle of the
+  sweep, the code restores the original power of the node.
+* **Apply winner** is added to the actions when a sweep has found a winner (the highlight
+  moves to it). It is the same offer as the dialog after the sweep, for the case that the
+  user first declined it.
 
-Every sweep opens one ``runs`` row and persists its levels and traces exactly as a
-scripted run records them. A finished sweep leaves the screen armed: adjust the range
-and sweep again — a new sweep is a new measurement, so the chart clears as it starts.
+Each sweep opens one ``runs`` row and stores its levels and traces in the same way as a
+scripted run records them. A finished sweep leaves the screen armed. The user can adjust
+the range and sweep again. A new sweep is a new measurement, so the chart clears when it
+starts.
 """
 
 from __future__ import annotations
@@ -55,49 +61,52 @@ from .widgets import NodeResolver
 if TYPE_CHECKING:
     from ..context import AppContext
 
-#: Human phrasing for each optimizer phase reported through ``on_phase``.
+#: The words for the user for each optimizer phase that is reported through ``on_phase``.
 _PHASE_LABELS = {
     "coarse": "coarse sweep",
     "refine": "refining around the leader",
     "verify": "verifying the leader",
 }
 
-#: The coarse grid spacings the Step dialog offers. 1 measures every level (no refine
-#: pass left to do); wider grids trade fewer transmissions for a refine pass later.
+#: The coarse grid spacings that the Step dialog offers. 1 measures each level, so no refine
+#: pass is necessary. A wider grid needs fewer transmissions, but it needs a refine pass
+#: later.
 STEP_CHOICES = (1, 2, 3, 4, 5)
 
-#: The per-level sample counts the Samples dialog offers (the trace tool's ladder).
+#: The numbers of samples for each level that the Samples dialog offers (the ladder of the
+#: trace tool).
 SAMPLE_CHOICES = (1, 2, 3, 5, 8)
 
 
-#: Every mark the sweep's action rows lead with. The list exists to *measure* the icon
-#: column so each label starts in the same place, and so a platform that draws no icon
-#: lane at all (see :func:`~meshterm.ui.menus.command_icon`) collapses it to nothing.
+#: Each mark that the action rows of the sweep start with. The list is there to *measure*
+#: the icon column, so that each label starts in the same place. Also, a platform that
+#: draws no icon lane (refer to :func:`~meshterm.ui.menus.command_icon`) makes the column
+#: zero cells wide.
 _ACTION_ICONS = ("✎", "⚙", "#", "▶", "★")
 
 
 def _icon_lane() -> int:
-    """The action rows' icon column, in cells — this screen's own marks, measured once."""
+    """The icon column of the action rows, in cells (the marks of this screen, measured once)."""
     return icon_lane(_ACTION_ICONS)
 
 
 def _icon(text: Text, icon: str, style: str) -> None:
-    """Append an action row's mark in the icon column, its trailing space included."""
+    """Append the mark of an action row in the icon column, with its trailing space."""
     text.append_text(icon_mark(icon, style, _icon_lane()))
 
 
 class TxSweepScreen(Screen):
-    """A full-screen TX-power sweep session — armed, but idle until told.
+    """A full-screen session of a TX-power sweep. It is armed, but idle until the user starts it.
 
-    ↑/↓ move the cursor over the action rows and Enter commits the selected one — the
-    cursor opens on Sweep, so plain Enter still just sweeps. PgUp/PgDn/Home/End scroll
-    the body, and Esc (or the Back row) backs out, cancelling any in-flight sweep (the
-    optimizer's unwind restores the node's original power).
+    ↑/↓ move the highlight over the action rows, and Enter commits the selected row. The
+    highlight opens on Sweep, so a plain Enter sweeps. PgUp/PgDn/Home/End scroll the body.
+    Esc leaves the screen and cancels any sweep that is in flight (the unwind of the
+    optimizer restores the original power of the node).
 
-    The screen renders state and routes keys; the owning session (see
-    :func:`open_tx_optimize`) injects the flows — the route composer, the parameter
-    dialogs, and the sweep runner — and feeds measurements back through
-    :meth:`on_phase` / :meth:`on_level` / :meth:`complete` / :meth:`fail`.
+    The screen renders the state and sends the keys to the correct code. The owning
+    session (refer to :func:`open_tx_optimize`) gives it the flows: the route composer, the
+    parameter dialogs, and the sweep runner. The session sends the measurements back
+    through :meth:`on_phase`, :meth:`on_level`, :meth:`complete`, and :meth:`fail`.
     """
 
     floating = False
@@ -124,27 +133,30 @@ class TxSweepScreen(Screen):
         pick_step: Callable[[], None] = lambda: None,
         pick_samples: Callable[[], None] = lambda: None,
     ) -> None:
-        """Create the sweep screen (nothing transmits until the user commits Sweep).
+        """Create the sweep screen. Nothing transmits until the user commits Sweep.
 
         Args:
-            admin_label: Display name of the node being tuned.
-            target_label: Display name of the node the SNR is measured at.
-            device_label: Our own node's name, opening the route line.
-            device_hash: Our own public key, so the route endpoints carry a hash.
-            resolve: Maps a hop's raw hash to a friendly contact name when known.
-            admin_key: The tuned node's key/hash, so its name wears its own hue.
-            target_key: The target's key/hash, likewise.
-            session: The running TUI session (for repaints).
-            tx_min: Initial low end of the sweep window.
-            tx_max: Initial high end of the sweep window.
-            step: Initial coarse grid spacing.
-            samples: Initial traces measured per level.
-            run_sweep: Starts one sweep (owner-guarded; no-op while one is flying).
-            apply_winner: Re-offers the apply dialog for a completed sweep's winner.
+            admin_label: The display name of the node that the sweep tunes.
+            target_label: The display name of the node at which the SNR is measured.
+            device_label: The name of our node, which starts the route line.
+            device_hash: The public key of our node, so that the ends of the route have a
+                hash.
+            resolve: Maps the raw hash of a hop to the name of a contact, when it is known.
+            admin_key: The key or hash of the tuned node, so that its name has its own hue.
+            target_key: The key or hash of the target, for the same reason.
+            session: The running TUI session (for paints).
+            tx_min: The initial low end of the sweep range.
+            tx_max: The initial high end of the sweep range.
+            step: The initial spacing of the coarse grid.
+            samples: The initial number of traces that are measured for each level.
+            run_sweep: Starts one sweep. The owner guards it, and it does nothing while a
+                sweep is in flight.
+            apply_winner: Offers the apply dialog again for the winner of a completed
+                sweep.
             compose_route: Opens the route composer flow over this screen.
-            pick_range: Floats the TX-window dialog.
+            pick_range: Floats the TX-range dialog.
             pick_step: Floats the grid-spacing dialog.
-            pick_samples: Floats the per-level sample-count dialog.
+            pick_samples: Floats the dialog for the number of samples for each level.
         """
         super().__init__()
         self.title = f"TX optimize — {admin_label} → {target_label}"
@@ -163,16 +175,16 @@ class TxSweepScreen(Screen):
         self._pick_step = pick_step
         self._pick_samples = pick_samples
 
-        #: Sweep parameters, mutated by the owner's dialogs between sweeps.
+        #: The sweep parameters. The dialogs of the owner change them between sweeps.
         self.tx_min = tx_min
         self.tx_max = tx_max
         self.step = step
         self.samples = samples
-        #: Hops the measurement crosses *before* the tuned node (composer output; at
-        #: the session's spec width). Empty = the direct shot.
+        #: The hops that the measurement crosses *before* the tuned node (output of the
+        #: composer, at the spec width of the session). Empty means the direct shot.
         self.route_hops: list[str] = []
-        #: One line describing the login state, owner-maintained (remembered /
-        #: will-ask / logged in), shown in the header.
+        #: One line that describes the login state (remembered, will ask, or logged in). The
+        #: owner maintains it, and the header shows it.
         self.login_text = ""
 
         self.running = False
@@ -187,13 +199,13 @@ class TxSweepScreen(Screen):
         self._error: str | None = None
         self._worker: asyncio.Task | None = None
         self._index = self._actions.index("sweep")
-        self._pin_cursor = False  # only pin the view while ↑/↓ are actually in use
+        self._pin_cursor = False  # pin the view only while the user uses ↑/↓
 
     # --- state -------------------------------------------------------------------
 
     @property
     def _actions(self) -> tuple[str, ...]:
-        """The action rows in display order; Apply appears once there is a winner."""
+        """The action rows in display order. Apply is added when there is a winner."""
         rows = ["route", "range", "step", "samples", "sweep"]
         if self._can_apply():
             rows.append("apply")
@@ -201,22 +213,23 @@ class TxSweepScreen(Screen):
 
     @property
     def footer_hint(self) -> str:  # type: ignore[override]
-        """The footer keys, tracking whether a sweep is in flight."""
+        """The footer keys. They change when a sweep is in flight."""
         if self.running:
             return "sweeping… · PgUp/PgDn scroll · Esc back"
         return "↑↓ actions · Enter run · PgUp/PgDn scroll · Esc back"
 
     def _can_apply(self) -> bool:
-        """Whether Apply should be offered (finished, got a winner, not yet set)."""
+        """Whether Apply is offered: the sweep finished, it has a winner, and it is not applied."""
         return self._result is not None and self._result.best_snr is not None and not self._applied
 
     def estimated_traces(self) -> int:
-        """The worst-case transmission count one Sweep commit can run.
+        """The worst-case number of transmissions that one commit of Sweep can run.
 
-        Coarse grid levels, plus the refine pass's up to ``2 · (step − 1)`` integer
-        fill-ins around the winner, plus the verify re-measure — each measured with
-        the chosen per-level samples. The real count is usually lower (refine clamps
-        at the window's ends and skips levels already measured).
+        The number is the levels of the coarse grid, plus up to ``2 · (step − 1)`` integer
+        fill-ins of the refine pass around the winner, plus the verify measurement again.
+        Each is measured with the chosen number of samples for each level. The real number
+        is usually lower, because the refine pass stops at the ends of the range and skips
+        levels that are already measured.
         """
         coarse = len(tx_optimizer.coarse_levels(self.tx_min, self.tx_max, self.step))
         refine = max(0, 2 * (self.step - 1))
@@ -225,7 +238,7 @@ class TxSweepScreen(Screen):
     # --- owner feed ----------------------------------------------------------------
 
     def sweep_started(self, worker: asyncio.Task) -> None:
-        """Adopt a just-started sweep: a new measurement, so the old evidence clears."""
+        """Take a sweep that just started. It is a new measurement, so clear the old evidence."""
         self.running = True
         self._worker = worker
         self._phase = None
@@ -238,25 +251,25 @@ class TxSweepScreen(Screen):
         self._session.invalidate()
 
     def sweep_finished(self) -> None:
-        """Mark the sweep no longer in flight (however it ended)."""
+        """Mark that the sweep is not in flight any more, however it ended."""
         self.running = False
         self._worker = None
         self._session.invalidate()
 
     def on_phase(self, phase: str) -> None:
-        """Record the optimizer entering a search phase (see ``tx_optimizer.PHASES``)."""
+        """Record that the optimizer enters a search phase (refer to ``tx_optimizer.PHASES``)."""
         self._phase = phase
         self._session.invalidate()
 
     def on_level(self, done: int, total: int, level: TxLevelResult) -> None:
-        """Record one measured level (replacing any earlier pass at the same power)."""
+        """Record one measured level. It replaces an earlier pass at the same power."""
         self._done, self._total = done, total
         self._levels[level.tx_power] = level
         self._best_tx = tx_optimizer.select_best(list(self._levels.values())).tx_power
         self._session.invalidate()
 
     def complete(self, result: TxOptResult) -> None:
-        """Adopt the finished sweep's selection and park the cursor on Apply."""
+        """Take the selection of the finished sweep and move the highlight to Apply."""
         self._result = result
         self._best_tx = result.best_tx
         if self._can_apply():
@@ -264,37 +277,38 @@ class TxSweepScreen(Screen):
         self._session.invalidate()
 
     def fail(self, error: str) -> None:
-        """Mark the sweep failed, keeping whatever levels already landed on screen."""
+        """Mark the sweep as failed. The levels that already arrived stay on the screen."""
         self._error = error
         self._session.invalidate()
 
     def mark_applied(self) -> None:
-        """Record that the winner was written to the admin node."""
+        """Record that the code wrote the winner to the admin node."""
         self._applied = True
         self._index = min(self._index, len(self._actions) - 1)
         self._session.invalidate()
 
     def phase_label(self) -> str:
-        """The in-flight dialog's status line: phase and level progress."""
+        """The status line of the in-flight dialog: the phase and the progress of the levels."""
         label = _PHASE_LABELS.get(self._phase or "", "starting…")
         if self._total:
             return f"{label} · level {self._done}/{self._total}"
         return label
 
     def cancel(self) -> None:
-        """Cancel any in-flight sweep (the optimizer's unwind restores the power)."""
+        """Cancel any sweep that is in flight. The unwind of the optimizer restores the power."""
         if self._worker is not None and not self._worker.done():
             self._worker.cancel()
 
     # --- input -------------------------------------------------------------------
 
     def handle(self, action: str, data: str = "") -> None:
-        """Move the action cursor, commit the selected action, scroll, or dismiss."""
+        """Move the highlight of the actions, commit the selected action, scroll, or leave."""
         if action == "enter":
             self._commit_action()
         elif action == "up":
-            # Both ends clamp rather than wrap — the app-wide rule for a row cursor:
-            # a highlight that leaps end to end takes the results window with it.
+            # Both ends clamp and do not wrap. This is the rule of the whole app for the
+            # highlight of a row. A highlight that jumps from one end to the other takes
+            # the page of results with it.
             self._index = max(0, self._index - 1)
             self._pin_cursor = True
         elif action == "down":
@@ -317,7 +331,7 @@ class TxSweepScreen(Screen):
             self.resolve(None)
 
     def _commit_action(self) -> None:
-        """Run the action row under the cursor (the flows guard against re-entry)."""
+        """Run the action row under the highlight. The flows guard against a second entry."""
         actions = self._actions
         key = actions[min(self._index, len(actions) - 1)]
         if key == "sweep":
@@ -336,14 +350,14 @@ class TxSweepScreen(Screen):
             self._open_flow(self._pick_samples)
 
     def _open_flow(self, flow: Callable[[], None]) -> None:
-        """Float a parameter flow over the screen (one at a time, never mid-sweep)."""
+        """Float a parameter flow over the screen. Only one at a time, and never during a sweep."""
         if self._dialog_open or self.running:
             return
         self._dialog_open = True
 
         async def run() -> None:
             try:
-                await flow()  # type: ignore[misc]  # owner flows are async closures
+                await flow()  # type: ignore[misc]  # the flows of the owner are async closures
             finally:
                 self._dialog_open = False
                 self._session.invalidate()
@@ -353,7 +367,7 @@ class TxSweepScreen(Screen):
     # --- rendering -----------------------------------------------------------------
 
     def render_body(self, width: int) -> list[str]:
-        """Render the header, the action list, the level chart, and the outcome."""
+        """Render the header, the list of actions, the chart of levels, and the outcome."""
         lines = self._header_lines(width)
         lines.append("")
         self._cursor: int | None = None
@@ -363,15 +377,16 @@ class TxSweepScreen(Screen):
             selected = i == self._index
             text = self._action_text(key, selected)
             text.no_wrap = True
-            # The route row carries a path line, so it is cut rather than truncated: a
-            # chip that runs off the row cracks, every other row keeps the ellipsis.
+            # The route row has a path line, so the code cuts it and does not truncate it.
+            # A chip that goes past the end of the row cracks. Each other row keeps the
+            # ellipsis.
             text = cut_to(text, width)
             text.no_wrap = True
             if selected:
                 self._cursor = len(lines)
             lines.append(render_to_ansi(text, width))
             if key == "samples":
-                lines.append("")  # set the sweep group apart from the parameters
+                lines.append("")  # separate the sweep group from the parameters
         tail: list[RenderableType] = []
         if self.running or self._levels:
             tail += [Text(), Text("Levels", style="accent"), self._levels_table()]
@@ -383,19 +398,20 @@ class TxSweepScreen(Screen):
         return lines
 
     def cursor_line(self) -> int | None:
-        """The highlighted action row while ↑/↓ are in use; free scrolling otherwise."""
+        """The line of the highlighted action row while ↑/↓ are in use. Else the page scrolls."""
         return getattr(self, "_cursor", None) if self._pin_cursor else None
 
     def _action_text(self, key: str, selected: bool) -> Text:
-        """One action row: pointer, glyph, and label (current value inlined)."""
+        """One action row: the pointer, the glyph, and the label with the current value."""
         text = Text("❯ " if selected else "  ", style="cursor" if selected else "")
         if key == "route":
             _icon(text, "✎", "brand")
             if self.route_hops:
-                # The composed relays alone — the sweep always sets out from us and always
-                # lands on the repeater being tuned, and neither is a hop anyone picked
-                # here. So both ends are drawn open: the chevrons say the route runs on
-                # past them, which is exactly what ``via`` claims in the word before it.
+                # Only the relays that the user composed. The sweep always starts from us and
+                # always arrives at the repeater that it tunes, and the user did not select
+                # either of them here as a hop. Thus both ends are drawn open. The chevrons
+                # say that the route continues past them. This is exactly what ``via`` says
+                # in the word before them.
                 text.append("Route — via ")
                 text.append_text(
                     path_line(
@@ -425,7 +441,7 @@ class TxSweepScreen(Screen):
         elif key == "sweep":
             _icon(text, "▶", "ok")
             text.append(f"Sweep — up to {self.estimated_traces()} paced transmissions")
-        else:  # apply — present only once there is a winner to set
+        else:  # apply: it is there only when there is a winner to set
             _icon(text, "★", "ok")
             best = self._result.best_tx if self._result is not None else "?"
             text.append(f"Apply winner — set TX {best} on {self._admin_label}")
@@ -434,11 +450,11 @@ class TxSweepScreen(Screen):
         return text
 
     def _header_lines(self, width: int) -> list[str]:
-        """The header lanes: tuned link, measured route, sweep window, login state.
+        """The header lanes: tuned link, measured route, sweep range, and login state.
 
-        The route renders through THE path widget and wraps at hop boundaries under
-        its own value column (the hanging-indent rule) instead of folding back to
-        column zero; the tuned link above it wears the same key hues as the route.
+        The route renders through the only path widget. It wraps at the boundaries of hops,
+        under its own value column (the hanging-indent rule), and does not fold back to
+        column zero. The tuned link above it has the same key hues as the route.
         """
         tuning = Text.assemble(
             ("tuning   ", "muted"),
@@ -469,17 +485,17 @@ class TxSweepScreen(Screen):
         return lines
 
     def _route_line(self) -> PathLine:
-        """The walk one measurement makes: out through the tuned link, mirrored home.
+        """The walk of one measurement: out through the tuned link, and back as a mirror image.
 
-        The outbound leg — us, any composed hops, the tuned node, the target — draws
-        in full colour (each name in its own key hue); the return (the outbound
-        mirrored back, the trace boomerang the optimizer actually flies) is dimmed,
-        reading as "not yours to compose".
+        The outbound leg is us, the composed hops, the tuned node, and the target. The code
+        draws it in full colour (each name in its own key hue). The return is the outbound
+        leg mirrored back. It is the trace boomerang that the optimizer really sends. The
+        code dims it, and it means "the user does not compose this".
 
-        Both our ends stand on the app-wide ``★`` rather than our name: every
-        measurement this screen makes leaves us and comes home to us, so spelling
-        ourselves out twice per line would cost the lane the very hops the sweep is
-        tuning — the same trade the trace route lane and the trophy card make.
+        Both our ends use the ``★`` of the whole app and not our name. Each measurement
+        that this screen makes leaves us and comes back to us. If the line spelled out our
+        name two times, the lane would lose cells that the hops being tuned need. The trace
+        route lane and the trophy card make the same choice.
         """
         hops: list[PathHop] = [PathHop(SELF_GLYPH, you=True)]
         for hop in self.route_hops:
@@ -493,12 +509,12 @@ class TxSweepScreen(Screen):
         return PathLine(hops)
 
     def _hop_name(self, hop: str) -> str:
-        """A route hop's friendly name when known, else its raw hash."""
+        """The name of a route hop when it is known, otherwise its raw hash."""
         named = self._resolve(hop)
         return named if named else hop
 
     def _levels_table(self) -> Table:
-        """Every measured level as a bar chart, ascending by TX, the best starred."""
+        """Each measured level as a bar chart, in ascending order of TX. The best has a star."""
         table = Table(box=None, padding=(0, 1, 0, 0), expand=False, header_style="muted")
         table.add_column("TX", justify="right", min_width=4)
         table.add_column("SNR AT TARGET")
@@ -529,7 +545,7 @@ class TxSweepScreen(Screen):
         return table
 
     def _outcome(self) -> Text | None:
-        """The completed sweep's verdict and apply status, or the in-flight error."""
+        """The verdict and the apply status of the completed sweep, or the error of the sweep."""
         if self._error is not None:
             return Text(f"✗ sweep failed: {self._error}", style="err")
         result = self._result
@@ -565,16 +581,16 @@ class TxSweepScreen(Screen):
 
 
 def _nth(n: int) -> str:
-    """``2 → "2nd"``, ``3 → "3rd"``, … for the Step action row."""
+    """Give the ordinal for the Step action row: ``2 → "2nd"``, ``3 → "3rd"``, and so on."""
     suffix = {1: "st", 2: "nd", 3: "rd"}.get(n if n < 20 else n % 10, "th")
     return f"{n}{suffix}"
 
 
 def parse_tx_range(text: str) -> tuple[int, int] | None:
-    """Parse a typed TX window like ``"12-28"`` / ``"12 28"`` into ``(low, high)``.
+    """Parse a typed TX range, such as ``"12-28"`` or ``"12 28"``, into ``(low, high)``.
 
-    Clamped to the remote firmware's representable window; ``None`` when the text
-    doesn't contain exactly two numbers in order.
+    The function limits the values to the range that the remote firmware can represent.
+    It returns ``None`` if the text does not have exactly two numbers in order.
     """
     numbers = re.findall(r"\d+", text)
     if len(numbers) != 2:
@@ -594,36 +610,41 @@ async def open_tx_optimize(
 ) -> dict[str, Any]:
     """Run the live TX-optimization session for one tuned link.
 
-    The tool's dialog has chosen the link and is already gone; this wires the armed-idle
-    screen to the radio, the topology evidence, and the database, and runs it until
-    dismissed — and Esc lands on the main menu, the sweep being the whole visit. Login
-    happens inside the first Sweep commit — a remembered password silently, otherwise
-    one floating prompt (remembered on success, forgotten on rejection: the trace
-    composer's convention). Each sweep opens its own ``runs`` row and records every
-    level and trace under it, exactly as a scripted run does.
+    The dialog of the tool has selected the link and is already gone. This function
+    connects the armed-idle screen to the radio, to the topology evidence, and to the
+    database. It runs the screen until the user leaves it, and Esc goes to the main menu,
+    because the sweep is the whole visit. The login occurs in the first commit of Sweep.
+    If a password is remembered, the login is silent. Otherwise, one floating prompt asks
+    for the password. MeshTerm remembers the password if the login works, and forgets it
+    if the node rejects it (the convention of the trace composer). Each sweep opens its own
+    ``runs`` row and records each level and trace under it, in the same way as a scripted
+    run does.
 
     Args:
-        ctx: The shared application context (must be running the interactive TUI surface).
-        admin_node: The contact being tuned (the hop before the target).
-        target_label: Display name of the node the SNR is measured at.
-        target_hash: The target's hex hash (full key, or the typed prefix).
+        ctx: The shared application context. It must run the interactive menu.
+        admin_node: The contact that the sweep tunes (the hop before the target).
+        target_label: The display name of the node at which the SNR is measured.
+        target_hash: The hex hash of the target (the full key, or the prefix that the user
+            typed).
 
     Returns:
-        The last sweep's recorded summary (empty if dismissed before any sweep ran).
+        The recorded summary of the last sweep (empty if the user left before a sweep ran).
 
     Raises:
-        RuntimeError: If called outside the interactive menu (no full-screen session).
+        RuntimeError: If the caller calls it outside the interactive menu (there is no
+            full-screen session).
     """
     from .path_composer import AUTO_SPEC, PathComposerScreen
     from .surface import TuiUi
     from .tui import CANCEL, Choice, SelectScreen
 
-    if not isinstance(ctx.ui, TuiUi):  # pragma: no cover - guarded by the menu-only caller
+    if not isinstance(ctx.ui, TuiUi):  # pragma: no cover - the caller is only in the menu
         raise RuntimeError("the live TX sweep is only available in the menu")
     session = ctx.ui.session
     device = await ctx.device()
-    # Contacts/self-info/routing width from the session cache (see DeviceState); the live
-    # ``device`` is still held for the sweep's own transmissions below.
+    # The contacts, the self-info, and the routing width come from the session cache (refer
+    # to DeviceState). The code still keeps the live ``device`` for the own transmissions of
+    # the sweep below.
     contacts = await ctx.devstate.contacts()
     resolve = trace_runner.make_node_resolver(contacts)
     self_info = await ctx.devstate.self_info()
@@ -632,7 +653,7 @@ async def open_tx_optimize(
 
     try:
         width_bytes = collapse_trace_width(int(await ctx.devstate.path_hash_mode()))
-    except Exception:  # noqa: BLE001 - optional read; the 1-byte default always works
+    except Exception:  # noqa: BLE001 - an optional read. The default of 1 byte always works
         width_bytes = 1
 
     admin_hash = (admin_node.public_key or admin_node.key_prefix).lower().removeprefix("0x")
@@ -663,13 +684,13 @@ async def open_tx_optimize(
     screen.login_text = login_text()
 
     def spec() -> str:
-        """The one-way wire spec of the next sweep: composed hops, tuned node, target."""
+        """The one-way wire spec of the next sweep: composed hops, tuned node, and target."""
         return render_custom_spec((*screen.route_hops, admin_hash, target_hex), width_bytes)
 
     # --- parameter flows (floated over the screen) ---------------------------------
 
     async def compose_route() -> None:
-        """Compose how the measurement reaches the tuned node, pinned as the target."""
+        """Compose how the measurement reaches the tuned node, which is pinned as the target."""
         topo = build_topology(
             self_id=device_hash or "local",
             contacts=contacts,
@@ -687,16 +708,16 @@ async def open_tx_optimize(
             target_hash=admin_hash,
             target_label=admin_node.name,
             hops=[topo.canonical(h) or h for h in screen.route_hops],
-            resolve=resolve,  # name a hop the topology left ambiguous, as we do
+            resolve=resolve,  # name a hop that the topology left ambiguous, as we do
         )
         result = await session.run_screen(composer)
         if result is CANCEL or not isinstance(result, str):
             return
         if result == AUTO_SPEC:
-            screen.route_hops = []  # device routing is meaningless here: direct shot
+            screen.route_hops = []  # routing by the device has no meaning here: direct shot
             return
-        # The composer emits the symmetric boomerang around the tuned node; keep just
-        # the outbound hops before it (the target leg is ours to append).
+        # The composer gives the symmetric boomerang around the tuned node. Keep only the
+        # outbound hops before it. The code adds the target leg.
         tokens = [t for t in result.split(",") if t]
         if tokens and len(tokens) % 2 == 1 and tokens == tokens[::-1]:
             screen.route_hops = tokens[: len(tokens) // 2]
@@ -704,7 +725,7 @@ async def open_tx_optimize(
             screen.route_hops = tokens[:-1] if tokens else []
 
     async def pick_range() -> None:
-        """Pick the sweep's TX window: the configured default, the full range, or typed."""
+        """Select the TX range of the sweep: the default, the full range, or a typed range."""
         preferred_lo, preferred_hi = ctx.preferences.tx_opt_min, ctx.preferences.tx_opt_max
         items = [
             Choice(
@@ -748,7 +769,7 @@ async def open_tx_optimize(
         screen.tx_min, screen.tx_max = picked
 
     async def pick_step() -> None:
-        """Pick the coarse grid spacing (1 = measure every level, nothing to refine)."""
+        """Select the coarse grid spacing. 1 measures each level, so there is nothing to refine."""
         items = [
             Choice(
                 title=f"{n}"
@@ -771,7 +792,7 @@ async def open_tx_optimize(
             screen.step = int(picked)
 
     async def pick_samples() -> None:
-        """Pick how many traces each level measures (paced, like the trace tool's)."""
+        """Select the number of traces for each level. They are paced, like the trace tool."""
         pace = ctx.preferences.trace_cooldown_s
         items = [
             Choice(
@@ -797,11 +818,11 @@ async def open_tx_optimize(
     # --- login, sweep, apply --------------------------------------------------------
 
     async def ensure_login() -> bool:
-        """Log in to the tuned node once per session, prompting only when needed.
+        """Log in to the tuned node one time for each session. Ask for a password only if necessary.
 
-        Runs *before* the in-flight dialog goes up, so the password prompt floats
-        over the idle screen and the login command itself hides behind the skeleton
-        card — the same shape as every other pre-transmission device call.
+        This runs *before* the in-flight dialog opens. Thus the password prompt floats over
+        the idle screen, and the login command itself is behind the skeleton card. This is
+        the same pattern as each other device call before a transmission.
         """
         nonlocal logged_in
         if logged_in:
@@ -830,7 +851,7 @@ async def open_tx_optimize(
             )
             return False
         if not outcome:
-            # Silence is not a denial: the password stays put for the next attempt.
+            # No reply is not a denial. The password stays for the next attempt.
             screen.login_text = login_text()
             await session.message_dialog(
                 Text(
@@ -846,7 +867,7 @@ async def open_tx_optimize(
         return True
 
     async def apply_dialog() -> None:
-        """Offer the winner in a floating dialog; write it to the node on Apply."""
+        """Offer the winner in a floating dialog. If the user selects Apply, write it."""
         result = screen._result
         if result is None or result.best_snr is None or screen._applied:
             return
@@ -856,15 +877,16 @@ async def open_tx_optimize(
             (str(result.best_tx), "brand"),
             (f" on {admin_node.name}?{was}", ""),
         )
-        # Platform-dialog convention: the safe way out left, the committing action right
-        # and default, so Enter applies and Esc backs out.
+        # The convention of platform dialogs: the safe way out is on the left, and the
+        # committing action is on the right and is the default. Thus Enter applies, and Esc
+        # backs out.
         choice = await session.button_dialog(
             prompt,
             [("Cancel", "cancel"), ("Apply", "apply")],
             title="Apply winner",
             default=1,
-            # The dialog default hint: Enter commits whichever button is highlighted,
-            # and ←→ is what moves it (see the quit confirm in ui/menu.py).
+            # The default hint of the dialog: Enter commits the button that is highlighted,
+            # and ←→ moves the highlight (refer to the quit confirm in ui/menu.py).
         )
         if choice != "apply":
             return
@@ -875,14 +897,14 @@ async def open_tx_optimize(
         summary["applied"] = True
 
     async def sweep() -> None:
-        """One Sweep commit: log in if needed, then drive the optimizer under a dialog."""
+        """One commit of Sweep: log in if it is necessary, then run the optimizer under a dialog."""
         run_id: int | None = None
         try:
             if not await ensure_login():
                 return
         except asyncio.CancelledError:
             raise
-        except Exception as exc:  # noqa: BLE001 - shown on the screen, not crashed through
+        except Exception as exc:  # noqa: BLE001 - the screen shows the error. It is not a crash
             screen.fail(str(exc))
             return
         finally:
@@ -925,7 +947,7 @@ async def open_tx_optimize(
                 tx_max=screen.tx_max,
                 coarse_step=screen.step,
                 samples_per_level=screen.samples,
-                apply=False,  # the decision moves to the dialog, after the evidence is in
+                apply=False,  # the dialog makes the decision, after the evidence is complete
                 cooldown_s=ctx.preferences.trace_cooldown_s,
                 snr_tolerance=ctx.preferences.tx_snr_tolerance_db,
                 on_level=screen.on_level,
@@ -937,7 +959,7 @@ async def open_tx_optimize(
             if run_id is not None:
                 ctx.repo.finish_run(run_id, "error", {"error": "cancelled"})
             raise
-        except Exception as exc:  # noqa: BLE001 - shown on the screen, not crashed through
+        except Exception as exc:  # noqa: BLE001 - the screen shows the error. It is not a crash
             screen.fail(str(exc))
             if run_id is not None:
                 ctx.repo.finish_run(run_id, "error", {"error": str(exc)})
@@ -948,7 +970,7 @@ async def open_tx_optimize(
                 await ticker
             except asyncio.CancelledError:
                 pass
-            except Exception:  # noqa: BLE001 - a spinner hiccup must never break the sweep
+            except Exception:  # noqa: BLE001 - a short fault of the spinner must never break the sweep
                 pass
             session.pop(flight)
             screen.sweep_finished()
@@ -990,15 +1012,16 @@ async def open_tx_optimize(
     finally:
         worker = screen._worker
         if worker is not None and not worker.done():
-            # Esc mid-sweep: stop the search and let the optimizer's unwind restore the
-            # node's original power. The skeleton card covers that last device command.
+            # Esc in the middle of a sweep: stop the search and let the unwind of the
+            # optimizer restore the original power of the node. The skeleton card covers
+            # that last device command.
             worker.cancel()
             async with ctx.ui.busy_overlay():
                 try:
                     await worker
                 except asyncio.CancelledError:
                     pass
-                except Exception:  # noqa: BLE001 - the sweep is over; nothing to surface
+                except Exception:  # noqa: BLE001 - the sweep is over, so there is nothing to show
                     pass
     return summary
 
@@ -1006,7 +1029,7 @@ async def open_tx_optimize(
 async def _animate(
     session: Any, spinner: Spinner, flight: TracingDialog, screen: TxSweepScreen
 ) -> None:
-    """Advance the in-flight dialog's spinner and status on a steady cadence."""
+    """Advance the spinner and the status of the in-flight dialog at a steady rate."""
     while True:
         await asyncio.sleep(spinner_interval())
         spinner.tick()

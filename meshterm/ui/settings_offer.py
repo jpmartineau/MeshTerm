@@ -1,21 +1,26 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The connect-time offer to reconcile a device's settings with what MeshTerm remembers.
+"""The offer at connect time to reconcile the device settings with what MeshTerm remembers.
 
-A firmware-less radio bridge forgets its configuration whenever it restarts, so the settings you
-changed through MeshTerm last session come back as firmware defaults. Unlike channels — silently
-replayed because filling an empty slot overwrites nothing — a setting is a single canonical
-value, so restoring a stale one could clobber a change made elsewhere. This surface therefore
-*asks* rather than acting: on connect, when the device's current settings drift from what
-MeshTerm saved for it, it offers to restore the saved values, adopt the device's current ones, or
-stop remembering the device (see :mod:`meshterm.core.settings_store`).
+A radio bridge with no firmware forgets its configuration each time that it restarts. Thus
+the settings that you changed through MeshTerm in the last session come back as the
+defaults of the firmware. Channels are different: MeshTerm replays them silently, because
+it writes a channel only into an empty slot, and this overwrites nothing. A setting is one
+canonical value, so if MeshTerm restored an old value, it could overwrite a change that
+was made in another place. Thus this screen *asks* and does not act. When the device
+connects, and its current settings are different from what MeshTerm saved for it, the
+screen offers three actions. The user can restore the saved values, adopt the current
+values of the device, or stop remembering the device (refer to
+:mod:`meshterm.core.settings_store`).
 
-One drift is the channel case in disguise and acts silently (JP, 2026-08-08): a manually set
-position on a device with no GPS. After a restart such a device reports no usable fix at all —
-an *empty slot*, not a competing value — so the saved position is written straight back instead
-of asking the operator whether to override a position with an undefined one.
+One difference is the channel case in a different form, and MeshTerm acts on it silently
+(JP, 2026-08-08): a position that the user set by hand on a device with no GPS. After a
+restart, such a device reports no usable fix at all. This is an *empty slot*, not a value
+that competes. Thus MeshTerm writes the saved position back immediately. It does not ask
+the user if it must overwrite a position with an undefined one.
 
-It runs once at startup, on the splash, only when a device is connected and something is actually
-remembered for it — so a firmware radio you don't manage through MeshTerm is never interrupted.
+This runs one time at startup, on the splash. It runs only when a device is connected and
+MeshTerm remembers something for it. Thus a radio with firmware that you do not manage
+through MeshTerm is never interrupted.
 """
 
 from __future__ import annotations
@@ -34,22 +39,22 @@ from .tui import Separator
 if TYPE_CHECKING:
     from ..core.connection import Device
 
-# The offer's actions, returned by the startup select.
+# The actions of the offer. The startup select returns one of them.
 _RESTORE = "restore"
 _ADOPT = "adopt"
 _FORGET = "forget"
 
-#: The advertised-position pair — the settings whose drift is judged as one fix, not two
-#: scalars, against :func:`_position_undefined`.
+#: The pair of settings for the advertised position. MeshTerm judges their difference as
+#: one fix and not as two scalars, against :func:`_position_undefined`.
 _POSITION_KEYS = frozenset({"adv_lat", "adv_lon"})
 
 
 def _position_undefined(snapshot: dict) -> bool:
     """Whether the device currently advertises no usable fix at all.
 
-    The same :func:`~meshterm.core.geo.usable_fix` judgment the map surfaces make: the
-    0/0 null island a GPS-less (or freshly restarted) device reports is no position, and
-    out-of-range junk is no position either.
+    This is the same judgment of :func:`~meshterm.core.geo.usable_fix` that the map screens
+    make. The 0/0 null island that a device with no GPS (or a device that just restarted)
+    reports is not a position. Values that are out of range are not a position either.
     """
     try:
         lat = float(snapshot.get("adv_lat") or 0.0)
@@ -62,12 +67,13 @@ def _position_undefined(snapshot: dict) -> bool:
 async def _gps_running(device: Device) -> bool:
     """Whether the device reports its GPS running (the firmware's ``gps`` variable is ``1``).
 
-    Asked only when a position has drifted, and best-effort: firmware without the variables,
-    or a failed read, is a device with no GPS to weigh.
+    MeshTerm asks only when a position is different from the saved one, and it does its
+    best only. Firmware that does not have the variables, or a read that failed, means a
+    device with no GPS to consider.
     """
     try:
         found = await device.get_custom_vars()
-    except Exception:  # noqa: BLE001 - optional read; absence means no GPS
+    except Exception:  # noqa: BLE001 - an optional read. If it is absent, there is no GPS.
         return False
     return str(found.get("gps", "")).strip() == "1"
 
@@ -75,10 +81,11 @@ async def _gps_running(device: Device) -> bool:
 async def offer_remembered_settings(ctx: AppContext) -> None:
     """Offer to reconcile the connected device's settings with MeshTerm's saved copy.
 
-    Best-effort and quiet: does nothing without a live link, without anything remembered for the
-    device, or when the device already matches. Never opens the radio itself — a deferred connect
-    (``connect_on_start`` off) simply skips this, since ``is_connected`` is false. A failure here
-    must not block reaching the menu, so everything is guarded.
+    The function does its best only, and it is quiet. It does nothing in these cases: no
+    live link, nothing remembered for the device, or the device already matches. It never
+    opens the radio itself. A deferred connect (``connect_on_start`` off) skips this
+    function, because ``is_connected`` is false. A failure here must not stop the user from
+    reaching the menu, so the function guards each step.
 
     Args:
         ctx: The shared application context.
@@ -91,20 +98,20 @@ async def offer_remembered_settings(ctx: AppContext) -> None:
         info = await device.get_self_info()
         pubkey = str(info.get("public_key") or "")
         if not store.settings(pubkey):
-            return  # nothing remembered — a firmware radio pays only this cheap probe
+            return  # nothing remembered. A radio with firmware pays only this small probe.
         snapshot = await build_snapshot(device)
         drifted = settings_drift(store, pubkey, snapshot)
-    except Exception as exc:  # noqa: BLE001 - a probe failure must not block the menu
+    except Exception as exc:  # noqa: BLE001 - a failure of the probe must not stop the menu
         ctx.log.debug("settings: drift check on connect failed: %s", exc)
         return
     if not drifted:
         return
 
-    # A drifted position on a device that reports none is the empty-slot case: restoring
-    # it overwrites nothing, and the alternative on offer — "keep the device's settings"
-    # — would mean trading a deliberately set position for an undefined one. So those
-    # keys restore silently, and only real value-against-value conflicts reach the
-    # operator.
+    # A position that is different, on a device that reports none, is the empty-slot case.
+    # If MeshTerm restores it, it overwrites nothing. The other action on offer is "keep
+    # the device's settings". This would replace a position that the user set on purpose
+    # with an undefined one. Thus MeshTerm restores those keys silently, and only the real
+    # conflicts between two values go to the user.
     if _position_undefined(snapshot):
         silent = [d for d in drifted if d.key in _POSITION_KEYS]
         if silent:
@@ -116,16 +123,17 @@ async def offer_remembered_settings(ctx: AppContext) -> None:
                     "reported no fix to weigh it against",
                     restored,
                 )
-            except Exception as exc:  # noqa: BLE001 - best-effort, like the rest of the offer
+            except Exception as exc:  # noqa: BLE001 - best effort, like the rest of the offer
                 ctx.log.debug("settings: silent position restore failed: %s", exc)
             drifted = [d for d in drifted if d.key not in _POSITION_KEYS]
             if not drifted:
                 return
 
-    # A device whose GPS is running moves its own position as it travels, so a fix unlike
-    # the saved one is a reading, not a setting that drifted: neither restored nor asked
-    # about, or every connect away from home would offer to put the node back there. (One
-    # with no fix yet was handled above: the saved position holds until the first fix.)
+    # A device whose GPS runs moves its own position when it travels. Thus a fix that is
+    # different from the saved one is a reading, not a setting that changed. MeshTerm does
+    # not restore it and does not ask about it. If it did, each connect away from home
+    # would offer to put the node back at home. (The code above handled a device that has
+    # no fix yet: the saved position holds until the first fix.)
     if any(d.key in _POSITION_KEYS for d in drifted) and await _gps_running(device):
         drifted = [d for d in drifted if d.key not in _POSITION_KEYS]
         if not drifted:
@@ -144,12 +152,15 @@ async def offer_remembered_settings(ctx: AppContext) -> None:
         elif choice == _FORGET:
             store.forget_all(pubkey)
             ctx.log.info("settings: stopped remembering this device's settings")
-    except Exception as exc:  # noqa: BLE001 - acting on the choice must not block the menu
+    except Exception as exc:  # noqa: BLE001 - an action on the choice must not stop the menu
         ctx.log.debug("settings: reconciling on connect failed: %s", exc)
 
 
 async def _prompt(ctx: AppContext, drifted: list[SettingDrift]) -> object:
-    """Show the startup offer and return the chosen action, or ``None`` if dismissed."""
+    """Show the startup offer and return the action that the user selects, or ``None``.
+
+    The function returns ``None`` if the user dismisses the offer.
+    """
     from .logo import load_logo
 
     count = len(drifted)
@@ -191,7 +202,10 @@ async def _prompt(ctx: AppContext, drifted: list[SettingDrift]) -> object:
 
 
 def _drift_summary(drifted: list[SettingDrift], *, cap: int = 6) -> Text:
-    """A muted one-line list of the drifted settings' labels, capped with a ``+N more`` tail."""
+    """A muted line with the labels of the settings that differ, with a ``+N more`` tail.
+
+    The list has a maximum of ``cap`` labels. The ``+N more`` tail counts the others.
+    """
     labels = [get_spec(d.key).label for d in drifted]
     shown = labels[:cap]
     text = "  " + ", ".join(shown)

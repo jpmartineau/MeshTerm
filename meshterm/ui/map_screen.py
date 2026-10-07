@@ -1,31 +1,33 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The interactive full-screen map: a pannable, zoomable slippy map in the terminal.
+"""The interactive full-screen map: a slippy map in the terminal, with pan and zoom.
 
-This drives the braille street map inside the TUI. It owns a :class:`~meshterm.core.geo.
-Viewport` over the mesh's nodes, fetches the vector tiles covering it in the background (so
-the UI never blocks on the network), and redraws via :func:`~meshterm.ui.map_render.
-render_map`. Keys:
+This module controls the braille street map in the TUI. The screen owns a
+:class:`~meshterm.core.geo.Viewport` over the nodes of the mesh. It downloads the vector
+tiles for the viewport in the background (thus the UI never waits for the network), and it
+draws the map again through :func:`~meshterm.ui.map_render.render_map`. The keys:
 
-* the **arrow keys** pan; holding **Shift** pans by a single character cell for fine
-  positioning. On the PicoCalc the Shift watcher supplies the modifier the console
-  strips: its keymap turns Shift+↑/↓ into PgUp/PgDn (rescued back into fine pans here —
-  no physical PgUp exists there, so the code can't mean anything else) and eats
-  Shift+←/→ outright — those never reach the app at all until the console keymap maps
-  them back to plain arrows,
-* ``PgUp`` / ``PgDn`` zoom in / out,
-* ``Home`` recenters and refits to the dense core of the nodes — the *region* the mesh
-  covers, and the same default view the map opens on,
-* ``^Y`` (for *you*) recenters on **your own node**, keeping the zoom you chose and
-  clearing any find (the lane's ``You`` chip; its Shift half also zooms in close),
-* **typing finds nodes**: every letter key feeds a live name filter — matching nodes keep
-  bright labels while the rest dim to context, ``Backspace`` edits, ``^Enter`` frames the
-  matches (keeping the query), and ``Enter`` or ``Esc`` drops the query where it is
-  without moving the view (a second ``Esc`` leaves the map). This is why no plain letters
-  are bound to actions here,
+* The **arrow keys** pan. Hold **Shift** to pan by one character cell, for a fine
+  position. On the PicoCalc, the Shift watcher supplies the modifier that the console
+  removes. The console keymap changes Shift+↑/↓ into PgUp/PgDn, and this screen changes
+  them back into fine pans: the PicoCalc has no physical PgUp key, so the code can have no
+  other meaning. The keymap also removes Shift+←/→ fully. These keys do not get to the app
+  until the console keymap maps them back to plain arrows.
+* ``PgUp`` / ``PgDn`` zoom in / out.
+* ``Home`` centres the viewport again and fits it to the dense core of the nodes. This is
+  the area that the mesh covers (the ``Region`` chip), and it is also the default viewport
+  when the map opens.
+* ``^Y`` (for "you") centres the viewport on **our node**. It keeps the zoom that the user
+  selected, and it clears the find query. The ``You`` chip on the F-key lane does the
+  same, and its Shift half also zooms in close.
+* **Type to find nodes.** Each letter key adds to a live name filter. The matching nodes
+  keep bright labels, and the other nodes become dim, as context. ``Backspace`` edits the
+  query. ``^Enter`` fits the viewport to the matches and keeps the query. ``Enter`` or
+  ``Esc`` clears the query and does not move the viewport (a second ``Esc`` leaves the
+  map). For this reason, no plain letter has an action on this screen.
 * ``Esc`` leaves the map.
 
-With no network (and no cached tiles) the basemap is simply absent and nodes are plotted on a
-blank grid — the map still works, it just has no streets.
+With no network (and no cached tiles), the basemap is absent and the map draws the nodes on
+a blank grid. The map still works, but it has no streets.
 """
 
 from __future__ import annotations
@@ -50,10 +52,10 @@ from .tui.screen import Screen
 if TYPE_CHECKING:
     from ..context import AppContext
 
-#: Fraction of the view a single (coarse) pan keypress moves.
+#: The fraction of the viewport that one (coarse) pan key press moves.
 _PAN_STEP = 0.30
 
-#: Unit pan direction (east, south) for each directional action / key.
+#: The unit pan direction (east, south) for each direction action or keyboard key.
 _PAN_DIRS: dict[str, tuple[int, int]] = {
     "up": (0, -1),
     "down": (0, 1),
@@ -61,17 +63,18 @@ _PAN_DIRS: dict[str, tuple[int, int]] = {
     "right": (1, 0),
 }
 
-#: How far past the tile source's max zoom the display may go (lower tiles are magnified).
+#: How many zoom levels the map can go past the max zoom of the tile source. Above the
+#: max zoom, the map magnifies the tiles of the lower zoom.
 _OVERZOOM = 2
 
 
 def _loop_running() -> bool:
-    """Whether there is an event loop to hand background work to.
+    """Whether an event loop is available to do the background work.
 
-    Asked *before* building a coroutine, not after: ``ensure_future`` without a loop
-    raises, but by then the coroutine exists and never gets awaited, which Python reports
-    as a resource warning on a path that is otherwise perfectly correct (a CLI export or a
-    test rendering a map with no loop at all).
+    The code asks this before it makes a coroutine, not after. ``ensure_future`` without a
+    loop raises an error. But at that time the coroutine exists and is never awaited, and
+    Python reports this as a resource warning. The path is otherwise fully correct (a CLI
+    export, or a test that renders a map with no loop).
     """
     try:
         asyncio.get_running_loop()
@@ -80,88 +83,96 @@ def _loop_running() -> bool:
     return True
 
 
-#: How many tiles may be loading at once. A load is a network fetch (waiting, which threads
-#: overlap well) then a decode (pure Python, which they don't — the GIL runs one at a time,
-#: and each holds the tile's whole decoded weight while it does). Two lets a fetch overlap a
-#: decode; more only multiplies what is in memory at the moment the reader is moving
-#: fastest, and spends the turns the paint needs. It is also what gives a fast pan's
-#: abandoned tiles a queue to be dropped from (see :meth:`MapScreen._load`).
+#: How many tiles MeshTerm can get at the same time. To get a tile is first a network
+#: download, then a decode. A download is a wait, and threads overlap waits well. A decode
+#: is pure Python, and threads do not overlap it: the GIL runs one decode at a time, and
+#: each decode holds all the decoded data of its tile while it runs. With two, a download
+#: can overlap a decode. A larger number only multiplies the data in memory when the user
+#: moves fastest, and it uses the turns that the paint needs. This limit also makes a
+#: queue, from which MeshTerm can remove the tiles that a fast pan left behind (refer to
+#: :meth:`MapScreen._load`).
 _TILE_LOADS = 2
 
-#: Whether a moved view is answered with the **rough first pass** before its finished
-#: frame — the ground fills, the watercourses and the through-roads, in a quarter of the
-#: time (see :func:`~meshterm.ui.map_render.render_ground`). Currently **off**: every view
-#: waits for the whole picture, and what it stands on until then is the last frame's
-#: ground reprojected (:class:`~meshterm.ui.map_render.Ghost`), or nothing where the view
-#: has run past that too.
+#: Whether the map shows a **rough first pass** for a moved viewport before its finished
+#: raster. The rough pass has the ground fills, the watercourses, and the through-roads, in
+#: a quarter of the time (refer to :func:`~meshterm.ui.map_render.render_ground`). This
+#: switch is **off** at this time. Each viewport waits for the full picture. Until then, the
+#: map shows the ground of the last raster, reprojected
+#: (:class:`~meshterm.ui.map_render.Ghost`), or nothing where the viewport is also past
+#: that ground.
 #:
-#: The switch is here rather than in the renderer because it is a decision about *when to
-#: ask*, not about what can be drawn: both passes still work, both are still tested, and
-#: the abandonment point between them (:meth:`MapScreen._draw_ground`) is still where a
-#: held pan key gets off. Turning it back on is this line.
+#: The switch is here and not in the renderer, because it is a decision about when to ask,
+#: not about what the renderer can draw. Both passes still work, and tests still examine
+#: both. Between the passes, :meth:`MapScreen._draw_ground` still has the point where a
+#: held pan key can stop the work for a viewport that it left. To turn the switch on
+#: again, change this line.
 _COARSE_PREVIEW = False
 
-#: How many pans in one direction it takes to read as a heading rather than a nudge.
+#: How many pans in one direction make a heading, instead of a small correction.
 _PREFETCH_MOMENTUM = 2
 
-#: How long the view must have held still before the prefetcher starts guessing. A raster
-#: finishing between two keypresses of a pan is not a pause — starting a fetch there puts
-#: a tile decode in the way of the next frame, which measured ~110 ms on the device. Long
-#: enough to tell a pause from a gap, short enough to still be reading time.
+#: How long the viewport must stay still before the prefetcher starts to guess. When a
+#: raster finishes between two key presses of a pan, that is not a pause. A download that
+#: starts there puts a tile decode before the next raster, and that delay was measured at
+#: approximately 110 ms on the handheld. This time is long enough to see the difference
+#: between a pause and a gap, and short enough to be in the time that the user reads.
 _PREFETCH_SETTLE = 1.0
 
-#: How many tiles the prefetcher will ask for around one view before it is satisfied. A
-#: bound rather than a target: the plan usually runs dry first, and this stops a view at a
-#: tile-grid corner from walking the whole neighbourhood.
+#: How many tiles the prefetcher asks for around one viewport before it stops. This is a
+#: limit, not a target: usually the plan has no more tiles before this limit. The limit
+#: stops a viewport at a corner of the tile grid from a walk through all the tiles around it.
 _PREFETCH_MAX = 12
 
-#: The zoom a frame homes in at when the matches set no extent of their own — a
-#: single node (or several at one spot) has nothing to frame, so ^Enter zooms to this
-#: street-level closeness rather than the fit's neutral default. Capped at the tile
-#: source's max so it never over-zooms onto blank tiles.
+#: The zoom for a fit when the matches have no extent. A single node (or several nodes at
+#: one spot) has no extent to fit, so ^Enter zooms to this street-level closeness, instead
+#: of the neutral default of the fit. The zoom is capped at the max zoom of the tile source,
+#: thus it never zooms in past that onto blank tiles.
 _FIND_ZOOM = 16
 
 
 class MapScreen(Screen):
-    """A full-screen, keyboard-driven map of the mesh's located nodes over an OSM basemap."""
+    """A full-screen map of the located mesh nodes over an OSM basemap, with keyboard control."""
 
     floating = False
-    #: The drawing runs right up to the panel's side borders: a picture has no text edge
-    #: to keep off them, so the padding columns would only be map given up.
+    #: The drawing goes fully to the side borders of the panel. A picture has no text edge
+    #: to keep away from the borders, so the padding cells only take space from the map.
     flush = True
 
-    #: Whether printable keys feed the find-as-you-type node filter. The location
-    #: picker turns this off: there, typing has no job and a silent filter would
-    #: mysteriously dim the context markers.
+    #: Whether the printable keys go to the find-as-you-type node filter. The location
+    #: picker sets this to off: there, typing has no function, and a filter that the user
+    #: cannot see makes the context markers dim for no clear reason.
     find_enabled = True
 
     @property
     def picocalc_lyra_lane(self):
-        r"""The PicoCalc lane: three ways to frame the view, then the zoom rocker.
+        r"""The PicoCalc lane: three ways to fit the viewport, then the zoom rocker.
 
-        The map is the one screen that repurposes the nav actions wholesale: PgUp/PgDn
-        zoom, Home reframes, and ``end`` is bound to nothing at all — so the shared lane's
-        Shift-bank jumps have nothing to jump to here and F4/F5 are lone slots. That is
-        also the one exception to the rule that a Home/End verb rides the Shift half of
-        its pager (JP, 2026-08-08): ``Region`` is not a vertical move through a body, it
-        is a *destination*, and it keeps the prime F1 slot next to the other two.
+        The map is the only screen that gives all the navigation actions new functions.
+        PgUp/PgDn zoom, Home fits the viewport again, and ``end`` has no function. Thus
+        the Shift-bank jumps of the shared lane have no target here, and F4/F5 are single
+        slots. This is also the only exception to the rule that a Home/End verb goes on
+        the Shift half of its pager (JP, 2026-08-08). ``Region`` is not a vertical move
+        through a body. It is a destination, and it keeps the best slot, F1, next to the
+        other two.
 
-        All three destinations answer "where should I be looking?", in widening order of
-        specificity: the whole **Region** the mesh covers, **You** at the centre of it, or
-        just the nodes a find query **Frame**\\ s. Region always acts; You needs our own
-        node to be on the map at all; Frame needs a query with matches to frame, so on an
-        unfiltered map it dims (and no-ops) rather than standing in for Region.
+        All three destinations answer the question "where do I look?", from the least
+        specific to the most specific: the full **Region** that the mesh covers, **You**
+        at the centre of it, or only the nodes that a find query matches (**Frame**).
+        Region always works. You works only when our node is on the map. Frame works only
+        when a query has matches to fit. Thus, on a map with no filter, Frame is dim (and
+        does nothing). It does not do the work of Region.
 
-        Two slots carry a Shift half along their own axis (JP, 2026-08-08). Behind You
-        sits **You +**: the same jump home, but zoomed in close — the ``+`` borrowed from
-        the zoom rocker's vocabulary, so the pair reads as "you / you, closer". Behind
-        Frame sits **Clear**: the find axis's other end, dropping the query the way Frame
-        commits it — lit exactly while there is a query to drop. Enter and Esc both do
-        that on a keyboard; the chip is how the pair teaches it where there is no hint line.
+        Two slots have a Shift half on their own axis (JP, 2026-08-08). Behind You is
+        **You +**: the same jump to our node, but zoomed in close. The ``+`` comes from
+        the words of the zoom rocker, so the pair reads as "you / you, closer". Behind
+        Frame is **Clear**: the other end of the find axis. Frame commits the query, and
+        Clear removes it. Clear is enabled only while there is a query to clear. On a
+        keyboard, Enter and Esc both clear the query. Where there is no hint line, the
+        chip shows the user this function.
 
-        The zoom pair keeps the lane's handedness (see
-        :data:`~meshterm.ui.tui.fkeys.DEFAULT_LANE`): out on the left, in on the right, so
-        F4/F5 read as the ``−``/``+`` rocker they are.
+        The zoom pair keeps the left-right order of the lane (refer to
+        :data:`~meshterm.ui.tui.fkeys.DEFAULT_LANE`): out on the left, in on the right.
+        Thus F4/F5 read as the ``−``/``+`` rocker that they are.
         """
         from .tui.fkeys import FPair
 
@@ -196,19 +207,24 @@ class MapScreen(Screen):
         """Create the map screen.
 
         Args:
-            session: The running TUI session (for size + repaint scheduling).
-            markers: The located mesh nodes to plot (must be non-empty).
-            source: The vector-tile source (already resolved/warmed).
-            max_tile_zoom: The source's max zoom, captured off the event loop at open time.
-            saved_view: A previously persisted ``(center_lat, center_lon, zoom)`` to reopen
-                on, or ``None`` to frame the nodes instead.
-            on_view_change: Called with the viewport whenever the centre or zoom changes, so
-                the caller can persist it. Deduplicated — only actual changes fire it.
-            view_fraction: Fraction of the nodes the default frame (and ``r`` reset) fits —
-                the densest that many, so outliers don't dominate. See :meth:`geo.Viewport.fit`.
-            find: A find query to open with, exactly as if the user had typed it — the
-                matching nodes light and the rest dim (the node-detail page seeds its node's
-                name here). Editable and Esc-clearable like any typed find; ``""`` = off.
+            session: The running TUI session (for the size, and to schedule a paint).
+            markers: The located mesh nodes to draw (must not be empty).
+            source: The vector-tile source (already resolved and warmed).
+            max_tile_zoom: The max zoom of the source, read off the event loop when the
+                map opens.
+            saved_view: A stored ``(center_lat, center_lon, zoom)`` to open on again, or
+                ``None`` to fit the viewport to the nodes.
+            on_view_change: Called with the viewport each time the centre or the zoom
+                changes, so that the caller can store it. Duplicates are removed: only a
+                real change calls it.
+            view_fraction: The fraction of the nodes that the default viewport (and the
+                ``Home`` reset) fits. These are the densest nodes in that fraction, so
+                that the outliers do not control the zoom. Refer to
+                :meth:`geo.Viewport.fit`.
+            find: A find query for the map to open with, the same as if the user typed
+                it. The matching nodes are bright and the other nodes are dim (the
+                node-detail page puts the name of its node here). The user can edit it
+                and clear it with Esc, as any typed query. ``""`` is off.
         """
         super().__init__()
         self.title = "Map"
@@ -219,178 +235,196 @@ class MapScreen(Screen):
         self._saved_view = saved_view
         self._on_view_change = on_view_change
         self._view_fraction = view_fraction
-        # The view last handed to ``on_view_change``; seeded with the restored view so
-        # reopening unchanged doesn't rewrite it.
+        # The viewport that was last given to ``on_view_change``. Its first value is the
+        # restored viewport, so that a map that opens again with no change does not write
+        # it again.
         self._last_saved = saved_view
-        #: The live find-as-you-type node filter ("" = off). Every printable key lands
-        #: here — the map binds no letters to actions — and rendering highlights the
-        #: matching markers while dimming the rest. A caller may seed it (``find``), which
-        #: behaves exactly like a query the user had already typed.
+        #: The live find-as-you-type node filter ("" is off). Each printable key goes here,
+        #: because the map gives no action to a letter. The render shows the matching
+        #: markers bright and makes the other markers dim. A caller can give its first value
+        #: (``find``), and that value acts the same as a query that the user typed.
         self._filter = find
         self._viewport: Viewport | None = None
-        self._size: tuple[int, int] = (0, 0)  # (dot_w, dot_h) the viewport is built for
-        # Ask the session to scrub the panel's right edge on the next paint (see
-        # :meth:`consume_edge_scrub`). Seeded ``True`` so the first braille frame's edge is
-        # cleaned even before the first pan.
+        self._size: tuple[int, int] = (0, 0)  # the (dot_w, dot_h) of the viewport
+        # Ask the session to clean the right edge of the panel at the next paint (refer to
+        # :meth:`consume_edge_scrub`). The first value is ``True``, so that MeshTerm cleans
+        # the edge of the first braille raster also before the first pan.
         self._needs_scrub = True
-        #: Whether the reader has yet touched this map. It gates the basemap credit's two
-        #: forms (see :mod:`meshterm.ui.attribution`): the whole line while nothing has
-        #: been pressed — the attribution may not be something you have to interact to see
-        #: — collapsing to the bare OpenStreetMap credit on the first key the map handles,
-        #: which is the "automatically on map interaction such as panning, clicking, or
-        #: zooming" clause of OSMF's guideline. A visit's worth of state, not a session's:
-        #: a map reopened is a map arrived at again.
+        #: Whether the user has touched this map yet. This value selects one of the two
+        #: forms of the basemap credit (refer to :mod:`meshterm.ui.attribution`). The full
+        #: line shows until the user presses a key, because the attribution must be visible
+        #: without an interaction. On the first key that the map handles, the line changes
+        #: to the short OpenStreetMap credit. This is the "automatically on map interaction
+        #: such as panning, clicking, or zooming" clause of the OSMF guideline. The value
+        #: is for one visit, not for one session: a map that opens again is a new arrival.
         self._untouched = True
-        # The view's decoded tiles, and nothing more — see :meth:`_trim_tiles`. A stored
-        # ``None`` is the source's own answer that there is nothing at those coordinates.
+        # The decoded tiles of the viewport, and nothing more (refer to
+        # :meth:`_trim_tiles`). A stored ``None`` is the answer of the source that there
+        # is nothing at those coordinates.
         self._tiles: dict[tuple[int, int, int], list[Layer] | None] = {}
         self._pending: set[tuple[int, int, int]] = set()
-        # The turns tile loads take (see :data:`_TILE_LOADS`), shared with the prefetcher.
+        # The turns of the tile loads (refer to :data:`_TILE_LOADS`). The prefetcher
+        # uses the same turns.
         self._tile_gate = asyncio.Semaphore(_TILE_LOADS)
-        # Tiles the source gave no answer about, and when each may be asked for again —
-        # a cooldown, not a verdict (see :meth:`_load`).
+        # The tiles that the source gave no answer about, and the time when MeshTerm can
+        # ask for each one again. This is a cooldown, not a final decision (refer to
+        # :meth:`_load`).
         self._unanswered: dict[tuple[int, int, int], float] = {}
-        # Anticipation (see :meth:`_prefetch_plan`): which way the view has been moving and
-        # for how many steps, the tiles already speculated on, and the one fetch in flight.
+        # Data for the prefetcher (refer to :meth:`_prefetch_plan`): the direction in which
+        # the viewport moved and for how many steps, the tiles that the prefetcher
+        # already guessed, and the one download in progress.
         self._heading: str | None = None
         self._momentum = 0
-        # When the view last stopped changing, and which view that was (monotonic).
+        # The time when the viewport last stopped its change, and which viewport that was
+        # (monotonic).
         self._settled_at = 0.0
         self._settled_view: Viewport | None = None
         self._speculated: OrderedDict[tuple[int, int, int], None] = OrderedDict()
         self._speculating = False
-        # The last finished ground frame and what it was drawn for — see :meth:`render_body`.
-        # Rasterizing a downtown view is ~0.5-1 s of pure Python (tens of thousands of
-        # vector features), far too slow to sit on a keystroke, so it happens off the paint
-        # path and the paint serves whatever is ready.
+        # The last finished ground raster, and the key that it was drawn for (refer to
+        # :meth:`render_body`). The raster of a downtown viewport is approximately
+        # 0.5-1 s of pure Python (tens of thousands of vector features). This is much too
+        # slow for a key press, so it occurs off the paint path, and the paint shows the
+        # raster that is ready.
         self._frame: list[str] | None = None
         self._frame_key: tuple | None = None
-        # Whether that frame is only the coarse first pass, and so still owes its detail.
+        # Whether that raster is only the coarse first pass. If so, it still needs its
+        # detail.
         self._frame_coarse = False
-        # That frame's ground, kept so a view that has moved on can stand on it until its
-        # own is drawn (see :meth:`_ground`).
+        # The ground of that raster. MeshTerm keeps it so that a viewport that moved can
+        # show it until the viewport has its own ground (refer to :meth:`_ground`).
         self._ghost: Ghost | None = None
-        self._drawing: tuple | None = None  # the key currently being rasterized
-        # The next raster to draw: its key plus the whole scene it stands for — viewport,
-        # markers, find query — snapshotted at request time (see :meth:`_schedule_ground`).
+        self._drawing: tuple | None = None  # the key that is now in the rasterizer
+        # The next raster to draw: its key, and the full scene for that key (the viewport,
+        # the markers, and the find query), copied when the request is made (refer to
+        # :meth:`_schedule_ground`).
         self._wanted: tuple[tuple, Viewport, list[MapMarker], str] | None = None
 
     # --- rendering -----------------------------------------------------------
 
     @property
     def footer_hint(self) -> str:  # type: ignore[override]
-        """Key hints — or the live find query.
+        """The key hints, or the live find query.
 
-        While a find filter is active the hints give way to the query itself with its
-        editing keys, so the typed text is always visible somewhere fixed.
+        While a find filter is active, the query and its edit keys replace the hints.
+        Thus the typed text is always visible in a fixed place.
 
-        The line spends its whole 72-cell budget, so the two view-jump keys share one atom
-        (``Home/^Y region/you``) and ``⇧ fine`` — a refinement of a key the line already
-        names, and the only atom here that documents a *modifier* rather than a binding —
-        is the one that gives way to make room for them. The basemap's state used to hang
-        off the end of this line as a suffix; it is a status atom, not a key, so it moved
-        to the title where the standards chain those (see :meth:`_title`), which is what
-        finally brought the line inside the budget.
+        The line uses all of its 72 cells. Thus the two keys that move the viewport to a
+        destination share one atom (``Home/^Y region/you``). The ``⇧ fine`` atom gives
+        its space to them. That atom only refines a key that the line already names, and
+        it is the only atom here that shows a modifier instead of a key binding. The
+        state of the basemap was once a suffix at the end of this line. That state is a
+        status atom, not a key, so we moved it to the title, where the standards chain the
+        status atoms (refer to :meth:`_title`). That change put the line inside its 72
+        cells.
         """
         if self._filter:
             return f"find: {self._filter}▏ · ^Enter frame · ⌫ erase · Enter/Esc clear"
         return "↑↓←→ pan · PgUp/PgDn zoom · Home/^Y region/you · type to find · Esc back"
 
     def consume_edge_scrub(self) -> int:
-        """Right-edge columns the session should force-repaint on the next paint (0 = none).
+        """How many right-edge cells the session must paint again at the next paint (0 is none).
 
-        A braille glyph the terminal font lacks is substituted by a *double-width* fallback,
-        which shoves the row and smears the panel's right border. The map body itself
-        redraws wholesale as it pans, so its cells self-heal — but the static border does
-        not change frame-to-frame, so prompt_toolkit's differential paint never rewrites it
-        and the smear lingers there. After a move we ask the session to force just that
-        column to repaint, scrubbing the smear without the whole-frame flicker a full
-        repaint would cause. (The map is :attr:`flush`, so there is no padding column
-        between the drawing and the border to scrub as well.)
+        When the terminal font has no glyph for a braille character, the terminal uses a
+        double-width fallback glyph. That glyph pushes the row to the right and smears the
+        right border of the panel. The map body is drawn again fully when it pans, so its
+        cells repair themselves. But the border does not change from one frame to the
+        next. Thus the differential paint of prompt_toolkit never writes the border again,
+        and the smear stays there. After a move, we ask the session to force a paint of
+        only the cells at that edge. This removes the smear without the flicker that a
+        full paint of the frame causes. (The map is :attr:`flush`, so no padding cell
+        between the drawing and the border needs this cleaning also.)
         """
         if not self._needs_scrub:
             return 0
         self._needs_scrub = False
-        return 1  # the panel's right border cell
+        return 1  # the cell of the right border of the panel
 
     def set_markers(self, markers: list[MapMarker]) -> None:
-        """Replace the plotted nodes on the open map — nodes that arrived after it opened.
+        """Replace the drawn nodes on the open map, to add the nodes that arrived after it opened.
 
-        The drawn frame is for the old overlay, so it stops being served; until the new one
-        lands, the nodes are drawn over that frame's ground rather than over black (see
-        :meth:`_ground`). The view stays where it is: the reader may already have moved it.
+        The drawn raster is for the old overlay, so the map stops showing it. Until the new
+        raster is ready, the map draws the nodes over the ground of the old raster, not
+        over black (refer to :meth:`_ground`). The viewport stays where it is, because the
+        user possibly moved it already.
         """
         self._markers = markers
         self._frame_key = None
         self._session.invalidate()
 
     def _query_echo(self) -> bool:
-        """Whether this paint echoes the find query over the canvas's bottom row.
+        """Whether this paint echoes the find query over the bottom line of the canvas.
 
-        Only where the footer isn't drawn (:attr:`~meshterm.platforms.Platform.footer_fkeys`):
-        there the hint line carrying the query never reaches the screen, so without this row
-        the map would silently filter itself while the reader has no idea what they typed.
-        On the desktop the footer already shows it and the canvas keeps the whole body.
+        The echo occurs only where MeshTerm does not draw the footer
+        (:attr:`~meshterm.platforms.Platform.footer_fkeys`). There, the hint line that has
+        the query never gets to the screen. Without this line, the map filters itself with
+        no visible sign, and the user does not know what they typed. On the desktop, the
+        footer already shows the query, and the canvas keeps the full body.
         """
         return bool(self._filter) and get_platform().footer_fkeys
 
     def render_body(self, width: int) -> list[str]:
-        """Build (or resize) the viewport, ensure its tiles, and render the frame.
+        """Build (or resize) the viewport, ask for its tiles, and render the map body.
 
-        Where the platform needs a body-line query echo (see :meth:`_query_echo`), it is
-        drawn *over* the canvas's last row — directly above the F-key lane — rather than
-        stacked above the map: an extra head line used to shift the whole ground down a
-        row the moment a find began (JP, 2026-08-08). Overlaying costs a strip of ground
-        behind the echo while a query is live, but the viewport itself never resizes, so
-        nothing jumps and the pan/zoom geometry holds steady.
+        Some platforms need a query echo in the body (refer to :meth:`_query_echo`).
+        There, the echo is drawn over the last line of the canvas, directly above the
+        F-key lane, and not on a line above the map. An extra line at the top once moved
+        all the ground down by one line when a find started (JP, 2026-08-08). The echo
+        hides a strip of ground while a query is live. But the viewport never changes its
+        size, so nothing jumps, and the pan/zoom geometry stays the same.
 
-        The order matters at the end: the prefetcher only guesses while the screen owes
-        the reader nothing, and what this paint owes is not known until :meth:`_ground`
-        has asked for its raster. Read a step earlier — from inside :meth:`_ensure_tiles`,
-        where it used to live — it sees the *previous* paint's answer, and a settled map
-        given a find keystroke starts a speculative fetch in the very paint that queues
-        the frame the reader is waiting for.
+        The order at the end is important. The prefetcher guesses only while the screen
+        has no work open for the user, and the work of this paint is not known until
+        :meth:`_ground` asks for its raster. If the prefetcher reads this one step earlier
+        (from :meth:`_ensure_tiles`, where it was before), it sees the answer of the
+        previous paint. Then a settled map that gets a find key press starts a
+        speculative download in the same paint that queues the raster that the user waits
+        for.
 
-        The basemap credit is stamped last, over the right end of that same bottom row
-        (see :mod:`meshterm.ui.attribution`), because its two forms turn on what the
-        reader has pressed rather than on what the raster shows — a frame is half a second
-        of Python and is served across many paints, so a credit baked into one would
-        either lag the keystroke that collapses it or force a redraw to shrink a caption.
-        Where the query echo wants this row too, the two share it: query left, credit
-        right, and the query is the half that gives way.
+        Where the frame has no bottom rule, the basemap credit is stamped last, over the
+        right end of that same bottom line (refer to :mod:`meshterm.ui.attribution`).
+        Elsewhere, the rule shows the credit (:attr:`bottom_caption`). The stamp comes
+        last because the two forms of the credit depend on what the user pressed, not on
+        what the raster shows. A raster takes half a second of Python, and MeshTerm shows
+        it across many paints. Thus a credit in the raster comes late after the key press
+        that makes it short, or it forces a new raster only to make a caption shorter.
+        Where the query echo also needs this line, the two share it: the query on the
+        left, the credit on the right. The query is the half that gives way.
         """
         vp = self._ensure_viewport(width)
         self._ensure_tiles(vp)
         self._persist()
         lines = self._ground(vp)
-        self._ensure_prefetch(vp)  # last: it reads what this paint just asked for
+        self._ensure_prefetch(vp)  # last, because it reads what this paint asked for
         self.title = self._title(vp)
         echo = query_text(self._filter) if self._query_echo() else None
         return attribution.map_body(lines, width, full=self._untouched, left=echo)
 
     @property
     def bottom_caption(self) -> str:  # type: ignore[override]
-        """The basemap credit, for a frame whose bottom rule can carry it.
+        """The basemap credit, for a frame that has a bottom rule to show it.
 
-        The other half of :func:`~meshterm.ui.attribution.map_body`, and the half that
-        costs the drawing nothing: where the panel has a bottom border, the credit is set
-        into it right-justified rather than stamped over the map's own last row (JP,
-        2026-09-13 — *"that way it's not in the map"*). Empty where the frame has no rule
-        to set it into, which is exactly where ``map_body`` stamps instead, so between
-        them the credit is drawn once on every platform and twice on none.
+        This is the other half of :func:`~meshterm.ui.attribution.map_body`, and the half
+        that takes nothing from the drawing. Where the panel has a bottom border, the
+        credit goes into it, right-justified, and is not stamped over the last line of the
+        map (JP, 2026-09-13: "that way it's not in the map"). The value is empty where the
+        frame has no rule for it. That is exactly where ``map_body`` stamps the credit
+        instead. Thus, together, they draw the credit one time on each platform, and
+        never two times.
 
-        Read per paint, like the title, so the collapse to
-        :data:`~meshterm.ui.attribution.CREDIT_SHORT` reaches the rule on the very
-        keystroke that causes it.
+        The frame reads this value at each paint, as it reads the title. Thus the change to
+        :data:`~meshterm.ui.attribution.CREDIT_SHORT` gets to the rule at the same key
+        press that causes it.
         """
         return attribution.rule_caption(full=self._untouched)
 
     def _ensure_viewport(self, width: int) -> Viewport:
-        """The viewport for a body ``width`` cells wide — built on first paint, else resized.
+        """The viewport for a body of ``width`` cells: built at the first paint, else resized.
 
-        Split out of :meth:`render_body` because a subclass may need the view *before* it
-        renders anything: the picker's crosshair rides the centre, so it has to know where
-        the centre is to build its marker (see :meth:`LocationPickScreen.render_body`).
+        This is a separate method from :meth:`render_body`, because a subclass can need the
+        viewport before it renders anything. The crosshair of the picker stays at the
+        centre, so the picker must know the centre to build its marker (refer to
+        :meth:`LocationPickScreen.render_body`).
         """
         _, cell_h = self._session.base_body_size()
         dot_w, dot_h = width * 2, max(1, cell_h) * 4
@@ -403,121 +437,129 @@ class MapScreen(Screen):
         return self._viewport
 
     def _ground_key(self, vp: Viewport) -> tuple:
-        """Everything the rasterized ground is a function of.
+        """All the inputs of the rasterized ground.
 
-        The tile *identities* go in the key rather than their contents: a tile's decoded
-        layers never change once loaded, so a tile arriving is the only way the picture can
-        gain detail, and that shows up here as a new key.
+        The key holds the identities of the tiles, not their contents. The decoded layers
+        of a tile never change after MeshTerm gets them. Thus a new tile is the only way
+        for the picture to get more detail, and a new tile makes a new key here.
         """
         loaded = tuple(t for t in vp.tiles(self._max_tile_zoom) if self._tiles.get(t))
         return (vp, loaded, self._filter, len(self._markers))
 
     def _ground(self, vp: Viewport) -> list[str]:
-        """The map picture for ``vp`` — from the last raster if it still applies, else soon.
+        """The map picture for ``vp``: from the last raster if it is still correct, else soon.
 
-        Rasterizing a view is 0.5-1 s of pure Python on the PicoCalc (a downtown frame
-        projects tens of thousands of vector features), so it cannot happen between a
-        keypress and the paint that answers it. Instead the paint always returns
-        immediately, with the best picture available *right now*, and a background task
-        draws the real one and asks for a repaint when it lands:
+        On the PicoCalc, the raster of a viewport takes 0.5-1 s of pure Python (a downtown
+        raster projects tens of thousands of vector features). Thus the raster cannot
+        occur between a key press and the paint that answers it. Instead, the paint always
+        returns immediately, with the best picture that is available now. A background
+        task draws the real picture, and asks for a paint when the picture is ready. There
+        are four cases:
 
-        * **Nothing has changed** — the raster is exactly this view: serve it (and if it
-          is only the coarse first pass, ask for the finishing one behind it).
-        * **Only the tiles changed** (a fetch landed, the view did not move) — the previous
-          raster is still correctly aligned, just missing some streets. Keep showing it
-          rather than blanking a good picture to redraw the same ground.
-        * **The view moved** — the old raster is in the wrong place *as a picture*, but the
-          ground it drew is still the only ground anyone has: reproject it onto the new
-          viewport (:class:`~meshterm.ui.map_render.Ghost`) and draw the nodes over it at
-          their real positions. That costs a few milliseconds, so panning still tracks the
-          keys exactly, and the streets slide with the view — dimmed, and short of the
-          edge you are panning onto — instead of the map blanking to black between every
-          keypress and flashing back when the frame lands (JP, 2026-08-09).
-        * **A tile this view shows is still on its way** — draw nothing yet. A raster now
-          would paint that tile's ground black, and being *this* view's frame it would
-          replace the ghost, so a zoom read as the ghost, then a black screen, then the map
-          drawn in (JP, 2026-10-04). It was also a raster thrown away: the tile's arrival
-          asks for another. So the screen keeps standing on what it has — the aligned frame,
-          or the ghost — until the tiles are in, and the next raster, which is the first, is
-          the real picture. A tile that comes back as silence is no longer on its way, so a
-          map with no network still draws what it can.
+        * **Nothing changed.** The raster is exactly this viewport: show it. (If it is
+          only the coarse first pass, ask for the finished pass after it.)
+        * **Only the tiles changed** (a download arrived, and the viewport did not move).
+          The previous raster is still correctly aligned, but some streets are missing.
+          Continue to show it. Do not blank a good picture only to draw the same ground
+          again.
+        * **The viewport moved.** As a picture, the old raster is in the incorrect
+          position. But its ground is still the only ground that is available. Reproject
+          that ground onto the new viewport (:class:`~meshterm.ui.map_render.Ghost`), and
+          draw the nodes over it at their real positions. This takes a few milliseconds,
+          so the pan still follows the keys exactly. The streets move with the viewport:
+          dim, and not up to the edge toward which the user pans. Without this, the map
+          goes black between each key press and comes back when the raster is ready (JP,
+          2026-08-09).
+        * **A tile that this viewport shows did not arrive yet.** Draw nothing yet. A
+          raster at this time paints the ground of that tile black. That raster is the
+          raster of this viewport, so it replaces the ghost. Thus a zoom showed the ghost,
+          then a black screen, then the map (JP, 2026-10-04). Also, MeshTerm discarded
+          that raster, because the arrival of the tile asks for another raster. Thus the
+          screen keeps what it has (the aligned raster, or the ghost) until the tiles are
+          in. The next raster, which is the first, is the real picture. A tile that comes
+          back as silence is not on its way any more, so a map with no network still draws
+          what it can.
 
-        The third of those is where the map goes black *and stays black*: four coarse pan
-        steps are 120% of the screen, so nothing drawn is under the view any more and
-        there is no ground to reproject. The answer to that is not this method but the one
-        it schedules — :meth:`_draw_ground` can land a rough picture in a quarter of the
-        time rather than nothing at all for a whole raster, which is
-        :data:`_COARSE_PREVIEW`, currently off.
+        The third case is where the map goes black and stays black. Four coarse pan steps
+        are 120% of the screen, so no drawn ground is under the viewport, and there is no
+        ground to reproject. The answer to that problem is not in this method, but in the
+        method that it schedules. :meth:`_draw_ground` can show a rough picture in a
+        quarter of the time, instead of nothing for a full raster. That is
+        :data:`_COARSE_PREVIEW`, which is off at this time.
         """
         key = self._ground_key(vp)
         if self._frame_key == key and self._frame is not None:
             if self._frame_coarse:
-                self._schedule_ground(key, vp)  # the first pass is on screen; finish it
+                self._schedule_ground(key, vp)  # the first pass is visible, so finish it
             return list(self._frame)
 
         if any(t in self._pending for t in vp.tiles(self._max_tile_zoom)):
-            # Waiting on this view's tiles, so anything queued is for a view already left.
+            # This viewport waits for its tiles, so a queued raster is for a viewport
+            # that the user already left.
             self._wanted = None
         else:
             self._schedule_ground(key, vp)
         if self._aligned(key) and self._frame is not None:
-            return list(self._frame)  # same view, only tiles differ — still aligned
-        # The view moved (or nothing has ever been drawn): markers over the last ground.
+            return list(self._frame)  # the same viewport, only the tiles differ: aligned
+        # The viewport moved (or nothing was drawn yet): the markers over the last ground.
         return render_map(vp, {}, self._markers, find=self._filter, ghost=self._ghost)
 
     def _aligned(self, key: tuple) -> bool:
-        """Whether the drawn frame is this view's picture, merely short of some detail.
+        """Whether the drawn raster is the picture of this viewport, with only less detail.
 
-        Everything but the tiles (``key[1]``) has to match: a frame drawn for a different
-        marker set is not "the same picture missing streets", it is a picture missing a
-        node — the picker's crosshair, say. A frame that *is* aligned stays on screen
-        while the newer one draws.
+        All the parts of the key, except the tiles (``key[1]``), must match. A raster
+        drawn for a different set of markers is not "the same picture missing streets".
+        It is a picture with a missing node (for example, the crosshair of the picker). An
+        aligned raster stays visible while the newer raster draws.
 
-        This is a question about the whole *picture*, which is why it is not the question
-        :meth:`_ground_drawn` asks.
+        This is a question about the full picture. For this reason, it is not the question
+        that :meth:`_ground_drawn` asks.
         """
         if self._frame is None or self._frame_key is None:
             return False
         return self._frame_key[0] == key[0] and self._frame_key[2:] == key[2:]
 
     def _ground_drawn(self, key: tuple) -> bool:
-        """Whether this view's ground is already drawn in full, so a rough pass would undo it.
+        """Whether the ground of this viewport is fully drawn. If so, a rough pass undoes it.
 
-        The two passes exist for a view that has run past every scrap of drawn ground; a
-        view whose ground is *already there* wants none of the first one, because a coarse
-        picture of ground the reader can already see takes detail away (buildings, back
-        streets, every street name) for the length of a raster.
+        The two passes are for a viewport that went past all of the drawn ground. A
+        viewport whose ground is already there does not want the first pass, because a
+        coarse picture of ground that the user can already see removes detail (buildings,
+        small streets, all the street names) for the time of a raster.
 
-        Only the viewport is asked about, and that is the difference from
-        :meth:`_aligned`. The find query and the marker count belong to the *overlay* —
-        change one and the frame on screen is the wrong picture and stops being served,
-        but the ground under it is the same ground, still drawn, still correct, and
-        reprojected onto the very next paint at zero offset as the stand-in
-        (:class:`~meshterm.ui.map_render.Ghost`, published with the frame it came from).
-        Asking the fuller question here meant every letter of a find query flattened the
-        streets to the rough pass and drew them back, once per keystroke.
+        This method asks only about the viewport, and that is the difference from
+        :meth:`_aligned`. The find query and the marker count are part of the overlay. If
+        one of them changes, the visible raster is the incorrect picture, and the map
+        stops showing it. But the ground under it is the same ground. It is still drawn
+        and still correct, and the next paint reprojects it at zero offset as the
+        temporary picture (:class:`~meshterm.ui.map_render.Ghost`, published with the
+        raster that it came from). When this method asked the fuller question, each letter
+        of a find query changed the streets to the rough pass and then drew them again,
+        one time for each key press.
         """
         if self._frame_key is None or self._frame_coarse:
             return False
         return self._frame_key[0] == key[0]
 
     def _schedule_ground(self, key: tuple, vp: Viewport) -> None:
-        """Note that ``key`` wants drawing, and start on it if nothing else is in flight.
+        """Mark ``key`` for a draw, and start the draw if no other raster is in progress.
 
-        Exactly **one** raster runs at a time, and it is always the newest one asked for.
-        A held arrow key hands us a new viewport on every repaint, and a render is most of
-        a second: starting one per keypress would pile up a queue of thread-bound work,
-        each frame of it already stale on arrival, and the contention would slow the very
-        keystrokes this is meant to keep quick. So a request that arrives mid-draw only
-        replaces the pending one, and the draw that finishes picks it up.
+        Exactly **one** raster runs at a time, and it is always the newest one that was
+        asked for. A held arrow key gives a new viewport at each paint, and a render takes
+        most of a second. If a raster starts for each key press, a queue of work for the
+        threads grows. Each raster in it is stale when it arrives, and the contention
+        makes the key presses slow, which this method must prevent. Thus a request that
+        arrives during a draw only replaces the pending request, and the draw that
+        finishes starts it.
 
-        The markers and the find query are **snapshotted here**, alongside the viewport, so
-        the raster draws the very scene ``key`` stands for. The draw itself happens later,
-        on a thread, long after the paint that asked for it returned — and a marker list
-        can be per-frame: the picker's crosshair is appended for the duration of one
-        ``render_body`` and taken straight back out (see
-        :meth:`LocationPickScreen.render_body`). Reading it at draw time would find it
-        gone, and the finished basemap would land over the crosshair and erase it.
+        The markers and the find query are **copied here**, with the viewport, so that
+        the raster draws exactly the scene that ``key`` is for. The draw itself occurs
+        later, on a thread, long after the paint that asked for it returned. And a marker
+        list can change for each frame: the crosshair of the picker is added for the
+        duration of one ``render_body`` and then removed immediately (refer to
+        :meth:`LocationPickScreen.render_body`). If the draw reads the list at draw time,
+        the crosshair is gone, and the finished basemap covers the crosshair and erases
+        it.
         """
         if key == self._drawing or (key == self._frame_key and not self._frame_coarse):
             return
@@ -526,15 +568,15 @@ class MapScreen(Screen):
             self._start_ground()
 
     def _start_ground(self) -> None:
-        """Begin the pending raster, or draw it inline where there is no event loop."""
+        """Start the pending raster, or draw it inline where there is no event loop."""
         if self._wanted is None:
             return
         key, vp, markers, find = self._wanted
         self._wanted = None
         tiles = {t: self._tiles.get(t) for t in vp.tiles(self._max_tile_zoom)}
         if not _loop_running():
-            # A static render (the CLI's map export, a test): there is nothing to be
-            # responsive *to*, so draw it here and now rather than never.
+            # A static render (the map export of the CLI, a test). There is no user input
+            # to answer quickly, so draw the raster here and now, instead of never.
             self._drawing = None
             self._frame, self._ghost = render_ground(vp, tiles, markers, find=find)
             self._frame_key, self._frame_coarse = key, False
@@ -552,49 +594,51 @@ class MapScreen(Screen):
         find: str,
         preview: bool,
     ) -> None:
-        """Rasterize one view off the event loop, coarse then finished, repainting at each.
+        """Rasterize one viewport off the event loop, coarse then finished, and paint after each.
 
-        The work is pure Python, so a thread does not truly run it in parallel — but the
-        interpreter still switches between threads every few milliseconds, which is the
-        whole point: keystrokes keep being serviced throughout instead of waiting for the
-        frame (measured worst-case delay ~50 ms, against the ~1 s of a blocking draw).
+        The work is pure Python, so a thread does not really run it in parallel. But the
+        interpreter still switches between threads every few milliseconds, and that is
+        the purpose: MeshTerm continues to answer key presses during the raster, and they
+        do not wait for it (the worst delay measured was approximately 50 ms, against
+        approximately 1 s for a draw that blocks).
 
-        **Two passes, because a whole frame is too big a thing to wait for or to throw
-        away** — where ``preview`` asks for both, which :data:`_COARSE_PREVIEW` currently
-        does not. A coarse pass (ground, water, through-roads; see
-        :func:`~meshterm.ui.map_render.render_ground`) is a quarter of the work — 249 ms
-        against 962 at zoom 13 on the PicoCalc — and it lands first, so a view that has
-        run past every scrap of drawn ground shows something true within a blink instead
-        of sitting black. Then the finished pass replaces it in place.
+        **Two passes, because a full raster is too large to wait for or to discard.** This
+        is only when ``preview`` asks for both passes, and :data:`_COARSE_PREVIEW` does
+        not at this time. A coarse pass (ground, water, through-roads, refer to
+        :func:`~meshterm.ui.map_render.render_ground`) is a quarter of the work: 249 ms
+        against 962 ms at zoom 13 on the PicoCalc. It is ready first. Thus a viewport that
+        went past all of the drawn ground shows a true picture almost immediately, and it
+        does not stay black. Then the finished pass replaces it in the same place.
 
-        The gap between the passes is also where a moving view gets off. A coarse pan step
-        is 30% of the screen, so four keypresses leave *nothing* of the last frame under
-        the view and the stand-in has no ground to reproject — and each of those presses
-        used to have to wait out a full raster being drawn for a view already three steps
-        stale. Checking :attr:`_wanted` between the passes cuts the unit of abandonable
-        work to the coarse one, so a pan being held is answered with real ground roughly
-        four times as often, and the finished frame is drawn for where the user actually
-        stopped.
+        The gap between the passes is also the point where a moving viewport can stop the
+        work. A coarse pan step is 30% of the screen, so after four key presses, nothing
+        of the last raster is under the viewport, and the ghost has no ground to
+        reproject. Before the check between the passes, each of those key presses waited
+        for a full raster of a viewport that was already three steps stale. A check of
+        :attr:`_wanted` between the passes makes the coarse pass the unit of work that
+        MeshTerm can abandon. Thus a held pan gets real ground approximately four times as
+        often, and the finished raster is drawn for the position where the user stopped.
 
-        Everything the frame is a function of arrives as an argument (see
-        :meth:`_schedule_ground`) — the screen's own state may have moved on by the time
-        the thread runs, and the frame is filed under the key of the scene it was asked
-        for, so it must *be* that scene.
+        All the inputs of the raster come as arguments (refer to
+        :meth:`_schedule_ground`). The state of the screen can change before the thread
+        runs. The raster is stored under the key of the scene that it was asked for, so
+        it must be exactly that scene.
 
         Args:
-            key: What the finished frame will be filed under.
-            vp: The view to draw.
-            tiles: The decoded tiles it draws from.
-            markers: The nodes to overlay, snapshotted at request time.
-            find: The live find filter, likewise.
-            preview: Whether to draw the coarse pass first. Off wholesale while
-                :data:`_COARSE_PREVIEW` is; and skipped anyway where this view's ground is
-                already drawn in full (see :meth:`_ground_drawn`), since there a coarse
-                picture would *remove* detail the reader can already see.
+            key: The key under which the finished raster is stored.
+            vp: The viewport to draw.
+            tiles: The decoded tiles to draw from.
+            markers: The nodes to overlay, copied at the time of the request.
+            find: The live find filter, also copied at that time.
+            preview: Whether to draw the coarse pass first. This is always off while
+                :data:`_COARSE_PREVIEW` is off. Also, MeshTerm skips the coarse pass where
+                the ground of this viewport is already fully drawn (refer to
+                :meth:`_ground_drawn`), because there a coarse picture removes detail that
+                the user can already see.
         """
         if preview and await self._pass(key, vp, tiles, markers, find, coarse=True):
             if self._wanted is not None:
-                self._drawing = None  # the view has moved on; draw where it is now
+                self._drawing = None  # the viewport moved, so draw where it is now
                 self._start_ground()
                 return
         await self._pass(key, vp, tiles, markers, find, coarse=False)
@@ -612,12 +656,12 @@ class MapScreen(Screen):
         *,
         coarse: bool,
     ) -> bool:
-        """Draw one pass off the loop and publish it; report whether it landed."""
+        """Draw one pass off the loop and publish it. Return whether the pass completed."""
         try:
             drawn = await asyncio.to_thread(
                 render_ground, vp, tiles, markers, find=find, coarse=coarse
             )
-        except Exception:  # noqa: BLE001 - a frame we couldn't draw is one we draw again
+        except Exception:  # noqa: BLE001 - if a raster fails, MeshTerm draws it again later
             return False
         lines, self._ghost = drawn
         self._frame, self._frame_key, self._frame_coarse = lines, key, coarse
@@ -626,10 +670,11 @@ class MapScreen(Screen):
         return True
 
     def _initial_viewport(self, dot_w: int, dot_h: int) -> Viewport:
-        """Restore the saved view (clamped to sane bounds) or frame the nodes' dense core.
+        """Restore the saved viewport (clamped to sane limits), or fit the dense core of the nodes.
 
-        With no saved view the default frames the half of the nodes nearest the median
-        centre, so distant outliers don't zoom the whole mesh out to a useless scale.
+        With no saved viewport, the default fits the ``view_fraction`` of the nodes that are
+        nearest to the median centre (half of the nodes by default). Thus the distant
+        outliers do not zoom the full mesh out to a scale that has no use.
         """
         if self._saved_view is not None:
             lat, lon, zoom = self._saved_view
@@ -644,7 +689,7 @@ class MapScreen(Screen):
         )
 
     def _persist(self) -> None:
-        """Hand the current centre/zoom to ``on_view_change`` if it changed since last time."""
+        """Give the centre and zoom to ``on_view_change`` if they changed after the last call."""
         vp = self._viewport
         if vp is None or self._on_view_change is None:
             return
@@ -655,22 +700,24 @@ class MapScreen(Screen):
         self._on_view_change(vp)
 
     def _matches(self) -> list[MapMarker]:
-        """The markers the live find filter currently matches (all of them when off)."""
+        """The markers that the live find filter matches now (all of them when it is off)."""
         needle = self._filter.strip().casefold()
         if not needle:
             return self._markers
         return [m for m in self._markers if needle in m.label.casefold()]
 
     def _title(self, vp: Viewport) -> str:
-        """A compact status title: zoom, node count (find matches), and ground scale.
+        """A compact status title: the zoom, the node count (or the find matches), and the scale.
 
-        The basemap's own state — tiles still in flight, or no source at all — is the last
-        atom when there is one to report, standing in for the scale rather than joining it.
-        Both are answers to "how much ground am I looking at", the status is the more urgent
-        of the two while it lasts, and swapping (rather than appending) keeps the title from
-        outgrowing a 53-column title bar, which clips rather than wraps.
+        When the basemap has a state to report, that state is the last atom. The state
+        replaces the scale, and it is not added after it. The states are: tiles still in
+        progress, a raster still in progress, or no source. The state and the scale both
+        answer "how much ground do I see", and the state is the more urgent of the two
+        while it lasts. A replacement (instead of an addition) keeps the title inside a
+        title bar of 53 cells, which clips the title and does not wrap it.
         """
-        # Ground metres per braille dot at the view centre, for a rough sense of scale.
+        # The metres of ground for each braille dot at the centre of the viewport, as an
+        # approximate scale.
         m_per_dot = (
             2
             * math.pi
@@ -687,9 +734,9 @@ class MapScreen(Screen):
         if self._pending:
             scale = f"{len(self._pending)} tiles…"
         elif self._drawing is not None or self._wanted is not None:
-            # The ground for this view is still being rasterized off the paint path (see
-            # :meth:`_ground`), so what is on screen is the nodes alone, or the last view's
-            # streets. Say so, in the same slot the tile fetch reports from.
+            # The ground for this viewport is still in the rasterizer, off the paint path
+            # (refer to :meth:`_ground`). Thus the screen shows only the nodes, or the
+            # streets of the last viewport. Say so, in the same slot as the tile downloads.
             scale = "drawing…"
         elif not self._source.available:
             scale = "offline"
@@ -702,22 +749,25 @@ class MapScreen(Screen):
     # --- tiles ---------------------------------------------------------------
 
     def _ensure_tiles(self, vp: Viewport) -> None:
-        """Schedule background fetches for any visible tile we don't have and aren't owed.
+        """Schedule background downloads for each visible tile that we do not have.
 
-        Asked on every paint, and deliberately **not** gated on
-        :attr:`~meshterm.services.basemap.BasemapSource.available`: that only reports
-        whether a template is known *yet*, and skipping the fetch while it isn't is how a
-        map that opened a moment too early stays empty for the rest of the session. The
-        fetch resolves the source itself, in its own thread, so asking is what un-sticks it.
+        The downloads are only for the tiles that are not already pending and not in a
+        cooldown. Each paint calls this method, and on purpose it does **not** check
+        :attr:`~meshterm.services.basemap.BasemapSource.available` first. That attribute
+        only reports whether a template is known yet. If the download is skipped while the
+        template is not known, a map that opened a moment too early stays empty for the
+        remainder of the session. The download resolves the source itself, in its own
+        thread, so the request is what makes the source work again.
 
-        A tile the source never answered about waits out
-        :data:`~meshterm.services.basemap.TILE_RETRY_SECONDS` in
-        :attr:`_unanswered` and is then asked for again — see :meth:`_load` for why that
-        isn't the same as a tile it answered "nothing here" about.
+        When the source gave no answer about a tile, that tile waits for
+        :data:`~meshterm.services.basemap.TILE_RETRY_SECONDS` in :attr:`_unanswered`.
+        Then MeshTerm asks for it again. Refer to :meth:`_load` for why this is not the
+        same as a tile for which the source answered "nothing here".
 
-        A tile the source already holds in RAM is taken here and now, with no thread
-        between: ground panned back onto is drawn in the very raster the move asks for,
-        rather than drawn without it first and again once a round trip to memory returned.
+        When the source already holds a tile in RAM, this method takes it immediately,
+        with no thread between. Thus ground that the user pans back onto is drawn in the
+        same raster that the move asks for. Without this, the raster is drawn first
+        without the tile, and then again after a round trip to memory returns.
         """
         wanted = vp.tiles(self._max_tile_zoom)
         self._trim_tiles(wanted)
@@ -726,7 +776,7 @@ class MapScreen(Screen):
                 layers = self._source.resident(*t)
                 if layers is not None:
                     self._tiles[t] = layers
-        if not _loop_running():  # nothing to fetch onto — a static render draws what it has
+        if not _loop_running():  # no loop for downloads: a static render draws what it has
             return
         self._expire_cooldowns()
         for t in wanted:
@@ -736,7 +786,7 @@ class MapScreen(Screen):
             asyncio.ensure_future(self._load(t))
 
     def _expire_cooldowns(self) -> None:
-        """Forget the silences that have served their time, so a long pan can't hoard them."""
+        """Forget the expired cooldowns, so that a long pan does not collect them."""
         if not self._unanswered:
             return
         now = monotonic()
@@ -745,37 +795,40 @@ class MapScreen(Screen):
     # --- anticipation ---------------------------------------------------------
 
     def _ensure_prefetch(self, vp: Viewport) -> None:
-        """Fetch one tile the next move is likely to need — but only in the quiet.
+        """Download one tile that the next move will probably need, but only when all is quiet.
 
-        A tile is 1.4 s off the PicoCalc's Wi-Fi and a few hundred milliseconds to decode
-        the first time, so ground that is fetched only once it is looked at arrives after
-        it was wanted. Fetching it a move early costs nothing the user can feel *provided
-        it is never the thing in the way*, and that is the whole of the pacing rule here:
-        the prefetcher runs only when the view it is guessing from is finished *and has
-        been for a moment* — every visible tile in, no raster running, nothing queued, and
-        :data:`_PREFETCH_SETTLE` of that since. Those are the seconds the user spends
-        reading the screen, which are also the seconds before they move; the wait is what
-        keeps a raster landing between two keypresses of a pan from being mistaken for a
-        pause, and it is measured from when the screen went quiet rather than from when
-        the view stopped moving, because a frame that took a second to draw has not been
-        looked at for a second.
+        On the PicoCalc, a tile takes 1.4 s to download over Wi-Fi, and a few hundred
+        milliseconds to decode the first time. Thus, if MeshTerm downloads ground only
+        when the user looks at it, the ground arrives after the user wanted it. A
+        download one move early costs nothing that the user can feel, on the condition
+        that it never blocks other work. That condition is the full pacing rule here. The
+        prefetcher runs only when the viewport from which it guesses is finished, and was
+        finished for a moment: all the visible tiles are in, no raster runs, nothing is
+        queued, and :data:`_PREFETCH_SETTLE` has passed after that. These are the seconds
+        in which the user reads the screen, which are also the seconds before the user
+        moves. Because of the wait, a raster that arrives between two key presses of a
+        pan does not look like a pause. The wait starts when the screen became quiet, not
+        when the viewport stopped its movement, because the user did not look for one
+        second at a raster that took one second to draw.
 
-        One fetch at a time, and the finished one asks for the next itself
-        (:meth:`_prefetch`) rather than waiting for a repaint: chaining through the paint
-        would cost a 40-80 ms interim frame per tile on the device, to show a picture that
-        has not changed.
+        Only one download runs at a time. When it finishes, it asks for the next one
+        itself (:meth:`_prefetch`), and it does not wait for a paint. A chain through the
+        paint costs an intermediate frame of 40-80 ms for each tile on the handheld, only
+        to show a picture that did not change.
 
-        All of which rests on being asked at the *end* of a paint, once :meth:`_ground`
-        has said what this frame owes — see :meth:`render_body`.
+        All of this works only because the paint calls this method at its end, after
+        :meth:`_ground` has said what this frame still needs. Refer to
+        :meth:`render_body`.
         """
-        # Still owing the reader something: a tile in flight, a raster running or queued.
+        # Work for the user is still open: a tile in progress, or a raster that runs or
+        # is queued.
         busy = bool(self._pending) or self._drawing is not None or self._wanted is not None
         if busy or self._settled_view is not vp:
             self._settled_view, self._settled_at = vp, monotonic()
         if busy or self._speculating or not _loop_running():
             return
         if monotonic() - self._settled_at < _PREFETCH_SETTLE:
-            return  # a raster landing between two keypresses of a pan is a gap, not a pause
+            return  # a raster between two key presses of a pan is a gap, not a pause
         tile = self._next_speculation(vp)
         if tile is None:
             return
@@ -784,54 +837,58 @@ class MapScreen(Screen):
         asyncio.ensure_future(self._prefetch(tile, vp))
 
     def _next_speculation(self, vp: Viewport) -> tuple[int, int, int] | None:
-        """The first tile in :meth:`_prefetch_plan` we have neither got nor guessed at.
+        """The first tile in :meth:`_prefetch_plan` that we do not have and did not guess.
 
-        A tile serving out its silence (:attr:`_unanswered`) is passed over as well, and
-        that is the same rule as the pacing above rather than an extra one: the cooldown
-        exists because the source has just gone quiet about that square and hammering it
-        helps nobody (see :meth:`_load`), and a guess is the last request that should be
-        the exception. It comes back into the plan when the cooldown expires — by which
-        time the reader may well have panned onto it, and then it is *their* fetch, made
-        on their behalf, which is the one the cooldown was always sized for.
+        This method also skips a tile that is in its cooldown after a silence
+        (:attr:`_unanswered`). That is the same rule as the pacing above, not an extra
+        rule. The cooldown exists because the source just became silent about that square,
+        and many requests for it help nobody (refer to :meth:`_load`). A guess is the last
+        request that must be an exception to the cooldown. The tile comes back into the
+        plan when the cooldown expires. At that time, the user possibly panned onto it
+        already. Then the download is for the user, and the cooldown was always sized for
+        that download.
         """
         for tile in self._prefetch_plan(vp):
             if tile in self._tiles or tile in self._pending or tile in self._speculated:
                 continue
             if tile in self._unanswered:
-                continue  # the source just went quiet about it; a guess must not push
+                continue  # the source just became silent about it, so a guess must not push
             return tile
         return None
 
     def _prefetch_plan(self, vp: Viewport) -> list[tuple[int, int, int]]:
-        """The tiles the next few moves would want, in the order they'd be wanted.
+        """The tiles that the next few moves will probably need, in the order of that need.
 
-        What the user does next is not a mystery to be modelled. Whatever they press, the
-        ground it reveals comes from the **ring of tiles around the ones on screen** —
-        that is what a pan uncovers, in whichever direction — or from one of the two
-        neighbouring zooms, which are the only moves whose tiles are a different set
-        entirely. So the plan is that ring and those two views, ordered by what the reader
-        just did:
+        It is not necessary to model what the user does next. For each key that the user
+        can press, the new ground comes from the **ring of tiles around the visible
+        tiles** (a pan in any direction shows that ring), or from one of the two
+        neighbouring zooms. Only a zoom move gives a fully different set of tiles. Thus
+        the plan is that ring and those two viewports, in an order that comes from the
+        last action of the user:
 
-        * **Ahead first.** A pan is rarely alone; the view is being carried somewhere. The
-          side of the ring the heading points at is fetched before any other, and once the
-          run reads as a heading rather than a nudge
-          (:data:`_PREFETCH_MOMENTUM`) the corners flanking it come too, because a
-          diagonal is two keys and readers steer.
-        * **Then out, then in.** Zooming out is how you find where you are, and it is the
-          move that shares nothing with the screen: a step out is four times the ground at
-          a tile zoom never visited. A step in is cheap to ask for and often free to
-          answer — at or above the source's max zoom it is the same tiles, magnified.
-        * **Then the rest of the ring**, for a reader who hasn't moved yet or is about to
-          change their mind. With no heading at all this is the whole of it, nearest
-          neighbours before corners, which is the right hedge when there is nothing to read.
+        * **Ahead first.** A pan is almost never alone, because the user moves the
+          viewport toward a place. The prefetcher gets the side of the ring in the
+          direction of the heading before all others. When the run is a heading and not a
+          small correction (:data:`_PREFETCH_MOMENTUM`), the corners on each side of that
+          side come too, because a diagonal is two keys and users steer.
+        * **Then out, then in.** A zoom out is how the user finds their position, and it
+          is the move that shares nothing with the screen: a step out is four times the
+          ground, at a tile zoom that the user did not visit. A step in costs little to
+          ask for, and often costs nothing to answer: at or above the max zoom of the
+          source, it uses the same tiles, magnified.
+        * **Then the rest of the ring**, for a user who did not move yet or who will
+          change direction. With no heading, the rest of the ring is the full ring, with
+          the nearest neighbours before the corners, and it comes before the zooms. That
+          is the correct hedge when there is no direction to read.
 
-        Working in tiles rather than in pan steps matters at the zooms where a single step
-        uncovers no new tile at all: the plan asks for the ground a move *reaches*, not
-        the ground one keypress lands on.
+        The plan uses tiles and not pan steps. This is important at the zooms where one
+        step shows no new tile: the plan asks for the ground that a move gets to, not the
+        ground under one key press.
 
-        Deliberately not here: the nodes a find could jump to. Those are a keystroke away
-        all over the map, so speculating on them is speculating on everything — and the
-        jump reframes the view anyway, arriving here as a new view with its own plan.
+        The plan does not include, on purpose, the nodes to which a find can jump. Those
+        nodes are one key press away everywhere on the map, so a guess at them is a guess
+        at everything. Also, the jump fits the viewport again, and it arrives here as a
+        new viewport with its own plan.
         """
         visible = vp.tiles(self._max_tile_zoom)
         if not visible:
@@ -855,15 +912,17 @@ class MapScreen(Screen):
                 if tile in seen:
                     continue
                 seen.add(tile)
-                # Which way this tile lies from the block on screen: -1, 0 or +1 per axis.
+                # The direction from the visible block to this tile: -1, 0, or +1 on each
+                # axis.
                 off_x = -1 if tx < x0 else (1 if tx > x1 else 0)
                 off_y = -1 if ty < y0 else (1 if ty > y1 else 0)
                 towards = off_x * hx + off_y * hy
                 if towards > 0 and (corners or not (off_x and off_y)):
                     ahead.append(tile)
                 else:
-                    # No heading: straight neighbours before corners. With one: everything
-                    # that isn't ahead is equally a change of mind, so distance decides.
+                    # With no heading: the straight neighbours before the corners. With a
+                    # heading: each tile that is not ahead is equally a change of
+                    # direction, so the distance decides.
                     flank.append(tile)
         flank.sort(key=lambda t: abs(t[1] - (x0 + x1) // 2) + abs(t[2] - (y0 + y1) // 2))
 
@@ -873,20 +932,20 @@ class MapScreen(Screen):
                 if tile not in seen:
                     seen.add(tile)
                     zooms.append(tile)
-        # With a heading to follow: ahead, then the zooms, then the change of mind. With
-        # none: every way a pan could go *first*, because the arrows are how this screen
-        # is driven and a zoom guessed at ahead of them is a tile the pan then waits for.
+        # With a heading: ahead, then the zooms, then the change of direction. With no
+        # heading: each direction of a pan first, because the user controls this screen
+        # with the arrows, and a zoom tile before them is a tile that the pan then waits
+        # for.
         plan = ahead + zooms + flank if ahead else flank + zooms
         return plan[:_PREFETCH_MAX]
 
     def _remember_speculation(self, tile: tuple[int, int, int]) -> None:
-        """Note that we've already guessed at ``tile``, keeping the record bounded.
+        """Mark ``tile`` as already guessed, and keep the list of these marks limited.
 
-        Guessed-at, not *held*: what a prefetch leaves behind is a decoded tile in the
-        source's own cache (on disk, and in its small resident memo), which is the whole
-        point — the screen keeps only what it is drawing. This is just the note that stops
-        the plan from asking twice, and it is allowed to forget, since forgetting costs at
-        worst a cache hit.
+        Guessed, not held: a prefetch leaves a decoded tile in the cache of the source, on
+        disk, and that is the purpose. The screen keeps only the tiles that it draws. This
+        list only stops the plan from asking two times, and it can forget a tile, because
+        the worst cost of that is a cache hit.
         """
         self._speculated[tile] = None
         self._speculated.move_to_end(tile)
@@ -894,77 +953,83 @@ class MapScreen(Screen):
             self._speculated.popitem(last=False)
 
     async def _prefetch(self, tile: tuple[int, int, int], vp: Viewport) -> None:
-        """Warm one tile into the source's disk cache, then take the next guess.
+        """Warm one tile into the disk cache of the source, then make the next guess.
 
-        Disk, not memory (:meth:`~meshterm.services.basemap.BasemapSource.warm`). A
-        prefetched tile is not this screen's to hold — :attr:`_tiles` is the view's working
-        set — and not the source's RAM's either: that budget is the history of where the
-        reader *has* been, and twelve guesses at up to 4.6 MB each would evict all of it
-        for ground they may never visit. What a guess saves is the network and the decode,
-        and the sidecar on disk is the whole of both, so the paint that finally wants the
-        tile reads it back in a tenth of a second instead of waiting out a second and a
-        half. A tile whose sidecar is already written costs the guess nothing at all.
+        Disk, not memory (:meth:`~meshterm.services.basemap.BasemapSource.warm`). This
+        screen must not hold a prefetched tile, because :attr:`_tiles` is the working set
+        of the viewport. The RAM of the source must not hold it either. That memory budget
+        is the history of where the user went, and twelve guesses at up to 4.6 MB each can
+        evict all of it, for ground that the user possibly never visits. A guess saves the
+        network and the decode, and the sidecar on disk holds the result of both. Thus the
+        paint that needs the tile later reads it in a tenth of a second, and does not wait
+        a second and a half. When the sidecar of a tile is already written, the guess
+        costs nothing.
 
-        It takes a turn at the tile gate like any load (:data:`_TILE_LOADS`), so a reader
-        who moves while it runs still has a turn waiting for the tiles they moved onto.
+        The prefetch takes a turn at the tile gate, as each tile load does
+        (:data:`_TILE_LOADS`). Thus, when the user moves while it runs, a turn is still
+        available for the tiles that the user moved onto.
 
-        No repaint either way: nothing on screen changed, and the whole point of doing
-        this early was to not spend the user's time.
+        There is no paint after the prefetch: nothing visible changed, and the purpose of
+        this early work was to not use the time of the user.
         """
         async with self._tile_gate:
             try:
                 await asyncio.to_thread(self._source.warm, *tile)
-            except Exception:  # noqa: BLE001 - a guess that didn't pay off is not an error
+            except Exception:  # noqa: BLE001 - a guess that did not help is not an error
                 pass
         self._speculating = False
-        if self._viewport is vp:  # still the same view, so the same plan: keep going
+        if self._viewport is vp:  # the same viewport, so the same plan: continue
             self._ensure_prefetch(vp)
 
     def _trim_tiles(self, wanted: list[tuple[int, int, int]]) -> None:
-        """Let go of every tile holding geometry that the view no longer shows.
+        """Release each tile with geometry that the viewport does not show now.
 
-        The history a pan back needs lives in the source, whose memory is budgeted in
-        bytes against the machine's RAM (see :meth:`~meshterm.services.basemap.
-        BasemapSource.resident`) — so a tile held here as well would be held *outside* that
-        budget. That is how the map used to freeze on the PicoCalc: eight-odd tiles of
-        history here, at up to 4.6 MB each, on top of the source's own, pushed a 100 MB
-        device into swapping to its SD card.
+        The history that a pan back needs is in the source. The memory of the source has a
+        budget in bytes, against the RAM of the machine (refer to
+        :meth:`~meshterm.services.basemap.BasemapSource.resident`). Thus a tile that this
+        screen also holds is outside that budget. That is how the map froze on the
+        PicoCalc before: approximately eight tiles of history here, at up to 4.6 MB each,
+        added to the history of the source, pushed a handheld with 100 MB into swap on its
+        SD card.
 
-        Only tiles holding geometry are dropped. An entry whose value is ``None`` is the
-        source's word that the tile is absent — a settled answer costing a dict slot rather
-        than a megabyte, so it stays; dropping it would only buy a pointless re-request on
-        the next repaint. A tile we got no answer about isn't here at all: it waits out its
-        cooldown in :attr:`_unanswered` and is asked for again.
+        This method removes only the tiles with geometry. An entry with the value ``None``
+        is the statement of the source that the tile is absent. It is a final answer that
+        costs a dict slot, not a megabyte, so it stays. If this method removes it, the
+        next paint only asks for it again, for no purpose. A tile that got no answer is
+        not here: it waits for its cooldown in :attr:`_unanswered`, and then MeshTerm asks
+        for it again.
 
         Args:
-            wanted: The tiles the current viewport needs.
+            wanted: The tiles that the current viewport needs.
         """
         keep = set(wanted)
         for key in [k for k, layers in self._tiles.items() if layers and k not in keep]:
             del self._tiles[key]
 
     async def _load(self, t: tuple[int, int, int]) -> None:
-        """Fetch+decode one tile off the event loop, then repaint.
+        """Download and decode one tile off the event loop, then paint.
 
-        What comes back is filed under the same distinction the tile source keeps (see
-        :class:`~meshterm.services.basemap._Response`), because this is where forgetting it
-        costs a picture. Geometry, or the source's own word that there is nothing at those
-        coordinates, is an answer: it goes in :attr:`_tiles` and is never asked about
-        again. Silence — offline, a timeout, a body the Wi-Fi cut short — is *not* an
-        answer, and filing it as one turns one bad moment into a black square that stays
-        black until the app is restarted. It goes in :attr:`_unanswered` instead, which is
-        a cooldown rather than a verdict.
+        The result goes into one of the same two groups that the tile source keeps (refer
+        to :class:`~meshterm.services.basemap._Response`), because here, if MeshTerm
+        forgets the difference, the map loses a picture. Geometry, or the statement of the
+        source that there is nothing at those coordinates, is an answer. It goes in
+        :attr:`_tiles`, and MeshTerm never asks about it again. Silence (offline, a
+        timeout, a body that the Wi-Fi cut short) is not an answer. If MeshTerm stores it
+        as an answer, one bad moment becomes a black square that stays black until the app
+        starts again. Thus silence goes in :attr:`_unanswered`, which is a cooldown, not a
+        final decision.
 
-        That distinction is only visible on a link that actually drops. On the PicoCalc it
+        That difference is visible only on a link that really drops. On the PicoCalc, it
         is the difference between a map and a map with holes in it (JP, 2026-08-18: tiles
-        black at the two highest zooms, where one z14 tile is the whole screen).
+        black at the two highest zooms, where one z14 tile is the full screen).
 
-        A load waits its turn (:data:`_TILE_LOADS`), and a tile the view has left by the
-        time its turn comes is **dropped unloaded**. A fast pan or a run of zoom steps asks
-        for every view it passes through, and loading all of them — each a decode of a
-        second or more, the zoomed-out ones the heaviest — was the backlog that kept the map
-        behind the keys long after they stopped. Dropped is not written off: nothing is
-        recorded, so the next paint that wants the tile asks for it like any other.
+        A tile load waits for its turn (:data:`_TILE_LOADS`). If the viewport left the
+        tile before its turn comes, MeshTerm **removes the tile without a load**. A fast
+        pan or a series of zoom steps asks for each viewport that it goes through. The load
+        of all of them (each a decode of a second or more, and the zoomed-out tiles are
+        the heaviest) was the backlog that kept the map behind the keys long after they
+        stopped. A removed tile is not marked as lost: MeshTerm stores nothing about it, so
+        the next paint that needs the tile asks for it as for any other tile.
         """
         async with self._tile_gate:
             vp = self._viewport
@@ -973,7 +1038,7 @@ class MapScreen(Screen):
                 return
             try:
                 layers = await asyncio.to_thread(self._source.load_tile, *t)
-            except Exception:  # noqa: BLE001 - a failed tile is just an absent one
+            except Exception:  # noqa: BLE001 - a failed tile is only an absent tile
                 layers = None
         self._pending.discard(t)
         if layers is not None or self._source.answered_empty(*t):
@@ -985,25 +1050,25 @@ class MapScreen(Screen):
     # --- input ---------------------------------------------------------------
 
     def handle(self, action: str, data: str = "") -> None:
-        """Pan, zoom, reframe, edit the find filter, or exit.
+        """Pan, zoom, fit the viewport again, edit the find filter, or leave.
 
-        Every printable key feeds the find filter — nothing pans or zooms by letter, so
-        typing a node name can never fling the view around. Esc peels one layer: an
-        active filter first, the map itself only once the filter is clear.
+        Each printable key goes to the find filter. No letter pans or zooms, so when the
+        user types a node name, the viewport never jumps around. Esc removes one layer:
+        first an active filter, and the map itself only when the filter is clear.
 
-        Three actions reframe the view, and each has both a key and an F-key chip:
-        ``home`` the whole region, ``locate`` (^Y, for *you*) our own node — ``locate_zoom``
-        the Shift-bank variant that also homes in — and ``frame`` (^Enter) the find
-        matches. ``clear_find`` drops the query without moving the view, which is also
-        what plain **Enter** does.
+        Three actions fit the viewport again, and each has a key and an F-key chip:
+        ``home`` fits the full region, ``locate`` (^Y, for "you") goes to our node, and
+        ``frame`` (^Enter) fits the find matches. ``locate_zoom`` is the Shift-bank
+        variant of ``locate`` that also zooms in. ``clear_find`` clears the query and does
+        not move the viewport, and plain **Enter** does the same.
 
-        Enter and ^Enter are the find's two ways out, and they split along whether the
-        *view* moves (JP, 2026-08-09). Typing a query dims everything that doesn't match,
-        and the common finish is "yes, that one — now let me look around it": the query
-        has done its job and only the dimming is in the way, so Enter drops the query and
-        leaves the view exactly where the reader put it. ^Enter is the other finish —
-        *take* me to them — and it keeps the query, because a frame is a place to arrive
-        and framing tighter from there is one more press, not a re-type.
+        Enter and ^Enter are the two ways out of a find, and the difference is whether
+        the viewport moves (JP, 2026-08-09). A query makes dim each node that does not
+        match. The usual end is "yes, that one, now let me look around it": the query did
+        its work, and only the dim nodes are in the way. Thus Enter clears the query and
+        leaves the viewport exactly where the user put it. ^Enter is the other end ("take
+        me to them"), and it keeps the query. A fit is a place to arrive, and a tighter
+        fit from there is one more key press, not a new query.
         """
         vp = self._viewport
         if action == "escape":
@@ -1015,26 +1080,28 @@ class MapScreen(Screen):
         if vp is None:
             return
         if action in _PAN_DIRS:
-            # A shifted arrow the console reports as the bare arrow (a keymap that
-            # strips the modifier) still fine-pans: the watcher knows whether Shift is
-            # physically held, and it stays False wherever it isn't watching — desktop
-            # terminals report shift_up/... themselves, on the branch below.
+            # The console can report a Shift arrow as the bare arrow (a keymap that
+            # removes the modifier). This arrow still does a fine pan, because the watcher
+            # knows whether Shift is physically held. The watcher stays False wherever it
+            # does not watch: the desktop terminals report shift_up/... themselves, on
+            # the branch below.
             self._pan(vp, action, fine=modifier_watch.shift_down())
         elif action.startswith("shift_") and action[len("shift_") :] in _PAN_DIRS:
             self._pan(vp, action[len("shift_") :], fine=True)
         elif action == "pageup":
             if modifier_watch.shift_down():
-                # The PicoCalc console's keymap translates Shift+↑ into PgUp (measured
-                # on-device, JP 2026-08-09: shifted vertical arrows were zooming). No
-                # physical PgUp exists on that keyboard — the pager rides the F-lane —
-                # so a raw PgUp with Shift held can only *be* a shifted arrow: fine-pan.
+                # The keymap of the PicoCalc console changes Shift+↑ into PgUp (measured
+                # on the handheld, JP 2026-08-09: Shift with a vertical arrow zoomed the
+                # map). That keyboard has no physical PgUp key (the pager is on the F-key
+                # lane). Thus a raw PgUp with Shift held can only be a Shift arrow: do a
+                # fine pan.
                 self._pan(vp, "up", fine=True)
             else:
                 self._reorient()
                 self._viewport = vp.zoomed(1, max_zoom=self._max_tile_zoom + _OVERZOOM)
         elif action == "pagedown":
             if modifier_watch.shift_down():
-                self._pan(vp, "down", fine=True)  # Shift+↓ arrives as PgDn — see above
+                self._pan(vp, "down", fine=True)  # Shift+↓ arrives as PgDn, as above
             else:
                 self._reorient()
                 self._viewport = vp.zoomed(-1)
@@ -1053,36 +1120,37 @@ class MapScreen(Screen):
             self._reorient()
             self._frame_matches(vp)
         elif action == "text" and self.find_enabled:
-            if not data.isspace() or self._filter:  # never begin the filter with a space
+            if not data.isspace() or self._filter:  # never start the filter with a space
                 self._filter += data
         elif action == "space" and self._filter:
-            self._filter += " "  # node names carry spaces; only meaningful mid-query
+            self._filter += " "  # node names have spaces, which are useful only mid-query
         elif action == "backspace":
             self._filter = self._filter[:-1]
-        # Any handled key may have redrawn the body, so clean the right edge next paint —
-        # and it is also the moment the map stops being one the reader has merely arrived
-        # at, which collapses the basemap credit to its remnant (see :attr:`_untouched`).
+        # A handled key can change the body, so clean the right edge at the next paint.
+        # This is also the moment when the user does more than arrive at the map. Thus the
+        # basemap credit changes to its short form (refer to :attr:`_untouched`).
         self._needs_scrub = True
         self._untouched = False
         self._persist()
 
     def _self_marker(self) -> MapMarker | None:
-        """Our own node among the markers, or ``None`` when the map can't place us.
+        """Our node among the markers, or ``None`` when the map cannot put us on it.
 
-        A device with no location fix of its own is simply absent from the marker list, so
-        ``You`` has nowhere to go and its chip dims (see :attr:`picocalc_lyra_lane`).
+        A device with no location fix of its own is absent from the marker list. Thus
+        ``You`` has no destination, and its chip is dim (refer to
+        :attr:`picocalc_lyra_lane`).
         """
         return next((m for m in self._markers if m.is_self), None)
 
     def _locate(self, vp: Viewport, *, zoom_in: bool = False) -> None:
-        """Recentre on our own node (``^Y`` / the ``You`` chip), clearing any find.
+        """Centre the viewport on our node (``^Y`` or the ``You`` chip), and clear the find query.
 
-        Plain ``You`` keeps the zoom the user chose — pressing it twice does the same
-        thing twice, and pairing it with one Zoom + is a single extra press. Its Shift
-        half (``You +``) is the one that also homes in, at the same street-level
-        closeness a single-match Frame lands on (:data:`_FIND_ZOOM`). Both clear the
-        find query (JP, 2026-08-08): jumping home while a filter dims the rest — or
-        matches nothing, us included — reads as starting over, and the map should agree.
+        Plain ``You`` keeps the zoom that the user selected. Two presses do the same thing
+        two times, and one more press of Zoom + adds the zoom. Its Shift half (``You +``)
+        also zooms in, to the same street-level closeness as a Frame with one match
+        (:data:`_FIND_ZOOM`). Both clear the find query (JP, 2026-08-08). A jump to our
+        node while a filter makes the other nodes dim (or matches nothing, and also not
+        us) looks like a new start, and the map must agree.
         """
         me = self._self_marker()
         if me is None:
@@ -1092,7 +1160,7 @@ class MapScreen(Screen):
         self._viewport = Viewport(clamp_lat(me.lat), me.lon, zoom, vp.dot_w, vp.dot_h)
 
     def _reset_view(self, vp: Viewport) -> None:
-        """Refit the view to the nodes' dense core (the map's opening frame)."""
+        """Fit the viewport to the dense core of the nodes again (as when the map opens)."""
         self._viewport = Viewport.fit(
             [(m.lat, m.lon) for m in self._markers],
             vp.dot_w,
@@ -1102,13 +1170,14 @@ class MapScreen(Screen):
         )
 
     def _frame_matches(self, vp: Viewport) -> None:
-        """Refit the view around the find filter's matches (^Enter on an active find).
+        """Fit the viewport to the matches of the find filter (^Enter on an active find).
 
-        All matches are framed (``fraction=1.0`` — the user asked for exactly these
-        nodes, so no dense-core trimming). A single match — or several at one spot — has
-        no extent to frame, so instead of the fit's neutral default the view homes in
-        close on it (:data:`_FIND_ZOOM`, capped at the tile source's max so it never
-        over-zooms onto blank tiles). No matches at all leaves the view alone.
+        The fit includes all the matches (``fraction=1.0``: the user asked for exactly
+        these nodes, so the fit does not cut down to a dense core). A single match (or
+        several matches at one spot) has no extent to fit. Thus, instead of the neutral
+        default of the fit, the viewport zooms in close on it (:data:`_FIND_ZOOM`, capped
+        at the max zoom of the tile source, thus it never zooms in past that onto blank
+        tiles). When there are no matches, the viewport does not change.
         """
         matches = self._matches()
         if not matches:
@@ -1123,25 +1192,27 @@ class MapScreen(Screen):
         )
 
     def _reorient(self) -> None:
-        """Forget which way the view was being carried — this move is not a continuation.
+        """Forget the direction of the viewport movement, because this move does not continue it.
 
-        A zoom or a jump home is the reader looking *around* rather than travelling, and
-        the ground it lands on says nothing about which way they will go from there. The
-        prefetcher reads the cleared heading as "no reading available" and hedges the four
-        directions evenly instead of buying ground ahead of a pan that has ended.
+        With a zoom or a jump to a destination, the user looks around, and does not
+        travel. The ground where the viewport arrives does not show which direction the
+        user will take from there. The prefetcher reads the cleared heading as "no
+        direction known", and it hedges equally in the four directions. It does not get
+        ground ahead of a pan that has ended.
         """
         self._heading, self._momentum = None, 0
 
     def _pan(self, vp: Viewport, direction: str, *, fine: bool) -> None:
-        """Pan by one coarse step, or — when ``fine`` — a single character cell.
+        """Pan by one coarse step, or by one character cell when ``fine`` is true.
 
-        A character cell is 2 braille dots wide and 4 tall, so the fine step is that many
-        dots expressed as a fraction of the current view.
+        A character cell is 2 braille dots wide and 4 dots tall. Thus the fine step is
+        that number of dots, as a fraction of the current viewport.
         """
         dx, dy = _PAN_DIRS[direction]
-        # Which way the view is being carried, and for how long — what the prefetcher
-        # reads to tell a heading from a nudge (see :meth:`_prefetch_plan`). A fine step
-        # is a correction, not a direction, so it holds the heading without extending it.
+        # The direction of the viewport movement, and for how many steps. The prefetcher
+        # reads this to find the difference between a heading and a small correction
+        # (refer to :meth:`_prefetch_plan`). A fine step is a correction, not a
+        # direction, so it keeps the heading and does not extend it.
         if not fine:
             self._momentum = self._momentum + 1 if direction == self._heading else 1
             self._heading = direction
@@ -1152,31 +1223,37 @@ class MapScreen(Screen):
 
 
 class LocationPickScreen(MapScreen):
-    """The map, repurposed as a coordinate picker: pan the crosshair, Enter to choose.
+    """The map, used as a coordinate picker: pan the crosshair, and press Enter to select.
 
-    Used by the config editor to set the node's advertised location by *pointing at the
-    map* instead of typing degrees. It is a :class:`MapScreen` with three changes: a
-    crosshair marker rides the view centre (labelled with the live coordinates, so the
-    user always sees exactly what they're about to pick), Enter resolves with the
-    centre's ``(lat, lon)`` instead of framing find matches (find is off here — see
-    :attr:`MapScreen.find_enabled`), and ``Home`` recentres on the *initial* location
-    rather than refitting the node cloud. The surrounding mesh nodes are still drawn, so
-    placing yourself relative to a known repeater is easy. Esc cancels (resolves CANCEL,
-    surfaced as ``None`` by the caller).
+    The config editor and Repeater admin use it to set the advertised location of a node.
+    The user points at the map, and does not type degrees. It is a :class:`MapScreen`
+    with three changes:
+
+    * A crosshair marker stays at the centre of the viewport. Its label shows the live
+      coordinates, so the user always sees exactly what they will select.
+    * Enter resolves with the ``(lat, lon)`` of the centre, and does not fit the viewport
+      to find matches (find is off here, refer to :attr:`MapScreen.find_enabled`).
+    * ``Home`` centres the viewport on the initial location again, and does not fit the
+      viewport to the nodes.
+
+    The mesh nodes around the crosshair are still drawn, so it is easy to put yourself
+    at a position relative to a known repeater. Esc cancels (it resolves CANCEL, which
+    the caller shows as ``None``).
     """
 
     find_enabled = False
 
     @property
     def picocalc_lyra_lane(self):  # type: ignore[override]
-        """The map's lane minus the two verbs a picker has no use for.
+        """The lane of the map, without the two verbs that a picker cannot use.
 
-        ``Frame`` goes because find is off here — nothing can ever be typed to frame, so
-        the slot is *empty*, not dim. ``You`` goes because the whole screen is about
-        choosing where "you" will be: the crosshair at the centre already is that answer,
-        and a chip that jumped to wherever the node currently claims to be would compete
-        with the pick rather than help it. ``Home`` keeps F1, but reframed: here it returns
-        to the view the picker **opened** on, so a pan that went wrong is one key to undo.
+        ``Frame`` goes, because find is off here. The user can never type a query to fit,
+        so the slot is empty, not dim. ``You`` goes, because the full screen is about the
+        selection of where "you" will be. The crosshair at the centre is already that
+        answer. A chip that jumps to the position that the node has now does not help the
+        selection, but competes with it. ``Home`` keeps F1, but with a new function (the
+        chip is ``Start``). Here it returns to the viewport that the picker **opened** on,
+        so one key undoes a pan that went wrong.
         """
         from .tui.fkeys import FPair
 
@@ -1201,14 +1278,15 @@ class LocationPickScreen(MapScreen):
         """Create the picker.
 
         Args:
-            session: The running TUI session (for size + repaint scheduling).
-            markers: Located mesh nodes to draw for context (may be empty).
-            source: The vector-tile source (already resolved/warmed).
-            max_tile_zoom: The source's max zoom, captured off the event loop at open time.
-            initial: The location to open centred on (the node's current position), or
-                ``None`` to frame the mesh instead (falling back to a world view when no
-                nodes are located either).
-            zoom: The zoom to open at when ``initial`` is given.
+            session: The running TUI session (for the size, and to schedule a paint).
+            markers: The located mesh nodes to draw as context (can be empty).
+            source: The vector-tile source (already resolved and warmed).
+            max_tile_zoom: The max zoom of the source, read off the event loop when the
+                picker opens.
+            initial: The location at the centre when the picker opens (the current
+                position of the node), or ``None`` to fit the viewport to the mesh. When
+                no node is located either, the picker shows a viewport of the world.
+            zoom: The zoom when the picker opens, if ``initial`` is given.
         """
         saved = (initial[0], initial[1], zoom) if initial is not None else None
         super().__init__(session, markers, source, max_tile_zoom, saved_view=saved)
@@ -1217,7 +1295,7 @@ class LocationPickScreen(MapScreen):
 
     @property
     def footer_hint(self) -> str:  # type: ignore[override]
-        """Key hints for picking, plus the live tile-loading indicator."""
+        """The key hints for the picker, and the live status of the tile downloads."""
         base = "↑↓←→ pan · ⇧ fine · PgUp/PgDn zoom · Enter set location · Esc cancel"
         if self._pending:
             return f"{base} · [muted]loading {len(self._pending)} tiles…[/muted]"
@@ -1226,25 +1304,26 @@ class LocationPickScreen(MapScreen):
         return base
 
     def _initial_viewport(self, dot_w: int, dot_h: int) -> Viewport:
-        """Open on the initial location, else frame the nodes, else a world view."""
+        """Open on the initial location, else fit the nodes, else show the world."""
         if self._saved_view is None and not self._markers:
-            return Viewport(20.0, 0.0, 2, dot_w, dot_h)  # nothing to frame — the world
+            return Viewport(20.0, 0.0, 2, dot_w, dot_h)  # nothing to fit: the world
         return super()._initial_viewport(dot_w, dot_h)
 
     def render_body(self, width: int) -> list[str]:
-        """Render the map with the crosshair marker pinned to the view centre.
+        """Render the map with the crosshair marker pinned to the centre of the viewport.
 
-        The crosshair is a transient marker appended for just this frame (never stored in
-        :attr:`_markers`), drawn in the "self" style so it reads as *your* position-to-be
-        and labelled with the live coordinates it would commit. The viewport is settled
-        first (:meth:`~MapScreen._ensure_viewport`) so the crosshair rides the centre from
-        the very first frame, and rides the *resized* centre when the window changes.
+        The crosshair is a temporary marker, added for this frame only (never stored in
+        :attr:`_markers`). It is drawn in the "self" style, so it reads as your future
+        position, and its label shows the live coordinates that Enter commits. The
+        viewport is settled first (:meth:`~MapScreen._ensure_viewport`). Thus the
+        crosshair is at the centre from the first frame, and at the resized centre when
+        the window changes.
 
-        Because the marker only exists for the duration of this call, every raster it
-        should appear in has to be requested from inside it — which is why the background
-        draw snapshots the scene rather than reading it back later (see
-        :meth:`~MapScreen._schedule_ground`); otherwise the finished basemap would land
-        over the crosshair and the picker would lose sight of what it is picking.
+        The marker exists only during this call. Thus each raster that must show it must
+        be requested from inside this call. For this reason, the background draw copies
+        the scene, and does not read it again later (refer to
+        :meth:`~MapScreen._schedule_ground`). Without the copy, the finished basemap covers
+        the crosshair, and the picker loses the position that it selects.
         """
         real = self._markers
         vp = self._ensure_viewport(width)
@@ -1261,22 +1340,23 @@ class LocationPickScreen(MapScreen):
             self._markers = real
 
     def _title(self, vp: Viewport) -> str:
-        """A live status title: the coordinates under the crosshair and the scale."""
+        """A live status title: the coordinates under the crosshair, and the scale."""
         base = super()._title(vp)
         scale = base.rsplit("·", 1)[-1].strip()
         return f"Set location · {vp.center_lat:.5f}, {vp.center_lon:.5f} · z{vp.zoom} · {scale}"
 
     def handle(self, action: str, data: str = "") -> None:
-        """Commit the centre on Enter; ``Home`` returns to the initial spot; else map keys."""
+        """Commit the centre on Enter. ``Home`` goes to the initial spot. Others are map keys."""
         if action == "enter":
             vp = self._viewport
             if vp is not None:
                 self.resolve((vp.center_lat, vp.center_lon))
             return
         if action in ("home", "ctrl_home") and self._viewport is not None:
-            # Reset returns to the *starting* view — the initial location when one was
-            # given, else the node frame — rather than refitting a cloud that now includes
-            # nowhere in particular. With neither, fall back to the world view.
+            # The reset returns to the first viewport: the initial location when there is
+            # one, else the fit to the nodes. It does not fit the viewport again to a set
+            # of nodes that now includes no specific place. With neither, use the
+            # viewport of the world.
             vp = self._viewport
             if self._initial is not None:
                 lat, lon = self._initial
@@ -1292,12 +1372,12 @@ class LocationPickScreen(MapScreen):
 
 
 def coords_or_none(lat: object, lon: object) -> tuple[float, float] | None:
-    """A stored coordinate pair as the picker's opening spot, or ``None`` to frame the mesh.
+    """A stored coordinate pair as the first spot of the picker, or ``None`` to fit the mesh.
 
-    Takes whatever a caller holds — floats from the companion, strings from a repeater's
-    CLI, ``None`` where nothing was read — and reads MeshCore's ``0, 0`` "no fix" as no
-    location at all, so a node that never had a position opens on the mesh rather than on
-    a point in the Gulf of Guinea.
+    The function accepts the values that a caller has: floats from the companion, strings
+    from the CLI of a repeater, or ``None`` where nothing was read. It reads the MeshCore
+    ``0, 0`` "no fix" as no location. Thus a node that never had a position opens on the
+    mesh, and not on a point in the Gulf of Guinea.
     """
     try:
         lat_f, lon_f = float(lat), float(lon)  # type: ignore[arg-type]
@@ -1311,24 +1391,27 @@ def coords_or_none(lat: object, lon: object) -> tuple[float, float] | None:
 async def pick_location(
     ctx: AppContext, *, initial: tuple[float, float] | None = None
 ) -> tuple[float, float] | None:
-    """Open the full-screen map as a coordinate picker; return ``(lat, lon)`` or ``None``.
+    """Open the full-screen map as a coordinate picker. Return ``(lat, lon)`` or ``None``.
 
-    Opens on the mesh's located nodes *already in hand* — the session's cached contacts and
-    position, and our own history — and never waits on the radio for them: they are context
-    for the pick, not part of it, and a companion refusing the contacts read (some do, for a
-    stretch) held the picker closed through every retry of it, twenty-odd seconds. Whatever
-    the cache lacked is fetched behind the open map and joins it when the radio answers; the
-    read is never cancelled, so a shared fetch another screen is waiting on survives the
-    picker closing. Then runs a :class:`LocationPickScreen` until the user commits a spot
-    with Enter or backs out with Esc.
+    The picker opens on the located mesh nodes that MeshTerm already has: the cached
+    contacts and position of the session, and our own history. It never waits for the
+    device to send them, because they are context for the selection, not part of it.
+    Before, when a companion refused the contacts read (some do, for a period), the picker
+    stayed closed through each retry of the read, for more than twenty seconds. MeshTerm
+    gets the data that the cache did not have behind the open map, and adds it to the map
+    when the device answers. The read is never cancelled. Thus, when another screen waits
+    for the same shared read, that read continues after the picker closes. Then the
+    function runs a :class:`LocationPickScreen` until the user commits a spot with Enter,
+    or leaves with Esc.
 
     Args:
-        ctx: Shared application context (must be in the interactive menu).
-        initial: The location to open centred on (e.g. the node's current coordinates),
-            or ``None`` to frame the mesh.
+        ctx: The shared application context (must be in the interactive menu).
+        initial: The location at the centre when the picker opens (for example, the
+            current coordinates of the node), or ``None`` to fit the mesh.
 
     Raises:
-        RuntimeError: If called outside the interactive menu (no full-screen session).
+        RuntimeError: If it is called outside the interactive menu (no full-screen
+            session).
     """
     import asyncio
 
@@ -1343,7 +1426,7 @@ async def pick_location(
     in_hand = devstate.peek_contacts() is not None and devstate.peek_self_info() is not None
     try:
         markers = await gather_markers(ctx, wait=False)
-    except Exception:  # noqa: BLE001 - context markers are a nicety, never a requirement
+    except Exception:  # noqa: BLE001 - context markers are useful, but never necessary
         markers = []
     source = basemap_source(ctx)
     max_zoom = await asyncio.to_thread(lambda: source.max_zoom)
@@ -1351,7 +1434,7 @@ async def pick_location(
     showing = True
 
     async def fill_in() -> None:
-        """Add what the cache lacked once the radio answers — or never, at no cost."""
+        """Add what the cache did not have when the device answers (or never, at no cost)."""
         try:
             fuller = await gather_markers(ctx)
         except Exception:  # noqa: BLE001 - the picker already works without them
@@ -1365,16 +1448,16 @@ async def pick_location(
         result = await session.run_screen(screen)
     finally:
         showing = False
-        # Same clean-slate repaint as open_map: the braille may have smeared the terminal.
+        # The same full paint as in open_map: the braille may have smeared the terminal.
         session.request_full_repaint()
     return None if result is CANCEL or result is None else result
 
 
 def basemap_source(ctx: AppContext) -> BasemapSource:
-    """The session's shared vector-tile source (see :attr:`AppContext.basemap_source`).
+    """The shared vector-tile source of the session (refer to :attr:`AppContext.basemap_source`).
 
-    Memoized on the context, so the one-off TileJSON resolve is paid once for the whole
-    session instead of on every map open or Node-detail location preview.
+    The context caches it. Thus MeshTerm resolves the TileJSON one time for the full
+    session, and not each time a map opens or the Node detail shows a location preview.
     """
     return ctx.basemap_source
 
@@ -1387,25 +1470,29 @@ async def open_map(
     find: str | None = None,
     fraction: float = DEFAULT_VIEW_FRACTION,
 ) -> None:
-    """Open the interactive full-screen map over ``markers`` and run until dismissed.
+    """Open the interactive full-screen map over ``markers``, and run until the user leaves.
 
-    Warms the tile source off the event loop (so the first paint doesn't block on the
-    network), then pushes the :class:`MapScreen` and awaits its dismissal.
+    The function warms the tile source off the event loop (thus the first paint does not
+    wait for the network). Then it pushes the :class:`MapScreen` and waits until the user
+    leaves it.
 
     Args:
-        ctx: Shared application context (must be in the interactive menu).
-        markers: The located mesh nodes to plot (non-empty).
-        focus: A ``(lat, lon)`` to open centred on — the node you opened the map from,
-            say — instead of the persisted "where you left the map" view. A focused open
-            is a transient peek: it deliberately wires no ``on_view_change``, so panning
-            around it never overwrites that saved view and the Map tool still reopens
-            where the user last left it.
-        find: A find query to open with — the focused node's name, so it lights among the
-            rest exactly as if the user had typed it. ``None`` opens with the find off.
-        fraction: Fraction of the nodes the default view frames (see :class:`MapScreen`).
+        ctx: The shared application context (must be in the interactive menu).
+        markers: The located mesh nodes to draw (not empty).
+        focus: A ``(lat, lon)`` at the centre when the map opens (for example, the node
+            from which the user opened the map). It replaces the stored viewport ("where
+            you left the map"). A focused map is a temporary look: on purpose, it
+            connects no ``on_view_change``. Thus a pan around it never writes over that
+            saved viewport, and the Map tool still opens where the user last left it.
+        find: A find query for the map to open with: the name of the focused node, so
+            that the node is bright among the others, the same as if the user typed the
+            name. ``None`` opens with the find off.
+        fraction: The fraction of the nodes that the default viewport fits (refer to
+            :class:`MapScreen`).
 
     Raises:
-        RuntimeError: If called outside the interactive menu (no full-screen session).
+        RuntimeError: If it is called outside the interactive menu (no full-screen
+            session).
     """
     from .surface import TuiUi
 
@@ -1413,12 +1500,13 @@ async def open_map(
         raise RuntimeError("the interactive map is only available in the menu")
     session = ctx.ui.session
     source = basemap_source(ctx)
-    # Resolve the tile template/zoom in a worker thread so the UI thread never blocks.
+    # Resolve the tile template and zoom in a worker thread, so the UI thread never blocks.
     max_zoom = await asyncio.to_thread(lambda: source.max_zoom)
     if focus is not None:
-        # Open on the focused node — matching the detail preview's centre and zoom
-        # (``min(13, max_zoom)``) so the full map is visibly the same place, larger. No
-        # ``on_view_change``: a focused peek must leave the persisted global view alone.
+        # Open on the focused node, with the same centre and zoom as the detail preview
+        # (``min(13, max_zoom)``). Thus the full map is clearly the same place, larger.
+        # No ``on_view_change``: a focused look must not change the stored global
+        # viewport.
         lat, lon = focus
         screen = MapScreen(
             session,
@@ -1442,7 +1530,8 @@ async def open_map(
     try:
         await session.run_screen(screen)
     finally:
-        # The map's braille may have smeared the terminal via double-width fallback glyphs
-        # that prompt_toolkit's diff can't see; force one full repaint so the menu drawn
-        # underneath starts from a clean slate rather than inheriting that garbage.
+        # The braille of the map may have smeared the terminal through double-width
+        # fallback glyphs that the diff of prompt_toolkit cannot see. Force one full
+        # paint, so that the menu drawn under the map starts from a clean terminal and
+        # does not keep that garbage.
         session.request_full_repaint()

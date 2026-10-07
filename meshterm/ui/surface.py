@@ -1,19 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The UI surface: one small API tools use for input and output, in either front-end.
+"""The output surface: one small API that tools use for input and output, in either front end.
 
-Tools never touch ``questionary`` or a raw console anymore — they talk to ``ctx.ui``. Two
-implementations back it:
+Tools do not use ``questionary`` or a raw console. They talk to ``ctx.ui``. Two
+implementations are behind it:
 
-* :class:`PlainUi` (scripted CLI): prints immediately and uses a Rich progress bar, so CLI
-  behavior is byte-for-byte what it was before the TUI existed.
-* :class:`TuiUi` (interactive menu): collects a tool's output and presents it in a bounded,
-  scrollable result window — or, when the whole result is just a line or two of text
-  ("✓ flood advertisement sent"), as a small centered popup with an OK button instead of
-  a full window (see :func:`_collapse_to_message`) — and routes every prompt/progress
-  through the full-screen :class:`~meshterm.ui.tui.session.TuiSession`.
+* :class:`PlainUi` (the scripted CLI) prints at once and uses a Rich progress bar. Thus the
+  behaviour of the CLI is exactly the same, byte for byte, as before the TUI existed.
+* :class:`TuiUi` (the interactive menu) collects the output of a tool and presents it in a
+  scrollable result screen of limited height. If the whole result is only a line or two
+  of text ("✓ flood advertisement sent"), it presents the result in a small centred
+  dialog with an OK button and not on a full result screen (refer to
+  :func:`_collapse_to_message`). It sends each prompt and each progress display through
+  the full-screen :class:`~meshterm.ui.tui.session.TuiSession`.
 
-The interactive prompt methods are only ever reached from a tool's ``prompt_params`` (menu
-only), so :class:`PlainUi` leaves them unsupported.
+Only the ``prompt_params`` of a tool (menu only) can reach the interactive prompt methods,
+so :class:`PlainUi` does not support them.
 """
 
 from __future__ import annotations
@@ -27,34 +28,37 @@ from rich.text import Text
 
 from .tui.session import TuiSession
 
-#: A validator returns ``True`` when input is acceptable, or an error message to show.
+#: A validator returns ``True`` if the input is acceptable, or an error message to show.
 Validator = Callable[[str], "bool | str"]
 
-#: Buffered output no taller than this many lines qualifies for the message dialog —
-#: the OK popup :meth:`TuiUi.present` shows instead of a full result window. Kept small:
-#: a dialog is an acknowledgement, not a reading surface. It counts the lines the tool
-#: *emitted*, before any wrapping: one sentence is one outcome however long it runs.
+#: Buffered output of this number of lines or less can use the message dialog. This is the
+#: OK dialog that :meth:`TuiUi.present` shows instead of a full result screen. The number
+#: is small, because a dialog is an acknowledgement and not a place to read. The count is
+#: the lines that the tool *emitted*, before any wrapping. One sentence is one outcome,
+#: and its length does not change that.
 _DIALOG_MAX_LINES = 3
 
-#: ... and no taller than this once wrapped to the box's width, which is what the box
-#: actually has to draw. The two counts differ only for a long line, and that is the case
-#: worth bounding: a three-line outcome stays a popup, while a note long enough to be a
-#: page of reading opens the scrollable window it belongs in.
+#: ... and this number of lines or less after the text wraps to the width of the box. This
+#: is what the box must draw. The two counts are different only for a long line, and this
+#: is the case that needs a limit. An outcome of three lines stays in a dialog. A note that
+#: is long enough to be a page of text opens the scrollable result screen, where it belongs.
 _DIALOG_MAX_WRAPPED = 8
 
-#: What :class:`~meshterm.ui.tui.prompt.ButtonDialog` spends on chrome around its widest
-#: line — its own ``dialog_width`` margin (panel padding, border, breathing room). Taken
-#: off the platform's readable width, it leaves the cells a message may actually use.
+#: The number of cells that :class:`~meshterm.ui.tui.prompt.ButtonDialog` uses for the
+#: chrome around its widest line: its own ``dialog_width`` margin (the padding of the
+#: panel, the border, and some space). If you subtract it from the readable width of the
+#: platform, you get the number of cells that a message can use.
 _DIALOG_CHROME_CELLS = 12
 
 
 def _dialog_wrap_cells() -> int:
-    """How wide a line may be inside the message popup, on the active platform.
+    """The maximum width of a line in the message dialog, on the active platform.
 
-    A dialog sizes to its widest line and the compositor caps that to the terminal, so a
-    line long enough to need the cap is a line clipped on a readable-width screen. Wrapping
-    to what fits *there* is what lets a long outcome — the sentence explaining why a read
-    failed — stay a popup at all rather than commandeering the whole frame.
+    A dialog has the width of its widest line, and the compositor limits that width to the
+    terminal. A line that is long enough to need the limit is clipped on a screen of the
+    readable width. A long outcome, for example the sentence that explains why a read
+    failed, can stay in a dialog only if the code wraps it to the width that fits there.
+    If it does not, the outcome takes the whole frame.
     """
     from ..platforms import get_platform
 
@@ -63,11 +67,12 @@ def _dialog_wrap_cells() -> int:
 
 
 def _wrapped(lines: list[Text], width: int) -> list[Text]:
-    """Re-flow ``lines`` to ``width`` cells, keeping every span they carry.
+    """Wrap ``lines`` again to ``width`` cells, and keep each span that they have.
 
-    A blank line wraps to nothing, and a blank line is content in an outcome block, so it
-    is kept as itself. The wrap leaves the break's trailing space on the line it ended,
-    which the dialog would then centre the line around — so each one is trimmed.
+    A blank line wraps to nothing, but a blank line is content in an outcome block, so the
+    function keeps it as it is. The wrap leaves the trailing space of the break on the line
+    that it ended. If the line keeps that space, the dialog centres the line with the space.
+    Thus the function trims each line.
     """
     from .tui.render import _console
 
@@ -76,40 +81,42 @@ def _wrapped(lines: list[Text], width: int) -> list[Text]:
     for line in lines:
         parts = list(line.wrap(console, width)) or [Text("")]
         for part in parts:
-            part.rstrip()  # in place; Rich's rstrip returns nothing
+            part.rstrip()  # in place. Rich's rstrip returns nothing
         out.extend(parts)
     return out
 
 
 class _NullBusy:
-    """The scripted surface's stand-in for a busy card: a caption that goes nowhere."""
+    """The substitute of the scripted CLI for a busy card: a caption that goes nowhere."""
 
     def __init__(self) -> None:
-        """Start with an empty caption; assigning to it is the whole of the contract."""
+        """Start with an empty caption. The only contract is that a caller can assign to it."""
         self.message = ""
 
 
 def _collapse_to_message(buffered: list[RenderableType]) -> Text | None:
-    """Collapse small, text-only buffered output into one wrapped dialog message.
+    """Collapse a small buffered output of only text into one wrapped dialog message.
 
-    This is the gate for :meth:`TuiUi.present`'s popup upgrade: output qualifies only
-    when everything buffered is plain note text (:class:`Text` — a table or panel from
-    ``show()`` disqualifies the lot) totalling at most :data:`_DIALOG_MAX_LINES` emitted
-    lines, and at most :data:`_DIALOG_MAX_WRAPPED` once re-flowed to the box's width.
-    Styling (the ``[ok]``/``[warn]`` markup on outcome notes) is preserved in the joined
-    message, which is what lets the dialog frame take its tone from it.
+    This is the gate for the upgrade to a dialog in :meth:`TuiUi.present`. The output
+    qualifies only if all the buffered items are plain note text (:class:`Text`). A table
+    or a panel from ``show()`` makes the whole output not qualify. The total must be at
+    most :data:`_DIALOG_MAX_LINES` emitted lines, and at most :data:`_DIALOG_MAX_WRAPPED`
+    lines after the text is wrapped again to the width of the box. The function keeps the
+    styling (the ``[ok]`` and ``[warn]`` markup on outcome notes) in the joined message.
+    Thus the frame of the dialog can take its tone from the styling.
 
-    The width is a **wrap**, not a rejection. A one-sentence outcome is an outcome to
-    acknowledge however long it runs, and sending it to the scrollable window for being
-    140 cells wide made the least interesting results the ones that took over the screen —
-    a tool that failed before it produced anything most of all.
+    The width causes a **wrap**, not a rejection. An outcome of one sentence is an outcome
+    to acknowledge, and its length does not change that. The code once sent such an outcome
+    to the scrollable result screen because it was 140 cells wide. Then the least interesting
+    results took over the screen. The worst case was a tool that failed before it made any
+    output.
 
     Args:
-        buffered: The renderables collected since the last present.
+        buffered: The renderables that were collected since the last present.
 
     Returns:
-        The lines joined into one :class:`Text`, or ``None`` when the output belongs in
-        the scrollable result window instead.
+        The lines joined into one :class:`Text`, or ``None`` if the output belongs in the
+        scrollable result screen.
     """
     if not buffered or not all(isinstance(item, Text) for item in buffered):
         return None
@@ -125,68 +132,71 @@ def _collapse_to_message(buffered: list[RenderableType]) -> Text | None:
 
 
 class Ui:
-    """Abstract UI surface. See :class:`PlainUi` and :class:`TuiUi` for the two backends."""
+    """Abstract output surface. :class:`PlainUi` and :class:`TuiUi` are the two backends."""
 
     def show(self, *renderables: RenderableType) -> None:
-        """Display one or more Rich renderables (tables, panels, text)."""
+        """Show one or more Rich renderables (tables, panels, text)."""
         raise NotImplementedError
 
     def note(self, markup: str) -> None:
-        """Display a short line of Rich-markup text."""
+        """Show a short line of text in Rich markup."""
         raise NotImplementedError
 
     def ack(self, markup: str) -> None:
-        """Acknowledge that an action was carried out — in the menu only.
+        """Acknowledge that an action was done. In the menu only.
 
-        The distinction from :meth:`note` is who the line is for. A note is *output*: the
-        answer the caller asked for. An acknowledgement is reassurance that a thing
-        happened — "✓ device clock set", "✓ channel 2 = #general" — which a person watching
-        a screen needs and a script does not, because the exit status already said it and
-        the line would only be something to filter out of the real output.
+        The difference from :meth:`note` is the person for whom the line is. A note is
+        *output*: the answer that the caller asked for. An acknowledgement tells the user
+        that something occurred, for example "✓ device clock set" or "✓ channel 2 =
+        #general". A person who looks at a screen needs it. A script does not need it,
+        because the exit status already says it. For a script the line is only something to
+        remove from the real output.
 
-        Both surfaces show them; what differs is *where*. The menu prints them in its
-        result window. The CLI prints them on **stderr** (see :meth:`PlainUi.ack`), which
-        keeps the promise the dropping was made to keep — ``meshterm contacts > f`` still
-        catches only the answer — while giving the person at the prompt back the ✓ and the
-        count they were losing to a rule written for a redirect they were not doing.
+        Both faces show acknowledgements, but in different places. The menu prints them in
+        its result screen. The CLI prints them on **stderr** (refer to
+        :meth:`PlainUi.ack`). Thus the CLI keeps the promise that was the reason for the
+        removal: ``meshterm contacts > f`` still catches only the answer. Also, the person
+        at the prompt gets back the ✓ and the count that a rule for a redirect took away,
+        and that person did not use a redirect.
         """
         raise NotImplementedError
 
     async def view(
         self, renderable: RenderableType, *, title: str = "", footer_hint: str = ""
     ) -> None:
-        """Show a renderable immediately in a dismissable window (prints in CLI mode)."""
+        """Show a renderable at once on a screen that the user can close (CLI mode prints it)."""
         raise NotImplementedError
 
     async def present(self, *, title: str = "") -> None:
-        """Flush any buffered output to the user (a no-op when output is immediate)."""
+        """Flush all buffered output to the user. It does nothing if the output is immediate."""
 
     def discard(self) -> None:
-        """Drop any buffered-but-unshown output (a no-op when output is immediate)."""
+        """Remove buffered output that was not shown. It does nothing if output is immediate."""
 
     def progress(self, title: str = "Working"):  # noqa: ANN201 - context manager, varies by backend
-        """Return a progress context manager exposing ``add_task``/``advance``/``update``."""
+        """Return a progress context manager with ``add_task``, ``advance``, and ``update``."""
         raise NotImplementedError
 
     def busy_overlay(self, message: str = "", *, title: str = ""):  # noqa: ANN201 - async CM, varies by backend
         """Return an async context manager that floats a "working" skeleton while its block runs.
 
-        In the interactive menu this shows the top-most skeleton card (see
-        :meth:`~meshterm.ui.tui.session.TuiSession.busy_overlay`), used to cover the lag of a
-        Bluetooth operation that would otherwise leave the screen blank. In scripted CLI mode
-        it does nothing (there is no full-screen surface to float over).
+        In the interactive menu this shows the skeleton card at the top (refer to
+        :meth:`~meshterm.ui.tui.session.TuiSession.busy_overlay`). It covers the delay of a
+        Bluetooth operation. Without it, the screen would be blank. In the scripted CLI it
+        does nothing, because there is no full-screen display to float over.
         """
         raise NotImplementedError
 
     def busy_dialog(self, message: str = "", *, title: str = ""):  # noqa: ANN201 - async CM, varies by backend
         """Return an async context manager that floats a **modal** busy card over a screen.
 
-        The counterpart to :meth:`busy_overlay`, for slow work a *screen* starts rather than
-        work that happens in the gap between screens. The overlay is not a screen at all: it
-        draws only on an empty stack and it takes no keys, so a hub that stays pushed while
-        it works gets neither the card nor the protection. This one is pushed and modal — see
-        :meth:`~meshterm.ui.tui.session.TuiSession.busy_dialog` for what that buys. In
-        scripted CLI mode it does nothing, as the overlay does.
+        It is the counterpart of :meth:`busy_overlay`. Use it for slow work that a *screen*
+        starts, and use the overlay for work that occurs in the gap between screens. The
+        overlay is not a screen. It draws only on an empty stack, and it takes no keys. Thus
+        a hub that stays pushed while it works gets no card and no protection. The busy
+        dialog is pushed and modal. Refer to
+        :meth:`~meshterm.ui.tui.session.TuiSession.busy_dialog` for the result of that. In
+        the scripted CLI it does nothing, the same as the overlay.
         """
         raise NotImplementedError
 
@@ -201,13 +211,14 @@ class Ui:
         delete_hint: str = "",
         floating: bool = False,
     ) -> Any:
-        """Prompt the user to choose one item; return its value or ``None`` if cancelled.
+        """Ask the user to select one item. Return its value, or ``None`` if the user cancels.
 
-        ``prompt`` draws an instruction inside the popup, above the list. Pass
-        ``filterable=False`` for a short, fixed list so a stray key can't narrow (and
-        resize) it. ``delete_hint`` (with rows marked deletable) enables the Delete
-        key's remove flow, and ``floating`` keeps a lead-in question drawn as a box even
-        with nothing under it — see :meth:`~meshterm.ui.tui.session.TuiSession.select`.
+        ``prompt`` draws an instruction in the dialog, above the list. For a short, fixed
+        list, pass ``filterable=False``. Then a key press by mistake cannot make the list
+        narrower (and change its size). ``delete_hint`` (with rows marked as deletable)
+        turns on the remove flow of the Delete key. ``floating`` keeps a lead-in question
+        drawn as a box, also when there is nothing under it. Refer to
+        :meth:`~meshterm.ui.tui.session.TuiSession.select`.
         """
         raise NotImplementedError
 
@@ -225,16 +236,16 @@ class Ui:
         live: Callable[[Callable[[list], None]], Awaitable[None]] | None = None,
         hscroll: bool | None = None,
     ) -> Any:
-        """Choose one item on a chromeless startup splash; ``None`` if skipped.
+        """Select one item on a startup splash that has no chrome. Return ``None`` if skipped.
 
-        ``live`` is work to run while the splash is up, handed a ``redraw(items)`` that
-        swaps the rows under the reader and repaints -- the device picker's rescan. It is
-        cancelled when the splash resolves.
+        ``live`` is work to run while the splash is up. It gets a ``redraw(items)`` function
+        that replaces the rows under the user and paints again. The rescan of the device
+        picker is an example. The code cancels the work when the splash resolves.
 
-        ``keys`` declares bare-key shortcuts the splash answers, resolving with a
-        :class:`~meshterm.ui.tui.select.KeyRequest` (the picker's hide/show-all pair), and
-        ``key_hint`` names them per highlighted row so the footer only advertises a key
-        where it would act. ``footer_hint`` replaces the base sentence.
+        ``keys`` declares the bare-key shortcuts that the splash answers. It resolves with a
+        :class:`~meshterm.ui.tui.select.KeyRequest` (the hide and show-all pair of the
+        picker). ``key_hint`` names them for each highlighted row, so the footer advertises
+        a key only where the key acts. ``footer_hint`` replaces the base sentence.
         """
         raise NotImplementedError
 
@@ -249,10 +260,12 @@ class Ui:
         backdrop_items: list | None = None,
         backdrop_default: Any = None,
     ) -> bool:
-        """Confirm a destructive action on the startup splash; ``True`` only if committed.
+        """Confirm a destructive action on the startup splash.
 
-        ``backdrop_items`` (the picker's rows) floats the confirm over a redrawn device list;
-        ``backdrop_default`` pre-highlights the row it acts on.
+        Return ``True`` only if the user commits.
+
+        ``backdrop_items`` (the rows of the picker) floats the confirm over a device list
+        that is drawn again. ``backdrop_default`` highlights the row that the action is for.
         """
         raise NotImplementedError
 
@@ -264,7 +277,7 @@ class Ui:
         banner: Any = None,
         footnote: str | None = None,
     ) -> None:
-        """Show a message on a chromeless startup splash until the user dismisses it."""
+        """Show a message on a startup splash that has no chrome, until the user closes it."""
         raise NotImplementedError
 
     async def busy_startup(
@@ -276,7 +289,7 @@ class Ui:
         banner: Any = None,
         footnote: str | None = None,
     ) -> Any:
-        """Await ``coro`` while showing a spinner on the startup splash; return its result."""
+        """Await ``coro`` while the startup splash shows a spinner. Return its result."""
         raise NotImplementedError
 
     async def prompt_pin_startup(
@@ -288,7 +301,7 @@ class Ui:
         banner: Any = None,
         footnote: str | None = None,
     ) -> str | None:
-        """Ask for a Bluetooth companion's pairing PIN on the splash; ``None`` if cancelled."""
+        """Ask for the pairing PIN of a Bluetooth companion on the splash. ``None`` if cancelled."""
         raise NotImplementedError
 
     async def prompt_text_startup(
@@ -302,11 +315,15 @@ class Ui:
         banner: Any = None,
         footnote: str | None = None,
     ) -> str | None:
-        """Ask for a line of text on a chromeless startup splash; ``None`` if cancelled."""
+        """Ask for a line of text on a startup splash that has no chrome. ``None`` if cancelled."""
         raise NotImplementedError
 
     async def reorder(self, title: str, labels: list[str]) -> list[int]:
-        """Let the user rearrange rows with the arrows; return the new order of row indices."""
+        """Let the user put the rows in a new order with the arrows.
+
+        Returns:
+            The new order of the row indices.
+        """
         raise NotImplementedError
 
     async def text(
@@ -320,18 +337,19 @@ class Ui:
         password: bool = False,
         floating: bool = False,
     ) -> str | None:
-        """Prompt for a line of text; return it or ``None`` if cancelled.
+        """Ask for a line of text. Return it, or ``None`` if the user cancels.
 
-        Keep ``title`` short (it heads the popup's border) and put the question/instruction
-        in ``prompt`` (drawn above the field), so a text popup reads like the button dialogs.
-        ``floating`` forces the prompt to draw as a centered popup even with nothing beneath
-        it (a mid-flow modal such as a remote-admin password) instead of filling the frame;
-        surfaces without a screen stack ignore it.
+        Keep ``title`` short, because it is in the border of the dialog. Put the question or
+        the instruction in ``prompt``, which is drawn above the field. Thus a text dialog
+        looks like the button dialogs. ``floating`` makes the prompt draw as a centred
+        dialog also when there is nothing under it (a modal in the middle of a flow, such as
+        a remote-admin password). Without it, the prompt fills the frame. A backend that has
+        no stack of screens ignores it.
         """
         raise NotImplementedError
 
     async def confirm(self, title: str, *, default: bool = True) -> bool | None:
-        """Prompt yes/no; return the answer or ``None`` if cancelled."""
+        """Ask a yes/no question. Return the answer, or ``None`` if the user cancels."""
         raise NotImplementedError
 
     async def dialog(
@@ -345,24 +363,25 @@ class Ui:
         danger: bool = False,
         destructive: bool = False,
     ) -> Any:
-        """Show a centered button dialog; return the chosen value or ``None`` on Esc.
+        """Show a centred button dialog. Return the selected value, or ``None`` on Esc.
 
-        The general choose-one popup (a prompt above a row of buttons). Two escalating
-        cautionary tiers theme the prompt and border: ``danger`` (amber) for a disruptive
-        choice — discarding edits, a reboot — and ``destructive`` (the reserved error red)
-        for irreversible data loss, so a delete confirm reads red like its typed-confirm
-        sibling. Buttons follow the platform-dialog convention: the safe way out sits on
-        the left and the committing action on the right, which is also the sensible
-        ``default`` so Enter commits it while Esc always backs out.
+        This is the general dialog to select one option (a prompt above a row of buttons).
+        There are two levels of caution, and they colour the prompt and the border.
+        ``danger`` (amber) is for a disruptive choice, such as to discard edits or to
+        reboot. ``destructive`` (the reserved error red) is for a loss of data that cannot
+        be undone. Thus a delete confirm is red, the same as its typed-confirm sibling.
+        The buttons follow the convention of platform dialogs. The safe way out is on the
+        left, and the committing action is on the right. The committing action is also the
+        correct ``default``. Thus Enter commits it, and Esc always backs out.
 
-        A pre-styled :class:`~rich.text.Text` prompt is drawn as it is, so it can name a
-        node in its own colours; the tier then themes only the border, and the prompt's
-        prose carries the tier's colour itself.
+        The code draws a :class:`~rich.text.Text` prompt that has a style as it is, so the
+        prompt can name a node in its own colours. The level then colours only the border,
+        and the prose of the prompt has the colour of the level itself.
         """
         raise NotImplementedError
 
     async def typed_confirm(self, warning: str, word: str, *, title: str = "Are you sure?") -> bool:
-        """Gate a destructive action behind typing ``word``; return whether it was typed."""
+        """Make the user type ``word`` before a destructive action. Return if it was typed."""
         raise NotImplementedError
 
     async def autocomplete(
@@ -374,34 +393,39 @@ class Ui:
         default: str = "",
         validate: Validator | None = None,
     ) -> str | None:
-        """Prompt for free text with suggestions; return it or ``None`` if cancelled."""
+        """Ask for free text with suggestions. Return it, or ``None`` if the user cancels."""
         raise NotImplementedError
 
     async def path(self, title: str, *, prompt: str = "", default: str = "") -> str | None:
-        """Prompt for a filesystem path; return it or ``None`` if cancelled."""
+        """Ask for a filesystem path. Return it, or ``None`` if the user cancels."""
         raise NotImplementedError
 
 
 class PlainUi(Ui):
-    """CLI surface: print straight to the scripted console; interactive prompts are unsupported.
+    """The CLI backend. It prints directly to the scripted console and has no prompts.
 
-    The console it prints on emits no colour, wraps nothing, and trims trailing whitespace
-    (:func:`meshterm.ui.script.console`), and everything a tool hands over passes through
-    :func:`~meshterm.ui.script.flatten` on the way out, so no border, box or hoisted title
-    reaches stdout. That fold is the net, not the design: a surface a script is meant to
-    read is *written* in the CLI's own vocabulary — see :mod:`meshterm.ui.script`.
+    The backend does not support interactive prompts. The console that it prints on emits
+    no colour, wraps nothing, and trims trailing whitespace
+    (:func:`meshterm.ui.script.console`). Everything that a tool gives to it passes through
+    :func:`~meshterm.ui.script.flatten` on the way out. Thus no border, no box, and no
+    hoisted title reaches stdout. That fold is a safety net and not the design. The output
+    that a script must read is *written* in the own vocabulary of the CLI (refer to
+    :mod:`meshterm.ui.script`).
     """
 
     def __init__(self, console: Console) -> None:
-        """Bind the surface to a Rich console.
+        """Connect the backend to a Rich console.
 
         Args:
-            console: The console tool output is printed to.
+            console: The console to which the output of a tool is printed.
         """
         self.console = console
 
     def show(self, *renderables: RenderableType) -> None:
-        """Print each renderable immediately, unframed (see :func:`~meshterm.ui.script.flatten`)."""
+        """Print each renderable at once, with no frame.
+
+        Refer to :func:`~meshterm.ui.script.flatten`.
+        """
         from . import script
 
         for renderable in renderables:
@@ -409,18 +433,18 @@ class PlainUi(Ui):
                 self.console.print(item)
 
     def note(self, markup: str) -> None:
-        """Print a markup line to the console immediately, as plain text.
+        """Print a markup line to the console at once, as plain text.
 
-        The parameter is markup — that is the shared surface's contract, and forty-odd
-        callers write it — but the scripted console does not interpret markup: a node
-        broadcasts its own name, and Rich would read ``[...]`` in one as a style tag. So
-        the tags are resolved *here* rather than by the console, and what reaches stdout
-        is the text they were wrapping. Printing them raw put ``[muted]`` and ``[/muted]``
-        around the private key that ``config export-key > key.hex`` is supposed to be the
-        whole content of.
+        The parameter is markup. This is the contract of the shared ``Ui`` class, and more
+        than forty callers write markup. But the scripted console does not interpret
+        markup. A node broadcasts its own name, and Rich would read a ``[...]`` in a name as
+        a style tag. Thus this method resolves the tags and the console does not, and the
+        text that the tags wrapped is what reaches stdout. When the method printed the tags
+        as they were, ``[muted]`` and ``[/muted]`` were around the private key. But
+        ``config export-key > key.hex`` must have only the key as its content.
 
-        Malformed markup — which is what a *name* holding a bracket looks like — is not an
-        error to report but a string to print, so it falls through verbatim.
+        Malformed markup is what a *name* that has a bracket looks like. It is not an error
+        to report but a string to print, so the method prints it as it is.
         """
         from rich.errors import MarkupError
         from rich.markup import render
@@ -431,17 +455,18 @@ class PlainUi(Ui):
             self.console.print(markup)
 
     def ack(self, markup: str) -> None:
-        """Print it on stderr, where everything *about* the run goes.
+        """Print the acknowledgement on stderr, where all output *about* the run goes.
 
-        These used to be dropped, and the reason was sound as far as it went: an
-        acknowledgement is not the answer, and a caller redirecting stdout must catch only
-        the answer. But stdout is not the only stream — putting them on stderr honours that
-        rule exactly, and a person watching a five-minute ``config restore`` gets the
-        setting-by-setting ✓ they had no way to see.
+        The CLI once removed these lines. The reason was correct, but only to a point. An
+        acknowledgement is not the answer, and a caller that redirects stdout must catch
+        only the answer. But stdout is not the only stream. If the CLI prints them on
+        stderr, it follows that rule exactly. Also, a person who watches a ``config
+        restore`` of five minutes gets the ✓ for each setting, which the person could not
+        see before.
 
-        The markup is resolved here rather than by the console, as :meth:`note` explains,
-        and a *name* holding a square bracket is not an error to report but a string to
-        print — so malformed markup falls through verbatim.
+        This method resolves the markup and the console does not, as :meth:`note` explains.
+        A *name* that has a square bracket is not an error to report but a string to print.
+        Thus malformed markup is printed as it is.
         """
         from rich.errors import MarkupError
         from rich.markup import render
@@ -457,19 +482,20 @@ class PlainUi(Ui):
     async def view(
         self, renderable: RenderableType, *, title: str = "", footer_hint: str = ""
     ) -> None:
-        """Print the renderable immediately, unframed (there is no windowing in CLI mode)."""
+        """Print the renderable at once, with no frame. CLI mode has no screens."""
         from . import script
 
         for item in script.flatten(renderable):
             self.console.print(item)
 
     def progress(self, title: str = "Working"):  # noqa: ANN201
-        """Return a progress bar drawn on stderr, so it never lands in piped output.
+        """Return a progress bar that is drawn on stderr, so it is never in piped output.
 
-        A progress bar is a courtesy to someone watching a long command run, and noise in
-        anything reading the command's output. stderr is where it belongs: visible in a
-        terminal, absent from ``meshterm contacts > contacts.txt``. Rich also draws
-        nothing at all when stderr is not a terminal, so a fully redirected run is silent.
+        A progress bar helps a person who watches a long command run. For a program that
+        reads the output of the command, it is noise. stderr is the correct place for it.
+        It is visible in a terminal, and it is not in ``meshterm contacts > contacts.txt``.
+        Also, Rich draws nothing when stderr is not a terminal, so a run with all streams
+        redirected is silent.
         """
         from . import script
         from .widgets import make_progress
@@ -481,20 +507,21 @@ class PlainUi(Ui):
 
     @asynccontextmanager
     async def busy_overlay(self, message: str = "", *, title: str = "") -> AsyncIterator[None]:
-        """Do nothing: the scripted CLI has no full-screen surface to float a skeleton over."""
+        """Do nothing. The scripted CLI has no full-screen display to float a skeleton over."""
         yield
 
     @asynccontextmanager
     async def busy_dialog(self, message: str = "", *, title: str = "") -> AsyncIterator[_NullBusy]:
-        """Do nothing: there is no screen to interrupt and no keyboard to take.
+        """Do nothing. There is no screen to interrupt and no keyboard to take.
 
-        Still yields something with a settable caption, because a caller that retitles the
-        card mid-batch must not have to ask which surface it is running on.
+        It still yields an object with a caption that a caller can set. A caller that
+        changes the title of the card in the middle of a batch must not have to ask which
+        backend it runs on.
         """
         yield _NullBusy()
 
     def _no_prompt(self) -> RuntimeError:
-        """Build the error raised if a rich prompt is reached on the non-interactive path."""
+        """Build the error that is raised if a prompt is reached on the non-interactive path."""
         return RuntimeError("interactive prompts are only available in the menu")
 
     async def select(
@@ -539,7 +566,7 @@ class PlainUi(Ui):
         backdrop_items: list | None = None,
         backdrop_default: Any = None,
     ) -> bool:
-        """Unsupported in scripted CLI mode — the picker splash is interactive-only."""
+        """Not supported in scripted CLI mode. The picker splash is only for the menu."""
         raise self._no_prompt()
 
     async def notify_startup(
@@ -562,7 +589,7 @@ class PlainUi(Ui):
         banner: Any = None,
         footnote: str | None = None,
     ) -> Any:
-        """No splash in scripted CLI mode; just await the task and return its result."""
+        """There is no splash in scripted CLI mode. Await the task and return its result."""
         return await coro
 
     async def prompt_pin_startup(
@@ -574,10 +601,11 @@ class PlainUi(Ui):
         banner: Any = None,
         footnote: str | None = None,
     ) -> str | None:
-        """Unsupported in scripted CLI mode — a PIN must be supplied non-interactively.
+        """Not supported in scripted CLI mode. The caller must give a PIN with no prompt.
 
-        The scripted path can't pop a dialog, so a PIN-protected device is handled by the
-        clean ``DeviceAuthenticationError`` message (pass ``--ble-pin``) rather than a prompt.
+        The scripted path cannot show a dialog. Thus a device that has a PIN gets the clear
+        ``DeviceAuthenticationError`` message (the user passes ``--ble-pin``) and not a
+        prompt.
         """
         raise self._no_prompt()
 
@@ -592,7 +620,7 @@ class PlainUi(Ui):
         banner: Any = None,
         footnote: str | None = None,
     ) -> str | None:
-        """Unsupported in scripted CLI mode — a network endpoint comes from ``--tcp`` instead."""
+        """Not supported in scripted CLI mode. A network endpoint comes from ``--tcp``."""
         raise self._no_prompt()
 
     async def reorder(self, title: str, labels: list[str]) -> list[int]:
@@ -610,16 +638,16 @@ class PlainUi(Ui):
         password: bool = False,
         floating: bool = False,
     ) -> str | None:
-        """Prompt on the terminal (line editor / getpass), re-asking until valid.
+        """Ask on the terminal (line editor or getpass). Ask again until the input is valid.
 
-        A few tools (e.g. a remote-admin password) can legitimately prompt from a scripted
-        run when no flag was supplied, so this stays functional on the CLI. An in-body
-        ``prompt`` (used by the interactive popups) is printed once as a lead-in line here.
-        ``floating`` is a full-screen-popup nicety with no meaning on the plain terminal, so
-        it is accepted and ignored.
+        A few tools (for example, a remote-admin password) can correctly ask a question in a
+        scripted run when the user did not give a flag. Thus this method works on the CLI.
+        The method prints the in-body ``prompt`` (which the interactive dialogs use) one time
+        as a lead-in line. ``floating`` is an extra for a full-screen dialog, and it has no
+        meaning on the plain terminal. The method accepts it and ignores it.
 
         Returns:
-            The entered string, or ``None`` on EOF / interrupt.
+            The string that the user entered, or ``None`` on EOF or an interrupt.
         """
         import getpass
 
@@ -659,7 +687,7 @@ class PlainUi(Ui):
         raise self._no_prompt()
 
     async def typed_confirm(self, warning: str, word: str, *, title: str = "Are you sure?") -> bool:
-        """Unsupported in scripted CLI mode (destructive CLI commands gate on ``--yes``)."""
+        """Not supported in scripted CLI mode. A destructive CLI command needs ``--yes``."""
         raise self._no_prompt()
 
     async def autocomplete(
@@ -680,13 +708,13 @@ class PlainUi(Ui):
 
 
 class TuiUi(Ui):
-    """Interactive surface: buffer output for a result window; route prompts to the session."""
+    """The menu backend. It buffers output for a result screen and sends prompts to the session."""
 
     def __init__(self, session: TuiSession) -> None:
-        """Bind the surface to a running session.
+        """Connect the backend to a running session.
 
         Args:
-            session: The full-screen session that renders prompts and windows.
+            session: The full-screen session that renders the prompts and the screens.
         """
         self.session = session
         self._buffer: list[RenderableType] = []
@@ -694,30 +722,30 @@ class TuiUi(Ui):
     # --- output --------------------------------------------------------------
 
     def show(self, *renderables: RenderableType) -> None:
-        """Collect renderables for the next result window."""
+        """Collect renderables for the next result screen."""
         self._buffer.extend(renderables)
 
     def note(self, markup: str) -> None:
-        """Collect a markup line for the next result window."""
+        """Collect a markup line for the next result screen."""
         self._buffer.append(Text.from_markup(markup))
 
     def ack(self, markup: str) -> None:
-        """Collect an acknowledgement — on this surface, exactly a note."""
+        """Collect an acknowledgement. In the menu, it is the same as a note."""
         self.note(markup)
 
     async def present(self, *, title: str = "") -> None:
-        """Show everything buffered since the last present; window or popup to fit.
+        """Show all output that was buffered since the last present, on a screen or in a dialog.
 
-        A short, text-only outcome (a line or two of notes — "✓ flood advertisement
-        sent") floats as a centered OK dialog over the current screen, so a one-line
-        result never commandeers the whole frame; anything bigger, or anything holding
-        a table/panel, opens the bounded scrollable result window as before (see
-        :func:`_collapse_to_message` for the exact gate). Clears the buffer afterward.
-        Does nothing if nothing was buffered (e.g. a tool that only produced a file
-        artifact and an empty message).
+        A short outcome that has only text (a line or two of notes, for example "✓ flood
+        advertisement sent") floats as a centred OK dialog over the current screen. Thus a
+        result of one line never takes the whole frame. A bigger outcome, or an outcome that
+        has a table or a panel, opens the scrollable result screen of limited height, as
+        before. Refer to :func:`_collapse_to_message` for the exact gate. The method then
+        clears the buffer. It does nothing if nothing was buffered (for example, a tool that
+        made only a file and an empty message).
 
         Args:
-            title: Heading for the result window or popup.
+            title: The heading for the result screen or the dialog.
         """
         if not self._buffer:
             return
@@ -731,25 +759,25 @@ class TuiUi(Ui):
         await self.session.scroll(body, title=title)
 
     def discard(self) -> None:
-        """Drop any buffered output without showing it."""
+        """Remove all buffered output and do not show it."""
         self._buffer = []
 
     async def view(
         self, renderable: RenderableType, *, title: str = "", footer_hint: str = ""
     ) -> None:
-        """Show a renderable immediately in a dismissable scroll window."""
+        """Show a renderable at once on a scroll screen that the user can close."""
         await self.session.scroll(renderable, title=title, footer_hint=footer_hint)
 
     def progress(self, title: str = "Working"):  # noqa: ANN201
-        """Return a progress dialog context manager for the session."""
+        """Return a context manager of a progress dialog for the session."""
         return self.session.progress(title)
 
     def busy_overlay(self, message: str = "", *, title: str = ""):  # noqa: ANN201
-        """Float the session's top-most skeleton card while the wrapped block runs."""
+        """Float the skeleton card at the top of the session while the wrapped block runs."""
         return self.session.busy_overlay(message, title=title)
 
     def busy_dialog(self, message: str = "", *, title: str = ""):  # noqa: ANN201
-        """Push the session's modal busy card over the current screen while the block runs."""
+        """Push the modal busy card of the session over the current screen while the block runs."""
         return self.session.busy_dialog(message, title=title)
 
     # --- input ---------------------------------------------------------------
@@ -765,7 +793,7 @@ class TuiUi(Ui):
         delete_hint: str = "",
         floating: bool = False,
     ) -> Any:
-        """Delegate to the session's select screen."""
+        """Give the work to the select screen of the session."""
         return await self.session.select(
             title,
             items,
@@ -790,7 +818,7 @@ class TuiUi(Ui):
         live: Callable[[Callable[[list], None]], Awaitable[None]] | None = None,
         hscroll: bool | None = None,
     ) -> Any:
-        """Delegate to the session's chromeless startup select splash."""
+        """Give the work to the startup select splash of the session, which has no chrome."""
         return await self.session.select_startup(
             title,
             items,
@@ -815,7 +843,7 @@ class TuiUi(Ui):
         backdrop_items: list | None = None,
         backdrop_default: Any = None,
     ) -> bool:
-        """Delegate to the session's startup confirm dialog (floated over the picker)."""
+        """Give the work to the startup confirm dialog of the session (floated over the picker)."""
         return await self.session.confirm_startup(
             prompt,
             title=title,
@@ -834,7 +862,7 @@ class TuiUi(Ui):
         banner: Any = None,
         footnote: str | None = None,
     ) -> None:
-        """Delegate to the session's chromeless startup message splash."""
+        """Give the work to the startup message splash of the session, which has no chrome."""
         await self.session.notify_startup(renderable, title=title, banner=banner, footnote=footnote)
 
     async def busy_startup(
@@ -846,7 +874,7 @@ class TuiUi(Ui):
         banner: Any = None,
         footnote: str | None = None,
     ) -> Any:
-        """Delegate to the session's animated-spinner startup splash."""
+        """Give the work to the startup splash of the session that has an animated spinner."""
         return await self.session.busy_startup(
             message, coro, title=title, banner=banner, footnote=footnote
         )
@@ -860,7 +888,7 @@ class TuiUi(Ui):
         banner: Any = None,
         footnote: str | None = None,
     ) -> str | None:
-        """Delegate to the session's startup PIN dialog."""
+        """Give the work to the startup PIN dialog of the session."""
         return await self.session.prompt_pin_startup(
             device_name, error=error, help_text=help_text, banner=banner, footnote=footnote
         )
@@ -876,7 +904,7 @@ class TuiUi(Ui):
         banner: Any = None,
         footnote: str | None = None,
     ) -> str | None:
-        """Delegate to the session's chromeless startup text dialog."""
+        """Give the work to the startup text dialog of the session, which has no chrome."""
         return await self.session.prompt_text_startup(
             title,
             prompt=prompt,
@@ -888,7 +916,7 @@ class TuiUi(Ui):
         )
 
     async def reorder(self, title: str, labels: list[str]) -> list[int]:
-        """Delegate to the session's reorder screen."""
+        """Give the work to the reorder screen of the session."""
         return await self.session.reorder(title, labels)
 
     async def text(
@@ -903,7 +931,7 @@ class TuiUi(Ui):
         byte_limit: int | None = None,
         floating: bool = False,
     ) -> str | None:
-        """Delegate to the session's text screen."""
+        """Give the work to the text screen of the session."""
         return await self.session.text(
             title,
             prompt=prompt,
@@ -916,7 +944,7 @@ class TuiUi(Ui):
         )
 
     async def confirm(self, title: str, *, default: bool = True) -> bool | None:
-        """Delegate to the session's confirm screen."""
+        """Give the work to the confirm screen of the session."""
         return await self.session.confirm(title, default=default)
 
     async def dialog(
@@ -930,10 +958,10 @@ class TuiUi(Ui):
         danger: bool = False,
         destructive: bool = False,
     ) -> Any:
-        """Delegate to the session's button dialog, in the caution tier the caller asked for.
+        """Give the work to the button dialog of the session, at the requested caution level.
 
-        ``danger`` themes the frame cautionary; ``destructive`` uses the reserved error
-        red, and is only for irreversible data loss.
+        ``danger`` gives the frame a colour of caution. ``destructive`` uses the reserved
+        error red, and it is only for a loss of data that cannot be undone.
         """
         tier = "err" if destructive else "warn" if danger else ""
         return await self.session.button_dialog(
@@ -947,7 +975,7 @@ class TuiUi(Ui):
         )
 
     async def typed_confirm(self, warning: str, word: str, *, title: str = "Are you sure?") -> bool:
-        """Delegate to the session's typed-confirmation dialog."""
+        """Give the work to the typed-confirmation dialog of the session."""
         return await self.session.typed_confirm(warning, word, title=title)
 
     async def autocomplete(
@@ -959,13 +987,13 @@ class TuiUi(Ui):
         default: str = "",
         validate: Validator | None = None,
     ) -> str | None:
-        """Delegate to the session's autocomplete screen."""
+        """Give the work to the autocomplete screen of the session."""
         return await self.session.autocomplete(
             title, choices, prompt=prompt, default=default, validate=validate
         )
 
     async def path(self, title: str, *, prompt: str = "", default: str = "") -> str | None:
-        """Prompt for a path as free text (with the current value prefilled)."""
+        """Ask for a path as free text. The current value is already in the field."""
         return await self.session.text(
             title, prompt=prompt, default=default, help_text="filesystem path"
         )

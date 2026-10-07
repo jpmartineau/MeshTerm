@@ -1,63 +1,70 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The trace path composer: build a forced route hop by hop, guided by observed links.
+"""The trace path composer: build a forced path hop by hop, with help from observed links.
 
-A floating dialog over a live trace screen. The route under construction reads across
-the top — ``★ → hop → … → ★`` — and beneath it sits a suggestion list: the nodes the
-topology evidence says the path's current tail can hear, strongest observed link first
-(see :meth:`~meshterm.services.topology.MeshTopology.next_hops`). Every link is
-bidirectional evidence, so a path that was ever *received* through two nodes proposes
-that link in either direction.
+A floating dialog over a live trace screen. The route that the user builds goes across
+the top (``★ → hop → … → ★``). Below it is a list of suggestions: the nodes that the
+current tail of the path can hear, as the topology evidence shows, strongest observed
+link first (refer to :meth:`~meshterm.services.topology.MeshTopology.next_hops`). Each
+link is evidence for the two directions. Thus, if MeshTerm ever received a path through
+two nodes, the composer offers that link in each direction.
 
-The composer serves both trace features, and which one owns it decides how the route's
-return half is written (the trace protocol has no separate return-path field — the spec
-sent to the device is one walk that ends within our earshot):
+The composer serves the two trace features. The feature that owns it decides how the
+return half of the route is written. (The trace protocol has no separate field for the
+return path. The spec that MeshTerm sends to the device is one walk that ends where our
+node can hear it.)
 
-* **Target mode** (*Trace target* — a ``target_id`` is pinned): only the outbound leg
-  is composed. The target stays pinned as the turning point and the return is the
-  outbound hops mirrored — the preview resolves and dims that half, since it isn't
-  yours to choose. An *Auto* action hands routing back to the device.
-* **Path mode** (*Trace path* — no target at all): the whole walk is yours, hop by
-  hop, until the route comes back within earshot of us — only the final landing on
-  our own node is filled in (and dimmed). The preview opens as just ``★ → + → ★``.
-  There is no *Auto* action, because with no destination there is nothing for the
-  device to route to.
+* **Target mode** ("Trace target", a ``target_id`` is pinned): the user composes only
+  the outbound leg. The target stays pinned as the turning point, and the return is the
+  outbound hops in the mirrored order. The preview resolves that half and dims it,
+  because the user does not choose it. An "Auto" action lets the device do the routing
+  again.
+* **Path mode** ("Trace path", no target): the user composes the full walk, hop by hop,
+  until the route comes back to where our node can hear it. The composer fills in (and
+  dims) only the last step back to our node. The preview starts as ``★ → + → ★`` only.
+  There is no "Auto" action, because with no destination, the device has nothing to
+  route to.
 
-Interaction, following the reorder screen's cursor-over-rows-and-actions pattern:
+Interaction, which follows the pattern of the reorder screen (a highlight that moves over
+rows and actions):
 
-* ↑/↓ move over suggestions and the action rows; Enter on a suggestion inserts it
-  at the route's insertion cursor.
-* ←/→ slide that insertion cursor along the editable leg — it rides *in* the route as
-  a hop of its own, the ``cursor``-white ``+`` slot the next chosen node drops into — so a
-  hop can be spliced in (at the slot) or removed (⌫, to its left) anywhere in the
-  route, not just at the end. It opens at the end of the composed leg, where inserting
-  is appending — the classic flow unchanged. The suggestion list follows: it always
-  proposes next hops from the node left of the cursor.
-* Typing filters the suggestions by name or hash — and when the typed text is itself
-  even-length hex, an *add custom hop* row appears, so a node we have never observed
-  (or a bare hash from another tool) can be forced into the route.
-* Backspace erases the filter first; with the filter empty it removes the hop left
-  of the cursor.
-* When the cursor stands after a repeater we hold admin credentials for, a *fetch
-  neighbours* row asks that repeater over the mesh for its own neighbour table —
-  fresh second-vantage evidence exactly where composing ran out of it. The dialog
-  resolves :class:`FetchNeighbours` and the owning flow fetches, refreshes the
-  topology, and reopens the composer mid-thought (hops and cursor preserved).
-* Enter on **Use this path** commits the composed spec; Esc cancels with no change.
-* A walk that crosses some link twice in the same direction shows a yellow ⚠ note
-  under the preview: still walkable, but no longer a *trail*, so the trophy case
-  will ignore it (the no-cheat rule — see :mod:`~meshterm.services.records`).
+* ↑/↓ move over the suggestions and the action rows. Enter on a suggestion inserts it at
+  the insertion slot of the route.
+* ←/→ move that insertion slot along the editable leg. The slot is in the route as a hop
+  of its own: the ``+`` slot in the ``cursor`` white, where the next selected node goes.
+  Thus the user can insert a hop (at the slot) or remove a hop (⌫, the hop to its left)
+  at each position in the route, not only at the end. The slot starts at the end of the
+  composed leg, where an insert is an append. That is the classic flow, with no change.
+  The list of suggestions follows the slot: it always offers next hops from the node to
+  the left of the slot.
+* Typed text filters the suggestions by name or by hash. When the typed text is hex with
+  an even length, a row appears that adds it as a custom hop. Thus the user can force a
+  node that MeshTerm never observed (or a bare hash from another tool) into the route.
+* Backspace (⌫) removes the filter text first. When the filter is empty, it removes the
+  hop to the left of the slot.
+* When the slot is after a repeater for which we have admin credentials, a "Fetch
+  neighbours" row asks that repeater, over the mesh, for its own neighbour table. That
+  gives new evidence from a second point on the mesh, at the exact place where the
+  composer has no more evidence. The dialog resolves with :class:`FetchNeighbours`. Then
+  the owning flow gets the table, refreshes the topology, and opens the composer again in
+  the same state (the hops and the slot stay the same).
+* Enter on **Use this path** returns the composed spec. Esc cancels with no change.
+* A walk that goes over a link two times in the same direction shows a yellow ⚠ note
+  below the preview. A trace can still walk it, but it is no longer a *trail*, so the
+  trophy case will ignore it (the no-cheat rule, refer to
+  :mod:`~meshterm.services.records`).
 
-Nodes render through the shared path widget in the trace flavour — ``Name (hash)``
-with names in their app-wide hues, the hash at the session's chosen path-hash width,
-and a hop the topology can't name falling back to the owning screen's own resolver
-(see :meth:`PathComposerScreen._resolve_entry`), so a node reads the same here as in
-the trace window this dialog floats over. The route preview is that same trace-window
-route lane, live: :mod:`~meshterm.ui.pathline` chips (or arrows), wrapped at hop
-boundaries, our two ends the bare ``★``, and no hash repeated after a name. That preview
-*is* the path, so the *Use this path* row doesn't respell it: the row names the action and
-the picture above it names the route. The suggestion list scrolls in a window under the pinned route
-preview (faint ``↑/↓ n more`` markers at its edges; PgUp/PgDn stride by a windowful),
-so the route under construction never leaves the screen.
+Nodes render through the shared path widget, in the trace format: ``Name (hash)``, with
+the names in their hues (the same in all the app), and the hash at the path-hash width
+that the session chose. When the topology cannot name a hop, the composer uses the
+resolver of the owning screen (refer to :meth:`PathComposerScreen._resolve_entry`). Thus
+a node looks the same here as in the trace screen below this dialog. The route preview is
+that same route lane of the trace screen, live: :mod:`~meshterm.ui.pathline` chips (or
+arrows), wrapped at hop boundaries, our two ends the bare ``★``, and no hash after a
+name. That preview is the path, so the "Use this path" row does not spell it again: the
+row names the action, and the picture above it names the route. The list of suggestions
+scrolls in a list window below the pinned route preview (faint ``↑/↓ n more`` markers at
+its edges, and PgUp/PgDn move by one full list window). Thus the route that the user
+builds never leaves the screen.
 """
 
 from __future__ import annotations
@@ -82,84 +89,88 @@ from .tui.render import query_line, render_lines, render_to_ansi
 from .tui.screen import ListWindow, Screen
 from .widgets import NodeResolver, age_seconds, format_age, identity_label, path_text
 
-#: Sentinel spec meaning "no forced path — let the device route" (the trace screen's
-#: empty-spec convention). Only meaningful in target mode; a path walk has no target
-#: for the device to route to, so path mode never resolves it.
+#: The sentinel spec for "no forced path, let the device route" (the convention of the
+#: trace screen for an empty spec). It has a meaning only in target mode. A path walk has
+#: no target for the device to route to, so path mode never resolves with it.
 AUTO_SPEC = ""
 
-#: How many suggestions to show at most; beyond this the evidence is too weak to matter
-#: and the dialog would outgrow the screen.
+#: The maximum number of suggestions to show. After this number, the evidence is too weak
+#: to be important, and the dialog would become larger than the screen.
 _MAX_SUGGESTIONS = 12
 
-#: Action-row sentinels (kept distinct from suggestion rows, which carry node ids).
-#: There is no cancel sentinel: leaving is Esc's, and a row that only pressed Esc for
-#: you cost a cursor stop above the row that commits.
+#: The sentinels of the action rows (different from the suggestion rows, which hold node
+#: ids). There is no cancel sentinel: Esc is the way to leave. A row that only did what
+#: Esc does cost one more highlight stop above the "Use this path" row.
 _USE = "use"
 _AUTO = "auto"
 
-#: One-letter tags for the evidence classes backing a link, shown beside each
-#: suggestion: T(race), R(oute — the firmware's learned out_path), P(acket log),
-#: N(eighbour table fetched from a repeater).
+#: One-letter tags for the classes of evidence behind a link, shown beside each
+#: suggestion: T(race), R(oute: the out_path that the firmware learned), P(acket log),
+#: N(eighbour table that MeshTerm got from a repeater).
 _SOURCE_TAGS = {"trace": "T", "route": "R", "packet": "P", "neighbour": "N"}
 
-#: The inline no-cheat warning, shown under the route preview while the composed walk
-#: crosses some link twice in the same direction — repeating a stretch would let its
-#: score be farmed, so the trophy case disqualifies such a walk (it is no longer a
-#: *trail*, graph theory's walk-with-no-repeated-edge; see
-#: :func:`~meshterm.services.records.first_repeated_edge`). Composing one stays legal —
-#: the warning only says the walk can't set records.
+#: The inline no-cheat warning. It shows below the route preview while the composed walk
+#: goes over a link two times in the same direction. If a walk repeats a section, the
+#: score of that section can be counted many times. Thus the trophy case disqualifies
+#: such a walk: it is no longer a *trail* (in graph theory, a walk with no repeated edge,
+#: refer to :func:`~meshterm.services.records.first_repeated_edge`). The user can still
+#: compose such a walk. The warning says only that the walk cannot set records.
 _NOT_A_TRAIL = "⚠ repeats a link — not a trail, so records ignore this walk"
 
 
 @dataclass(frozen=True, slots=True)
 class FetchNeighbours:
-    """The composer's resolution when the user asks a repeater for its neighbours.
+    """The result of the composer when the user asks a repeater for its neighbours.
 
-    The dialog itself never touches the radio; it resolves this marker and the owning
-    flow performs the login + fetch, refreshes the topology, and reopens the composer
-    with :attr:`PathComposerScreen.hops` and :attr:`PathComposerScreen.cursor`
-    re-seeded.
+    The dialog itself never uses the radio. It resolves with this marker. Then the owning
+    flow does the login and gets the neighbours, refreshes the topology, and opens the
+    composer again, with the values of :attr:`PathComposerScreen.hops` and
+    :attr:`PathComposerScreen.cursor` from before.
 
     Attributes:
-        node: Canonical id of the repeater to query (the insertion cursor's anchor
-            when committed).
+        node: The canonical id of the repeater to ask (the anchor of the insertion slot
+            when the user selected the row).
     """
 
     node: str
 
 
 class PathComposerScreen(Screen):
-    """Compose a forced trace path step by step, mirrored at a target or hand-routed.
+    """Compose a forced trace path step by step: mirrored at a target, or routed by hand.
 
-    Resolves with the finished spec (comma-separated hex — in target mode the outbound
-    hops, the target, then the mirrored return; in path mode the composed walk
-    verbatim), :data:`AUTO_SPEC` for device routing (target mode only), or
-    :data:`~meshterm.ui.tui.screen.CANCEL`.
+    The screen resolves with one of these values:
 
-    The dialog only ever grows (see :attr:`~meshterm.ui.tui.screen.Screen.grow_only`):
-    every added hop widens the route preview and each new tail swaps in a different
-    suggestion set, so a size-to-content box would twitch on every keystroke. Instead
-    the box holds its tallest and widest extent for the composing session, like the
-    packet viewer.
+    - The finished spec, as comma-separated hex. In target mode, it is the outbound hops,
+      the target, then the mirrored return. In path mode, it is the composed walk exactly.
+    - :data:`AUTO_SPEC`, to let the device route (target mode only).
+    - :data:`~meshterm.ui.tui.screen.CANCEL`.
+
+    The dialog can only become larger (refer to
+    :attr:`~meshterm.ui.tui.screen.Screen.grow_only`). Each added hop makes the route
+    preview wider, and each new tail brings a different set of suggestions. Thus a box that
+    fits its content would change size at each key press. Instead, the box keeps its largest
+    height and width while the user composes, like the packet viewer.
     """
 
     grow_only = True
 
-    #: The composing keys, in the hint grammar's navigation-then-actions-then-Esc order.
-    #: Esc's verb is the only part that moves — see :attr:`footer_hint`.
-    #: ``←→ slot``, not ``←→ cursor``: this app's *cursor* is the row the ❯ points at,
-    #: which is what ↑↓ moves here — the arrows move the **insertion slot** along the path
-    #: being built, the app's own word for it (and the one thing besides the row cursor
-    #: that wears the selection white).
+    #: The keyboard keys of the composer, in the order of the hint rules: navigation, then
+    #: actions, then Esc. Only the verb of Esc changes (refer to :attr:`footer_hint`).
+    #: ``←→ slot``, not ``←→ cursor``: in this app, the word "cursor" names the row that ❯
+    #: points to (the highlight), and ↑↓ move it here. The arrows ←→ move the **insertion
+    #: slot** along the path that the user builds. "Insertion slot" is the app's own word
+    #: for it. It is also the only thing, other than the highlight, that has the selection
+    #: white.
     _HINT = "↑↓ move · ←→ slot · Enter add · type to filter · ⌫ remove · Esc cancel"
 
     @property
     def footer_hint(self) -> str:  # type: ignore[override]
-        """The composing keys, with ``Esc clear`` standing in while an entry is typed.
+        """The keyboard keys of the composer, with ``Esc clear`` while there is a typed entry.
 
-        Esc peels the typed entry before it abandons the composer, exactly as ⌫ peels it
-        before it removes a hop, so the line says which of the two the press will do (the
-        app-wide filter rule — the map, the mesh walk and every select list read the same).
+        Esc clears the typed entry before it cancels the composer, exactly as ⌫ removes the
+        entry before it removes a hop. Thus the line says which of the two actions the key
+        press will do. This is the filter rule for all the app: the map, the mesh walk, and
+        each select list show the same.
         """
         if not self._entry:
             return self._HINT
@@ -182,31 +193,37 @@ class PathComposerScreen(Screen):
     ) -> None:
         """Build the composer.
 
-        A pinned target (all three ``target_*`` arguments) selects target mode: the
-        target is excluded from suggestions (the path implicitly turns at it) and the
-        emitted spec appends it plus the mirrored return. With no target the composer
-        is in path mode — the whole walk is composed by hand and committed verbatim.
+        A pinned target (all three ``target_*`` arguments) selects target mode. The
+        suggestions do not include the target (the path turns at it implicitly), and the
+        returned spec adds the target and the mirrored return at its end. With no target,
+        the composer is in path mode: the user composes the full walk by hand, and the
+        composer returns it exactly.
 
         Args:
-            device_label: Our own node's name, opening and closing the route preview.
-            topology: The evidence graph suggestions are drawn from.
-            width_bytes: Preferred per-hop path-hash width (bytes) for the emitted spec.
-            target_id: The pinned target's canonical id, or ``None`` for path mode.
-            target_hash: The target's hex hash used as the symmetric spec's turning
-                point (its full key prefix; truncated to the spec width at commit).
-            target_label: The target's display name for the route preview.
-            device_hash: Our own public key, so the preview's endpoints carry a hash
-                exactly like the trace screen's route line.
-            hops: Canonical ids of already-composed hops (reopening the dialog resumes
-                where the user left off).
-            cursor: Arrow index the insertion cursor resumes at (reopening after a
-                fetch); ``None`` parks it at the path's end, the append position.
-            fetch_nodes: Canonical ids whose live neighbour table can be fetched
-                (repeater contacts with a public key); when the path's tail is one of
-                them, the *fetch neighbours* row appears.
-            resolve: The owning screen's node resolver — the fallback that names a hop
-                the topology can't (see :meth:`_resolve_entry`), so the composer reads
-                the same names the screen that opened it does.
+            device_label: The name of our node, at the start and at the end of the route
+                preview.
+            topology: The evidence graph that the suggestions come from.
+            width_bytes: The preferred path-hash width for each hop (bytes) of the
+                returned spec.
+            target_id: The canonical id of the pinned target, or ``None`` for path mode.
+            target_hash: The key prefix of the target, in hex. It is the turning point of
+                the symmetric spec. When the user confirms the path, it is truncated to the
+                width of the spec.
+            target_label: The name of the target to show in the route preview.
+            device_hash: The public key of our node. Thus the endpoints of the preview have
+                a hash, exactly like the route line of the trace screen.
+            hops: The canonical ids of the hops that are already composed (when the
+                dialog opens again, it continues where the user stopped).
+            cursor: The arrow index where the insertion slot starts again (when the
+                dialog opens again after a neighbour request). ``None`` puts the slot at
+                the end of the path, the position for an append.
+            fetch_nodes: The canonical ids of the nodes whose live neighbour table
+                MeshTerm can get (repeater contacts with a public key). When the tail of
+                the path is one of them, the "Fetch neighbours" row appears.
+            resolve: The node resolver of the owning screen. It is the fallback that
+                names a hop that the topology cannot name (refer to
+                :meth:`_resolve_entry`). Thus the composer shows the same names as the
+                screen that opened it.
         """
         super().__init__()
         self.title = f"Compose path — {target_label}" if target_label else "Compose path"
@@ -217,66 +234,68 @@ class PathComposerScreen(Screen):
         self._device_hash = (device_hash or "").lower().removeprefix("0x")
         self._topology = topology
         self._resolve = resolve
-        #: Resolved display names by node id — see :meth:`_resolve_entry`.
+        #: The resolved names to show, by node id (refer to :meth:`_resolve_entry`).
         self._names: dict[str, str] = {}
-        #: The graph ids each node reads as — see :meth:`_aliases`.
+        #: The graph ids that are the same node as each node (refer to :meth:`_aliases`).
         self._alias_cache: dict[str, set[str]] = {}
         self._width_bytes = width_bytes
         self._hops: list[str] = list(hops or [])
-        #: The insertion cursor: which joining arrow of the editable leg it sits on.
-        #: Arrow k stands between display node k (us at 0, else hop k) and its
-        #: successor — an insert lands at hops index k, ⌫ removes hop k-1.
+        #: The insertion slot: the joining arrow of the editable leg where the slot is.
+        #: Arrow k is between shown node k (our node at 0, or else hop k) and the node
+        #: after it. An insert goes to hops index k, and ⌫ removes hop k-1.
         self._cursor = len(self._hops) if cursor is None else max(0, min(cursor, len(self._hops)))
         self._fetch_nodes = fetch_nodes
         self._entry = ""
         self._index = 0
-        #: The suggestion/action list's window under the pinned route preview.
+        #: The list window of the suggestion and action rows, below the pinned route preview.
         self._list = ListWindow()
 
     @property
     def hops(self) -> list[str]:
-        """The composed hops so far (for re-seeding after a fetch)."""
+        """The hops that the user composed until now (to restore after a neighbour request)."""
         return list(self._hops)
 
     @property
     def cursor(self) -> int:
-        """The insertion cursor's arrow index (for re-seeding after a fetch)."""
+        """The arrow index of the insertion slot (to restore after a neighbour request)."""
         return self._cursor
 
     # --- state -----------------------------------------------------------------
 
     @property
     def _mirrored(self) -> bool:
-        """Whether the return leg is the pinned target's mirror (target mode)."""
+        """Whether the return leg is a mirror at the pinned target (target mode)."""
         return self._target_id is not None
 
     def _anchor(self) -> str:
-        """The node just left of the insertion cursor (us while the cursor is home).
+        """The node to the left of the insertion slot (our node when the slot is at the start).
 
-        Suggestions, the fetch row, and the *Next hop from* heading all follow this
-        anchor — an insert continues the walk from here, wherever the cursor stands.
+        The suggestions, the "Fetch neighbours" row, and the "Next hop from" heading all
+        follow this anchor. An insert continues the walk from here, at each position of the
+        slot.
         """
         return self._hops[self._cursor - 1] if self._cursor else self._topology.self_id
 
     def _same_node(self, a: str, b: str) -> bool:
-        """Whether two graph ids read as one node — same name, one prefixing the other.
+        """Whether two graph ids are one node: the same name, and one id a prefix of the other.
 
-        The evidence graph keeps a hop hash it can't pin down as its own vertex: a
-        1-byte ``3d`` that prefix-matches two contacts stays ``3d``, separate from the
-        ``3d63c6429436`` its wider sightings landed on. Both are real ids with real
-        evidence, and the graph is right not to guess — but on screen, once the name
-        resolver has named them (see :meth:`_resolve_entry`), they are one row shown
-        twice. The test is deliberately both halves: a shared *name*, and one hash a
-        prefix of the other. Two unnamed hashes never merge (they resolve to
-        themselves, so the names differ) and two same-named nodes on unrelated keys —
-        a duplicate contact name, a renamed node — never merge either.
+        The evidence graph keeps a hop hash that it cannot identify as a vertex of its own.
+        A 1-byte ``3d`` that matches the prefix of two contacts stays ``3d``. It is
+        separate from the ``3d63c6429436`` that the wider observations of the node went
+        to. The two ids are real, with real evidence, and the graph is correct not to
+        guess. But on the screen, after the name resolver names them (refer to
+        :meth:`_resolve_entry`), they are one row, shown two times. Thus the test has two
+        parts on purpose: a shared name, and one hash that is a prefix of the other. Two
+        hashes with no name never merge, because each resolves to itself, so the names
+        are different. Two nodes with the same name and unrelated keys (a duplicate
+        contact name, a renamed node) never merge either.
 
         Args:
             a: One node id.
-            b: The other.
+            b: The other node id.
 
         Returns:
-            Whether the two should be shown, and addressed, as a single node.
+            Whether the composer must show, and address, the two ids as one node.
         """
         if a == b:
             return True
@@ -286,17 +305,19 @@ class PathComposerScreen(Screen):
         return named != a and named == self._resolve_entry(b)
 
     def _aliases(self, node: str) -> set[str]:
-        """Every id in the graph that reads as ``node`` — the stubs it is split across.
+        """All the ids in the graph that are the same node as ``node``: its stubs.
 
-        The other half of :meth:`_same_node`: a merged suggestion must also *stand* as
-        the merged node, so the next step out of it sees everything all its ids have
-        been heard talking to. Without this, folding ``3d`` into ``3d63c6429436`` would
-        quietly cost the composer whatever was only ever observed under the stub.
+        The other half of :meth:`_same_node`. A merged suggestion must also act as the
+        merged node when it is the anchor. Thus the next step from it finds all the nodes
+        that any of its ids was heard to talk to. Without this method, a merge of ``3d``
+        into ``3d63c6429436`` would silently lose all that the composer observed only
+        under the stub.
 
-        Cached per node, since this walks the whole graph and :meth:`_suggestions` runs
-        several times per keystroke (the row list, the dialog's width, the paint). The
-        topology is fixed for the screen's lifetime — a neighbour fetch builds a fresh
-        one — so the answer can't go stale under the cache.
+        The result is cached for each node, because this method goes through the full
+        graph, and :meth:`_suggestions` runs several times for each key press (for the
+        row list, the width of the dialog, and the paint). The topology does not change
+        while the screen is open (a neighbour request builds a new topology). Thus the
+        cached answer cannot become out of date.
         """
         ids = self._alias_cache.get(node)
         if ids is not None:
@@ -310,13 +331,13 @@ class PathComposerScreen(Screen):
         return ids
 
     def _pooled(self, one, other):  # noqa: ANN001, ANN201
-        """Fold two suggestions for the same node into one row, evidence pooled.
+        """Merge two suggestions for the same node into one row, with their evidence added.
 
-        The surviving id is the longer of the two — the more specific identity, and the
-        one that addresses the node best when the spec is rendered. The readings behind
-        it are summed exactly as the topology pools evidence when it coalesces a stub
-        itself, so the row's ``n×`` and median SNR describe the whole node rather than
-        whichever half happened to rank first.
+        The id that stays is the longer of the two ids. It is the more specific identity,
+        and it addresses the node best when the spec is rendered. The function adds the
+        readings together exactly as the topology adds evidence when it merges a stub
+        itself. Thus the ``n×`` and the median SNR of the row describe the full node, not
+        the half that was ranked first by chance.
         """
         node = one.node if len(one.node) >= len(other.node) else other.node
         stamps = [link.last_seen for link in (one.link, other.link) if link.last_seen is not None]
@@ -335,23 +356,25 @@ class PathComposerScreen(Screen):
         )
 
     def _suggestions(self) -> list:
-        """The current suggestion rows — duplicates merged, filtered by the typed entry.
+        """The current suggestion rows, with duplicates merged and the typed entry as filter.
 
-        Target mode excludes the target (the path implicitly turns at it) and every
-        used hop (revisiting one on the outbound leg is never useful — the mirror
-        already recrosses it). Path mode only excludes ourselves and the cursor's
-        two neighbours (either would make the inserted hop a self-loop): a return
-        leg legitimately reuses outbound repeaters. Every exclusion covers the excluded
-        node's aliases too, so a stub of the anchor can't be proposed as a step off it.
+        Target mode removes the target (the path turns at it implicitly) and each hop that
+        is already used. On the outbound leg, a second visit to a hop is never useful,
+        because the mirror already goes over it again. Path mode removes only our node and
+        the two neighbours of the insertion slot (each of them would make the inserted hop
+        a loop to itself). A return leg can correctly use outbound repeaters again. Each
+        exclusion also covers the aliases of the excluded node, so the composer cannot
+        offer a stub of the anchor as a step from the anchor.
 
-        Suggestions are gathered from all of the anchor's aliases and then folded
-        pairwise (:meth:`_same_node`, :meth:`_pooled`), so a node the graph holds under
-        both a stub and a full id appears once, with all of its evidence, ranked by its
-        best link.
+        The function collects the suggestions from all the aliases of the anchor, then
+        merges them in pairs (:meth:`_same_node`, :meth:`_pooled`). Thus a node that the
+        graph holds under a stub and under a full id appears one time, with all of its
+        evidence, ranked by its best link.
 
         Returns:
-            The (possibly filtered) :class:`~meshterm.services.topology.HopSuggestion`
-            list for the insertion cursor's anchor, capped at :data:`_MAX_SUGGESTIONS`.
+            The :class:`~meshterm.services.topology.HopSuggestion` list for the anchor of
+            the insertion slot (filtered, if there is a typed entry), with a maximum of
+            :data:`_MAX_SUGGESTIONS` items.
         """
         if self._mirrored:
             exclude = frozenset({self._topology.self_id, self._target_id, *self._hops})
@@ -384,20 +407,21 @@ class PathComposerScreen(Screen):
         return merged[:_MAX_SUGGESTIONS]
 
     def _custom_hex(self) -> str | None:
-        """The typed entry as an addable hex hop, or ``None`` when it isn't one."""
+        """The typed entry as a hex hop that the user can add, or ``None`` if it is not one."""
         needle = self._entry.strip().lower().removeprefix("0x")
         return needle if is_path_hash(needle) else None
 
     def _rows(self) -> list[tuple[str, object]]:
-        """The cursor-addressable rows: custom hop, suggestions, fetch, then actions."""
+        """The rows that the highlight can go to: custom hop, suggestions, fetch, actions."""
         rows: list[tuple[str, object]] = []
         custom = self._custom_hex()
         if custom:
             rows.append(("custom", custom))
         rows.extend(("hop", s) for s in self._suggestions())
-        # The cursor standing after a repeater we hold credentials for, its live
-        # neighbour table is one keypress away — placed with the suggestions, because
-        # that is what it extends: "don't see the node you need? ask the repeater."
+        # When the slot is after a repeater for which we have credentials, its live
+        # neighbour table is one key press away. The row goes with the suggestions,
+        # because it adds to them: if you do not see the node that you need, ask the
+        # repeater.
         if self._anchor() in self._fetch_nodes:
             rows.append(("fetch", self._anchor()))
         rows.append(("action", _USE))
@@ -406,24 +430,25 @@ class PathComposerScreen(Screen):
         return rows
 
     def _spec(self) -> str:
-        """Render the composed route as the spec the trace command will send.
+        """Render the composed route as the spec that the trace command will send.
 
-        Target mode appends the target and the mirrored return leg (see
-        :func:`~meshterm.services.topology.render_forced_spec`); path mode renders
-        the composed walk verbatim (:func:`~meshterm.services.topology.
-        render_custom_spec`) — empty until it has at least one hop.
+        Target mode adds the target and the mirrored return leg at the end (refer to
+        :func:`~meshterm.services.topology.render_forced_spec`). Path mode renders the
+        composed walk exactly (:func:`~meshterm.services.topology.render_custom_spec`).
+        The spec is empty until the walk has one hop or more.
         """
         if self._mirrored:
             return render_forced_spec(tuple(self._hops), self._target_hash, self._width_bytes)
         return render_custom_spec(tuple(self._hops), self._width_bytes)
 
     def _walk_nodes(self) -> list[str]:
-        """The whole walk the current composition transmits, as canonical ids.
+        """The full walk that the current composition transmits, as canonical ids.
 
-        Target mode is the symmetric boomerang (outbound hops, the target, the
-        mirrored return); path mode is the composed hops verbatim. This is what the
-        record-eligibility check runs over — the mirror halves matter, because a
-        repeated outbound stretch repeats on the return leg too.
+        In target mode, the walk goes out and comes back the same way: the outbound hops,
+        the target, and the mirrored return. In path mode, it is the composed hops
+        exactly. The check of record eligibility runs over this walk. The mirror halves
+        are important, because a repeated section of the outbound leg also repeats on the
+        return leg.
         """
         if self._mirrored:
             return [*self._hops, str(self._target_id), *reversed(self._hops)]
@@ -432,10 +457,11 @@ class PathComposerScreen(Screen):
     # --- rendering ---------------------------------------------------------------
 
     def _path_entry(self, node: str) -> str | None:
-        """A canonical id as a :func:`path_text` hop entry (``None`` = our device).
+        """A canonical id as a hop entry for :func:`path_text` (``None`` is our node).
 
-        The pinned target rides as its full hash when one is known, so its hash
-        annotation shows the spec width even past the canonical id's 12 hex.
+        When the full key prefix of the pinned target is known, the entry is that prefix.
+        Thus its hash annotation shows the spec width, also when that width is more than
+        the 12 hex digits of the canonical id.
         """
         if node == self._topology.self_id:
             return None
@@ -444,24 +470,26 @@ class PathComposerScreen(Screen):
         return node
 
     def _resolve_entry(self, entry: str) -> str:
-        """Resolve an entry to its display name — the target's label, else a node's.
+        """Resolve an entry to its name: the label of the target, or else the name of a node.
 
-        Two resolvers, in order, because they answer different questions. The topology
-        names a node it has *identified*: a hop hash that prefix-matches exactly one
-        contact is that contact, so its canonical id carries the name. But a short hash
-        — a 1-byte hop, the common case at the protocol's default width — often matches
-        several contacts, and rather than guess, the topology keeps it as itself and
-        knows no name for it. The owning screen's resolver
+        The method uses two resolvers, in order, because they answer different questions.
+        The topology names a node that it identified: a hop hash that matches the prefix
+        of exactly one contact is that contact, so its canonical id has the name. But a
+        short hash (a 1-byte hop, which is the usual case at the default width of the
+        protocol) often matches several contacts. The topology does not guess. It keeps
+        the hash as it is, and knows no name for it. The resolver of the owning screen
         (:func:`~meshterm.services.trace_runner.make_node_resolver`) is the same
-        first-match lookup the trace screens name their walked hops by, so falling back
-        to it means a node the trace window shows as *Lakeside* is *Lakeside* here too,
-        instead of a bare ``3d`` the reader has to decode. Nothing is invented: an
-        unmatched hash comes back unchanged and renders as a hash.
+        first-match lookup that the trace screens use to name their walked hops. Thus,
+        with this fallback, a node that the trace screen shows as "Lakeside" is
+        "Lakeside" here too, not a bare ``3d`` that the user must decode. The method
+        invents nothing: a hash with no match is returned unchanged, and renders as a
+        hash.
 
-        Memoized: both resolvers scan the contact list, and this now runs over every
-        link in the graph on the way to each repaint (see :meth:`_aliases`). Neither
-        the topology nor the resolver changes while a composer is open — a neighbour
-        fetch builds a fresh screen — so the answers are stable for its lifetime.
+        The results are cached, because the two resolvers scan the contact list, and this
+        method now runs over each link in the graph before each paint (refer to
+        :meth:`_aliases`). The topology and the resolver do not change while a composer is
+        open (a neighbour request builds a new screen). Thus the answers stay the same
+        for the life of the composer.
         """
         if self._target_id is not None and entry == (self._target_hash or self._target_id):
             return self._target_label or entry
@@ -472,17 +500,18 @@ class PathComposerScreen(Screen):
         return named
 
     def _node_text(self, node: str, *, dim: bool = False) -> Text:
-        """One route node through THE path widget, the trace presentation.
+        """One route node, through the only path widget, in the trace format.
 
-        ``Name (hash)`` when known — the name in its app-wide hue, our own device
-        the white ``you`` — a bare brand hash when not. Hashes show at the spec's
-        preferred path-hash width, the same width every other trace-feature view
-        truncates to, so a node reads the same length everywhere.
+        When the name is known: ``Name (hash)``, with the name in its hue (the same in all
+        the app), and our node in the white ``you`` style. When the name is not known: a
+        bare hash in the ``brand`` style. Hashes show at the preferred path-hash width of
+        the spec. All the other screens of the trace features truncate to the same width,
+        so a node has the same length everywhere.
 
         Args:
-            node: The node's canonical id (or ``self_id`` for our own device).
-            dim: Whether to render in the resolved-return-leg's uniform faint style
-                rather than the normal route colours.
+            node: The canonical id of the node (or ``self_id`` for our node).
+            dim: Whether to render in the uniform faint style of the resolved return leg,
+                instead of the normal route colours.
         """
         return path_text(
             [self._path_entry(node)],
@@ -496,32 +525,31 @@ class PathComposerScreen(Screen):
         )
 
     def _route_preview(self) -> PathLine:
-        """The route under construction, endpoints filled in automatically.
+        """The route that the user builds, with the endpoints filled in automatically.
 
-        THE path widget, drawn exactly as the trace screen that opened this dialog
-        draws its route lane — the composer is a live preview of that lane, so the two
-        must be the same picture. Target mode shows the composed outbound in full
-        colour, then the pinned target and the mirrored return resolved and dimmed
-        right alongside it (``dim_from``) — the dimming reads as "this half isn't yours
-        to compose". Path mode shows every composed hop in full colour (they are all
-        yours) between our own node at both ends, with only the final landing back on
-        us dimmed.
+        The only path widget, drawn exactly as the trace screen that opened this dialog
+        draws its route lane. The composer is a live preview of that lane, so the two must
+        be the same picture. Target mode shows the composed outbound leg in full colour.
+        Immediately after it, it shows the pinned target and the mirrored return, resolved
+        and dimmed (``dim_from``). The dimmed part means "you do not compose this half".
+        Path mode shows each composed hop in full colour (the user composes all of them),
+        between our node at the two ends. Only the last step back to our node is dimmed.
 
-        Both our ends go bare (``bare_self``): a composed walk always leaves us and
-        comes home to us, so the ``★`` says it in one cell and leaves the rest of the
-        dialog's width to the hops being chosen. Named hops show no hash either: the hex
-        the spec goes on the air as is not what anyone is choosing here — it would only
-        crowd the route this dialog exists to shape, which is why the *Use this path* row
-        no longer respells it either. An unnamed hop still reads as its hash, truncated
-        to the session's chosen path-hash width.
+        Our two ends are bare (``bare_self``). A composed walk always starts at our node
+        and comes back to our node, so the ``★`` says this in one cell. The remaining width
+        of the dialog is for the hops that the user selects. A named hop shows no hash
+        either. The hex that the spec transmits is not what the user chooses here. The hex
+        would only fill the route that this dialog is for. That is also why the "Use this
+        path" row does not spell the route again. A hop with no name still shows as its
+        hash, truncated to the path-hash width that the session chose.
 
-        The insertion cursor is *in* the route, not between two of its hops: the
-        ``+`` slot (:data:`~meshterm.ui.pathline.CURSOR_GLYPH`) sits where the next
-        chosen node will, in the ``cursor`` white the row cursor below it wears. Drawing an
-        insertion point as a position rather than as a gap is what lets the preview stay
-        the picture the trace window paints — chips and all, rather than falling back to
-        arrows for the sake of a seam to sit in — and lets a wrapped route carry the
-        cursor like any other hop instead of stranding it on a line break.
+        The insertion slot is in the route, not between two of its hops. The ``+`` slot
+        (:data:`~meshterm.ui.pathline.CURSOR_GLYPH`) is where the next selected node will
+        be, in the ``cursor`` white of the highlight below it. The slot is a position, not
+        a gap. Thus the preview stays the same picture that the trace screen draws, with
+        its chips, and it does not have to use arrows only to get a seam for the slot.
+        Also, a wrapped route keeps the slot like any other hop, and the slot is not left
+        alone at a line break.
         """
         entries: list[str | None] = [None]
         entries.extend(self._path_entry(hop) for hop in self._hops)
@@ -538,13 +566,13 @@ class PathComposerScreen(Screen):
             device_hash=self._device_hash or None,
             dim_from=(2 if self._mirrored else 1) + len(self._hops),
             bare_self=True,
-            # The entries open on our own ★, so arrow index k — the slot after display
-            # node k — is rendered-hop index k + 1.
+            # The entries start with our ★, so arrow index k (the slot after shown node k)
+            # is rendered-hop index k + 1.
             cursor=self._cursor + 1,
         )
 
     def _suggestion_text(self, suggestion) -> Text:  # noqa: ANN001
-        """One suggestion row: node, then its link's evidence trail."""
+        """One suggestion row: the node, then the evidence of its link."""
         text = self._node_text(suggestion.node)
         link = suggestion.link
         snr = link.median_snr
@@ -560,7 +588,7 @@ class PathComposerScreen(Screen):
         return text
 
     def _row_text(self, kind: str, payload: object) -> Text:
-        """The display text for one cursor-addressable row."""
+        """The text to show for one row that the highlight can go to."""
         if kind == "custom":
             text = Text("+ add hop ", style="warn")
             text.append(str(payload), style="brand")
@@ -570,16 +598,17 @@ class PathComposerScreen(Screen):
             return self._suggestion_text(payload)
         if kind == "fetch":
             text = Text("⇣ Fetch neighbours from ", style="")
-            text.append_text(self._node_text(str(payload)))  # named like every other row
+            text.append_text(self._node_text(str(payload)))  # named like each other row
             text.append("  (asks the repeater over the mesh)", style="muted")
             return text
         if payload == _USE:
             label = Text.assemble(("✓ ", "ok"), "Use this path")
-            # "This path" is the one pinned two rows up, in colour and at full width — the
-            # dialog exists to shape it and never lets it scroll away. Respelling it here
-            # as raw hex (JP, 2026-08-10) said the same thing worse, and grew the row by a
-            # hop every time the route did. Only the empty case still needs words: an
-            # unarmed row has to say why.
+            # "This path" is the path that is pinned two rows above, in colour and at full
+            # width. The dialog is there to shape it, and never lets it scroll away. This
+            # row once spelled it again as raw hex. That said the same thing less well, and
+            # the row became one hop longer each time that the route did (JP, 2026-08-10).
+            # Only the empty case still must have words: a row that cannot act must say
+            # why.
             if not self._spec():
                 label.append("  (add a hop first)", style="muted")
             return label
@@ -587,10 +616,10 @@ class PathComposerScreen(Screen):
 
     @property
     def dialog_width(self) -> int:
-        """Natural outer width hugging the widest row (compositor still caps it)."""
+        """The natural outer width, which fits the widest row (the compositor sets a limit)."""
         widths = [cell_len(self.title), cell_len(self.footer_hint)]
-        # The preview carries its own cursor slot, so the measured line is the drawn
-        # line — same hops, same mode, same width.
+        # The preview has its own insertion slot, so the measured line is the drawn line:
+        # the same hops, the same mode, and the same width.
         widths.append(self._route_preview().text().cell_len)
         if first_repeated_edge(self._walk_nodes()) is not None:
             widths.append(cell_len(_NOT_A_TRAIL))
@@ -599,18 +628,19 @@ class PathComposerScreen(Screen):
         return max(widths, default=20) + 8
 
     def render_body(self, width: int) -> list[str]:
-        """Render the pinned route preview and filter line, then the windowed rows.
+        """Render the pinned route preview and filter line, then the rows of the list window.
 
-        The preview and heading hold still; the suggestion/action rows scroll in
-        whatever the dialog's budget has left (see :class:`ListWindow`), so a long
-        suggestion list can never push the route being composed out of the dialog.
+        The preview and the heading do not move. The suggestion and action rows scroll in
+        the space that remains in the dialog (refer to :class:`ListWindow`). Thus a long
+        list of suggestions can never push the route that the user composes out of the
+        dialog.
         """
         rows = self._rows()
         self._index = max(0, min(self._index, len(rows) - 1))
 
-        # The preview breaks at hop boundaries under a 2-column hanging indent (never
-        # mid-name, never mid-chip); the insertion slot is one of those hops, so it
-        # lands on a line like the rest and is always visible.
+        # The preview breaks at hop boundaries, with a hanging indent of 2 cells (never in
+        # a name, never in a chip). The insertion slot is one of those hops, so it goes on
+        # a line like the other hops, and it is always visible.
         lines = [
             render_to_ansi(line, width, no_wrap=True)
             for line in self._route_preview().wrapped(width, indent=2)
@@ -626,20 +656,21 @@ class PathComposerScreen(Screen):
             heading.append(" — strongest first", style="muted")
             lines.extend(render_lines(heading, width))
 
-        # Each windowable entry is one rendered line tagged with its row index
-        # (``None`` = a spacer or note line the cursor can't land on).
+        # Each entry of the list window is one rendered line, tagged with its row index
+        # (``None`` is a spacer line or a note line, where the highlight cannot go).
         entries: list[tuple[int | None, str]] = []
         for i, (kind, payload) in enumerate(rows):
             if kind == "action" and (i == 0 or rows[i - 1][0] != "action"):
-                entries.append((None, ""))  # a spacer sets the action group apart
+                entries.append((None, ""))  # a spacer separates the action group
             is_sel = i == self._index
             text = Text("❯ " if is_sel else "  ", style="cursor" if is_sel else "")
             text.append_text(self._row_text(kind, payload))
             if is_sel:
                 text.style = "cursor"
             text.no_wrap = True
-            # A suggestion row names a node in the route's own vocabulary, so it is cut
-            # like one: a chip that runs off the dialog cracks, prose keeps the ellipsis.
+            # A suggestion row names a node in the same format as the route, so it is cut
+            # like the route: a chip that goes past the edge of the dialog breaks on a half
+            # block, and prose keeps the ellipsis.
             text = cut_to(text, width)
             text.no_wrap = True
             entries.append((i, render_to_ansi(text, width)))
@@ -651,9 +682,10 @@ class PathComposerScreen(Screen):
                 )
             else:
                 note = "(no observed links from here — type a hex hash to force a hop)"
-            # One entry per wrapped line: a multi-line string in a single entry would
-            # smuggle a newline into the windowed list's row math (and past the width
-            # contract, which measures per line — at 53 columns the note wraps).
+            # One entry for each wrapped line. A string of more than one line in one entry
+            # would put a newline into the row arithmetic of the list window. It would also
+            # get past the width contract, which measures each line (at 53 cells, the note
+            # wraps).
             for note_line in render_lines(Text(note, style="muted"), width):
                 entries.append((None, note_line))
 
@@ -681,14 +713,14 @@ class PathComposerScreen(Screen):
     # --- input ---------------------------------------------------------------------
 
     def _insert_hop(self, node: str) -> None:
-        """Splice a hop in at the insertion cursor, which advances past it."""
+        """Insert a hop at the insertion slot, and move the slot past the new hop."""
         self._hops.insert(self._cursor, node)
         self._cursor += 1
         self._entry = ""
         self._index = 0
 
     def _commit_row(self) -> None:
-        """Apply the highlighted row: insert a hop at the cursor or run an action."""
+        """Apply the highlighted row: insert a hop at the insertion slot, or run an action."""
         rows = self._rows()
         if not rows:
             return
@@ -701,17 +733,18 @@ class PathComposerScreen(Screen):
             self.resolve(FetchNeighbours(node=str(payload)))
         elif payload == _USE:
             spec = self._spec()
-            if spec:  # an empty path walk would masquerade as AUTO_SPEC
+            if spec:  # an empty path walk would look the same as AUTO_SPEC
                 self.resolve(spec)
         elif payload == _AUTO:
             self.resolve(AUTO_SPEC)
 
     def handle(self, action: str, data: str = "") -> None:
-        """Move the cursors, edit the entry, add/remove hops, or commit/cancel."""
+        """Move the highlight or slot, edit the entry, add or remove hops, confirm, or cancel."""
         rows = self._rows()
-        # Both ends clamp rather than wrap: this list scrolls inside a window (see
-        # ListWindow), and a highlight that jumped from the tail to the head would take the
-        # whole window with it — the one move that looks like the screen changed under you.
+        # The two ends clamp, and do not wrap: this list scrolls in a list window (refer to
+        # ListWindow). A highlight that jumped from the end to the start would move the full
+        # list window with it. That is the only move that looks as if the screen changed
+        # below the user.
         if action == "up" and rows:
             self._index = max(0, self._index - 1)
         elif action == "down" and rows:
@@ -725,7 +758,7 @@ class PathComposerScreen(Screen):
         elif action in ("end", "ctrl_end"):
             self._index = max(0, len(rows) - 1)
         elif action == "left" and self._cursor:
-            self._cursor -= 1  # the anchor moved: suggestions re-seat below
+            self._cursor -= 1  # the anchor moved, so the suggestions below change
             self._index = 0
         elif action == "right" and self._cursor < len(self._hops):
             self._cursor += 1
@@ -740,13 +773,13 @@ class PathComposerScreen(Screen):
                 self._cursor -= 1
             self._index = 0
         elif action == "text" and data.isprintable():
-            if not data.isspace() or self._entry:  # never begin the entry with a space
+            if not data.isspace() or self._entry:  # never start the entry with a space
                 self._entry += data
                 self._index = 0
         elif action == "escape":
-            # The typed entry is the most recent thing the reader entered, so Esc peels it
-            # first — the same layering ⌫ already has here (entry, then a hop) and the
-            # app-wide rule for a find-as-you-type screen.
+            # The typed entry is the most recent thing that the user entered, so Esc clears
+            # it first. ⌫ already has the same order here (the entry, then a hop), and this
+            # is the rule for each find-as-you-type screen in the app.
             if self._entry:
                 self._entry = ""
                 self._index = 0

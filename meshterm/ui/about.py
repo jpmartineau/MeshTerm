@@ -1,28 +1,30 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The About MeshTerm pages: the app, the person who wrote it, and how to help it along.
+"""The About MeshTerm pages: the app, the person who wrote it, and how to help it.
 
-Four read-only pages hung under the main menu's *About MeshTerm* section — the one
-section that names a subject rather than a doing, because "what is this thing, and who
-made it" is a question the other five can't answer. Each opens as a full screen, scrolls
-if the terminal is short, and is left with Esc; nothing here touches the radio or the
-database, so a page reads the same with no device attached at all.
+These are four read-only pages under the *About MeshTerm* section of the main menu. This is
+the one section that names a subject and not an action. The other five sections cannot
+answer the question "what is this thing, and who made it". Each page opens as a full
+screen, scrolls if the terminal is short, and the user leaves it with Esc. Nothing here
+touches the radio or the database. Thus a page reads the same when no device is attached.
 
-Unlike every other screen in the app, these are **written** rather than composed: their
-content is markdown, living beside the wordmark in ``meshterm/assets/pages``, drawn
-through :mod:`meshterm.ui.markdown` in the app's own visual language (see that module
-for what each construct becomes). Filling a page in means editing its ``.md`` file —
-no screen, menu row, or CLI face has to follow — and everything markdown offers is
-available while doing it: sections, sub-headings, lists, quotes, links, tables.
+Unlike each other screen in the app, these pages are **written** and not composed. Their
+content is markdown. It is in ``meshterm/assets/pages``, beside the wordmark.
+:mod:`meshterm.ui.markdown` draws it in the own visual language of the app (refer to that
+module for what each construct becomes). To fill in a page, edit its ``.md`` file. No
+screen, menu row, or CLI face must follow. Everything that markdown offers is available:
+sections, sub-headings, lists, quotes, links, and tables.
 
-All four are written. The ``##`` headings are the shape each page was written into,
-and they are load-bearing beyond the eye: the screen records where each one landed while
-rendering, which is what lets it pin the heading a reader is under and step the section
-jump from one to the next — so a page is navigable the way a grouped list is.
+All four pages are written. The ``##`` headings are the shape into which each page was
+written, and they have a function that the eye does not see. The screen records where each
+heading lands while it renders. Thus it can pin the heading that the user is under, and the
+section jump can step from one heading to the next. A page is navigable in the same way as
+a grouped list.
 
-What is *not* written into those files: the version, the author, and the copyright span.
-Each page names them with a ``{version}`` / ``{author}`` / ``{copyright}`` placeholder
-that is filled from :mod:`meshterm` itself (:func:`~meshterm.copyright_notice`) as the
-page is opened, so the About page can never drift from the package it describes.
+Three items are *not* written into those files: the version, the author, and the copyright
+span. Each page names them with a ``{version}``, ``{author}``, or ``{copyright}``
+placeholder. The code fills the placeholder from :mod:`meshterm` itself
+(:func:`~meshterm.copyright_notice`) when the page opens. Thus the About page can never
+drift from the package that it describes.
 """
 
 from __future__ import annotations
@@ -38,8 +40,8 @@ from .tui.render import render_lines
 if TYPE_CHECKING:
     from ..context import AppContext
 
-#: Where the written pages live — beside the wordmark, in the package's assets, so they
-#: ship with the wheel and can be edited without touching Python.
+#: The place of the written pages: beside the wordmark, in the assets of the package. Thus
+#: they ship with the wheel, and a person can edit them without a change to Python code.
 _PAGES = Path(__file__).resolve().parent.parent / "assets" / "pages"
 
 
@@ -47,7 +49,7 @@ def _page(name: str) -> MarkdownDoc:
     """Load ``assets/pages/<name>.md``, fill in the live package facts, and render it.
 
     Args:
-        name: The page file's stem.
+        name: The stem of the page file.
 
     Returns:
         The rendered page.
@@ -63,58 +65,60 @@ def _page(name: str) -> MarkdownDoc:
 
 
 def about_meshterm() -> MarkdownDoc:
-    """The *About MeshTerm* page: what the app is, where it came from, its terms."""
+    """The *About MeshTerm* page: what the app is, where it came from, and its terms."""
     return _page("about")
 
 
 def about_author() -> MarkdownDoc:
-    """The *About the author* page: the person behind MeshTerm, on the mesh and off it."""
+    """The *About the author* page: the person who made MeshTerm, on the mesh and off it."""
     return _page("author")
 
 
 def join_discord() -> MarkdownDoc:
-    """The *Join Discord* page: the invite link, and a QR of it to point a phone at.
+    """The *Join Discord* page: the invite link, and a QR code of it for a phone camera.
 
-    A page rather than a popup because there is nothing to decide — it is a link, and on
-    a headless console the QR *is* how the link gets off the screen.
+    This is a page and not a dialog, because the user has nothing to decide. It is a link.
+    On a headless console, the QR code is the way that the link leaves the screen.
     """
     return _page("discord")
 
 
 def support_project() -> MarkdownDoc:
-    """The *Support MeshTerm* page: what keeps it going, and how to chip in.
+    """The *Support MeshTerm* page: what keeps it going, and how to help.
 
-    Deliberately two-sided — money is one way to help and not the only one, so the page
-    keeps a section for the other kind rather than folding it into a donate link.
+    The page has two sides, on purpose. Money is one way to help, but it is not the only
+    way. Thus the page has a section for the other kind of help, and it does not put that
+    help into a donate link.
     """
     return _page("support")
 
 
 class AboutPage(ScrollScreen):
-    """One written page: a read-only body, drawn full-screen, left with Esc.
+    """One written page: a read-only body, drawn full-screen, that the user leaves with Esc.
 
-    Nearly all of it is the shared read-only screen — the pager, the derived footer hint
-    that only names the pager when there *is* something to page, the PicoCalc F-key lane
-    that dims on the same gate — with two things added, both of which come from the body
-    being a *document* rather than a block:
+    Most of it is the shared read-only screen. This includes the pager, the footer hint
+    that it derives (it names the pager only when there is something to page), and the
+    PicoCalc F-key lane that dims on the same condition. Two things are added. Both come
+    from the fact that the body is a *document* and not a block:
 
-    * It renders block by block and records where each ``##`` section starts, so a
-      heading pins to the top row while its prose scrolls under it and ``^PgUp``/``^PgDn``
-      step section by section (the same landmark machinery a grouped select list uses).
-    * Its lane claims the left-hand ``Sect ↑`` / ``Sect ↓`` pair once the page has more
-      than one section, because on the console the lane is the only place a chord can
-      advertise itself.
+    * It renders block by block, and it records where each ``##`` section starts. Thus a
+      heading pins to the top row while its prose scrolls under it, and ``^PgUp`` and
+      ``^PgDn`` step from section to section (the same landmark machinery that a grouped
+      select list uses).
+    * When the page has more than one section, its lane claims the left-hand pair
+      ``Sect ↑`` and ``Sect ↓``. On the console, the lane is the only place where a chord
+      can advertise itself.
 
-    Only the framing differs from a result window: these are full screens rather than
-    floating views, so Esc reads *back*.
+    Only the framing is different from a result window. These pages are full screens and
+    not floating views, so Esc reads *back*.
     """
 
     def __init__(self, title: str, doc: MarkdownDoc) -> None:
         """Show ``doc`` as the page under ``title``.
 
         Args:
-            title: The page's heading — sentence case, no icon (icons live in the menu
-                rows that open these pages, never in a title).
+            title: The heading of the page, in sentence case, with no icon. Icons are in
+                the menu rows that open these pages, and never in a title.
             doc: The rendered page, from one of the builders above.
         """
         super().__init__(doc, title=title, floating=False)
@@ -122,12 +126,12 @@ class AboutPage(ScrollScreen):
 
     @property
     def picocalc_lyra_lane(self):
-        """The shared pager lane, plus the section step on a page that has sections.
+        """The shared pager lane, with the section step on a page that has sections.
 
-        A left-hand pair rises toward F1, so ``Sect ↑`` sits outside ``Sect ↓`` — the
-        order a grouped select list uses on the same two keys, dispatching the same two
-        actions. Both are lit only while the page actually scrolls: with the whole page
-        on screen there is no section to step *to*.
+        A left-hand pair rises toward F1, so ``Sect ↑`` is outside ``Sect ↓``. A grouped
+        select list uses this order on the same two keys, and it sends the same two actions.
+        Both chips are lit only while the page scrolls. When the whole page is visible, there
+        is no section to which to step.
         """
         from .tui.fkeys import FPair, default_lane
 
@@ -138,13 +142,13 @@ class AboutPage(ScrollScreen):
         return lane
 
     def render_body(self, width: int) -> list[str]:
-        """Render the page a block at a time, noting where its section headings land."""
+        """Render the page one block at a time, and note where its section headings land."""
         lines: list[str] = []
         self._sticky_headers = []
         for block in self._doc.blocks:
-            # A blank separator renders to no lines at all on its own (it is one empty
-            # Text, and an empty render has nothing to split); inside the document's
-            # Group it would be the empty line it is meant to be, so it stays one here.
+            # A blank separator by itself renders to no lines. It is one empty Text, and an
+            # empty render has nothing to split. Inside the Group of the document, it is the
+            # empty line that it must be. Thus it stays one empty line here.
             rendered = render_lines(block.renderable, width) or [""]
             if block.heading:
                 self._sticky_headers.append((len(lines), rendered))
@@ -154,15 +158,15 @@ class AboutPage(ScrollScreen):
 
 
 async def open_about_page(ctx: AppContext, title: str, doc: MarkdownDoc) -> None:
-    """Open one About page full-screen and hold it until the reader backs out.
+    """Open one About page full-screen and hold it until the user goes back.
 
     Args:
-        ctx: The shared application context (must be running the interactive TUI).
-        title: The page's heading.
-        doc: The page's content.
+        ctx: The shared application context (the interactive TUI must run).
+        title: The heading of the page.
+        doc: The content of the page.
 
     Raises:
-        RuntimeError: If called outside the interactive menu (no full-screen session).
+        RuntimeError: If the caller is outside the interactive menu (no full-screen session).
     """
     from .surface import TuiUi
 

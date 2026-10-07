@@ -1,57 +1,62 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The Mesh walk: walk the mesh's observed shape one node at a time.
+"""The Mesh walk: go through the observed shape of the mesh, one node at a time.
 
-The interactive face of the ``walk`` tool. The trace path composer already distills
-every fragment of topology we ever received — trace walks, firmware routes, RX-logged
-relay chains, repeater neighbour tables — into one evidence graph
-(:mod:`~meshterm.services.topology`); this screen is that graph made explorable. Nothing
-here transmits: the walk is a reading of what the radio has already heard.
+This screen is the interactive form of the ``walk`` tool. The trace path composer
+collects each part of the topology that we received into one evidence graph
+(:mod:`~meshterm.services.topology`): trace walks, firmware routes, relay chains from the
+RX log, and the neighbour tables of repeaters. This screen lets the user explore that
+graph. Nothing here transmits: the walk shows only what the radio has already heard.
 
-Rather than plotting the whole mesh at once (which reads as a hairball the moment the
-graph grows), the walk keeps one node *in focus* — our own, to begin with — and shows
-only its immediate neighbourhood:
+The walk does not plot the full mesh at one time, because a large graph then looks like
+a tangle. Instead, the walk keeps one node *in focus* (at the start, our node) and shows
+only its direct neighbours:
 
-* the **canvas** — the majority of the screen, so the shape stays legible — anchors the
-  focus at the far **west** with its name to its right, then fans a deliberately sparse
-  spread of its strongest neighbours across the width to the east, each named just to the
-  right of its marker. Every marker is the app-wide **node-type mark**, glyph and colour
-  both — the very mark the map and the route graph pin that node with — while *identity*
-  rides the name beside it, in the node's key hue. Edges are braille lines coloured by the
-  link's median SNR (green → amber → red, slate for links with no reading) and faded by
-  evidence age; they leave the *right end of the focus name* so a connecting line never
-  crosses a label. The fan sits on a row grid — one marker per row, a blank row between
-  each, a blank row above and below where the canvas can afford it — and only as many
-  neighbours as those rows carry are drawn; the weaker rest, ranked by observed strength
-  (SNR, sample count, and recency folded together, so a strong-but-long-stale link is not
-  promoted over a fresher one), collapse into one ``…`` marker, which stands in for
-  whichever of them the list highlights (its own mark, its own name, and a grey
-  ``(2/17)`` for where it sits among them). Only ways *onward* are drawn: the node the
-  walk came from is behind you, and ⌫ is how you go back to it.
-* the **link list** beneath names every way onward as a selectable row, strongest
-  observed link first — so the cursor's home, row 0, is always the strongest link out of
-  here: type glyph, name, hash, SNR with a quality bar, the evidence behind the link
-  (samples, sources, age), and how many links continue onward from that node. The highlighted
-  row's marker and label light white on the canvas. The list scrolls *within* the screen — the
-  canvas, legend, and heading hold still, and
-  faint ``↑/↓ n more`` markers bracket the window — with ↑↓ moving one row and
-  PgUp/PgDn a windowful.
+* The **canvas** takes most of the screen, so that the shape stays easy to read. It puts
+  the focus at the far **west**, with its name to its right. Then it spreads a fan of the
+  strongest neighbours to the east across the width. The fan is sparse on purpose. The
+  name of each neighbour is immediately to the right of its marker. Each marker is the
+  **node-type mark** of the app, with its glyph and its colour: the same mark that the
+  map and the route graph use for that node. The *identity* of the node is in the name
+  next to the marker, in the hue of the node. Edges are braille lines. The median SNR of
+  the link sets the colour of an edge (green → amber → red, and slate for a link with no
+  reading), and the age of the evidence makes it fainter. Each edge starts at the *right
+  end of the focus name*, so that a line never crosses a label. The fan is on a grid of
+  rows: one marker on each row, a blank row between two markers, and a blank row above
+  and below when the canvas has the space. The canvas draws only as many neighbours as
+  these rows can hold. The remaining weaker neighbours collapse into one ``…`` marker.
+  They are ranked by observed strength: the SNR, the sample count, and the recency
+  together. Thus a strong link that is very old does not go above a newer one. When the
+  list highlights one of the collapsed neighbours, the ``…`` marker stands in for it: it
+  shows the mark of that node, its name, and a grey ``(2/17)`` for its position among
+  them. The canvas draws only the ways *onward*. The node that the walk came from is
+  behind you, and ⌫ takes you back to it.
+* The **link list** below the canvas shows each way onward as a row that you can
+  select. The strongest observed link is first. Thus row 0, where the highlight starts,
+  is always the strongest link from this node. Each row has the type glyph, the name,
+  the hash, the SNR with a quality bar, the evidence for the link (samples, sources, and
+  age), and the number of links that continue onward from that node. On the canvas, the
+  label of the highlighted row shows in white. The list scrolls *inside* the screen: the
+  canvas, the legend, and the heading do not move, and faint ``↑/↓ n more`` markers are
+  at the top and bottom of the list window. ↑↓ move one row, and PgUp/PgDn move one list
+  window.
 
-**Enter walks**: the highlighted neighbour becomes the new focus, the breadcrumb trail
-across the top grows (a :mod:`~meshterm.ui.pathline` path line — powerline chips where the
-terminal draws them, ``you › Hilltop-Repeater › …`` where it doesn't, each name in its
-node's own hue), and **⌫ steps back** along it. Walking to a node already on the trail
-truncates the stack to its first appearance — the loop you walked to get back there is
-dropped rather than recorded. The trail never wraps: it is one line read through a
-window, drawn whole while whole fits and *cropped* at either edge the walk continues
-past — a chip sheared on its own half block, the way every path row in the app that
-outgrows its lane is cut. At rest the window sits at the tail, so the focus and the
-steps just taken are in view and it is the walk's start that is cropped; **←→ slide
-it** to read back over a long walk. **^Y** refocuses our own node.
-**Typing finds** — a global filter over every node in the graph, islands included — and
-narrows the canvas's fan to matching neighbours as it goes, the focus and the came-from
-node holding through it; Enter teleports the focus to the highlighted match (the trail
-restarts there, since the walk didn't cross the gap). Esc peels find first, the screen
-second.
+**Enter walks**: the highlighted neighbour becomes the new focus, and the breadcrumb trail
+at the top becomes longer. The trail is a :mod:`~meshterm.ui.pathline` path line: powerline
+chips where the terminal can draw them, or ``you › Hilltop-Repeater › …`` where it cannot.
+Each name is in the hue of its node. **⌫ steps back** along the trail. If you walk to a
+node that is already on the trail, the stack is cut back to the first position of that
+node. Thus the loop that you walked to come back there is removed, not stored. The trail
+never wraps. It is one line that the user reads through a window. It is drawn complete
+while it fits. If it does not fit, it is *cropped* at each edge where the walk
+continues: the chip breaks on its own half block, the same as each path row in the app
+that is too long for its lane. At rest, the window is at the tail. Thus the focus and the
+last steps are visible, and the crop removes the start of the walk. **←→ slide the
+window**, so that you can read back over a long walk. **^Y** puts the focus on our node
+again. **Typing finds**: a filter over all the nodes in the graph, islands also. While you
+type, it also narrows the fan on the canvas to the neighbours that match, and the focus
+stays. Enter teleports the focus to the highlighted match. The trail then starts again
+there, because the walk did not cross the gap. The first Esc clears the find, and the
+second Esc leaves the screen.
 """
 
 from __future__ import annotations
@@ -81,122 +86,131 @@ from .widgets import DEFAULT_GLYPH, NODE_GLYPHS, format_age, highlighted_hash, s
 if TYPE_CHECKING:
     from ..context import AppContext
 
-#: The share of the width east of the focus's name that the fan keeps for its own reach,
-#: however long the names it must make room for. Below this the graph stops reading as a
-#: fan at all — the markers pile onto the focus — so past it the labels clip instead (see
-#: :meth:`WalkScreen._place_neighbours`).
+#: The part of the width east of the focus name that the fan keeps for its reach, however
+#: long the names are that it must make space for. Below this part, the graph does not
+#: look like a fan (the markers pile onto the focus). Thus, past this limit, the labels
+#: are clipped instead (refer to :meth:`WalkScreen._place_neighbours`).
 _MIN_FAN_REACH = 1 / 3
 
-#: The canvas's floor in character rows: below this the fan's shape stops reading.
+#: The minimum height of the canvas in character rows. Below this height, the user cannot
+#: see the shape of the fan.
 _CANVAS_MIN_H = 6
 
-#: Rows the link list always keeps for itself under the canvas, however tall the
-#: graph would like to be — a windowed list needs at least a few rows to scroll in.
+#: The rows that the link list always keeps for itself under the canvas, however tall the
+#: graph wants to be. A list in a list window must have at least a few rows to scroll in.
 _LIST_MIN_ROWS = 3
 
-#: The widest any on-canvas label renders before it ellipsizes — a generous cap that most
-#: real node names clear whole. It is only an upper bound: each label is *also* clamped to
-#: the cells actually free between its marker and the canvas edge (see :meth:`_label_right`,
-#: :meth:`_focus_anchor`, :meth:`_place_label`), so a name loses letters only when it
-#: genuinely won't fit, not to a fixed short budget — the fan's placement leaves most
-#: markers far more room than the old flat cap allowed.
+#: The maximum width of a label on the canvas before it ellipsizes. This limit is large,
+#: and most real node names fit it completely. It is only an upper limit: each label is
+#: *also* clamped to the free cells between its marker and the edge of the canvas (refer to
+#: :meth:`_label_right`, :meth:`_focus_anchor`, :meth:`_place_label`). Thus a name loses
+#: letters only when it really does not fit, not because of a fixed short limit. The fan
+#: placement gives most markers much more space than the old fixed limit did.
 _LABEL_W = 22
 
-#: The fan's own label cap — higher than the focus's, and the longest a name may pull its
-#: marker west to spell (JP, 2026-08-09). The fan is *where the names are read*, so it gets the
-#: room; the focus keeps the tighter :data:`_LABEL_W` because every cell it spends pushes
-#: the whole fan east, and its name is spelled out in full on the line below the canvas
-#: anyway. 32 is the protocol's own limit on a node name, so a name that fits the mesh
-#: fits here.
+#: The label limit of the fan. It is higher than the limit of the focus, and it is the
+#: longest name for which a marker can move west (JP, 2026-08-09). The user reads the names
+#: in the fan, so the fan gets the space. The focus keeps the smaller :data:`_LABEL_W`,
+#: because each cell that it uses pushes the full fan east. Also, the line below the
+#: canvas shows the full name of the focus. 32 is the limit of the protocol for a node
+#: name, so a name that fits the mesh fits here.
 _FAN_LABEL_W = 32
 
-#: The name length the fan's *default* reach is sized for. Markers whose own name is longer
-#: step west from there one cell per extra cell of name; markers with a shorter one stay
-#: put, so a single long name never drags the whole fan in with it.
+#: The name length for which the *default* reach of the fan is sized. A marker with a
+#: longer name moves west from there, one cell for each extra cell of the name. A marker
+#: with a shorter name does not move. Thus one long name never pulls the full fan in.
 _FAN_BASE_LABEL_W = 12
 
-#: The fan's angular reach on each side of due east, in radians. This sets the fan's
-#: *vertical* spread (the marker rows the leaves fan across); the *horizontal* reach is
-#: flattened from it by :data:`_FAN_X_FLATTEN`, so a leaf's height and its easting are
-#: decoupled. The whole fan stays east of the focus — neighbours to the right, labels
-#: rightward — and a smaller neighbourhood uses proportionally less of the arc so two
-#: nodes never sit at its extremes with nothing between them.
+#: The angular reach of the fan on each side of due east, in radians. This angle sets the
+#: *vertical* spread of the fan (the marker rows that the leaves spread across).
+#: :data:`_FAN_X_FLATTEN` makes the *horizontal* reach flatter than this angle. Thus the
+#: height of a leaf and its distance to the east are independent. The full fan stays east
+#: of the focus (neighbours to the right, labels to the right). A smaller neighbourhood
+#: uses a proportionally smaller part of the arc. Thus two nodes are never at the two ends
+#: of the arc with nothing between them.
 _FAN_HALF_ANGLE = math.radians(72)
 
-#: How much flatter the fan's horizontal reach is than its vertical spread. A leaf's full
-#: fan angle sets its *height*; its *east reach* uses only this fraction of that angle, so
-#: the rim (top/bottom) leaves bow just gently back from due-east instead of curling in
-#: toward the focus on a true circle. The fan then spreads across the width rather than
-#: bulging in the middle with empty corners. ``1.0`` restores the old circular arc; lower
-#: flattens it further. The setback still scales with the fan's angular reach, so a small
-#: fan sitting near due-east barely eases back at all.
+#: How much flatter the horizontal reach of the fan is than its vertical spread. The full
+#: fan angle of a leaf sets its *height*. Its *east reach* uses only this fraction of that
+#: angle. Thus the leaves at the rim (top and bottom) curve back from due east only a
+#: little, and do not curve in toward the focus on a true circle. The fan then spreads
+#: across the width, and it does not bulge in the middle with empty corners. ``1.0`` gives
+#: the old circular arc again, and a lower value makes it flatter. The setback still
+#: changes with the angular reach of the fan, so a small fan near due east moves back
+#: almost not at all.
 _FAN_X_FLATTEN = 0.55
 
-#: The fan size worth giving up its outer blank rows for. Above this the canvas keeps a
-#: blank row top and bottom; below it, those rows go to nodes instead — see
-#: :meth:`WalkScreen._fan_capacity`.
+#: The fan size for which the canvas gives up its outer blank rows. Above this size, the
+#: canvas keeps a blank row at the top and at the bottom. Below it, these rows go to nodes
+#: instead. Refer to :meth:`WalkScreen._fan_capacity`.
 _FAN_MIN_SLOTS = 7
 
-#: Sentinel key for the collapsed weaker-links marker in the placed-node map. NUL can
-#: never collide with a canonical id (those are hex).
+#: The sentinel key for the collapsed marker of the weaker links, in the map of placed
+#: nodes. NUL can never be the same as a canonical id (canonical ids are hex).
 _MORE = "\x00more"
 
-#: The breadcrumb trail's own hop joiner (``›``, not the app-wide ``→``). Either end that
-#: holds walk out of view wears the app's cut mark — a chip broken off on its own fill,
-#: the faint ``…`` where the line is drawn in arrows (see :meth:`WalkScreen._trail_text`).
+#: The separator between the hops of the breadcrumb trail (``›``, not the ``→`` of the
+#: rest of the app). Each end that has more walk outside the viewport shows the cut mark
+#: of the app: a chip that breaks on its own fill, or the faint ``…`` where the line is
+#: drawn in arrows (refer to :meth:`WalkScreen._trail_text`).
 _TRAIL_SEP = " › "
 
-#: Cells one ←/→ press slides the breadcrumb by — the same step every other windowed path
-#: row in the app takes (the node page's routes, the Message paths lanes, the select
-#: list's ``hscroll``), because this is the same window: one line, cropped, read a lane at
-#: a time. A hop a press was the old fit's unit, when the overflow was whole hops going
-#: behind a ``⋯``; a cropped line has no hop boundaries to step by, and stepping by the
-#: crop's own unit is what makes the slide read as a slide.
+#: The cells by which one ←/→ press slides the breadcrumb. This is the same step as each
+#: other path row in a window in the app (the routes on the node page, the Message paths
+#: lanes, the ``hscroll`` of the select list), because this is the same type of window:
+#: one line, cropped, that the user reads one lane at a time. The old fit moved one hop for
+#: each press, when the overflow put whole hops behind a ``⋯``. A cropped line has no hop
+#: boundaries to step by. When the step is the unit of the crop, the slide looks like a
+#: slide.
 _HSCROLL_STEP = 8
 
-#: How many find matches the list shows at most (the filter narrows it fast).
+#: The maximum number of find matches that the list shows (the filter narrows it fast).
 _MAX_MATCHES = 10
 
-#: The narrowest the neighbour/match list's name lane shrinks to. The lane is content-sized
-#: and flexes up to whatever the fixed lanes leave (see :meth:`WalkScreen._lane_widths`),
-#: so as much of a long name shows as the row can spare.
+#: The minimum width of the name lane in the list of neighbours or matches. The lane width
+#: comes from its content, and it can grow to the width that the fixed lanes leave (refer
+#: to :meth:`WalkScreen._lane_widths`). Thus a long name shows as much as the row has space
+#: for.
 _LIST_NAME_MIN = 10
 
-#: The *widest* the key lane spans — the whole 12-hex canonical id, addressed prefix lit in
-#: the node's hue (see :func:`highlighted_hash`). The lane flexes down from here on a byte
-#: boundary to hand a long name more room, but never below its lit hash (see
-#: :meth:`WalkScreen._lane_widths`): the name loses letters before the hash does.
+#: The *maximum* width of the key lane: the full canonical id of 12 hex digits, with the
+#: addressed prefix lit in the hue of the node (refer to :func:`highlighted_hash`). The
+#: lane becomes narrower from here on a byte boundary, to give a long name more space. But
+#: it never becomes narrower than its lit hash (refer to :meth:`WalkScreen._lane_widths`):
+#: the name loses letters before the hash does.
 _LIST_HASH_W = 12
 
-#: Cells a link row spends *outside* its two flexing lanes (name and key), so those two can
-#: size to what's left: pointer (2) + type glyph and its space (2) + the name→key space (1)
-#: + gap (2) + SNR (5) + space (1) + quality bar (4) + samples (5) + source tags (5)
-#: + age (5) + a reserve for the trailing ⌫/⋯ marker (8).
+#: The cells that a link row uses *outside* its two flexible lanes (name and key), so that
+#: these two lanes can use the remaining cells: pointer (2) + type glyph and its space (2)
+#: + the space between name and key (1) + gap (2) + SNR (5) + space (1) + quality bar (4)
+#: + samples (5) + source tags (5) + age (5) + a reserve for the ⋯ count at the end (8).
 _LINK_ROW_FIXED = 2 + 2 + 1 + 2 + 5 + 1 + 4 + 5 + 5 + 5 + 8
 
-#: The same, for a find-match row — which trails a short distance note rather than the SNR
-#: evidence: pointer (2) + glyph and space (2) + name→key space (1) + gap (2)
-#: + a distance reserve (12, for ``this device`` / ``N hops out``).
+#: The same, for a find-match row. This row ends with a short note of the distance, not
+#: with the SNR evidence: pointer (2) + glyph and space (2) + the space between name and
+#: key (1) + gap (2) + a reserve for the distance (12, for ``this device`` / ``N hops out``).
 _MATCH_ROW_FIXED = 2 + 2 + 1 + 2 + 12
 
-#: SNR (dB) → edge colour anchors, interpolated linearly and clamped at the ends: the
-#: red/amber/green of the app's snr styles, so the graph and the rows agree.
+#: The anchors from SNR (dB) to edge colour. The colour between two anchors is a linear
+#: interpolation, and it is clamped at the ends. These are the red, amber, and green of the
+#: SNR styles of the app, so that the graph and the rows agree.
 _SNR_STOPS: tuple[tuple[float, RGB], ...] = (
     (-15.0, (239, 68, 68)),
     (0.0, (250, 204, 21)),
     (10.0, (74, 222, 128)),
 )
 
-#: Edge colour for a link with no SNR reading at all (e.g. known only from a route).
+#: The edge colour for a link with no SNR reading (for example, a link known only from a
+#: route).
 _NO_READING: RGB = (100, 116, 139)
 
-#: One-letter tags for the evidence classes backing a link, matching the path
-#: composer's: T(race), R(oute), P(acket log), N(eighbour table).
+#: One-letter tags for the types of evidence for a link, the same as in the path composer:
+#: T(race), R(oute), P(acket log), N(eighbour table).
 _SOURCE_TAGS = {"trace": "T", "route": "R", "packet": "P", "neighbour": "N"}
 
 
 def _snr_rgb(snr: float | None) -> RGB:
-    """The edge colour for a link's median SNR (see :data:`_SNR_STOPS`)."""
+    """The edge colour for the median SNR of a link (refer to :data:`_SNR_STOPS`)."""
     if snr is None:
         return _NO_READING
     if snr <= _SNR_STOPS[0][0]:
@@ -209,12 +223,12 @@ def _snr_rgb(snr: float | None) -> RGB:
 
 
 def _scaled(rgb: RGB, factor: float) -> RGB:
-    """``rgb`` dimmed (or mildly brightened) by ``factor``, clamped to byte range."""
+    """``rgb`` made dimmer (or a little brighter) by ``factor``, clamped to the byte range."""
     return tuple(max(0, min(255, round(c * factor))) for c in rgb)  # type: ignore[return-value]
 
 
 def _freshness(last_seen: datetime | None, now: datetime) -> float:
-    """How brightly a link draws for its evidence age: 1.0 fresh → 0.5 stale."""
+    """How bright a link is for the age of its evidence: 1.0 new → 0.5 stale."""
     if last_seen is None or getattr(last_seen, "tzinfo", None) is None:
         return 0.55
     age = (now - last_seen).total_seconds()
@@ -226,25 +240,26 @@ def _freshness(last_seen: datetime | None, now: datetime) -> float:
 
 
 class WalkScreen(Screen):
-    """The full-screen mesh walker: a focus neighbourhood canvas over a link list."""
+    """The full-screen mesh walk: a canvas of the focus neighbourhood over a link list."""
 
     floating = False
 
     @property
     def picocalc_lyra_lane(self):
-        """``You`` on the screen's own F3, the shared pager and its two ends on F4/F5.
+        """``You`` on the F3 of this screen, and the shared pager with its two ends on F4/F5.
 
-        ``You`` is not an end of the link list — it drops the whole trail and puts the
-        focus back on our own node — so it never belonged behind the pager, where it had
-        to stand in for *Top* and leave *Bottom* blank to keep the pretence. It takes a
-        slot of the screen's own instead (JP, 2026-08-09), which is what F1-F3 are for,
-        and the pager's Shift bank goes back to meaning here what it means everywhere
-        else: the two ends of the list this screen scrolls. ^Y reaches the same action on
-        a keyboard, the same chord the map spends on our node.
+        ``You`` is not an end of the link list. It removes the full trail and puts the
+        focus on our node again. Thus it was never correct behind the pager, where it had
+        to stand in for *Top* and leave *Bottom* blank to keep up the pretence. Instead, it
+        takes a slot of this screen (JP, 2026-08-09), because F1-F3 are for this purpose.
+        The Shift bank of the pager then has the same meaning here as in all other places:
+        the two ends of the list that this screen scrolls. On a keyboard, ^Y does the same
+        action. The map uses the same chord for our node.
 
-        Both nav slots need rows to move through, which a leaf node in a sparse graph may
-        not have; ``You`` needs somewhere to come back *from* — a walked trail, or a find
-        narrowing the list — and dims once the focus is already us.
+        The two navigation slots must have rows to move through, and a leaf node in a
+        sparse graph may not have them. ``You`` must have a place to come back *from* (a
+        walked trail, or a find that narrows the list). It dims when the focus is already
+        our node.
         """
         from .tui.fkeys import FPair, default_lane
 
@@ -255,60 +270,62 @@ class WalkScreen(Screen):
     def __init__(
         self,
         *,
-        session,  # noqa: ANN001 - TuiSession, imported lazily to avoid a cycle
+        session,  # noqa: ANN001 - a TuiSession, imported late to prevent an import cycle
         topo: MeshTopology,
         contacts: dict[str, Contact],
         self_label: str,
         prefix_bytes: int = 0,
     ) -> None:
-        """Create the walk over a built topology snapshot.
+        """Create the walk over a snapshot of a built topology.
 
         Args:
-            session: The running TUI session (repaints).
+            session: The running TUI session (for paints).
             topo: The evidence graph to walk.
-            contacts: Contacts keyed by canonical id, for glyphs, names, and ages.
-            self_label: Display name for our own node (its mesh name when known).
-            prefix_bytes: Path-hash width to light in the hash lane (0 = none).
+            contacts: The contacts by canonical id, for glyphs, names, and ages.
+            self_label: The display name for our node (its mesh name when it is known).
+            prefix_bytes: The width of the path hash to light in the hash lane (0 = none).
         """
         super().__init__()
-        # The screen's name, and nothing else (JP, 2026-08-30). It carried the focus and
-        # the graph's size — ``Mesh walk — Hilltop-Repeater · 42 nodes · 61 links`` — which
-        # ran past a 53-column title bar, and every atom of it was already on the screen
-        # below: the trail ends on the focus, the line under it names that node in colour
-        # with its hash and its ring, and how big the neighbourhood is, is what the canvas
-        # and the link list are *for*. Set once here rather than composed per render, so
-        # the top row never rewrites itself as the walk moves.
+        # The name of the screen, and nothing more (JP, 2026-08-30). The title once had the
+        # focus and the size of the graph:
+        # ``Mesh walk — Hilltop-Repeater · 42 nodes · 61 links``. That title was longer than
+        # a title bar of 53 columns, and each atom of it was already on the screen below.
+        # The trail ends on the focus. The line under the trail shows the name of that node
+        # in colour, with its hash and its ring. The canvas and the link list exist to show
+        # the size of the neighbourhood. The title is set one time here, not composed at
+        # each render. Thus the top row never changes while the walk moves.
         self.title = "Mesh walk"
         self._session = session
         self._topo = topo
         self._contacts = contacts
         self._self_label = self_label
         self._prefix_bytes = prefix_bytes
-        #: The walked trail of canonical ids; the focus is its last entry. Walking
-        #: appends, ⌫ pops, ^Y resets to us, a find teleport restarts it.
+        #: The walked trail of canonical ids. The focus is its last entry. A walk appends,
+        #: ⌫ pops, ^Y resets the trail to our node, and a find teleport starts it again.
         self._trail: list[str] = [topo.self_id]
-        #: Hops the breadcrumb line is scrolled off its *tail* end (see
-        #: :meth:`_trail_text`). 0 is the resting state — the focus flush right — and
-        #: every change to the trail returns it there.
+        #: The cells by which the breadcrumb line is scrolled off its *tail* end (refer to
+        #: :meth:`_trail_text`). 0 is the rest state (the focus at the right edge). Each
+        #: change to the trail sets it back to 0.
         self._trail_scroll = 0
-        #: ``((width, trail) → the furthest that can scroll)``, settled at render (see
-        #: :meth:`_trail_max_scroll`) so a keypress can clamp itself without a width.
+        #: ``((width, trail) → the furthest that can scroll)``, set at render (refer to
+        #: :meth:`_trail_max_scroll`). Thus a key press can clamp itself without a width.
         self._trail_fit: tuple[tuple, int] | None = None
-        #: The width the trail last rendered at, for that same clamp.
+        #: The width of the last render of the trail, for that same clamp.
         self._trail_width = 0
-        #: Index of the highlighted row in the current list (neighbours or matches).
+        #: The index of the highlighted row in the current list (neighbours or matches).
         self._index = 0
-        #: The live find-as-you-type filter ("" = off; matches every node known).
+        #: The live find-as-you-type filter ("" = off). It searches all the known nodes.
         self._filter = ""
-        self._needs_scrub = True  # braille smear scrub, exactly like the map
-        #: The link list's window (the list scrolls, the screen doesn't); its
-        #: settled capacity is the stride a PgUp/PgDn moves the highlight by.
+        self._needs_scrub = True  # the scrub of the braille smear, the same as on the map
+        #: The list window of the link list (the list scrolls, the screen does not). Its
+        #: settled capacity is the step by which a PgUp/PgDn moves the highlight.
         self._list = ListWindow()
-        # Graph-derived memos. The topology is snapshotted once when the screen opens
-        # (fresh evidence means reopening), so everything derived purely from it —
-        # neighbour lists, the node set, BFS depths, onward-link counts — is computed
-        # once per key instead of once per repaint. Nothing ever invalidates these:
-        # they live exactly as long as the frozen graph they describe.
+        # Caches of values from the graph. MeshTerm takes a snapshot of the topology one
+        # time when the screen opens (to see new evidence, open the screen again). Thus
+        # each value that comes only from the snapshot (neighbour lists, the node set, BFS
+        # depths, the counts of onward links) is calculated one time for each key, not at
+        # each paint. Nothing ever makes these caches invalid: they exist exactly as long
+        # as the frozen graph that they describe.
         self._links_of_memo: dict[str, list[tuple[str, Link]]] = {}
         self._all_nodes_memo: set[str] | None = None
         self._hops_out_memo: dict[str, int] | None = None
@@ -318,19 +335,20 @@ class WalkScreen(Screen):
 
     @property
     def _focus(self) -> str:
-        """The node currently in focus (the trail's last step)."""
+        """The node that is now in focus (the last step of the trail)."""
         return self._trail[-1]
 
     @property
     def _came_from(self) -> str | None:
-        """The node the trail arrived from, or ``None`` at the trail's start."""
+        """The node that the trail came from, or ``None`` at the start of the trail."""
         return self._trail[-2] if len(self._trail) > 1 else None
 
     def _links_of(self, node: str) -> list[tuple[str, Link]]:
-        """``(other, link)`` for every link off ``node``, strongest evidence first.
+        """``(other, link)`` for each link from ``node``, the strongest evidence first.
 
-        Memoized per node over the frozen graph (the sort order is pinned at first
-        ask — strength decays over hours, far slower than a screen stays open).
+        The result is cached for each node over the frozen graph. The sort order is set
+        at the first request: the strength decreases over hours, much slower than the
+        time that a screen stays open.
         """
         memoized = self._links_of_memo.get(node)
         if memoized is not None:
@@ -346,7 +364,7 @@ class WalkScreen(Screen):
         return pairs
 
     def _all_nodes(self) -> set[str]:
-        """Every node the graph mentions, plus us (walkable even when alone)."""
+        """All the nodes in the graph, and our node (a walk can start there, also alone)."""
         if self._all_nodes_memo is None:
             nodes = {self._topo.self_id}
             for link in self._topo.links():
@@ -356,10 +374,10 @@ class WalkScreen(Screen):
         return self._all_nodes_memo
 
     def _hops_out(self) -> dict[str, int]:
-        """BFS hop distance from our own node over the evidence links.
+        """The BFS hop distance from our node over the evidence links.
 
-        Nodes with no path to us are absent — they are the islands, flagged as such
-        wherever a distance would otherwise show.
+        A node with no path to our node is not in the result. Such nodes are the islands.
+        Where a distance usually shows, the screen marks them as islands.
         """
         if self._hops_out_memo is not None:
             return self._hops_out_memo
@@ -381,10 +399,10 @@ class WalkScreen(Screen):
     def _is_match(self, node: str) -> bool:
         """Whether the live find query matches this node (by display name or by id).
 
-        The one predicate behind both things the query narrows: the list of teleport
-        candidates (:meth:`_matches`, over the whole graph) and the canvas's fan
-        (:meth:`_canvas_lines`, over the focus's own neighbours). No filter matches
-        everything, so a caller need not check for one first.
+        This is the only predicate for the two things that the query narrows: the list of
+        teleport candidates (:meth:`_matches`, over the full graph) and the fan on the
+        canvas (:meth:`_canvas_lines`, over the neighbours of the focus). When there is no
+        filter, all nodes match. Thus a caller does not have to check for a filter first.
         """
         needle = self._filter.strip().casefold()
         if not needle:
@@ -392,7 +410,7 @@ class WalkScreen(Screen):
         return needle in self._label(node).casefold() or needle in node.casefold()
 
     def _matches(self) -> list[str]:
-        """Nodes the find filter matches: nearest first, then by display name."""
+        """The nodes that the find filter matches: the nearest first, then by display name."""
         if not self._filter.strip():
             return []
         depths = self._hops_out()
@@ -401,11 +419,12 @@ class WalkScreen(Screen):
         return candidates[:_MAX_MATCHES]
 
     def _rows(self) -> list[str]:
-        """The selectable node ids the list currently shows: matches, or the ways onward.
+        """The node ids that the list now shows and that the user can select.
 
-        Neighbour rows are :meth:`_fan_nodes` — the same set the canvas draws, in the same
-        strongest-first order — so row 0, where every reset of the cursor lands, is the
-        strongest link out of here.
+        These are the matches, or the ways onward. The neighbour rows are
+        :meth:`_fan_nodes`: the same set that the canvas draws, in the same order (the
+        strongest first). Thus row 0, where the highlight goes at each reset, is the
+        strongest link from this node.
         """
         if self._filter:
             return self._matches()
@@ -415,15 +434,15 @@ class WalkScreen(Screen):
 
     @property
     def footer_hint(self) -> str:  # type: ignore[override]
-        """Walking keys — or the live find query while one is being typed.
+        """The keys of the walk, or the live find query while the user types one.
 
-        Every atom fits the 72-cell budget only because two of them take turns. ``←→
-        trail`` appears exactly while the breadcrumb has more walk than width (an inert
-        key is never advertised — the hint line's own long-standing rule, and the F-lane's
-        after it), and it takes the place of ``type to find``: a walk deep enough to
-        overflow the trail is one where the scroll is the unknown key, while typing
-        announces itself the instant a letter lands, replacing this whole line with the
-        query. The find is self-teaching; the scroll had no way to be.
+        All the atoms fit the limit of 72 cells only because two of them alternate.
+        ``←→ trail`` shows exactly while the breadcrumb has more walk than width. (A
+        keyboard key that does nothing is never shown: this is an old rule of the hint
+        line, and of the F-key lane after it.) It takes the place of ``type to find``. When a
+        walk is long enough to overflow the trail, the scroll is the key that the user
+        does not know. But typing shows itself at the first letter, because the query
+        then replaces this full line. The find teaches itself, and the scroll could not.
         """
         if self._filter:
             return f"find: {self._filter}▏ · ↑↓ move · Enter focus · ⌫ erase · Esc clear"
@@ -438,11 +457,11 @@ class WalkScreen(Screen):
         return " · ".join(atoms)
 
     def handle(self, action: str, data: str = "") -> None:
-        """Move the highlight, walk, back up, find, or dismiss.
+        """Move the highlight, walk, step back, find, or close.
 
-        Home/End are the list's own ends here, as on every other scrolling screen; the jump
-        back to our own node is ``locate`` (^Y, and the lane's F3), which is not a place in
-        this list at all — see :attr:`picocalc_lyra_lane`.
+        Home/End go to the ends of the list here, the same as on each other screen that
+        scrolls. The jump back to our node is ``locate`` (^Y, and F3 on the lane), which is
+        not a position in this list. Refer to :attr:`picocalc_lyra_lane`.
         """
         rows = self._rows()
         if action == "escape":
@@ -453,15 +472,16 @@ class WalkScreen(Screen):
                 self.resolve(None)
                 return
         elif action == "up" and rows:
-            # Both ends clamp rather than wrap: the list scrolls inside a window (see
-            # ListWindow), and a highlight that jumped end to end would take the window
-            # with it — the one move that looks like the screen changed under you.
+            # Both ends clamp and do not wrap. The list scrolls inside a list window (refer
+            # to ListWindow). If the highlight jumps from one end to the other, it takes the
+            # list window with it. That is the one move that looks like a change of the
+            # screen under you.
             self._index = max(0, self._index - 1)
         elif action == "down" and rows:
             self._index = min(len(rows) - 1, self._index + 1)
         elif action == "pageup" and rows:
-            # The highlight pages by one list windowful: the window follows the
-            # highlight, so paging the view without it would just snap straight back.
+            # The highlight moves by the height of one list window. The list window follows
+            # the highlight. Thus, if only the list window moves, it goes back immediately.
             self._index = max(0, self._index - self._list.page)
         elif action == "pagedown" and rows:
             self._index = min(len(rows) - 1, self._index + self._list.page)
@@ -480,10 +500,11 @@ class WalkScreen(Screen):
         elif action in ("end", "ctrl_end") and rows:
             self._index = len(rows) - 1
         elif action == "left":
-            # The breadcrumb scrolls, the list doesn't — it is the one line here with more
-            # content than width. Clamped against the width the last paint settled, so
-            # holding ← parks at the head instead of banking presses to undo (0 until the
-            # trail actually overflows, which makes the key inert on a short walk).
+            # The breadcrumb scrolls, and the list does not: the breadcrumb is the only line
+            # here with more content than width. The scroll is clamped against the width of
+            # the last paint. Thus, when the user holds ←, the line stops at the head, and
+            # the extra presses are not kept for later. (The limit is 0 until the trail
+            # overflows, so the keyboard key does nothing on a short walk.)
             self._trail_scroll = min(
                 self._trail_scroll + _HSCROLL_STEP,
                 self._trail_max_scroll(self._trail_width),
@@ -491,46 +512,47 @@ class WalkScreen(Screen):
         elif action == "right":
             self._trail_scroll = max(0, self._trail_scroll - _HSCROLL_STEP)
         elif action == "locate":
-            # ^Y (and F3): abandon the walk rather than move within it — the trail goes
-            # back to just us and any find narrowing the list is dropped with it.
+            # ^Y (and F3): stop the walk, instead of a move inside it. The trail goes back
+            # to only our node, and a find that narrows the list is also removed.
             self._trail = [self._topo.self_id]
             self._filter = ""
             self._index = 0
             self._trail_scroll = 0
         elif action == "text":
-            if not data.isspace() or self._filter:  # never begin the filter with a space
+            if not data.isspace() or self._filter:  # never start the filter with a space
                 self._filter += data
                 self._index = 0
         elif action == "space" and self._filter:
-            self._filter += " "  # node names carry spaces; only meaningful mid-query
+            self._filter += " "  # node names have spaces. A space is useful only mid-query
         self._needs_scrub = True
         self._session.invalidate()
 
     def _walk(self, rows: list[str]) -> None:
-        """Focus the highlighted row: a step along the trail, or a find teleport."""
+        """Put the focus on the highlighted row: a step along the trail, or a find teleport."""
         if not rows:
             return
         target = rows[min(self._index, len(rows) - 1)]
         if self._filter:
-            # A teleport restarts the trail at the target — the walk didn't cross the
-            # gap, so pretending it did would make ⌫ retrace a path never taken.
+            # A teleport starts the trail again at the target. The walk did not cross the
+            # gap. If the trail shows that it did, ⌫ goes back along a path that the user
+            # never took.
             self._trail = [target]
             self._filter = ""
         elif target in self._trail:
-            # Revisiting a node already on the trail — stepping back through the west
-            # node, or looping round to an earlier one — truncates the stack to that
-            # node's first appearance. We drop the circular stretch we walked to get
-            # back here rather than recording the round trip; losing the loop is the point.
+            # A walk to a node that is already on the trail (a step back through the west
+            # node, or a loop round to an earlier node) cuts the stack back to the first
+            # position of that node. We remove the loop that we walked to come back here,
+            # and we do not store the round trip. The removal of the loop is intentional.
             self._trail = self._trail[: self._trail.index(target) + 1]
         else:
             self._trail.append(target)
         self._index = 0
-        self._trail_scroll = 0  # the new focus is the news; put it back in view
+        self._trail_scroll = 0  # the new focus is the important part. Make it visible again
 
-    # --- smear scrub (same fallback-glyph problem as the map) ---------------------
+    # --- smear scrub (the same problem with fallback glyphs as on the map) ---------
 
     def consume_edge_scrub(self) -> int:
-        """Right-edge columns to force-repaint after a redraw (see the map screen)."""
+        """The columns at the right edge to paint again after a paint (refer to the map)."""
         if not self._needs_scrub:
             return 0
         self._needs_scrub = False
@@ -539,12 +561,12 @@ class WalkScreen(Screen):
     # --- rendering -----------------------------------------------------------------
 
     def render_body(self, width: int) -> list[str]:
-        """Render the trail, the focus line, the canvas, and the windowed link list.
+        """Render the trail, the focus line, the canvas, and the link list in its list window.
 
-        The body is laid out to fit the frame's viewport exactly: the canvas takes
-        the majority of the rows (a touch less of the share on tall terminals), the
-        chrome around it holds still, and whatever remains is the link list's
-        window — only its rows scroll, inside :meth:`_list_lines`.
+        The layout of the body fits the viewport of the frame exactly. The canvas takes
+        most of the rows (a slightly smaller part on tall terminals). The chrome around it
+        does not move. The remaining rows are the list window of the link list. Only its
+        rows scroll, inside :meth:`_list_lines`.
         """
         links = self._topo.links()
         rows = self._rows()
@@ -554,13 +576,14 @@ class WalkScreen(Screen):
 
         depths = self._hops_out()
         selected = rows[self._index] if rows else None
-        viewport = self._scroll_viewport  # recorded by the frame before this render
+        viewport = self._scroll_viewport  # the frame stores it before this render
 
         header = self._header_lines(width, depths)
-        # The legend and the blank under it go on a short frame, where the rows are the
-        # list's (see widgets.short_frame); the list's heading stays either way.
+        # On a short frame, the legend and the blank line under it are removed, because
+        # there the rows go to the list (refer to widgets.short_frame). The heading of the
+        # list stays in both cases.
         keyed = not short_frame(viewport)
-        chrome = len(header) + (3 if keyed else 1) + self._query_row()  # (+find echo)
+        chrome = len(header) + (3 if keyed else 1) + self._query_row()  # (+ the find echo)
         canvas_h = self._canvas_height(viewport, chrome)
         list_win = max(1, viewport - chrome - canvas_h)
 
@@ -574,24 +597,25 @@ class WalkScreen(Screen):
         return lines
 
     def _query_row(self) -> int:
-        """Whether this paint spends a list row echoing the find query (1) or not (0).
+        """Whether this paint uses a list row to echo the find query (1) or not (0).
 
-        Only where the footer isn't drawn (:attr:`~meshterm.platforms.Platform.footer_fkeys`):
-        there the hint line carrying the query never reaches the screen, so without this row
-        the list would narrow to matches with no sign of what was typed to narrow it. The row
-        sits directly above the ``Matches`` heading — above what it narrows, as on every other
-        find-as-you-type screen — and the list, not the canvas, cedes the line for it.
+        This occurs only where the footer is not drawn
+        (:attr:`~meshterm.platforms.Platform.footer_fkeys`). There, the hint line that has
+        the query never gets to the screen. Without this row, the list narrows to the
+        matches and shows no sign of the text that narrowed it. The row is immediately
+        above the ``Matches`` heading: above what it narrows, as on each other
+        find-as-you-type screen. The list gives the line for it, not the canvas.
         """
         return 1 if self._filter and get_platform().footer_fkeys else 0
 
     def _canvas_height(self, viewport: int, chrome: int) -> int:
-        """Rows the canvas takes: the majority of the screen, ceded where pointless.
+        """The rows for the canvas: most of the screen, but fewer where more do not help.
 
-        The share starts at ~62% of the viewport and tapers toward half on tall
-        terminals (a huge graph area buys little once the fan is legible, while the
-        list keeps earning rows). A sparse neighbourhood caps it lower — a two-node
-        link needs no half-screen void — and the link list always keeps its
-        :data:`_LIST_MIN_ROWS` under the fixed chrome.
+        The part starts at approximately 62% of the viewport, and it decreases toward half
+        on tall terminals. When the fan is easy to read, a very large graph area adds
+        little, but more rows still help the list. A sparse neighbourhood sets a lower
+        limit: a link between two nodes does not need half a screen of empty space. The
+        link list always keeps its :data:`_LIST_MIN_ROWS` under the fixed chrome.
         """
         crowd = len(self._fan_nodes())
         share = 0.62 - 0.12 * min(max(viewport - 20, 0) / 24.0, 1.0)
@@ -601,12 +625,11 @@ class WalkScreen(Screen):
         return max(4, height)
 
     def _header_lines(self, width: int, depths: dict[str, int]) -> list[str]:
-        """The breadcrumb trail and the focus node's identity line.
+        """The breadcrumb trail and the identity line of the focus node.
 
-        The trail draws always — even at the root, where it is just our own node — so the
-        breadcrumb is a constant fixture and the header keeps a steady height whether you
-        have walked or not, rather than the whole body shifting up a row the moment you take
-        the first step.
+        The trail always shows, also at the root, where it is only our node. Thus the
+        breadcrumb is always there, and the header keeps the same height before and after
+        you walk. Without it, the full body moves up one row at your first step.
         """
         return [
             render_to_ansi(self._trail_text(width), width, no_wrap=True),
@@ -614,54 +637,59 @@ class WalkScreen(Screen):
         ]
 
     def _trail_text(self, width: int) -> Text:
-        """The breadcrumb trail as a path line: one line, ← → scrollable, never wrapped.
+        """The breadcrumb trail as a path line: one line, scrolls with ← →, never wraps.
 
-        The walk *is* a path — us, then every node stepped through, ending on the focus —
-        so it renders through :class:`~meshterm.ui.pathline.PathLine` like every other hop
-        sequence in the app: powerline chips wherever the terminal can draw them, the
-        trail's own ``›`` arrows where it can't. Each hop wears its node's key-derived hue
-        (ours the white ``you``; a node known only by a bare hash stays muted — colour is
-        reserved for keyed identities), so the trail and the rows below it agree on who is
-        who.
+        The walk *is* a path: our node, then each node that the walk stepped through, and
+        at the end the focus. Thus it renders through
+        :class:`~meshterm.ui.pathline.PathLine`, the same as each other sequence of hops in
+        the app: powerline chips where the terminal can draw them, and the ``›`` arrows of
+        the trail where it cannot. Each hop shows in the hue of its node, which comes from
+        its key. Our node is the white ``you``. A node known only by a bare hash takes the
+        grey of an unknown node (``node.unknown``), because colour is only for nodes that
+        have a key. Thus the trail and the rows below it agree about which node is which.
 
-        The line never wraps and it is never elided: it is composed once at its natural
-        length and then **read through a window**, exactly as every other path row in the
-        app that outgrows its lane is (the node page's routes, the Message paths lanes, a
-        trophy row under ``←→``). Whole while whole fits — flush left, opening on its
-        rounded head chip, as it would in a lane with cells to spare — and cropped when it
-        doesn't, with **each edge the walk continues past wearing the cut mark**
-        (:func:`~meshterm.ui.pathline.cut_mark`): a chip sheared on the half block in its
-        own fill, the faint ``…`` where the trail is drawn in arrows. What the reader
-        loses is the cells the lane ran out of, never the whole hop those cells were part
-        of (JP, 2026-09-05) — no ``⋯`` here, on either side, because nothing is elided.
+        The line never wraps, and nothing in it is ever elided. It is composed one time at
+        its natural length, and then the user **reads it through a window**, the same as
+        each other path row in the app that is too long for its lane (the routes on the
+        node page, the Message paths lanes, a trophy row under ``←→``). While all of it
+        fits, it shows complete: at the left edge, and it starts on its rounded head chip,
+        as it does in a lane with free cells. When it does not fit, it is cropped, and
+        **each edge where the walk continues shows the cut mark**
+        (:func:`~meshterm.ui.pathline.cut_mark`): a chip that breaks on the half block in
+        its own fill, or the faint ``…`` where the trail is drawn in arrows. The user
+        loses only the cells for which the lane had no space, never the full hop that
+        these cells were part of (JP, 2026-09-05). There is no ``⋯`` here on either side,
+        because nothing is elided.
 
-        Which edge the line hangs off follows one thing: **whether the walk's start is on
-        it.** A line showing its first hop sits left, where a path that begins at its
-        beginning belongs; one cropped at the head sits right, holding the crack against
-        the edge it continues past — and a crop lands exactly on the width, so that flush
-        is by construction rather than by a pad. At rest the window is at the tail, so the
-        focus and the steps that just led to it are what a glance lands on.
+        Only one thing sets the edge where the line starts: **whether the start of the
+        walk is on the line.** A line that shows its first hop is at the left, because a
+        path that starts at its start belongs there. A line that is cropped at the head is
+        at the right, with the break against the edge where it continues. A crop is
+        exactly the width, so the line touches the edge because of its construction, not
+        because of padding. At rest, the window is at the tail. Thus the user sees the
+        focus and the last steps to it first.
 
-        ← and → then **slide the window** (JP, 2026-08-09), :data:`_HSCROLL_STEP` cells a
-        press: the cropped head is a real part of the walk and a long one had no way to be
-        read at all. The marks are chrome *inside* the lane rather than extra width — each
-        costs the window a cell, so the crop is measured only once both are known, else the
-        line would draw a cell past the row. Sliding stops where the head comes into view
-        rather than running the line off the edge, and any change to the trail itself
-        resets it: a walk, a step back, a teleport and ^Y all end with the focus in view,
-        which is where the next move is read from.
+        ← and → then **slide the window** (JP, 2026-08-09), by :data:`_HSCROLL_STEP` cells
+        for each press. The cropped head is a real part of the walk, and before this
+        change the user could not read a long walk at all. The marks are chrome *inside*
+        the lane, not extra width. Each mark takes one cell from the window. Thus the crop
+        is measured only when the two marks are known, or the line draws one cell past the
+        row. The slide stops when the head becomes visible, so the line does not move off
+        the edge. Each change to the trail resets the slide: a walk, a step back, a
+        teleport, and ^Y all end with the focus visible, because the user reads the next
+        move from there.
         """
         self._trail_width = width
         full = PathLine(
             [self._trail_hop(node) for node in self._trail], separator=_TRAIL_SEP
         ).text()
         total = full.cell_len
-        # Clamped before the fit is read, so a line that grew back into its width (a
-        # wider terminal, a step back) leaves no slide banked behind a whole picture.
+        # The scroll is clamped before the fit is read. Thus, when a line fits its width
+        # again (a wider terminal, a step back), no slide stays behind a complete line.
         self._trail_scroll = max(0, min(self._trail_scroll, self._trail_max_scroll(width)))
         if total <= width:
-            return full  # whole, from the start, flush left — nothing to crop or slide
-        end = total - self._trail_scroll  # one past the last cell the window shows
+            return full  # complete, from the start, at the left edge. No crop, no slide
+        end = total - self._trail_scroll  # one cell after the last cell in the window
         inner = width - (1 if self._trail_scroll else 0)
         left = 1 if end > inner else 0
         window = min(end, inner - left)
@@ -675,19 +703,20 @@ class WalkScreen(Screen):
         return line
 
     def _trail_max_scroll(self, width: int) -> int:
-        """How far ← may slide the trail: the first whole step that shows its head.
+        """How far ← can slide the trail: the first whole step that shows its head.
 
-        Sliding past that only shortens a line already showing every cell it has, so the
-        walk stops there — the same claim the F-lane makes when it dims a key that would
-        do nothing. The stop is a whole :data:`_HSCROLL_STEP` rather than the exact cell
-        that brings the head in: a slid line has given up a cell to its right mark, so its
-        last window spans one less than the lane, and stopping short of a whole step would
-        leave the *left* mark drawn, promising a head ← can no longer reach. (Every other
-        windowed path row in the app clamps the same way.) ``0`` for a trail that fits,
-        which is what makes ← inert on a short walk without the handler knowing the width.
+        A slide past that point only makes a line shorter that already shows all its
+        cells. Thus the slide stops there. The F-key lane says the same thing when it dims
+        a key that does nothing. The stop is a whole :data:`_HSCROLL_STEP`, not the exact
+        cell that makes the head visible. A slid line gives one cell to its right mark,
+        so its last window is one cell narrower than the lane. If the slide stops before a
+        whole step, the *left* mark stays drawn, and it shows a head that ← can no longer
+        reach. (Each other path row in a window in the app clamps the same
+        way.) The result is ``0`` for a trail that fits. Thus ← does nothing on a short
+        walk, and the handler does not have to know the width.
 
-        Memoized on ``(width, trail)``: it costs a rendering, and the answer only moves
-        when the walk or the terminal does.
+        The result is cached on ``(width, trail)``: it costs a render, and the answer
+        changes only when the walk or the terminal changes.
         """
         key = (width, tuple(self._trail))
         if self._trail_fit is not None and self._trail_fit[0] == key:
@@ -702,12 +731,13 @@ class WalkScreen(Screen):
         return limit
 
     def _trail_hop(self, node: str) -> PathHop:
-        """One walked step as a path hop: its display name in its own identity colour.
+        """One walked step as a path hop: its display name in the colour of its identity.
 
-        Our own node takes the app-wide :data:`~meshterm.ui.pathline.SELF_GLYPH` instead
-        of its name: every walk sets out from us, so the star says in one cell what the
-        trail's most width-starved line would otherwise spend a whole name on — and the
-        cells it frees are steps that stay in view before the head has to be elided.
+        Our node takes the :data:`~meshterm.ui.pathline.SELF_GLYPH` of the app instead of
+        its name. Each walk starts from our node, and the trail is the line that has the
+        least free width. Thus the star says in one cell what a full name says in many.
+        The cells that it makes free hold more steps that stay visible before the head
+        must be cropped.
         """
         style = self._list_name_style(node)
         if style == "you":
@@ -718,22 +748,22 @@ class WalkScreen(Screen):
         )
 
     def _focus_line(self, depths: dict[str, int]) -> Text:
-        """Who is in focus: glyph, name with its parenthesized hash, distance, and recency.
+        """The node in focus: glyph, name with its hash in parentheses, distance, and recency.
 
-        The leading glyph carries the node type as its *shape* and the node's own key hue
-        as its *colour* (:meth:`_glyph_style`, matching the canvas marker), so the line no
-        longer spells the type out; the name reads ``name (hash)`` — the addressed
-        path-hash in parentheses, its digits lit in the node's hue — rather than a bare
-        slice of the key.
+        The first glyph shows the node type with its *shape* and with its *colour*: the
+        colour of the type (:meth:`_glyph_style`, the same as the canvas marker). Thus the
+        line does not write the type in words. The name shows as ``name (hash)``: the
+        addressed path hash in parentheses, with its digits lit in the hue of the node,
+        not a bare part of the key.
 
-        The ``N hops out`` distance is the *shortest* observed path from us to this node
-        (a BFS over the whole evidence graph, :meth:`_hops_out`) — the node's ring in the
-        mesh. It is deliberately **not** the length of the breadcrumb trail above, which is
-        the route you happened to *walk* to reach the focus: wander out a long way and
-        double back, or step to a node also reachable by a shorter link, and the walk is
-        longer than the ring. The two answer different questions — "how near is this node?"
-        versus "how did I get here?" — so a shorter "hops out" than the trail is correct,
-        not a miscount.
+        The ``N hops out`` distance is the *shortest* observed path from our node to this
+        node (a BFS over the full evidence graph, :meth:`_hops_out`): the ring of the node
+        in the mesh. On purpose, it is **not** the length of the breadcrumb trail above,
+        which is the route that you *walked* to get to the focus. If you walk out far and
+        come back, or step to a node that a shorter link also gets to, the walk is longer
+        than the ring. The two values answer different questions ("how near is this
+        node?" and "how did I get here?"). Thus a "hops out" that is shorter than the
+        trail is correct, not a wrong count.
         """
         node = self._focus
         glyph, _type_color = self._glyph(node)
@@ -761,11 +791,12 @@ class WalkScreen(Screen):
         return line
 
     def _short_hash(self, node: str) -> str:
-        """The node's addressable path-hash as hex, or ``''`` for a placeholder id.
+        """The addressable path hash of the node as hex, or ``''`` for a placeholder id.
 
-        The first ``prefix_bytes`` bytes (at least one, so there is always a hash to show)
-        of a hex id; a non-hex stand-in like ``"local"`` — our own node with no key — has
-        no hash and yields the empty string, so the focus line drops the parenthetical.
+        This is the first ``prefix_bytes`` bytes of a hex id (at least one, so that there
+        is always a hash to show). A stand-in that is not hex, such as ``"local"`` (our
+        node with no key), has no hash, and the result is the empty string. Thus the focus
+        line does not show the parentheses.
         """
         raw = node.lower()
         if not raw or any(c not in "0123456789abcdef" for c in raw):
@@ -775,39 +806,43 @@ class WalkScreen(Screen):
     # -- the canvas --
 
     def _canvas_lines(self, width: int, canvas_h: int, selected: str | None) -> list[str]:
-        """Draw the focus neighbourhood: focus at the far west, the strongest fan east.
+        """Draw the focus neighbourhood: the focus at the far west, the strongest fan east.
 
-        The focus icon sits at the far west with its name to its right; the fan spreads
-        east across the available width (see :meth:`_place_neighbours`), each neighbour
-        named to the right of its marker. Every marker is a whole **node-type mark**, glyph
-        and colour both (:meth:`_marker_rgb`), the same one the map and the route graph
-        pin that node with; identity rides the *name* beside it, in the key hue. No marker
-        is recoloured, not even the selection's — the highlighted row is shown by its
-        *label* going white and by the lit route.
+        The focus icon is at the far west, with its name to its right. The fan spreads east
+        across the available width (refer to :meth:`_place_neighbours`), and the name of
+        each neighbour is to the right of its marker. Each marker is a complete
+        **node-type mark**, with its glyph and its colour (:meth:`_marker_rgb`): the same
+        mark that the map and the route graph use for that node. The identity of the node
+        is in the *name* next to the marker, in the hue of the key. No marker changes its
+        colour, also not the marker of the selection. The highlighted row shows as a white
+        *label* and as the lit route.
 
-        While a find query is being typed the fan is narrowed to the neighbours it matches
-        — the east is *the ways onward*, which is what the query is asking about — and the
-        focus holds through it: it is the walk so far, not a candidate, so the picture keeps
-        its bearings while the choices thin out. The node the walk came *from* is not drawn
-        at all (JP, 2026-08-09): it is behind you, ⌫ is how you go back to it, and drawing
-        it made the one thing on the canvas that isn't a way onward look like one.
+        While the user types a find query, the fan narrows to the neighbours that match.
+        The east is *the ways onward*, and the query asks about them. The focus stays
+        through the find: it is the walk until now, not a candidate. Thus the picture
+        keeps its orientation while the choices become fewer. The node that the walk came
+        *from* is not drawn (JP, 2026-08-09). It is behind you, and ⌫ takes you back to
+        it. When it was drawn, the one thing on the canvas that is not a way onward looked
+        like one.
 
-        Only as many neighbours as the area can carry get their own marker (see
-        :meth:`_fan_capacity`); the weaker rest collapse into one ``…`` marker at the fan's
-        foot. Highlighting a collapsed row from the list makes that marker *stand in for*
-        the highlighted node — its own type mark, its own name, and a grey ``(2/17)`` for
-        where it sits among the collapsed — so a selection is never invisible and never
-        mistaken for a node of its own. Every edge leaves the *right end of the focus name*
-        so a connecting line never crosses a label, and the edge to the selected link draws
-        brightest and undimmed over the rest.
+        Only as many neighbours as the area can hold get their own marker (refer to
+        :meth:`_fan_capacity`). The remaining weaker neighbours collapse into one ``…``
+        marker at the foot of the fan. When the list highlights a collapsed row, that
+        marker *stands in for* the highlighted node: its type mark, its name, and a grey
+        ``(2/17)`` for its position among the collapsed nodes. Thus a selection is never
+        invisible, and the user never thinks that it is a separate node. Each edge starts
+        at the *right end of the focus name*, so that a line never crosses a label. The
+        edge to the selected link is the brightest, is not dimmed, and is drawn over the
+        others.
         """
         canvas = MapCanvas(width, canvas_h)
         by_other = dict(self._links_of(self._focus))
         fan = self._fan_nodes()
         capacity = self._fan_capacity(canvas_h)
         if len(fan) > capacity:
-            # The … marker takes a slot of its own, so it has to earn it: it stands in for
-            # the last slot's worth *plus* whatever didn't fit, never for a single node.
+            # The … marker takes a slot of its own, so it must have a reason for it. It
+            # stands in for the node of the last slot *and* all the nodes that did not fit,
+            # never for one node only.
             shown, hidden = fan[: capacity - 1], fan[capacity - 1 :]
         else:
             shown, hidden = fan, []
@@ -815,20 +850,22 @@ class WalkScreen(Screen):
         fx, fy = self._focus_pos(width, canvas_h, slots)
         ax, ay, focus_name = self._focus_anchor(width, canvas_h, slots)
         stand_in = selected if selected in hidden else None
-        # The … slot is laid out for the label it wears at rest. A stand-in's name is not
-        # allowed to move it: the geometry must not depend on the selection, or the whole
-        # fan would shuffle as the cursor walked the collapsed nodes. A long name that
-        # doesn't fit the slot simply truncates (JP, 2026-08-09).
+        # The layout of the … slot is for the label that it has at rest. The name of a
+        # stand-in must not move it. The geometry must not depend on the selection. If it
+        # does, the full fan moves around while the highlight goes through the collapsed
+        # nodes. A long name that does not fit the slot is truncated (JP, 2026-08-09).
         placed = self._place_neighbours(
             width, canvas_h, shown, bool(hidden), more_label=f"+{len(hidden)} weaker"
         )
 
-        # Edges first (markers and labels overprint them), coloured by SNR and faded by
-        # evidence age. Every edge leaves the focus's name-end anchor and lands on its
-        # neighbour's marker. The selected link's edge draws brightest and on top, shedding
-        # the age fade so it reads as one lit thread over the dimmer rest (the age is still
-        # legible in the row's age column). The collapsed marker's edge is slate — unless
-        # the selection hides in it, when it becomes that node's own edge.
+        # The edges first (the markers and labels overprint them). The SNR sets their
+        # colour, and the age of the evidence makes them fainter. Each edge starts at the
+        # anchor at the end of the focus name and ends on the marker of its neighbour.
+        # The edge of the selected link is the brightest and is on top. It does not get
+        # the age fade, so it shows as one lit line over the dimmer others. (The user can
+        # still read the age in the age column of the row.) The edge of the collapsed
+        # marker is slate. But when the selection is one of its nodes, it becomes the
+        # edge of that node.
         now = utcnow()
         for other, (x, y) in placed.items():
             if other == _MORE:
@@ -848,18 +885,19 @@ class WalkScreen(Screen):
                     priority = 2
             canvas.draw_line([(ax, ay), (x, y)], color, priority)
 
-        # The focus marker at the far west, its name to the RIGHT — icon left, name right,
-        # the walk's reading way. The edges have already left the name-end, so they run east
-        # clear of the label rather than through it.
+        # The focus marker at the far west, with its name to the RIGHT: icon at the left,
+        # name at the right, in the direction in which the user reads the walk. The edges
+        # start at the end of the name. Thus they go east away from the label, not through
+        # it.
         glyph, _colour = self._glyph(self._focus)
         canvas.marker(fx, fy, glyph, self._marker_rgb(self._focus))
         self._label_right(canvas, fx, fy, focus_name, self._label_rgb(self._focus))
 
-        # Markers first, then labels. Every marker wears its node type's colour — the
-        # selection is shown by its white *label* and the lit route, never by recolouring
-        # a mark that means something else. Labels are laid most-important-first (the
-        # selection, then the strongest links) so the collision check drops the least
-        # important where two would overprint.
+        # The markers first, then the labels. Each marker has the colour of its node type.
+        # The selection shows as a white *label* and the lit route, never as a new colour
+        # on a mark that has a different meaning. The labels go on in order of importance
+        # (the selection, then the strongest links). Thus, where two labels overprint, the
+        # collision check removes the less important one.
         white = (255, 255, 255)
         for other, (x, y) in placed.items():
             node = stand_in if other == _MORE else other
@@ -879,15 +917,14 @@ class WalkScreen(Screen):
             x, y = placed[_MORE]
             grey = mark_rgb(UNKNOWN_MARK[1])
             if stand_in is not None:
-                # The marker is that node now: its own mark, and its name in the selection
-                # white — a collapsed node is *only ever drawn while selected*, so white is
-                # what it is here, exactly as it would be if it had a marker of its own. The
-                # rank among the collapsed set sits *west* of the mark (JP, 2026-08-09)
-                # rather than trailing the name, so the name still ends where every other
-                # name on the fan ends and the count reads as an annotation on the marker
-                # instead of part of what the node is called. That count is what keeps the
-                # stand-in honest: a lone name would claim the fan has one more member than
-                # it drew.
+                # The marker is now that node: its own mark, and its name in the white of
+                # the selection. A collapsed node is drawn *only while it is selected*, so
+                # here it is white, exactly as it would be with a marker of its own. The rank
+                # in the collapsed set is *west* of the mark (JP, 2026-08-09), not after the
+                # name. Thus the name ends where each other name on the fan ends, and the
+                # count reads as a note on the marker, not as a part of the name of the node.
+                # The count keeps the stand-in correct: a name alone tells the user that the
+                # fan has one more member than it drew.
                 self._label_left(canvas, x, y, self._more_rank(stand_in, hidden), grey)
                 self._label_right(canvas, x, y, self._label(stand_in), white)
             else:
@@ -897,19 +934,19 @@ class WalkScreen(Screen):
 
     @staticmethod
     def _more_rank(node: str, hidden: list[str]) -> str:
-        """``(2/17)`` — where ``node`` sits among the collapsed links, and how many there are."""
+        """``(2/17)``: the position of ``node`` among the collapsed links, and their count."""
         return f"({hidden.index(node) + 1}/{len(hidden)})"
 
     def _fan_nodes(self) -> list[str]:
-        """The focus's ways *onward*: every neighbour but the one the walk came from.
+        """The ways *onward* from the focus: each neighbour but the one the walk came from.
 
-        The single definition of what the east of this screen is about, shared by the
-        canvas and the link list so the picture and the rows can never disagree about what
-        is on offer — including under a find, which narrows both. The came-from node is
-        excluded (JP, 2026-08-09) — it is where you have been, ⌫ is how you return to it,
-        and listing it as a link both invited a walk that just undoes the last one and cost
-        the list its top row: with it gone, the strongest link is always the row the cursor
-        opens on.
+        This is the only definition of the content of the east of this screen. The canvas
+        and the link list share it, so that the picture and the rows always agree about
+        the choices, also under a find, which narrows the two. The node that the walk came
+        from is excluded (JP, 2026-08-09). You were there before, and ⌫ takes you back to
+        it. When the list showed it as a link, it asked for a walk that only undoes the
+        last walk, and it took the top row of the list. Without it, the strongest link is
+        always the row where the highlight starts.
         """
         back = self._came_from
         return [
@@ -919,18 +956,19 @@ class WalkScreen(Screen):
         ]
 
     def _fan_capacity(self, canvas_h: int) -> int:
-        """How many marker rows the canvas carries — the ``…`` marker's own among them.
+        """How many marker rows the canvas holds, with the row of the ``…`` marker.
 
-        The fan is a **row grid, not an arc's spread** (JP, 2026-08-09): one marker per
-        row with a blank row between each, and a blank row above and below the block —
-        ``2n + 1`` rows for ``n`` markers. Even spacing is what makes a fan of five read as
-        five rather than as a clump at the rim, which is what an evenly-spaced *angle*
-        sweep produced (its rows fell out of a sine, so they crowded top and bottom).
+        The fan is a **grid of rows, not the spread of an arc** (JP, 2026-08-09): one
+        marker on each row, with a blank row between two markers, and a blank row above
+        and below the block. That is ``2n + 1`` rows for ``n`` markers. With equal
+        spacing, a fan of five reads as five, not as a group at the rim. An equal spacing
+        of the *angle* gave that group, because its rows came from a sine, so they were
+        close together at the top and the bottom.
 
-        The outer blank rows are the part that gives: a canvas too short to reach
-        :data:`_FAN_MIN_SLOTS` neighbours with them drops them and fits ``n`` in ``2n - 1``
-        instead. Air is worth a row until it costs a *node* — seeing the neighbourhood is
-        what the screen is for.
+        The outer blank rows are the part that can go. If a canvas with them is too short
+        for :data:`_FAN_MIN_SLOTS` neighbours, it removes them and fits ``n`` in
+        ``2n - 1`` rows instead. Empty space is worth a row until it costs a *node*: the
+        screen exists to show the neighbourhood.
         """
         padded = (canvas_h - 1) // 2
         if padded >= _FAN_MIN_SLOTS:
@@ -938,11 +976,11 @@ class WalkScreen(Screen):
         return max(3, (canvas_h + 1) // 2)
 
     def _fan_rows(self, canvas_h: int, slots: int) -> list[int]:
-        """The canvas rows the fan's ``slots`` markers sit on, top to bottom.
+        """The canvas rows for the ``slots`` markers of the fan, from top to bottom.
 
-        Centred as one block, which is what hands back the outer blank row whenever the
-        canvas is taller than the block needs — and drops it, evenly, when it isn't (see
-        :meth:`_fan_capacity`).
+        The rows are centred as one block. Thus the outer blank row comes back when the
+        canvas is taller than the block, and it goes equally from the two ends when the
+        canvas is not (refer to :meth:`_fan_capacity`).
         """
         if slots <= 0:
             return []
@@ -951,17 +989,17 @@ class WalkScreen(Screen):
         return [min(canvas_h - 1, top + 2 * i) for i in range(slots)]
 
     def _focus_pos(self, width: int, canvas_h: int, slots: int = 0) -> tuple[int, int]:
-        """The focus marker's dot position: near the west edge, name and fan to its east.
+        """The dot position of the focus marker: near the west edge, name and fan to its east.
 
-        The icon hugs the left so its name (drawn to the right) and the neighbour fan get
-        the whole width to spread across — the graph aired out rather than squeezed into
-        the middle.
+        The icon is near the left edge. Thus its name (drawn to the right) and the fan of
+        neighbours have the full width to spread across: the graph has space, and it is
+        not pushed into the middle.
 
-        Vertically it sits level with the **fan's** middle rather than the canvas's: the
-        block of ``slots`` markers is centred, and the focus is centred on *it*, so the
-        edges leaving it fan out symmetrically however the block's parity falls. With no
-        fan to be level with (``slots`` 0 — a leaf node, or a find matching nothing here)
-        it takes the canvas midline.
+        Vertically, it is level with the middle of the **fan**, not of the canvas. The
+        block of ``slots`` markers is centred, and the focus is centred on *the block*.
+        Thus the edges from the focus spread equally up and down, for an odd or even
+        number of markers. When there is no fan (``slots`` 0: a leaf node, or a find that
+        matches nothing here), the focus is on the middle line of the canvas.
         """
         x = max(4, (width * 2) // 12)
         rows = self._fan_rows(canvas_h, slots)
@@ -969,12 +1007,12 @@ class WalkScreen(Screen):
         return x, round(row * 4 + 2)
 
     def _focus_anchor(self, width: int, canvas_h: int, slots: int = 0) -> tuple[int, int, str]:
-        """The focus's edge-attach point and its on-canvas name.
+        """The attach point of the edges on the focus, and the focus name on the canvas.
 
-        The focus icon sits at the far west (:meth:`_focus_pos`) with its name to the
-        *right*; every edge leaves the **right end of that name** so the connecting lines
-        never cross the label. Returns the attach point in dot coordinates and the name as
-        it is drawn (clipped to the room between the icon and the canvas edge).
+        The focus icon is at the far west (:meth:`_focus_pos`), with its name to the
+        *right*. Each edge starts at the **right end of that name**, so that the lines
+        never cross the label. The result is the attach point in dot coordinates and the
+        name as it is drawn (clipped to the space between the icon and the canvas edge).
         """
         fx, fy = self._focus_pos(width, canvas_h, slots)
         icon_cx = fx >> 1
@@ -991,43 +1029,44 @@ class WalkScreen(Screen):
         *,
         more_label: str = "",
     ) -> dict[str, tuple[int, int]]:
-        """Dot-space positions for the drawn fan: a row grid east of the focus's name.
+        """The dot positions of the drawn fan: a grid of rows east of the focus name.
 
-        Everyone shown takes a row of their own east of the focus's name-end anchor,
-        strongest link at the top and weakest at the bottom — the same order as the list
-        below, so the picture and the rows correspond — with the collapsed ``…`` marker
-        (keyed :data:`_MORE`) taking the fan's last slot. The rows come from
-        :meth:`_fan_rows`: evenly spaced, one blank row between each, the block centred.
+        Each node that shows takes its own row, east of the anchor at the end of the focus
+        name. The strongest link is at the top and the weakest is at the bottom. This is the
+        same order as the list below, so the picture and the rows agree. The collapsed
+        ``…`` marker (key :data:`_MORE`) takes the last slot of the fan. The rows come from
+        :meth:`_fan_rows`: equal spacing, one blank row between two markers, and the block
+        centred.
 
-        The easting is an arc, reined in **per marker** by the name that marker has to
-        spell (JP, 2026-08-09). The fan reaches for a tip sized to an ordinary name
-        (:data:`_FAN_BASE_LABEL_W`), and then each marker whose own name wants more room
-        than that steps west by exactly the difference — so a single long name costs *its*
-        row some reach and leaves the rest of the fan where it was. Sizing the whole fan to
-        the longest name (what this did first) meant one 29-cell repeater pulled every
-        marker west with it; not sizing at all (what it did before that) meant a fixed
-        20-cell margin ellipsized anything longer on a canvas with room to spare.
+        The distance to the east follows an arc, and the name that each marker must show
+        limits it **for each marker** (JP, 2026-08-09). The fan reaches to a tip sized for a
+        usual name (:data:`_FAN_BASE_LABEL_W`). Then each marker whose name needs more
+        space than that moves west by exactly the difference. Thus one long name makes the
+        reach shorter only on *its* row, and the rest of the fan stays where it was. The
+        first version sized the full fan for the longest name, so one repeater name of 29
+        cells pulled each marker west. The version before that did no sizing, so a fixed
+        margin of 20 cells ellipsized each longer name, also on a canvas with free space.
 
         A marker never comes further west than :data:`_MIN_FAN_REACH` of the width,
-        whatever its name wants: past that the markers pile onto the focus and the graph
-        stops reading as a fan at all, so a name too long for what's left is truncated by
-        the label placer instead.
+        whatever its name needs. Past that point, the markers pile onto the focus and the
+        graph does not look like a fan. Thus the label placer truncates a name that is too
+        long for the remaining space.
 
-        Only the *row* of a leaf sets its angle; its east reach bows by
-        :data:`_FAN_X_FLATTEN` of that, so the fan curves gently rather than standing as a
-        flat column, while the rim leaves still reach well east instead of curling back
-        toward the focus on a true circle. A small fan uses proportionally less of the arc,
-        so two neighbours sit near due east rather than at opposite rims. Anchoring at the
-        name-end (rather than at the icon) hands the fan the whole width east of the focus
-        label to breathe in.
+        Only the *row* of a leaf sets its angle. Its east reach curves by
+        :data:`_FAN_X_FLATTEN` of that angle. Thus the fan has a gentle curve and is not a
+        flat column, and the leaves at the rim still reach far east and do not curve back
+        toward the focus on a true circle. A small fan uses a proportionally smaller part
+        of the arc, so two neighbours are near due east, not at opposite rims. The anchor
+        is at the end of the name (not at the icon). Thus the fan has the full width east
+        of the focus label.
 
         Args:
             width: The canvas width in cells.
             canvas_h: The canvas height in cells.
-            shown: The neighbours drawn with markers of their own, strongest first.
+            shown: The neighbours drawn with markers of their own, the strongest first.
             more: Whether a collapsed ``…`` marker takes the last slot.
-            more_label: What that marker is labelled at rest, so its slot is laid out for
-                the label it *usually* wears rather than for a passing selection.
+            more_label: The label of that marker at rest. Thus the layout of its slot is
+                for the label that it *usually* has, not for a selection that soon moves.
         """
         placed: dict[str, tuple[int, int]] = {}
         keys = list(shown) + ([_MORE] if more else [])
@@ -1038,8 +1077,8 @@ class WalkScreen(Screen):
         rows = self._fan_rows(canvas_h, len(keys))
         labels = [self._label(node) for node in shown] + ([more_label] if more else [])
         floor = ax + (dot_w - ax) * _MIN_FAN_REACH
-        # The marker's own cell, a blank, then the label: that is what has to sit east of a
-        # marker, in cells, doubled into dot space.
+        # The cell of the marker, a blank, then the label: these must be east of a marker.
+        # They are in cells, multiplied by two for dot space.
         rx = max(floor, 2 * (width - 2 - _FAN_BASE_LABEL_W)) - ax
         phi = _FAN_HALF_ANGLE * min(1.0, (len(keys) - 1) / 5.0)
         for i, (node, row, label) in enumerate(zip(keys, rows, labels, strict=True)):
@@ -1048,7 +1087,7 @@ class WalkScreen(Screen):
             room = 2 * (width - 2 - min(cell_len(label), _FAN_LABEL_W))
             placed[node] = (
                 round(max(floor, min(x, room))),
-                row * 4 + 2,  # mid-cell, so an edge meets the glyph
+                row * 4 + 2,  # the middle of the cell, so that an edge meets the glyph
             )
         return placed
 
@@ -1056,9 +1095,9 @@ class WalkScreen(Screen):
     def _clip(label: str, room: int, cap: int = _LABEL_W) -> str:
         """``label`` fit to ``room`` cells.
 
-        Whole if it fits, else ellipsized (``…`` alone at one cell, nothing at zero).
-        The cap and the room-to-edge both flow through here, so a name is only ever
-        shortened as far as it truly must be.
+        The label is complete if it fits, or else ellipsized (only ``…`` at one cell,
+        nothing at zero). The limit and the space to the edge both go through here. Thus a
+        name is never made shorter than is necessary.
         """
         room = min(room, cap)
         if room <= 0:
@@ -1068,16 +1107,16 @@ class WalkScreen(Screen):
         return "…" if room == 1 else label[: room - 1] + "…"
 
     def _place_label(self, canvas: MapCanvas, x: int, y: int, label: str, rgb: RGB) -> None:
-        """Place one marker label, retrying a row below then above on collision.
+        """Place one marker label. On a collision, try one row below, then one row above.
 
-        It goes to the right of the marker where that fits, else to the left.
+        The label goes to the right of the marker where it fits, or else to the left.
 
-        The label is clamped to whichever side has more room — the cells free to the
-        right of the marker, or to its left — so the selection keeps as much of its name
-        as the canvas allows before ellipsizing.
+        The label is clamped to the side that has more space: the free cells to the
+        right of the marker, or to its left. Thus the selection keeps as much of its name
+        as the canvas permits before it ellipsizes.
         """
         cx = x >> 1
-        room = max(canvas.cell_w - (cx + 2), cx - 1)  # the roomier of right / left
+        room = max(canvas.cell_w - (cx + 2), cx - 1)  # the larger space, right or left
         label = self._clip(label, room)
         if not label:
             return
@@ -1086,16 +1125,16 @@ class WalkScreen(Screen):
                 return
 
     def _label_right(self, canvas: MapCanvas, x: int, y: int, label: str, rgb: RGB) -> None:
-        """Place a node's label to the *right* of its marker, dodging by row.
+        """Place a node label to the *right* of its marker, on another row if necessary.
 
-        Every node but the selected one (which keeps the two-sided
-        :meth:`_place_label`) is named to the right of its icon — the reading
-        direction of the walk. The label tries the marker's own row first, then a
-        row below and above to slip past a crowded neighbour; if every checked row
-        is blocked it is stamped to the right regardless, so a node is never left a
-        bare glyph. The name is clamped to the cells actually free between the marker
-        and the canvas edge — which :meth:`_place_neighbours` has already sized the fan
-        to keep, so on any canvas wide enough the clamp never bites.
+        Each node except the selected one (which keeps the two-sided :meth:`_place_label`)
+        has its name to the right of its icon: the direction in which the user reads the
+        walk. The label tries the row of the marker first. Then it tries a row below and
+        above, to go past a neighbour that is too near. If all the checked rows are
+        blocked, the label is stamped to the right in all cases, so that a node is never
+        only a bare glyph. The name is clamped to the free cells between the marker and
+        the canvas edge. :meth:`_place_neighbours` already sized the fan to keep these
+        cells free, so on a canvas that is wide enough the clamp never cuts a name.
         """
         cx, cy = x >> 1, y >> 2
         start = cx + 2
@@ -1108,16 +1147,17 @@ class WalkScreen(Screen):
         canvas._place_run(start, cy, label, rgb, bold=True)
 
     def _label_left(self, canvas: MapCanvas, x: int, y: int, label: str, rgb: RGB) -> None:
-        """Place a short annotation to the *left* of a marker, on the marker's own row.
+        """Place a short note to the *left* of a marker, on the row of the marker.
 
-        The one thing drawn on that side (the collapsed marker's rank — see
-        :meth:`_canvas_lines`), and it stays on the row it annotates rather than dodging:
-        a counter that slipped a row would read as belonging to the neighbour above. West
-        of a fan marker is the marker's own incoming edge and little else, so it is placed
-        unconditionally and simply overprints the braille it lands on — the same fallback
-        :meth:`_label_right` ends on. It carries its own trailing blank into the run so the
-        gap before the mark is a real gap: left unwritten, the incoming edge's braille
-        threads straight through it and glues the counter to the glyph.
+        This note is the only thing drawn on that side (the rank of the collapsed marker,
+        refer to :meth:`_canvas_lines`). It stays on the row that it is about and does not
+        move. If the counter moves one row, it looks like a part of the neighbour above.
+        West of a fan marker there is only the incoming edge of the marker and little
+        else. Thus the note is placed in all cases, and it overprints the braille
+        under it: the same fallback as at the end of :meth:`_label_right`. The run includes
+        a blank after the note, so that the gap before the mark is a real gap. If that
+        cell is not written, the braille of the incoming edge goes through it and joins
+        the counter to the glyph.
         """
         cx, cy = x >> 1, y >> 2
         label = self._clip(label, cx - 1, cap=_FAN_LABEL_W)
@@ -1126,15 +1166,15 @@ class WalkScreen(Screen):
         canvas._place_run(cx - 1 - cell_len(label), cy, label + " ", rgb, bold=True)
 
     def _legend(self) -> Text:
-        """The one-line glyph legend and edge key under the canvas.
+        """The one-line legend of the glyphs and the edges under the canvas.
 
-        A key to both halves of a mark, now that the canvas draws marks whole: each role's
-        glyph in the very colour it wears up there, so the line is a sample rather than a
-        shape chart. The pairs come from the same places :meth:`_glyph` draws them from, so
-        the key cannot drift from the picture — including on the console, where the
-        ``type.*`` names are what let each mark pick its slot deliberately rather than
-        landing wherever a downsample of the hex drops it. The words stay muted: they are
-        chrome, the marks are the content.
+        The legend explains the two halves of a mark, because the canvas now draws complete
+        marks. It shows the glyph of each role in the same colour that it has on the
+        canvas, so the line is a sample, not a chart of shapes. The pairs come from the same
+        source as in :meth:`_glyph`. Thus the legend cannot become different from the
+        picture. This is also true on the console, where the ``type.*`` names let each mark
+        select its slot on purpose, and not get the slot to which a downsample of the hex
+        moves it. The words stay muted: they are chrome, and the marks are the content.
         """
         legend = Text()
         for (glyph, colour), word in (
@@ -1153,12 +1193,12 @@ class WalkScreen(Screen):
     def _list_lines(
         self, width: int, rows: list[str], depths: dict[str, int], win: int
     ) -> list[str]:
-        """The selectable rows, windowed to ``win`` lines under a pinned heading.
+        """The selectable rows, in a list window of ``win`` lines under a pinned heading.
 
-        Only the rows scroll — the heading (and everything above it) holds still.
-        When the list outgrows the window, faint ``↑/↓ n more`` markers take the
-        window's edge rows and the highlight is kept inside what remains; the
-        window's row count becomes the PgUp/PgDn stride.
+        Only the rows scroll. The heading (and all that is above it) does not move. When
+        the list is longer than the list window, faint ``↑/↓ n more`` markers take the
+        edge rows of the list window, and the highlight stays in the remaining rows. The
+        row count of the list window becomes the PgUp/PgDn step.
         """
         out: list[str] = []
         if self._query_row():
@@ -1185,13 +1225,13 @@ class WalkScreen(Screen):
                 )
                 out.append(render_to_ansi(note, width))
                 return out
-            # Rows are the authority on *which* links this list holds and in what order
-            # (:meth:`_rows`); the link table is only looked up *through* them. Rendering
-            # straight out of the table was the bug: it still carried the node the walk came
-            # from, so every index past it named one row and drew another, and the highlight
-            # sat one link away from the one the canvas was lighting. Onward counts are
-            # still gathered over the whole table — that memo is per focus, not per paint,
-            # and a narrowed view must not be what fills it.
+            # The rows set *which* links this list has, and in which order (:meth:`_rows`).
+            # The code finds a link in the link table only *through* the rows. There was a
+            # bug when the list rendered directly from the table: the table still had the
+            # node that the walk came from. Thus each index after it named one row and drew
+            # another, and the highlight was one link away from the link that the canvas
+            # lit. The onward counts still come from the full table: that cache is for each
+            # focus, not for each paint, and a narrowed list must not fill it.
             by_other = dict(self._links_of(self._focus))
             onward = self._onward_counts(self._links_of(self._focus))
             name_w, key_w = self._lane_widths(width, rows, _LINK_ROW_FIXED)
@@ -1218,21 +1258,21 @@ class WalkScreen(Screen):
         return out
 
     def _lane_widths(self, width: int, nodes: list[str], fixed: int) -> tuple[int, int]:
-        """The list's ``(name, key)`` lane widths — the name lane first, the key filling in.
+        """The ``(name, key)`` lane widths of the list: the name lane first, then the key.
 
-        The name lane sizes to the widest name the rows carry (a short-name list stays
-        tight); the key lane takes whatever's left, capped at the whole 12-hex id. When the
-        two together outrun the row, the *key* gives ground first — shrinking on a byte
-        boundary down to a floor that still shows its whole lit hash plus a ``…`` — and only
-        once the key is at that floor does a long name start losing letters. So the name is
-        the last thing truncated and the hash never is (the user reads names, and addresses
-        by hash).
+        The name lane is as wide as the widest name in the rows (a list of short names
+        stays narrow). The key lane takes the remaining width, with a limit of the full id
+        of 12 hex digits. When the two together are wider than the row, the *key* becomes
+        narrower first. It shrinks on a byte boundary down to a minimum that still shows
+        its full lit hash and a ``…``. Only when the key is at that minimum does a long
+        name start to lose letters. Thus the name is the last thing that is truncated, and
+        the hash is never truncated (the user reads names, and addresses by hash).
         """
         hash_w = max(2, min(_LIST_HASH_W, self._prefix_bytes * 2))
-        # The tightest key lane that still shows the whole hash: the hash plus a "…". An odd
-        # width, so :func:`highlighted_hash` keeps an even hash_w digits with no wasted cell;
-        # when the hash already fills the id there's nothing to drop, so the floor is the
-        # full width.
+        # The narrowest key lane that still shows the full hash: the hash and a "…". The
+        # width is odd, so :func:`highlighted_hash` keeps an even number (hash_w) of digits
+        # with no unused cell. When the hash already fills the id, there is nothing to
+        # remove, so the minimum is the full width.
         key_floor = _LIST_HASH_W if hash_w >= _LIST_HASH_W else hash_w + 1
         avail = width - fixed
         widest = max((cell_len(self._label(n)) for n in nodes), default=_LIST_NAME_MIN)
@@ -1241,11 +1281,11 @@ class WalkScreen(Screen):
         return name_w, key_w
 
     def _onward_counts(self, pairs: list[tuple[str, Link]]) -> dict[str, int]:
-        """How many links continue from each neighbour, the one back here excluded.
+        """How many links continue from each neighbour, without the link back here.
 
-        Memoized per focus (the counts depend only on the frozen graph and whose
-        neighbours are being listed) — this was quadratic per repaint: every
-        neighbour re-walked a fresh copy of the whole link table.
+        The result is cached for each focus (the counts depend only on the frozen graph and
+        on the node whose neighbours the list shows). Before the cache, this was quadratic
+        at each paint: each neighbour went again through a new copy of the full link table.
         """
         focus = self._focus
         memoized = self._onward_memo.get(focus)
@@ -1253,8 +1293,8 @@ class WalkScreen(Screen):
             return memoized
         counts: dict[str, int] = {}
         for other, _link in pairs:
-            # A link off the neighbour "continues onward" unless its far end is here:
-            # one endpoint is the neighbour itself, so only the far endpoint can be us.
+            # A link from the neighbour "continues onward" if its far end is not here. One
+            # endpoint is the neighbour, so only the far endpoint can be the focus.
             counts[other] = sum(1 for far, _l in self._links_of(other) if far != focus)
         self._onward_memo[focus] = counts
         return counts
@@ -1262,7 +1302,7 @@ class WalkScreen(Screen):
     def _link_row(
         self, other: str, link: Link, selected: bool, onward: int, name_w: int, key_w: int
     ) -> Text:
-        """One neighbour row: glyph, name, hash, SNR + bar, evidence, onward count."""
+        """One neighbour row: glyph, name, hash, SNR and bar, evidence, onward count."""
         glyph, glyph_style = self._glyph(other)
         row = Text()
         row.append("❯ " if selected else "  ", style="cursor" if selected else "")
@@ -1300,7 +1340,7 @@ class WalkScreen(Screen):
     def _match_row(
         self, node: str, selected: bool, depths: dict[str, int], name_w: int, key_w: int
     ) -> Text:
-        """One find match: glyph, name, hash, and how far out it sits."""
+        """One find match: glyph, name, hash, and its distance from our node."""
         glyph, glyph_style = self._glyph(node)
         row = Text()
         row.append("❯ " if selected else "  ", style="cursor" if selected else "")
@@ -1324,63 +1364,65 @@ class WalkScreen(Screen):
         return row
 
     def _list_name_style(self, node: str) -> str:
-        """The list's name colour: the app-wide palette hue (hash-derived), us in pure white."""
+        """The name colour in the list: the node hue (from its key), our node pure white."""
         if node == self._topo.self_id:
             return "you"
         label = self._label(node)
-        if label == node[:8]:  # a bare hash is not a name — colour is the name signal
+        if label == node[:8]:  # a bare hash is not a name. The colour shows a name
             return "node.unknown"
         return name_style(label, node)
 
     def _known(self, node: str) -> bool:
-        """Whether the node is identified — named, or us — so its hash may carry a hue.
+        """Whether the node is identified (named, or our node), so that its hash can have a hue.
 
-        The gate every hash lane here passes to :func:`~meshterm.ui.widgets.highlighted_hash`:
-        an unknown node's hash reads grey whole, matching its ``node.unknown`` name lane
-        and its ``○`` ring on the canvas.
+        Each hash lane here gives this gate to
+        :func:`~meshterm.ui.widgets.highlighted_hash`. The full hash of an unknown node is
+        grey, the same as its ``node.unknown`` name lane and its ``○`` ring on the canvas.
         """
         return self._list_name_style(node) != "node.unknown"
 
     def _marker_rgb(self, node: str) -> RGB:
-        """The marker colour for a node: the hue its *type* wears everywhere (JP, 2026-08-09).
+        """The marker colour of a node: its *type* colour, as in all places (JP, 2026-08-09).
 
-        The walk used to colour markers by identity — the key-derived per-node hue — with
-        the glyph shape left to carry the type alone. That put this one canvas at odds with
-        every other place a typed node is pinned (the map, the route graph, a contact row),
-        where the mark's colour *is* the type and is chosen deliberately per platform
-        through the theme's ``type.*`` (a naive downsample greys the repeater's violet).
-        Identity has its own lane here and always did: the **name** beside the marker, in
-        the key hue (:meth:`_label_rgb`). Shape and colour now agree, and the legend under
-        the canvas can key both.
+        The walk once gave each marker the colour of its identity (the hue of the node,
+        from its key), and only the glyph shape showed the type. Thus this canvas was
+        different from each other place that shows a node with its type (the map, the
+        route graph, a contact row). There, the colour of the mark *is* the type, and the
+        ``type.*`` styles of the theme select it on purpose for each platform (a simple
+        downsample makes the violet of the repeater grey). The identity has its own lane
+        here, and always had it: the **name** next to the marker, in the hue of the key
+        (:meth:`_label_rgb`). The shape and the colour now agree, and the legend under the
+        canvas can explain both.
         """
         return mark_rgb(self._glyph(node)[1])
 
     def _label_rgb(self, node: str) -> RGB:
-        """The label colour for a node on the canvas: its name hue, ours white, a bare hash grey.
+        """The label colour for a node on the canvas: its hue, our node white, a bare hash grey.
 
-        The RGB counterpart of :meth:`_list_name_style`: a named node's key hue, our own
-        node white, and a node known only by a bare hash the unknown-node grey (a key
-        standing in as a name is never itself coloured, so the marker carries the identity
-        and the hash-label stays grey).
+        This is the RGB form of :meth:`_list_name_style`: the hue of the key for a node
+        with a name, white for our node, and the grey of an unknown node for a node known
+        only by a bare hash. A key that stands in for a name never gets a colour of its
+        own. Thus the hash label stays grey, and the marker shows only the type mark
+        (refer to :meth:`_marker_rgb`).
         """
         style = self._list_name_style(node)
         if style == "you":
             return (255, 255, 255)
-        if "#" not in style:  # a theme name (node.unknown) — the platform picks the shade
+        if "#" not in style:  # a theme name (node.unknown). The platform selects the shade
             return mark_rgb(style)
         return parse_hex(style.rsplit("#", 1)[-1])
 
     def _glyph_style(self, node: str) -> str:
-        """The Rich style a node's type glyph takes in body text — its type colour.
+        """The Rich style of the type glyph of a node in body text: the colour of its type.
 
-        The text-side companion of :meth:`_marker_rgb`: the same ``type.*`` entry (or the
-        star's own yellow), so the focus line's leading glyph, the list rows' glyphs and
-        the canvas markers are one mark drawn three ways.
+        This is the text form of :meth:`_marker_rgb`: the same ``type.*`` entry (or the
+        yellow of the star). Thus the first glyph of the focus line, the glyphs of the list
+        rows, and the canvas markers are one mark, drawn in three ways.
         """
         return self._glyph(node)[1]
 
     def _empty_state(self, width: int) -> list[str]:
-        """A friendly explanation while the evidence graph is still empty."""
+        """A helpful explanation while the evidence graph is still empty."""
         lines = [
             Text(),
             Text("This walk has no evidence to draw yet.", style="accent"),
@@ -1395,20 +1437,20 @@ class WalkScreen(Screen):
         return [render_to_ansi(t, width, no_wrap=True) for t in lines]
 
     def _glyph(self, node: str) -> tuple[str, str]:
-        """A node's mark: the type glyph and the colour that type wears app-wide.
+        """The mark of a node: the type glyph and the colour of that type in all the app.
 
-        The shared marks (:data:`~meshterm.ui.widgets.NODE_GLYPHS`) and the shared
-        ``type.*`` colours behind them, so a node is pinned here in exactly the glyph and
-        hue the map, the route graph and the contact list pin it in — ``▲`` violet for a
-        repeater, ``■`` for a room, ``◉`` for a sensor, ``●`` pink for a plain node, our
-        own the yellow ``★``, and a node we have heard of but never identified the grey
-        ``○``. Colour and shape say the same thing, which is what makes the legend below
-        the canvas a key rather than a coincidence.
+        These are the shared marks (:data:`~meshterm.ui.widgets.NODE_GLYPHS`) and the
+        shared ``type.*`` colours for them. Thus a node shows here with exactly the glyph
+        and colour that the map, the route graph, and the contact list use for it: ``▲``
+        violet for a repeater, ``■`` for a room, ``◉`` for a sensor, ``●`` pink for a
+        plain node, the yellow ``★`` for our node, and the grey ``○`` for a node that we
+        heard of but never identified. The colour and the shape say the same thing. Thus
+        the legend below the canvas is a real explanation, not a coincidence.
 
         Returns:
-            ``(glyph, colour)`` — the colour in whichever encoding
+            ``(glyph, colour)``: the colour in the encoding that
             :func:`~meshterm.ui.theme.mark_rgb` takes (a literal hex, or a theme name where
-            the platform must pick its own slot).
+            the platform must select its own slot).
         """
         if node == self._topo.self_id:
             return SELF_MARK
@@ -1418,30 +1460,31 @@ class WalkScreen(Screen):
         return NODE_GLYPHS.get(contact.node_type, DEFAULT_GLYPH)
 
     def _label(self, node: str) -> str:
-        """A node's display name: its own name for us, contact name, or short hash."""
+        """The display name: our own name for our node, a contact name, or a short hash."""
         if node == self._topo.self_id:
             return self._self_label
         return self._topo.display_name(node) or node[:8]
 
 
 async def open_walk(ctx: AppContext) -> None:
-    """Build the evidence graph and run the full-screen mesh walk until dismissed.
+    """Build the evidence graph and run the full-screen mesh walk until the user closes it.
 
-    Contacts and our own identity come from the device when one is reachable
-    (best-effort — the stored evidence draws fine without them, just with hashes for
-    names); the graph itself comes entirely from the repository, snapshotted once when
-    the screen opens. No transmissions, ever.
+    The contacts and our identity come from the device when the device can be reached.
+    This is best-effort: the stored evidence draws correctly without them, but with
+    hashes instead of names. The graph comes fully from the repository, as a snapshot
+    taken one time when the screen opens. Nothing is ever transmitted.
 
     Args:
-        ctx: The shared application context (must be running the interactive TUI).
+        ctx: The shared application context (it must run the interactive TUI).
 
     Raises:
-        RuntimeError: If called outside the interactive menu (no full-screen session).
+        RuntimeError: If the call is not from the interactive menu (no full-screen
+            session).
     """
     from ..services.topology import build_topology
     from .surface import TuiUi
 
-    if not isinstance(ctx.ui, TuiUi):  # pragma: no cover - guarded by the menu-only caller
+    if not isinstance(ctx.ui, TuiUi):  # pragma: no cover - the caller is only in the menu
         raise RuntimeError("the mesh walk is only available in the menu")
     session = ctx.ui.session
 
@@ -1454,7 +1497,7 @@ async def open_walk(ctx: AppContext) -> None:
             info = await ctx.devstate.self_info()
             self_label = str(info.get("name") or "you")
             self_hash = str(info.get("public_key") or "") or None
-    except Exception:  # noqa: BLE001 - names are a nicety; the graph renders without them
+    except Exception:  # noqa: BLE001 - names are optional. The graph renders without them
         contacts = []
     prefix_bytes = await ctx.devstate.routing_prefix_bytes()
 
@@ -1481,6 +1524,7 @@ async def open_walk(ctx: AppContext) -> None:
     try:
         await session.run_screen(screen)
     finally:
-        # The same clean-slate repaint as the map: braille fallback glyphs may have
-        # smeared cells prompt_toolkit's differential paint will never rewrite.
+        # The same full paint from a clean screen as on the map. Braille fallback glyphs
+        # may have smeared cells that the differential paint of prompt_toolkit never
+        # writes again.
         session.request_full_repaint()

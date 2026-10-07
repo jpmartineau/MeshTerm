@@ -1,17 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The live chat screen and its launcher.
+"""The live chat screen and the function that opens it.
 
-This is the interactive, full-screen chat experience: a scrolling transcript with an input
-line pinned at the bottom, where messages you send and messages that arrive over the mesh
-appear together in real time. Like the device picker and config editor, this module sits in
-the UI layer but is allowed to depend on the context and services — it wires the
-:class:`~meshterm.services.chat_service.ChatService` send path and the always-on event hub
-to a :class:`~meshterm.ui.tui.screen.Screen`.
+This is the interactive, full-screen chat: a transcript that scrolls, with an input line
+pinned at the bottom. The messages that you send and the messages that come in over the
+mesh show together in real time. This module is in the UI layer, the same as the device
+picker and the config editor, but it can depend on the context and the services. It
+connects the send path of :class:`~meshterm.services.chat_service.ChatService` and the
+event hub, which always runs, to a :class:`~meshterm.ui.tui.screen.Screen`.
 
-The screen subscribes to the hub for the duration it is open so inbound messages for the
-current conversation append live; :class:`~meshterm.services.chat_service.ChatService`
-independently persists every inbound message, so history is complete whether or not the
-screen is open.
+While the screen is open, it subscribes to the hub. Thus the inbound messages for the
+current conversation are appended live. Separately,
+:class:`~meshterm.services.chat_service.ChatService` stores each inbound message. Thus
+the history is complete, also when the screen is not open.
 """
 
 from __future__ import annotations
@@ -48,99 +48,108 @@ if TYPE_CHECKING:
     from ..context import AppContext
 
 
-#: Delivery-state marks for a *resolved* outbound direct message, shown at the end of its
-#: line: acknowledged, or transmitted-but-unacknowledged (retryable via ^R). The app-wide
-#: ``✓``/``✗`` status marks in their ok/err styles — not the ✅/❌ emoji, which belong to
-#: the packet-class icon lane. While the ack is still pending the line shows an animated
-#: spinner instead (see :meth:`ChatScreen._delivery_glyph`).
+#: The delivery marks for a *resolved* outbound direct message, at the end of its line:
+#: acknowledged, or transmitted but not acknowledged (^R can retry it). These are the
+#: ``✓``/``✗`` status marks of the app in their ok/err styles, not the ✅/❌ emoji, which
+#: are for the lane of packet-class icons. While the ack is still pending, the line shows an
+#: animated spinner instead (refer to :meth:`ChatScreen._delivery_glyph`).
 _DELIVERED = ("✓", "ok")
 _FAILED = ("✗", "err")
 
-#: A whitespace-delimited word — the unit the wrap moves whole, so the run a URL must not be
-#: cut across is the word it sits in, any bracket or full stop beside it included.
+#: A word between whitespace. The wrap moves a word only as a whole. Thus the run that a
+#: wrap must not cut a URL in is the word that has the URL, with a bracket or a full stop
+#: next to it.
 _WORD = re.compile(r"\S+")
 
-#: The column a URL too long to hang under its body starts at instead: the timestamp's,
-#: clear of the ``❯`` the picked message's first line carries in front of it.
+#: The column where a URL starts when it is too long to hang under its body: the column of
+#: the timestamp, after the ``❯`` that is in front of the first line of the selected message.
 _URL_GUTTER = 2
 
-#: Whether a message's URLs are drawn as QR codes under it (``Platform.url_codes``, the
-#: PicoCalc's alone). Bound per platform, never asked per frame.
+#: Whether the URLs of a message are drawn as QR codes under it (``Platform.url_codes``,
+#: only on the PicoCalc). Bound for each platform, never asked at each frame.
 _URL_CODES = False
 
 
 @on_platform
 def _bind(platform: Platform) -> None:
-    """Hang codes under URLs where the platform draws them (now and on switches)."""
+    """Hang codes under URLs where the platform draws them (now and at each switch)."""
     global _URL_CODES
     _URL_CODES = platform.url_codes
 
 
 class ChatScreen(Screen):
-    """A live conversation: a scrolling transcript above a pinned input line.
+    """A live conversation: a transcript that scrolls, above a pinned input line.
 
-    The transcript auto-sticks to the newest message (and snaps back to the bottom
-    whenever you type or send). ↑ picks a message — the pick walks with ↑↓/PgUp/PgDn
-    and carries the view with it; ^End (or Esc) returns focus to the compose line.
-    Enter sends the current line, or acts on a picked message: in a channel it primes
-    a reply ``@mention``, in a direct chat it opens the message's delivery paths. ^P
-    opens the picked message's paths in either kind — a path belongs to one message, so
-    with nothing picked there is nothing to show — and ^U its links as QR codes, on the
-    share screen. Esc leaves the chat once nothing is picked.
+    The transcript automatically stays on the newest message (and goes back to the bottom
+    each time you type or send). ↑ selects a message. The selection moves with
+    ↑↓/PgUp/PgDn, and the viewport moves with it. ^End (or Esc) puts the focus on the
+    compose line again. Enter sends the current line, or does an action on a selected
+    message: in a channel, it starts a reply with an ``@mention``, and in a direct chat, it
+    opens the delivery paths of the message. In the two types of chat, ^P opens the paths
+    of the selected message. A path belongs to one message, so when no message is
+    selected, there is nothing to show. ^U shows the links of the selected message as QR
+    codes, on the share screen. When no message is selected, Esc leaves the chat.
 
-    A channel with a send scope names its region in the title (``#ops · yul``), and ^R there
-    resends a message *unscoped* — the picked one, or with nothing picked the newest — the
-    way out for a scoped message no repeater in earshot carries — after an amber confirm,
-    since an unscoped flood reaches every repeater the scope was keeping it from.
+    A channel with a send scope shows its region in the title (``#ops · yul``). There, ^R
+    sends a message again *unscoped*: the selected message, or the newest when no message is
+    selected. This is the solution for a scoped message that no repeater in range relays.
+    It comes after an amber confirm, because an unscoped flood gets to each repeater that
+    the scope kept it from.
     """
 
     floating = False
-    #: Home and End move the compose line's caret here, so edge scroll leaves them alone.
+    #: Home and End move the caret of the compose line here. Thus edge scroll does not use
+    #: them.
     home_end_jumps = False
 
     @property
     def picocalc_lyra_lane(self):
-        """The PicoCalc lane in the transcript's own words: Latest/Oldest, Paths, Retry.
+        """The PicoCalc lane in the words of the transcript: Latest/Oldest, Paths, Retry.
 
-        The shared lane's Shift bank dispatches the plain ``end``/``home`` actions, but
-        here those are already claimed by the compose line's cursor (see :meth:`handle`) —
-        so left alone, both keys land on the same "clear the pick, stick to the tail"
-        fallthrough and read as if either one scrolls to the bottom. The two companions
-        dispatch ``ctrl_end``/``ctrl_home`` instead, and say what those do to a
-        conversation: return to the *latest* message and the compose line, or reach back
-        to the *oldest*. That is the shared pair relabelled in place, so it keeps the
-        shared handedness — each jump still sitting behind the page heading the same way
-        (see :data:`~meshterm.ui.tui.fkeys.DEFAULT_LANE`). F4/F5 keep the shared paging
-        pair, which is what a screenful of transcript looks like from the outside even
-        though it is the pick that moves.
+        The Shift bank of the shared lane sends the plain ``end``/``home`` actions. But
+        here the cursor of the compose line already uses them (refer to :meth:`handle`).
+        Thus, without a change, the two keyboard keys go to the same fallback ("clear the
+        selection, stay at the tail"), and each one seems to scroll to the bottom. Instead,
+        the two Shift slots send ``ctrl_end``/``ctrl_home``, and their labels say what
+        these actions do to a conversation: go back to the *latest* message and the
+        compose line, or go back to the *oldest*. This is the shared pair with new labels
+        in the same slots. Thus it keeps the shared sides: each jump is still behind the
+        page key that goes in the same direction (refer to
+        :data:`~meshterm.ui.tui.fkeys.DEFAULT_LANE`). F4/F5 keep the shared paging pair.
+        From the outside, the transcript moves by one screen, also when it is the selection
+        that moves.
 
-        The F3 pair follows the lane's two claims. *Retry* is absent in a channel — a
-        channel message is never acknowledged, so there is no such thing to retry there —
-        and merely dim in a direct chat with nothing outstanding. A channel's Shift slot is
-        *Resend* instead — the picked message (or the newest) again, unscoped (see
-        :meth:`_retry_target`) — present where a resend is wired and dim until that message
-        is one of ours that went out under a region. *Paths* needs a picked message to have
-        paths of, and both nav slots need a transcript to walk.
+        The F3 pair follows the two rules of the lane. *Retry* is not there in a channel,
+        because a channel message is never acknowledged, so there is nothing to retry. In
+        a direct chat with nothing outstanding, it is only dim. The Shift slot of a channel
+        is *Resend* instead: the selected message (or the newest) again, unscoped (refer
+        to :meth:`_retry_target`). It is there when a resend is connected, and it is dim
+        until that message is one of ours that went out under a region. *Paths* must have
+        a selected message to show the paths of, and the two navigation slots must have a
+        transcript to move through.
 
-        F1/F2 carry the **day** jump, the transcript's own section step (its dividers are
-        days) — the same claim a grouped select list makes with ``Sect ↑``/``Sect ↓``, on
-        the same keys, dispatching the same ``ctrl_pageup``/``ctrl_pagedown``. Naming it
-        for what the sections *are* here is the lane's rule that a chip names an action.
-        A left-hand pair rises toward F1, so ``Day ↑`` (back through the transcript) sits
-        outside ``Day ↓``, matching both the pager on the right and the list it echoes.
-        Lit only with more than one day to step between: a conversation held in an
-        afternoon has sections the way a one-section list does — none.
+        F1/F2 have the **day** jump: the section step of the transcript (its dividers are
+        days). A grouped select list does the same with ``Sect ↑``/``Sect ↓``, on the same
+        keyboard keys, which send the same ``ctrl_pageup``/``ctrl_pagedown``. The label
+        names what the sections *are* here, because of the lane rule that a chip names an
+        action. A left-hand pair rises toward F1. Thus ``Day ↑`` (back through the
+        transcript) is on the outer side of ``Day ↓``, the same as the pager on the right
+        and the list that it copies. These chips are lit only when there is more than one
+        day to step between. A conversation in one afternoon has no sections, the same as
+        a list with one section.
 
-        ``QR`` (^U) rides F2's Shift half, beside ``Retry`` on F3's, the two being things
-        to do *to* the picked message: its links' codes on a share screen, larger than
-        the ones hung under it in the transcript. Lit while the pick carries a URL.
+        ``QR`` (^U) is on the Shift half of F2, next to ``Retry`` on the Shift half of F3.
+        The two are actions *on* the selected message: the codes of its links on a share
+        screen, larger than the codes under it in the transcript. ``QR`` is lit while the
+        selection has a URL.
         """
         from .tui.fkeys import FPair, default_lane
 
         lane = list(default_lane(nav=bool(self._messages)))
         live = bool(self._messages)
-        # Messages are chronological, so two days exist exactly when the ends disagree —
-        # O(1), where walking the dividers would re-date the whole transcript every paint.
+        # The messages are in time order. Thus there are two days exactly when the two ends
+        # have different dates. This costs O(1). A walk through the dividers dates the full
+        # transcript again at each paint.
         days = live and (
             self._messages[0].created_at.astimezone().date()
             != self._messages[-1].created_at.astimezone().date()
@@ -178,7 +187,7 @@ class ChatScreen(Screen):
         *,
         send: Callable[[str], Awaitable[ChatMessage | None]],
         names: dict[str, str],
-        session,  # noqa: ANN001 - TuiSession, imported lazily to avoid a cycle
+        session,  # noqa: ANN001 - a TuiSession, imported late to prevent an import cycle
         resend: Callable[[ChatMessage], Awaitable[ChatMessage]] | None = None,
         paths: Callable[[ChatMessage], Awaitable[None]] | None = None,
         key_of: Callable[[str], str | None] | None = None,
@@ -188,44 +197,49 @@ class ChatScreen(Screen):
         """Build the chat screen.
 
         Args:
-            conversation: The thread being shown (its label titles the screen).
-            messages: The initial transcript (history), oldest-first.
-            send: Async callable that sends a line and returns the recorded outbound
+            conversation: The thread that the screen shows (its label is the title of the
+                screen).
+            messages: The initial transcript (history), the oldest first.
+            send: An async callable that sends a line and returns the stored outbound
                 message (or ``None`` if nothing was sent).
-            names: Map of contact key prefix to friendly name, for labeling inbound
-                direct messages.
-            session: The running :class:`~meshterm.ui.tui.session.TuiSession`, used to
-                request repaints when messages arrive or a send completes.
-            resend: Async callable that re-attempts delivery of an unacknowledged direct
-                message, updating it in place (direct chats only; ``None`` for channels).
-            paths: Async callable that presents the delivery paths of the picked message
-                (the ^P view); ``None`` leaves the affordance quietly inert.
-            key_of: Maps a sender's display name back to its node's key (see
-                :func:`~meshterm.services.trace_runner.make_name_key_resolver`), the seed
-                of the sender's hue; ``None`` (or a name it can't place) leaves senders
-                muted — colour is reserved for keyed identities.
-            scope: The channel's send scope, stated in the title as a bare ``·`` atom
-                (``#ops · yul`` — a channel's title has no other atom a region name could be
-                mistaken for); ``None`` for a channel sending under the device
-                default, and always for a direct chat.
-            resend_unscoped: Async callable that sends a channel message's text again,
-                unscoped, and returns the recorded message (channels only; ``None`` leaves
-                ^R inert there).
+            names: A map from contact key prefix to friendly name, for the labels of
+                inbound direct messages.
+            session: The running :class:`~meshterm.ui.tui.session.TuiSession`. The screen
+                uses it to ask for a paint when messages arrive or a send completes.
+            resend: An async callable that tries again to deliver a direct message that
+                is not acknowledged, and changes the message in place (direct chats only,
+                ``None`` for channels).
+            paths: An async callable that shows the delivery paths of the selected
+                message (the ^P view). ``None`` makes this action do nothing, with no
+                message.
+            key_of: Finds the key of the node of a sender from its display name (refer to
+                :func:`~meshterm.services.trace_runner.make_name_key_resolver`). The key
+                is the source of the hue of the sender. With ``None`` (or for a name that
+                it cannot find), the sender gets the grey of an unknown node
+                (``node.unknown``), because colour is only for identities that have a key.
+            scope: The send scope of the channel, shown in the title as a bare ``·`` atom
+                (``#ops · yul``: the title of a channel has no other atom that the user
+                can think is a region name). ``None`` for a channel that sends under the
+                default scope of the device, and always ``None`` for a direct chat.
+            resend_unscoped: An async callable that sends the text of a channel message
+                again, unscoped, and returns the stored message (channels only. With
+                ``None``, ^R does nothing there).
         """
         super().__init__()
         self._scope = scope if conversation.is_channel else None
         self.title = f"{conversation.label} · {self._scope}" if self._scope else conversation.label
         self._is_channel = conversation.is_channel
-        # Many voices or one: a channel and a room are read the same way — each message under
-        # whoever wrote it, Enter on one replying with an @mention — where a direct chat has
-        # two people and Enter on a message opens its paths.
+        # Many voices or one. The user reads a channel and a room in the same way: each
+        # message under its author, and Enter on a message starts a reply with an
+        # @mention. A direct chat has two persons, and Enter on a message opens its paths.
         self._multiparty = conversation.is_channel or conversation.is_room
-        # Whether typing reaches the compose line. Off where nothing typed could be sent (a
-        # room that keeps nothing from us), so keys never fill a line the reader cannot see.
+        # Whether typing goes to the compose line. It is off where no typed text can be
+        # sent (a room that keeps nothing from us). Thus the keyboard keys never fill a
+        # line that the user cannot see.
         self._composing = True
         self._key_of: Callable[[str], str | None] = key_of or (lambda name: None)
-        # A direct thread's one remote sender is the peer; its key colours the header
-        # even when the resolver can't place the display name.
+        # The one remote sender of a direct thread is the peer. Its key gives the colour of
+        # the header, also when the resolver cannot find the display name.
         contact = conversation.contact
         self._peer_key = (
             ""
@@ -241,35 +255,39 @@ class ChatScreen(Screen):
         self._session = session
         self._editor = LineEditor()
         self._sending = False
-        # Cycled while a direct message is in flight, so its trailing glyph spins (rather than
-        # a static hourglass) until the ack resolves. Shared across messages: only one send or
-        # retry is ever in flight at a time (both gated by ``_sending``).
+        # It turns while a direct message is in flight, so that the glyph at the end of the
+        # message spins (instead of a static hourglass) until the ack resolves. All messages
+        # share it: only one send or retry is ever in flight at a time (``_sending``
+        # controls the two).
         self._spinner = Spinner()
         self._status = ""
-        self._stick = True  # keep the newest message in view until the user scrolls up
+        self._stick = True  # keep the newest message visible until the user scrolls up
         self._paths_open = False  # one paths dialog at a time
-        self._codes_open = False  # one links share screen at a time
+        self._codes_open = False  # one share screen of links at a time
         self._paste_open = False  # one paste-confirm dialog at a time
         self._resend_open = False  # one resend-unscoped confirm at a time
-        # The pick: index of the highlighted message (or None when the compose line is
-        # focused), plus the body line it rendered on so the frame keeps it in view.
+        # The selection: the index of the highlighted message (or None when the compose
+        # line has the focus), and the body line where it rendered, so that the frame keeps
+        # it visible.
         self._selected: int | None = None
         self._selected_line: int | None = None
-        # One past the picked message's last rendered row, so its whole block is kept in
-        # view, not just its head (see render_body).
+        # One line after the last rendered row of the selected message, so that its full
+        # block stays visible, not only its head (refer to render_body).
         self._selected_end: int | None = None
-        # Memoizes _render_grouped's output per message, so a repaint triggered by
-        # something outside the transcript (a keystroke, the 1s idle tick, a spinner
-        # frame) only re-renders the rows that actually changed. See _render_grouped.
+        # The cache of the output of _render_grouped for each message. Thus a paint that
+        # something outside the transcript causes (a key press, the 1 s idle tick, an
+        # animation step of a spinner) renders again only the rows that changed. Refer to
+        # _render_grouped.
         self._render_cache: dict | None = None
-        # Strong references to the sends, resends and spinner tickers started off a key
-        # handler. The event loop only holds a *weak* one, so a task nothing else names can
-        # be collected mid-flight — a half-transmitted message, or a spinner that stops
-        # turning. Each task discards itself from the set when it finishes.
+        # Strong references to the sends, resends, and spinner tickers that a key handler
+        # starts. The event loop holds only a *weak* reference. Thus the garbage collector
+        # can remove a task that nothing else names while it runs: the result is a message
+        # that is only half transmitted, or a spinner that stops. Each task removes itself
+        # from the set when it finishes.
         self._tasks: set[asyncio.Task] = set()
 
-    def _spawn(self, coro) -> asyncio.Task:  # noqa: ANN001 - any coroutine this screen owns
-        """Start ``coro`` on the loop and hold a reference to it until it finishes."""
+    def _spawn(self, coro) -> asyncio.Task:  # noqa: ANN001 - any coroutine of this screen
+        """Start ``coro`` on the loop and keep a reference to it until it finishes."""
         task = asyncio.ensure_future(coro)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
@@ -277,20 +295,22 @@ class ChatScreen(Screen):
 
     @property
     def footer_hint(self) -> str:
-        """Key hint, reflecting whether a message is picked and what Enter does to it.
+        """The key hint. It shows whether a message is selected and what Enter does to it.
 
-        Only keys that would act appear: ``^P paths`` needs a picked message to show the
-        paths *of*, ``^U QR`` a picked message with a URL in it (see :meth:`_picked_urls`),
-        and ``^R retry failed`` something to retry (see :meth:`_retry_target`) — the same
-        rules the F-key lane dims its slots by.
+        Only the keys that do something show. ``^P paths`` must have a selected message to
+        show the paths *of*. ``^U QR`` must have a selected message with a URL in it
+        (refer to :meth:`_picked_urls`). ``^R retry failed`` must have something to retry
+        (refer to :meth:`_retry_target`). The F-key lane uses the same rules to dim its
+        slots.
         """
         if self._selected is not None:
             code = " · ^U QR" if self._picked_urls() else ""
             if self._is_channel and self._retry_target() is not None:
-                # A picked scoped message of ours can be resent unscoped, and that key has
-                # to be named; the reply's "(@mention)" and ^End give way to keep the line
-                # inside 72 (Esc still cancels the pick, and Enter still says what it does),
-                # and ↑↓ too when a link's code is also there to name.
+                # A selected scoped message of ours can be sent again unscoped, and the hint
+                # must name that key. The "(@mention)" of the reply and ^End are removed to
+                # keep the line inside 72 cells (Esc still cancels the selection, and Enter
+                # still says what it does). ↑↓ is also removed when the hint must also name
+                # the code of a link.
                 pick = "" if code else " · ↑↓ pick"
                 return f"Enter reply · ^P paths{code} · ^R resend unscoped{pick} · Esc cancel"
             if self._is_channel:
@@ -305,9 +325,9 @@ class ChatScreen(Screen):
     # --- live updates --------------------------------------------------------
 
     def append(self, message: ChatMessage) -> None:
-        """Append an inbound message to the transcript and repaint."""
+        """Append an inbound message to the transcript and paint."""
         self._messages.append(message)
-        # Don't yank the view to the tail while the user is picking a message to reply to.
+        # Do not pull the viewport to the tail while the user selects a message to reply to.
         if self._selected is None:
             self._stick = True
         self._session.invalidate()
@@ -315,18 +335,19 @@ class ChatScreen(Screen):
     # --- rendering -----------------------------------------------------------
 
     def render_body(self, width: int) -> list[str]:
-        """Render the transcript, a divider, the input line, and any status."""
+        """Render the transcript, a divider, the input line, and the status, if there is one."""
         self._selected_line = None
         self._selected_end = None
         if not self._messages:
             lines = render_lines(Text(self._empty_text, style="muted"), width)
         else:
-            # Both direct and channel threads use the same grouped, Discord/Slack-style
-            # transcript: consecutive messages from one sender share a colored header, with
-            # day dividers between them. Rendering per-message also lets us record where the
-            # picked message lands (see _selected_line / cursor_line). Both thread kinds
-            # pick; what differs is only what Enter then does with the pick — a reply in a
-            # channel, the delivery paths in a direct thread.
+            # Direct threads and channel threads use the same grouped transcript, in the
+            # style of Discord or Slack: consecutive messages from one sender share a
+            # coloured header, with day dividers between them. Because the render is for
+            # each message, we can also store where the selected message is (refer to
+            # _selected_line / cursor_line). The user can select in the two types of thread.
+            # The only difference is what Enter then does with the selection: a reply in a
+            # channel, or the delivery paths in a direct thread.
             if self._selected is not None:
                 self._selected = max(0, min(self._selected, len(self._messages) - 1))
             lines = self._render_grouped(width)
@@ -342,63 +363,69 @@ class ChatScreen(Screen):
             footer_parts.append(Text(self._status, style="muted"))
         lines += render_lines(Group(*footer_parts), width)
 
-        # Sticking to the bottom: hand the frame an over-large offset so it clamps the view
-        # to the final lines (input + latest messages). Scrolling up clears the stick.
+        # Stay at the bottom: give the frame an offset that is too large, so that it clamps
+        # the viewport to the last lines (input and latest messages). A scroll up clears
+        # the stick.
         if self._stick:
             self.scroll = len(lines)
         elif self._selected_end is not None:
-            # The pick keeps its *whole* message in view, the codes hanging under its text
-            # included. The frame holds only the one line cursor_line names, the message's
-            # head, so a pick walking down would park the head on the bottom row and leave
-            # its codes below the fold. Scroll far enough to show the message's last row
-            # (one spare for the day divider pinned over the top); the frame then raises
-            # the view again only if that would push the head off the top.
+            # The selection keeps its *full* message visible, with the codes under its text.
+            # The frame keeps only the one line that cursor_line names, the head of the
+            # message. With only that line, a selection that moves down stops the head on
+            # the bottom row, and the codes are below the viewport. Scroll far enough to
+            # show the last row of the message (one extra line for the day divider pinned
+            # at the top). The frame then moves the viewport up again only if that pushes
+            # the head off the top.
             self.scroll = max(self.scroll, self._selected_end - self._scroll_viewport + 1)
         return lines
 
     def cursor_line(self) -> int | None:
-        """Keep the picked reply target in view; otherwise free scroll (managed by stick)."""
+        """Keep the selected reply target visible.
+
+        When nothing is selected, the scroll is free (the stick controls it).
+        """
         return self._selected_line
 
-    #: What an empty transcript says.
+    #: The text of an empty transcript.
     _empty_text = "No messages yet — say hello!"
 
     @property
     def _replies(self) -> bool:
-        """Whether Enter on a picked message replies to it (else it opens its paths).
+        """Whether Enter on a selected message replies to it (or else opens its paths).
 
-        Where there are many voices and an @mention to say which one is answered — and
-        only while there is a compose line to put the reply on.
+        This is true where there are many voices and an @mention says which one gets the
+        answer, and only while there is a compose line for the reply.
         """
         return self._multiparty and self._composing
 
     def _compose_line(self, width: int) -> RenderableType:
-        """The compose line under the transcript: the input, with its byte budget.
+        """The compose line under the transcript: the input, with its byte limit.
 
-        The byte budget is pinned to the right edge of the input's *last* line — so a
-        compose that wraps onto a second line keeps the counter in the bottom-right
-        corner rather than letting it trail the cursor down the wrap. Only a last line
-        already full to the edge pushes it onto a right-aligned line of its own.
+        The byte counter is pinned to the right edge of the *last* line of the input. Thus,
+        when the text wraps onto a second line, the counter stays in the bottom-right
+        corner and does not follow the cursor down the wrap. Only when the last line is
+        already full to the edge does the counter go onto its own right-aligned line.
         """
         limit = self._byte_limit()
         input_line = self._editor.render(overflow_at=self._overflow_at(limit))
         return right_aligned_tail(input_line, self._byte_counter(limit), width)
 
-    # --- outgoing byte budget ------------------------------------------------
+    # --- outgoing byte limit -------------------------------------------------
 
     def _byte_limit(self) -> int:
-        """The UTF-8 byte ceiling for a message in this conversation (channel vs direct)."""
+        """The UTF-8 byte limit for a message in this conversation (channel or direct)."""
         return CHANNEL_BYTE_LIMIT if self._is_channel else DM_BYTE_LIMIT
 
     def _used_bytes(self) -> int:
-        """UTF-8 byte length of the current compose buffer — what counts against the limit."""
+        """The UTF-8 byte length of the current compose buffer: what counts against the limit."""
         return len(self._editor.text.encode("utf-8"))
 
     def _overflow_at(self, limit: int) -> int | None:
-        """Index of the first compose character whose bytes spill past ``limit``, else ``None``.
+        """The index of the first compose character with bytes past ``limit``, or ``None``.
 
-        Walking by character (not byte) keeps multibyte input intact: an emoji or accented
-        letter is entirely under or entirely over the line, never split mid-sequence.
+        The count goes by character (not by byte), so multibyte input stays complete: an
+        emoji or an accented letter is fully under or fully over the line, never divided
+        in the middle of its sequence.
         """
         total = 0
         for i, ch in enumerate(self._editor.text):
@@ -408,11 +435,11 @@ class ChatScreen(Screen):
         return None
 
     def _byte_counter(self, limit: int) -> Text:
-        """The inline ``used/limit`` budget — the shared compose gauge (:func:`byte_counter`)."""
+        """The inline ``used/limit`` counter: the shared compose gauge (:func:`byte_counter`)."""
         return byte_counter(self._used_bytes(), limit)
 
     def _name(self, peer: str | None) -> str | None:
-        """Resolve a sender key prefix to a contact name (exact, then prefix match)."""
+        """Find the contact name for a sender key prefix (exact match, then prefix match)."""
         if not peer:
             return None
         needle = peer.lower()
@@ -426,28 +453,33 @@ class ChatScreen(Screen):
     # --- grouped rendering ---------------------------------------------------
 
     def _render_grouped(self, width: int) -> list[str]:
-        """Render the transcript to ANSI lines, tracking the picked message's row.
+        """Render the transcript to ANSI lines, and keep the row of the selected message.
 
-        Serves both direct and channel threads. Consecutive messages from the same sender on
-        the same day share one colored header, with each message body indented below. A muted
-        divider marks each new day, and a blank line separates distinct sender groups.
-        Rendering message-by-message (rather than as one Group) lets us record the body line
-        of the picked message in :attr:`_selected_line` so the frame can scroll it into
-        view. Both thread kinds pick — see :meth:`handle`.
+        This serves direct threads and channel threads. Consecutive messages from the same
+        sender on the same day share one coloured header, with each message body indented
+        below it. A divider marks each new day, and a blank line separates two different
+        sender groups. The render goes one message at a time (not as one Group). Thus we
+        can store the body line of the selected message in :attr:`_selected_line`, so that
+        the frame can scroll it into the viewport. The user can select in the two types of
+        thread (refer to :meth:`handle`).
 
-        A repaint is triggered constantly by things that touch nothing here — the idle
-        tick, a keystroke, the ack spinner — so this memoizes each message's rendered lines
-        in :attr:`_render_cache` and, message by message, splices in the cached slice
-        instead of re-rendering it. A message is only ever re-rendered when it must be:
-        it's still awaiting its ack (the spinner redraws its trailing glyph every tick),
-        it's the currently picked one (styled by the pick, not by the message), or its
-        identity/``acked`` no longer match what's cached (appended, replaced in place by a
-        pending bubble resolving, or removed). Crucially this is per-message, not a cached
-        prefix cut off at the first such row — a message stays cheap to redraw no matter
-        how far back in a long transcript it sits, so paging up through history doesn't
-        regress to a full re-render every keystroke the way a prefix cutoff would.
-        Grouping context (day/sender headers) is cheap to recompute either way, so it's
-        derived fresh every time and never trusted from the cache.
+        Things that change nothing here cause a paint all the time: the idle tick, a key
+        press, the ack spinner. Thus this method caches the rendered lines of each message
+        in :attr:`_render_cache`, and for each message it puts in the cached slice instead
+        of a new render. A message renders again only when this is necessary:
+
+        * it still waits for its ack (the spinner draws its last glyph again at each
+          tick),
+        * it is the selected message (the selection sets its style, not the message), or
+        * its identity or ``acked`` is different from the cache (it was appended, it was
+          replaced in place when a pending bubble resolved, or it was removed).
+
+        Most importantly, this works for each message. It is not a cached prefix that
+        stops at the first such row. Thus a message stays cheap to draw again, however far
+        back it is in a long transcript. With a prefix that stops, a page up through the
+        history causes a full render again at each key press. With this method, it does
+        not. The grouping context (day and sender headers) is cheap to calculate again in
+        all cases. Thus it is calculated new each time, and never taken from the cache.
         """
         messages = self._messages
         total = len(messages)
@@ -465,11 +497,11 @@ class ChatScreen(Screen):
             cache_count = 0
 
         lines: list[str] = []
-        # Record each day divider as a sticky block of its own one row, so the divider
-        # governing the topmost visible message is re-pinned to the top row once it
-        # scrolls off — the same base Screen.sticky_block the conversation picker uses for
-        # its section headings. A day has nothing to say beyond its date, so the block is
-        # the divider alone; a select list's heading may carry its description along.
+        # Store each day divider as a sticky block of one row. Thus, when the divider of
+        # the top visible message scrolls off, it is pinned to the top row again. This is
+        # the same base Screen.sticky_block that the conversation picker uses for its
+        # section headings. A day has nothing to say except its date, so the block is only
+        # the divider. The heading of a select list can also have its description.
         self._sticky_headers = []
         ids: list[int] = []
         ackeds: list[bool | None] = []
@@ -483,8 +515,8 @@ class ChatScreen(Screen):
             stamp = message.created_at.astimezone()
             day = stamp.date()
             sender, body = self._sender_and_body(message)
-            # Group by (are-we-the-sender, display name), not the name alone, so our own
-            # messages never merge with a remote sender who happens to be named the same.
+            # Group by (are-we-the-sender, display name), not by the name alone. Thus our
+            # messages never join with those of a remote sender that has the same name.
             group = (message.outbound, sender)
             new_day = day != prev_day
             selected = idx == self._selected
@@ -507,11 +539,11 @@ class ChatScreen(Screen):
                 if new_day:
                     if lines:
                         lines += render_lines(Text(""), width)
-                    # A day divider is this transcript's section heading — it pins to the
-                    # top row while its day scrolls under it and ^PgUp/^PgDn step by it —
-                    # so it wears the app's heading dress (``── Label ──`` in the bold
-                    # ``heading`` grey, see menus.section_heading). The rule above the
-                    # compose line is plain ``muted``: that one really is chrome.
+                    # A day divider is the section heading of this transcript: it pins to the
+                    # top row while its day scrolls under it, and ^PgUp/^PgDn step by it.
+                    # Thus it has the heading style of the app (``── Label ──`` in the bold
+                    # ``heading`` grey, refer to menus.section_heading). The rule above the
+                    # compose line is plain ``muted``, because that rule is chrome.
                     divider = render_lines(
                         Text(f"── {stamp:%a} {stamp:%b} {stamp.day} ──", style="heading"), width
                     )
@@ -523,11 +555,12 @@ class ChatScreen(Screen):
                     header = self._group_header(sender, message)
                     lines += render_lines(header, width)
                 if selected:
-                    # The first message owns the head of the transcript: nothing precedes
-                    # its day divider, so its pick anchors at line 0 rather than at its own
-                    # body. Anchoring on the body left the view scrolled two lines in at the
-                    # very top — the divider only pinned, the sender chip gone, and the
-                    # title bar's ↑ lit over a transcript with nothing above it.
+                    # The first message has the head of the transcript: nothing comes before
+                    # its day divider. Thus its selection anchors at line 0, not at its own
+                    # body. When the anchor was on the body, the viewport at the very top
+                    # was scrolled down two lines: the divider was only pinned, the sender
+                    # chip was not visible, and the ↑ of the title bar was lit over a
+                    # transcript with nothing above it.
                     self._selected_line = 0 if idx == 0 else len(lines)
                 lines += self._body_lines(body, message, width, selected=selected)
                 if selected:
@@ -549,11 +582,11 @@ class ChatScreen(Screen):
         return lines
 
     def _sender_and_body(self, message: ChatMessage) -> tuple[str, str]:
-        """Return the display sender and cleaned body for a message.
+        """Return the display sender and the clean body of a message.
 
-        Our own messages are ``you``. Inbound channel messages carry a ``Name: `` prefix we
-        lift into the sender (falling back to ``·`` when absent); inbound direct messages take
-        the sender from the resolved contact name (or the raw key, or ``?``).
+        Our messages are ``you``. An inbound channel message has a ``Name: `` prefix, which
+        we move into the sender (``·`` when there is no prefix). An inbound direct message
+        gets the sender from the resolved contact name (or the raw key, or ``?``).
         """
         if message.outbound:
             return "you", message.text
@@ -565,50 +598,52 @@ class ChatScreen(Screen):
     def _group_header(self, sender: str, message: ChatMessage) -> Text:
         """Build the sender header that starts a group: the name, drawn as a chip.
 
-        The chip is what separates a *label* from the prose under it — a name standing
-        alone above its messages reads as a tag rather than as a coloured word someone
-        typed. It is a path line's own chip (see :func:`~meshterm.ui.widgets.name_chip`),
-        so a sender wears exactly what that node wears as a hop in a route, our own
-        messages included: the ``★``, never our name.
+        The chip makes a *label* different from the prose under it. A name alone above its
+        messages then reads as a tag, not as a coloured word that a person typed. It is the
+        chip of a path line (refer to :func:`~meshterm.ui.widgets.name_chip`). Thus a
+        sender looks exactly like that node as a hop in a route, also for our messages:
+        the ``★``, never our name.
 
-        Only this one is framed: an ``@mention`` inside a body (see
-        :meth:`_render_mentions`) is part of what was said, and inscribing it would put a
+        Only this name is in a chip. An ``@mention`` in a body (refer to
+        :meth:`_render_mentions`) is a part of what the sender said. A chip for it puts a
         chip in the middle of a sentence.
         """
         if message.outbound:
             return name_chip("", you=True)
-        # ``·`` is a channel line that arrived with no sender prefix — nobody to key on.
+        # ``·`` is a channel line that arrived with no sender prefix: there is no key to use.
         return name_chip(sender, None if sender == "·" else self._header_key(sender, message))
 
     def _header_key(self, sender: str, message: ChatMessage) -> str | None:
-        """The key that colours a group's sender chip: the one the sender's name resolves to.
+        """The key that gives the colour of the sender chip of a group: the key of the name.
 
-        A hook rather than a call, because a room knows more than a name: each post carries
-        its author's key prefix, which colours the chip with no name lookup at all (see
-        :class:`~meshterm.ui.room.RoomScreen`).
+        This is a hook, not a call, because a room knows more than a name. Each post has the
+        key prefix of its author, which gives the colour of the chip with no name lookup
+        (refer to :class:`~meshterm.ui.room.RoomScreen`).
         """
         return self._sender_key(sender)
 
     def _body_lines(
         self, body: str, message: ChatMessage, width: int, *, selected: bool = False
     ) -> list[str]:
-        """Render one message to ANSI lines, stamped with its own time and hanging-indented.
+        """Render one message to ANSI lines, with its own time and a hanging indent.
 
-        The per-message timestamp lives here (not on the group header) so every message
-        shows the time it was actually sent, even when several are grouped under one
-        sender — otherwise a run of same-sender messages would appear to share one time.
-        A long body wraps with a hanging indent so continuation lines align under the body
-        rather than under the timestamp gutter. When ``selected``, the line is marked as the
-        reply target (matching the select screen's ``❯`` pointer and cursor highlight).
+        The timestamp of each message is here (not on the group header), so that each
+        message shows the time when it was sent, also when one sender has many messages in
+        a group. Without this, a run of messages from the same sender seems to share one
+        time. A long body wraps with a hanging indent, so that the next lines align under
+        the body and not under the timestamp gutter. When ``selected`` is true, the line
+        is marked as the reply target (the same as the ``❯`` pointer and the highlight of
+        the select screen).
 
-        A URL is never cut where the screen can hold it: one too long for the body's lane
-        steps out to the timestamp's column on a line of its own (see
-        :func:`~meshterm.ui.tui.render.render_hanging`), since a terminal opens a link, and
-        a reader copies one, only while it sits on one line.
+        A URL is never cut where the screen can hold it. A URL that is too long for the
+        body lane moves out to the column of the timestamp, on its own line (refer to
+        :func:`~meshterm.ui.tui.render.render_hanging`). This is because a terminal opens
+        a link, and a user copies one, only while it is on one line.
 
         Where the platform draws them (:data:`_URL_CODES`, the PicoCalc), each URL in the
-        body gets a QR code under it, side by side and hanging at the body's indent, so a
-        link read on the handheld can be opened on a phone instead of typed out.
+        body gets a QR code under it. The codes are side by side, at the indent of the
+        body. Thus the user can open a link from the handheld on a phone, and does not
+        have to type it.
         """
         stamp = message.created_at.astimezone()
         prefix = Text()
@@ -625,11 +660,12 @@ class ChatScreen(Screen):
         return lines
 
     def _body_text(self, body: str, message: ChatMessage, *, selected: bool) -> Text:
-        """Build the styled body of a message: mentions colored, then any trailing glyphs."""
+        """Build the styled body of a message: mentions in colour, then the glyphs at the end."""
         text = self._render_mentions(body, selected=selected)
         if message.outbound:
-            # Direct messages track per-message delivery (spin → ✅/❌, retryable); channel
-            # broadcasts have no ack, so only flag one that failed to leave the companion.
+            # A direct message shows its own delivery (spinner → ✓/✗, and a retry is
+            # possible). A channel broadcast has no ack. Thus mark only a channel message
+            # that did not leave the companion.
             if message.is_channel:
                 if message.acked is False:
                     text.append("  ⚠ no ack", style="warn")
@@ -642,12 +678,13 @@ class ChatScreen(Screen):
         return text
 
     def _scope_note(self, message: ChatMessage) -> Text:
-        """A muted tail on a sent message that went out under a scope other than the title's.
+        """A muted note after a sent message that went out under a scope not in the title.
 
-        Only in a channel whose title names a scope, and only for the exceptions to it — an
-        unscoped resend, or a message sent before the scope was set or changed. Every other
-        line would repeat the title; and in a channel with no scope of its own, the default
-        its messages went under is the device's business, not news on every line.
+        This note shows only in a channel whose title names a scope, and only for the
+        exceptions to that scope: an unscoped resend, or a message sent before the scope
+        was set or changed. On each other line, a note only repeats the title. In
+        a channel with no scope of its own, the default scope of its messages belongs to
+        the device. It is not news to show on each line.
         """
         if not self._scope or not message.scope or message.scope == self._scope:
             return Text()
@@ -656,13 +693,13 @@ class ChatScreen(Screen):
         return Text(f"  · scope {message.scope}", style="muted")
 
     def _render_mentions(self, body: str, *, selected: bool) -> Text:
-        """Render body text, rewriting each ``@[Name]`` token to a ``@Name`` in its hue.
+        """Render body text, and change each ``@[Name]`` token to a ``@Name`` in its hue.
 
-        The reply flow primes the compose line with an ``@[Name]`` token (see
-        :meth:`_begin_reply`); here it reads back as a bare ``@Name`` colored in that
-        sender's stable hue, so a mention is visually tied to the person it names. Text
-        around the mentions keeps the line's base style (``cursor`` when the message is the
-        picked reply target, otherwise unstyled).
+        The reply flow puts an ``@[Name]`` token in the compose line (refer to
+        :meth:`_begin_reply`). Here it shows as a bare ``@Name`` in the stable hue of that
+        sender. Thus the user sees that a mention belongs to the person that it names. The
+        text around the mentions keeps the base style of the line (``cursor`` when the
+        message is the selected reply target, or else no style).
         """
         base = "cursor" if selected else None
         text = Text()
@@ -678,11 +715,12 @@ class ChatScreen(Screen):
         return text
 
     def _delivery_glyph(self, acked: bool | None) -> Text:
-        """Map an outbound direct message's ``acked`` state to its trailing mark.
+        """Map the ``acked`` state of an outbound direct message to the mark at its end.
 
-        A message still awaiting its ack (``acked is None``) shows the current spinner frame,
-        animated by :meth:`_spin_while` for as long as the send is in flight; a resolved one
-        shows the delivered ``✓`` (ok) or the unacknowledged ``✗`` (err).
+        A message that still waits for its ack (``acked is None``) shows the current
+        animation step of the spinner. :meth:`_spin_while` animates it while the send is in
+        flight. A resolved message shows the delivered ``✓`` (ok) or the unacknowledged
+        ``✗`` (err).
         """
         if acked is None:
             return self._spinner.text()
@@ -690,11 +728,11 @@ class ChatScreen(Screen):
         return Text(glyph, style=style)
 
     def _pick_banner(self) -> Text:
-        """One-line cue shown above the input while a message is picked.
+        """A one-line note above the input while a message is selected.
 
-        Channels lead with the reply affordance (Enter's job there); direct chats with
-        the paths view (their Enter). Both mention what the pick is for, so the state
-        never reads as a mystery highlight.
+        In a channel, it starts with the reply (what Enter does there). In a direct chat,
+        it starts with the paths view (what Enter does there). The two say what the
+        selection is for. Thus the user never sees a highlight that has no explanation.
         """
         message = self._messages[self._selected]
         sender, _ = self._sender_and_body(message)
@@ -707,41 +745,43 @@ class ChatScreen(Screen):
         return Text("Enter to see the paths this message took · End to cancel", style="accent")
 
     def _sender_style(self, sender: str, *, is_self: bool = False, mention: bool = False) -> str:
-        """Pick a stable color for a sender name — keyed on the sender's node key.
+        """Get a stable colour for a sender name, from the node key of the sender.
 
-        Our own messages are white — keyed on ``is_self`` (the message being outbound), not
-        on the ``"you"`` label, so a remote sender who happens to be named ``you`` still gets
-        a hue from the palette rather than masquerading as us. ``·`` (unknown) takes
-        ``node.unknown``. Every other sender resolves its name back to a key (contacts, then
-        the recorder's stored names; a direct thread's *sender label* falls back to the
-        peer's own key) and takes that key's hue; a name no known node carries stays
-        ``node.unknown`` too — the app-wide rule that colour marks a keyed identity.
+        Our messages are white. This comes from ``is_self`` (the message is outbound), not
+        from the ``"you"`` label. Thus a remote sender with the name ``you`` still gets a
+        hue from the palette, and does not look like our node. ``·`` (unknown) takes
+        ``node.unknown``. Each other sender name is resolved to a key (the contacts, then
+        the names that the recorder stored, and in a direct thread the *sender label*
+        falls back to the key of the peer), and takes the hue of that key. A name that no
+        known node has also stays ``node.unknown``: the rule of the app is that colour
+        marks an identity that has a key.
 
-        Every grey here is the *node* grey, never ``muted``: an unidentified sender is
-        content you can still act on (pick the message, open its paths), not chrome, and
-        the two must not track each other — on the console ``muted`` is the dark slot and
-        ``node.unknown`` the light one (JP, 2026-08-12).
+        Each grey here is the *node* grey, never ``muted``. An unidentified sender is
+        content that you can still do actions on (select the message, open its paths),
+        not chrome. The two greys must not follow each other: on the console, ``muted`` is
+        the dark slot and ``node.unknown`` is the light one (JP, 2026-08-12).
 
-        ``mention=True`` styles an ``@mention`` in the body rather than a sender label: a
-        mention names an arbitrary person, so the peer-key fallback must not apply — an
-        unresolved one stays grey in a direct chat exactly as it does in a channel.
+        ``mention=True`` gives the style of an ``@mention`` in the body, not of a sender
+        label. A mention names any person, so the fallback to the key of the peer must
+        not apply. Thus a mention that is not resolved stays grey in a direct chat,
+        exactly as it does in a channel.
         """
         if is_self:
-            return "you"  # white, out of the per-sender hue range — always easy to spot
+            return "you"  # white, outside the range of sender hues, so always easy to see
         if sender == "·":
             return "node.unknown"
         return name_style(sender, self._sender_key(sender, mention=mention))
 
     def _sender_key(self, sender: str, *, mention: bool = False) -> str | None:
-        """The key a sender name resolves back to, or ``None`` when nothing places it.
+        """The key of a sender name, or ``None`` when nothing gives a key for it.
 
-        Contacts first, then the recorder's stored names; in a *direct* thread a sender
-        label that resolves to nothing falls back to the peer's own key, since the only
-        two people in the conversation are us and them. A mention names an arbitrary
-        person, so that fallback must not apply to one.
+        The contacts first, then the names that the recorder stored. In a *direct* thread,
+        a sender label with no key falls back to the key of the peer, because the only two
+        persons in the conversation are we and the peer. A mention names any person, so
+        that fallback must not apply to a mention.
 
-        Shared by the colour (:meth:`_sender_style`) and the chip
-        (:meth:`_group_header`) so the two can't disagree about who a name is.
+        The colour (:meth:`_sender_style`) and the chip (:meth:`_group_header`) share this
+        method. Thus the two cannot disagree about the identity of a name.
         """
         key = self._key_of(sender)
         if not key and not self._multiparty and not mention:
@@ -751,19 +791,20 @@ class ChatScreen(Screen):
     # --- input ---------------------------------------------------------------
 
     def handle(self, action: str, data: str = "") -> None:
-        """Dispatch a key: pick and act on messages, edit the compose line, or leave.
+        """Dispatch a key: select messages and do actions on them, edit the compose line, or leave.
 
-        Both chat kinds share one model. With no message picked, Enter sends and typing
-        edits the compose line; a paste (Ctrl-V, or a terminal's bracketed paste) is
-        confirmed on an amber dialog before it lands there (see :meth:`_begin_paste`). ↑
-        picks the newest message; the pick then walks with
-        ↑↓, PgUp/PgDn (a screenful), Ctrl+Home (the very first message), and
-        Ctrl+PgUp/PgDn (day dividers), carrying the view with it. Enter on a picked
-        message primes a reply ``@mention`` in a channel and opens the delivery paths
-        in a direct chat; ^P opens the picked message's paths in either kind, and ^U its
-        links' QR codes, each doing nothing while nothing is picked. ^End (or moving past
-        the newest) returns to the compose line; Esc peels the pick first, the screen
-        second.
+        The two types of chat share one model. When no message is selected, Enter sends,
+        and typing edits the compose line. An amber dialog asks the user to confirm a paste
+        (Ctrl-V, or the bracketed paste of a terminal) before the paste goes into the line
+        (refer to :meth:`_begin_paste`). ↑ selects the newest message. The selection then
+        moves with ↑↓, PgUp/PgDn (one screen), Ctrl+Home (the very first message), and
+        Ctrl+PgUp/PgDn (day dividers), and the viewport moves with it. Enter on a selected
+        message starts a reply with an ``@mention`` in a channel, and opens the delivery
+        paths in a direct chat. In the two types of chat, ^P opens the paths of the
+        selected message, and ^U the QR codes of its links. The two do nothing when no
+        message is selected. ^End (or a move past the newest message) goes back to the
+        compose line. The first Esc clears the selection, and the second Esc leaves the
+        screen.
         """
         if action == "enter":
             if self._selected is not None:
@@ -786,7 +827,7 @@ class ChatScreen(Screen):
                 self._retry()
         elif action == "escape":
             if self._selected is not None:
-                self._clear_selection()  # first Esc unpicks; next leaves the chat
+                self._clear_selection()  # the first Esc clears the selection, the next leaves
                 self._session.invalidate()
             else:
                 self.resolve(CANCEL)
@@ -808,20 +849,21 @@ class ChatScreen(Screen):
             self._select_section(1)
         elif action == "ctrl_end":
             self._clear_selection()
-            self._stick = True  # jump back to the live tail / compose line
+            self._stick = True  # jump back to the live tail and the compose line
         else:
             if self._composing and self._editor.edit(action, data):
-                # Touching the compose line returns focus there — nothing stays picked.
-                self._status = ""  # trimming clears the "too long" notice
+                # An edit of the compose line puts the focus there. Nothing stays selected.
+                self._status = ""  # an edit clears the "too long" notice
                 self._clear_selection()
                 self._stick = True
 
     def _open_paths(self, index: int | None) -> None:
-        """Float the delivery-paths view for the picked message (one dialog at a time).
+        """Float the delivery-paths view for the selected message (one dialog at a time).
 
-        ``index`` is the pick, so ``None`` — nothing picked — opens nothing: a path is a
-        route one *particular* message walked, and guessing at the latest one showed the
-        paths of whichever message happened to be at the bottom of the transcript.
+        ``index`` is the selection. Thus ``None`` (nothing selected) opens nothing. A path
+        is a route that one *specific* message walked. When the code guessed the latest
+        message, it showed the paths of the message that was at the bottom of the
+        transcript at that time.
         """
         if index is None or not self._messages or self._paths is None or self._paths_open:
             return
@@ -838,20 +880,21 @@ class ChatScreen(Screen):
         self._session.run_detached(run())
 
     def _picked_urls(self) -> list[str]:
-        """The URLs in the picked message's body, in reading order; none with nothing picked."""
+        """The URLs in the body of the selected message, in order. None if nothing is selected."""
         if self._selected is None or not self._messages:
             return []
         message = self._messages[max(0, min(self._selected, len(self._messages) - 1))]
         return links.urls(self._sender_and_body(message)[1])
 
     def _open_codes(self) -> None:
-        """Show the picked message's links as QR codes on the share screen (^U).
+        """Show the links of the selected message as QR codes on the share screen (^U).
 
-        The share screen a channel or a contact card gets (:class:`~meshterm.ui.qr.
-        QrScreen`), full-frame, so a phone can take a link read here and open it. Several
-        links are one screen that ←→ steps through, in the order the message gives them.
-        Like ^P it acts on the *pick*: a link belongs to one message, and with nothing
-        picked there is no telling which. One share screen at a time.
+        This is the share screen of a channel or of a contact card
+        (:class:`~meshterm.ui.qr.QrScreen`), full-frame. Thus a phone can read a link from
+        here and open it. Many links are on one screen that ←→ step through, in the order of
+        the message. The same as ^P, it acts on the *selection*: a link belongs to one
+        message, and when nothing is selected, the screen cannot know which message. One
+        share screen at a time.
         """
         urls = self._picked_urls()
         if not urls or self._codes_open:
@@ -870,12 +913,12 @@ class ChatScreen(Screen):
     def _begin_paste(self, data: str) -> None:
         """Confirm a clipboard paste on an amber dialog, then insert it into the compose line.
 
-        A chat message goes out over the air, so a paste — which can be far larger than a
-        keystroke, or carry content the user didn't mean to broadcast — is gated behind a
-        Cancel/Paste confirm (the amber ``danger`` tier: disruptive, not data loss) rather
-        than dropped straight in. Newlines and control characters fold to spaces (a message
-        is one line); an empty result never opens the dialog. One paste dialog at a time,
-        scheduled off the key handler like the paths view.
+        A chat message goes out over the air. A paste can be much larger than a key press,
+        or it can have content that the user did not want to broadcast. Thus a paste must
+        go through a Cancel/Paste confirm (the amber ``danger`` tier: disruptive, not a loss
+        of data), and does not go directly into the line. Newlines and control characters
+        become spaces (a message is one line). An empty result never opens the dialog. One
+        paste dialog at a time, scheduled from the key handler, the same as the paths view.
         """
         if self._paste_open or not self._composing:
             return
@@ -901,9 +944,9 @@ class ChatScreen(Screen):
             finally:
                 self._paste_open = False
             if confirmed:
-                # Land it in the compose line: drop any message pick, snap back to the tail,
-                # and insert the run through the shared editor. An over-budget result is
-                # flagged by the byte gauge, exactly as typing past the limit already is.
+                # Put it in the compose line: clear the selection, go back to the tail, and
+                # insert the run through the shared editor. If the result is over the limit,
+                # the byte gauge marks it, exactly as it marks typing past the limit.
                 self._clear_selection()
                 self._stick = True
                 self._editor.edit("text", clean)
@@ -915,8 +958,8 @@ class ChatScreen(Screen):
     def _move_selection(self, delta: int) -> None:
         """Move the reply selection by ``delta`` messages (negative = toward older).
 
-        Entering from the compose line only happens moving up (``delta < 0``); moving past
-        the newest message drops the selection and re-sticks to the tail.
+        The selection starts from the compose line only on a move up (``delta < 0``). A
+        move past the newest message clears the selection and stays at the tail again.
         """
         if not self._messages:
             return
@@ -935,12 +978,12 @@ class ChatScreen(Screen):
             self._stick = False
 
     def _select_section(self, direction: int) -> None:
-        """Jump the reply selection to the first message of the previous/next day.
+        """Move the reply selection to the first message of the previous or next day.
 
-        The selection-space analogue of the transcript's Ctrl+PageUp/PageDown day jump: down
-        moves to the first message of the following day (dropping to the tail when there's no
-        later day); up moves to the first message of the current day, or the previous day's
-        when already atop one.
+        This is the day jump of the transcript (Ctrl+PageUp/PageDown), for the selection.
+        Down moves to the first message of the next day (or to the tail when there is no
+        later day). Up moves to the first message of the current day, or to the first
+        message of the previous day when the selection is already on a first message.
         """
         if not self._messages:
             return
@@ -963,7 +1006,7 @@ class ChatScreen(Screen):
         self._stick = False
 
     def _day_start_indices(self) -> list[int]:
-        """Message indices that begin a new local-day group — matching the transcript dividers."""
+        """The indexes of the messages that start a new local day: the transcript dividers."""
         starts: list[int] = []
         prev_day = None
         for i, message in enumerate(self._messages):
@@ -974,12 +1017,12 @@ class ChatScreen(Screen):
         return starts
 
     def _clear_selection(self) -> None:
-        """Drop any reply selection (focus returns to the compose line)."""
+        """Clear the reply selection (the focus goes back to the compose line)."""
         self._selected = None
         self._selected_line = None
 
     def _begin_reply(self) -> None:
-        """Prime the compose line with an ``@mention`` of the picked message's sender."""
+        """Start the compose line with an ``@mention`` of the sender of the selected message."""
         message = self._messages[self._selected]
         sender, _ = self._sender_and_body(message)
         named = not message.outbound and sender != "·"
@@ -990,10 +1033,11 @@ class ChatScreen(Screen):
         self._session.invalidate()
 
     def _submit(self) -> None:
-        """Send the current input line as a message (scheduled off the key handler).
+        """Send the current input line as a message (scheduled from the key handler).
 
-        Refuses an over-budget line: the buffer is kept intact (so the user can trim it) and
-        the overage is reported, matching the red overflow the compose bar already shows.
+        A line over the limit is refused. The buffer stays the same (so that the user can
+        make it shorter), and the status shows the overage, the same as the red overflow
+        that the compose bar already shows.
         """
         text = self._editor.text.strip()
         if not text or self._sending:
@@ -1012,9 +1056,9 @@ class ChatScreen(Screen):
             self._session.invalidate()
             self._spawn(self._send_channel(text))
         else:
-            # Direct chats show an optimistic bubble whose trailing mark tracks delivery:
-            # a spinner now, then ✓/✗ once the ack resolves (or times out). acked=None
-            # ⇒ still spinning.
+            # A direct chat shows an optimistic bubble. The mark at its end shows the
+            # delivery: a spinner now, then ✓/✗ when the ack resolves (or times out).
+            # acked=None ⇒ the spinner still turns.
             pending = ChatMessage(text=text, outbound=True, created_at=utcnow())
             self._messages.append(pending)
             self._status = ""
@@ -1022,13 +1066,13 @@ class ChatScreen(Screen):
             self._spawn(self._send_direct(pending))
 
     async def _send_channel(self, text: str) -> None:
-        """Broadcast a channel message and append it once the companion accepts it."""
+        """Broadcast a channel message, and append it when the companion accepts it."""
         try:
             message = await self._send(text)
             if message is not None:
                 self._messages.append(message)
             self._status = ""
-        except Exception as exc:  # noqa: BLE001 - report inline, keep the chat alive
+        except Exception as exc:  # noqa: BLE001 - show the error inline, keep the chat open
             self._status = f"send failed: {exc}"
         finally:
             self._sending = False
@@ -1036,14 +1080,15 @@ class ChatScreen(Screen):
             self._session.invalidate()
 
     async def _spin_while(self, coro: Awaitable[Any]) -> Any:
-        """Await ``coro`` while animating the delivery spinner on the in-flight message.
+        """Await ``coro`` while the delivery spinner animates on the message in flight.
 
-        A background timer advances the shared spinner and repaints every
-        :func:`~meshterm.ui.tui.spinner.spinner_interval` seconds (the platform's spin
-        cadence), so a pending message's trailing glyph spins until
-        the ack resolves. The timer is always cancelled (and awaited, so it can't outlive the
-        send as a stray pending task) before returning. The spinner is cosmetic, so any hiccup
-        in the animation is swallowed rather than allowed to break the send.
+        A background timer moves the shared spinner forward and paints every
+        :func:`~meshterm.ui.tui.spinner.spinner_interval` seconds (the spin rate of the
+        platform). Thus the glyph at the end of a pending message spins until the ack
+        resolves. Before the method returns, it always cancels the timer (and awaits it, so
+        that it cannot stay after the send as a stray pending task). The spinner is only
+        for the look. Thus the method ignores each problem in the animation, so that the
+        problem cannot break the send.
         """
         self._spinner.reset()
 
@@ -1062,20 +1107,20 @@ class ChatScreen(Screen):
                 await ticker
             except asyncio.CancelledError:
                 pass
-            except Exception:  # noqa: BLE001 - a spinner hiccup must never break a send
+            except Exception:  # noqa: BLE001 - a spinner problem must never break a send
                 pass
 
     async def _send_direct(self, pending: ChatMessage) -> None:
-        """Await delivery of the optimistic ``pending`` bubble, swapping in the stored row.
+        """Await the delivery of the optimistic ``pending`` bubble, then put in the stored row.
 
-        On success the pending bubble is replaced by the recorded message (carrying its
-        resolved ``acked`` state and row id, so a ❌ can later be retried in place). A hard
-        failure — the companion rejecting the send outright — drops the bubble and reports
-        the error inline, matching how a failed send has always surfaced.
+        On success, the stored message replaces the pending bubble. The stored message has
+        its resolved ``acked`` state and its row id, so that the user can retry a ✗ later
+        in place. A hard failure (the companion refuses the send) removes the bubble and
+        shows the error inline, the same as a failed send always did.
         """
         try:
             message = await self._spin_while(self._send(pending.text))
-        except Exception as exc:  # noqa: BLE001 - report inline, keep the chat alive
+        except Exception as exc:  # noqa: BLE001 - show the error inline, keep the chat open
             self._discard(pending)
             self._status = f"send failed: {exc}"
         else:
@@ -1090,17 +1135,18 @@ class ChatScreen(Screen):
             self._session.invalidate()
 
     def _retry_target(self) -> ChatMessage | None:
-        """The message ^R would re-send, or ``None`` when there is nothing to retry.
+        """The message that ^R sends again, or ``None`` when there is nothing to retry.
 
-        In a direct chat, the newest outbound message that went out and was never
-        acknowledged. In a channel — where nothing is ever acknowledged — a message *we*
-        sent under a region, which ^R sends again unscoped: the **picked** one when a
-        message is picked (the reader pointed at it), else the newest we sent. With a pick,
-        only the pick: a picked message that isn't a scoped one of ours offers nothing,
-        rather than ^R quietly reaching past it to another. With none, only the newest —
-        once its unscoped copy has gone that copy is the newest, and nothing is left to
-        offer. Either way only while a resend could actually start — no send already in
-        flight, and a resend path wired.
+        In a direct chat, this is the newest outbound message that went out and was never
+        acknowledged. In a channel, nothing is ever acknowledged. There, it is a message
+        that *we* sent under a region, and ^R sends it again unscoped: the **selected**
+        message when a message is selected (the user pointed at it), or else the newest
+        message that we sent. With a selection, only the selection counts. If the selected
+        message is not a scoped message of ours, ^R offers nothing, and does not go past it
+        to another message without a sign. With no selection, only the newest counts.
+        When its unscoped copy has gone, that copy is the newest, and nothing remains to
+        offer. In the two cases, this is true only while a resend can start: no send is
+        already in flight, and a resend path is connected.
         """
         if self._is_channel:
             if self._sending or self._resend_unscoped is None:
@@ -1125,26 +1171,27 @@ class ChatScreen(Screen):
         )
 
     def _retry(self) -> None:
-        """Re-attempt delivery of the most recent unacknowledged direct message (Ctrl-R)."""
+        """Try again to deliver the most recent unacknowledged direct message (Ctrl-R)."""
         target = self._retry_target()
         if target is None:
             return
         self._sending = True
-        target.acked = None  # back to ⏳ while the retry is in flight
+        target.acked = None  # back to the spinner while the retry is in flight
         self._status = "retrying…"
         self._stick = True
         self._session.invalidate()
         self._spawn(self._resend_message(target))
 
     def _begin_resend_unscoped(self) -> None:
-        """Confirm, then send a scoped channel message again unscoped (^R).
+        """Confirm, then send a scoped channel message again, unscoped (^R).
 
-        Amber (``danger``): nothing is lost, but an unscoped flood is relayed by every
-        repeater that allows one — the whole mesh the scope was keeping the message out of —
-        so it is a choice made on purpose, with the region it is leaving named. The resend
-        is a new message on the air (a channel message has no identity to re-deliver), so
-        it appends as one; a radio that can't send unscoped refuses before anything goes
-        out, and the status line says why.
+        The dialog is amber (``danger``). Nothing is lost, but each repeater that permits
+        an unscoped flood relays it: all the mesh that the scope kept the message out of.
+        Thus it is a choice made on purpose, and the dialog names the region that the
+        message leaves. The resend is a new message on the air (a channel message has no
+        identity to deliver again), so it is appended as a new message. A radio that
+        cannot send unscoped refuses before anything goes out, and the status line says
+        why.
         """
         target = self._retry_target()
         if target is None or self._resend_open:
@@ -1173,7 +1220,8 @@ class ChatScreen(Screen):
                 return
             self._sending = True
             self._status = "resending unscoped…"
-            # The resend lands at the tail as a new message; the pick that chose it is done.
+            # The resend goes to the tail as a new message. The selection that chose it is
+            # done.
             self._clear_selection()
             self._stick = True
             self._session.invalidate()
@@ -1182,7 +1230,7 @@ class ChatScreen(Screen):
                 if message is not None:
                     self._messages.append(message)
                 self._status = ""
-            except Exception as exc:  # noqa: BLE001 - report inline, keep the chat alive
+            except Exception as exc:  # noqa: BLE001 - show the error inline, keep the chat open
                 self._status = f"resend failed: {exc}"
             finally:
                 self._sending = False
@@ -1192,11 +1240,11 @@ class ChatScreen(Screen):
         self._spawn(run())
 
     async def _resend_message(self, message: ChatMessage) -> None:
-        """Drive a retry to completion, refreshing the message's delivery state in place."""
+        """Run a retry to its end, and refresh the delivery state of the message in place."""
         assert self._resend is not None
         try:
             await self._spin_while(self._resend(message))
-        except Exception as exc:  # noqa: BLE001 - report inline, keep the chat alive
+        except Exception as exc:  # noqa: BLE001 - show the error inline, keep the chat open
             message.acked = False
             self._status = f"retry failed: {exc}"
         else:
@@ -1207,41 +1255,42 @@ class ChatScreen(Screen):
             self._session.invalidate()
 
     def _swap(self, old: ChatMessage, new: ChatMessage) -> None:
-        """Replace an optimistic bubble with its recorded message, in place."""
+        """Replace an optimistic bubble with its stored message, in place."""
         try:
             self._messages[self._messages.index(old)] = new
-        except ValueError:  # pragma: no cover - the bubble is always still present
+        except ValueError:  # pragma: no cover - the bubble is always still there
             self._messages.append(new)
 
     def _discard(self, message: ChatMessage) -> None:
-        """Drop an optimistic bubble that never became a real message."""
+        """Remove an optimistic bubble that never became a real message."""
         try:
             self._messages.remove(message)
-        except ValueError:  # pragma: no cover - defensive
+        except ValueError:  # pragma: no cover - a defensive check
             pass
 
 
 async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
-    """Open the live chat screen for ``conversation`` and run it until dismissed.
+    """Open the live chat screen for ``conversation`` and run it until the user closes it.
 
-    Ensures listening and message recording are active, loads the stored transcript,
-    subscribes to the hub so inbound messages for this thread append live, and pushes the
-    screen. The subscription and the active-conversation marker are always cleaned up on
-    exit.
+    This function makes sure that the listener and the message recorder run, reads the
+    stored transcript, subscribes to the hub so that inbound messages for this thread are
+    appended live, and pushes the screen. At exit, it always removes the subscription and
+    the marker of the active conversation.
 
     Args:
-        ctx: The shared application context (must be running the interactive TUI surface).
+        ctx: The shared application context (it must run the interactive TUI surface).
         conversation: The channel or contact conversation to open.
 
     Returns:
-        The number of messages shown in the transcript when the screen closed.
+        The number of messages in the transcript when the screen closed.
 
     Raises:
-        RuntimeError: If called outside the interactive menu (no full-screen session).
+        RuntimeError: If the call is not from the interactive menu (no full-screen
+            session).
     """
     from .surface import TuiUi
 
-    if not isinstance(ctx.ui, TuiUi):  # pragma: no cover - guarded by the menu-only caller
+    if not isinstance(ctx.ui, TuiUi):  # pragma: no cover - the caller is only in the menu
         raise RuntimeError("live chat is only available in the interactive menu")
     if conversation.is_room:
         from .room import open_room
@@ -1251,8 +1300,8 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
 
     device = await ctx.device()
     try:
-        await ctx.chat.start()  # begin recording inbound if it wasn't already
-    except Exception:  # noqa: BLE001 - the hub may already be running; recording is best-effort
+        await ctx.chat.start()  # start to store inbound messages, if it did not already
+    except Exception:  # noqa: BLE001 - the hub may already run. The recorder is best-effort
         pass
 
     from ..services import trace_runner
@@ -1331,23 +1380,25 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
 
 
 async def _with_restore(ctx: AppContext, attempt: Callable[[], Awaitable[Any]]) -> Any:
-    """Run a direct send, offering to restore a contact the device has forgotten, then retry.
+    """Run a direct send. If the device forgot the contact, offer to restore it, then retry.
 
-    The one rejection a send can recover from: the firmware has no contact for the recipient
-    (see :class:`~meshterm.core.connection.ContactNotOnDeviceError`), which one write puts
-    right. The user is asked first (:func:`_restore_contact`); declining re-raises, so the
-    chat reports the refusal exactly as it reports any other failed send.
+    This is the one rejection from which a send can recover: the firmware has no contact
+    for the recipient (refer to :class:`~meshterm.core.connection.ContactNotOnDeviceError`),
+    and one write corrects it. The user is asked first (:func:`_restore_contact`). If the
+    user declines, the error is raised again. Thus the chat shows the refusal exactly as it
+    shows each other failed send.
 
     Args:
         ctx: The shared application context.
-        attempt: The send to run — called a second time, unchanged, once the contact is back.
+        attempt: The send to run. It is called a second time, with no change, when the
+            contact is back.
 
     Returns:
-        Whatever ``attempt`` returns.
+        The return value of ``attempt``.
 
     Raises:
-        Exception: Anything ``attempt`` raises; a forgotten-contact rejection is re-raised
-            only when the offer to add it back was declined.
+        Exception: Each error that ``attempt`` raises. A rejection for a forgotten contact
+            is raised again only when the user declined the offer to add it back.
     """
     try:
         return await attempt()
@@ -1358,27 +1409,30 @@ async def _with_restore(ctx: AppContext, attempt: Callable[[], Awaitable[Any]]) 
 
 
 async def _restore_contact(ctx: AppContext, missing: ContactNotOnDeviceError) -> bool:
-    """Offer to write a forgotten contact back to the device; ``True`` if it now holds it.
+    """Offer to write a forgotten contact back to the device. ``True`` if it now has it.
 
-    A direct message is addressed by the *device's* own contact entry, so a contact the
-    firmware has dropped can't be messaged even though MeshTerm still lists it (the list a
-    screen sees is the union of the device's table and the ones MeshTerm remembers for it —
-    see :mod:`meshterm.core.contact_store`). Everything the entry needs is on the contact we
-    already hold, so the fix is one write; the send that hit the rejection retries after it.
+    A direct message is addressed through the contact entry of the *device*. Thus MeshTerm
+    cannot send a message to a contact that the firmware removed, also when MeshTerm still
+    lists it. (The list on a screen is the union of the table of the device and the
+    contacts that MeshTerm keeps for it: refer to :mod:`meshterm.core.contact_store`.) The
+    contact that we already have holds all the data that the entry must have. Thus one
+    write is the repair, and the send that got the rejection tries again after it.
 
-    The write is offered rather than done silently: it changes what the device stores, and a
-    full contact table refuses it (which is worth seeing, not swallowing).
+    The function offers the write and does not do it silently. The write changes what the
+    device stores, and a full contact table refuses it (the user must see that, and it must
+    not be hidden).
 
     Args:
         ctx: The shared application context.
-        missing: The rejection, carrying the contact the device couldn't find.
+        missing: The rejection, with the contact that the device could not find.
 
     Returns:
-        ``True`` once the contact is on the device (retry the send), ``False`` if the user
-        declined — in which case the caller re-raises, so the chat reports the refusal.
+        ``True`` when the contact is on the device (retry the send). ``False`` if the user
+        declined. Then the caller raises the error again, so that the chat shows the
+        refusal.
 
     Raises:
-        DeviceCommandError: If the device refused the write (a full table, most often).
+        DeviceCommandError: If the device refused the write (most often, a full table).
     """
     contact = missing.contact
     add = await ctx.ui.dialog(
@@ -1392,14 +1446,14 @@ async def _restore_contact(ctx: AppContext, missing: ContactNotOnDeviceError) ->
         return False
     device = await ctx.device()
     await device.add_contact(contact)
-    # The device's table just changed under the session cache; the next read re-fetches it
-    # (with the route the firmware learns for the contact from here on).
+    # The table of the device changed under the session cache. The next read gets it again
+    # (with the route that the firmware learns for the contact from now on).
     ctx.devstate.invalidate_contacts()
     return True
 
 
 def _contact_names(contacts: list[Contact]) -> dict[str, str]:
-    """Build a key-prefix → name map for labeling inbound direct messages."""
+    """Build a map from key prefix to name, for the labels of inbound direct messages."""
     names: dict[str, str] = {}
     for contact in contacts:
         for key in (contact.key_prefix, contact.public_key[:12]):
@@ -1413,10 +1467,10 @@ def _belongs(message: Message, conversation: Conversation) -> bool:
 
     Args:
         message: The received message.
-        conversation: The conversation currently shown.
+        conversation: The conversation that the screen shows now.
 
     Returns:
-        ``True`` if the message should append to this transcript.
+        ``True`` if the message must be appended to this transcript.
     """
     if conversation.is_channel:
         return message.is_channel and message.channel == conversation.channel_idx
@@ -1433,23 +1487,24 @@ def _belongs(message: Message, conversation: Conversation) -> bool:
 
 
 def _sent_scope_line(ctx: AppContext, message: ChatMessage, *, relayed: bool) -> Text | None:
-    """What a message we sent went out under, for the paths dialog — and why it may be lost.
+    """The scope of a message that we sent, for the paths dialog, and why it can be lost.
 
-    Built from the scope recorded on the message at send time (:attr:`ChatMessage.scope`),
-    never from the channel's scope now, which may have moved on since. When a scoped
-    message has no relayed copy on record *and* no repeater was ever heard here to carry
-    its region (:meth:`~meshterm.core.region_store.RegionStore.carriers`), the likeliest
-    reason is stated plainly: a scoped flood is relayed only by repeaters carrying its
-    region, and nothing known in earshot does.
+    The line comes from the scope stored on the message at send time
+    (:attr:`ChatMessage.scope`), never from the current scope of the channel, which may
+    have changed since then. A scoped message can have no stored relayed copy *and* no
+    repeater that was ever heard here to relay its region
+    (:meth:`~meshterm.core.region_store.RegionStore.carriers`). Then the line gives the
+    most probable reason in plain words: only repeaters that relay its region relay a
+    scoped flood, and no known repeater in range does.
 
     Args:
-        ctx: Shared application context (for the region store).
+        ctx: The shared application context (for the region store).
         message: The message whose paths are open.
-        relayed: Whether any copy of it was heard coming back.
+        relayed: Whether a copy of it was heard when it came back.
 
     Returns:
-        The line, or ``None`` for a message with no recorded scope (inbound, direct, or
-        sent before scopes were recorded).
+        The line, or ``None`` for a message with no stored scope (inbound, direct, or
+        sent before MeshTerm stored scopes).
     """
     from ..core.regions import UNSCOPED, Scope
     from .widgets import scope_text
@@ -1478,24 +1533,28 @@ def _sent_scope_line(ctx: AppContext, message: ChatMessage, *, relayed: bool) ->
 async def _make_paths_presenter(
     ctx: AppContext,
     conversation: Conversation,
-    device,  # noqa: ANN001 - core Device; typed at the source
+    device,  # noqa: ANN001 - the core Device. Its type is set at the source
 ) -> Callable[[ChatMessage], Awaitable[None]]:
-    """Build the async presenter behind the chat's ^P delivery-paths view.
+    """Build the async presenter for the ^P delivery-paths view of the chat.
 
-    Gathers what the presenter needs once per chat open: a hop-name resolver over the
-    contacts plus every name the recorder ever overheard (the app-wide rule that a
-    nameable node never shows as a bare hash), our own node's name for the white
-    ``you``, the routing prefix width for the hash highlights, and — for a channel —
-    its secret, read from the device when the conversation didn't carry one (a picker
-    conversation knows its identity but not always its key).
+    It collects what the presenter must have, one time each time the chat opens:
+
+    * a resolver of hop names over the contacts and all the names that the recorder ever
+      heard (the rule of the app is that a node that has a name never shows as a bare
+      hash),
+    * the name of our node, for the white ``you``,
+    * the width of the routing prefix, for the lit hashes, and
+    * for a channel, its secret. The function reads it from the device when the
+      conversation did not have one (a conversation from the picker knows its identity,
+      but not always its key).
 
     Args:
         ctx: The shared application context.
-        conversation: The conversation the chat screen is opening.
-        device: The connected device (already awaited by the caller).
+        conversation: The conversation that the chat screen opens.
+        device: The connected device (the caller already awaited it).
 
     Returns:
-        An async callable presenting one message's paths in a floating window.
+        An async callable that shows the paths of one message in a floating window.
     """
     from ..services import trace_runner
     from ..services.message_paths import (
@@ -1519,10 +1578,10 @@ async def _make_paths_presenter(
     try:
         info = await ctx.devstate.self_info()
         self_name = str(info.get("name") or "") or None
-        # Our own key names one end of every direct frame in this conversation; the
-        # contact's key names the other (see :func:`direct_arrivals`).
+        # Our key names one end of each direct packet in this conversation. The key of
+        # the contact names the other end (refer to :func:`direct_arrivals`).
         self_key = str(info.get("public_key") or "") or None
-    except Exception:  # noqa: BLE001 - a nameless self just skips the white highlight
+    except Exception:  # noqa: BLE001 - our node with no name only gets no white highlight
         self_name = None
 
     secret = conversation.secret
@@ -1531,7 +1590,7 @@ async def _make_paths_presenter(
             payload = await device.get_channel(conversation.channel_idx)
             raw = (payload or {}).get("channel_secret")
             secret = bytes(raw) if raw else None
-        except Exception:  # noqa: BLE001 - no key, no decrypt; the view says so honestly
+        except Exception:  # noqa: BLE001 - no key, no decrypt. The view says so correctly
             secret = None
 
     async def present(message: ChatMessage) -> None:
@@ -1565,9 +1624,9 @@ async def _make_paths_presenter(
             arrivals, exact = direct_arrivals(
                 ctx.repo, message, self_key=self_key, peer_key=peer_key
             )
-            # An exact match is the same claim the channel view makes: these frames are
-            # this message. It is earned by the frames' shared MAC, so it survives being
-            # unable to read a word of them.
+            # An exact match says the same as the channel view: these packets are this
+            # message. The shared MAC of the packets gives the match. Thus it is correct,
+            # also when MeshTerm cannot read one word of them.
             matched = exact
             arrivals = collapse(arrivals)
             heard = sum(a.copies for a in arrivals)
@@ -1584,16 +1643,17 @@ async def _make_paths_presenter(
                     if peer_key and self_key
                     else "direct frames are encrypted — matched by time alone"
                 )
-        # The path's two ends: who the message set out from, and who it was addressed to.
-        # Our own sends leave us for the peer; an inbound channel message names its sender
-        # on the wire and is addressed to everyone, so it lands on us; a direct chat's
-        # inbound origin is the conversation's peer.
+        # The two ends of the path: the node that the message started from, and the node
+        # that it was addressed to. Our sends go from our node to the peer. An inbound
+        # channel message names its sender on the air and is addressed to all nodes, so it
+        # ends on our node. The origin of an inbound message in a direct chat is the peer of
+        # the conversation.
         destination: str | None = self_name
         if message.outbound:
             source = self_name
-            # A channel broadcast is addressed to nobody in particular, and the copies we
-            # log are its rebroadcasts coming back — so it really does end on us. A direct
-            # send does not: it was going to one node, and that is where its route ends.
+            # A channel broadcast is addressed to no specific node, and the copies that we
+            # log are its rebroadcasts that come back. Thus it really ends on our node. A
+            # direct send does not: it went to one node, and its route ends there.
             if not conversation.is_channel:
                 destination = conversation.label
         elif conversation.is_channel:

@@ -1,47 +1,55 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The Message paths dialog: every way one chat message reached this radio.
+"""The Message paths dialog: all the paths on which one chat message reached our node.
 
-The interactive face of :mod:`~meshterm.services.message_paths`, opened from the chat
-with ``^P`` (or Enter on a picked direct message). The evidence — one logged frame per
-arrival, each with the relay path it rode — is laid out twice, so the shape and the
-detail read together:
+This dialog is the interactive part of :mod:`~meshterm.services.message_paths`. The user
+opens it from the chat with ``^P`` (or Enter on a selected direct message). The evidence
+is one logged packet for each arrival, each with the relay path that it went through. The
+dialog shows this evidence two times, so that the user can read the shape and the detail
+together:
 
-* a **graph** up top draws every distinct path the message took through the shared
-  route-graph widget (:mod:`~meshterm.ui.pathgraph`): the currently selected path
-  white, the unused paths gray beneath it. The origin sits at the left, we sit at the
-  right, and every relay in between gets its own node-type marker (``▲`` repeater, …)
-  plus the first byte of its hash — set straight above or below the marker, in the mesh
-  name's own colour, so the byte reads as that node and never crowds the line running
-  through it. A node-type key sits under the graph. The row list carries the full names,
-  so the graph's labels stay two cells wide and a many-path graph stays readable.
-* the **arrival list** beneath is two lines per logged copy. On top, alone on its lane
-  and introduced by nothing, the **route** as a path line (:mod:`~meshterm.ui.pathline`):
-  the origin, every relay, and us — the same two endpoints the graph draws between, so
-  the row and the picture start and finish in the same places. Each node is a chip in its
-  own hue, named where we know it (``Lakeside``) and standing in its own hash at the
-  device's path-hash width where we don't (``e839f2``, keyless grey); our own end is the
-  app-wide ``★``. No hash is repeated after a name — the graph above is where the hash
-  bytes live, and a chip and its label share the node's colour, so the two halves
-  cross-reference by hue instead of by spelling the hex twice. Under it, hanging muted,
-  the frame's own facts: time heard, reception SNR, and which resend it was.
-  The route is the line you pick — it is what one arrival differs from another by, and
-  what the graph highlights. The list scrolls *inside* the dialog, in whatever rows the
-  quote and the graph above it leave, with faint ``↑ n more`` / ``↓ n more`` edge markers
-  (the app-wide windowed-list pattern, :class:`~meshterm.ui.tui.screen.ListWindow`) — so
-  walking the arrivals can never push the picture they belong to out of the box, and the
-  fan compresses its own lanes before the list would lose its window. ↑↓ move the
-  selection (the graph's highlight follows), PgUp/PgDn page it by a windowful; a
-  route longer than the dialog **scrolls horizontally with ←→**, the whole line shifting
-  under a cracked chip at whichever edge continues, and snaps back the moment the
-  selection moves on. A row you are *not* on is cut the same way — it just cannot slide.
+* A **graph** at the top draws each different path that the message went through. It
+  uses the shared route-graph widget (:mod:`~meshterm.ui.pathgraph`). The selected path
+  is white, and the unused paths are grey below it. The origin is at the left, and our
+  node is at the right. Each relay between them gets its own node-type marker (``▲``
+  repeater, …) and the first byte of its hash. The byte is directly above or below the
+  marker, in the colour of the node name. Thus the byte reads as that node, and it stays
+  apart from the line that goes through the node. A legend of the node types is below
+  the graph. The rows of the list have the full names. Thus the labels of the graph stay
+  two cells wide, and a graph with many paths stays readable.
+* The **arrival list** below the graph has two lines for each logged copy. The first line
+  has only the **route**, as a path line (:mod:`~meshterm.ui.pathline`), with no label
+  before it. The route has the origin, each relay, and our node. These are the same two
+  ends that the graph draws between, so the row and the picture start and end at the
+  same places. Each node is a chip in its own hue. The chip shows the name of the node
+  when MeshTerm knows it (``Lakeside``). If not, the chip shows the hash of the node at
+  the path-hash width of the device (``e839f2``, in the grey of a node with no key). The
+  end at our node is the ``★`` of the whole app. No hash comes after a name, because the
+  hash bytes are in the graph above. Also, a chip and its label have the colour of the
+  node. Thus the two parts refer to each other by hue, and the hex is not written two
+  times. The second line, muted and indented under the route, has the facts of the
+  packet: the time when it was heard, the SNR of the reception, and the number of the
+  resend.
 
-The message's **scope** — the region it was flooded into — rides the title as a status
-atom (``Message paths · scope harbour``), stated once for the message rather than per
-arrival: every copy carries its sender's transport code unchanged (see
-:func:`~meshterm.services.message_paths.message_scope`).
+  The route is the line that the user selects, because the route is the difference
+  between one arrival and another, and the graph shows that route in white. The list
+  scrolls in the dialog, in the rows that the quote and the graph above it leave. Faint
+  ``↑ n more`` and ``↓ n more`` markers are at its edges (the list window of the whole
+  app, :class:`~meshterm.ui.tui.screen.ListWindow`). Thus, when the user moves through
+  the arrivals, the picture that they belong to never goes out of the box. Also, the
+  graph compresses its graph lanes before the list loses its list window. The ↑ and ↓
+  keys move the highlight, and the graph follows it. PgUp and PgDn move the highlight by
+  one list window. A route that is longer than the dialog **scrolls horizontally with
+  ←→**. The full line moves, with a cracked chip at each edge where the route continues.
+  When the highlight moves to a different row, the route goes back to its start
+  immediately. A row that is not highlighted is cut the same way, but it cannot move.
 
-Nothing here transmits; like the service beneath it, this is a read-model over what
-the radio already heard.
+The **scope** of the message (the region that the message was flooded into) is a status
+atom in the title (``Message paths · scope harbour``). The title states it one time for
+the message, not for each arrival, because each copy carries the transport code of its
+sender unchanged (refer to :func:`~meshterm.services.message_paths.message_scope`).
+
+Nothing in this module transmits. Like the service below it, this dialog is a read-model
+over the packets that the radio already heard.
 """
 
 from __future__ import annotations
@@ -81,30 +89,33 @@ from .widgets import (
 if TYPE_CHECKING:
     from ..core.regions import Scope
 
-#: Cells one ←/→ press shifts the selected row by.
+#: The number of cells by which one ← or → key press moves the selected row.
 _HSTEP = 4
 
-#: Columns the reception-facts line hangs in under the route it belongs to — past the
-#: ``❯ `` pointer lane, so the pair reads as one arrival with its detail tucked under it.
+#: The indent in cells of the line of reception facts, under the route that it is part
+#: of. The indent is past the ``❯ `` pointer lane, so that the two lines read as one
+#: arrival with its detail under it.
 _DETAIL_INDENT = 4
 
-#: The fewest rows the fan may compress to, and the most it may spend — the graph gives
-#: its lane pitch up to the arrival list before the list would lose its window.
+#: The minimum number of rows that the graph can compress to, and the maximum number of
+#: rows that it can use. When rows are not sufficient, the graph makes the pitch of its
+#: graph lanes smaller first, so that the arrival list keeps its list window.
 _GRAPH_MIN_ROWS = 5
 _GRAPH_MAX_ROWS = 15
 
-#: Lines the arrival list is guaranteed out of the dialog's budget, so a tall fan can
-#: never squeeze it below *two* arrivals and the marker saying more are hidden — one row
-#: alone is a fact, and what this dialog is for is comparing one arrival against another.
+#: The number of lines that the arrival list always gets from the budget of the dialog.
+#: Thus a tall graph can never make the list smaller than two arrivals and the marker
+#: that says that more are hidden. One row alone is only a fact, but the purpose of this
+#: dialog is to compare one arrival with another.
 _LIST_MIN_LINES = 5
 
-#: Edge colours: the selected path draws white over the unused paths' gray.
+#: The colours of the edges: the selected path is white, over the grey of the unused paths.
 _EDGE_SELECTED = (255, 255, 255)
 _EDGE_UNUSED = (110, 110, 110)
 
 
 class MessagePathsScreen(Screen):
-    """A floating dialog: one message's arrivals as a path graph over a row list."""
+    """A floating dialog: the arrivals of one message as a path graph above a list of rows."""
 
     def __init__(
         self,
@@ -123,38 +134,44 @@ class MessagePathsScreen(Screen):
         scope: Scope | None = None,
         sent_scope: Text | None = None,
     ) -> None:
-        """Build the dialog over one message's matched arrivals.
+        """Build the dialog for the matched arrivals of one message.
 
         Args:
-            message: The chat message whose delivery evidence is shown.
-            arrivals: Its logged arrivals, oldest first (may be empty).
-            matched: Whether the arrivals were matched by content (a decrypted
-                channel frame) rather than merely by time — the summary line warns
-                when they weren't.
-            resolve: Maps a hop hash to a friendly name when known.
-            prefix_bytes: The device's path-hash width — how many bytes of an unnamed
-                hop's hash stand in for its (unknown) name.
-            self_name: Our own node's name (the graph's right endpoint, white).
-            summary: The one-line evidence summary shown under the quoted text.
-            source: Display name of the message's origin — the sender parsed from a
-                channel message, us for an outbound one, the peer for a direct chat
-                (``None`` reads as an unknown ``?`` origin).
-            destination: Display name of the node the message was *addressed to* — the far
-                end for a message we sent, ourselves for one we received. It closes the
-                path line, so an outgoing message reads ``★ ▶ … ▶ Bob`` rather than
-                starting and ending on our own star, which is what made every send look
-                like a round trip (JP, 2026-09-02). ``None`` closes on our own ``★``.
-            type_of: Maps a relay hash to its node type, so the graph marks a repeater
-                ``▲`` (etc.) instead of a generic dot; ``None`` keeps the plain dots.
-            key_of: Maps the origin's display name back to its node's key, so the
-                graph's left endpoint takes its key-derived hue; ``None`` (or an
-                unresolvable name) leaves it muted.
-            scope: The region the message was flooded into, read off its arrivals'
-                frames (:func:`~meshterm.services.message_paths.message_scope`); ``None``
-                where no copy was a flood, and the title then states nothing.
-            sent_scope: For a message we sent, the line saying what it was flooded under
-                (``sent under scope yul``, and why nothing relayed it where that is
-                known), drawn under the summary; ``None`` draws nothing.
+            message: The chat message whose evidence of delivery the dialog shows.
+            arrivals: The logged arrivals of the message, oldest first. The list can be
+                empty.
+            matched: Whether the arrivals were matched by content (a decrypted channel
+                packet), and not only by time. When they were not, the summary line
+                shows a warning.
+            resolve: Gives the friendly name for the hash of a hop, when the name is
+                known.
+            prefix_bytes: The path-hash width of the device: the number of bytes of the
+                hash of a hop with no name that the dialog shows instead of its unknown
+                name.
+            self_name: The name of our node (the right end of the graph, in white).
+            summary: The one-line summary of the evidence, shown under the quoted text.
+            source: The display name of the origin of the message: the sender parsed
+                from a channel message, our node for an outbound message, or the peer
+                for a direct chat. ``None`` shows as an unknown origin, ``?``.
+            destination: The display name of the node that the message was addressed
+                to: the far end for a message that our node sent, or our node for a
+                message that it received. This node ends the path line. Thus an
+                outgoing message reads ``★ ▶ … ▶ Bob``, and it does not start and end
+                on our own star. Before, it did, and each send looked like a round trip
+                (JP, 2026-09-02). ``None`` ends the line on our own ``★``.
+            type_of: Gives the node type for the hash of a relay. Thus the graph marks
+                a repeater with ``▲`` (and the other types with their markers), not with
+                a generic dot. ``None`` keeps the plain dots.
+            key_of: Gives the key of the node for the display name of the origin. Thus
+                the left end of the graph gets the hue that comes from the key. ``None``
+                (or a name that it cannot resolve) leaves that end muted.
+            scope: The region that the message was flooded into, read from the packets
+                of its arrivals (:func:`~meshterm.services.message_paths.message_scope`).
+                It is ``None`` when no copy was a flood. Then the title states no scope.
+            sent_scope: For a message that our node sent: the line that says the scope
+                that the message was flooded under (``sent under scope yul``), and why
+                no node relayed it, when that is known. The dialog draws this line under
+                the summary. ``None`` draws nothing.
         """
         super().__init__()
         self.title = self.titled(scope)
@@ -171,30 +188,34 @@ class MessagePathsScreen(Screen):
         self._key_of = key_of
         self._sent_scope = sent_scope
         self._index = 0
-        #: Cells the selected row is shifted left by (reset whenever ↑↓ move), and
-        #: how far it *can* shift, measured against the width of the last render.
+        #: The number of cells by which the selected row is moved left (set to zero each
+        #: time ↑ or ↓ moves the highlight), and the maximum move, measured against the
+        #: width of the last paint.
         self._hshift = 0
         self._hmax = 0
         self._cursor: int | None = None
-        #: The arrival list's window over the rows the pinned head leaves (its ``page`` is
-        #: the PgUp/PgDn stride), and whether it currently hides any rows — which is what
-        #: makes the paging keys worth advertising.
+        #: The list window of the arrival list, over the rows that the pinned head leaves
+        #: (its ``page`` is the step of PgUp and PgDn). Also, whether the list window hides
+        #: rows now.
+        #: The hint shows the paging keys only when it does, because only then do these
+        #: keys do something.
         self._list = ListWindow()
         self._list_hidden = False
 
     @staticmethod
     def titled(scope: Scope | None) -> str:
-        """The dialog's title: its name, then the message's scope as a status atom.
+        """The title of the dialog: its name, then the scope of the message as a status atom.
 
-        Every copy of one message carries its sender's transport code (the code is over the
-        payload, which no relay touches), so the scope is a fact about the *message*, not
-        about any one arrival — stated once, up here, rather than repeated down a list whose
-        rows differ only by path. It rides the title because the title is where a screen's
-        status atoms chain (``Message paths · scope harbour``) and it costs the body no
-        line: on the PicoCalc's 26 rows a line spent here is a lane of the fan or a row of
-        the list. The words are :func:`~meshterm.ui.widgets.scope_text`'s, plain — a title
-        carries no styling — so ``unscoped`` and ``unknown scope 3fa1`` read here exactly as they
-        do on the packet viewer's ``route`` row.
+        Each copy of one message carries the transport code of its sender. (The code is
+        calculated over the payload, and no relay changes the payload.) Thus the scope is a
+        fact about the message, not about one arrival. The title states it one time, and
+        the list does not repeat it on rows that are different only by path. The scope is
+        in the title, because the status atoms of a screen make a chain in the title
+        (``Message paths · scope harbour``). Also, there it uses no line of the body. On
+        the 26 rows of the PicoCalc, a line here is one graph lane or one row of the
+        list. The words come from :func:`~meshterm.ui.widgets.scope_text`, without style,
+        because a title has no styles. Thus ``unscoped`` and ``unknown scope 3fa1`` read
+        here the same as on the ``route`` row of the packet viewer.
         """
         atom = scope_text(scope).plain
         return f"Message paths · {atom}" if atom else "Message paths"
@@ -203,10 +224,10 @@ class MessagePathsScreen(Screen):
 
     @property
     def footer_hint(self) -> str:  # type: ignore[override]
-        """Row keys while there are rows; a bare close hint otherwise.
+        """The keys for the rows while there are rows. If there are no rows, only the close hint.
 
-        The paging atom appears only while the window actually hides arrivals — the
-        app-wide rule that a hint never advertises a key that would do nothing.
+        The paging atom shows only while the list window hides arrivals. This is the rule of
+        the whole app: a hint never shows a key that does nothing.
         """
         if not self._arrivals:
             return "Esc close"
@@ -218,22 +239,24 @@ class MessagePathsScreen(Screen):
 
     @property
     def picocalc_lyra_lane(self):
-        """The shared pager, dimmed while every arrival is already on screen.
+        """The shared pager, dim when there is only one arrival or none.
 
-        Both banks move the *selection* here — the pager by a windowful, the jumps to the
-        first and last arrival — so they are live exactly when there is more than one
-        arrival to move between, whether or not the window hides any.
+        Here, both banks move the highlight. The pager moves it by one list window, and
+        the jumps move it to the first and the last arrival. Thus the chips are live
+        exactly when there is more than one arrival to move between, also when the list
+        window hides no arrivals.
         """
         from .tui.fkeys import default_lane
 
         return default_lane(nav=len(self._arrivals) > 1)
 
     def handle(self, action: str, data: str = "") -> None:
-        """Move the selection, shift the selected line sideways, or dismiss."""
+        """Move the highlight, move the selected line to the side, or close the dialog."""
         rows = len(self._arrivals)
-        # Both ends clamp rather than wrap: the arrivals scroll inside a window (see
-        # ListWindow), and a highlight that jumped from the last arrival to the first would
-        # take the window with it — the one move that looks like the screen changed under you.
+        # Both ends clamp. The highlight does not go around to the other end, because the
+        # arrivals scroll in a list window (refer to ListWindow). If the highlight jumps
+        # from the last arrival to the first, the list window goes with it. That is the only
+        # move that looks like a change of the whole screen.
         if action == "up" and rows:
             self._index = max(0, self._index - 1)
             self._hshift = 0
@@ -241,7 +264,7 @@ class MessagePathsScreen(Screen):
             self._index = min(rows - 1, self._index + 1)
             self._hshift = 0
         elif action == "pageup" and rows:
-            # A windowful of *arrivals*, not of body lines: the list is what moves.
+            # One list window of arrivals, not of body lines, because the list is what moves.
             self._index = max(0, self._index - self._list.page)
             self._hshift = 0
         elif action in ("pagedown", "space") and rows:
@@ -261,25 +284,25 @@ class MessagePathsScreen(Screen):
             self.resolve(None)
 
     def cursor_line(self) -> int | None:
-        """The selected row's body line.
+        """The body line of the selected row.
 
-        The window already keeps it inside the dialog, so this only bites on a terminal
-        too short for even the compressed head.
+        The list window already keeps the row in the dialog. Thus this value has an effect only
+        on a terminal that is too short for the compressed head.
         """
         return self._cursor
 
     # --- rendering -------------------------------------------------------------
 
     def render_body(self, width: int) -> list[str]:
-        """The pinned quote and path graph, then the arrival list windowed under them.
+        """The pinned quote and path graph, then the arrival list in a list window below them.
 
-        The head — the quoted message, the evidence summary, the fan and its captions —
-        holds still, and only the arrival rows scroll (see
-        :class:`~meshterm.ui.tui.screen.ListWindow`), so walking the arrivals can never
-        carry the picture they are being compared against out of the dialog. The three
-        share one budget: the head takes its lines, the list is guaranteed
-        :data:`_LIST_MIN_LINES`, and the fan compresses its lane pitch into whatever is
-        left rather than growing past it.
+        The head does not move. It is the quoted message, the summary of the evidence, and
+        the graph with its captions. Only the arrival rows scroll (refer to
+        :class:`~meshterm.ui.tui.screen.ListWindow`). Thus, when the user moves through the
+        arrivals, the picture that they are compared with never goes out of the dialog.
+        The three parts share one budget. The head gets its lines, and the list always gets
+        :data:`_LIST_MIN_LINES`. The graph compresses the pitch of its graph lanes into the
+        rows that remain, and it does not grow past them.
         """
         viewport = self._scroll_viewport
         quoted = self._message.text.replace("\n", " ")
@@ -294,7 +317,7 @@ class MessagePathsScreen(Screen):
             render_to_ansi(stamp, width, no_wrap=True),
         ]
         if self._sent_scope is not None:
-            # Wrapped rather than cut: its tail is the reason a message went nowhere.
+            # Wrapped, not cut, because its end is the reason why a message went nowhere.
             lines.extend(render_lines(self._sent_scope, width))
         self._cursor = None
         self._list_hidden = False
@@ -306,25 +329,27 @@ class MessagePathsScreen(Screen):
                 if self._matched
                 else "No direct-message frames logged in the window."
             )
-            # One entry per drawn row: a wrapped render_to_ansi is one string holding a
-            # newline, which the frame counts as a single line and measures as one.
+            # One entry for each drawn row. A wrapped render_to_ansi is one string that
+            # holds a newline, and the frame counts it and measures it as one line.
             lines.extend(render_lines(Text(note, style="muted"), width))
             self._scroll_total = len(lines)
             return lines
 
-        # The rows are drawn before the fan is sized: what they need is one of the terms
-        # the fan's row ceiling is struck from.
+        # The rows are drawn before the graph gets its size, because the lines that the
+        # rows need are one of the terms that MeshTerm subtracts to find the row limit of
+        # the graph.
         blocks = [
             self._row_block(arrival, i == self._index, width)
             for i, arrival in enumerate(self._arrivals)
         ]
         heights = [len(block) for block in blocks]
 
-        # No blank line above the graph: its canvas already opens with air over the
-        # topmost lane, so a spacer here would read as two rows of margin.
+        # No blank line above the graph. Its canvas already starts with empty space above
+        # the top graph lane, so a blank line here reads as two rows of margin.
         revisit = self._revisit_line(width)
-        # The fan's caption and node-type key, which a short frame leaves out: the marks
-        # mean one thing app-wide, and the rows go to the list (see widgets.short_frame).
+        # The caption and the node-type legend of the graph. A short frame leaves them out,
+        # because the markers have one meaning in the whole app, and the rows go to the
+        # list (refer to widgets.short_frame).
         key: list[str] = []
         if not short_frame(viewport):
             far = "you" if not self._destination else self._destination
@@ -334,8 +359,9 @@ class MessagePathsScreen(Screen):
             )
             key.append(render_to_ansi(caption, width, no_wrap=True))
             key.extend(render_lines(node_type_legend(width=width), width, no_wrap=True))
-        # The fan's own trailing chrome (that key, the revisit note) plus the blank that
-        # sets the list apart — all struck from the budget before the ceiling is.
+        # The chrome after the graph (that legend and the revisit note), and the blank line
+        # that puts the list apart. MeshTerm subtracts all of them from the budget before it
+        # calculates the row limit.
         chrome = len(key) + len(revisit) + 1
         room = viewport - len(lines) - chrome - min(sum(heights), _LIST_MIN_LINES)
         graph = self._graph_lines(width, max(_GRAPH_MIN_ROWS, min(_GRAPH_MAX_ROWS, room)))
@@ -345,7 +371,7 @@ class MessagePathsScreen(Screen):
             lines.extend(revisit)
         lines.append("")
 
-        # -- the arrival list, windowed into whatever the head left.
+        # -- the arrival list, in a list window in the rows that the head left.
         window = max(min(heights), viewport - len(lines))
         top, count = self._list.fit_blocks(heights, window, self._index)
         if top > 0:
@@ -362,15 +388,15 @@ class MessagePathsScreen(Screen):
         return lines
 
     def _row_block(self, arrival: Arrival, selected: bool, width: int) -> list[str]:
-        """One arrival as the window moves it: its route, then its facts hanging under it."""
+        """One arrival as the list window moves it: its route, then its facts indented under it."""
         if selected:
             route = self._selected_line(arrival, width)
         else:
             row = Text("  ")
             row.append_text(self._path_text(arrival))
-            # Cut here rather than letting the render boundary ellipsize it: an
-            # unselected route runs off the lane exactly as the selected one does,
-            # and it owes the reader the same cracked chip rather than three dots.
+            # Cut the route here, and do not let the render boundary ellipsize it. An
+            # unselected route goes past the end of the lane the same as the selected
+            # route, and it must show the user the same cracked chip, not three dots.
             route = render_to_ansi(cut_to(row, width), width, no_wrap=True)
         detail = Text(" " * _DETAIL_INDENT)
         detail.append_text(self._detail_text(arrival))
@@ -379,26 +405,27 @@ class MessagePathsScreen(Screen):
     # -- the rows --
 
     def _path_text(self, arrival: Arrival) -> Text:
-        """One arrival's whole route — the row's first line, and the one you pick.
+        """The full route of one arrival: the first line of the row, which the user selects.
 
-        The route gets the row's full width to itself, so no ``via`` introduces it: on a
-        lane that holds nothing else there is nothing to tell it apart from. It is THE
-        path line, so a route here is drawn exactly as a route anywhere else — chips in
-        each node's own hue where the terminal can draw them, arrows where it can't.
-        Hops read as names, nothing else: an unnamed hop, having no name to show, stands
-        in its own hash at the device's path-hash width (muted grey — colour is the
-        "this is a name" signal), and no hop repeats its hash after its name. The hash
-        bytes are the graph's job, one row up; what ties the two together is the shared
-        node hue, not a second spelling of the hex.
+        The route has the full width of the row, so no ``via`` comes before it. On a lane
+        that holds nothing else, there is nothing to tell it apart from. It is the only
+        path line of the app, so a route here is drawn the same as a route at all other
+        places: chips in the hue of each node where the terminal can draw them, and arrows
+        where it cannot. The hops show only names. A hop with no name to show shows its
+        own hash at the path-hash width of the device instead (in muted grey, because
+        colour is the signal for "this is a name"). No hop repeats its hash after its
+        name. The hash bytes are in the graph, one row up. The node hue that the two share
+        connects them, not a second copy of the hex.
 
-        The line runs **origin to us**, not relay to relay (JP, 2026-08-09): a path's
-        ends are the nodes it went between, and a chain that opens on its first *relay*
-        reads as a route from a node that only passed the message on. So the sender leads
-        (:meth:`_origin_hop`) and we close it on the app-wide ``★``, which is exactly what
-        the graph one row up draws between — the two now name the same two endpoints
-        instead of the row starting a hop later than the picture above it. A hopless
-        arrival is no longer a lone word: ``Alice ▶ ★`` *is* what direct delivery looks
-        like, and it reads on the same rails as every other row.
+        The line goes **from the origin to our node**, not from relay to relay (JP,
+        2026-08-09). The ends of a path are the nodes that it went between. A chain that
+        starts on its first relay reads as a route from a node that only passed the
+        message on. Thus the sender is first (:meth:`_origin_hop`), and the line ends on
+        the ``★`` of the whole app. The graph one row up draws between these same two
+        ends. Now the two name the same two ends, and the row does not start one hop
+        after the picture above it. An arrival with no hops is not a single word now:
+        ``Alice ▶ ★`` is how direct delivery looks, and it has the same form as all the
+        other rows.
         """
         relays = path_line(
             arrival.hops,
@@ -410,13 +437,14 @@ class MessagePathsScreen(Screen):
         return PathLine([self._origin_hop(), *relays, self._far_hop()]).text()
 
     def _far_hop(self) -> PathHop:
-        """The node the path ends on — where the message was addressed, not always us.
+        """The node at the end of the path: the addressee of the message, not always our node.
 
-        The line used to close on our own ``★`` unconditionally, which is right for a
-        message we *received* and wrong for one we sent: with our star opening the line too
-        (:meth:`_origin_hop`), every outgoing message drew ``★ ▶ … ▶ ★`` and read as a round
-        trip. It is the same rule the line already follows at its head — a path runs between
-        the nodes it went *between* — applied at last to its tail.
+        Before, the line always ended on the ``★`` of our node. That is correct for a
+        message that our node received, and wrong for a message that our node sent. Our
+        star also starts the line (:meth:`_origin_hop`), so each outgoing message drew
+        ``★ ▶ … ▶ ★`` and read as a round trip. This is the same rule that the line already
+        follows at its start (a path goes between the nodes that it went between), now
+        also at its end.
         """
         if not self._destination:
             return PathHop(SELF_GLYPH, you=True)
@@ -428,12 +456,13 @@ class MessagePathsScreen(Screen):
         )
 
     def _origin_hop(self) -> PathHop:
-        """The node the message set out from — the route's true head.
+        """The node that the message started from: the true start of the route.
 
-        The same origin the graph's left endpoint draws (:func:`~meshterm.ui.widgets.
-        route_graph_style`), named and hued the same way: the sender's display name in its
-        key-derived hue, our own ``★`` for a message we sent, and a bare ``?`` where the
-        frame named nobody — never a hue guessed from a name we can't place.
+        It is the same origin that the left end of the graph draws
+        (:func:`~meshterm.ui.widgets.route_graph_style`), with the same name and hue. The
+        display name of the sender is in the hue that comes from its key. A message that
+        our node sent shows our own ``★``. When the packet named no node, the hop is only
+        ``?``. MeshTerm never guesses a hue from a name that it cannot place.
         """
         if not self._source:
             return PathHop("?")
@@ -442,27 +471,30 @@ class MessagePathsScreen(Screen):
         return PathHop(self._source, key=self._key_of(self._source) if self._key_of else None)
 
     def _detail_text(self, arrival: Arrival) -> Text:
-        """One arrival's reception facts — when it landed, how loudly, which copy.
+        """The reception facts of one arrival: when it arrived, how strong it was, which copy.
 
-        The row's second line, hanging muted under the route it describes: the path is
-        what distinguishes one arrival from another (and what the graph above draws), so
-        it takes the lane, and the frame's own particulars step in beneath it.
+        This is the second line of the row, muted and indented under the route that it
+        describes. The path is the difference between one arrival and another (and the
+        graph above draws it), so the path gets the lane. The details of the packet go
+        below it.
 
-        The hop count leads (:func:`~meshterm.ui.pathline.hops_atom`): it is the one fact
-        about the route the line above encodes without stating, and the number two
-        arrivals of the same message are compared on before anything else.
+        The hop count is first (:func:`~meshterm.ui.pathline.hops_atom`). It is the one
+        fact about the route that the line above encodes but does not state. Also, it is
+        the first number by which the user compares two arrivals of the same message.
 
-        A row stands for a *path*, not a frame (see
-        :func:`~meshterm.services.message_paths.collapse`), so a path heard more than once
-        says how many times and the time reads as the first of them — a direct send is
-        retried and every retry is overheard off every repeater in earshot, which used to
-        fill the list with a dozen identical lines. The SNR is the best that path managed,
-        which is what it is capable of.
+        A row is one path, not one packet (refer to
+        :func:`~meshterm.services.message_paths.collapse`). Thus a path that was heard more
+        than one time shows how many times, and the time is the time of the first of them.
+        The reason is that a direct send is tried again, and the device overhears each try
+        from each repeater in range. Before, this filled the list with a dozen lines that
+        were the same. The SNR is the best SNR of that path, because that shows what the
+        path can do.
         """
-        # What the hop count *is* depends on the route type, so the lane says which: a
-        # flooded frame's path is where it has been, a direct-routed one's is where it was
-        # going, and a routed frame carrying none has had its route consumed — which is not
-        # the same as having arrived in zero hops, however much an empty field looks like it.
+        # The meaning of the hop count depends on the route type, so the lane says which
+        # type. The path of a flooded packet is where it went. The path of a direct-routed
+        # packet is where it was going to go. A routed packet that carries no path had its
+        # route consumed. That is not the same as an arrival in zero hops, although the
+        # empty field looks the same.
         if not arrival.route_known:
             text = Text("routed", style="warn")
             text.append("  ·  route not carried", style="muted")
@@ -482,18 +514,18 @@ class MessagePathsScreen(Screen):
         return text
 
     def _selected_line(self, arrival: Arrival, width: int) -> str:
-        """The highlighted path: ``❯`` pointer, shifted by ``←→`` under an edge cut mark.
+        """The highlighted path: the ``❯`` pointer, and the route moved by ``←→`` under cut marks.
 
-        The picked line is the route — the one thing here long enough to need scrolling,
-        and the one the graph above highlights — and the shift bound is measured here
-        against the current width, so a resize can only ever leave the row clamped back
-        into range.
+        The selected line is the route. It is the only thing here that can be long enough
+        to scroll, and it is the path that the graph above shows in white. The limit of the
+        move is measured here against the current width. Thus, after a resize, the row can
+        only be clamped back into its range.
 
-        Each edge the route continues past wears :func:`~meshterm.ui.pathline.cut_mark`,
-        so a chip the scroll cuts breaks off on a half block in its own colour rather
-        than behind an ellipsis: the route is being *slid*, not shortened, and a cracked
-        segment is what says so. An arrow-drawn route falls back to the ``…`` the row has
-        always shown.
+        Each edge past which the route continues gets
+        :func:`~meshterm.ui.pathline.cut_mark`. Thus a chip that the scroll cuts breaks off
+        on a half block in its own colour, not behind an ellipsis. The route moves to the
+        side, but it is not made shorter, and the cracked segment shows this. A route drawn
+        with arrows uses the ``…`` that the row always showed.
         """
         full = self._path_text(arrival)
         avail = max(1, width - 2)
@@ -504,9 +536,9 @@ class MessagePathsScreen(Screen):
         right_more = 1 if shift + avail < full.cell_len else 0
         inner = max(1, avail - left_more - right_more)
         line = Text("❯ ", style="cursor", no_wrap=True)
-        # The marks stand for the cell just outside the window on their own side, so each
-        # takes its colour from the nearest cell still drawn — the chip the reader can see
-        # being the one that visibly runs on.
+        # Each mark stands for the cell immediately outside the visible part on its side. Thus
+        # each mark takes its colour from the nearest cell that is still drawn, because the
+        # chip that the user can see is the chip that visibly continues.
         if left_more:
             line.append_text(cut_mark(full, shift + left_more, ELIDE_HEAD))
         line.append_text(crop_cells(full, shift + left_more, inner))
@@ -518,37 +550,39 @@ class MessagePathsScreen(Screen):
     # -- the graph --
 
     def _paths(self) -> list[tuple[str, ...]]:
-        """The distinct relay paths across the arrivals, in first-heard order."""
+        """The different relay paths of the arrivals, in the order that they were first heard."""
         seen: list[tuple[str, ...]] = []
         for arrival in self._arrivals:
-            # A frame whose route was consumed has nothing to draw: an empty lane in the fan
-            # would be a claim of adjacency the frame never made.
+            # A packet whose route was consumed has nothing to draw. An empty graph lane says
+            # that the two ends are next to each other, but the packet never said that.
             if arrival.route_known and arrival.hops not in seen:
                 seen.append(arrival.hops)
         return seen
 
     def _graph_lines(self, width: int, max_rows: int) -> list[str]:
-        """Draw every distinct path origin → us, the selected one white over gray.
+        """Draw each different path from the origin to our node, the selected path white over grey.
 
-        The shared route-graph widget does the layout (a left-to-right flow of paths that
-        diverge and converge, each route its own lane and each relay drawn once); this just
-        maps each distinct path to a
-        :class:`~meshterm.ui.pathgraph.PathLayer` — the selected one white on top, the
-        rest gray beneath — and hands it the shared route-graph callbacks
-        (:func:`~meshterm.ui.widgets.route_graph_style`): endpoints named, relays their
-        own map marker where the type is known, each labelled by its first hash byte in
-        the node's own hue.
+        The shared route-graph widget does the layout: a flow of paths from left to right
+        that go apart and come together, with each route on its own graph lane and each
+        relay drawn one time. This method only maps each different path to a
+        :class:`~meshterm.ui.pathgraph.PathLayer` (the selected path white on top, the
+        other paths grey below it). Then it gives the widget the shared route-graph
+        callbacks (:func:`~meshterm.ui.widgets.route_graph_style`). These callbacks name
+        the ends, give each relay its own map marker when the type is known, and label each
+        relay with the first byte of its hash in the hue of the node.
 
-        Layout rank is fixed by first-heard order (the first path heard is always the spine),
-        exactly as the node detail's Routes tab fixes it by evidence order, so the fan's
-        geometry holds still as ↑↓ walk the arrivals — only the emphasis (which lane draws
-        white and on top) follows the pick.
+        The order in which the paths were first heard sets the layout rank (the first path
+        heard is always the spine). The Routes tab of the node detail sets the rank by the
+        order of the evidence in the same way. Thus the shape of the graph does not move
+        while ↑ and ↓ move through the arrivals. Only the emphasis (which graph lane is
+        white and on top) follows the selection.
 
         Args:
-            width: Canvas width in cells.
-            max_rows: The most rows the fan may spend — what the dialog's budget leaves once
-                the quote, the fan's own captions and the list's guaranteed lines are paid
-                for. A fan with more lanes than that compresses its lane pitch to fit.
+            width: The width of the canvas in cells.
+            max_rows: The maximum number of rows for the graph. This is what the budget of
+                the dialog leaves after the quote, the captions of the graph, and the
+                minimum lines of the list. A graph with more graph lanes than that
+                compresses the pitch of its graph lanes to fit.
         """
         selected = self._arrivals[self._index].hops
         paths = self._paths()
@@ -582,13 +616,14 @@ class MessagePathsScreen(Screen):
         )
 
     def _revisit_line(self, width: int) -> list[str]:
-        """The ⚠ note when any drawn path touches one hop twice, else no line at all.
+        """The ⚠ note when a drawn path goes through one hop two times. If not, no line.
 
-        These paths are *overheard*, not composed: a repeated hop is real evidence, so the graph
-        draws each visit its own marker (``allow_duplicate_nodes``) rather than folding the walk
-        into a cycle it cannot seat. That leaves one name on two markers, which this explains —
-        once for the whole fan, naming every hop repeated anywhere in it, since the note belongs
-        to the picture rather than to whichever arrival ↑↓ happen to be resting on.
+        These paths were overheard, not composed. Thus a repeated hop is real evidence, and
+        the graph draws a marker for each visit (``allow_duplicate_nodes``). It does not fold
+        the walk into a cycle that it cannot place. The result is one name on two markers,
+        and this note explains it. The note is one time for the whole graph, and it names
+        each hop that is repeated at any place in the graph. The reason is that the note is
+        about the picture, not about the arrival that ↑ and ↓ selected at that time.
         """
         repeated: list[str] = []
         for path in self._paths():

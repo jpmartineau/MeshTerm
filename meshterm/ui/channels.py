@@ -1,44 +1,49 @@
 # SPDX-License-Identifier: Apache-2.0
 """The interactive channel manager, rendered in the full-screen session.
 
-This is the user-facing channel-management experience for the ``channels`` tool: a live
-list of the device's channel slots with, for each, a detail view that shows the sharable
-QR code and key, renames or re-keys it, opens it in chat, mutes its notifications, or clears
-it. New channels are created four ways — a fresh private channel (random key), a public ``#``
-channel (key derived from the name), joining by pasting a key, or importing a scanned
-``meshcore://`` link. Every change is written to the device immediately (like a phone app), so
-the list you see always reflects the radio.
+This is the channel management that the user sees for the ``channels`` tool. It is a live
+list of the channel slots of the device. For each slot, a detail screen shows the QR code
+and the key that the user can share. On the detail screen the user can rename the channel,
+change its key, open it in chat, mute its notifications, or clear it. There are four ways
+to make a new channel: a new private channel (random key), a public ``#`` channel (the key
+comes from the name), joining with a key that the user pastes, or importing a scanned
+``meshcore://`` link. Each change is written to the device at once, as in a phone app.
+Thus the list always shows the state of the radio.
 
-Muting is the one per-channel setting that is a local *preference* rather than device
-configuration: a muted channel's new messages stop raising the unread badge (its inbound
-messages no longer accrue unread, and muting zeros whatever it had), while still being
-recorded to history. The mute lives in :class:`~meshterm.core.mute_store.MuteStore`, keyed by
-the channel's intrinsic identity so it follows the channel across slot moves, and the list
-row shows a ``🔕`` in its (then always-empty) unread lane to mark it.
+Muting is the one setting of a channel that is a local *preference* and not a configuration
+of the device. The new messages of a muted channel do not make the unread badge higher.
+Its inbound messages do not add to the unread count, and muting sets the count to zero.
+But MeshTerm still records the messages in the history. The mute is in
+:class:`~meshterm.core.mute_store.MuteStore`. Its key is the intrinsic identity of the
+channel, so the mute stays with the channel when the channel moves to another slot. The
+list row shows a ``🔕`` in its unread lane (which is then always empty) to mark the mute.
 
-A channel's **send scope** is the other: the region its messages are flooded into, so only
-the repeaters carrying that region relay them. The firmware has no such thing per channel —
-the chat sets the companion's session scope around each send instead (see
-:meth:`~meshterm.core.connection.Device.send_channel_in_scope`) — so it is kept by MeshTerm,
-in :class:`~meshterm.core.region_store.RegionStore`, keyed the same way a mute is. The
-detail page's *Send scope…* row picks it from the regions already known here, or takes a
-typed name.
+The **send scope** of a channel is the other such setting. It is the region into which the
+messages of the channel are flooded, so that only the repeaters that carry that region
+relay them. The firmware has no send scope for each channel. The chat sets the session
+scope of the companion around each send (refer to
+:meth:`~meshterm.core.connection.Device.send_channel_in_scope`). Thus MeshTerm keeps the
+send scope, in :class:`~meshterm.core.region_store.RegionStore`, with the same key type as
+a mute. The row *Send scope…* of the detail page lets the user select the scope from the
+regions that MeshTerm already knows, or type a name.
 
-The list is laid out like the config editor: fixed, column-aligned lanes under one header
-line — the openness glyph and name, send scope, unread badge, total messages, last-message
-age, and a braille sparkline of the trailing two hours' traffic — so a glance shows not
-just *which* channels exist but which ones are alive. Openness beyond the glyph, and the
-hash, live in the detail views (the title line and Show key), keeping the list lean enough that the
-activity lane survives a 72-column terminal. The message statistics come from
+The list has the same layout as the config editor: fixed lanes, aligned in columns, under
+one header line. The lanes are the openness glyph and name, the send scope, the unread
+badge, the total messages, the age of the last message, and a braille sparkline of the
+traffic of the last two hours. Thus a glance shows which channels exist and also which
+channels are active. The openness (other than the glyph) and the hash are in the detail
+screens (the title line and Show key). This keeps the list small enough that the activity
+lane stays visible on a terminal of 72 columns. The message statistics come from
 :meth:`~meshterm.persistence.repository.Repository.channel_stats` (read through a small
-TTL cache) and the unread counts from the live chat service, and each row is a callable
-title re-resolved on repaint, so a message arriving while the list sits open updates its
-row in place — the same trick the conversation picker uses. The menus also follow the
-config editor's persistent-backdrop pattern: the list stays pushed while every sub-prompt
-floats over it as a modal popup, rather than replacing the screen.
+TTL cache). The unread counts come from the live chat service. Each row is a callable
+title that the code resolves again at each paint. Thus, if a message arrives while the
+list is open, its row updates in place. The conversation picker uses the same method. The
+menus also follow the pattern of the config editor with a backdrop that stays: the list
+stays pushed, and each sub-prompt floats over it as a modal dialog, and does not replace
+the screen.
 
-The module sits in the UI layer but, like the config editor and chat screen, is allowed to
-depend on the context and services; it owns no persistence of its own.
+This module is in the UI layer. But, as the config editor and the chat screen do, it can
+depend on the context and the services. It has no persistence of its own.
 """
 
 from __future__ import annotations
@@ -87,10 +92,12 @@ if TYPE_CHECKING:
     from ..context import AppContext
     from ..persistence.repository import ChannelStats
 
-#: The manager's footer sentence: navigation, then the filter, then the action, Esc last.
+#: The footer sentence of the manager: navigation, then the filter, then the action, and Esc
+#: last.
 _MANAGER_HINT = "↑↓ move · type to filter · Enter open · Esc back"
 
-# Top-menu action sentinels (distinct from a plain slot index, which selects that channel).
+# The sentinels of the actions of the top menu. They are different from a plain slot index,
+# which selects that channel.
 _CREATE = "__create__"
 _PUBLIC = "__public__"
 _DEFAULT_PUBLIC = "__default_public__"
@@ -98,7 +105,7 @@ _JOIN = "__join__"
 _IMPORT = "__import__"
 _REORDER = "__reorder__"
 
-# Channel-detail action sentinels.
+# The sentinels of the actions of the channel detail screen.
 _QR = "qr"
 _KEY = "key"
 _CHAT = "chat"
@@ -106,45 +113,49 @@ _MUTE = "mute"
 _SCOPE = "scope"
 _EDIT = "edit"
 
-# Send-scope picker sentinels: clear the channel's scope, or type a region by name.
+# The sentinels of the send-scope picker: clear the scope of the channel, or type the name of
+# a region.
 _NO_SCOPE = "__no_scope__"
 _TYPE_REGION = "__type_region__"
 
-#: The scope picker's footer: a value picker over a list that can grow, so it filters.
+#: The footer of the scope picker. It is a value picker over a list that can grow, so it
+#: filters.
 _SCOPE_HINT = "↑↓ move · type to filter · Enter set · Esc keep"
 _CLEAR = "clear"
 
 
 async def manage_channels(ctx: AppContext) -> int:
-    """Run the interactive channel manager until the user backs out.
+    """Run the interactive channel manager until the user leaves it.
 
-    The visit says **nothing** on the way out. It used to bank a note per action and then an
-    "✓ applied 3 channel changes" line on top of those, shown once the manager had already
-    closed — an acknowledgement for changes the reader had just watched land in the list in
-    front of them, arriving as a tidy popup or as a full-frame window depending on how many
-    lines had piled up. An error is the exception, and is shown when it happens (see
-    :func:`_import_link`).
+    The visit says **nothing** when the user leaves. It once stored a note for each action,
+    and then added a line "✓ applied 3 channel changes" after them. The line was shown when
+    the manager was already closed. It was an acknowledgement for changes that the user had
+    just seen in the list in front of them. It came as a short dialog or as a full-frame
+    result screen, and that depended on the number of lines that had collected. An error is the
+    exception. The manager shows an error when it occurs (refer to :func:`_import_link`).
 
-    What the reader gets instead is the wait itself: every device action reports *while it
-    runs*, under the modal busy card (:meth:`~meshterm.ui.surface.Ui.busy_dialog`) — see
-    :func:`write_channel` and ``settle`` below for where those are drawn, and why the card
-    has to be modal.
+    The user gets the wait itself instead. Each device action reports *while it runs*, under
+    the modal busy card (:meth:`~meshterm.ui.surface.Ui.busy_dialog`). Refer to
+    :func:`write_channel` and ``settle`` below for the places where the cards are drawn, and
+    for the reason why the card must be modal.
 
     Args:
-        ctx: Shared application context (provides the connected device and UI surface).
+        ctx: The shared application context (it gives the connected device and the UI).
 
     Returns:
-        How many channels were created, changed, or cleared — the run log's record of what
-        the visit did (``ToolResult.summary``), not anything the reader is shown.
+        The number of channels that were created, changed, or cleared. This is the record
+        of the run log of what the visit did (``ToolResult.summary``). The user does not
+        see it.
     """
     device = await ctx.device()
-    # The firmware's slot count is fixed for the session, so discover it once (a read-only
-    # probe) rather than assuming a hard-coded 8; it drives the free-slot check and the
-    # used/total display below. Read through the session cache: on firmware that never
-    # rejects an out-of-range index the probe walks every slot (slow), and the count never
-    # changes for a connection, so it is warmed once (prewarm/first open) and reused on every
-    # later open. A device that can't report any slots falls back to the standard count so the
-    # manager stays usable instead of showing zero capacity.
+    # The number of slots of the firmware is fixed for the session, so find it one time
+    # (a probe that only reads) and do not assume a fixed 8. The number controls the check
+    # for a free slot and the used/total display below. Read it through the session cache.
+    # On firmware that never rejects an index that is out of range, the probe walks each
+    # slot (slow). The count does not change for a connection, so the code warms it one time
+    # (prewarm or the first open) and uses it again at each later open. If a device cannot
+    # report any slots, the code uses the standard count. Thus the manager stays usable and
+    # does not show zero capacity.
     capacity = await ctx.devstate.channel_capacity() or MAX_CHANNELS
     stats = _LiveStats(ctx)
     changes = 0
@@ -152,46 +163,49 @@ async def manage_channels(ctx: AppContext) -> int:
     slots: list = []
 
     async def reload() -> tuple[str, list]:
-        """Re-probe the slot layout and rebuild the list's title and rows.
+        """Probe the slot layout again and build the title and the rows of the list again.
 
-        Through the session cache — the slot probe walks every index and is one of the
-        slowest reads on a screen open, so a screen opened after this one (or this one after
-        another) reuses the one probe. A local copy so the mutation helpers below can work a
-        working list; each mutation invalidates the cache (see ``handle``), so this re-probes
-        the fresh layout rather than trusting the stale copy.
+        This goes through the session cache. The slot probe walks each index, and it is one
+        of the slowest reads when a screen opens. Thus a screen that opens after this one
+        (or this one after another screen) uses the same probe again. The function keeps a
+        local copy, so that the helpers below that change the list can work on a working
+        list. Each change makes the cache invalid (refer to ``handle``). Thus this function
+        probes the new layout again and does not trust the old copy.
         """
         nonlocal slots
         slots = list(await ctx.devstate.channel_slots())
         return _menu_items(ctx, slots, capacity, stats)
 
     async def settle(*, moved: bool = False) -> tuple[str, list]:
-        """Re-probe the layout — and, when a slot actually moved, re-file what points at it.
+        """Probe the layout again. If a slot moved, file again what points to it.
 
-        Two device round-trips back to back when something changed (the chat service's slot
-        map and the slot probe ``reload`` calls one of the slowest reads the app makes), so
-        they report as a single wait rather than boxes flashing in sequence — and while the
-        card is up the reader cannot type into a list whose rows are being replaced
-        underneath them.
+        When something changed, this is two round trips to the device, one after the other.
+        They are the slot map of the chat service, and the slot probe that ``reload`` calls,
+        which is one of the slowest reads that the app does. They report as one wait, and
+        not as boxes that flash in a sequence. Also, while the card is up, the user cannot
+        type into a list whose rows are replaced under the user.
 
         Args:
-            moved: Whether a slot's occupant changed during the round just finished. The
-                caller decides that by comparing ``devstate.channels_epoch``, not by trusting
-                a count (see :func:`write_channel`, which drops the cache as it writes).
+            moved: Whether the occupant of a slot changed during the round that just ended.
+                The caller finds this by a comparison of ``devstate.channels_epoch``. It
+                does not trust a count (refer to :func:`write_channel`, which drops the
+                cache when it writes).
         """
         async with ctx.ui.busy_dialog("reading channels…", title="Channels"):
             title_and_items = await reload()
             if moved:
-                # Inbound messages carry only a slot index, which the chat service maps to a
-                # channel identity through a cache keyed by slot; refresh it now so a message
-                # on a reused/re-keyed slot is filed under the channel that's actually there
-                # and not the one that used to be — otherwise its transcript surfaces in the
-                # wrong chat. After ``reload``, deliberately: it reads the same cached probe,
-                # so this way round the pair costs one walk of the device instead of two.
+                # An inbound message has only a slot index. The chat service maps it to the
+                # identity of a channel through a cache with the slot as the key. Refresh the
+                # cache now. Then a message on a slot that is used again or has a new key is
+                # filed under the channel that is there now, and not under the channel that
+                # was there before. If not, its transcript is in the wrong chat. This is
+                # after ``reload`` on purpose. It reads the same cached probe, so in this
+                # order the pair needs one walk of the device and not two.
                 await _refresh_chat_channels(ctx)
             return title_and_items
 
     async def handle(choice: object) -> bool:
-        """Dispatch one menu choice (over the still-pushed list); ``False`` exits."""
+        """Do one menu choice (over the list that is still pushed). ``False`` leaves the manager."""
         nonlocal changes, highlight
         if choice is None:  # Esc
             return False
@@ -214,11 +228,12 @@ async def manage_channels(ctx: AppContext) -> int:
                 changes += await _channel_detail(ctx, device, slot, stats)
         return True
 
-    # The list stays pushed for the whole visit: every sub-flow — creating a channel,
-    # importing a link, a slot's detail page — floats over it, and the rows are re-probed and
-    # swapped in place afterwards, so the highlight (and any typed filter) survives a layout
-    # that changed under it. A surface with no session — the plain CLI, scripted tests — has
-    # no stack to stay on and runs the same dispatcher a round at a time.
+    # The list stays pushed for the whole visit. Each sub-flow floats over it: to create a
+    # channel, to import a link, or the detail page of a slot. After each sub-flow, the code
+    # probes the rows again and replaces them in place. Thus the highlight (and a typed
+    # filter) stays when the layout changed under it. A UI that has no session (the plain
+    # CLI, or scripted tests) has no stack to stay on. It runs the same dispatcher, one
+    # round at a time.
     title, items = await settle()
     session = getattr(ctx.ui, "session", None)
     if session is None:
@@ -227,19 +242,21 @@ async def manage_channels(ctx: AppContext) -> int:
             try:
                 keep = await _menu_round(ctx, title, items, default=highlight, handle=handle)
             except BaseException:
-                # A write that landed and then raised — or a ^W unwinding out through the QR
-                # view opened after it — moved the device just as much as one that returned
-                # cleanly. The epoch says so where the action's return value never got the
-                # chance to, so the chat map is re-filed on the way past.
+                # A write that reached the device and then raised an error changed the
+                # device as much as a write that returned with no error. A ^W that unwinds
+                # through the QR screen, which opened after the write, does the same. The
+                # epoch shows this when the return value of the action did not have the
+                # chance to show it. Thus the code files the chat map again before it
+                # raises the error again.
                 if ctx.devstate.channels_epoch != epoch:
                     await _refresh_chat_channels(ctx)
                 raise
             if not keep:
                 return changes
             title, items = await settle(moved=ctx.devstate.channels_epoch != epoch)
-    # ``Enter open``, not the list default: every slot row pushes the channel's detail
-    # screen and Reorder pushes the reorder screen, which is what the chat picker — the same
-    # channels, one screen over — has always said.
+    # The hint is ``Enter open`` and not the default of the list. Each slot row pushes the
+    # detail screen of the channel, and Reorder pushes the reorder screen. The chat picker
+    # shows the same channels, one screen over, and it has always said the same.
     menu = SelectScreen(title, items, footer_hint=_MANAGER_HINT)
     async with session.stay(menu) as visit:
         while True:
@@ -248,7 +265,7 @@ async def manage_channels(ctx: AppContext) -> int:
             try:
                 keep = await handle(None if choice is CANCEL else choice)
             except BaseException:
-                if ctx.devstate.channels_epoch != epoch:  # see the note on the other loop
+                if ctx.devstate.channels_epoch != epoch:  # refer to the note on the other loop
                     await _refresh_chat_channels(ctx)
                 raise
             if not keep:
@@ -265,42 +282,45 @@ async def _menu_round(
     handle: Callable[[object], Awaitable],
     default: object = None,
 ) -> object:
-    """Select once and dispatch the choice — what a surface with no screen stack does.
+    """Select one time and do the choice. This is what a UI with no stack of screens does.
 
-    Both channel menus keep one screen for the whole visit in the full-screen session
-    (``session.stay``, rows swapped in place), which is the only way the cursor, the sort
-    and a typed filter survive an action. A surface without a stack — the plain CLI, a
-    scripted test — has nothing to keep, so it selects, dispatches, and is called again;
-    ``default`` is all it can carry between rounds, and the summary line has nowhere to be
-    drawn at all.
+    In the full-screen session, both channel menus keep one screen for the whole visit
+    (``session.stay``, with the rows replaced in place). This is the only way that the
+    highlight, the sort, and a typed filter stay after an action. A UI that has no stack
+    (the plain CLI, or a scripted test) has nothing to keep. It selects, does the choice,
+    and is called again. ``default`` is the only value that it can carry from one round to
+    the next. The summary line has no place to be drawn.
 
     Args:
-        ctx: Shared application context.
-        title: The menu's border heading.
-        items: The menu's :class:`Choice`/:class:`Separator` rows.
-        handle: Async dispatcher awaited with the chosen value (``None`` for Esc).
-        default: A choice value to re-highlight, so the menu reopens where it was left.
+        ctx: The shared application context.
+        title: The heading in the border of the menu.
+        items: The :class:`Choice` and :class:`Separator` rows of the menu.
+        handle: The async function that is awaited with the selected value (``None`` for
+            Esc).
+        default: The value of a choice to highlight again, so that the menu opens again
+            where the user left it.
 
     Returns:
-        Whatever ``handle`` returns.
+        The value that ``handle`` returns.
     """
     return await handle(await ctx.ui.select(title, items, default=default))
 
 
 async def _refresh_chat_channels(ctx: AppContext) -> None:
-    """Rebuild the chat service's slot→identity cache after a channel mutation.
+    """Build the slot-to-identity cache of the chat service again after a channel change.
 
-    Best-effort: a device read hiccup here must never break the channel manager, and the
-    cache also self-heals on the next miss, so a failure is only logged.
+    This is a best effort. A short fault in a device read must never stop the channel
+    manager. The cache also repairs itself at the next miss, so the code only logs a
+    failure.
     """
     try:
         await ctx.chat.refresh_channels()
-    except Exception as exc:  # noqa: BLE001 - refresh is best-effort; never fatal here
+    except Exception as exc:  # noqa: BLE001 - a best effort. It is never a fatal error here
         ctx.log.debug("channels: chat cache refresh failed: %s", exc)
 
 
 def _next_free_slot(slots: list[ChannelSlot], capacity: int) -> int | None:
-    """Return the lowest unused slot index, or ``None`` when every slot is full."""
+    """Return the lowest unused slot index, or ``None`` if each slot is full."""
     used = {s.idx for s in slots}
     return next((i for i in range(capacity) if i not in used), None)
 
@@ -311,34 +331,39 @@ def _next_free_slot(slots: list[ChannelSlot], capacity: int) -> int | None:
 async def write_channel(
     ctx: AppContext, device: Device, idx: int, name: str, secret: bytes | None
 ) -> None:
-    """Write a channel to a device slot, remembering it so a forgetful device can be restored.
+    """Write a channel to a device slot, and remember it for a restore.
 
-    The single boundary every channel mutation goes through — create, join, import, edit,
-    reorder, and clear all land here — so the channel store stays a faithful record of what
-    MeshTerm wrote (see :mod:`meshterm.core.channel_store`). Clearing a slot (an empty ``name``)
-    forgets it; any other write remembers the channel under the device's own public key, storing
-    a name-derived channel's derived key so it can later be replayed as-is. Remembering is
-    best-effort: it never blocks or fails the actual device write.
+    The memory lets MeshTerm restore a device that forgets its channels.
+    This is the only boundary that each channel change goes through. Create, join, import,
+    edit, reorder, and clear all come here. Thus the channel store is a true record of what
+    MeshTerm wrote (refer to :mod:`meshterm.core.channel_store`). If the user clears a slot
+    (an empty ``name``), the store forgets it. Any other write makes the store remember the
+    channel under the own public key of the device. For a channel whose key comes from its
+    name, the store keeps that derived key, so that it can be sent again as it is. The
+    remembering is a best effort. It never blocks the real write to the device, and it never
+    makes the write fail.
 
-    Being the one boundary, it is also where the *wait* is reported: the write and the
-    identity probe behind it are a device round-trip each, and until the card went up the
-    list sat there looking idle and fully interactive while they ran. A batch (a reorder)
-    nests inside its caller's card rather than flashing one box per slot.
+    Because this is the only boundary, it is also the place where the *wait* is reported.
+    The write and the identity probe after it are one round trip to the device each. Before
+    the card existed, the list looked idle and fully interactive while they ran. A batch (a
+    reorder) is nested in the card of its caller. It does not flash one box for each slot.
 
     Args:
-        ctx: Shared application context (for the channel store and cached self-info).
+        ctx: The shared application context (for the channel store and the cached
+            self-info).
         device: The connected device to write to.
         idx: The slot to write.
-        name: The channel name (empty clears the slot).
-        secret: The 16-byte secret, or ``None`` to let the firmware derive it from the name.
+        name: The channel name (an empty name clears the slot).
+        secret: The secret of 16 bytes, or ``None`` to let the firmware derive it from the
+            name.
     """
     caption = f"clearing slot {idx}…" if not name.strip() else f"saving {name.strip()}…"
     async with ctx.ui.busy_dialog(caption, title="Channels"):
         await _write_and_remember(ctx, device, idx, name, secret)
-    # The layout on the device is no longer what anything cached, so say so here rather
-    # than leaving each caller to remember: the menu's manager did (and lost it whenever an
-    # action raised on its way back), and the four CLI subcommands never did at all. The
-    # bump also *is* the signal a caller compares across a round — see
+    # The layout on the device is not what any cache has now. Say so here, and do not leave
+    # each caller to remember it. The manager of the menu did remember it, but it lost the
+    # call when an action raised an error on its way back. The four CLI subcommands never
+    # did it. The bump is also the signal that a caller compares across a round. Refer to
     # :attr:`~meshterm.services.device_state.DeviceState.channels_epoch`.
     ctx.devstate.invalidate_channels()
 
@@ -346,14 +371,17 @@ async def write_channel(
 async def _write_and_remember(
     ctx: AppContext, device: Device, idx: int, name: str, secret: bytes | None
 ) -> None:
-    """Do the write itself and the channel-store bookkeeping (see :func:`write_channel`)."""
+    """Do the write itself and the bookkeeping of the channel store.
+
+    Refer to :func:`write_channel`.
+    """
     await device.set_channel(idx, name, secret)
     store = ctx.channel_store
     if store is None:
         return
     try:
         pubkey = (await ctx.devstate.self_info()).get("public_key", "")
-    except Exception as exc:  # noqa: BLE001 - identity probe is best-effort; skip remembering
+    except Exception as exc:  # noqa: BLE001 - the identity probe is a best effort, so skip the store
         ctx.log.debug("channels: could not read self key to remember channel: %s", exc)
         return
     if not pubkey:
@@ -365,11 +393,12 @@ async def _write_and_remember(
 
 
 def _slot_label(slot: ChannelSlot) -> str:
-    """Format a channel for a compact row (the reorder screen): just its glyph and name.
+    """Format a channel for a compact row (the reorder screen): only its glyph and name.
 
-    The reorder screen is about *position*, not vitals — the openness, hash, and message
-    lanes of the manager list would only widen the popup — so each row is the channel
-    exactly as the manager's first lane shows it: glyph, gap, name.
+    The reorder screen is about *position* and not about the vital data. The openness,
+    hash, and message lanes of the manager list would only make the dialog wider. Thus
+    each row is the channel exactly as the first lane of the manager shows it: glyph, gap,
+    name.
     """
     return f"{channel_glyph(slot.name, slot.secret)} {slot.name}"
 
@@ -378,18 +407,22 @@ def _slot_label(slot: ChannelSlot) -> str:
 
 
 def _is_muted(ctx: AppContext, slot: ChannelSlot) -> bool:
-    """Whether this channel's new-message notifications are muted (see :class:`MuteStore`)."""
+    """Whether the notifications of new messages of this channel are muted.
+
+    Refer to :class:`MuteStore`.
+    """
     return ctx.mute_store.is_muted(slot.identity)
 
 
 def _toggle_mute(ctx: AppContext, slot: ChannelSlot) -> None:
-    """Flip a channel's notification mute, zeroing its unread the moment it is muted.
+    """Change the notification mute of a channel. When it is muted, set its unread count to zero.
 
-    Muting is a remembered per-channel preference (keyed by the channel's intrinsic
-    identity, so it follows the channel across slot moves) that stops its new messages from
-    raising the unread badge. Muting also clears whatever unread it had accrued this session,
-    so the badge drops immediately rather than lingering until the next open — the reverse
-    (unmuting) simply lets future messages start counting again.
+    Muting is a preference that MeshTerm remembers for each channel. Its key is the
+    intrinsic identity of the channel, so it stays with the channel when the channel moves
+    to another slot. Muting stops the new messages of the channel from making the unread
+    badge higher. Muting also clears the unread count that the channel had in this session.
+    Thus the badge goes down at once and does not stay until the next open. If the user
+    unmutes the channel, future messages start to count again.
     """
     now_muted = not _is_muted(ctx, slot)
     ctx.mute_store.set_muted(slot.identity, now_muted)
@@ -400,27 +433,30 @@ def _toggle_mute(ctx: AppContext, slot: ChannelSlot) -> None:
 # --- message statistics --------------------------------------------------------
 
 
-#: Floor for the shared channel-activity peak: with every channel quiet, a lone message
-#: draws against at least this many per bucket, so a single stray stays a small nub
-#: rather than filling its column. Low, since channel chatter is sparse to begin with.
+#: The lower limit for the shared channel-activity peak. When each channel is quiet, a
+#: single message is drawn against at least this number for each bucket. Thus a single
+#: message stays a small nub and does not fill its column. The number is low, because
+#: channel traffic is sparse from the start.
 _ACTIVITY_FLOOR = 2.0
 
 
 class _LiveStats:
-    """A self-refreshing view of every channel's stored-message statistics.
+    """A view of the statistics of the stored messages of each channel. It refreshes itself.
 
-    The conversation picker's ``_LiveLasts`` pattern applied to
-    :meth:`~meshterm.persistence.repository.Repository.channel_stats`: the list rows read
-    through this on every repaint (their titles are callables), so a message arriving while
-    the manager sits open updates that channel's counts, age, and sparkline in place —
-    but the repository is re-queried at most once per ``ttl`` seconds rather than once per
-    row per repaint, so a full slot table stays cheap at the session's ~1 Hz repaint.
-    The TTL sits *above* that repaint period on purpose: at exactly the tick rate every
-    idle frame would still land one repository query — the throttle would gate nothing.
+    This is the ``_LiveLasts`` pattern of the conversation picker, used for
+    :meth:`~meshterm.persistence.repository.Repository.channel_stats`. The list rows read
+    through this object at each paint (their titles are callables). Thus, if a message
+    arrives while the manager is open, the counts, the age, and the sparkline of that
+    channel update in place. But the code queries the repository at most one time for each
+    ``ttl`` seconds, and not one time for each row at each paint. Thus a full slot table
+    stays cheap at the repaint of the session, which is approximately 1 Hz. The TTL is
+    *higher* than that repaint period on purpose. If the TTL was exactly the tick rate,
+    each idle frame would still cause one repository query, and the throttle would limit
+    nothing.
     """
 
     def __init__(self, ctx: AppContext, *, ttl: float = 3.0) -> None:
-        """Bind to a context; the first read populates the cache."""
+        """Connect to a context. The first read fills the cache."""
         self._ctx = ctx
         self._ttl = ttl
         self._cache: dict[str, ChannelStats] | None = None
@@ -428,34 +464,40 @@ class _LiveStats:
         self._at = 0.0
 
     def _snapshot(self) -> dict[str, ChannelStats]:
-        """Every channel's stats, re-reading the repository at most once per ``ttl``."""
+        """The statistics of each channel.
+
+        It reads the repository again at most one time for each ``ttl``.
+        """
         now = time.monotonic()
         if self._cache is None or now - self._at >= self._ttl:
             try:
                 self._cache = self._ctx.repo.channel_stats()
-            except Exception:  # noqa: BLE001 - keep the last good snapshot on a read error
+            except Exception:  # noqa: BLE001 - if a read fails, keep the last good snapshot
                 self._cache = self._cache or {}
-            self._peak = None  # derived from the snapshot; recompute on the next read
+            self._peak = None  # it comes from the snapshot, so calculate it again at the next read
             self._at = now
         return self._cache
 
     def get(self, channel_id: str) -> ChannelStats | None:
-        """Return the stats for one channel identity, refreshing once the TTL lapses."""
+        """Return the statistics for one channel identity. Refresh them when the TTL ends."""
         return self._snapshot().get(channel_id)
 
     def peak(self) -> float:
-        """The shared sparkline scale across *every* channel, cached per snapshot.
+        """The sparkline scale that is shared across *each* channel. It is cached for each snapshot.
 
-        A steady ceiling over the pooled per-channel histograms (see
-        :func:`~meshterm.ui.braillechart.activity_peak`): outlier-robust so one busy
-        burst doesn't flatten the column, floored so a lull's stray message stays a nub,
-        and steadied by pooling a window deeper than the rows draw. Handing this one
-        value to every row's :func:`~meshterm.ui.braillechart.activity_sparkline` scales the whole
-        activity column against the busiest channel on screen, so the rows' bar heights
-        are comparable at a glance instead of each self-scaling to its own ceiling.
+        This is a steady upper limit over the histograms of all the channels together (refer
+        to :func:`~meshterm.ui.braillechart.activity_peak`). Outliers have little effect on
+        it, so one busy burst does not flatten the column. It has a lower limit, so a single
+        message in a quiet period stays a nub. It is steadier because the pool uses a time window
+        that is deeper than the rows draw. The code gives this one value to the
+        :func:`~meshterm.ui.braillechart.activity_sparkline` of each row. Thus the whole
+        activity column is scaled against the busiest channel on the screen. The bar heights
+        of the rows are comparable at a glance, and each row does not scale to its own
+        upper limit.
 
-        Read live through the same cache/TTL as :meth:`get`, and memoised alongside that
-        snapshot so a full slot table doesn't recompute the pooled peak once per row.
+        The method reads live through the same cache and TTL as :meth:`get`. It caches the
+        value together with that snapshot, so a full slot table does not calculate the pooled
+        peak again for each row.
         """
         snapshot = self._snapshot()
         if self._peak is None:
@@ -466,34 +508,40 @@ class _LiveStats:
         return self._peak
 
 
-#: Widest the name lane grows (longer names are ellipsized so the lanes stay put).
+#: The maximum width of the name lane. Names that are longer are cut with an ellipsis, so
+#: that the lanes stay in their places.
 _NAME_WIDTH_MAX = 18
-#: Cells the name and send-scope lanes share. The scope lane is drawn only while at least
-#: one channel on the list has a scope — a column of blanks says nothing — and is then only
-#: as wide as the longest scope (never narrower than its ``SCOPE`` label), taking what the
-#: names leave of this budget: with a name at :data:`_NAME_WIDTH_MAX` it gets eight cells —
-#: what the 72-column row had spare before the lane existed, less the last cell an
-#: ellipsizing row keeps back — so the activity sparkline keeps its full width on the
-#: desktop; shorter names give a long region name more of its own. A 30-byte region name is
-#: ellipsized rather than let widen the row. On the PicoCalc's 53 the sparkline is already
-#: drawn shorter to fit (see :func:`_slot_text`), so a scope lane there shortens it further,
-#: and costs the MSGS count behind it only once the chart has no cells left; the detail page
-#: states it. The leading SLOT lane is paid for out of this budget too (see
-#: :func:`_menu_items`), for the same reason: the sparkline keeps its cells.
+#: The number of cells that the name lane and the send-scope lane share. The code draws the
+#: scope lane only if at least one channel in the list has a scope, because a column of
+#: blanks gives no information. The lane is then only as wide as the longest scope (but not
+#: narrower than its ``SCOPE`` label). It takes what the names leave of this budget. If a
+#: name has the width :data:`_NAME_WIDTH_MAX`, the scope lane gets eight cells. This is the
+#: space that the row of 72 columns had before the lane existed, less the last cell that a
+#: row with an ellipsis keeps free. Thus the activity sparkline keeps its full width on the
+#: desktop. Shorter names give more cells to a long region name. A region name of 30 bytes
+#: gets an ellipsis, and the row does not become wider. On the PicoCalc, with 53 columns,
+#: the code already draws the sparkline shorter to fit (refer to :func:`_slot_text`). Thus a
+#: scope lane there makes it shorter again. It takes cells from the MSGS count behind it
+#: only when the chart has no cells left. The detail page states the scope. The leading
+#: SLOT lane also uses cells from this budget (refer to :func:`_menu_items`), for the same
+#: reason: the sparkline keeps its cells.
 _NAME_SCOPE_BUDGET = _NAME_WIDTH_MAX + 8
-#: Narrowest the right-aligned slot-index lane is drawn (two digits: MeshCore's default
-#: table holds more than ten slots); a wider table widens it to its highest index.
+#: The minimum width of the slot-index lane, which is aligned to the right. It has two
+#: digits, because the default table of MeshCore has more than ten slots. A wider table
+#: makes the lane as wide as its highest index.
 _SLOT_WIDTH_MIN = 2
-#: Width of the unread-badge lane (fits ``● 999``), matching the conversation picker's.
+#: The width of the unread-badge lane (it fits ``● 999``). It is the same as the width in the
+#: conversation picker.
 _BADGE_WIDTH = 5
-#: Width of the right-aligned total-messages lane.
+#: The width of the total-messages lane, which is aligned to the right.
 _COUNT_WIDTH = 5
-#: Width of the right-aligned last-message-age lane (fits ``never``-length ages).
+#: The width of the last-message-age lane, which is aligned to the right. It fits ages that
+#: are as long as ``never``.
 _AGE_WIDTH = 5
 
 
-#: Cells the activity sparkline takes when the row has room for all of it: two five-minute
-#: buckets a braille cell, so the trailing two hours.
+#: The number of cells that the activity sparkline uses when the row has room for all of it.
+#: A braille cell has two buckets of five minutes, so the sparkline shows the last two hours.
 _ACTIVITY_CELLS = ACTIVITY_DRAWN_BUCKETS // 2
 
 
@@ -501,20 +549,22 @@ _ACTIVITY_CELLS = ACTIVITY_DRAWN_BUCKETS // 2
 def _activity_sparkline(
     histogram: tuple[int, ...], peak: float, cells: int = _ACTIVITY_CELLS
 ) -> Text:
-    """The channel's braille activity sparkline, ``cells`` wide, now at the right.
+    """The braille activity sparkline of the channel, ``cells`` wide, with now on the right.
 
-    The shared :func:`~meshterm.ui.braillechart.activity_sparkline` over the newest
-    ``2 × cells`` five-minute buckets of the repository histogram — the trailing two hours
-    at its full :data:`_ACTIVITY_CELLS`, less where the row has less room (see
-    :func:`_slot_text`), which drops the *oldest* buckets so now stays on the right edge.
-    Scaled to ``peak`` — the shared ceiling across every channel (see
-    :meth:`_LiveStats.peak`) — so the whole activity column shares one scale and the rows'
-    bars are comparable at a glance. The histogram runs deeper than is drawn; the tail
-    past the drawn buckets shapes ``peak`` but isn't charted.
+    This is the shared :func:`~meshterm.ui.braillechart.activity_sparkline` over the newest
+    ``2 × cells`` buckets of five minutes of the histogram of the repository. At the full
+    :data:`_ACTIVITY_CELLS` it shows the last two hours. It shows less where the row has
+    less room (refer to :func:`_slot_text`). Then it removes the *oldest* buckets, so that
+    now stays on the right edge. It is scaled to ``peak``, which is the shared upper limit
+    across each channel (refer to :meth:`_LiveStats.peak`). Thus the whole activity column
+    has one scale, and the bars of the rows are comparable at a glance. The histogram is
+    deeper than the drawn part. The tail after the drawn buckets has an effect on ``peak``,
+    but the chart does not show it.
 
-    Memoized on its (hashable) inputs: the row callables rebuild every repaint, but the
-    histogram snapshot only moves once per :class:`_LiveStats` TTL, so between refreshes
-    every slot's sparkline is a cache hit. Callers treat the returned Text as read-only.
+    The function is cached on its inputs, which are hashable. The row callables are built
+    again at each paint, but the histogram snapshot changes only one time for each
+    :class:`_LiveStats` TTL. Thus between refreshes the sparkline of each slot is a cache
+    hit. Callers must treat the returned Text as read-only.
     """
     return activity_sparkline(histogram, 2 * cells, peak=peak)
 
@@ -523,25 +573,27 @@ def _activity_sparkline(
 
 
 def _lanes_header(slot_w: int, name_w: int, scope_w: int, width: int) -> str:
-    """Column headers over the channel list's fixed lanes (see :func:`_slot_text`).
+    """The column headers over the fixed lanes of the channel list (refer to :func:`_slot_text`).
 
-    The indent covers the select screen's pointer column (2 cells, drawn on choice rows but
-    not separators). ``SLOT`` leads — the index every ``channels`` command and the chat's
-    slot references take — and its lane also spans the unlabelled glyph lane after it,
-    *measured* rather than assumed: a channel's glyph is two cells on the desktop and one on
-    the console, so a hard-coded width put every later label a column off there. ``NEW``
-    sits over the unread badge's lane. (No TYPE or HASH lane: the glyph already carries the
-    openness and the hash lives in Show key, which buys the activity sparkline its room on a
-    72-column terminal.) ``SCOPE`` sits between the name and the badge: it says where the channel's
-    messages go, which is the channel's own fact, before the lanes that count its traffic —
-    and only while some channel has one (``scope_w`` is 0 otherwise). ``LAST`` comes before
-    ``MSGS``: how recently a channel spoke is the question a glance down the list asks, and
-    the total is the detail behind it.
+    The indent covers the pointer column of the select screen (2 cells, drawn on choice
+    rows but not on separators). ``SLOT`` is first. It is the index that each ``channels``
+    command and the slot references of the chat use. Its lane also covers the glyph lane
+    after it, which has no label. The code *measures* the width and does not assume it.
+    The glyph of a channel is two cells on the desktop and one on the console. A fixed width
+    put each later label one column off there. ``NEW`` is over the lane of the unread
+    badge. There is no TYPE lane and no HASH lane. The glyph already shows the openness, and
+    the hash is in Show key. This gives the activity sparkline its room on a terminal of 72
+    columns. ``SCOPE`` is between the name and the badge. It says where the messages of the
+    channel go, which is a fact of the channel itself, and it comes before the lanes that
+    count its traffic. The code shows it only while some channel has a scope (otherwise
+    ``scope_w`` is 0). ``LAST`` is before ``MSGS``. A glance down the list asks how recently
+    a channel spoke, and the total is the detail behind that.
 
-    Resolved against the render width, because the header row is pinned and must stay one
-    row: at 53 columns the full line ran to 54 and wrapped, costing a content row out of
-    twenty-six and leaving the landmark drawn twice over. ``ACTIVITY`` gives its cells back
-    first (see :func:`~meshterm.ui.menus.column_header`), as the chart under it does.
+    The code resolves the header against the render width, because the header row is pinned
+    and must stay one row. At 53 columns the full line was 54 cells and it wrapped. That
+    used one content row of the twenty-six, and the landmark was drawn two times.
+    ``ACTIVITY`` gives its cells back first (refer to
+    :func:`~meshterm.ui.menus.column_header`), as the chart under it does.
     """
     return column_header(
         [
@@ -549,12 +601,12 @@ def _lanes_header(slot_w: int, name_w: int, scope_w: int, width: int) -> str:
             Lane("CHANNEL", name_w + 2),
             *([Lane("SCOPE", scope_w + 2)] if scope_w else []),
             Lane("NEW", _BADGE_WIDTH + 2),
-            # Right-aligned, because the values under them are: an age and a count are
-            # padded to the right edge of their lane, so a left-aligned label would sit
-            # off the digits it names.
+            # Aligned to the right, because the values under them are. An age and a count
+            # are padded to the right edge of their lane, so a label aligned to the left
+            # would be away from the digits that it names.
             Lane(f"{'LAST':>{_AGE_WIDTH}}", _AGE_WIDTH + 2),
             Lane(f"{'MSGS':>{_COUNT_WIDTH}}", _COUNT_WIDTH + 2),
-            Lane(("ACTIVITY", "ACT", "")),  # gone with its chart (see _slot_text)
+            Lane(("ACTIVITY", "ACT", "")),  # it is removed with its chart (refer to _slot_text)
         ],
         width,
     )
@@ -563,12 +615,13 @@ def _lanes_header(slot_w: int, name_w: int, scope_w: int, width: int) -> str:
 def _slot_row(
     ctx: AppContext, slot: ChannelSlot, stats: _LiveStats, slot_w: int, name_w: int, scope_w: int
 ) -> Callable[[int], Text]:
-    """Return a list-row title *callable* the select screen re-renders on each repaint.
+    """Return a title callable for a list row. The select screen renders it again at each paint.
 
-    The unread badge, counts, age, and activity sparkline are all read live (see
-    :class:`_LiveStats`), so a message arriving while the list sits open updates the row on
-    the next repaint — exactly the conversation picker's behavior. It takes the render
-    width, so the sparkline can fit itself to the row (see :func:`_slot_text`).
+    The code reads the unread badge, the counts, the age, and the activity sparkline live
+    (refer to :class:`_LiveStats`). Thus, if a message arrives while the list is open, the
+    row updates at the next paint. This is exactly the behaviour of the conversation
+    picker. The callable takes the render width, so the sparkline can fit itself to the row
+    (refer to :func:`_slot_text`).
     """
     return lambda width: _slot_text(ctx, slot, stats, slot_w, name_w, scope_w, width)
 
@@ -582,28 +635,30 @@ def _slot_text(
     scope_w: int,
     width: int,
 ) -> Text:
-    """Build one channel's list row as fixed-width, colour-coded lanes, ``width`` cells at most.
+    """Build the list row of one channel, ``width`` cells at most.
 
-    Alignment carries the readability — slot index (right-aligned, muted), glyph, name,
-    send scope, unread badge, last-message age, total messages, and the activity
-    sparkline each sit in their own lane under the :func:`_lanes_header` line. Colour
-    stays light and purposeful: the name is the row's focus in the base colour, the
-    descriptive lanes are muted, the unread ``●`` badge is red with its count in warn
-    (the conversation picker's language), and the sparkline
-    draws in the ok green over a faint flatline. A muted channel shows a muted ``🔕`` in
-    the unread lane instead of a count — muting zeros its unread and stops it accruing, so
-    that lane is always free to carry the state. The scope is the region name in the
-    ``scope`` style, and blank for a channel that sends under the device default — the
-    ordinary case, which a word in every row would only make harder to see past; with
-    ``scope_w`` 0 (no channel has one) the lane is not drawn at all. The row is always a
-    Rich :class:`~rich.text.Text` so those spans survive under the select screen's row
-    highlight.
+    The row has lanes of fixed width and colours. The alignment makes the row easy to read.
+    The slot index (aligned right, muted), the glyph, the name, the send scope, the unread
+    badge, the age of the last message, the total messages, and the activity sparkline are
+    each in their own lane under the :func:`_lanes_header` line. The colour is light and has
+    a purpose. The name is the focus of the row, in the base colour. The descriptive lanes
+    are muted. The unread ``●`` badge is red, with its count in warn (the language of the
+    conversation picker). The sparkline is drawn in the ok green over a faint flat line.
+    A muted channel shows a muted ``🔕`` in the unread lane and not a count. Muting sets
+    the unread count to zero and stops it from growing, so that lane is always free to
+    show the state. The scope is the region name in the ``scope`` style. It is blank for a
+    channel that sends with the default of the device. That is the ordinary case, and a
+    word in each row would make it harder to see the other rows. If ``scope_w`` is 0 (no
+    channel has a scope), the code does not draw the lane. The row is always a Rich
+    :class:`~rich.text.Text`, so those spans stay under the row highlight of the select
+    screen.
 
-    **The sparkline is the last lane, and it shortens to fit** (JP, 2026-10-03): where the
-    row is narrower than every lane at full width (the PicoCalc and Cardputer's 53 columns,
-    a long name, a scope lane), the chart is drawn in whatever cells the lanes before it
-    leave, dropping its oldest buckets so now stays on the right — rather than the row's
-    ellipsis cutting it off mid-chart. With no cell left for it, it is not drawn at all.
+    **The sparkline is the last lane, and it becomes shorter to fit** (JP, 2026-10-03).
+    Where the row is narrower than all the lanes at their full width (the 53 columns of the
+    PicoCalc and the Cardputer, a long name, or a scope lane), the code draws the chart in
+    the cells that the lanes before it leave. It removes the oldest buckets, so that now
+    stays on the right. The ellipsis of the row does not cut the chart in the middle. If no
+    cell is left for it, the code does not draw it.
     """
     st = stats.get(slot.identity)
     muted = _is_muted(ctx, slot)
@@ -632,19 +687,19 @@ def _slot_text(
     text.append("  ")
     total = st.total if st is not None else 0
     if total:
-        # Clamped so a pathological backlog can't push the row out of its lanes.
+        # A limit, so that an extreme backlog cannot push the row out of its lanes.
         text.append(f"{min(total, 99999):>{_COUNT_WIDTH}}")
     else:
-        # ``○`` is the app's empty mark. ``·`` here was three things at once: the separator
-        # that chains status atoms, the picker's unknown-sender stand-in, and — in this very
-        # row — what the console folds ``🔕`` to, so a muted channel with no messages drew
-        # the same glyph twice meaning different things.
+        # ``○`` is the empty mark of the app. ``·`` had three meanings here: the separator
+        # that chains status atoms, the stand-in of the picker for an unknown sender, and,
+        # in this same row, what the console folds ``🔕`` to. Thus a muted channel with no
+        # messages drew the same glyph two times with different meanings.
         text.append(f"{'○':>{_COUNT_WIDTH}}", style="muted")
-    # Whatever the lanes leave after the gap, up to the chart's full width.
+    # The cells that the lanes leave after the gap, up to the full width of the chart.
     cells = min(_ACTIVITY_CELLS, width - text.cell_len - 2)
     if cells > 0:
         text.append("  ")
-        # The shared peak across all channels, so every row's sparkline uses one scale.
+        # The shared peak across all channels, so the sparkline of each row has one scale.
         histogram = st.histogram if st is not None else ()
         text.append_text(_activity_sparkline(histogram, stats.peak(), cells))
     return text
@@ -653,41 +708,44 @@ def _slot_text(
 def _menu_items(
     ctx: AppContext, slots: list[ChannelSlot], capacity: int, stats: _LiveStats
 ) -> tuple[str, list]:
-    """Build the channel manager's title and rows for the current slot table.
+    """Build the title and the rows of the channel manager for the current slot table.
 
-    Returns the ``(title, items)`` for one :func:`_menu_round`: the channel rows in their
-    aligned lanes under a column-header line (the config editor's presentation), then the
-    Organize and Add-a-channel action sections. The slot usage lives in the title, so the
-    header line is free to be pure column labels.
+    The function returns the ``(title, items)`` for one :func:`_menu_round`. The items are
+    the channel rows in their aligned lanes under a column-header line (the presentation of
+    the config editor), and then the sections of actions, Organize and Add a channel. The
+    slot usage is in the title, so the header line has only column labels.
     """
     items: list = []
     if slots:
         slot_w = max(_SLOT_WIDTH_MIN, *(len(str(s.idx)) for s in slots))
         name_w = min(_NAME_WIDTH_MAX, max(len("CHANNEL"), *(len(s.name) for s in slots)))
         scopes = [cell_len(_channel_scope(ctx, s) or "") for s in slots]
-        # No lane at all while no channel has a scope (see :data:`_NAME_SCOPE_BUDGET`); the
-        # slot lane and its gap come out of the same budget, so the sparkline keeps its room.
-        # A drawn scope lane is never narrower than its label — a long name gives up cells
-        # before the lane would crowd ``SCOPE`` against ``NEW``.
+        # There is no scope lane while no channel has a scope (refer to
+        # :data:`_NAME_SCOPE_BUDGET`). The slot lane and its gap come out of the same
+        # budget, so the sparkline keeps its room. A scope lane that is drawn is never
+        # narrower than its label. A long name gives up cells before the lane would put
+        # ``SCOPE`` too close to ``NEW``.
         budget = _NAME_SCOPE_BUDGET - (slot_w + 2)
         scope_w = max(len("SCOPE"), min(budget - name_w, max(*scopes))) if any(scopes) else 0
         name_w = min(name_w, budget - scope_w)
-        # The lane names are this block's only landmark (its section carries no ── heading ──),
-        # so they pin overhead while the slots scroll and give way to Organize/Add a channel.
+        # The lane names are the only landmark of this block (its section has no
+        # ── heading ──). Thus they stay pinned at the top while the slots scroll, and they
+        # give way to Organize and Add a channel.
         items.append(Separator(lambda w: _lanes_header(slot_w, name_w, scope_w, w), heading=True))
         for slot in slots:
-            # Fitted: the row is whole at any width (its chart shortens), so the highlight
-            # draws it fitted too rather than as a line for ←→ to slide (Choice.fitted).
+            # Fitted: the row is complete at any width (its chart gets shorter). Thus the
+            # highlight also draws it fitted, and not as a line that ←→ slides
+            # (Choice.fitted).
             row = _slot_row(ctx, slot, stats, slot_w, name_w, scope_w)
             items.append(Choice(title=row, value=slot.idx, fitted=True))
     else:
         items.append(Separator("  no channels yet — add one below"))
 
-    # One measured icon column for every command row on this screen, so the one-cell marks
-    # (↕) start their labels in the same column as the two-cell ones (＋ ＃ 🌐 🔑 🔗) instead
-    # of a column early — which the Organize row used to fix by hand, with two spaces and a
-    # four-line comment. Empty where the platform draws no icons, and the labels take the
-    # cells back.
+    # One icon column, which the code measures, for each command row on this screen. Thus
+    # the marks of one cell (↕) start their labels in the same column as the marks of two
+    # cells (＋ ＃ 🌐 🔑 🔗), and not one column early. The Organize row once corrected this
+    # by hand, with two spaces and a comment of four lines. The column is empty where the
+    # platform draws no icons, and the labels use the cells.
     lane = icon_lane(("↕", "🌐", "＋", "＃", "🔑", "🔗"))
     if len(slots) > 1:
         items.append(section_heading("Organize"))
@@ -696,13 +754,13 @@ def _menu_items(
 
     items.append(section_heading("Add a channel"))
     if _next_free_slot(slots, capacity) is None:
-        # The list already knows there is nowhere to put one, so it says so here rather than
-        # offering four rows that all dead-end in the same refusal.
+        # The list already knows that there is no free slot. It says so here, and it does not
+        # offer four rows that all end in the same refusal.
         items.append(Separator("  every slot is full — clear one first"))
         return f"Channels · {len(slots)}/{capacity} slots", items
     rows = []
-    # The firmware's built-in fixed-key Public channel has one well-known secret, so it's the
-    # same channel on every slot — offer to restore it only while no slot already holds it.
+    # The Public channel of the firmware has a fixed key. It has one well-known secret, so it
+    # is the same channel on each slot. Offer to restore it only if no slot has it already.
     if not any(s.secret == DEFAULT_PUBLIC_SECRET for s in slots):
         rows.append(
             (
@@ -737,28 +795,30 @@ def _menu_items(
     )
     items.extend(menu_rows(rows))
 
-    # ``·`` chains a status atom; ``—`` would introduce a subject, and the slot count is not
-    # what this screen is about (see Contacts, which reads "Contacts · 12 known").
+    # ``·`` chains a status atom. ``—`` introduces a subject, and the slot count is not the
+    # subject of this screen (refer to Contacts, which reads "Contacts · 12 known").
     return f"Channels · {len(slots)}/{capacity} slots", items
 
 
 def _detail_summary(ctx: AppContext, slot: ChannelSlot, stats: _LiveStats) -> str:
-    """One line of vital signs for the detail screen: what it is, then how it has been used.
+    """One line of vital data for the detail screen: what the channel is, then how it was used.
 
-    The openness and the hash lead, having moved here out of the screen's title, which was
-    carrying them in a parenthesised blob and running to 42 cells — the whole of the
-    PicoCalc's borderless title bar, leaving no room for the one place that says Esc leaves.
+    The openness and the hash are first. They moved here from the title of the screen. The
+    title had them in a blob in parentheses, and it was 42 cells wide. That is the whole
+    borderless title bar of the PicoCalc, and it left no room for the one place that says
+    that Esc leaves.
 
-    The line is one line. Atoms are shed from the right until it fits the platform's
-    readable width, because the ones on the left identify the channel and the ones on the
-    right describe traffic the reader can also see in the row they came from.
+    The line is one line. The code removes atoms from the right until it fits the readable
+    width of the platform. The atoms on the left identify the channel. The atoms on the
+    right describe traffic, which the user can also see in the row that the user came from.
     """
     st = stats.get(slot.identity)
     unread = ctx.chat.unread(slot.conversation.key)
     kind = "public" if slot.is_public else "private"
     parts = [kind, f"hash {slot.hash}", f"slot {slot.idx}"]
-    # The scope rides with the channel's identity rather than its traffic: it decides who
-    # can hear the next message, so it is kept ahead of the counts when the line sheds.
+    # The scope goes with the identity of the channel and not with its traffic. It decides
+    # who can hear the next message, so the line keeps it before the counts when it removes
+    # atoms.
     scope = _channel_scope(ctx, slot)
     if scope:
         parts.append(f"scope {scope}")
@@ -779,19 +839,20 @@ def _detail_summary(ctx: AppContext, slot: ChannelSlot, stats: _LiveStats) -> st
 
 
 def _detail_items(ctx: AppContext, slot: ChannelSlot) -> list:
-    """Build the channel-detail rows: label and description in two aligned lanes.
+    """Build the rows of the channel detail screen: label and description in two aligned lanes.
 
-    The Actions presentation (menu-style lanes, no header line — these are commands,
-    not tabular data), padded in display cells so the double-width emoji can't skew the
-    description column. Open-in-chat carries the channel's live unread badge, the
-    notifications row reads as a toggle whose glyph and verb reflect the current mute state
-    (an immediate action, so no trailing ``…``), and the one destructive row keeps an
-    err-tinted label so it reads as such.
+    This is the Actions presentation (lanes in the style of a menu, with no header line,
+    because these are commands and not tabular data). The code pads in display cells, so
+    that the emoji of double width do not move the description column. The Open in chat row
+    has the live unread badge of the channel. The notifications row is a toggle, and its
+    glyph and verb show the current mute state (it is an immediate action, so it has no
+    ``…`` at the end). The one destructive row keeps a label with the err tint, so that it
+    looks destructive.
     """
     unread = ctx.chat.unread(slot.conversation.key)
-    # ✎ and 🗑 are one cell where 📱 🔑 💬 🔔 🔕 are two, so the column is measured once and
-    # every mark padded out to it — otherwise the edit and clear rows start their labels a
-    # column left of the rows above them.
+    # ✎ and 🗑 are one cell, and 📱 🔑 💬 🔔 🔕 are two cells. Thus the code measures the
+    # column one time and pads each mark to it. If not, the edit row and the clear row start
+    # their labels one column to the left of the rows above them.
     lane = icon_lane(("📱", "🔑", "💬", "🔔", "🔕", "🔖", "✎", "🗑"))
     chat_label = marked_label("💬", "Open in chat", "", lane=lane)
     if unread:
@@ -830,8 +891,8 @@ def _detail_items(ctx: AppContext, slot: ChannelSlot) -> list:
                 _EDIT,
             ),
             (
-                # The tint goes on the mark, not the words — and falls back to the words only
-                # where the platform draws no mark at all (see menus.marked_label).
+                # The tint is on the mark and not on the words. It is on the words only where
+                # the platform draws no mark (refer to menus.marked_label).
                 marked_label("🗑", "Clear this slot…", "err", lane=lane),
                 "Remove the channel from this device",
                 _CLEAR,
@@ -844,29 +905,30 @@ def _detail_items(ctx: AppContext, slot: ChannelSlot) -> list:
 async def _channel_detail(
     ctx: AppContext, device: Device, slot: ChannelSlot, stats: _LiveStats
 ) -> int:
-    """Show one channel's actions (QR, key, chat, rename, clear); return changes made.
+    """Show the actions of one channel (QR, key, chat, rename, clear). Return the changes made.
 
-    The screen leads with the channel's vital signs (see :func:`_detail_summary`) above the
-    action rows, and — like the main list — is one screen for the whole visit: it stays
-    pushed while each action's prompts float over it, and the rows and the vital-signs line
-    are swapped in place afterwards rather than the screen being drawn again. Both are live
-    (the mute row is a toggle; the summary counts unread and ages the last message), so both
-    are re-read each round, and the highlight stays on the row that was just used.
+    The screen starts with the vital data of the channel (refer to :func:`_detail_summary`)
+    above the action rows. As the main list does, it is one screen for the whole visit. It
+    stays pushed while the prompts of each action float over it. After the action, the code
+    replaces the rows and the vital-data line in place, and does not draw the screen again.
+    Both are live (the mute row is a toggle, and the summary counts the unread messages and
+    gives the age of the last message). Thus the code reads both again at each round, and
+    the highlight stays on the row that the user just used.
 
-    A **clear** closes the page, because the channel it was about is gone. A **rename or
-    re-key does not**: the channel is still there and this is still its page, so the new name
-    and key are read back into the title, the summary and the rows, and the reader stays
-    where they were. The page used to close on both, for no better reason than ``slot`` being
-    a snapshot that the rename had made stale.
+    A **clear** closes the page, because the channel that the page was about is gone. A
+    **rename or a new key does not close it**. The channel is still there, and this is still
+    its page. Thus the code reads the new name and key again into the title, the summary,
+    and the rows, and the user stays where the user was. The page once closed in both cases.
+    The only reason was that ``slot`` was a snapshot that the rename made old.
     """
     changes = 0
 
     def title_for() -> str:
-        """``Feature — subject``: the openness and the hash lead the summary line instead."""
+        """``Feature — subject``. The openness and the hash are in the summary line instead."""
         return f"Channel — {slot.name}"
 
     async def reread() -> bool:
-        """Re-point ``slot`` at what now occupies its index; ``False`` if nothing does."""
+        """Point ``slot`` at what occupies its index now. ``False`` if nothing does."""
         nonlocal slot
         fresh = next((s for s in await ctx.devstate.channel_slots() if s.idx == slot.idx), None)
         if fresh is None:
@@ -875,7 +937,10 @@ async def _channel_detail(
         return True
 
     async def handle(choice: object) -> int | None:
-        """Run one action; an int closes the detail with that many changes, ``None`` stays."""
+        """Run one action.
+
+        An int closes the detail screen with that number of changes. ``None`` stays.
+        """
         nonlocal changes
         if choice is None:  # Esc
             return changes
@@ -886,23 +951,24 @@ async def _channel_detail(
         elif choice == _CHAT:
             await _open_chat(ctx, slot)
         elif choice == _MUTE:
-            # A preference, not a slot-config change: toggle in place and loop back to the
-            # detail (whose rows re-render to the new state) without counting a channel change.
+            # This is a preference and not a change of the slot config. Change the toggle in
+            # place and go back to the detail screen (its rows render again to the new
+            # state). Do not count it as a channel change.
             _toggle_mute(ctx, slot)
         elif choice == _SCOPE:
-            # MeshTerm's to keep, like the mute: nothing is written to the radio until a
-            # message is sent, so it is not a channel change either.
+            # MeshTerm keeps it, as it keeps the mute. Nothing is written to the radio until
+            # a message is sent, so it is not a channel change either.
             await _pick_scope(ctx, slot)
         elif choice == _EDIT and await _edit(ctx, device, slot):
             changes += 1
-            if not await reread():  # pragma: no cover - the slot we just wrote is there
+            if not await reread():  # pragma: no cover - the slot that we just wrote is there
                 return changes
         elif choice == _CLEAR and await _clear(ctx, device, slot):
-            return changes + 1  # the channel this page is about is gone; so is the page
+            return changes + 1  # the channel of this page is gone, and the page is gone too
         return None
 
-    # A surface with no session (the plain CLI, scripted tests) has no stack to stay on and
-    # runs the same dispatcher a round at a time, as the manager above does.
+    # A UI that has no session (the plain CLI, or scripted tests) has no stack to stay on.
+    # It runs the same dispatcher one round at a time, as the manager above does.
     session = getattr(ctx.ui, "session", None)
     if session is None:
         while True:
@@ -932,24 +998,25 @@ async def _channel_detail(
 
 
 def _channel_scope(ctx: AppContext, slot: ChannelSlot) -> str | None:
-    """The region this channel's messages are sent under, or ``None`` for the device default."""
+    """The region for the messages of this channel, or ``None`` for the device default."""
     store = getattr(ctx, "region_store", None)
     return store.channel_scope(slot.identity) if store is not None else None
 
 
 def _scope_row(ctx: AppContext, slot: ChannelSlot, lane: int) -> tuple:
-    """The detail page's *Send scope…* row, its description saying what is set now."""
+    """The *Send scope…* row of the detail page. Its description says what is set now."""
     scope = _channel_scope(ctx, slot)
     description = f"Messages flood in {scope} only" if scope else "Keep messages in one region"
     return (marked_label("🔖", "Send scope…", "", lane=lane), description, _SCOPE)
 
 
 def _scope_items(ctx: AppContext, current: str | None) -> list:
-    """The scope picker's rows: no scope, every region known here, then typing one in.
+    """The rows of the scope picker: no scope, each known region, then a row to type one.
 
-    A region reads in the ``scope`` style (a region is not a node, so no node hue), with
-    how many repeaters were heard to carry it — the thing that decides whether a message
-    scoped to it goes anywhere at all. The one in force is marked ``current``.
+    A region is shown in the ``scope`` style (a region is not a node, so it has no node
+    hue). The row also shows the number of repeaters that were heard to carry the region.
+    This number decides if a message that has that scope goes anywhere. The scope that is
+    now in use is marked ``current``.
     """
     store = getattr(ctx, "region_store", None)
     none_row = Text("No scope — the device default")
@@ -969,20 +1036,20 @@ def _scope_items(ctx: AppContext, current: str | None) -> list:
 
 
 async def _pick_scope(ctx: AppContext, slot: ChannelSlot) -> bool:
-    """Pick the region a channel's messages are sent under; return whether it changed.
+    """Select the region in which the messages of a channel are sent. Return whether it changed.
 
-    A value picker floated over the detail page, opening on the scope in force. Typing a
-    new name is a second step stacked on the first (the ``run_steps`` shape): Esc on the
-    name field comes back to the list rather than abandoning the pick. A typed name is
-    learned (source ``typed``) as well as set, so the next channel can pick it from the
-    list.
+    This is a value picker that floats over the detail page. It opens on the scope that is
+    now in use. To type a new name is a second step on top of the first (the ``run_steps``
+    shape). Esc on the name field goes back to the list and does not abandon the selection.
+    The code sets a typed name and also learns it (source ``typed``), so that the next
+    channel can select it from the list.
 
     Args:
-        ctx: Shared application context.
-        slot: The channel whose scope is being set.
+        ctx: The shared application context.
+        slot: The channel for which the user sets the scope.
 
     Returns:
-        ``True`` when the channel's scope changed.
+        ``True`` if the scope of the channel changed.
     """
     store = getattr(ctx, "region_store", None)
     if store is None:  # pragma: no cover - every real context builds one
@@ -1010,7 +1077,7 @@ async def _pick_scope(ctx: AppContext, slot: ChannelSlot) -> bool:
                 validate=_valid_region,
             )
             if typed is None:
-                continue  # Esc on the name steps back to the list
+                continue  # Esc on the name goes back to the list
             picked = store.learn(typed, "typed") or typed
         wanted = None if picked == _NO_SCOPE else str(picked)
         if wanted == current:
@@ -1020,7 +1087,7 @@ async def _pick_scope(ctx: AppContext, slot: ChannelSlot) -> bool:
 
 
 def _valid_region(text: str) -> bool | str:
-    """Require a region name the firmware could hold (see :func:`regions.validate`)."""
+    """Make sure that the firmware can hold the region name (refer to :func:`regions.validate`)."""
     try:
         validate_region(text)
     except RegionNameError as exc:
@@ -1034,7 +1101,7 @@ def _valid_region(text: str) -> bool | str:
 async def _create_private(
     ctx: AppContext, device: Device, slots: list[ChannelSlot], capacity: int
 ) -> int:
-    """Create a private channel with a fresh random key on the next free slot."""
+    """Create a private channel with a new random key on the next free slot."""
     idx = await _pick_free_slot(ctx, device, slots, capacity)
     if idx is None:
         return 0
@@ -1050,12 +1117,12 @@ async def _create_private(
 async def _add_default_public(
     ctx: AppContext, device: Device, slots: list[ChannelSlot], capacity: int
 ) -> int:
-    """Add MeshCore's built-in fixed-key ``Public`` channel on the next free slot.
+    """Add the ``Public`` channel of MeshCore, which has a fixed key, on the next free slot.
 
-    One well-known secret means it is the same channel on every slot, so a second copy is
-    not a channel but a duplicate row. The menu already drops this action once a slot holds
-    it; this is the same check where the action *runs*, for a press that was on its way while
-    the first one was still being written.
+    It has one well-known secret. Thus it is the same channel on each slot, and a second
+    copy is not a channel but a duplicate row. The menu already removes this action when a
+    slot has the channel. This is the same check at the place where the action *runs*. It is
+    for a key press that was on its way while the first write was still in progress.
     """
     if any(s.secret == DEFAULT_PUBLIC_SECRET for s in slots):
         return 0
@@ -1069,7 +1136,7 @@ async def _add_default_public(
 async def _add_public(
     ctx: AppContext, device: Device, slots: list[ChannelSlot], capacity: int
 ) -> int:
-    """Create a public channel whose key is derived from its (``#``-prefixed) name."""
+    """Create a public channel. The key comes from its name, which starts with ``#``."""
     idx = await _pick_free_slot(ctx, device, slots, capacity)
     if idx is None:
         return 0
@@ -1083,8 +1150,8 @@ async def _add_public(
     name = raw.strip()
     if not name.startswith("#"):
         name = f"#{name}"
-    secret = derive_secret(name)  # what the firmware will compute; kept for the QR/share
-    await write_channel(ctx, device, idx, name, None)  # None => firmware derives the key from name
+    secret = derive_secret(name)  # what the firmware will calculate. It is for the QR and share
+    await write_channel(ctx, device, idx, name, None)  # None: the firmware derives the key
     await _show_share(ctx, name, secret)
     return 1
 
@@ -1092,11 +1159,12 @@ async def _add_public(
 async def _join_with_key(
     ctx: AppContext, device: Device, slots: list[ChannelSlot], capacity: int
 ) -> int:
-    """Join an existing private channel by entering its name and 16-byte key.
+    """Join an existing private channel. The user enters its name and its key of 16 bytes.
 
-    The two prompts are a stack (:func:`~meshterm.ui.menus.run_steps`): Esc on the key
-    steps back to the name with what was typed still in the field, rather than throwing
-    both away — a 32-hex key is a long thing to mistype.
+    The two prompts are a stack (:func:`~meshterm.ui.menus.run_steps`). Esc on the key goes
+    back to the name, and the text that the user typed is still in the field. The code does
+    not remove both answers. A key of 32 hex digits is long, and it is easy to type it
+    wrong.
     """
     idx = await _pick_free_slot(ctx, device, slots, capacity)
     if idx is None:
@@ -1130,7 +1198,7 @@ async def _import_link(
     if not url:
         return 0
     parsed = parse_share_url(url)
-    if parsed is None:  # pragma: no cover - guarded by the validator
+    if parsed is None:  # pragma: no cover - the validator prevents this
         await _say(ctx, "not a valid channel link", "err")
         return 0
     name, secret = parsed
@@ -1139,13 +1207,14 @@ async def _import_link(
 
 
 async def _edit(ctx: AppContext, device: Device, slot: ChannelSlot) -> bool:
-    """Rename and/or re-key an existing channel; return whether it changed.
+    """Rename an existing channel, change its key, or do both. Return whether it changed.
 
-    Name then key, as a stack (:func:`~meshterm.ui.menus.run_steps`): Esc on the key steps
-    back to the name rather than dropping the rename with it. Each step opens on what it
-    was last given — the slot's current value the first time through, whatever was typed
-    when it is come back to (a committed blank key included, since blank means *derive it
-    from the name*).
+    The prompts are the name, then the key, as a stack (:func:`~meshterm.ui.menus.run_steps`).
+    Esc on the key goes back to the name, and the code does not remove the rename. Each step
+    opens with the last answer that it got. The first time, this is the current value of the
+    slot. When the user comes back to a step, this is the text that the user typed. A blank
+    key that the user committed is included, because blank means *derive the key from the
+    name*.
     """
     answers = await run_steps(
         [
@@ -1175,11 +1244,12 @@ async def _edit(ctx: AppContext, device: Device, slot: ChannelSlot) -> bool:
 
 
 async def _clear(ctx: AppContext, device: Device, slot: ChannelSlot) -> bool:
-    """Clear a channel slot after confirmation; return whether it was cleared.
+    """Clear a channel slot after a confirmation. Return whether it was cleared.
 
-    A red data-loss dialog (Cancel left, the verb right and default, ``destructive``
-    theming — clearing a slot drops its key) rather than a bare yes/no, so it reads
-    like every other delete confirm.
+    The confirmation is a red dialog for a loss of data. Cancel is on the left, and the verb
+    is on the right and is the default. It has the ``destructive`` colours, because the
+    clear removes the key of the slot. It is not a bare yes/no dialog. Thus it looks like
+    each other delete confirm.
     """
     choice = await ctx.ui.dialog(
         f"Clear {slot.name}? This removes the channel from this device.",
@@ -1190,9 +1260,9 @@ async def _clear(ctx: AppContext, device: Device, slot: ChannelSlot) -> bool:
     )
     if choice != "clear":
         return False
-    ctx.chat.set_active(slot.conversation.key)  # drop its unread before the slot goes away
+    ctx.chat.set_active(slot.conversation.key)  # remove its unread count before the slot is gone
     ctx.chat.set_active(None)
-    await write_channel(ctx, device, slot.idx, "", None)  # empty name => the slot reads as unused
+    await write_channel(ctx, device, slot.idx, "", None)  # an empty name: the slot is unused
     return True
 
 
@@ -1200,7 +1270,10 @@ async def _clear(ctx: AppContext, device: Device, slot: ChannelSlot) -> bool:
 
 
 async def _write_slot(ctx: AppContext, device: Device, idx: int, slot: ChannelSlot) -> None:
-    """Write ``slot``'s contents into slot ``idx`` (name-derived channels re-derive their key)."""
+    """Write the contents of ``slot`` into slot ``idx``.
+
+    A channel whose key comes from its name derives the key again.
+    """
     secret = None if slot.is_name_derived else slot.secret
     await write_channel(ctx, device, idx, slot.name, secret)
 
@@ -1208,26 +1281,28 @@ async def _write_slot(ctx: AppContext, device: Device, idx: int, slot: ChannelSl
 async def _apply_order(
     ctx: AppContext, device: Device, slots: list[ChannelSlot], order: list[int]
 ) -> int:
-    """Rewrite the channel slots so they display in ``order``; return the writes made.
+    """Write the channel slots again so that they show in ``order``. Return the writes made.
 
-    ``slots`` is the current list in slot-index order and ``order`` is a permutation of its
-    positions (as returned by the reorder screen). The channels are re-laid across the same
-    physical slot indices, lowest first, so their on-device order matches the new display
-    order. Only slots whose occupant actually changes are written. Reads come from the
-    in-memory snapshot, so the interleaved writes never clobber a not-yet-placed channel.
+    ``slots`` is the current list in the order of the slot index. ``order`` is a
+    permutation of its positions (the reorder screen returns it). The code puts the
+    channels again in the same physical slot indices, lowest first. Thus their order on the
+    device is the same as the new display order. The code writes only the slots whose
+    occupant changes. The reads come from the snapshot in memory. Thus the writes between
+    them never overwrite a channel that is not placed yet.
     """
     indices = sorted(s.idx for s in slots)  # the physical slots to fill, ascending
     moves = [
         (target_idx, slots[pos])
         for target_idx, pos in zip(indices, order, strict=True)
-        if slots[pos].idx != target_idx  # already in place; no write needed
+        if slots[pos].idx != target_idx  # already in place, so no write is necessary
     ]
     if not moves:
         return 0
-    # One card for the whole batch, retitled as it walks: this is the longest thing the
-    # manager does — a write per moved channel, each a device round-trip — and the one place
-    # where a count is worth showing, because the reader can see it is progressing rather
-    # than stuck. The per-write cards inside nest into this one.
+    # One card for the whole batch. Its title changes as the batch advances. This is the
+    # longest operation of the manager: one write for each channel that moves, and each
+    # write is a round trip to the device. It is the one place where a count is useful,
+    # because the user can see that the operation advances and is not stuck. The cards of
+    # the single writes are nested in this card.
     async with ctx.ui.busy_dialog("reordering channels…", title="Channels") as busy:
         for position, (target_idx, slot) in enumerate(moves, start=1):
             busy.message = f"moving {slot.name} · {position}/{len(moves)}"
@@ -1236,24 +1311,25 @@ async def _apply_order(
 
 
 async def _reorder_channels(ctx: AppContext, device: Device, slots: list[ChannelSlot]) -> int:
-    """Let the user drag channels into a new order with the arrows; return writes made."""
-    if len(slots) < 2:  # pragma: no cover - the menu only offers reorder with 2+ channels
+    """Let the user move channels into a new order with the arrows. Return the writes made."""
+    if len(slots) < 2:  # pragma: no cover - the menu offers reorder only with 2 or more channels
         return 0
     labels = [_slot_label(slot) for slot in slots]
     order = await ctx.ui.reorder("Reorder channels", labels)
     if not order or order == list(range(len(slots))):
-        return 0  # cancelled or left unchanged
-    # Chat history is keyed by each channel's intrinsic identity, not its slot, so it follows
-    # the channels automatically — reordering needs no history migration. The slot→identity
-    # cache the chat service resolves inbound messages through is refreshed centrally by
-    # manage_channels once any change lands (see :func:`_refresh_chat_channels`).
+        return 0  # the user cancelled, or the order did not change
+    # The key of the chat history is the intrinsic identity of each channel and not its
+    # slot. Thus the history follows the channels automatically, and a reorder needs no
+    # migration of the history. The cache from slot to identity, which the chat service uses
+    # to resolve inbound messages, is refreshed in one place by manage_channels when any
+    # change arrives (refer to :func:`_refresh_chat_channels`).
     try:
         return await _apply_order(ctx, device, slots, order)
-    except Exception as exc:  # noqa: BLE001 - reported here, where the half-done state is
-        # A relay is a sequence of writes with no transaction under it, so a link that drops
-        # partway leaves the slots between the two orders. That is worth saying plainly and
-        # at once: the manager re-reads on the way out of this round, so what the reader is
-        # about to look at *is* the half-applied layout, and nothing else would tell them so.
+    except Exception as exc:  # noqa: BLE001 - reported here, where the half-done state is known
+        # A reorder is a sequence of writes with no transaction under it. If the link drops
+        # in the middle, the slots are between the two orders. The code must say this
+        # plainly and at once. The manager reads again when this round ends, so the user will
+        # look at the half-applied layout, and nothing else tells the user that.
         ctx.log.debug("channels: reorder stopped partway: %s", exc)
         await _say(ctx, f"reorder stopped partway — {exc}", "err")
         return 0
@@ -1263,20 +1339,23 @@ async def _reorder_channels(ctx: AppContext, device: Device, slots: list[Channel
 
 
 async def _show_share(ctx: AppContext, name: str, secret: bytes) -> None:
-    """Show the channel's QR code and its share URL, full-frame (see ``share_screen``)."""
+    """Show the QR code of the channel and its share URL, in the full frame.
+
+    Refer to ``share_screen``.
+    """
     await share_screen(ctx, name=name, url=share_url(name, secret))
 
 
 async def _show_key(ctx: AppContext, slot: ChannelSlot) -> None:
-    """Show a channel's name, type, hash, key, and share link as labelled blocks.
+    """Show the name, type, hash, key, and share link of a channel as blocks with labels.
 
-    Deliberately not a table: a bordered grid inside a popup is visual noise and wastes
-    the very columns the values need. Each field is instead a muted column-header-style
-    label with its value on the line beneath, and the long values — the hash, key, and
-    link exist to be copied out whole — *wrap* to the popup's width (``overflow="fold"``,
-    since they are single unbreakable words) rather than being chopped at an ellipsis.
-    The hash's first byte keeps the brand highlight: it is the two-character fingerprint
-    the MeshCore companion app reports.
+    This is not a table, on purpose. A grid with borders in a dialog is visual noise, and it
+    wastes the columns that the values need. Each field is a muted label in the style of a
+    column header, and its value is on the line under it. The long values (the hash, the
+    key, and the link are for the user to copy completely) *wrap* to the width of the
+    dialog (``overflow="fold"``, because they are single words that cannot break). They are
+    not cut at an ellipsis. The first byte of the hash keeps the brand highlight. It is the
+    fingerprint of two characters that the MeshCore companion app reports.
     """
     if slot.is_name_derived:
         kind = "public (key from name)"
@@ -1304,7 +1383,7 @@ async def _show_key(ctx: AppContext, slot: ChannelSlot) -> None:
 
 
 async def _open_chat(ctx: AppContext, slot: ChannelSlot) -> None:
-    """Open this channel in the live chat screen."""
+    """Open this channel on the live chat screen."""
     from .chat import open_chat
 
     await open_chat(ctx, slot.conversation)
@@ -1313,23 +1392,23 @@ async def _open_chat(ctx: AppContext, slot: ChannelSlot) -> None:
 async def _pick_free_slot(
     ctx: AppContext, device: Device, slots: list[ChannelSlot], capacity: int
 ) -> int | None:
-    """Return a slot that is *confirmed* empty, or ``None`` (having said why) if there is none.
+    """Return a slot that is *confirmed* empty. If there is none, say why and return ``None``.
 
-    The list this picks from is a snapshot, and a snapshot can be short of the truth: a slot
-    probe that failed partway returns the slots it managed to read, so a slot holding a
-    channel the probe never reached looks free. Every add flow lands here, and what follows
-    it is an unconditional write — so the slot is read back one more time before it is handed
-    out. A channel is not something to overwrite on the strength of a list that might be
-    missing a row.
+    The list that this function selects from is a snapshot, and a snapshot can be different
+    from the truth. A slot probe that failed in the middle returns the slots that it could
+    read. Then a slot that has a channel that the probe did not reach looks free. Each add
+    flow comes here, and an unconditional write follows. Thus the function reads the slot one
+    more time before it gives the slot to the caller. The code must not overwrite a channel
+    because of a list that can have a missing row.
 
     Args:
-        ctx: Shared application context (for the message surfaces).
+        ctx: The shared application context (for the message dialogs).
         device: The connected device, for the confirming read.
-        slots: The slots as last read.
-        capacity: The device's slot count.
+        slots: The slots as they were last read.
+        capacity: The number of slots of the device.
 
     Returns:
-        A free slot index, or ``None`` when there is none to give.
+        The index of a free slot, or ``None`` if there is no slot to give.
     """
     idx = _next_free_slot(slots, capacity)
     if idx is None:
@@ -1338,7 +1417,7 @@ async def _pick_free_slot(
     try:
         async with ctx.ui.busy_dialog(f"checking slot {idx}…", title="Channels"):
             occupant = await device.get_channel(idx)
-    except Exception as exc:  # noqa: BLE001 - unreadable is not provably free
+    except Exception as exc:  # noqa: BLE001 - a slot that the code cannot read is not proved free
         ctx.log.debug("channels: could not confirm slot %s is free: %s", idx, exc)
         await _say(ctx, f"could not read slot {idx} — nothing was written", "err")
         return None
@@ -1349,16 +1428,16 @@ async def _pick_free_slot(
 
 
 async def _say(ctx: AppContext, text: str, style: str) -> None:
-    """Tell the reader something *now*, in a popup over the manager it happened in.
+    """Tell the user something *now*, in a dialog over the manager where it happened.
 
-    An in-visit outcome is not a tool result: it belongs to the action in front of the
-    reader, so it goes to the dialog surface rather than into the buffer the menu drains
-    once the whole tool has finished (which is where a failed import used to leave it).
+    An outcome during the visit is not a tool result. It belongs to the action in front of
+    the user. Thus it goes to a dialog and not into the buffer that the menu empties when the
+    whole tool has finished. A failed import once stayed in that buffer.
     """
     mark = {"err": "✗", "warn": "⚠"}.get(style, "")
     body = Text(f"{mark} {text}" if mark else text, style=style)
     session = getattr(ctx.ui, "session", None)
-    if session is None:  # the scripted CLI has no dialog surface; print it
+    if session is None:  # the scripted CLI has no dialogs, so print the text
         ctx.ui.note(f"[{style}]{body.plain}[/{style}]")
         return
     await session.message_dialog(body, title="Channels")
@@ -1368,12 +1447,12 @@ async def _say(ctx: AppContext, text: str, style: str) -> None:
 
 
 def _nonblank(text: str) -> bool | str:
-    """Require a non-empty name."""
+    """Make sure that the name is not empty."""
     return bool(text.strip()) or "Enter a channel name."
 
 
 def _valid_secret(text: str) -> bool | str:
-    """Require a valid 16-byte hex key."""
+    """Make sure that the text is a valid key of 16 bytes in hex."""
     try:
         normalize_secret(text)
         return True
@@ -1382,10 +1461,10 @@ def _valid_secret(text: str) -> bool | str:
 
 
 def _optional_secret(text: str) -> bool | str:
-    """Accept a blank key (derive from name) or a valid 16-byte hex key."""
+    """Accept a blank key (derive it from the name) or a valid key of 16 bytes in hex."""
     return True if not text.strip() else _valid_secret(text)
 
 
 def _valid_link(text: str) -> bool | str:
-    """Require a parseable ``meshcore://channel/add`` link."""
+    """Make sure that the text is a ``meshcore://channel/add`` link that the code can parse."""
     return parse_share_url(text) is not None or "Not a valid meshcore:// channel link."

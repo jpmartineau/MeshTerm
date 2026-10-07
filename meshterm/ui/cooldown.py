@@ -1,18 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Waiting out a transmit cooldown, visibly and cancellably.
+"""Wait for the end of a transmit cooldown, with a visible countdown that the user can cancel.
 
-MeshTerm holds itself back between transmissions (see
-:mod:`meshterm.core.transmit_gate`). A short hold is nothing anyone needs told about; a
-long one, spent frozen, reads as a hung app on the very screen where "did the radio die?"
-is the reader's first thought. So the wait has a threshold: under
-:data:`SILENT_WAIT_S` it simply happens, and over it becomes a
-:class:`~meshterm.ui.tui.prompt.CountdownDialog` — the seconds ticking down over a Cancel
-chip, floating on the screen that asked, which the reader can back out of to abandon the
-action entirely.
+MeshTerm waits between two transmissions (refer to :mod:`meshterm.core.transmit_gate`).
+A short wait does not need a message. But a long wait with a frozen screen looks like an
+app that does not respond. And it occurs on the screen where the first question of the
+user is "did the radio die?". Thus the wait has a threshold:
 
-One function, :func:`wait_for_cooldown`, and its answer is the only thing a caller tests:
-``True`` means the air is clear and the action may go ahead, ``False`` means the reader
-changed their mind.
+- At or under :data:`SILENT_WAIT_S`, the wait occurs with no message.
+- Over it, the wait becomes a :class:`~meshterm.ui.tui.prompt.CountdownDialog`. The
+  seconds count down above a Cancel chip, in a dialog that floats on the screen that
+  asked. The user can leave the dialog to cancel the action completely.
+
+There is one function, :func:`wait_for_cooldown`. Its result is the only thing that a
+caller tests. ``True`` means that the cooldown is over and the action can continue.
+``False`` means that the user changed their mind.
 """
 
 from __future__ import annotations
@@ -25,31 +26,31 @@ from ..core import transmit_gate
 if TYPE_CHECKING:
     from ..context import AppContext
 
-#: A wait at or under this many seconds passes without a word. Long enough to cover the
-#: ordinary spacing between two transmissions, short enough that a reader never sits in
-#: front of an unexplained stillness — a dialog that flashes up for half a second would
-#: itself be the interruption.
+#: A wait of this number of seconds or less occurs with no message. The value is long
+#: enough for the usual time between two transmissions. It is also short enough that the
+#: user never waits in front of a screen that does not change and does not say why. If
+#: a dialog shows for only half a second, that dialog is itself the interruption.
 SILENT_WAIT_S = 2.0
 
-#: How often the countdown redraws. Fast enough that the seconds look like they are
-#: counting rather than jumping, slow enough to cost nothing.
+#: The time between two paints of the countdown. It is fast enough that the seconds seem
+#: to count down smoothly instead of in jumps. It is slow enough that it costs nothing.
 _TICK_S = 0.2
 
 
 async def wait_for_cooldown(ctx: AppContext, *, action: str, flood_advert: bool = False) -> bool:
-    """Hold until the transmit cooldown has passed; ``False`` if the reader gave up.
+    """Wait until the transmit cooldown is over. Return ``False`` if the user cancels.
 
     Args:
-        ctx: Shared application context (for the UI surface).
-        action: What is waiting, named as the thing about to happen — it becomes the
-            dialog's title, so it reads "Flood advert", not "Waiting to send a flood
-            advert".
-        flood_advert: Whether the pending transmission is a flood advert, which waits out
-            its own longer clock as well as the general one.
+        ctx: The shared application context (for the UI surface).
+        action: The action that waits, named as the event that will occur next. It
+            becomes the title of the dialog. Thus the title is "Flood advert", not
+            "Waiting to send a flood advert".
+        flood_advert: ``True`` if the transmission that waits is a flood advert. A flood
+            advert waits for its own, longer clock, and also for the general clock.
 
     Returns:
-        ``True`` when the wait is over and the caller may transmit; ``False`` if the
-        countdown was cancelled.
+        ``True`` when the wait is over and the caller can transmit. ``False`` if the user
+        cancelled the countdown.
     """
     remaining = transmit_gate.remaining(flood_advert=flood_advert)
     if remaining <= 0:
@@ -60,8 +61,9 @@ async def wait_for_cooldown(ctx: AppContext, *, action: str, flood_advert: bool 
 
     session = getattr(ctx.ui, "session", None)
     if session is None:
-        # No full-screen session to float a dialog over (the scripted CLI): the wait is
-        # still owed, so it is still taken — just silently, as every other CLI pause is.
+        # There is no full-screen session on which a dialog can float (the scripted CLI).
+        # The wait is still necessary, thus MeshTerm still waits. It waits with no message,
+        # the same as each other pause in the CLI.
         await asyncio.sleep(remaining)
         return True
 
@@ -82,15 +84,16 @@ async def wait_for_cooldown(ctx: AppContext, *, action: str, flood_advert: bool 
 
 
 async def _tick(session, dialog, flood_advert: bool) -> None:  # noqa: ANN001
-    """Feed the dialog the live remaining time until it resolves itself at zero."""
+    """Give the live remaining time to the dialog, until the dialog resolves itself at zero."""
     try:
         while True:
             await asyncio.sleep(_TICK_S)
             dialog.set_remaining(transmit_gate.remaining(flood_advert=flood_advert))
             session.invalidate()
     except asyncio.CancelledError:
-        # Swallowed so the task finishes on its own final cycle rather than being torn
-        # down while pending — the same courtesy the progress dialog's animator takes.
+        # Catch the cancellation and ignore it, so that the task ends on its own last loop
+        # cycle. Thus the loop does not destroy the task while it is pending. The animator
+        # of the progress dialog does the same thing.
         pass
 
 

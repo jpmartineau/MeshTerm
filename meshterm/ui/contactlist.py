@@ -1,25 +1,31 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The shared contact list: one sortable, filterable lane layout for every screenful of contacts.
+"""The shared contact list: one lane layout, with sort and filter, for each screen of contacts.
 
-Extracted from the Time Machine's subject picker so the app has exactly one way to draw "a
-full-screen list of contacts": aligned lanes under a sort-aware column header, our own node
-pinned first, the sort riding the Ctrl+arrows (plain arrows keep the highlight, letters keep
-type-to-filter), and the name lane sized to its content so the columns anchor left while the
-key lane soaks up the rest of the terminal. The Contacts screen, the Time Machine picker, the
-Archived list and the courier recipient list all build on :class:`ContactListScreen`; each
-hands its rows over as :class:`ContactRow` values — however it learned them (stored history of
-*discovered* contacts, the device's *added* contact table, the contacts a sweep archived) — so
-the lists render, sort, and steer identically without sharing a data source.
+We took this module from the subject picker of the Time Machine, so that the app has exactly
+one way to draw "a full-screen list of contacts". It draws aligned lanes under a column
+header that shows the sort, with our node pinned first. The Ctrl+arrow keys change the sort,
+so the plain arrow keys stay with the highlight, and the letters stay with type-to-filter.
+The name lane has the width of its content. Thus the columns stay at the left, and the key
+lane uses the width of the terminal that remains.
 
-**Name and key are fixtures; everything between them is a lane set.** Every list opens on the
-name and closes on the key — those two are what a contact *is*, and the flexing widths are
-built around them — and declares the middle lanes it wants as a tuple of :class:`ContactLane`
-(:data:`DEFAULT_LANES` for ``NAME · HEARD · PKTS · KEY``, :data:`TRACE_LANES` for the Trace
-picker's extra ``TRACED``, :data:`ARCHIVED_LANES` for the Archived list's single ``ARCHIVED``).
-A lane carries its own sort-ring id, header label, width, and how to read its value off a row,
-so adding one is a declaration rather than a branch: the header, the row builder, the sort
-metric and the lane-width arithmetic all read the same tuple. It replaces a ``show_traced``
-flag that had already made three of those four places say "and if it's the trace picker…".
+The Contacts screen, the Time Machine picker, the Archived list, and the courier recipient
+list all build on :class:`ContactListScreen`. Each one gives its rows as :class:`ContactRow`
+values, from any source (the stored history of *discovered* contacts, the table of *added*
+contacts on the device, the contacts that a sweep archived). Thus the lists render, sort,
+and move in the same way, but they do not share a data source.
+
+**The name and the key are fixed. All the lanes between them are a lane set.** Each list
+starts with the name and ends with the key. These two lanes are what a contact *is*, and the
+flexible widths are built around them. Each list declares the middle lanes that it wants as
+a tuple of :class:`ContactLane` (:data:`DEFAULT_LANES` for ``NAME · HEARD · PKTS · KEY``,
+:data:`TRACE_LANES` for the extra ``TRACED`` of the Trace picker, :data:`ARCHIVED_LANES` for
+the single ``ARCHIVED`` of the Archived list).
+
+A lane has its own sort ring id, header label, width, and the way to read its value from a
+row. Thus to add a lane is a declaration, not a branch: the header, the row builder, the
+sort metric, and the calculation of the lane widths all read the same tuple. The tuple
+replaces a ``show_traced`` flag. That flag had already caused three of those four places to
+say "and if it's the trace picker…".
 """
 
 from __future__ import annotations
@@ -44,49 +50,53 @@ from .widgets import (
     highlighted_hash,
 )
 
-#: The narrowest the name lane shrinks to (a very narrow terminal), so the header's ``NAME``
-#: label and its sort triangle always have somewhere to sit.
+#: The minimum width of the name lane (on a very narrow terminal), so that the ``NAME``
+#: label of the header and its sort triangle always have space.
 _NAME_MIN = 6
 
-#: The key lane's floor in cells — four leading bytes plus an ellipsis, still a recognisable
-#: prefix on a very narrow terminal. The lane otherwise flexes to fill whatever width the
-#: (content-sized) name lane leaves, so a longer key — our own 64-hex node key, or a full key
-#: resolved from a contact — shows as many whole bytes as fit, ellipsized past that (see
-#: :func:`~meshterm.ui.widgets.highlighted_hash`).
+#: The minimum width of the key lane in cells: three leading bytes and an ellipsis, which is
+#: still a recognizable prefix on a very narrow terminal. In other cases, the lane expands to
+#: fill the width that the name lane (sized to its content) leaves. Thus a longer key (the
+#: 64-hex key of our node, or a full key resolved from a contact) shows as many full bytes as
+#: fit, with an ellipsis after them (refer to :func:`~meshterm.ui.widgets.highlighted_hash`).
 _HASH_MIN = 8
 
-#: Cells between adjacent lanes. Wide enough that the sort triangle the header draws in a
-#: column's trailing gap keeps a clear space either side and never abuts the next column's
-#: label — a 2-cell gap (just the triangle and its one leading space) left the arrow touching
-#: whatever followed. Both the header and the value lanes gap by this, so the two stay aligned.
+#: The number of cells between two lanes that are next to each other. The header draws the
+#: sort triangle in the trailing gap of a column. This gap is wide enough that the triangle
+#: has a clear space on each side and never touches the label of the next column. A gap of
+#: 2 cells (only the triangle and its one leading space) let the arrow touch the text after
+#: it. The header and the value lanes both use this gap, so the two stay aligned.
 _GAP = 3
 _GAP_S = " " * _GAP
 
-#: Everything in a row besides the name lane, the key lane, and the middle lanes: the select
-#: pointer (2), the type glyph and its space (2), and the gap before the key. Each declared
-#: :class:`ContactLane` adds its own gapped width on top (see
-#: :meth:`ContactListScreen._lane_widths`); the name lane is content-sized and the key lane
-#: takes whatever is left.
+#: All the parts of a row other than the name lane, the key lane, and the middle lanes: the
+#: select pointer (2), the type glyph and its space (2), and the gap before the key. Each
+#: declared :class:`ContactLane` adds its own width and gap to this (refer to
+#: :meth:`ContactListScreen._lane_widths`). The name lane has the width of its content, and
+#: the key lane gets the width that remains.
 _LEAD = 2 + 2 + _GAP
 
 
 @dataclass(frozen=True)
 class ContactLane:
-    """One of the fixed lanes drawn between a row's name and its key.
+    """One of the fixed lanes drawn between the name and the key of a row.
 
-    A lane is a *declaration*, not a branch: it names the sort-ring column it answers to, the
-    header label over it, its width in cells, and how to read its value off a
-    :class:`ContactRow`. The header builder, the row builder, the sort metric and the
-    lane-width arithmetic all read the same tuple, so a new lane is added in one place.
+    A lane is a *declaration*, not a branch. It names the column of the sort ring that it
+    belongs to, the header label above it, its width in cells, and how to read its value
+    from a :class:`ContactRow`. The header builder, the row builder, the sort metric, and
+    the calculation of the lane widths all read the same tuple. Thus you add a new lane in
+    one place.
 
     Attributes:
-        column: The sort-ring id this lane sorts under (see :data:`SORT_COLUMNS`).
-        label: The header label. Never wider than :attr:`width`, or the header would
-            outrun the value lane under it and shift every column after it.
-        width: The lane's field width in cells; values are right-aligned into it.
-        field: The :class:`ContactRow` attribute holding the lane's value.
-        kind: ``"age"`` for a datetime drawn as a recency-heat-coloured relative age, or
-            ``"count"`` for an integer tally drawn muted (a faint ``—`` when ``None``).
+        column: The sort ring id under which this lane sorts (refer to
+            :data:`SORT_COLUMNS`).
+        label: The header label. It is never wider than :attr:`width`. If it is wider, the
+            header goes past the value lane under it and moves each column after it.
+        width: The field width of the lane in cells. The values align to the right in it.
+        field: The :class:`ContactRow` attribute that holds the value of the lane.
+        kind: ``"age"`` for a datetime drawn as a relative age in the colour of the
+            recency heat, or ``"count"`` for an integer count drawn muted (a faint ``—``
+            when ``None``).
     """
 
     column: str
@@ -96,45 +106,47 @@ class ContactLane:
     kind: str = "age"
 
 
-#: How long the node was last heard ago — the lane every list of *live* contacts carries.
+#: How long ago MeshTerm last heard the node: the lane that each list of *live* contacts has.
 HEARD_LANE = ContactLane("heard", "HEARD", 5, "last_seen")
 
-#: How many transmissions MeshTerm has overheard from the node.
+#: The number of transmissions from the node that MeshTerm heard.
 PKTS_LANE = ContactLane("packets", "PKTS", 5, "count", kind="count")
 
-#: How long ago the node was last traced — the Trace-target picker's extra lane.
+#: How long ago the node was last traced: the extra lane of the Trace-target picker.
 TRACED_LANE = ContactLane("traced", "TRACED", 6, "last_traced")
 
-#: How long ago the contact was archived off the device — the Archived list's only lane.
-#: Drawn exactly as ``HEARD`` is, recency heat and all: it is the same question (how long
-#: ago did this happen) about a different event, and giving it its own visual language would
-#: have been a second grammar for the reader to learn for no gain.
+#: How long ago the contact was archived and removed from the device: the only lane of the
+#: Archived list. It is drawn exactly as ``HEARD`` is, with the recency heat. It is the same
+#: question (how long ago did this occur) about a different event. A visual language of its
+#: own is a second grammar that the user must learn, with no benefit.
 ARCHIVED_LANE = ContactLane("archived", "ARCHIVED", 8, "archived_at")
 
-#: The ordinary contact list's middle lanes: ``NAME · HEARD · PKTS · KEY``.
+#: The middle lanes of the usual contact list: ``NAME · HEARD · PKTS · KEY``.
 DEFAULT_LANES: tuple[ContactLane, ...] = (HEARD_LANE, PKTS_LANE)
 
-#: The Trace-target picker's, which inserts ``TRACED`` ahead of the usual two.
+#: The middle lanes of the Trace-target picker, which puts ``TRACED`` before the usual two.
 TRACE_LANES: tuple[ContactLane, ...] = (TRACED_LANE, HEARD_LANE, PKTS_LANE)
 
-#: The Archived list's: ``NAME · ARCHIVED · KEY``. No ``HEARD`` and no ``PKTS`` — an archived
-#: contact is off the device, so what it is still doing on the air is not what this screen is
-#: about; when it left is.
+#: The middle lanes of the Archived list: ``NAME · ARCHIVED · KEY``. There is no ``HEARD``
+#: and no ``PKTS``. An archived contact is not on the device, so this screen is not about
+#: what the contact still transmits. It is about when the contact left.
 ARCHIVED_LANES: tuple[ContactLane, ...] = (ARCHIVED_LANE,)
 
-#: The padlock a locked contact's row leads with (see :attr:`ContactRow.locked`) — the
-#: private-channel ``🔒`` of the icon lexicon, which is the same claim (this one is closed to
-#: something), and on the PicoCalc the font's own hand-drawn padlock ``⚿`` through
-#: :func:`~meshterm.ui.theme.glyph`. An unlocked contact draws nothing: the mark is an
-#: exception worth noticing, and a lane of open padlocks would bury the few that aren't.
+#: The padlock at the start of the row of a locked contact (refer to
+#: :attr:`ContactRow.locked`). It is the private-channel ``🔒`` of the icon lexicon, because
+#: it means the same thing (this item is closed to something). On the PicoCalc,
+#: :func:`~meshterm.ui.theme.glyph` gives the hand-drawn padlock ``⚿`` of the font. An
+#: unlocked contact draws nothing. The mark is an exception that the user must notice, and a
+#: lane of open padlocks makes the few closed padlocks hard to see.
 _LOCK_ICON = "🔒"
 
 
 def _lock_lane_width(rows: list[ContactRow]) -> int:
-    """The lock column's width in cells: this platform's padlock and its gap, or ``0``.
+    """The width of the lock column in cells: the platform padlock and its gap, or ``0``.
 
-    The column sits left of the type glyph and exists only while some row is locked, so a
-    list with no locks spends no cells on it — on the PicoCalc's 53 those are a name's cells.
+    The column is on the left of the type glyph. It is there only while a row is locked, so
+    a list with no locks uses no cells for it. On the 53 cells of the PicoCalc, those cells
+    are for a name.
     """
     if not any(row.locked for row in rows):
         return 0
@@ -142,7 +154,7 @@ def _lock_lane_width(rows: list[ContactRow]) -> int:
 
 
 def _lock_cell(row: ContactRow, lock_w: int) -> str:
-    """A row's lock column: the padlock and its gap when locked, blank otherwise."""
+    """The lock column of a row: the padlock and its gap when locked, or else blanks."""
     if not lock_w:
         return ""
     if not row.locked:
@@ -151,16 +163,17 @@ def _lock_cell(row: ContactRow, lock_w: int) -> str:
     return mark + " " * (lock_w - cell_len(mark))
 
 
-#: The muted ``(you)`` tag on the own-node lane (see :func:`_lane`), its width folded into
-#: the name lane's content sizing so the tag never truncates.
+#: The muted ``(you)`` tag on the lane of our node (refer to :func:`_lane`). Its width is part
+#: of the content size of the name lane, so the tag is never cut.
 _YOU_TAG = "  (you)"
 
-#: The sort ring and each column's natural opening direction — name A→Z, most-recently-heard
-#: first, most packets first, and ``hash`` on the contact's key (ascending = ``0`` → ``f``).
-#: The ``hash`` ring id predates the lexicon and stays for saved-sort compatibility; its
-#: column header reads ``KEY`` — the lane shows the key, with the hash lit inside it.
-#: Callers build their :class:`~meshterm.ui.widgets.ContactsSort` over these so the Ctrl+arrows
-#: walk the same four columns on every contact list.
+#: The sort ring, and the natural first direction of each column: name A→Z, the most
+#: recently heard first, the most packets first, and ``hash`` on the key of the contact
+#: (ascending = ``0`` → ``f``). The ``hash`` ring id is older than the lexicon. It stays for
+#: compatibility with saved sorts. Its column header shows ``KEY``, because the lane shows
+#: the key with the hash lit in it. Callers build their
+#: :class:`~meshterm.ui.widgets.ContactsSort` over these values. Thus the Ctrl+arrow keys go
+#: through the same four columns on each contact list.
 SORT_COLUMNS: tuple[str, ...] = ("name", "heard", "packets", "hash")
 SORT_OPENS_ASCENDING: dict[str, bool] = {
     "name": True,
@@ -169,14 +182,17 @@ SORT_OPENS_ASCENDING: dict[str, bool] = {
     "hash": True,
 }
 
-#: The Trace-target picker's wider sort ring. It adds a ``traced`` column — how long ago the
-#: node was last traced — between name and heard, and opens on it *ascending*, which is what
-#: every age lane's natural open is: the metric is an **age**, so ascending is freshest-first
-#: and never-traced rows carry ``+inf`` and gather at the bottom under either direction (see
-#: :func:`_ordered`). It read ``False`` while ``traced`` alone sorted on a raw timestamp; the
-#: lane spec made that special case unnecessary, and one age column now sorts like the rest.
-#: The picker builds its :class:`~meshterm.ui.widgets.ContactsSort` over these, so the
-#: Ctrl+arrows walk all five columns; a list without the ``traced`` lane keeps to
+#: The wider sort ring of the Trace-target picker. It adds a ``traced`` column (how long ago
+#: the node was last traced) between name and heard. It opens on that column *ascending*,
+#: which is the natural first direction of each age lane. The metric is an **age**, so
+#: ascending puts the newest first. Rows that were never traced have ``+inf``, and they
+#: collect at the old end in both directions: at the bottom when ascending, and at the top
+#: when descending (refer to :func:`_ordered`).
+#:
+#: The value was ``False`` while only ``traced`` sorted on a raw timestamp. The lane spec
+#: made that special case unnecessary, and now this age column sorts like the others. The
+#: picker builds its :class:`~meshterm.ui.widgets.ContactsSort` over these values, so the
+#: Ctrl+arrow keys go through all five columns. A list without the ``traced`` lane uses
 #: :data:`SORT_COLUMNS`.
 TRACE_SORT_COLUMNS: tuple[str, ...] = ("name", "traced", "heard", "packets", "hash")
 TRACE_SORT_OPENS_ASCENDING: dict[str, bool] = {
@@ -187,10 +203,10 @@ TRACE_SORT_OPENS_ASCENDING: dict[str, bool] = {
     "hash": True,
 }
 
-#: The Archived list's ring — ``NAME · ARCHIVED · KEY``, matching :data:`ARCHIVED_LANES`.
-#: ``archived`` opens *ascending* on the lane's age, so the most recently archived contacts
-#: come first: the question this screen answers is "what did that sweep just take?", and the
-#: answer should be at the top of it.
+#: The sort ring of the Archived list: ``NAME · ARCHIVED · KEY``, the same as
+#: :data:`ARCHIVED_LANES`. ``archived`` opens *ascending* on the age of the lane, so the
+#: most recently archived contacts come first. This screen answers the question "what did
+#: that sweep just take?", and the answer must be at the top of the screen.
 ARCHIVED_SORT_COLUMNS: tuple[str, ...] = ("name", "archived", "hash")
 ARCHIVED_SORT_OPENS_ASCENDING: dict[str, bool] = {
     "name": True,
@@ -198,46 +214,53 @@ ARCHIVED_SORT_OPENS_ASCENDING: dict[str, bool] = {
     "hash": True,
 }
 
-#: What the active sort column and its triangle are lit in, matching the static Contacts
-#: table's header (see :func:`~meshterm.ui.widgets._sort_header`) so sort cues read
-#: identically everywhere. The app's ``cursor`` white — the same ink the highlighted row
-#: wears, because this is the same claim one lane over: *this* is the one you picked. It
-#: used to be a bare cyan, which put a selection cue back on the node spectrum (and, on
-#: the console, straight onto the wordmark's slot).
+#: The style of the active sort column and its triangle. It is the same as in the header of
+#: the static Contacts table (refer to :func:`~meshterm.ui.widgets._sort_header`), so that
+#: sort cues look the same everywhere. It is the ``cursor`` white of the app, the same
+#: colour as the highlighted row, because it says the same thing in a different lane:
+#: *this* is the one that you selected. Before, it was a plain cyan. That colour put a
+#: selection cue back on the node spectrum (and, on the console, directly on the slot of
+#: the wordmark).
 _SORT_ACTIVE = "cursor"
 
-#: The default footer: navigation, the Ctrl+arrow sort, filtering, then Esc last.
+#: The default footer: navigation, the Ctrl+arrow sort, the filter, and then Esc at the end.
 _HINT = "↑↓ move · ^←→↑↓ sort · type to filter · Enter open · Esc back"
 
 
 @dataclass
 class ContactRow:
-    """One contact's lane data, however the caller learned it.
+    """The lane data of one contact, from any source that the caller used.
 
     Attributes:
-        value: What the row's :class:`~meshterm.ui.tui.select.Choice` resolves with —
-            also the identity a re-sort uses to keep the highlight on its contact, so it
-            should be unique across the list.
-        name: The display name, drawn in the contact's hash-derived palette hue; ``None``
-            renders a muted ``unknown`` (an own-node row falls back to a bare ``you``
-            instead).
-        key: The hex the key lane shows — as full a key as the caller could resolve;
-            also the seed of the name's palette hue. Empty renders a muted ``?``.
-        node_type: The contact's node type for the leading glyph (``None`` = the plain-node
-            ``●``; ignored on the own-node row, which always leads with the yellow ``★``).
-        last_seen: When the contact was last heard (aware UTC) — fills the heard lane,
-            coloured by recency heat; ``None`` reads ``never`` in the cold style.
-        count: The packet tally; ``None`` renders a faint ``—`` (never overheard).
-        last_traced: When this node was last traced (aware UTC) — fills the ``TRACED`` lane
-            (:data:`TRACE_LANES`), coloured by recency heat; ``None`` reads ``never``.
-            Ignored by lists that don't declare the lane.
-        archived_at: When this contact was archived off the device (aware UTC) — fills the
-            ``ARCHIVED`` lane (:data:`ARCHIVED_LANES`). Ignored by lists without it.
-        locked: Whether the contact is locked against archiving. Leads the row with a
-            padlock, left of the type glyph; ``False`` draws nothing there.
-        you: Whether this is our own node: the ``★`` marker, the pure-white ``you`` name
-            style with a muted ``(you)`` tag, faint ``—`` heard/packet lanes (we never
-            overhear ourselves), pinned above the sorted block whatever the sort.
+        value: The value that the :class:`~meshterm.ui.tui.select.Choice` of the row
+            resolves with. A new sort also uses it as the identity to keep the highlight
+            on its contact, so it must be unique in the list.
+        name: The display name, drawn in the hue of the contact. ``None`` renders a muted
+            ``unknown`` (the row of our node shows a plain ``you`` instead).
+        key: The hex that the key lane shows: the most complete key that the caller could
+            resolve. It is also the source of the hue of the name. An empty value renders
+            a muted ``?``.
+        node_type: The node type of the contact, for the leading glyph (``None`` = the
+            plain node ``●``). The row of our node ignores it, and always starts with the
+            yellow ``★``.
+        last_seen: When MeshTerm last heard the contact (aware UTC). It fills the heard
+            lane, in the colour of the recency heat. ``None`` shows ``never`` in the cold
+            style.
+        count: The packet count. ``None`` renders a faint ``—`` (MeshTerm never heard the
+            node).
+        last_traced: When this node was last traced (aware UTC). It fills the ``TRACED``
+            lane (:data:`TRACE_LANES`), in the colour of the recency heat. ``None`` shows
+            ``never``. Lists that do not declare the lane ignore it.
+        archived_at: When this contact was archived and removed from the device (aware
+            UTC). It fills the ``ARCHIVED`` lane (:data:`ARCHIVED_LANES`). Lists without
+            that lane ignore it.
+        locked: Whether the contact is locked, so that it cannot be archived. A padlock
+            then starts the row, on the left of the type glyph. ``False`` draws nothing
+            there.
+        you: Whether this is our node. Our node gets the ``★`` marker, the pure-white
+            ``you`` name style with a muted ``(you)`` tag, and faint ``—`` heard and packet
+            lanes (MeshTerm never hears our node). Its row is pinned above the sorted
+            block, whatever the sort.
     """
 
     value: object
@@ -258,59 +281,63 @@ def _header(
     lanes: tuple[ContactLane, ...] = DEFAULT_LANES,
     lock_w: int = 0,
 ) -> Text:
-    """Column labels over the contact lanes (see :func:`_lane`).
+    """The column labels above the contact lanes (refer to :func:`_lane`).
 
-    The lanes read ``NAME``, then each declared :class:`ContactLane` in order, then ``KEY``
-    — matching the row builder, which walks the same tuple. The four leading spaces cover
-    the select screen's pointer column (2 cells) plus the one-cell type glyph and its gap,
-    so each label lands over its lane.
+    The lanes show ``NAME``, then each declared :class:`ContactLane` in order, then
+    ``KEY``. This is the same order as in the row builder, which goes through the same
+    tuple. The four leading spaces are for the pointer column of the select screen (2
+    cells), and for the one-cell type glyph and its gap. Thus each label is above its lane.
 
-    Every column is sortable, so any one can be the active sort. The active column's label
-    *and* its direction triangle (``▲`` ascending, ``▼`` descending) are lit together in the
-    app's ``cursor`` white — the same cue the static Contacts table's
-    :func:`~meshterm.ui.widgets._sort_header` lights. The triangle lands in the column's
-    trailing :data:`_GAP`, flanked by a space on each side so it never abuts the next
-    column's label, and every column reserves that same gap whether or not it holds a
-    triangle — so switching the sort never widens a lane and shifts the rest of the row.
-    Returned as a :class:`~rich.text.Text` (not a plain string) so just the active column
-    carries the colour while the rest stays muted.
+    Each column can sort, so any column can be the active sort. The label of the active
+    column *and* its direction triangle (``▲`` ascending, ``▼`` descending) both get the
+    ``cursor`` white of the app. :func:`~meshterm.ui.widgets._sort_header` of the static
+    Contacts table uses the same cue. The triangle is in the trailing :data:`_GAP` of the
+    column, with a space on each side, so that it never touches the label of the next
+    column. Each column keeps that same gap, also when it has no triangle. Thus a change of
+    the sort never makes a lane wider or moves the rest of the row.
+
+    The function returns a :class:`~rich.text.Text` (not a plain string), so that only the
+    active column has the colour, and the other columns stay muted.
     """
 
     def column(header: Text, label: str, key: str, field_w: int, *, last: bool = False) -> None:
-        """Append one column: its label, the sort triangle when active, then the lane gap.
+        """Add one column: its label, the sort triangle if active, then the lane gap.
 
-        The label fills ``field_w`` cells (its value lane's width); the two-cell triangle
-        mark and the clear space after it live in the trailing :data:`_GAP`, so the arrow
-        keeps a space either side. The last column (KEY) takes no trailing gap.
+        The label fills ``field_w`` cells (the width of its value lane). The two-cell
+        triangle mark and the clear space after it are in the trailing :data:`_GAP`, so
+        that the arrow has a space on each side. The last column (KEY) has no trailing gap.
         """
         active = key == sort.column
         mark = (" " + ("▲" if sort.ascending else "▼")) if active else "  "
-        # Label and mark go down as one span so the active lane's highlight covers both.
+        # The label and the mark are one span, so that the colour of the active lane
+        # covers both.
         header.append(label + mark, style=_SORT_ACTIVE if active else "muted")
-        # Pad the label out to its lane width (the flexing name lane needs it), then the
-        # inter-column gap less the two cells the mark already spent.
+        # Pad the label to the width of its lane (the flexible name lane must have this).
+        # Then add the gap between columns, minus the two cells that the mark already used.
         header.append(" " * max(0, field_w - cell_len(label)), style="muted")
         if not last:
             header.append(" " * (_GAP - 2), style="muted")
 
-    # The pointer (2), the lock column when the list has one, the type glyph and its gap (2).
+    # The pointer (2), the lock column if the list has one, and the type glyph and its gap (2).
     header = Text(" " * (4 + lock_w), style="muted")
     column(header, "NAME", "name", name_w)
     for lane in lanes:
-        # Right-aligned label over a right-aligned value, so a narrow field's header sits
-        # where its digits will (``PKTS`` over a 5-cell count) rather than off to the left.
+        # A label aligned to the right, above a value aligned to the right. Thus the header
+        # of a narrow field is where its digits will be (``PKTS`` above a 5-cell count), not
+        # to the left of them.
         column(header, f"{lane.label:>{lane.width}}", lane.column, lane.width)
     column(header, "KEY", "hash", 3, last=True)
     return header
 
 
 def _lane_cell(row: ContactRow, lane: ContactLane) -> Text:
-    """One row's value for one lane, right-aligned into the lane's width and styled by kind.
+    """The value of one row in one lane: aligned to the right, with the style of its kind.
 
-    An ``age`` lane draws the relative age in the column form (:func:`format_age`) under
-    recency heat, so a fresh value glows and a cold one greys — the same reading whatever
-    the event the lane times. A ``count`` lane draws the tally muted, or a faint ``—`` where
-    there is nothing to count, and clamps so a runaway tally can't widen the column.
+    An ``age`` lane draws the relative age in the column form (:func:`format_age`), in the
+    colour of the recency heat. Thus a new value is bright and an old value is grey, the
+    same for each event that the lane measures. A ``count`` lane draws the count muted, or
+    a faint ``—`` where there is nothing to count. It clamps the count, so that a very
+    large count cannot make the column wider.
     """
     value = getattr(row, lane.field, None)
     if lane.kind == "count":
@@ -329,22 +356,24 @@ def _you_lane(
     lanes: tuple[ContactLane, ...] = DEFAULT_LANES,
     lock_w: int = 0,
 ) -> Text:
-    """Our own node's lane — laid out exactly like :func:`_lane`'s regular rows.
+    """The lane of our node, with the same layout as the usual rows of :func:`_lane`.
 
-    Drawn like the map and the static table draw us: the ``★`` self marker (yellow), the
-    name in the pure-white ``you`` style with a muted ``(you)`` tag, and our key with its
-    hash lit at the routing width, filling the flexing key lane — our 64-hex key is longer
-    than any lane, so it shows as many digits as fit and ellipsizes. **Every middle lane
-    reads a faint ``—``**, whatever the list declares: we never overhear, trace, or archive
-    ourselves, so none of those has a value to show and each says so identically.
+    It is drawn as the map and the static table draw our node: the ``★`` self marker
+    (yellow), the name in the pure-white ``you`` style with a muted ``(you)`` tag, and our
+    key with its hash lit at the routing width, in the flexible key lane. Our 64-hex key is
+    longer than any lane, so it shows as many digits as fit, and then an ellipsis. **Each
+    middle lane shows a faint ``—``**, whatever lanes the list declares. MeshTerm never
+    hears, traces, or archives our node, so no middle lane has a value to show, and
+    each lane says so in the same way.
     """
-    text = Text(" " * lock_w, no_wrap=True, overflow="ellipsis")  # we are never locked
+    text = Text(" " * lock_w, no_wrap=True, overflow="ellipsis")  # our node is never locked
     text.append(SELF_MARK[0], style=SELF_MARK[1])
     text.append(" ")
-    # The name lane, exactly name_w cells: the name (white) with a snug muted "(you)" tag —
-    # padded out to fill the lane — or, when the name alone would crowd out the tag, the
-    # name fit to the lane with the tag dropped. The lane is sized to hold the tag (see
-    # ContactListScreen._widest_name), so the drop is a very-long-name guard.
+    # The name lane, exactly name_w cells. It has the name (white) with a muted "(you)" tag
+    # close after it, padded to fill the lane. If the name alone leaves no space for the
+    # tag, the name is fitted to the lane and the tag is removed. The lane is sized to hold
+    # the tag (refer to ContactListScreen._widest_name), so the removal is only a guard for
+    # a very long name.
     used = cell_len(row.name) + cell_len(_YOU_TAG) if row.name else 0
     if row.name and used <= name_w:
         text.append(row.name, style="you")
@@ -355,7 +384,7 @@ def _you_lane(
     for lane in lanes:
         text.append(_GAP_S)
         text.append(f"{'—':>{lane.width}}", style="faint")
-    text.append(_GAP_S)  # the lane gap the header's KEY lane keeps (see _header)
+    text.append(_GAP_S)  # the same gap as before KEY in the header (refer to _header)
     if row.key:
         text.append_text(highlighted_hash(row.key, prefix_bytes, width=hash_w))
     else:
@@ -371,27 +400,30 @@ def _lane(
     lanes: tuple[ContactLane, ...] = DEFAULT_LANES,
     lock_w: int = 0,
 ) -> Text:
-    """One contact as fixed, colour-coded lanes under :func:`_header`'s columns.
+    """One contact as fixed lanes with colour codes, under the columns of :func:`_header`.
 
-    A locked contact's padlock leads, in a column of its own (``lock_w`` cells, zero when
-    no row in the list is locked). The type glyph follows (the app's shared marker palette),
-    so the mark reads ``▲`` for a repeater, ``■`` for a room, ``◉`` for a sensor, ``●`` for a
-    plain node. The name takes
-    the contact's hash-derived palette hue (a nameless contact's ``unknown`` placeholder
-    stays muted — colour marks a name, and the hash lane already carries the identity) and
-    the flexing name lane (``name_w`` cells). Each declared lane follows in order, drawn by
-    :func:`_lane_cell`; the key closes the row in the shared key widget, its hash lit at the
-    device's routing width, or a muted ``?`` when no key is known at all. An own-node row
-    (:attr:`ContactRow.you`) takes its own drawing — see :func:`_you_lane`.
+    The padlock of a locked contact comes first, in a column of its own (``lock_w`` cells,
+    zero when no row in the list is locked). The type glyph follows (from the shared marker
+    palette of the app). Thus the mark is ``▲`` for a repeater, ``■`` for a room server,
+    ``◉`` for a sensor, and ``●`` for a plain node. The name gets the hue of the contact and
+    the flexible name lane (``name_w`` cells). The ``unknown`` placeholder of a contact
+    without a name stays muted, because colour marks a name, and the key lane already shows
+    the identity.
+
+    Each declared lane follows in order, drawn by :func:`_lane_cell`. The key ends the row
+    in the shared key widget, with its hash lit at the routing width of the device. When no
+    key is known at all, the row ends with a muted ``?``. The row of our node
+    (:attr:`ContactRow.you`) has its own drawing (refer to :func:`_you_lane`).
 
     Args:
-        row: The contact's lane data.
-        name_w: The name lane's width in cells (content-sized across the whole list).
-        prefix_bytes: The hash width in bytes to light at the head of the key.
-        hash_w: The flexing key lane's width in cells (a short key pads out to it; see
-            :func:`~meshterm.ui.widgets.highlighted_hash`).
+        row: The lane data of the contact.
+        name_w: The width of the name lane in cells (sized to the content of the full
+            list).
+        prefix_bytes: The width of the hash in bytes, to light at the start of the key.
+        hash_w: The width of the flexible key lane in cells
+            (:func:`~meshterm.ui.widgets.highlighted_hash` pads a short key to this width).
         lanes: The middle lanes to draw between the name and the key.
-        lock_w: The lock column's width in cells (see :func:`_lock_lane_width`).
+        lock_w: The width of the lock column in cells (refer to :func:`_lock_lane_width`).
     """
     if row.you:
         return _you_lane(row, name_w, prefix_bytes, hash_w, lanes, lock_w)
@@ -406,11 +438,11 @@ def _lane(
     for lane in lanes:
         text.append(_GAP_S)
         text.append_text(_lane_cell(row, lane))
-    text.append(_GAP_S)  # the lane gap the header's KEY lane keeps (see _header)
+    text.append(_GAP_S)  # the same gap as before KEY in the header (refer to _header)
     if row.key:
-        # A nameless row is an unidentified node: its key lane greys whole (prefix
-        # unlit) like every unknown-node hash in the app, the name lane's muted
-        # ``unknown`` beside it making the same claim.
+        # A row without a name is an unidentified node. All of its key lane is grey (the
+        # prefix is not lit), like each hash of an unknown node in the app. The muted
+        # ``unknown`` in the name lane next to it says the same thing.
         text.append_text(
             highlighted_hash(row.key, prefix_bytes, width=hash_w, known=bool(row.name))
         )
@@ -424,33 +456,35 @@ def _ordered(
     sort: ContactsSort,
     lanes: tuple[ContactLane, ...] = DEFAULT_LANES,
 ) -> list[ContactRow]:
-    """Order the sortable rows by the active sort (own-node rows are pinned elsewhere).
+    """Order the sortable rows by the active sort (our node is pinned in a different place).
 
-    The two fixture columns sort on themselves — name A→Z, ``hash`` by the displayed key
-    (ascending = ``0`` → ``f``). Every other column is a declared :class:`ContactLane`, and
-    sorts by the lane's own metric: a ``count`` lane by its tally, an ``age`` lane by *age in
-    seconds*, so ascending is freshest-first and a row with no value at all gathers at the
-    old end whichever direction is in force. That last property is what makes ``heard``,
-    ``traced`` and ``archived`` behave identically without one line of code naming any of
-    them.
+    The two fixed columns sort on their own values: name A→Z, and ``hash`` by the displayed
+    key (ascending = ``0`` → ``f``). Each other column is a declared :class:`ContactLane`,
+    and sorts by the metric of the lane. A ``count`` lane sorts by its count, and an ``age``
+    lane sorts by *age in seconds*. Thus ascending puts the newest first, and a row with no
+    value at all collects at the old end in both directions. Because of this property,
+    ``heard``, ``traced``, and ``archived`` behave the same, and no line of code names any
+    of them.
 
-    A name-ascending pre-sort is the stable tiebreak, so two contacts sharing a metric keep
-    an A→Z order under both directions rather than flipping with the primary key.
+    A pre-sort by name, ascending, is the stable tiebreak. Thus two contacts with the same
+    metric keep an A→Z order in both directions, and do not change places with the primary
+    key.
     """
     by_column = {lane.column: lane for lane in lanes}
 
     def key_name(row: ContactRow) -> str:
         return (row.name or "unknown").casefold()
 
-    def metric(row: ContactRow):  # noqa: ANN202 - homogeneous per sort
+    def metric(row: ContactRow):  # noqa: ANN202 - the same type for each sort
         if sort.column == "name":
             return key_name(row)
         if sort.column == "hash":
             return row.key
         lane = by_column.get(sort.column)
         if lane is None:
-            # A sort ring wider than the lanes on screen (a saved sort from another list):
-            # nothing to order by, so the stable name pre-sort stands.
+            # A sort ring that is wider than the lanes on the screen (a saved sort from a
+            # different list). There is nothing to sort by, so the stable pre-sort by name
+            # stays.
             return 0
         value = getattr(row, lane.field, None)
         if lane.kind == "count":
@@ -464,54 +498,59 @@ def _ordered(
 
 
 class ContactListScreen(SelectScreen):
-    """A full-screen, sortable, filterable contact list in the shared lane layout.
+    """A full-screen contact list, with sort and filter, in the shared lane layout.
 
-    The rows run in aligned lanes — the name (in the contact's hash-derived palette hue),
-    then whatever middle lanes the list declared, then the key — own-node rows first, then
-    the rest in the active sort order. ``lanes`` picks the set: :data:`DEFAULT_LANES` for
-    the usual ``NAME · HEARD · PKTS · KEY``, :data:`TRACE_LANES` for the Trace picker's
-    extra ``TRACED``, :data:`ARCHIVED_LANES` for the Archived list's ``NAME · ARCHIVED ·
-    KEY``. Pair the set with a ``sort`` whose ring spans it. The lanes anchor to the left:
-    the name lane is sized to its widest name (not the terminal), so the columns stay put
-    as the window widens and the freed width flows to the key lane, which shows each key as
-    fully as it fits (see :meth:`_lane_widths`). It is a full-screen list — a place — by
-    default; the one instance that is a *question* (the trace target picker) sets
-    ``floating`` on itself and is drawn as a popup over the menu.
+    The rows are in aligned lanes: the name (in the hue of the contact), then the middle
+    lanes that the list declared, then the key. The rows of our node are first, then the
+    other rows in the active sort order. ``lanes`` selects the set: :data:`DEFAULT_LANES`
+    for the usual ``NAME · HEARD · PKTS · KEY``, :data:`TRACE_LANES` for the extra
+    ``TRACED`` of the Trace picker, and :data:`ARCHIVED_LANES` for the
+    ``NAME · ARCHIVED · KEY`` of the Archived list. Give the set a ``sort`` whose ring
+    covers it.
 
-    The sort rides the Ctrl+arrows, leaving the plain arrows for the highlight and the
-    letters for type-to-filter: **Ctrl+←/→** pick the column (each adopting its natural
-    direction) and **Ctrl+↑/↓** force ascending/descending. Every change re-sorts the
-    contact block in place — the lead rows and headers stay pinned, the highlight rides its
-    contact, and any active filter holds — the same
-    :class:`~meshterm.ui.widgets.ContactsSort` model and white column cue the static
-    Contacts table uses, only its keys moved off the plain arrows that a filterable list
-    already spends.
+    The lanes stay at the left. The name lane has the width of its widest name (not of the
+    terminal). Thus the columns do not move when the window becomes wider, and the free
+    width goes to the key lane, which shows each key as fully as it fits (refer to
+    :meth:`_lane_widths`). By default, it is a full-screen list, that is, a place. The only
+    instance that is a *question* (the trace target picker) sets ``floating`` on itself,
+    and it is drawn as a dialog over the menu.
+
+    The sort uses the Ctrl+arrow keys, so the plain arrow keys stay with the highlight and
+    the letters stay with type-to-filter. **Ctrl+←/→** select the column (each column
+    starts in its natural direction), and **Ctrl+↑/↓** force ascending or descending. Each
+    change sorts the contact block again in place. The lead rows and the headers stay
+    pinned, the highlight stays on its contact, and an active filter stays.
+
+    This is the same :class:`~meshterm.ui.widgets.ContactsSort` model and white column cue
+    that the static Contacts table uses. Only the keyboard keys are different, because a
+    list with a filter already uses the plain arrow keys.
     """
 
     floating = False
 
     @property
     def picocalc_lyra_lane(self):
-        """The select list's lane, with the whole sort added on F3/F8.
+        """The F-key lane of the select list, with the full sort added on F3/F8.
 
-        Four columns is a short ring — walking it backwards saves at most two presses, so
-        it never earns the Shift companion. That slot takes the sort's *other* half
-        instead: the direction. F3 steps the column forward (each column opening in its
-        natural direction) and F8 flips the one in force.
+        Four columns is a short ring. To go through it backward saves a maximum of two key
+        presses, so it is not worth the Shift companion. Thus that slot gets the *other*
+        half of the sort instead: the direction. F3 moves to the next column (each column
+        opens in its natural direction), and F8 reverses the direction that is in force.
 
-        The flip chip names the direction it would *give* you, not the one already in
-        force — ``Sort ▼`` while the list reads ascending — in the same triangle the header
-        lights over the active column, so the chip and the column cue can never read as
-        the same claim.
+        The reverse chip names the direction that it *gives* you, not the direction
+        already in force (``Sort ▼`` while the list is ascending). It uses the same
+        triangle that the header shows above the active column. Thus the chip and the
+        column cue can never seem to say the same thing.
 
-        Built on ``super()``'s lane rather than the bare default, so a contact list that
-        carries section headings (the Time Machine's whole-mesh lead, the Contacts screen's
-        archive tail) keeps the section jumps the select list promotes onto F1/F2.
+        The lane is built on the lane of ``super()``, not on the plain default. Thus a
+        contact list that has section headings (the whole-mesh lead of the Time Machine,
+        the archive tail of the Contacts screen) keeps the section jumps that the select
+        list puts on F1/F2.
         """
         from .tui.fkeys import FPair
 
         lane = list(super().picocalc_lyra_lane)
-        descend = self._sort.ascending  # ascending now, so the flip lands descending
+        descend = self._sort.ascending  # ascending now, so the reverse makes it descending
         lane[2] = FPair(
             "Sort →",
             "ctrl_right",
@@ -533,29 +572,33 @@ class ContactListScreen(SelectScreen):
         footer_hint: str = _HINT,
         lanes: tuple[ContactLane, ...] = DEFAULT_LANES,
     ) -> None:
-        """Build the list over already-resolved rows.
+        """Build the list over rows that are already resolved.
 
         Args:
-            title: Short heading shown in the border.
-            rows: Every contact's lane data; :attr:`ContactRow.you` rows are pinned first (in
-                the order given), the rest re-sorted here per ``sort``.
-            prefix_bytes: The hash width in bytes to light at the head of each key.
-            sort: The sort state, mutated in place by the Ctrl+arrows — pass the same
-                instance across re-opens so the chosen order persists. Its ring should span
-                the ring matching ``lanes`` (:data:`SORT_COLUMNS`,
-                :data:`TRACE_SORT_COLUMNS` or :data:`ARCHIVED_SORT_COLUMNS`), so every
-                column on screen is reachable and no column off it is.
-            prompt: An optional instruction shown above the list.
-            lead: Rows (choices/separators) drawn above the column header — the Time
-                Machine's whole-mesh row and its section heading; ``None`` for none.
-            tail: Rows (choices/separators) drawn *below* the sorted contacts — the
-                Contacts screen's maintenance actions. They sit past every contact whatever
-                the sort, and (being ordinary choices) fall out of view while a
-                type-to-filter narrows the list, exactly like the Trophy case's delete rows.
-                ``None`` for a pure pick-list.
-            footer_hint: Footer key hint; the default advertises the full grammar.
-            lanes: The fixed lanes drawn between each row's name and its key. See
-                :data:`DEFAULT_LANES`, :data:`TRACE_LANES` and :data:`ARCHIVED_LANES`.
+            title: The short heading in the border.
+            rows: The lane data of each contact. The :attr:`ContactRow.you` rows are
+                pinned first (in the given order), and this method sorts the other rows by
+                ``sort``.
+            prefix_bytes: The width of the hash in bytes, to light at the start of each key.
+            sort: The sort state. The Ctrl+arrow keys change it in place. Give the same
+                instance each time that the list opens again, so that the chosen order
+                stays. Its ring must cover the ring that matches ``lanes``
+                (:data:`SORT_COLUMNS`, :data:`TRACE_SORT_COLUMNS`, or
+                :data:`ARCHIVED_SORT_COLUMNS`). Thus the user can get to each column on the
+                screen, and to no column that is not on the screen.
+            prompt: An optional instruction above the list.
+            lead: Rows (choices and separators) drawn above the column header: the
+                whole-mesh row of the Time Machine and its section heading. ``None`` for no
+                rows.
+            tail: Rows (choices and separators) drawn *below* the sorted contacts: the
+                maintenance actions of the Contacts screen. They are after all the
+                contacts, whatever the sort. They are usual choices, so they are not
+                visible while type-to-filter makes the list shorter, exactly like the
+                delete rows of the Trophy case. ``None`` for a list that is only for
+                selection.
+            footer_hint: The key hint of the footer. The default shows the full grammar.
+            lanes: The fixed lanes drawn between the name and the key of each row. Refer
+                to :data:`DEFAULT_LANES`, :data:`TRACE_LANES`, and :data:`ARCHIVED_LANES`.
         """
         self._contact_rows = rows
         self._prefix_bytes = prefix_bytes
@@ -563,7 +606,8 @@ class ContactListScreen(SelectScreen):
         self._lanes = tuple(lanes)
         self._lead = list(lead) if lead else []
         self._tail = list(tail) if tail else []
-        # Provisional until the first render learns the true width (see render_body).
+        # Temporary values until the first render finds the true width (refer to
+        # render_body).
         self._name_w = _NAME_MIN
         self._hash_w = _HASH_MIN
         super().__init__(
@@ -574,15 +618,17 @@ class ContactListScreen(SelectScreen):
         )
 
     def _compose_items(self) -> list:
-        """The lead rows, the sort-aware column header, the contact lanes, then any tail rows.
+        """The lead rows, the column header with the sort, the contact lanes, the tail rows.
 
-        Own-node rows lead the lanes and stay first whatever the sort: only the block
-        below them reorders (see :func:`_ordered`). Tail rows (an archive action, the exit
-        group) close the list, past every contact whatever the sort.
+        The rows of our node are first in the lanes and stay first, whatever the sort.
+        Only the block below them changes order (refer to :func:`_ordered`). The tail rows
+        (the archive actions of the Contacts screen) end the list, after all the contacts,
+        whatever the sort.
         """
         items: list = list(self._lead)
-        # The lane names lead the contacts as their landmark, so they pin overhead while the
-        # list scrolls — a row deep in the sort can still be read off its columns.
+        # The lane names come before the contacts as their landmark, so they stay pinned at
+        # the top while the list scrolls. Thus the user can still read the columns of a row
+        # far down in the sort.
         lock_w = _lock_lane_width(self._contact_rows)
         items.append(
             Separator(_header(self._name_w, self._sort, self._lanes, lock_w), heading=True)
@@ -607,34 +653,36 @@ class ContactListScreen(SelectScreen):
         return items
 
     def update_rows(self, rows: list[ContactRow]) -> None:
-        """Swap the contact lanes in place, keeping the reader's place.
+        """Replace the contact lanes in place, and keep the position of the user.
 
-        The :meth:`~meshterm.ui.tui.select.SelectScreen.replace_items` counterpart for a
-        list whose *lanes* are data: the Trace-target picker's ``TRACED`` column ages the
-        moment a trace it launched comes back, and the list is sorted by that column. The
-        rows are recomposed and re-sorted, and the highlight lands back on the same contact
-        wherever the new order put it — so the node just traced rises to the top with the
-        cursor riding it. The typed filter and the sort ride along untouched.
+        This is the counterpart of
+        :meth:`~meshterm.ui.tui.select.SelectScreen.replace_items` for a list whose *lanes*
+        are data. The ``TRACED`` column of the Trace-target picker changes its age when a
+        trace that the picker started comes back, and the list is sorted by that column.
+        This method composes and sorts the rows again, and puts the highlight back on the
+        same contact, wherever the new order put it. Thus the node that was traced last
+        goes to the top, and the highlight goes with it. The typed filter and the sort do
+        not change.
 
-        Use it for a lane that changed; a contact that is *gone* is the rebuild case (see
-        :func:`~meshterm.ui.contacts_screen.open_contacts`), because the row the list was
-        holding a place in no longer exists.
+        Use it for a lane that changed. A contact that is *gone* is the case for a rebuild
+        (refer to :func:`~meshterm.ui.contacts_screen.open_contacts`), because the row that
+        the list kept a position in no longer exists.
 
         Args:
-            rows: Every contact's lane data, as :meth:`__init__` takes it.
+            rows: The lane data of each contact, as :meth:`__init__` accepts it.
         """
         self._contact_rows = rows
         self._rebuild()
 
     def _rebuild(self) -> None:
-        """Recompose the rows for the current sort/width, keeping the highlight on its contact."""
+        """Rebuild the rows for the current sort and width, with the highlight on its contact."""
         current = self._current_choice()
         keep = current.value if current is not None else None
         self._items = self._compose_items()
         self._reselect(keep)
 
     def _reselect(self, value: object) -> None:
-        """Move the highlight back onto the choice with ``value`` (else clamp it in range)."""
+        """Move the highlight back to the choice with ``value`` (or else clamp it in range)."""
         choices = self._choices()
         for i, choice in enumerate(choices):
             if choice.value == value:
@@ -643,12 +691,13 @@ class ContactListScreen(SelectScreen):
         self._index = max(0, min(self._index, len(choices) - 1)) if choices else 0
 
     def _widest_name(self) -> int:
-        """The widest rendered name in cells across every lane the list draws.
+        """The width in cells of the widest rendered name, in all the lanes of the list.
 
-        The name lane is sized to its content, not the terminal, so the columns anchor to
-        the left instead of drifting apart as the window widens. The measure spans the
-        regular rows (``unknown`` for the nameless, as the row renders them) and any
-        own-node row's name plus its ``(you)`` tag, so the tag always fits.
+        The name lane has the width of its content, not of the terminal. Thus the columns
+        stay at the left, and do not move apart when the window becomes wider. The
+        measurement includes the usual rows (``unknown`` for a row without a name, as the
+        row renders it), and the name of each row of our node with its ``(you)`` tag, so
+        that the tag always fits.
         """
         widths = [cell_len("unknown")]
         for row in self._contact_rows:
@@ -661,15 +710,17 @@ class ContactListScreen(SelectScreen):
         return max(widths)
 
     def _lane_widths(self, width: int) -> tuple[int, int]:
-        """The name and key lane widths for a terminal ``width`` cells wide.
+        """The widths of the name lane and the key lane, for a terminal ``width`` cells wide.
 
-        The name lane is content-sized (see :meth:`_widest_name`) so it stays put as the
-        window grows; it only yields when a very long name would starve the key lane past
-        its :data:`_HASH_MIN` floor. The key lane then takes all the width the fixed lanes
-        and the name lane leave, so keys show as fully as they fit — a heard id's 12 hex
-        digits with room to spare, a 64-hex key ellipsized to the lane. Each declared lane
-        adds its gapped width to the fixed lead, so a list that drops two lanes (the
-        Archived one) hands both back to the key.
+        The name lane has the width of its content (refer to :meth:`_widest_name`), so it
+        does not move when the window becomes wider. It becomes narrower only when a very
+        long name makes the key lane narrower than its :data:`_HASH_MIN` minimum. The key
+        lane then gets all the width that the fixed lanes and the name lane leave. Thus
+        keys show as fully as they fit: the 12 hex digits of a key prefix from stored
+        history with free space, and a 64-hex key cut with an ellipsis to fit the lane.
+
+        Each declared lane adds its width and gap to the fixed lead. Thus a list without
+        two of the lanes (the Archived list) gives both widths back to the key.
         """
         lead = (
             _LEAD
@@ -682,7 +733,7 @@ class ContactListScreen(SelectScreen):
         return name_w, hash_w
 
     def render_body(self, width: int) -> list[str]:
-        """Size the name lane to content and flex the key lane, then render the list."""
+        """Size the name lane to its content and adjust the key lane, then render the list."""
         name_w, hash_w = self._lane_widths(width)
         if (name_w, hash_w) != (self._name_w, self._hash_w):
             self._name_w, self._hash_w = name_w, hash_w
@@ -690,7 +741,7 @@ class ContactListScreen(SelectScreen):
         return super().render_body(width)
 
     def handle(self, action: str, data: str = "") -> None:
-        """Steer the sort with the Ctrl+arrows; everything else is the base list's."""
+        """Change the sort with the Ctrl+arrow keys. The base list handles all other actions."""
         if action == "ctrl_left":
             self._sort.move(-1)
             self._rebuild()

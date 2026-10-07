@@ -1,104 +1,124 @@
 # SPDX-License-Identifier: Apache-2.0
-"""THE route-graph widget: hop sequences drawn as a left-to-right flow of paths.
+"""The only route-graph widget: hop sequences drawn as a flow of paths from left to right.
 
-Extracted from the Message paths dialog so every screen that draws walked (or planned)
-routes draws them the same way. A *layer* is one path — its relay hops, an edge colour,
-and a draw priority — and the widget lays every distinct path out between a shared left
-and right endpoint marker.
+This widget was extracted from the Message paths dialog, so that each screen that draws
+walked (or planned) routes draws them the same way. A *layer* is one path: its relay hops,
+an edge colour, and a draw priority. The widget puts each distinct path between a shared
+left endpoint marker and a shared right endpoint marker.
 
-Every path shares its two endpoints (an origin on the left, us on the right) and is walked
-left to right, so the picture is a *flow*: routes that **diverge** out of the origin, run
-their own course, and **converge** back into us, sharing a relay wherever their walks agree.
-Earlier drawings tried a vertical *bus* the lanes tapped at right angles (a metro map you
-wander around, the bare 90° turns hiding that A flows to B), then oblique branches straight
-off each marker (which left every off-lane relay a pointed *peak* or *valley*). The widget
-now draws the fan as a **multilane highway**: a node sits level in its lane, and a route changes
-lane only *between* nodes, easing across on a single gentle shift the way a car drifts one lane
-over and then settles. Concretely:
+All paths share their two endpoints (an origin on the left, our node on the right), and
+each path is walked from left to right. Thus the picture is a *flow*: routes **diverge**
+from the origin, go on their own course, and **converge** back into our node. They share a
+relay where their walks agree.
 
-* **lanes** — the highest-*priority* path (the spine, e.g. the best-evidence route) holds the
-  flow's centre, its relays in a straight run, and the alternatives fan above and below it a
-  fixed pitch of text rows apart. Priority fixes the geometry; a separate *emphasis* rank picks
-  which route is drawn highlighted (on top, winning any shared cell) without moving a marker, so
-  a caller can light a different route without the picture reflowing. Rather than give every
-  route a full-width lane of its own —
-  which stacks the band as tall as the route count even where the routes barely overlap — the
-  lanes are *packed by column*: the spine keeps its own relays, and each other node slides to the
-  innermost free row above or below the spine *in its own column*, so a column with one off-spine
-  node claims a single flanking row however many routes cross the graph, and only a column where
-  routes genuinely stack pays the deeper rows. Which flank an alternative takes is then *balanced*
-  so column-sharing routes split above and below rather than piling one flank two deep while the
-  other sits empty (the band is only as tall as its deepest flank plus the other's): a five-route
-  fan through at most two nodes per column draws three lanes deep — spine plus one flank each side
-  — not five. The two endpoints sit at the vertical centre of the packed band, so the spine runs
-  through them — dead straight when the flanks come out even and the lanes are odd, leaning gently
-  to the centre otherwise (and where the lanes are even, one extra padding row is opened between
-  the two central lanes so the endpoints land on an exact centred row between them);
-* **columns** (x) place each node by *balanced* rank — its distance from the origin over its
-  distance-plus-remaining-distance to us — so a path's relays spread evenly between the two
-  ends however long the other paths are, and a shared relay lands in one place;
-* **level seating** — every node is entered and left on a *level tangent*, so a relay that sits
-  off its neighbours' lane reads as a gentle rise-and-settle, never a pointed peak or valley.
-  Between two nodes on different lanes the shift leaves the first level, drifts across, and
-  arrives level into the second — the only bends are the soft level→curve→level eases, never a
-  bare right angle in open canvas. The curve spans the whole gap rather than a centred stretch
-  flanked by flat platforms: a platform-to-curve corner draws a heavy braille *knee*, so the
-  stroke runs continuously node to node and stays an even, thin arc (see :data:`_CURVE_SPAN`);
-* **shared relays** draw as a single marker (a route re-using a hop is not a new node): the
-  marker sits on its highest-priority path's lane, and a lower path that also rides it leans
-  off its lane to meet the marker and back — which reads as the alternative *branching
-  through the shared node*, exactly the story the evidence tells;
-* **revisits** — that merge is right *across* paths (two routes rode one relay) and wrong
-  *within* one: a single walk that touches the same hop twice is not a node two routes share,
-  it is a **cycle**, and a left-to-right flow has nowhere to seat one. Ranked over the cyclic
-  edge set the balanced-x relaxation never settles, so the loop's members land in near-identical
-  columns — markers piled a cell apart, labels colliding, the back-edge dropping as a bare
-  vertical — while the relays outside it are squashed against the ends. ``allow_duplicate_nodes``
-  hands each revisit its own marker instead (see :func:`_split_revisits`), which keeps the flow
-  acyclic and draws the walk in its true order; the cost is that one node *may* appear twice,
-  so a caller that turns it on should say so on the surface (:func:`~meshterm.ui.widgets.
-  revisit_note`). It is opt-in because the choice is a caller's to make: a path we *composed*
-  (the Trophy case's scored walk) collapses a revisit deliberately, while an **observed** via
-  chain — hops named by a one-byte hash, where a repeat is as likely two colliding nodes as a
-  genuine loop — must be drawn as heard;
-* **detours** — a route heard as a sibling route *plus* an inserted relay is that sibling with
-  a detour, and the whole fan is measured against the row budget *before* its shape is
-  committed: while the rows allow, the detour **nests** — its inserted relay takes the lane
-  just outside its sibling's, on the same flank, so the sibling's straight run visibly skips
-  the relay and the detour reads as the wider arc through it. Only a viewport too short for
-  that extra lane **folds** the relay onto the sibling's lane itself (weakest detours first,
-  re-measuring after each), where the sibling's run passes over it — the legible-but-lossier
-  last resort, never the default (see :func:`_layout_lanes`);
-* **bypasses** — the detour's mirror: beside the spine's ``A → B → C`` lives the shorter route
-  that *skips* ``B``, and with ``A`` and ``C`` seated on one lane its ``A→C`` edge is a level
-  run straight through the marker of the one node it doesn't ride — drawn, it reads as *via*
-  ``B``, the story the evidence rules out. Where the skipped node's own column has room — a
-  free lane just off it, or one the row budget affords opening — the edge bends around instead,
-  arcing through an unmarked *virtual waypoint* in that column, the same wider-arc grammar a
-  nested detour draws, so skipping reads as skipping (see :func:`_bypass_vias`); only a graph
-  with genuinely no room left keeps the level pass-over;
-* **diverge / converge** — the fan at each end is flow, not a switchboard: routes leave the
-  origin overlapping on the centre line and peel off one by one to their lanes (the
-  divergence), and mirror that back into us on the right (the convergence). Every edge draws
-  exactly once, however many routes share it; the one edge drawn as a bare vertical is a pair
-  of nodes walked in *both* directions — a genuine two-way hop, the sole place a straight
-  up-and-down line tells the truth;
-* **the highlight recedes the rest** — where one layer is emphasised over the others, it is
-  the *only* path drawn in colour: every node it does not ride draws its marker and its label
-  in one dark grey (:data:`_OFF_ROUTE`), the same dim its unused lines already carry. A fan is
-  one route read against its alternatives, and full-hue markers strewn along the grey lines
-  argued with the very thing the emphasis was saying. The endpoints are never dimmed (every
-  path runs through them), and the glyphs keep their shapes — a repeater is still ``▲``
-  off-route, only its ink recedes. With no emphasis to compare (a single path, or a fan whose
-  layers are all equal) nothing is faded and the caller's colours stand as given;
-* **labels** sit straight above or below their marker — pushed to the side away from the
-  graph's middle, a spot clear of the drawn lines preferred — and endpoints slide their
-  label inward from the canvas edge so a long name still lands by its marker. A caller that
-  wants a node unlabelled returns ``None`` for it.
+Earlier versions tried two other drawings. The first was a vertical *bus* that the lanes
+joined at right angles. It looked like a metro map with no direction, and the bare 90°
+turns hid that A flows to B. The second had oblique branches directly from each marker,
+which made each relay off the lane a pointed peak or valley. The widget now draws the fan
+as a **multilane highway**. A node is level in its lane, and a route changes lane only
+between nodes, with one gentle shift, the same as a car that moves over one lane and then
+goes straight. In detail:
 
-Everything renders onto a :class:`~meshterm.ui.mapcanvas.MapCanvas`; the caller supplies
-the per-node glyph/label/colour callbacks, so the widget stays free of contact-list and
-theme concerns.
+* **Lanes**: the path with the highest *priority* (the spine, for example the route with
+  the best evidence) holds the centre of the flow, with its relays in a straight run. The
+  alternatives fan out above and below it, a fixed pitch of text rows apart. The priority
+  sets the geometry. A separate *emphasis* rank selects which route is drawn emphasized (on
+  top, so it wins any shared cell), and it moves no marker. Thus a caller can give the
+  emphasis to a different route, and the layout of the picture does not change.
+
+  The widget does not give each route a full-width lane of its own, because then the band
+  is as tall as the number of routes, also where the routes almost do not overlap.
+  Instead, the lanes are *packed by column*. The spine keeps its own relays, and each other
+  node moves to the innermost free row above or below the spine, in its own column. Thus a
+  column with one node off the spine uses one flanking row, however many routes cross the
+  graph. Only a column where routes really stack uses the deeper rows.
+
+  Then the widget *balances* which flank an alternative takes. Routes that share a column
+  split above and below, instead of two deep on one flank while the other flank is empty
+  (the band is only as tall as its deepest flank plus the other flank). Thus a fan of five
+  routes, with a maximum of two nodes in each column, draws three lanes deep (the spine
+  plus one flank on each side), not five.
+
+  The two endpoints are at the vertical centre of the packed band, so the spine goes
+  through them. The spine is fully straight when the flanks are equal and the number of
+  lanes is odd. Otherwise, it leans gently to the centre. When the number of lanes is
+  even, the widget opens one more padding row between the two central lanes, so that the
+  endpoints are on an exact centred row between them.
+* **Columns** (x): each node goes to a column by its *balanced* rank. This rank is its
+  distance from the origin, divided by the sum of that distance and the remaining distance
+  to our node. Thus the relays of a path spread evenly between the two ends, however long
+  the other paths are, and a shared relay is in one place.
+* **Level seating**: the line enters and leaves each node on a *level tangent*. Thus a
+  relay that is off the lane of its neighbours looks like a gentle rise and settle, never a
+  pointed peak or valley. Between two nodes on different lanes, the shift leaves the first
+  node level, moves across, and arrives level at the second node. The only bends are the
+  soft level→curve→level eases, never a bare right angle in open canvas. The curve spans the
+  full gap, not a centred part with flat platforms on its two sides, because a corner
+  between a platform and the curve draws a heavy braille *knee*. Thus the stroke goes
+  continuously from node to node and stays an even, thin arc (refer to :data:`_CURVE_SPAN`).
+* **Shared relays** draw as one marker (a route that uses a hop again is not a new node).
+  The marker is on the lane of its path with the highest priority. A path with a lower
+  priority that also goes through it leans off its lane to meet the marker, and then goes
+  back. This shape shows the alternative as a branch through the shared node, which is
+  exactly what the evidence tells.
+* **Revisits**: that merge is correct across paths (two routes went through one relay), but
+  it is wrong in one path. When one walk touches the same hop two times, that hop is not a
+  node that two routes share. It is a **cycle**, and a flow from left to right has no place
+  for a cycle. On a set of edges with a cycle, the relaxation of the balanced x never
+  settles. Thus the members of the loop go to almost the same columns: markers one cell
+  apart, labels on top of each other, and the back edge as a bare vertical line. Also, the
+  relays outside the loop are pushed against the ends.
+
+  Instead, ``allow_duplicate_nodes`` gives each revisit its own marker (refer to
+  :func:`_split_revisits`). This keeps the flow without cycles, and draws the walk in its
+  true order. The cost is that one node can show two times, so a caller that turns it on
+  must tell the user so on the surface (:func:`~meshterm.ui.widgets.revisit_note`). It is
+  opt-in, because the caller must make this choice. A path that MeshTerm *composed* (the
+  scored walk of the Trophy case) collapses a revisit on purpose. But an **observed** via
+  chain must be drawn as heard: its hops are named by a one-byte hash, so a repeat is as
+  probably two nodes with the same hash byte as a real loop.
+* **Detours**: a heard route that is a sibling route plus one inserted relay is that
+  sibling with a detour. The widget measures the full fan against the row budget before it
+  sets the shape. While there are enough rows, the detour **nests**: its inserted relay goes
+  to the lane directly outside the lane of its sibling, on the same flank. Thus the straight
+  run of the sibling clearly skips the relay, and the detour shows as the wider arc through
+  the relay. Only a viewport that is too short for that extra lane **folds** the relay onto
+  the lane of the sibling (the weakest detours first, with a new measurement after each
+  fold). There, the run of the sibling passes over the relay. This fold is the last resort,
+  which is easy to read but loses information. It is never the default (refer to
+  :func:`_layout_lanes`).
+* **Bypasses**: the opposite of a detour. Next to the ``A → B → C`` of the spine, there is
+  a shorter route that skips ``B``. When ``A`` and ``C`` are on one lane, its ``A→C`` edge
+  is a level run directly through the marker of the one node that it does not go through.
+  If it is drawn that way, it looks like a route through ``B``, which the evidence excludes.
+  When the column of the skipped node has space (a free lane next to it, or a lane that the
+  row budget can open), the edge bends around instead. It goes in an arc through an
+  unmarked *virtual waypoint* in that column, the same wider arc that a nested detour
+  draws. Thus a skip looks like a skip (refer to :func:`_bypass_vias`). Only a graph with
+  really no space left keeps the level pass-over.
+* **Diverge and converge**: the fan at each end is a flow, not a switchboard. Routes leave
+  the origin on top of each other on the centre line, and then go off one at a time to
+  their lanes (the divergence). On the right, they do the opposite into our node (the
+  convergence). Each edge draws exactly one time, however many routes share it. The only
+  edge that draws as a bare vertical line is a pair of nodes walked in both directions.
+  That is a real two-way hop, and the only place where a straight vertical line is true.
+* **Emphasis dims the rest**: when one layer has more emphasis than the others, it is the
+  only path in colour. Each node that it does not go through draws its marker and its
+  label in one dark grey (:data:`_OFF_ROUTE`), the same dim colour as its unused lines. A
+  fan is one route that the user compares with its alternatives, and markers in full hue
+  along the grey lines contradicted what the emphasis told. The endpoints are never dimmed
+  (all paths go through them), and the glyphs keep their shapes: a repeater off the route
+  is still ``▲``, and only its colour is dim. When there is no emphasis to compare (one
+  path, or a fan with all layers equal), nothing is dim, and the colours of the caller
+  stay as they are.
+* **Labels** are directly above or below their marker, on the side away from the middle of
+  the graph, and a place with no drawn lines is preferred. An endpoint moves its label
+  inward from the edge of the canvas, so that a long name is still next to its marker. A
+  caller that wants a node without a label returns ``None`` for it.
+
+All the drawing renders onto a :class:`~meshterm.ui.mapcanvas.MapCanvas`. The caller
+supplies the callbacks for the glyph, the label, and the colour of each node. Thus the
+widget does not have to know about the contact list or the theme.
 """
 
 from __future__ import annotations
@@ -110,7 +130,7 @@ from math import ceil
 
 from ..services.topology import is_path_hash
 from .mapcanvas import MapCanvas
-from .marks import (  # noqa: F401 - canonical home; re-exported for existing importers
+from .marks import (  # noqa: F401 - the canonical home, re-exported for existing importers
     DST_NODE,
     RGB,
     SRC_NODE,
@@ -121,99 +141,108 @@ from .marks import (  # noqa: F401 - canonical home; re-exported for existing im
 )
 from .theme import mark_rgb
 
-#: Joins a hop id to its occurrence index when ``allow_duplicate_nodes`` splits a path's
-#: revisits into their own markers. Leans on the same guarantee the endpoint sentinels do —
-#: NUL never appears in a hex hop id — so a qualified id can never collide with a real one,
-#: and :func:`_base_node` maps it back before any caller callback ever sees it.
+#: Joins a hop id to its occurrence index when ``allow_duplicate_nodes`` gives each revisit
+#: of a path its own marker. It uses the same guarantee as the endpoint sentinels (NUL never
+#: occurs in a hex hop id). Thus a qualified id can never be the same as a real id, and
+#: :func:`_base_node` changes it back before any callback of the caller sees it.
 _OCCURRENCE_SEP = "\x00#"
 
-#: Text rows between adjacent lane markers — the pitch one lane maps to. At the default there
-#: are two blank rows padding each gap (room for a lane's label and its neighbour's), and an
-#: *even* lane count opens one extra row between the two central lanes so the endpoints land on
-#: an exact centred row (see the vertical-sizing block). A graph with more lanes than fit the
-#: row budget scales the pitch down to fit, and a graph with few lanes never stretches *past* it
-#: (spreading the lanes apart would only reintroduce the empty space the layout exists to
-#: avoid), so a sparse graph draws compact rather than splayed.
+#: The text rows between the markers of two lanes that are next to each other: the pitch of
+#: one lane. At the default, two blank rows pad each gap (space for the label of a lane and
+#: the label of its neighbour). An even number of lanes opens one more row between the two
+#: central lanes, so that the endpoints are on an exact centred row (refer to the block for
+#: the vertical size). A graph with more lanes than the row budget can hold makes the pitch
+#: smaller to fit. A graph with few lanes never makes the pitch larger than this value,
+#: because more distance between the lanes only brings back the empty space that the layout
+#: must prevent. Thus a sparse graph draws compact, not spread out.
 _LANE_PITCH_ROWS = 3
 
-#: Dots reserved beyond the outermost lane at each end of the graph — a label row for that
-#: lane's markers, plus a little air.
+#: The dots that are kept free past the outermost lane at each end of the graph: a label
+#: row for the markers of that lane, plus a small space.
 _GRAPH_END_DOTS = 8
 
-#: The dot row within a character cell a horizontal edge line is aimed at — the upper-middle
-#: of the cell's 2×4 pixel grid (rows 0..3 top-down), where a one-dot line reads as running
-#: through the glyph rather than hugging its bottom edge. Every lane's y is snapped onto this
-#: row (see :func:`_mid_row`) so a level run stays level and same-column markers align.
+#: The dot row in a character cell at which a horizontal edge line aims: the upper middle
+#: of the 2×4 pixel grid of the cell (rows 0..3 from the top). There, a line one dot thick
+#: looks like it goes through the glyph, not along its bottom edge. The y of each lane snaps
+#: onto this row (refer to :func:`_mid_row`), so that a level run stays level and the
+#: markers in the same column align.
 _CELL_MID_DOT = 2
 
-#: Dot-space margin the endpoint markers keep from the canvas edges.
+#: The margin, in dots, between the endpoint markers and the edges of the canvas.
 _GRAPH_PAD_DOTS = 6
 
-#: The share of a lane change's horizontal column gap spent on the eased curve itself — the rest
-#: would split into two flat platforms flanking it. Set to the whole gap: the curve runs
-#: continuously from one node to the next with *no* separate flat segment. A shorter curve leaves
-#: flat platforms but reintroduces a **corner** where a platform (slope 0) meets the climbing
-#: curve, and that corner piles a heavy braille *knee* (a cell filled 3–4 dots) that reads thick —
-#: the more so the shallower the curve's end tangent. Spanning the whole gap removes the corner,
-#: so the stroke stays an even, thin arc end to end; the nodes still seat level because the curve's
-#: end tangents are kept horizontal (see :data:`_BEND_K`), giving each marker a flat point to sit on
-#: without a platform run. (In a very tight column a full-lane shift is unavoidably steep right
-#: up to the node, so its marker sits on a gentle slope rather than dead level — the honest cost
-#: of keeping the stroke thin there.)
+#: The part of the horizontal column gap of a lane change that the eased curve uses. If the
+#: value is smaller, the rest splits into two flat platforms, one on each side of the curve.
+#: The value is the full gap: the curve goes continuously from one node to the next, with
+#: no separate flat segment. A shorter curve leaves flat platforms, but it brings back a
+#: **corner** where a platform (slope 0) meets the rising curve. That corner makes a heavy
+#: braille *knee* (a cell with 3 or 4 dots filled) that looks thick, and more so when the
+#: end tangent of the curve is shallower. When the curve spans the full gap, there is no
+#: corner, so the stroke stays an even, thin arc from end to end. The nodes are still
+#: level, because the end tangents of the curve stay horizontal (refer to :data:`_BEND_K`).
+#: Thus each marker has a flat point, without a platform run. (In a very narrow column, a
+#: shift of a full lane is necessarily steep up to the node, so its marker is on a gentle
+#: slope, not fully level. That is the true cost of a thin stroke there.)
 _CURVE_SPAN = 1.0
 
-#: The shortest horizontal run a lane change is given even for a one-lane hop, so a tight
-#: column gap still bends across a few dots rather than snapping over in one abrupt step.
+#: The shortest horizontal run that a lane change gets, also for a hop of one lane. Thus a
+#: narrow column gap still bends across some dots, and does not jump in one abrupt step.
 _MIN_SHIFT_DOTS = 4
 
-#: How far (as a fraction of the shift's horizontal span) the bezier control points sit in from
-#: each end — both placed level with their own end, so the curve leaves and enters each node
-#: horizontally. This flat end tangent is what seats a node level now that the curve spans the
-#: whole gap (:data:`_CURVE_SPAN`) with no separate platform. It trades against thinness: a higher
-#: value holds the tangent flatter for longer (a better-seated node) but steepens the curve's
-#: middle to compensate (a thicker centre), while a lower value spreads the drop more evenly
-#: (thinner) but tilts the node's tangent (a marker on a slope). Tuned to the balance that keeps
-#: the marker's seating close to level while the stroke stays an even, thin arc between nodes.
+#: The distance of the bezier control points in from each end, as a fraction of the
+#: horizontal span of the shift. Each control point is level with its own end, so the curve
+#: leaves and enters each node horizontally. Now that the curve spans the full gap
+#: (:data:`_CURVE_SPAN`) with no separate platform, this flat end tangent is what keeps a
+#: node level. The value is a balance with thinness. A higher value keeps the tangent flat
+#: for longer (a better-seated node), but makes the middle of the curve steeper to
+#: compensate (a thicker centre). A lower value spreads the drop more evenly (thinner), but
+#: tilts the tangent at the node (a marker on a slope). The value is tuned to keep the
+#: marker almost level while the stroke stays an even, thin arc between nodes.
 _BEND_K = 0.4
 
-#: Dots left of our marker the flow arrow sits — one cell, so it embeds in the trunk as ``▶★``
-#: and marks the node → us direction without crowding the endpoint.
+#: The distance in dots from the flow arrow to our marker, on its left: one cell. Thus the
+#: arrow is part of the trunk as ``▶★``, and it shows the direction node → our node with
+#: enough space for the endpoint.
 _ARROW_GAP_DOTS = 2
 
-#: The dim every node *off* the highlighted path draws in — its marker and its label
-#: alike, in both encodings the callbacks speak. A fan's whole point is one route read
-#: against its alternatives, and the picture only says which route that is if everything
-#: not on it recedes: the unused lines already draw grey, and a full-hue marker with a
-#: full-hue label sitting on one is the loudest thing in the frame (JP, 2026-09-04). Any
-#: value in this range folds to the console's dark-grey slot, so the rule survives the
-#: 16-colour quantizer unchanged.
+#: The dim colour of each node off the emphasized path, for its marker and for its label,
+#: in the two encodings that the callbacks use. The purpose of a fan is to compare one route
+#: with its alternatives. The picture shows which route that is only if all the rest is
+#: dim. The unused lines already draw grey, and a marker in full hue with a label in full
+#: hue on such a line is the most visible thing in the frame (JP, 2026-09-04). Each value in
+#: this range folds to the dark-grey slot of the console, so the rule stays the same after
+#: the 16-colour quantizer.
 _OFF_ROUTE: RGB = (110, 110, 110)
 _OFF_ROUTE_HEX = "#{:02x}{:02x}{:02x}".format(*_OFF_ROUTE)
 
-#: Most distinct paths the lane order is optimised over by exhaustive search. Beyond it the
-#: search space (``(n-1)!`` orders of the non-central lanes) is too large, so a barycentre
-#: heuristic seats the lanes instead. The widget's real inputs sit far under this.
+#: The maximum number of distinct paths for which an exhaustive search optimizes the lane
+#: order. Past this number, the search space (``(n-1)!`` orders of the lanes that are not
+#: central) is too large, so a barycentre heuristic seats the lanes instead. The real inputs
+#: of the widget are far below this number.
 _MAX_EXACT_LANES = 8
 
-#: Sweeps of the barycentre lane-ordering heuristic used past :data:`_MAX_EXACT_LANES`.
+#: The number of sweeps of the barycentre heuristic for the lane order. It is used past
+#: :data:`_MAX_EXACT_LANES`.
 _ORDER_SWEEPS = 8
 
-#: Most non-best routes the side-balancer weighs by exhaustive 2-colouring (see
-#: :func:`_balance_sides`). Past it the ``2**m`` side assignments grow too many, so the routes
-#: keep the side the jog order handed them. The widget's real inputs sit far under this.
+#: The maximum number of routes (other than the best route) that the side balancer examines
+#: by exhaustive 2-colouring (refer to :func:`_balance_sides`). Past this number, there are
+#: too many ``2**m`` side assignments, so the routes keep the side that the jog order gave
+#: them. The real inputs of the widget are far below this number.
 _MAX_BALANCE_ROUTES = 16
 
-#: The glyph used for the flow arrow embedded in the trunk just before us,
-#: so the whole flow reads better as a directed run node → us (not a map you wander).
+#: The glyph of the flow arrow in the trunk directly before our node, so that the full flow
+#: reads better as a directed run (node → our node), not as a map with no direction.
 # _ARROW_GLYPH = "▶"
 _ARROW_GLYPH = ""
 
-#: How far a layer's emphasis outranks its layout priority when edges compete for a cell.
-#: Emphasis is the draw-time highlight — the selected path drawn on top and winning any shared
-#: cell — and must beat any spread of priority values, so it is scaled well past the small
-#: priorities the widget ever sees. Layout geometry ignores emphasis entirely; only the colour
-#: and z-order of the drawn edges follow it (see :func:`_draw_rank`), so re-emphasising a
-#: different path repaints the same picture in new colours rather than relaying it.
+#: How much the emphasis of a layer outranks its layout priority when edges compete for a
+#: cell. The emphasis applies at draw time: the selected path draws on top and wins any
+#: shared cell. It must be larger than any range of priority values, so it is scaled far
+#: past the small priorities that the widget gets. The layout geometry ignores the emphasis
+#: fully. Only the colour and the z-order of the drawn edges follow it (refer to
+#: :func:`_draw_rank`). Thus when a different path gets the emphasis, the same picture is
+#: drawn again in new colours, and its layout does not change.
 _EMPHASIS_BOOST = 1_000_000
 
 
@@ -222,19 +251,21 @@ class PathLayer:
     """One path drawn on the route graph.
 
     Attributes:
-        hops: The relay node ids between the endpoints, in walk order (empty = the
-            path runs endpoint to endpoint straight across).
-        color: The edge colour the path draws in.
-        priority: **Layout** rank — which path is the spine. The highest-priority path takes
-            the straight centre lane and owns any relay it shares (weaker paths jog to meet it),
-            so it fixes every node's column and lane. Geometry depends on this alone, never on
-            :attr:`emphasis`: a caller that wants the drawn picture to hold still while it
-            re-highlights keeps each path's priority constant.
-        emphasis: **Draw** rank — the highlight, layered over the fixed geometry. Where edges
-            share a cell (or cross), the higher-emphasis path wins the colour and draws on top;
-            it moves no marker. Defaults to ``0`` (all paths equal, so the colour falls to
-            :attr:`priority` as before). A caller that highlights by selection varies *this*,
-            not priority, so the layout stays put and only the colours change.
+        hops: The relay node ids between the endpoints, in walk order. If it is empty, the
+            path goes straight across from endpoint to endpoint.
+        color: The colour of the edges of the path.
+        priority: The **layout** rank, which selects the spine. The path with the highest
+            priority takes the straight centre lane and owns each relay that it shares
+            (weaker paths jog to meet it). Thus it sets the column and the lane of each
+            node. The geometry depends only on this value, never on :attr:`emphasis`. A
+            caller that wants the drawn picture to stay the same while it moves the emphasis
+            keeps the priority of each path constant.
+        emphasis: The **draw** rank: the emphasis, on top of the fixed geometry. Where edges
+            share a cell (or cross), the path with more emphasis gets the colour and draws
+            on top. It moves no marker. The default is ``0`` (all paths are equal, so the
+            colour comes from :attr:`priority` as before). A caller that shows the selection
+            by emphasis changes this value, not the priority. Thus the layout stays the
+            same, and only the colours change.
     """
 
     hops: tuple[str, ...]
@@ -246,10 +277,10 @@ class PathLayer:
 def _mid_row(y_dot: float) -> int:
     """Snap a dot row onto the upper-middle dot of its character cell.
 
-    A braille cell is four dot rows tall; a horizontal line drawn on the top or bottom row
-    hugs the glyph's edge and reads as sitting too high or too low. Snapping every lane's y
-    to :data:`_CELL_MID_DOT` keeps markers — and the level runs along a lane — centred in the
-    cell's pixel space.
+    A braille cell is four dot rows tall. A horizontal line on the top row or on the bottom
+    row is at the edge of the glyph, and looks too high or too low. When the y of each lane
+    snaps to :data:`_CELL_MID_DOT`, the markers (and the level runs along a lane) stay
+    centred in the pixel space of the cell.
     """
     return round((y_dot - _CELL_MID_DOT) / 4) * 4 + _CELL_MID_DOT
 
@@ -257,12 +288,13 @@ def _mid_row(y_dot: float) -> int:
 def _collapse(layers: Sequence[PathLayer]) -> list[PathLayer]:
     """Fold layers with identical hop sequences onto one drawn path.
 
-    Re-walking a known route highlights it rather than doubling it. Geometry keeps the
-    strongest ``priority`` of the folded copies (so a shared route seats where its best
-    instance would), while the highlight — the drawn colour and its on-top order — follows the
-    most-*emphasised* copy, and the emphasis carries across. So two routes that only differ in
-    a cluster-internal order the caller has contracted away land on one line, and selecting
-    either lights it, even when a higher-priority copy owns the layout.
+    When a known route is walked again, the route gets the emphasis, and it does not draw
+    two times. The geometry keeps the strongest ``priority`` of the folded copies (so a
+    shared route is where its best copy would be). The emphasis (the drawn colour and the
+    order on top) follows the copy with the most emphasis, and that emphasis goes to the
+    folded path. Thus two routes that are different only in an order inside a cluster,
+    which the caller removed, are on one line. A selection of either route gives that line
+    the emphasis, also when a copy with a higher priority owns the layout.
     """
     drawn: list[PathLayer] = []
     by_hops: dict[tuple[str, ...], int] = {}
@@ -284,19 +316,22 @@ def _collapse(layers: Sequence[PathLayer]) -> list[PathLayer]:
 
 
 def _coalesce_prefixes(layers: Sequence[PathLayer]) -> list[PathLayer]:
-    """Fold an under-specified hop into the longer id it can only be, across the layers.
+    """Fold a hop with too few bytes into the only longer id that it can be, across the layers.
 
-    A relay reaches the graph at different hash widths across the paths — a 1-byte trace
-    hop (``be``) beside the same node's wider id (``be1d1c1dbc4b``). Drawn as-is they double
-    the node: two markers a column apart, often carrying the same resolved name. The
-    observed-topology graph coalesces what it can, but only where a hash is unambiguous
-    against the *whole* contact list; a hash that opens two contacts (``be`` also begins
-    ``bedd2b``) survives to here, even though among *these* paths it can only be the one wide
-    node present. So the widget closes the gap locally: using only the ids the layers hold,
-    a short id is rewritten to the longer id it strictly prefixes when exactly one such id is
-    present (following a chain to its longest end); a short id that prefixes two distinct
-    present nodes is genuinely ambiguous and left as itself. The per-node callbacks then see
-    one id per node, and any paths made identical by the rewrite collapse together downstream.
+    A relay can come into the graph at different hash widths in different paths: a 1-byte
+    trace hop (``be``) next to a wider id of the same node (``be1d1c1dbc4b``). If they are
+    drawn as they are, the node shows two times: two markers a column apart, often with the
+    same resolved name. The graph of the observed topology coalesces what it can, but only
+    where a hash has one meaning in the full contact list. A hash that starts two contacts
+    (``be`` also starts ``bedd2b``) comes through to this point, although in these paths it
+    can only be the one wide node that is present.
+
+    Thus the widget closes the gap locally, with only the ids that the layers hold. It
+    rewrites a short id to the longer id of which it is a strict prefix, when exactly one
+    such id is present (and it follows a chain to its longest end). A short id that is a
+    prefix of two distinct nodes that are present is really ambiguous, and stays as it is.
+    Then the callbacks for each node see one id for each node, and any paths that the
+    rewrite made identical collapse together later.
     """
     ids = {hop for layer in layers for hop in layer.hops}
     remap: dict[str, str] = {}
@@ -312,7 +347,7 @@ def _coalesce_prefixes(layers: Sequence[PathLayer]) -> list[PathLayer]:
         return list(layers)
 
     def resolved(hop: str) -> str:
-        for _ in range(len(remap) + 1):  # follow a rewrite chain, guarded against cycles
+        for _ in range(len(remap) + 1):  # follow a rewrite chain, with a guard against cycles
             if hop not in remap:
                 break
             hop = remap[hop]
@@ -330,11 +365,12 @@ def _coalesce_prefixes(layers: Sequence[PathLayer]) -> list[PathLayer]:
 
 
 def _prefix_merge(nodes: set[str]) -> tuple[str, str] | None:
-    """The next ``(short, long)`` id pair to fold among ``nodes``, or ``None`` when none.
+    """The next ``(short, long)`` id pair to fold among ``nodes``, else ``None``.
 
-    A short hex id (under a full 6-byte width) folds when the longer present ids that
-    extend it all lie on one prefix chain — the longest starts with every other — so it can
-    only name that one node. Shortest ids are offered first, collapsing a chain from its end.
+    A short hex id (less than the full width of 6 bytes) folds when all the longer present
+    ids that extend it are on one prefix chain (the longest id starts with each of the
+    others). Then the short id can only name that one node. The shortest ids come first, so
+    that a chain collapses from its end.
     """
     for short in sorted(nodes, key=len):
         if len(short) >= 12 or not is_path_hash(short):
@@ -356,14 +392,15 @@ def _prefix_merge(nodes: set[str]) -> tuple[str, str] | None:
 
 
 def revisited_hops(hops: Sequence[str]) -> tuple[str, ...]:
-    """The hops one path touches more than once, in first-appearance order.
+    """The hops that one path touches more than one time, in the order of first appearance.
 
-    The test a caller applies before deciding to draw with ``allow_duplicate_nodes`` — and the
-    hops it then names in its warning (:func:`~meshterm.ui.widgets.revisit_note`), since a
-    graph drawing one node twice owes the reader that much. Judged on the ids as given: at the
-    one-byte width an observed via chain addresses its hops by, a repeat is as likely two
-    different nodes colliding on a hash byte as a packet genuinely walking a loop, and neither
-    the path nor this widget can tell them apart — which is exactly what the warning says.
+    A caller applies this test before it decides to draw with ``allow_duplicate_nodes``.
+    Then the caller names these hops in its warning (:func:`~meshterm.ui.widgets.revisit_note`),
+    because a graph that draws one node two times must tell the user at least that. The test
+    uses the ids as given. An observed via chain addresses its hops with one byte. At that
+    width, a repeat is as probably two different nodes with the same hash byte as a packet
+    that really walked a loop. Neither the path nor this widget can tell them apart, and
+    that is exactly what the warning says.
     """
     counts: dict[str, int] = {}
     for hop in hops:
@@ -373,14 +410,15 @@ def revisited_hops(hops: Sequence[str]) -> tuple[str, ...]:
 
 
 def _split_revisits(layers: Sequence[PathLayer]) -> list[PathLayer]:
-    r"""Give every revisit *within* a path its own node id, so no walk folds into a cycle.
+    r"""Give each revisit in a path its own node id, so that no walk folds into a cycle.
 
-    The k-th occurrence of a hop in one layer becomes ``hop\\x00#k`` (the first keeps the bare
-    id), which leaves the flow acyclic and lets the balanced rank spread the walk evenly again.
-    Counting runs per layer but the qualifier is positional, so occurrence *k* of a hop means the
-    same id in every layer that reaches that far: two routes riding one relay once still merge on
-    the bare id — the diverge/converge story the widget exists to tell survives untouched, and
-    only a genuine within-path repeat splits.
+    The k-th occurrence of a hop in one layer becomes ``hop\\x00#k`` (the first occurrence
+    keeps the bare id). Thus the flow has no cycle, and the balanced rank can spread the walk
+    evenly again. The count is done for each layer, but the qualifier is positional. Thus
+    occurrence *k* of a hop is the same id in each layer that goes that far. Two routes that
+    go through one relay one time still merge on the bare id. The diverge and converge
+    picture, which is the purpose of the widget, does not change, and only a real repeat in
+    one path splits.
     """
     split: list[PathLayer] = []
     for layer in layers:
@@ -395,19 +433,22 @@ def _split_revisits(layers: Sequence[PathLayer]) -> list[PathLayer]:
 
 
 def _base_node(node: str) -> str:
-    """An occurrence-qualified internal id back to the caller's own node id (else unchanged)."""
+    """Change an internal id with an occurrence qualifier back to the node id of the caller.
+
+    An id without a qualifier does not change.
+    """
     return node.split(_OCCURRENCE_SEP, 1)[0]
 
 
 def _unqualified(
     glyph_of: GlyphOf, label_of: LabelOf, label_rgb_of: LabelRgbOf
 ) -> tuple[GlyphOf, LabelOf, LabelRgbOf]:
-    """Wrap the per-node callbacks so a split revisit reaches them as the node it really is.
+    """Wrap the callbacks for each node, so that they get a split revisit as its real node.
 
-    Occurrence qualifiers are the widget's private bookkeeping: a caller supplies callbacks keyed
-    on its own hop ids and gets back a marker, a label and a hue per *node*, so both markers of a
-    revisited hop draw identically — the same glyph, the same name, the same colour — and the
-    picture says "here twice" rather than inventing a second identity.
+    The occurrence qualifiers are private data of the widget. A caller supplies callbacks
+    keyed on its own hop ids, and gets a marker, a label, and a hue for each node. Thus the
+    two markers of a revisited hop draw identically (the same glyph, the same name, the same
+    colour). The picture says "here twice", and does not make up a second identity.
     """
 
     def glyph(node: str) -> tuple[str, str]:
@@ -423,26 +464,28 @@ def _unqualified(
 
 
 def _draw_rank(layer: PathLayer) -> int:
-    """A layer's edge draw rank: emphasis dominates, layout priority breaks ties.
+    """The draw rank for the edges of a layer: first the emphasis, then the layout priority.
 
-    Governs only which colour wins a shared cell and which edge draws on top — never node
-    placement (that is :attr:`PathLayer.priority` alone). So a caller can re-emphasise a
-    different path (bump its :attr:`~PathLayer.emphasis`) and the graph repaints in new colours
-    over the very same layout, rather than reflowing because the spine changed.
+    It controls only which colour wins a shared cell and which edge draws on top, never the
+    placement of a node (only :attr:`PathLayer.priority` sets that). Thus a caller can give
+    the emphasis to a different path (it increases its :attr:`~PathLayer.emphasis`). Then the
+    graph is drawn again in new colours over the same layout, and the layout does not change
+    because of a new spine.
     """
     return layer.priority + layer.emphasis * _EMPHASIS_BOOST
 
 
 def _highlighted(drawn: Sequence[PathLayer], seqs: Sequence[tuple[str, ...]]) -> set[str] | None:
-    """The nodes on the one emphasised path, or ``None`` when no single path is singled out.
+    """The nodes on the one emphasized path, or ``None`` when no single path has the emphasis.
 
-    A highlight is a *comparison*, so it takes at least two paths and exactly one winner: a
-    lone path has nothing to be read against, and a fan whose layers all carry the same
-    emphasis (the default — a picture with no selection at all) has no route to fade toward.
-    Both cases return ``None``, and the caller's colours are then used exactly as given.
+    An emphasis is a *comparison*, so at least two paths and exactly one winner are
+    necessary. One path alone has nothing to compare with. A fan whose layers all have the
+    same emphasis (the default: a picture with no selection) has no single route, so nothing
+    is dimmed. In both cases, the function returns ``None``, and then the colours of the
+    caller are used exactly as given.
 
-    The returned set carries the endpoints, since every path runs through them: the origin and
-    us are never the thing a selection distinguishes.
+    The returned set has the endpoints, because all paths go through them. A selection never
+    makes the origin or our node different.
     """
     if len(drawn) < 2:
         return None
@@ -454,12 +497,12 @@ def _highlighted(drawn: Sequence[PathLayer], seqs: Sequence[tuple[str, ...]]) ->
 def _dim_off_route(
     glyph_of: GlyphOf, label_rgb_of: LabelRgbOf, lit: set[str]
 ) -> tuple[GlyphOf, LabelRgbOf]:
-    """Wrap the marker/label colour callbacks to draw everything outside ``lit`` grey.
+    """Wrap the marker and label colour callbacks to draw all nodes outside ``lit`` grey.
 
-    The caller's own callbacks are still asked for every node *on* the highlighted path, so
-    a node keeps whatever hue its screen gives it there; off it, neither callback is consulted
-    for a colour that would be thrown away. The glyph itself is untouched — a repeater is
-    still ``▲`` off-route, it is only the ink that recedes.
+    The callbacks of the caller are still asked about each node on the emphasized path, so a
+    node there keeps the hue that its screen gives it. Off the path, ``label_rgb_of`` is not
+    called, and the colour that ``glyph_of`` returns is not used. The glyph does not change:
+    a repeater off the route is still ``▲``, and only its colour is dim.
     """
 
     def glyph(node: str) -> tuple[str, str]:
@@ -488,62 +531,69 @@ def render_path_graph(
 
     Args:
         layers: The paths to draw. The highest ``priority`` takes the straight centre lane and
-            fixes the geometry; a separate ``emphasis`` (default ``0``) decides which path is
-            drawn highlighted — on top, winning any shared cell — without moving a marker, so
-            re-emphasising a path repaints the same layout in new colours. Layers with identical
-            hop sequences collapse to one drawn path owned by the highest priority among them.
-        width: Canvas width in character cells.
-        glyph_of: Marker glyph + colour per node id (endpoints keyed by
-            :data:`SRC_NODE` / :data:`DST_NODE`). The colour is whatever
-            :func:`~meshterm.ui.theme.mark_rgb` takes — a literal ``#rrggbb`` or a theme
-            style name.
-        label_of: Label text per node id (``None``/``""`` = bare marker). A label is
-            kept whole unless it is wider than the canvas, when it is ellipsized to fit.
-        label_rgb_of: Label colour per node id.
-        min_rows: The fewest canvas rows to draw, however few the lanes.
-        max_rows: The most canvas rows to spend; a graph with more lanes than fit
-            compresses its lane spacing rather than growing past this.
-        lane_pitch: Text rows between adjacent lane markers (so ``lane_pitch - 1`` blank rows
-            pad each gap). An even lane count opens one extra row between the two central lanes
-            so the endpoints land on an exact centred row. The row budget compresses the pitch
-            when there are many lanes, and never stretches it when there are few. Defaults to
+            sets the geometry. A separate ``emphasis`` (default ``0``) decides which path is
+            drawn with emphasis (on top, so it wins any shared cell), and it moves no marker.
+            Thus when a different path gets the emphasis, the same layout is drawn again in
+            new colours. Layers with identical hop sequences collapse to one drawn path,
+            which the highest priority among them owns.
+        width: The width of the canvas, in cells.
+        glyph_of: The marker glyph and its colour for each node id (the endpoints use the
+            keys :data:`SRC_NODE` and :data:`DST_NODE`). The colour is any value that
+            :func:`~meshterm.ui.theme.mark_rgb` accepts: a literal ``#rrggbb`` or the name of
+            a theme style.
+        label_of: The label text for each node id (``None`` or ``""`` gives a bare marker).
+            A label stays complete, but if it is wider than the canvas, it is ellipsized to
+            fit.
+        label_rgb_of: The label colour for each node id.
+        min_rows: The minimum number of canvas rows to draw, however few lanes there are.
+        max_rows: The maximum number of canvas rows to use. A graph with more lanes than can
+            fit makes the spacing of its lanes smaller, instead of growing past this number.
+        lane_pitch: The text rows between the markers of lanes that are next to each other
+            (thus ``lane_pitch - 1`` blank rows pad each gap). An even number of lanes opens
+            one more row between the two central lanes, so that the endpoints are on an
+            exact centred row. The row budget makes the pitch smaller when there are many
+            lanes, and never makes it larger when there are few. The default is
             :data:`_LANE_PITCH_ROWS`.
-        allow_duplicate_nodes: Draw a hop a path touches *twice* as two markers rather than
-            folding it into one. Off by default, because folding is right for a path the caller
-            composed. Turn it on for an **observed** walk, where the fold would make a cycle the
-            left-to-right flow cannot seat and the layout collapses (see the module docstring):
-            the walk then draws in its true order, at the cost of one node possibly appearing
-            twice — which the caller should flag on the surface (:func:`~meshterm.ui.widgets.
-            revisit_note`, over :func:`revisited_hops`). Relays shared *between* paths merge
-            either way.
+        allow_duplicate_nodes: Draw a hop that a path touches two times as two markers,
+            instead of one folded marker. It is off by default, because the fold is correct
+            for a path that the caller composed. Turn it on for an **observed** walk. For
+            such a walk, the fold makes a cycle that the flow from left to right cannot
+            seat, and the layout collapses (refer to the module docstring). With this
+            argument, the walk draws in its true order. The cost is that one node can show
+            two times, and the caller must tell the user so on the surface
+            (:func:`~meshterm.ui.widgets.revisit_note`, with the result of
+            :func:`revisited_hops`). Relays that two paths share merge in both cases.
 
     Returns:
-        One ANSI string per canvas row (empty when there are no layers to draw).
+        One ANSI string for each canvas row (an empty list when there are no layers to
+        draw).
     """
     if not layers:
         return []
 
     drawn = _collapse(_coalesce_prefixes(layers))
     if allow_duplicate_nodes:
-        # After the prefix/identical folds, so a revisit is counted over the ids actually drawn:
-        # a hop that only *looks* repeated at two hash widths coalesces to one id first, and is
-        # then correctly seen as the single visit it is.
+        # After the prefix fold and the identical-path fold, so that the count of revisits uses
+        # the ids that are drawn. A hop that only looks repeated at two hash widths first
+        # coalesces to one id, and then it is correctly counted as one visit.
         drawn = _split_revisits(drawn)
         glyph_of, label_of, label_rgb_of = _unqualified(glyph_of, label_of, label_rgb_of)
     seqs = [(SRC_NODE, *layer.hops, DST_NODE) for layer in drawn]
 
-    # Where one path is emphasised over the rest, everything not on it recedes: the nodes
-    # the highlight rides keep their hue, every other marker and label draws :data:`_OFF_ROUTE`
-    # grey. Membership is tested in the graph's *own* id space — after the prefix coalesce,
-    # the identical-path collapse and the revisit split — so a relay the selected route reaches
-    # by a short hash still counts as ridden once it is folded into the wide marker drawn for it.
+    # When one path has more emphasis than the rest, all that is not on it is dim. The nodes
+    # of the emphasized path keep their hue, and each other marker and label draws in the
+    # :data:`_OFF_ROUTE` grey. The membership test uses the own id space of the graph (after
+    # the prefix coalesce, the identical-path collapse, and the revisit split). Thus a relay
+    # that the selected route reaches by a short hash still counts as on the route, after it
+    # is folded into the wide marker that is drawn for it.
     lit = _highlighted(drawn, seqs)
     if lit is not None:
         glyph_of, label_rgb_of = _dim_off_route(glyph_of, label_rgb_of, lit)
 
-    # First-appearance order for every node, so the layout is identical on every repaint: a
-    # set of hash-seeded string ids would iterate in a run-varying order and let the passes
-    # settle differently each time, making the graph jump between frames.
+    # The order of first appearance for each node, so that the layout is identical at each
+    # paint. A set of string ids with a hash seed iterates in an order that changes from run
+    # to run. Then the passes settle differently each time, and the graph jumps between
+    # frames.
     ordered_nodes: list[str] = []
     seen: set[str] = set()
     edges: set[tuple[str, str]] = set()
@@ -556,11 +606,12 @@ def render_path_graph(
 
     xfrac = _balanced_x(ordered_nodes, edges)
 
-    # A node draws on its highest-priority owning path — the first (by priority, then
-    # appearance) to carry it — so a shared relay sits once, on the strongest route through it,
-    # and weaker routes jog to meet it. A path that introduces no node of its own (every hop
-    # already owned by a stronger route) is *subsumed*: it earns no lane and simply threads the
-    # markers others placed, so it costs no empty band.
+    # A node draws on the path with the highest priority that owns it: the first path (by
+    # priority, then by appearance) that goes through it. Thus a shared relay is drawn one
+    # time, on the strongest route through it, and weaker routes jog to meet it. A path that
+    # adds no node of its own (a stronger route already owns each of its hops) is *subsumed*:
+    # it gets no lane, and it goes through the markers that other paths placed. Thus it costs
+    # no empty band.
     best = max(range(len(drawn)), key=lambda j: drawn[j].priority)
     owner: dict[str, int] = {}
     for i in sorted(range(len(drawn)), key=lambda j: -drawn[j].priority):
@@ -571,27 +622,29 @@ def render_path_graph(
     def col_of(node: str) -> int:
         return (_GRAPH_PAD_DOTS + round(xfrac[node] * span)) >> 1
 
-    # Seat every node on a signed lane, sizing the whole fan against the row budget before
-    # committing to a shape: detour routes nest outside their sibling while the rows allow it,
-    # and fold onto the sibling's lane only as the last resort. See :func:`_layout_lanes`.
+    # Seat each node on a signed lane. Measure the full fan against the row budget before the
+    # shape is set: detour routes nest outside their sibling while there are enough rows, and
+    # fold onto the lane of the sibling only as the last resort. Refer to :func:`_layout_lanes`.
     signed = _layout_lanes(drawn, seqs, ordered_nodes, owner, best, col_of, max_rows, lane_pitch)
 
-    # A pair walked in *both* directions draws as the one honest vertical (the edge pass
-    # below) — and is likewise never bent around anything.
+    # A pair walked in both directions draws as the one true vertical line (the edge pass
+    # below). It also never bends around anything.
     bidir = {frozenset((u, v)) for (u, v) in edges if (v, u) in edges}
-    # An edge that would run level straight through a marker it *skips* bends around it
-    # instead, through a virtual waypoint in the skipped node's own column — wherever the
-    # column has room (see :func:`_bypass_vias`). The via lanes join the band extent below,
-    # so the vertical sizing affords any lane a bypass opens.
+    # An edge that would go level directly through a marker that it skips bends around the
+    # marker instead, through a virtual waypoint in the column of the skipped node, when the
+    # column has space (refer to :func:`_bypass_vias`). The lanes of the waypoints
+    # (``via_lanes``) are part of the band extent below, so the vertical size includes each
+    # lane that a bypass opens.
     vias = _bypass_vias(seqs, bidir, signed, col_of, max_rows, lane_pitch)
     via_lanes = [lane for hops in vias.values() for _m, lane in hops]
 
-    # The endpoints sit at the vertical centre of the compressed lane band, where the strongest
-    # route runs through them as the graph's spine; the alternatives fan above and below. When the
-    # flanks balance out evenly the spine's own lane *is* that centre and it runs dead straight;
-    # when the band is lopsided (or even-numbered) the centre falls between lanes, and the best
-    # path eases gently to reach the endpoints rather than seating the whole graph off-centre —
-    # a lean the balancer keeps small by flattening the flanks first.
+    # The endpoints are at the vertical centre of the compressed lane band, where the
+    # strongest route goes through them as the spine of the graph. The alternatives fan out
+    # above and below. When the flanks are equal, the lane of the spine is that centre, and
+    # the spine is fully straight. When the band is not balanced (or has an even number of
+    # lanes), the centre is between lanes. Then the best path eases gently to reach the
+    # endpoints, instead of a full graph that is off the centre. The balancer keeps this lean
+    # small, because it makes the flanks equal first.
     low = min([*signed.values(), *via_lanes], default=0)
     high = max([*signed.values(), *via_lanes], default=0)
     max_lane = high - low
@@ -601,21 +654,23 @@ def render_path_graph(
         for node in ordered_nodes
     }
 
-    # -- Vertical sizing. Each lane sits on its own text row, ``lane_pitch`` rows apart (so
-    # ``lane_pitch - 1`` blank rows pad each gap). On an *even* lane count the two central lanes
-    # are opened one extra row apart, so the endpoints — pinned to the band's centre — land on
-    # the exact middle row between them rather than on a fractional row that would snap off it;
-    # an *odd* count already seats a central lane there for them to ride. A graph too tall for
-    # ``max_rows`` scales every row down proportionally (never up), so it stays compact.
-    even_lanes = max_lane % 2 == 1  # N = max_lane + 1 lanes; even ⟺ max_lane odd
-    lower_centre = max_lane // 2 + 1  # first lane below the centre (only meaningful when even)
+    # -- Vertical size. Each lane is on its own text row, ``lane_pitch`` rows apart (thus
+    # ``lane_pitch - 1`` blank rows pad each gap). For an even number of lanes, the two
+    # central lanes are one more row apart. Thus the endpoints, which are pinned to the
+    # centre of the band, are on the exact middle row between them, not on a fractional row
+    # that snaps off it. For an odd number, a central lane is already there for the
+    # endpoints. A graph that is too tall for ``max_rows`` makes each row proportionally
+    # smaller (never larger), so that it stays compact.
+    even_lanes = max_lane % 2 == 1  # N = max_lane + 1 lanes, so even ⟺ max_lane odd
+    lower_centre = max_lane // 2 + 1  # the first lane below the centre (used only when even)
 
     def slot(lane: float) -> float:
-        """The text row (pre-scaling) a lane index maps to, with the even-count centre gap."""
+        """The unscaled text row of a lane index, with the centre gap for an even count."""
         rows_out = lane * lane_pitch
         if even_lanes and lane > lower_centre - 1:
-            # the lower-central lane and everything below it are pushed one row down; the
-            # endpoints' half-lane takes half of it, landing them on the widened gap's middle.
+            # the lower central lane and all lanes below it move one row down. The half lane
+            # of the endpoints takes half of that row, so the endpoints are in the middle of
+            # the wider gap.
             rows_out += min(1.0, lane - (lower_centre - 1))
         return rows_out
 
@@ -624,7 +679,7 @@ def render_path_graph(
         lane_rows = 0.0
         scale = 0.0
     else:
-        lane_rows = slot(float(max_lane))  # total lane span, in rows
+        lane_rows = slot(float(max_lane))  # the total lane span, in rows
         ideal = lane_rows * 4 + 2 * _GRAPH_END_DOTS
         rows = max(min_rows, min(max_rows, ceil(ideal / 4)))
         avail = rows * 4 - 2 * _GRAPH_END_DOTS
@@ -632,8 +687,9 @@ def render_path_graph(
 
     canvas = MapCanvas(width, rows)
     band = lane_rows * 4 * scale
-    # Centre the band, anchored on a cell-mid row so the (unscaled) integer lane rows land dead
-    # on their cells — no per-lane snap drift that would nudge a centred endpoint off its middle.
+    # Centre the band, with its anchor on a row at the middle of a cell, so that the
+    # (unscaled) integer lane rows are exactly on their cells. Thus there is no snap drift
+    # for each lane that can move a centred endpoint off its middle.
     top = float(_mid_row((rows * 4 - band) / 2))
 
     def x_of(node: str) -> int:
@@ -643,9 +699,9 @@ def render_path_graph(
         node: (x_of(node), _mid_row(top + slot(node_lane[node]) * 4 * scale))
         for node in ordered_nodes
     }
-    # Each bypass via becomes a dot point at the skipped marker's exact x, seated on its own
-    # lane row through the same slot/snap the real nodes ride — the arc's level peak sits dead
-    # over the node it clears.
+    # Each bypass waypoint becomes a dot point at the exact x of the skipped marker, on its
+    # own lane row, through the same slot and snap as the real nodes. Thus the level peak of
+    # the arc is exactly over the node that it goes around.
     via_pts: dict[frozenset[str], list[tuple[float, float]]] = {
         key: [
             (float(pos[m][0]), float(_mid_row(top + slot(float(lane - low)) * 4 * scale)))
@@ -653,14 +709,14 @@ def render_path_graph(
         ]
         for key, hops in vias.items()
     }
-    # -- Edges. Collect every edge once, keyed by its unordered node pair: an edge two routes
-    # share — or a pair walked in *both* directions — must draw a single time, else it silts up
-    # as a doubled line a dot off itself (two routes' Bresenham runs never land on the exact
-    # same dots). Each pair keeps the colour and draw rank of the strongest route through it —
-    # by draw rank, so the *emphasised* (highlighted) route wins a shared edge over a merely
-    # higher-priority spine, and the highlight paints the whole selected route rather than
-    # dropping out where it overlaps another. A two-way pair (``bidir``, above) draws as the
-    # one honest vertical rather than a lane change.
+    # -- Edges. Collect each edge one time, keyed by its unordered node pair. An edge that two
+    # routes share (or a pair walked in both directions) must draw only one time. If not, it
+    # becomes a double line, one dot off itself (the Bresenham runs of two routes never go on
+    # exactly the same dots). Each pair keeps the colour and the draw rank of the strongest
+    # route through it. The strength is the draw rank, so that the emphasized route wins a
+    # shared edge over a spine that only has a higher priority. Thus the emphasis colours the
+    # full selected route, and does not stop where it overlaps another route. A two-way pair
+    # (``bidir``, above) draws as the one true vertical line, not as a lane change.
     edge_style: dict[frozenset[str], tuple[int, RGB]] = {}
     for layer, seq in sorted(zip(drawn, seqs, strict=True), key=lambda ls: _draw_rank(ls[0])):
         rank = _draw_rank(layer)
@@ -669,19 +725,20 @@ def render_path_graph(
             prev = edge_style.get(key)
             if prev is None or rank > prev[0]:
                 edge_style[key] = (rank, layer.color)
-    # Draw ascending by draw rank so the strongest/most-emphasised route's colour wins any cell
-    # two edges share and sits on top.
+    # Draw in ascending order of draw rank, so that the colour of the strongest route (or the
+    # route with the most emphasis) wins any cell that two edges share, and is on top.
     for key, (rank, color) in sorted(edge_style.items(), key=lambda kv: kv[1][0]):
         u, v = tuple(key)
         canvas.draw_line(_route(u, v, pos, key in bidir, via_pts.get(key, ())), color, rank)
 
-    # -- An arrow embedded in the trunk just before us, so the whole flow reads as a directed
-    # run node → us (not a map you wander). A single glyph in the spine's own colour: it reserves
-    # its cell, so the endpoint label routes around it rather than colliding with stray dots.
+    # -- An arrow in the trunk directly before our node, so that the full flow reads as a
+    # directed run (node → our node), not as a map with no direction. It is one glyph in the
+    # colour of the spine. It reserves its cell, so the endpoint label goes around it and does
+    # not collide with stray dots.
     ax, ay = pos[DST_NODE]
     canvas.marker(ax - _ARROW_GAP_DOTS, ay, _ARROW_GLYPH, drawn[best].color)
 
-    # -- Markers for every node (endpoints and relays alike each draw once).
+    # -- Markers for each node (each endpoint and each relay draws one time).
     for node in ordered_nodes:
         glyph, colour = glyph_of(node)
         canvas.marker(*pos[node], glyph, mark_rgb(colour))
@@ -697,30 +754,33 @@ def _route(
     bidir: bool,
     vias: Sequence[tuple[float, float]] = (),
 ) -> list[tuple[float, float]]:
-    """The point chain for one edge (dot coordinates), drawn as multilane-highway flow.
+    """The point chain for one edge (in dot coordinates), drawn as a multilane-highway flow.
 
-    Two nodes on the same lane join with a level run; two on different lanes join with one smooth
-    **shift** — a bezier S that leaves the first marker level, drifts across the intervening lanes,
-    and settles level into the second (see :func:`_sbend`), so there is no corner anywhere, only
-    the eased level→curve→level of the shift. The shift spans the whole column gap
-    (:data:`_CURVE_SPAN`) rather than a centred stretch flanked by flat platforms: a platform would
-    meet the climbing curve at a corner, and that corner draws a heavy braille *knee*, so the curve
-    runs continuously node to node instead and the marker seats on the curve's own level end
-    tangent. The endpoints, sitting at the centre of the lane band, make the origin's diverging
-    peels and us's converging merges fall out of this one rule — no endpoint special case.
+    Two nodes on the same lane join with a level run. Two nodes on different lanes join with
+    one smooth **shift**: a bezier S that leaves the first marker level, moves across the
+    lanes between them, and arrives level at the second marker (refer to :func:`_sbend`).
+    Thus there is no corner, only the eased level→curve→level of the shift.
 
-    ``vias`` are an edge's bypass waypoints (:func:`_bypass_vias`), threaded between the two
-    markers in x order: the run applies the same level-or-shift grammar anchor to anchor —
-    marker to via to via to marker — so a bypass eases out, sits level for an instant dead
-    over the marker it clears, and eases back in, never cutting through it. The lone exception
-    is ``bidir``: a pair walked both ways draws as a single straight segment between the markers
-    (a near-vertical when the layout stacks them), the one place an up-and-down line is the
-    honest picture — and never a bent one.
+    The shift spans the full column gap (:data:`_CURVE_SPAN`), not a centred part with flat
+    platforms on its two sides. A platform meets the rising curve at a corner, and that
+    corner draws a heavy braille *knee*. Thus the curve goes continuously from node to node,
+    and the marker is on the level end tangent of the curve. The endpoints are at the centre
+    of the lane band, so the branches that diverge from the origin and the merges that
+    converge into our node come from this one rule, with no special case for the endpoints.
+
+    ``vias`` are the bypass waypoints of an edge (:func:`_bypass_vias`), between the two
+    markers in x order. The run applies the same level-or-shift rule from anchor to anchor
+    (marker to waypoint to waypoint to marker). Thus a bypass eases out, is level for an
+    instant exactly over the marker that it goes around, and eases back in. It never cuts
+    through the marker. The only exception is ``bidir``: a pair walked in both directions
+    draws as one straight segment between the markers (almost vertical when the layout
+    stacks them). That is the only place where a vertical line is the true picture, and it
+    is never bent.
     """
     (xu, yu), (xv, yv) = pos[u], pos[v]
     if bidir:
         return [(xu, yu), (xv, yv)]
-    if xu > xv:  # orient the trapezium left→right; balanced rank only ties, never inverts
+    if xu > xv:  # orient the trapezium left→right (balanced rank can only tie, never invert)
         (xu, yu), (xv, yv) = (xv, yv), (xu, yu)
     anchors: list[tuple[float, float]] = [(xu, yu), *sorted(vias), (xv, yv)]
     pts: list[tuple[float, float]] = [anchors[0]]
@@ -731,20 +791,22 @@ def _route(
         dx = xb - xa
         shift = min(dx, max(_MIN_SHIFT_DOTS, round(dx * _CURVE_SPAN)))
         stub = (dx - shift) // 2
-        # A bezier S across the whole gap (level tangents at both ends, so it eases out of and
-        # back into each anchor with no corner — and no platform corner to pile a heavy knee).
+        # A bezier S across the full gap. It has level tangents at the two ends, so it eases
+        # out of and back into each anchor with no corner, and with no platform corner that
+        # makes a heavy knee.
         pts.extend([*_sbend(xa + stub, ya, xb - stub, yb), (xb, yb)])
     return pts
 
 
 def _sbend(x0: float, y0: float, x1: float, y1: float) -> list[tuple[float, float]]:
-    """Sample a cubic-bezier S-curve from ``(x0, y0)`` to ``(x1, y1)``, level at both ends.
+    """Sample a cubic-bezier S-curve from ``(x0, y0)`` to ``(x1, y1)``, level at the two ends.
 
-    Both control points sit level with their own endpoint (:data:`_BEND_K` of the span in from
-    each side), so the curve's tangent is horizontal where it meets the platforms — the smooth
-    lane change that drifts across and settles rather than cutting a hard diagonal. Sampled
-    densely enough that the polyline rasterizes as a continuous curve; the convex hull keeps it
-    inside the ``(x0, y0)–(x1, y1)`` box, so it never overshoots its lane or column.
+    Each control point is level with its own endpoint (:data:`_BEND_K` of the span in from
+    each side). Thus the tangent of the curve is horizontal where it meets the platforms: a
+    smooth lane change that moves across and settles, instead of a hard diagonal. The samples
+    are dense enough that the polyline rasterizes as a continuous curve. The convex hull
+    keeps the curve inside the ``(x0, y0)–(x1, y1)`` box, so it never goes past its lane or
+    column.
     """
     cx0 = x0 + _BEND_K * (x1 - x0)
     cx1 = x1 - _BEND_K * (x1 - x0)
@@ -759,23 +821,26 @@ def _sbend(x0: float, y0: float, x1: float, y1: float) -> list[tuple[float, floa
 
 
 def _balanced_x(ordered_nodes: list[str], edges: set[tuple[str, str]]) -> dict[str, float]:
-    """Each node's horizontal position in ``0..1`` — balanced rank from origin toward us.
+    """The x of each node in ``0..1``: the balanced rank from the origin to our node.
 
-    A node's fraction is its longest-path distance from the origin over that distance plus
-    its longest remaining distance to us: the origin lands at ``0``, us at ``1``, and every
-    other node between them in proportion to how far along its route it sits. So a path's
-    relays spread *evenly* between the two ends however many hops the other paths take — a
-    lone relay on a one-hop route lands mid-canvas rather than jammed against the origin with
-    a long edge arcing across to us — and a relay shared by routes of different lengths still
-    resolves to one x. Because every edge steps the from-origin distance up and the
-    to-us distance down, the fraction rises strictly along each path: edges only ever run
-    left to right.
+    The fraction of a node is its longest-path distance from the origin, divided by the sum
+    of that distance and its longest remaining distance to our node. Thus the origin is at
+    ``0``, our node is at ``1``, and each other node is between them, in proportion to how
+    far along its route it is. The relays of a path spread evenly between the two ends,
+    however many hops the other paths have. For example, one relay on a route of one hop
+    goes to the middle of the canvas, not against the origin with a long edge in an arc
+    across to our node.
 
-    A pair walked in *both* directions is a 2-cycle in the edge set, and the longest-path
-    relaxation would loop through it, inflating every downstream depth toward the node-count
-    cap and jamming other relays hard against the ends. So the rank runs over the graph with
-    each such pair (transitively) merged to one representative — the acyclic flow the picture
-    really is; the pair, drawn as a single vertical, rightly shares an x anyway.
+    A relay that routes of different lengths share still gets one x. Each edge increases
+    the distance from the origin and decreases the distance to our node. Thus the fraction
+    increases strictly along each path: edges always go from left to right.
+
+    A pair walked in both directions is a 2-cycle in the edge set. Without a merge, the
+    longest-path relaxation loops through it, increases each downstream depth up to the
+    limit of the node count, and pushes other relays hard against the ends. Thus the rank
+    runs over the graph with each such pair (transitively) merged into one representative.
+    That is the flow without cycles that the picture really is. The pair draws as one
+    vertical line, so it correctly shares an x in any case.
     """
     rep = _merge_bidir_pairs(ordered_nodes, edges)
     reps: list[str] = []
@@ -792,13 +857,13 @@ def _balanced_x(ordered_nodes: list[str], edges: set[tuple[str, str]]) -> dict[s
 
 
 def _merge_bidir_pairs(ordered_nodes: list[str], edges: set[tuple[str, str]]) -> dict[str, str]:
-    """Map each node to a representative, uniting any two joined by a both-ways edge.
+    """Map each node to a representative, and unite each two nodes that a two-way edge joins.
 
-    Two nodes walked in both directions form a 2-cycle; uniting them — transitively, so a
-    chain of such pairs folds into one group — lets the balanced rank treat the flow as the
-    acyclic run it otherwise is. A node in no such pair maps to itself. The choice of which
-    member is the representative doesn't matter: every member is assigned the group's one
-    fraction, and the group's rank is structural.
+    Two nodes walked in both directions make a 2-cycle. The function unites them
+    transitively, so a chain of such pairs folds into one group. Thus the balanced rank can
+    treat the flow as the run without cycles that it is in all other respects. A node in no
+    such pair maps to itself. It is not important which member is the representative: each
+    member gets the one fraction of the group, and the rank of the group is structural.
     """
     parent = {node: node for node in ordered_nodes}
 
@@ -806,7 +871,7 @@ def _merge_bidir_pairs(ordered_nodes: list[str], edges: set[tuple[str, str]]) ->
         root = node
         while parent[root] != root:
             root = parent[root]
-        while parent[node] != root:  # path-compress
+        while parent[node] != root:  # compress the path
             parent[node], node = root, parent[node]
         return root
 
@@ -819,18 +884,20 @@ def _merge_bidir_pairs(ordered_nodes: list[str], edges: set[tuple[str, str]]) ->
 
 
 def bidir_clusters(sequences: Sequence[tuple[str, ...]]) -> list[tuple[str, ...]]:
-    """The groups of three or more nodes that form a bidirectional cluster (a flow SCC).
+    """The groups of three or more nodes that make a bidirectional cluster (a flow SCC).
 
-    Two nodes walked in both directions are a 2-cycle the graph draws as one tidy vertical
-    pair — fine on its own. Three or more mutually linked that way are a strongly-connected
-    knot the left-to-right flow cannot order: :func:`_merge_bidir_pairs` collapses them all
-    onto one column, where their markers and labels pile up illegibly. A caller can pass its
-    path sequences (endpoints included) here to find those knots and contract each to a single
-    super-node *before* drawing, so the cluster reads as one marker rather than a jam — the one
-    honest way to seat a cycle in a DAG layout.
+    Two nodes walked in both directions are a 2-cycle, which the graph draws as one tidy
+    vertical pair. That is good by itself. Three or more nodes linked to each other in that
+    way are a strongly connected knot that the flow from left to right cannot put in order.
+    :func:`_merge_bidir_pairs` collapses them all onto one column, where their markers and
+    labels go on top of each other and nobody can read them. A caller can give its path
+    sequences (with the endpoints) to this function, to find those knots and contract each
+    knot to one super-node before it draws. Thus the cluster shows as one marker, not as a
+    jam. This is the only true way to seat a cycle in a DAG layout.
 
-    Returns each cluster's member ids in first-appearance order (endpoints excluded); a lone
-    node or the tidy two-node pair is not a cluster and is not returned.
+    Returns the member ids of each cluster in the order of first appearance (without the
+    endpoints). One node alone, or the tidy pair of two nodes, is not a cluster, and the
+    function does not return it.
     """
     edges = {pair for seq in sequences for pair in pairwise(seq)}
     ordered = list(dict.fromkeys(node for seq in sequences for node in seq))
@@ -844,10 +911,11 @@ def bidir_clusters(sequences: Sequence[tuple[str, ...]]) -> list[tuple[str, ...]
 
 
 def _longest_paths(ordered_nodes: list[str], edges: set[tuple[str, str]]) -> dict[str, int]:
-    """Longest-path depth of each node over ``edges`` (relaxed to a fixed point).
+    """The longest-path depth of each node over ``edges`` (relaxed to a fixed point).
 
-    Capped at the node count so a pathological cycle in the id set can't spin it forever;
-    the graphs are acyclic fans, so it settles in a couple of passes.
+    The number of passes has the node count as its limit, so that a pathological cycle in
+    the id set cannot make it loop forever. The graphs are fans without cycles, so it
+    settles in a few passes.
     """
     depth = {node: 0 for node in ordered_nodes}
     for _ in range(len(ordered_nodes)):
@@ -866,21 +934,24 @@ def _detour_nests(
     seqs: Sequence[tuple[str, ...]],
     owner: dict[str, int],
 ) -> dict[int, int]:
-    """Map each *detour* path to the sibling route it branches off — detection only.
+    """Map each *detour* path to the sibling route that it branches off (detection only).
 
-    A route heard as another route *plus* an inserted relay or two — same convergence into us,
-    one extra hop on the way — is that sibling with a detour, not an independent track: a
-    bearing path whose relays, minus the ones it alone owns, exactly match a
-    higher-or-equal-priority sibling's relays, where that sibling truly owns them (is their
-    lane). What to *do* with the pair is the layout's call (:func:`_layout_lanes`): while the
-    row budget allows, the detour nests just outside its sibling's lane
-    (:func:`_compress_lanes`), and only a budget too tight for that folds it onto the sibling's
-    lane itself (:func:`_fold_detour`). Returns ``{detour_index: sibling_index}``, weakest
-    detours first in iteration order; ``owner`` is not modified.
+    A heard route that is another route plus one or two inserted relays (the same
+    convergence into our node, with one more hop on the way) is that sibling with a detour.
+    It is not an independent track. Such a path owns some relays. Its other relays are
+    exactly the relays of a sibling with a higher or equal priority, and that sibling really
+    owns them (it is their lane).
+
+    The layout decides what to do with the pair (:func:`_layout_lanes`). While the row
+    budget lets it, the detour nests directly outside the lane of its sibling
+    (:func:`_compress_lanes`). Only a budget that is too tight for that folds the detour onto
+    the lane of the sibling (:func:`_fold_detour`). Returns ``{detour_index: sibling_index}``,
+    with the weakest detours first in iteration order. ``owner`` does not change.
     """
     relays = [frozenset(n for n in seq if n not in (SRC_NODE, DST_NODE)) for seq in seqs]
     nests: dict[int, int] = {}
-    # Weakest first, so a marginal detour pairs with its stronger sibling, never the reverse.
+    # Weakest first, so that a marginal detour pairs with its stronger sibling, never the
+    # opposite.
     for i in sorted(range(len(drawn)), key=lambda j: drawn[j].priority):
         own_i = {n for n in seqs[i] if owner[n] == i}
         residual = relays[i] - own_i
@@ -903,15 +974,18 @@ def _fold_detour(
     owner: dict[str, int],
     col_of: Callable[[str], int],
 ) -> None:
-    """Re-own detour path ``i``'s extra relays onto its sibling ``q``'s lane — the last resort.
+    """Fold the extra relays of detour ``i`` onto the lane of sibling ``q``: the last resort.
 
-    The single-lane picture a too-short viewport falls back to: the detour's owned relays are
-    re-owned to the sibling, riding its lane as waypoints the branch dips through — at the cost
-    of the sibling's own straight run passing over them — provided none shares a cell column
-    with a node *already on that lane* (including a detour folded there earlier, so two siblings
-    that insert a relay at the same column don't overprint; the refused one keeps its own lane).
-    The folded path then owns nothing, earns no lane, and costs no band. Mutates ``owner`` in
-    place.
+    This is the one-lane picture that a viewport that is too short falls back to. The relays
+    that the detour owns get the sibling as their new owner. They go on its lane as
+    waypoints, through which the branch dips. The cost is that the straight run of the
+    sibling passes over them.
+
+    The fold occurs only if none of these relays shares a cell column with a node that is
+    already on that lane. This includes a detour that was folded there before, so that two
+    siblings that insert a relay at the same column do not print over each other (the
+    refused detour keeps its own lane). Then the folded path owns nothing, gets no lane, and
+    costs no band. This function changes ``owner`` in place.
     """
     own_i = {n for n in seqs[i] if owner[n] == i}
     q_cols = {col_of(n) for n, o in owner.items() if o == q and n not in (SRC_NODE, DST_NODE)}
@@ -922,11 +996,12 @@ def _fold_detour(
 
 
 def _band_rows(n_lanes: int, lane_pitch: int) -> int:
-    """The canvas rows a band of ``n_lanes`` needs at full pitch — the sizing block's mirror.
+    """The canvas rows that are necessary for a band of ``n_lanes`` at full pitch.
 
-    Mirrors ``render_path_graph``'s vertical sizing (its ``slot`` span plus the end margins) so
-    the lane layout can weigh a candidate shape against ``max_rows`` *before* committing to it,
-    rather than drawing it compressed and finding out.
+    It does the same calculation as the vertical size block of ``render_path_graph`` (its
+    ``slot`` span plus the end margins). Thus the lane layout can compare a candidate shape
+    with ``max_rows`` before it sets that shape, instead of a compressed drawing that shows
+    the problem only after the fact.
     """
     max_lane = n_lanes - 1
     if max_lane <= 0:
@@ -945,20 +1020,24 @@ def _layout_lanes(
     max_rows: int,
     lane_pitch: int,
 ) -> dict[str, int]:
-    """Seat every relay on a signed lane, spending rows on detours before folding them.
+    """Seat each relay on a signed lane, and use rows for detours before they fold.
 
-    The whole fan is weighed against the row budget before the shape is committed: the detour
-    routes (:func:`_detour_nests`) first *nest* — each keeps its own lane just outside the
-    sibling it branches off (:func:`_compress_lanes`), so the sibling's straight run visibly
-    skips the inserted relay rather than passing over its marker. Only when that band would not
-    fit ``max_rows`` at full pitch is a detour *folded* onto its sibling's lane
-    (:func:`_fold_detour`) — weakest first, one at a time, re-laying and re-measuring until the
-    band fits or no detours remain — so the everything-on-one-lane picture is the last resort,
-    never the default. Whatever still overflows after every fold is the honest minimum and is
-    left to the renderer's pitch compression. Mutates ``owner`` in place where it folds.
+    The function measures the full fan against the row budget before it sets the shape.
+    First, the detour routes (:func:`_detour_nests`) *nest*: each keeps its own lane
+    directly outside the sibling that it branches off (:func:`_compress_lanes`). Thus the
+    straight run of the sibling clearly skips the inserted relay, and does not pass over its
+    marker. Only when that band does not fit ``max_rows`` at full pitch does a detour *fold*
+    onto the lane of its sibling (:func:`_fold_detour`). The weakest detour folds first, one
+    at a time, and the function lays out and measures again until the band fits or no
+    detours remain. Thus the picture with all the relays on one lane is the last resort,
+    never the default.
 
-    Returns ``{node: signed_lane}`` for every relay — ``0`` the spine, ``<0`` above, ``>0``
-    below — as :func:`_compress_lanes` yields it.
+    What is still too tall after all the folds is the true minimum, and the pitch
+    compression of the renderer handles it. The function changes ``owner`` in place where it
+    folds.
+
+    Returns ``{node: signed_lane}`` for each relay (``0`` is the spine, ``<0`` is above,
+    ``>0`` is below), as :func:`_compress_lanes` returns it.
     """
     nests = _detour_nests(drawn, seqs, owner)
     while True:
@@ -969,9 +1048,10 @@ def _layout_lanes(
         lanes = max(signed.values(), default=0) - min(signed.values(), default=0) + 1
         if _band_rows(lanes, lane_pitch) <= max_rows:
             return signed
-        # Too tall for the viewport: fold the weakest detour onto its sibling's lane and try
-        # again. A fold the column guard refuses still leaves the nest map (the route reverts
-        # to a plain lane of its own), so the loop always runs out of detours and terminates.
+        # Too tall for the viewport: fold the weakest detour onto the lane of its sibling, and
+        # try again. A fold that the column guard refuses still removes the detour from the
+        # nest map (the route goes back to a plain lane of its own). Thus the loop always runs
+        # out of detours and stops.
         victim = min(nests, key=lambda i: drawn[i].priority)
         _fold_detour(victim, nests.pop(victim), seqs, owner, col_of)
 
@@ -984,49 +1064,55 @@ def _bypass_vias(
     max_rows: int,
     lane_pitch: int,
 ) -> dict[frozenset[str], list[tuple[str, int]]]:
-    """Bend each edge that runs level through a marker it skips — where the column has room.
+    """Bend each edge that goes level through a skipped marker, where the column has space.
 
-    The subset pair is the trigger: beside an ``A → B → C → D`` route lives the shorter
-    ``A → C → D``, and with ``A`` and ``C`` seated on one lane the shorter route's ``A→C``
-    edge is a level run straight through ``B``'s cell — drawn, it reads as *via B*, the one
-    story the evidence rules out (worse still under emphasis, where the subset's highlight
-    repaints the spine's own run and the skipped relay looks selected). Any marker sitting
-    between an edge's ends on their shared lane is by construction a node that edge skips:
-    had the route visited it, the walk would hold ``A→B`` and ``B→C``, never ``A→C``. So each
-    such edge is given a *virtual waypoint* — an unmarked via point in the skipped node's own
-    column, on the innermost lane above or below it that is genuinely free — and the edge arcs
-    through the via instead: out, level for an instant over the skipped marker's shoulder, and
-    back — the same wider-arc grammar a nested detour draws, so a skip reads as a skip.
+    A subset pair is the trigger. Next to an ``A → B → C → D`` route, there is the shorter
+    ``A → C → D``. When ``A`` and ``C`` are on one lane, the ``A→C`` edge of the shorter
+    route is a level run directly through the cell of ``B``. If it is drawn that way, it
+    looks like a route through B, which is the one thing that the evidence excludes. With
+    emphasis, it is worse: the emphasis of the subset colours the run of the spine again, and
+    the skipped relay looks selected.
 
-    Room is measured, never assumed. A lane at that column is free when no marker seats there
-    and no route *runs level* through it across that column (a via on such a lane would peak
-    tangent on that route's line and read as touching it); and a via may open a lane *outside*
-    the current band only while the grown band still fits ``max_rows`` at full pitch
-    (:func:`_band_rows`) — the same budget the detour fold answers to. The innermost free lane
-    wins, the no-growth side breaking a depth tie (above on a dead heat); an edge whose skipped
-    column truly has no room — every lane taken, growth unaffordable — keeps today's level
-    pass-over, the honest last resort. Edges are visited in walk order (a set of string pairs
-    would iterate hash-seeded and let two runs claim a contested lane differently), so the
-    picture is identical on every repaint.
+    Each marker between the ends of an edge on their shared lane is, by construction, a node
+    that the edge skips. If the route went through it, the walk would have ``A→B`` and
+    ``B→C``, never ``A→C``. Thus each such edge gets a *virtual waypoint*: an unmarked point
+    in the column of the skipped node, on the innermost lane above or below it that is
+    really free. The edge goes in an arc through that waypoint instead: out, level for an
+    instant next to the skipped marker, and back. This is the same wider arc that a nested
+    detour draws, so a skip looks like a skip.
 
-    Returns ``{edge pair: [(skipped node, via signed lane), …]}``, vias left to right, in the
-    signed-lane space of ``signed``. The caller folds the via lanes into the band extent — so
-    the vertical sizing affords any lane a bypass opened — and seats each via at the skipped
-    node's exact x on that lane's row. Bidirectional pairs draw as the one honest vertical and
-    are never bent.
+    The space is measured, never assumed. A lane at that column is free when no marker is
+    there and no route goes level through it across that column (a waypoint on such a lane
+    has its peak on the line of that route, and it looks like it touches that line). Also, a
+    waypoint can open a lane outside the current band only while the larger band still fits
+    ``max_rows`` at full pitch (:func:`_band_rows`). This is the same budget that the detour
+    fold uses. The innermost free lane wins. If two lanes have the same depth, the side that
+    does not grow the band wins (and above wins if they are fully equal).
+
+    An edge whose skipped column really has no space (all the lanes are taken, and the band
+    cannot grow) keeps the plain level pass-over, which is the true last resort. The
+    function visits the edges in walk order, so that the picture is identical at each paint.
+    A set of string pairs iterates in an order from the hash seed, and then two runs can
+    give a contested lane to different edges.
+
+    Returns ``{edge pair: [(skipped node, via signed lane), …]}``, with the waypoints from
+    left to right, in the signed-lane space of ``signed``. The caller adds the waypoint lanes
+    to the band extent, so that the vertical size includes each lane that a bypass opened.
+    The caller seats each waypoint at the exact x of the skipped node, on the row of that
+    lane. Bidirectional pairs draw as the one true vertical line, and never bend.
     """
     if not signed:
         return {}
     low = min(signed.values())
     high = max(signed.values())
-    centre = (low + high) / 2.0  # the endpoints' lane — integral only when a lane truly is
+    centre = (low + high) / 2.0  # the endpoint lane (an integer only when it is a real lane)
 
     def lane_of(node: str) -> float:
         return centre if node in (SRC_NODE, DST_NODE) else float(signed[node])
 
     cols = {node: col_of(node) for node in (*signed, SRC_NODE, DST_NODE)}
 
-    # Every drawn edge once, in walk order; the level ones keep their lane and column span.
+    # Each drawn edge one time, in walk order. The level edges keep their lane and column span.
     level: list[tuple[frozenset[str], float, int, int]] = []
     seen: set[frozenset[str]] = set()
     for seq in seqs:
@@ -1039,8 +1125,9 @@ def _bypass_vias(
                 c0, c1 = sorted((cols[u], cols[v]))
                 level.append((key, lane_of(u), c0, c1))
 
-    # What a via must not land on: every seated marker, and every column a level run sweeps
-    # on its own lane (kissing another route's straight run reads as touching it).
+    # Where a waypoint must not go: each seated marker, and each column that a level run
+    # crosses on its own lane (a waypoint next to the straight run of another route looks
+    # like it touches that run).
     taken: set[tuple[int, float]] = {(cols[n], float(seat)) for n, seat in signed.items()}
     taken.add((cols[SRC_NODE], centre))
     taken.add((cols[DST_NODE], centre))
@@ -1055,8 +1142,9 @@ def _bypass_vias(
             key=lambda n: cols[n],
         )
         for m in skipped:
-            # The innermost free lane each side of the skipped node, then the better of the
-            # two: shallower first, the side that keeps the band's height on a depth tie.
+            # The innermost free lane on each side of the skipped node, then the better of
+            # the two: the shallower lane first, and on a depth tie, the side that keeps the
+            # height of the band.
             pick: tuple[int, int, int, int] | None = None
             for side, sign in ((0, -1), (1, 1)):
                 for depth in range(1, high - low + 3):
@@ -1067,12 +1155,12 @@ def _bypass_vias(
                     if grows:
                         n_lanes = max(high, cand) - min(low, cand) + 1
                         if _band_rows(n_lanes, lane_pitch) > max_rows:
-                            break  # deeper on this side only grows further — give it up
+                            break  # deeper on this side only grows more, so stop on this side
                     if pick is None or (depth, grows, side) < pick[:3]:
                         pick = (depth, grows, side, cand)
                     break  # the innermost free lane on this side is found
             if pick is None:
-                continue  # no room anywhere — the level pass-over stands
+                continue  # no space on either side: the level pass-over stays
             via_lane = pick[3]
             taken.add((cols[m], float(via_lane)))
             low, high = min(low, via_lane), max(high, via_lane)
@@ -1086,23 +1174,27 @@ def _assign_lanes(
     owner: dict[str, int],
     best: int,
 ) -> dict[int, int]:
-    """Seat each lane-bearing path on a horizontal lane, best centred, sharing routes close.
+    """Seat each lane-bearing path on a horizontal lane.
 
-    Returns ``{path_index: lane}`` — only for the paths that own at least one node (a subsumed
-    path threads others' markers and needs no lane of its own) — with lanes ``0`` (top) up. The
-    best path is pinned to the centre lane, where it runs straight through the two endpoints as
-    the graph's spine; the rest are ordered to minimise the total *jog* — the vertical distance
-    a path travels to reach a relay another path owns — so routes that share hops sit near each
-    other and a shared relay costs the shortest detour. Small graphs
-    (``≤`` :data:`_MAX_EXACT_LANES` lanes) get the exact best order by search; larger ones fall
-    back to a barycentre heuristic.
+    The best path is in the centre, and routes that share hops are near each other. Returns
+    ``{path_index: lane}`` only for the paths that own at least one node (a subsumed path
+    goes through the markers of other paths, and has no lane of its own). The lanes count
+    from ``0`` (the top) up.
+
+    The best path is pinned to the centre lane, where it goes straight through the two
+    endpoints as the spine of the graph. The other paths are in the order that minimizes
+    the total *jog*: the vertical distance that a path travels to reach a relay that another
+    path owns. Thus routes that share hops are near each other, and a shared relay costs the
+    shortest detour. Small graphs (``≤`` :data:`_MAX_EXACT_LANES` lanes) get the exact best
+    order by a search. Larger graphs use a barycentre heuristic instead.
     """
     bearing = [i for i in range(len(drawn)) if any(owner[node] == i for node in seqs[i])]
     n = len(bearing)
     if n == 1:
         return {bearing[0]: 0}
 
-    # Each bearing path's jog partners: the owning lanes of the hops it borrows from others.
+    # The jog partners of each bearing path: the owner lanes of the hops that it borrows from
+    # other paths.
     shared_owners = {i: [owner[node] for node in seqs[i] if owner[node] != i] for i in bearing}
 
     def jog(lane: dict[int, int]) -> int:
@@ -1132,11 +1224,12 @@ def _barycentre_lanes(
     centre_slot: int,
     shared_owners: dict[int, list[int]],
 ) -> dict[int, int]:
-    """Heuristic lane order for a graph too large to search: barycentre sweeps.
+    """A heuristic lane order for a graph that is too large to search: barycentre sweeps.
 
-    Each path is repeatedly re-seated at the average lane of the paths it shares relays with,
-    with the best path pinned to the centre lane. A handful of sweeps settles sharing routes
-    next to each other — the cheap crossing-minimiser, at the coarser grain of whole lanes.
+    Each sweep seats each path again at the average lane of the paths with which it shares
+    relays, and the best path stays pinned to the centre lane. A small number of sweeps puts
+    routes that share relays next to each other. This is the low-cost crossing minimizer, at
+    the coarser grain of whole lanes.
     """
     lane = {p: float(k) for k, p in enumerate(bearing)}
     lane[best] = float(centre_slot)
@@ -1159,54 +1252,62 @@ def _compress_lanes(
     col_of: Callable[[str], int],
     nests: dict[int, int] | None = None,
 ) -> dict[str, int]:
-    """Squeeze the per-path lanes onto the fewest rows, one node at a time within each column.
+    """Compress the lanes of the paths onto the fewest rows, one node at a time in each column.
 
-    :func:`_assign_lanes` seats each path on a lane of its own, so the band is as tall as the
-    graph has routes — even where the routes only ever run one or two abreast. But a lane is a
-    whole-width row: two routes need distinct rows only in the *columns* where they both carry a
-    node, and endpoint-to-endpoint every route already shares the origin and us. So this pass
-    keeps the best path's relays on the spine (offset ``0``) and slides every other node to the
-    innermost free lane *above or below* it *in its own column*: a column with one node above
-    the spine uses the first row above however many routes fan past it, and only a column where
-    several routes truly stack claims the deeper rows.
+    :func:`_assign_lanes` seats each path on a lane of its own, so the band is as tall as
+    the number of routes in the graph, also where the routes only go one or two side by
+    side. But a lane is a full-width row. Two routes must have distinct rows only in the
+    columns where they both have a node, and from endpoint to endpoint, each route already
+    shares the origin and our node. Thus this pass keeps the relays of the best path on the
+    spine (offset ``0``), and moves each other node to the innermost free lane above or below
+    the spine, in its own column. A column with one node above the spine uses the first row
+    above, however many routes fan past it. Only a column where several routes really stack
+    uses the deeper rows.
 
-    Which **side** each alternative takes is not inherited from its jog-order lane — that seats
-    routes sharing a relay *adjacent*, which piles column-sharing routes onto the *same* flank
-    and leaves the band as tall as one flank's deepest stack plus the other's, even when no
-    single column holds more than two nodes. Instead :func:`_balance_sides` 2-colours the
-    alternatives to flatten the deeper flank (the spine may lean off dead-centre to reach the
-    band's middle, which is fine), so a five-route fan through at most two nodes per column draws
-    three lanes — spine plus one flank each side — not five. The best path's relays still hold
-    the straight spine; the returned lanes are signed offsets from it (``<0`` above, ``>0``
-    below), which the caller shifts to a ``0``-based band.
+    The **side** that each alternative takes does not come from its jog-order lane. That
+    order seats routes that share a relay next to each other. Thus it puts routes that share
+    a column onto the same flank, and the band is as tall as the deepest stack of one flank
+    plus that of the other flank, also when no column holds more than two nodes.
 
-    A *nested* detour (``nests``, from :func:`_detour_nests`) is held a whole lane **outside**
-    the flank sibling it branches off: its route is pinned to the sibling's side and its own
-    relays take a depth *floor* one past the sibling's, so the sibling's straight run — which
-    sweeps through the detour relay's column on its own lane — never passes over the relay's
-    marker. The detour then reads as the wider arc it is: out past the sibling, through its
-    inserted relay, and back in to the shared node. (A detour off the *spine* needs no floor —
-    the first flank row is already outside lane ``0``.)
+    Instead, :func:`_balance_sides` 2-colours the alternatives to make the deeper flank
+    flatter. (The spine can lean off the exact centre to reach the middle of the band, and
+    that is acceptable.) Thus a fan of five routes, with a maximum of two nodes in each
+    column, draws three lanes (the spine plus one flank on each side), not five. The relays
+    of the best path still hold the straight spine. The returned lanes are signed offsets
+    from it (``<0`` above, ``>0`` below), which the caller shifts to a band that starts at
+    ``0``.
 
-    Returns ``{node: signed_lane}`` for every relay (endpoints are placed on the band centre by
-    the caller, not here). A node a column holds alone off the spine always lands on ``±1`` —
-    or ``±2`` when it is a nested detour's — so a sparse multi-route graph collapses to the
-    three-lane spine-and-two-flanks it really is.
+    A *nested* detour (``nests``, from :func:`_detour_nests`) stays a full lane **outside**
+    the flank sibling that it branches off. Its route is pinned to the side of the sibling,
+    and its own relays get a depth *floor* one more than the floor of the sibling. The
+    straight run of the sibling crosses the column of the detour relay on its own lane.
+    Because of the floor, that run never passes over the marker of the relay. Then the
+    detour shows as the wider arc that it is: out past the sibling, through its inserted
+    relay, and back in to the shared node. (A floor is not necessary for a detour off the
+    spine, because the first flank row is already outside lane ``0``.)
+
+    Returns ``{node: signed_lane}`` for each relay (the caller puts the endpoints on the
+    centre of the band, not this function). A node that is alone off the spine in its
+    column always goes on ``±1`` (or on ``±2`` when it belongs to a nested detour). Thus a
+    sparse graph with many routes collapses to what it really is: three lanes, with the
+    spine and two flanks.
     """
     nests = nests or {}
     best_lane = lane_of_path[best]
     relays = [node for node in ordered_nodes if node not in (SRC_NODE, DST_NODE)]
     spine = {node for node in relays if owner[node] == best}
     off_spine = [node for node in relays if node not in spine]
-    # The non-best bearing routes, in the jog-order _assign_lanes settled (each route keyed by
-    # its signed lane relative to best), so ties fall to the arrangement that already reads clean.
+    # The bearing routes other than the best route, in the jog order that _assign_lanes
+    # settled (each route keyed by its signed lane relative to the best route). Thus a tie
+    # goes to the arrangement that is already clean.
     routes = sorted(
         {owner[node] for node in off_spine},
         key=lambda r: (lane_of_path[r] - best_lane, r),
     )
     cols_of_route = {r: {col_of(node) for node in off_spine if owner[node] == r} for r in routes}
-    # A nested detour's own relays sit a lane outside its sibling's (the floor), on the same
-    # flank (the tie); a detour whose sibling is the spine is just an ordinary flank route.
+    # The relays of a nested detour are one lane outside the relays of its sibling (the
+    # floor), on the same flank (the tie). A detour whose sibling is the spine is an ordinary
+    # flank route.
     floor = {r: 1 for r in routes}
     tie: dict[int, int] = {}
     for d, s in nests.items():
@@ -1216,7 +1317,7 @@ def _compress_lanes(
     orig_side = {r: (1 if lane_of_path[r] - best_lane > 0 else -1) for r in routes}
     side = _balance_sides(routes, cols_of_route, orig_side, floor, tie)
 
-    rank = {r: i for i, r in enumerate(routes)}  # nearest-to-spine order within a flank
+    rank = {r: i for i, r in enumerate(routes)}  # nearest to the spine first, in a flank
     columns: dict[int, list[str]] = {}
     for node in off_spine:
         columns.setdefault(col_of(node), []).append(node)
@@ -1251,33 +1352,39 @@ def _balance_sides(
 ) -> dict[int, int]:
     """Choose a flank (``-1`` above / ``+1`` below the spine) for each alternative route.
 
-    The band a :func:`_compress_lanes` pack draws is ``(deepest stack above) + (deepest stack
-    below) + 1``: two alternatives need distinct rows only where they share a column, so a flank
-    is only as deep as its most-crowded column. The jog order that seats sharing routes adjacent
-    puts them on the *same* flank, which can stack one flank two deep while the other sits empty
-    — a needlessly tall band. So the routes are 2-coloured, exhaustively while they are few
-    (:data:`_MAX_BALANCE_ROUTES`; past it the jog-order sides stand):
+    The band that a :func:`_compress_lanes` pack draws is ``(deepest stack above) + (deepest
+    stack below) + 1``. Two alternatives must have distinct rows only where they share a
+    column, so a flank is only as deep as its most crowded column. The jog order seats routes
+    that share relays next to each other, and thus puts them on the same flank. Then one
+    flank can stack two deep while the other flank is empty, and the band is taller than
+    necessary. Thus the routes are 2-coloured, by exhaustive search while there are few of
+    them (:data:`_MAX_BALANCE_ROUTES`, past which the jog-order sides stay):
 
-    * a nested detour is pinned to its sibling's flank (``tie``) — nesting outside the sibling
-      is the point, so a colouring that strands the pair apart is not a candidate — and a
-      column's stack is measured with the detour's depth *floor*, so its outside row counts;
-    * never above the **ceiling** the jog order itself draws — balancing may flatten a band, never
-      grow one. A column that genuinely stacks three nodes forces one flank two deep whatever the
-      colouring, and filling the other flank to match it (prettier, but taller) is refused;
-    * under that ceiling, **flatten the deeper flank**, so a fan piled two deep on one side while
-      the other is empty splits across both and the band shrinks;
-    * then even the two flanks, then keep the jog-order side. So a graph the jog order already
-      draws flat is left exactly as it is — its lower-band one-sided alternative has the *same*
-      deepest flank, so the balance tie-break holds it airy rather than lopsiding it a row shorter
-      — while a graph with a needlessly deep flank is the one that actually moves.
+    * A nested detour is pinned to the flank of its sibling (``tie``). The purpose is to
+      nest outside the sibling, so a colouring that puts the pair on different flanks is not
+      a candidate. The stack of a column is measured with the depth *floor* of the detour,
+      so its outside row counts.
+    * Never above the **ceiling** that the jog order itself draws. The balance can make a
+      band flatter, but never taller. A column that really stacks three nodes makes one
+      flank two deep with any colouring. A colouring that fills the other flank to the same
+      depth (better to look at, but taller) is refused.
+    * Below that ceiling, **make the deeper flank flatter**. Thus a fan that is two deep on
+      one side, while the other side is empty, splits across the two sides, and the band
+      becomes smaller.
+    * Then make the two flanks equal, and then keep the jog-order side. Thus a graph that
+      the jog order already draws flat stays exactly as it is. An alternative that puts its
+      routes on one side gives a lower band, but it has the same deepest flank. Thus the
+      balance tie-break keeps the open shape, instead of a lopsided shape that is one row
+      shorter. Only a graph with a flank that is deeper than necessary changes.
 
     Returns ``{route_index: side}``.
     """
     if not routes:
         return {}
-    # The jog-order baseline, with each nested detour pulled onto its sibling's flank — the
-    # tie-respecting shape the ceiling and the agreement tie-break are both measured against
-    # (and the one assignment guaranteed to survive its own ceiling).
+    # The jog-order baseline, with each nested detour moved onto the flank of its sibling.
+    # This shape obeys the ties, and the ceiling and the agreement tie-break are both
+    # measured against it (it is also the one assignment that is sure to pass its own
+    # ceiling).
     forced = dict(orig_side)
     for d, s in tie.items():
         forced[d] = forced[s]
@@ -1293,8 +1400,8 @@ def _balance_sides(
                     for col in cols_of_route[r]:
                         cols.setdefault(col, []).append(r)
             for members in cols.values():
-                # The same innermost-out stacking the pack applies: floors push a nested
-                # detour's row outward even where the column holds nothing else.
+                # The same stack order from the inside out as the pack uses: floors push the
+                # row of a nested detour outward, also where the column holds nothing else.
                 depth = 0
                 for f in sorted(floor[r] for r in members):
                     depth = max(depth + 1, f)
@@ -1302,7 +1409,7 @@ def _balance_sides(
         return deep[-1], deep[1]
 
     orig_above, orig_below = flanks(forced)
-    ceiling = orig_above + orig_below  # the jog order's band height − 1; never draw taller
+    ceiling = orig_above + orig_below  # the band height of the jog order − 1, never taller
 
     best_assign: dict[int, int] | None = None
     best_key: tuple[int, int, int] | None = None
@@ -1311,13 +1418,13 @@ def _balance_sides(
         if any(assign[d] != assign[s] for d, s in tie.items()):  # a nest split off its sibling
             continue
         deep_above, deep_below = flanks(assign)
-        if deep_above + deep_below > ceiling:  # taller than the jog order would draw — reject
+        if deep_above + deep_below > ceiling:  # taller than the jog order draws, so reject it
             continue
         agree = sum(1 for r in routes if assign[r] == forced[r])
         key = (max(deep_above, deep_below), abs(deep_above - deep_below), -agree)
         if best_key is None or key < best_key:
             best_key, best_assign = key, assign
-    assert best_assign is not None  # `forced` honours the ties and meets its own ceiling
+    assert best_assign is not None  # `forced` obeys the ties and meets its own ceiling
     return best_assign
 
 
@@ -1331,17 +1438,18 @@ def _place_labels(
     label_of: LabelOf,
     label_rgb_of: LabelRgbOf,
 ) -> None:
-    """Write each node's label above or below its marker, clear of the lines if it can.
+    """Write the label of each node above or below its marker, away from the lines if possible.
 
-    Endpoints first, then relays down the lanes, so the named ends win any contest for a
-    cell. Each label is tried on the side away from the graph's middle first (spreading the
-    text outward off the busy centre), preferring a row the drawn lines don't already occupy.
-    Any node hard against a canvas edge — an endpoint by construction, or a relay a balanced
-    rank pins near the origin or us — slides its centre anchor inward far enough for the whole
-    name to land, since a centred label overhanging the edge places nothing and would leave the
-    marker silently unlabelled. When both stacked rows are blocked the label falls back to
-    sitting beside its marker. A name is only ever shortened when it is wider than the entire
-    canvas.
+    The endpoints come first, then the relays down the lanes, so that the named ends win any
+    contest for a cell. The function tries each label first on the side away from the middle
+    of the graph (to spread the text outward, off the busy centre). It prefers a row that the
+    drawn lines do not already use. A node at a canvas edge moves its centre anchor inward
+    far enough for the full name to fit. Such a node is an endpoint by construction, or a
+    relay that a balanced rank pins near the origin or our node.
+
+    A centred label that goes past the edge places nothing, and then the marker has no
+    label, with no warning. When the two stacked rows are blocked, the label goes next to
+    its marker instead. A name is shortened only when it is wider than the full canvas.
     """
     endpoints = [n for n in (DST_NODE, SRC_NODE) if n in pos]
     relays = sorted(
@@ -1356,9 +1464,10 @@ def _place_labels(
             label = label[: max(1, width - 1)] + "…"
         rgb = label_rgb_of(node)
         x, y = pos[node]
-        # Clamp the centre cell so the whole label fits between the canvas edges: a marker near
-        # an edge would otherwise centre its name off-canvas, place nothing, and be dropped. A
-        # marker with room to spare keeps its true centre (the clamp is a no-op there).
+        # Clamp the centre cell so that the full label fits between the canvas edges. Without
+        # the clamp, a marker near an edge centres its name off the canvas, places nothing,
+        # and loses its label. A marker with enough space keeps its true centre (there, the
+        # clamp does nothing).
         half = len(label) // 2
         cx = min(max(x >> 1, half), max(half, width - (len(label) - half)))
         anchor_x = cx * 2
@@ -1370,7 +1479,7 @@ def _place_labels(
             continue
         if any(canvas.place_label(anchor_x, sy, label, rgb, bold=True) for sy in rows_out):
             continue
-        # Both rows blocked: sit the label beside the marker (clear of the drawn lines if it
-        # can, else over them) rather than drop it.
+        # The two rows are blocked: put the label next to the marker (away from the drawn lines
+        # if possible, else over them), instead of no label.
         if not canvas.marker_label(x, y, label, rgb, avoid_dots=True):
             canvas.marker_label(x, y, label, rgb)
