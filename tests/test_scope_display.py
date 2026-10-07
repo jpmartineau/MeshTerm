@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Where a flood's scope is shown: the packet viewer, the live feed, message paths, monitor.
+"""The places where the scope of a flood is shown.
 
-The scope itself — the maths, the store, the history columns — is pinned in
-``test_regions.py``; these tests are about the surfaces that state it, and the one rule
-they all share: a flood says which region it was sent into (or that it was unscoped, or
-scoped to a region nobody here has named), and a direct frame says nothing at all.
+These are the packet viewer, the live feed, message paths, and the monitor.
+``test_regions.py`` tests the scope itself: the maths, the store, and the history columns.
+These tests are about the screens that show the scope. All these screens follow one rule.
+A flood shows the region that it was sent into. Or it shows that it was unscoped, or that
+it was scoped to a region that nobody here has named. A direct packet shows no scope.
 """
 
 from __future__ import annotations
@@ -43,12 +44,12 @@ from meshterm.ui.renderers import JsonRenderer, PlainRenderer
 from tests.conftest import plain as _plain
 from tests.test_message_paths import SECRET, _grp_txt_raw
 
-#: An arbitrary channel-text payload to scope (the code is over it, not over its meaning).
+#: A channel-text payload, chosen at random, to scope. The code uses the bytes, not the meaning.
 _PAYLOAD = bytes.fromhex("a71c2d00112233445566778899aabbccddeeff")
 
 
 def _scoped(region: str, payload: bytes = _PAYLOAD, **extra) -> dict:
-    """An RX-log frame's raw payload for a channel text flooded under ``region``."""
+    """The raw payload of an RX-log packet for a channel text that is flooded in ``region``."""
     code = transport_code(region_key(region), scope_body(5, payload))
     return {
         "route_typename": "TC_FLOOD",
@@ -61,7 +62,7 @@ def _scoped(region: str, payload: bytes = _PAYLOAD, **extra) -> dict:
 
 
 def _code(region: str) -> str:
-    """The 4-hex code a :func:`_scoped` frame carries."""
+    """The 4-hex code that a :func:`_scoped` packet has."""
     return f"{transport_code(region_key(region), scope_body(5, _PAYLOAD)):04x}"
 
 
@@ -70,7 +71,10 @@ _DIRECT = {"route_typename": "DIRECT", "payload_typename": "TEXT_MSG", "dest_has
 
 
 def _knows(*names: str):  # noqa: ANN202 - a scope reader over a fixed set of names
-    """A ``scope_of`` that knows exactly ``names`` — the region store's answer, in small."""
+    """A ``scope_of`` that knows exactly ``names``.
+
+    It is a small version of the answer of the region store.
+    """
     return lambda raw: frame_scope(raw, names) if isinstance(raw, dict) else None
 
 
@@ -79,7 +83,10 @@ def _stripped(lines: list[str]) -> list[str]:
 
 
 def _col(line: str, needle: str) -> int:
-    """The display column (cells, not characters — the class icon is two) of ``needle``."""
+    """The display column of ``needle``, in cells and not in characters.
+
+    The class icon is two cells.
+    """
     return cell_len(line[: line.index(needle)])
 
 
@@ -87,7 +94,10 @@ def _col(line: str, needle: str) -> int:
 
 
 def _card_row(raw: dict, label: str, scope_of=None) -> str | None:  # noqa: ANN001
-    """The value of the viewer's ``label`` row for one frame, as plain text (``None``: absent)."""
+    """The value of the ``label`` row of the viewer for one packet, as plain text.
+
+    The function returns ``None`` when the row is absent.
+    """
     entry = PacketEntry(when=utcnow(), kind="packet", path="3d", raw=raw)
     body = _stripped(
         PacketViewer([entry], 0, resolve=lambda h: "", scope_of=scope_of).render_body(80)
@@ -97,18 +107,22 @@ def _card_row(raw: dict, label: str, scope_of=None) -> str | None:  # noqa: ANN0
 
 
 def _has_scope_row(text: str, value: str) -> bool:
-    """Whether a rendered card carries a ``scope`` row reading ``value``."""
+    """Whether a rendered card has a ``scope`` row with the text ``value``."""
     return re.search(rf"^scope\s+{re.escape(value)}\s*$", text, re.M) is not None
 
 
 def test_the_viewer_names_the_region_a_flood_was_scoped_to() -> None:
-    """``tc flood`` said *how* and never *where*: route says flood, its own row the region."""
+    """The viewer names the region that a flood was scoped to.
+
+    ``tc flood`` showed how the packet went, and never where. Now the route row says flood,
+    and a separate row says the region.
+    """
     assert _card_row(_scoped("harbour"), "route", _knows("harbour")) == "flood"
     assert _card_row(_scoped("harbour"), "scope", _knows("harbour")) == "harbour"
 
 
 def test_the_viewer_shows_an_unnamed_scopes_code_and_a_plain_flood_as_unscoped() -> None:
-    """A scope no known name reproduces keeps its code; a plain flood reads unscoped."""
+    """A scope that no known name gives keeps its code. A plain flood shows unscoped."""
     assert _card_row(_scoped("elsewhere"), "scope", _knows("harbour")) == (
         f"unknown region · code {_code('elsewhere')}"
     )
@@ -116,13 +130,20 @@ def test_the_viewer_shows_an_unnamed_scopes_code_and_a_plain_flood_as_unscoped()
 
 
 def test_the_viewer_without_a_store_still_tells_scoped_from_unscoped() -> None:
-    """No names at hand is less of the truth, never a wrong one: the code stands in."""
+    """If no names are known, the viewer shows less of the truth, and never a wrong value.
+
+    The code replaces the name with the code.
+    """
     assert _card_row(_scoped("harbour"), "scope") == f"unknown region · code {_code('harbour')}"
     assert _card_row(_FLOOD, "scope") == "unscoped"
 
 
 def test_the_viewer_never_gives_a_direct_frame_a_scope() -> None:
-    """A repeater never region-filters a direct packet: its route word alone, no scope row."""
+    """The viewer gives no scope to a direct packet.
+
+    A repeater never filters a direct packet by region. The viewer shows the route word
+    only, and no scope row.
+    """
     assert _card_row(_DIRECT, "route", _knows("harbour")) == "direct"
     assert _card_row(_DIRECT, "scope", _knows("harbour")) is None
     tc_direct = {**_DIRECT, "route_typename": "TC_DIRECT"}
@@ -131,7 +152,10 @@ def test_the_viewer_never_gives_a_direct_frame_a_scope() -> None:
 
 
 def test_the_viewer_keeps_the_scope_body_out_of_the_raw_dump(tmp_path: Path) -> None:
-    """The restored HMAC input is plumbing the route row already spoke for."""
+    """The viewer keeps the scope body out of the raw dump.
+
+    The restored HMAC input is an internal detail, and the route row already shows it.
+    """
     raw = _scoped("harbour")
     restored = {k: v for k, v in raw.items() if k not in ("payload_type", "pkt_payload")}
     restored["scope_body"] = scope_body(5, _PAYLOAD).hex()
@@ -143,12 +167,16 @@ def test_the_viewer_keeps_the_scope_body_out_of_the_raw_dump(tmp_path: Path) -> 
             scope_of=_knows("harbour"),
         ).render_body(80)
     )
-    assert _has_scope_row(body, "harbour")  # a replayed frame resolves exactly as a live one
+    assert _has_scope_row(body, "harbour")  # a replayed packet resolves as a live packet does
     assert "scope_body" not in body
 
 
 def test_the_viewer_renames_a_scope_the_moment_its_region_is_learned(tmp_path: Path) -> None:
-    """The card is memoized, but not past a name arriving: the scope is in the cache key."""
+    """The viewer renames a scope when it learns its region.
+
+    The card is cached, but the cache does not hold the old card when a name arrives,
+    because the scope is part of the cache key.
+    """
     store = RegionStore(tmp_path / "regions.json")
     entry = PacketEntry(when=utcnow(), kind="packet", path="", raw=_scoped("harbour"))
     viewer = PacketViewer([entry], 0, resolve=lambda h: "", scope_of=store.scope_of)
@@ -166,7 +194,7 @@ class _Session:
 
 
 def _feed(*raws: dict) -> LiveFeedScreen:
-    """A live feed over one packet row per frame, oldest first, knowing ``harbour``."""
+    """A live feed with one packet row for each packet, oldest first. The feed knows ``harbour``."""
     screen = LiveFeedScreen(
         session=_Session(),
         resolve=lambda h: "",
@@ -181,7 +209,10 @@ def _feed(*raws: dict) -> LiveFeedScreen:
 
 
 def test_the_feed_scope_lane_sits_between_subject_and_readings() -> None:
-    """A plain flood is a muted dash; a direct frame, which has no scope, leaves it blank."""
+    """The scope lane of the feed is between the subject and the readings.
+
+    A plain flood has a muted dash. A direct packet has no scope, so its lane is blank.
+    """
     screen = _feed(_DIRECT, _FLOOD, _scoped("elsewhere"), _scoped("harbour"))
     header, *rows = _stripped(screen.render_body(100))
     lanes = header.split()
@@ -190,15 +221,16 @@ def test_the_feed_scope_lane_sits_between_subject_and_readings() -> None:
     assert _col(rows[0], "harbour") == col
     assert _col(rows[1], f"? {_code('elsewhere')}") == col
     assert _col(rows[2], " - ") + 1 == col
-    assert "-" not in rows[3].replace("-9", "")  # the direct frame's lane is blank
+    assert "-" not in rows[3].replace("-9", "")  # the lane of the direct packet is blank
     assert all(row.rstrip().endswith("dBm") for row in rows)
 
 
 def test_the_feed_never_collapses_a_lane() -> None:
-    """The class name and the scope are drawn at every width; a narrow row scrolls instead.
+    """The feed never collapses a lane.
 
-    Nothing gives way: at 72 columns (a 68-cell body) the readings run past the edge, and
-    the highlighted row's ←→ is what reaches them.
+    The feed draws the class name and the scope at each width. A narrow row scrolls
+    instead. No lane gives way: at 72 columns (a body of 68 cells) the readings go past the
+    edge, and the ←→ keys on the highlighted row reach them.
     """
     screen = _feed(_scoped("harbour"))
     for width in (68, 72, 80, 100):
@@ -207,11 +239,15 @@ def test_the_feed_never_collapses_a_lane() -> None:
         assert _col(header, "SCOPE") == _col(row, "harbour"), width
     screen._selected = 0  # noqa: SLF001
     screen.render_body(68)
-    assert screen._hmax > 0  # noqa: SLF001 - the row is wider than the body: ←→ reaches it
+    assert screen._hmax > 0  # noqa: SLF001 - the row is wider than the body, and ←→ reaches it
 
 
 def test_the_picocalc_feed_names_the_class_without_an_icon() -> None:
-    """On the console the class icon is a one-glyph stand-in; the name alone says it."""
+    """The feed on the PicoCalc names the class without an icon.
+
+    On the console, the class icon is a substitute of one glyph. The name alone shows the
+    class.
+    """
     from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 
     set_platform(PICOCALC_LYRA)
@@ -225,7 +261,10 @@ def test_the_picocalc_feed_names_the_class_without_an_icon() -> None:
 
 
 def test_the_feed_hands_its_scope_reader_to_the_viewer() -> None:
-    """Enter opens a card that names the same region the row did."""
+    """The feed gives its scope reader to the viewer.
+
+    Thus Enter opens a card with the same region as the row.
+    """
     screen = _feed(_scoped("harbour"))
     opened: list = []
     screen._session.run_screen = lambda viewer: opened.append(viewer)  # noqa: SLF001
@@ -238,10 +277,11 @@ def test_the_feed_hands_its_scope_reader_to_the_viewer() -> None:
 
 
 def test_a_messages_scope_is_read_once_off_its_arrivals() -> None:
-    """Every copy carries the sender's code, so the first flooded copy answers.
+    """The scope of a message is read one time from its arrivals.
 
-    A named reading beats an unnamed one, any scope beats unscoped, and direct copies
-    have nothing to say.
+    Each copy has the code of the sender, so the first flooded copy gives the answer. A
+    reading with a name wins over a reading with no name. Any scope wins over unscoped.
+    Direct copies give no scope.
     """
     scope_of = _knows("harbour")
     when = utcnow()
@@ -261,7 +301,11 @@ def test_a_messages_scope_is_read_once_off_its_arrivals() -> None:
 
 
 def test_a_stored_scoped_message_resolves_through_its_arrivals(tmp_path: Path) -> None:
-    """History keeps what resolution needs, the matcher keeps the frame, collapse keeps it."""
+    """A stored scoped message resolves through its arrivals.
+
+    The history keeps what the resolution needs. The matcher keeps the packet, and the
+    collapse keeps it too.
+    """
     repo = Repository(tmp_path / "test.db")
     run = repo.start_run("monitor", {}, None)
     now = utcnow()
@@ -305,7 +349,11 @@ def _paths_screen(scope: Scope | None) -> MessagePathsScreen:
 
 
 def test_the_paths_dialog_states_the_scope_once_in_its_title() -> None:
-    """A status atom on the title, in the viewer's words — and none for a direct message."""
+    """The paths dialog states the scope one time, in its title.
+
+    The scope is a status atom on the title, in the words of the viewer. A direct message
+    has no atom.
+    """
     assert _paths_screen(Scope("scoped", "harbour", "3fa1")).title == (
         "Message paths · scope harbour"
     )
@@ -314,7 +362,7 @@ def test_the_paths_dialog_states_the_scope_once_in_its_title() -> None:
     )
     assert _paths_screen(UNSCOPED).title == "Message paths · unscoped"
     assert _paths_screen(None).title == "Message paths"
-    # …and never per arrival row: the body does not repeat it.
+    # The title does not repeat for each arrival row: the body does not repeat the scope.
     body = _plain(_paths_screen(Scope("scoped", "harbour", "3fa1")).render_body(72))
     assert "harbour" not in body
 
@@ -346,10 +394,11 @@ def _record(scope: Scope | None, name: str) -> dict:
 
 
 def test_monitor_streams_the_scope_before_the_name() -> None:
-    """A pinned SCOPE lane on the plain face, and NAME still last.
+    """The monitor stream has the scope before the name.
 
-    A long region overruns its lane and pushes the row right, so the one field built to be
-    pushed is the only one it can push.
+    The plain face has a fixed SCOPE lane, and NAME is still last. A long region goes past
+    its lane and pushes the row to the right. Thus the region can push only the one field
+    that is made to be pushed.
     """
     text = _capture(
         PlainRenderer,
@@ -380,7 +429,7 @@ def test_monitor_streams_the_scope_before_the_name() -> None:
 
 
 def test_monitor_json_carries_the_scope_object_or_null() -> None:
-    """The document speaks the shared scope shape; a frame with none is ``null``."""
+    """The document uses the shared scope shape. A packet with no scope has ``null``."""
     text = _capture(
         JsonRenderer, [_record(Scope("scoped", "harbour", "3fa1"), "Alice"), _record(None, "Bob")]
     )
@@ -394,7 +443,7 @@ def test_monitor_json_carries_the_scope_object_or_null() -> None:
 
 
 def _channel_header(scopes: dict[int, str]) -> str:
-    """The Channels list's column header, with the given slots scoped."""
+    """The column header of the Channels list, with a scope for the given slots."""
     from meshterm.core.channel_probe import ChannelSlot
     from meshterm.ui.channels import _LiveStats, _menu_items
     from meshterm.ui.tui.select import SelectScreen
@@ -410,7 +459,10 @@ def _channel_header(scopes: dict[int, str]) -> str:
 
 
 def test_the_channel_list_draws_scope_only_when_a_channel_has_one() -> None:
-    """A column of blanks says nothing; one scoped channel brings the lane back."""
+    """The channel list draws the scope lane only when a channel has a scope.
+
+    A column of blanks has no information. One scoped channel brings the lane back.
+    """
     assert _channel_header({}).split() == ["SLOT", "CHANNEL", "NEW", "LAST", "MSGS", "ACTIVITY"]
     assert _channel_header({1: "harbour"}).split() == [
         "SLOT",
@@ -427,7 +479,10 @@ def test_the_channel_list_draws_scope_only_when_a_channel_has_one() -> None:
 
 
 def test_a_decoded_messages_card_reads_its_scope_off_its_logged_copies(tmp_path: Path) -> None:
-    """A 💬 row carries no frame; its card finds the flooded copy in the log and names it."""
+    """The card of a decoded message reads its scope from its logged copies.
+
+    A 💬 row has no packet. Its card finds the flooded copy in the log and names the scope.
+    """
     from types import SimpleNamespace
 
     from meshterm.persistence.repository import Repository
@@ -454,13 +509,13 @@ def test_a_decoded_messages_card_reads_its_scope_off_its_logged_copies(tmp_path:
     read = message_scope_reader(ctx, {1: ("#general", SECRET)})
 
     entry = PacketEntry(when=when, kind="message", channel=1, text=text)
-    assert read(entry).state == "unknown"  # the copy is found; its region not yet named
+    assert read(entry).state == "unknown"  # the copy is found, but its region has no name yet
     store.learn("harbour", "typed")
-    assert read(entry).region == "harbour"  # named the moment the region is known
+    assert read(entry).region == "harbour"  # the name appears when the region is known
 
     viewer = PacketViewer([entry], 0, resolve=lambda h: "", message_scope=read)
     assert _has_scope_row(_plain(viewer.render_body(80)), "harbour")
     other = PacketEntry(when=when, kind="message", channel=1, text="Bob: something else")
-    assert read(other) is None  # no copy of it in the log: no scope row, no guess
+    assert read(other) is None  # no copy of it in the log, so no scope row and no guess
     assert read(PacketEntry(when=when, kind="message", channel=9, text=text)) is None
     repo.close()

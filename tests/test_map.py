@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the node map: MVT decoding, projection, the braille canvas, and the tool.
 
-The vector-tile decoder and geometry are exercised against a real cached tile fixture
-(``tests/fixtures/tile_14_4843_5861.mvt``, central Montréal) so the parsing is verified end
-to end without the network; the projection, canvas, and compositor are pure; the tool runs
-against the :class:`MockDevice` simulator with the basemap disabled (no network in tests).
+The tests use a real cached tile fixture (``tests/fixtures/tile_14_4843_5861.mvt``,
+central Montréal) for the vector-tile decoder and the geometry. Thus the tests check the
+parsing from end to end without the network. The projection, the canvas, and the
+compositor are pure. The tool runs against the :class:`MockDevice` simulator with the
+basemap off (the tests have no network).
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ from meshterm.services.basemap import TILE_RETRY_SECONDS as _TILE_RETRY
 from meshterm.tools.map import MapTool
 from meshterm.ui.map_screen import _PAN_DIRS, _PAN_STEP
 from meshterm.ui.mapcanvas import MapCanvas, parse_hex
-from tests.conftest import plain as _plain  # THE strip-and-join screen reader
+from tests.conftest import plain as _plain  # the only strip-and-join screen reader
 
 if TYPE_CHECKING:
     from meshterm.ui.map_screen import MapScreen
@@ -45,16 +46,16 @@ _FIXTURE = Path(__file__).parent / "fixtures" / "tile_14_4843_5861.mvt"
 
 
 def test_decode_tile_reads_expected_layers() -> None:
-    """The real fixture decodes into the OpenMapTiles layers the map relies on."""
+    """The real fixture decodes into the OpenMapTiles layers that the map uses."""
     layers = {layer.name: layer for layer in decode_tile(_FIXTURE.read_bytes())}
     for expected in ("transportation", "transportation_name", "water", "waterway", "place"):
         assert expected in layers, expected
     assert layers["transportation"].extent == 4096
-    assert layers["transportation"].features  # roads were decoded
+    assert layers["transportation"].features  # the decoder decoded roads
 
 
 def test_decode_tile_resolves_names_and_geometry() -> None:
-    """Street and place features carry resolved names and non-trivial geometry."""
+    """Street and place features have resolved names and geometry that is not trivial."""
     layers = {layer.name: layer for layer in decode_tile(_FIXTURE.read_bytes())}
     streets = [f.name for f in layers["transportation_name"].features if f.name]
     assert any("Rue" in s or "Avenue" in s or "Av." in s for s in streets)
@@ -62,7 +63,7 @@ def test_decode_tile_resolves_names_and_geometry() -> None:
     places = {f.name: f.get("class") for f in layers["place"].features if f.name}
     assert "Montréal" in places and places["Montréal"] == "city"
 
-    # A road is a line with at least two points; water is a polygon.
+    # A road is a line with at least two points. Water is a polygon.
     assert any(
         f.geom_type == GEOM_LINE and len(f.rings[0]) >= 2 for f in layers["transportation"].features
     )
@@ -70,15 +71,15 @@ def test_decode_tile_resolves_names_and_geometry() -> None:
 
 
 def test_decode_tile_handles_empty_input() -> None:
-    """An empty byte string decodes to no layers rather than raising."""
+    """An empty byte string decodes to no layers. It does not raise."""
     assert decode_tile(b"") == []
 
 
 def test_decode_tile_filter_keeps_the_whole_tile_visible() -> None:
-    """A narrowed decode still names every layer — it only skips their features.
+    """A narrowed decode still names each layer. It only skips their features.
 
-    The tile source decides whether a cache entry is real by whether it parsed into
-    layers, so narrowing must never make a tile look like it holds nothing.
+    The tile source decides if a cache entry is real by checking if it parsed into layers.
+    Thus a narrowed decode must not make a tile look as if it has nothing.
     """
     raw = _FIXTURE.read_bytes()
     full = decode_tile(raw)
@@ -87,16 +88,16 @@ def test_decode_tile_filter_keeps_the_whole_tile_visible() -> None:
     assert [layer.name for layer in narrow] == [layer.name for layer in full]
     assert all(layer.extent == 4096 for layer in narrow)
     picked = {layer.name: layer for layer in narrow}
-    assert picked["water"].features  # the one we asked for was decoded
-    assert not picked["building"].features  # the rest were skipped, not dropped
+    assert picked["water"].features  # the decoder decoded the layer that the test asked for
+    assert not picked["building"].features  # the decoder skipped the others, but kept the names
 
 
 def test_decode_tile_filter_is_invisible_to_the_renderer() -> None:
-    """Narrowing to ``DRAWN_LAYERS`` draws exactly the map a full decode draws.
+    """A decode narrowed to ``DRAWN_LAYERS`` draws the same map as a full decode.
 
-    This is the anti-drift guard: if ``_draw_tile`` grows a lookup for a layer that
-    isn't in ``DRAWN_LAYERS``, that layer arrives featureless and the rendered output
-    diverges here.
+    This is the guard against drift. Suppose ``_draw_tile`` starts to look up a layer that
+    is not in ``DRAWN_LAYERS``. Then that layer arrives with no features, and the rendered
+    output is different here.
     """
     from meshterm.ui.map_render import DRAWN_LAYERS, MapMarker, render_map
 
@@ -111,7 +112,7 @@ def test_decode_tile_filter_is_invisible_to_the_renderer() -> None:
 
 
 def test_decode_tile_filter_skips_the_layers_the_map_never_draws() -> None:
-    """The layers left undecoded are the ones that made a tile expensive."""
+    """The layers that the decoder does not decode are the layers that made a tile expensive."""
     from meshterm.ui.map_render import DRAWN_LAYERS
 
     drawn = decode_tile(_FIXTURE.read_bytes(), layers=DRAWN_LAYERS)
@@ -125,7 +126,7 @@ def test_decode_tile_filter_skips_the_layers_the_map_never_draws() -> None:
 
 
 def _building_dots(zoom: int) -> int:
-    """Lit cells in a render of the fixture's buildings alone, at ``zoom``."""
+    """The lit cells in a render of only the buildings of the fixture, at ``zoom``."""
     from meshterm.ui.map_render import render_map
 
     layers = decode_tile(_FIXTURE.read_bytes(), layers={"building"})
@@ -135,7 +136,7 @@ def _building_dots(zoom: int) -> int:
 
 
 def test_buildings_wait_for_the_zoom_that_can_hold_them() -> None:
-    """Below the gate a footprint is about two dots across, so the layer is a haze."""
+    """Below the gate, a footprint is approximately two dots wide, so the layer is a haze."""
     from meshterm.ui.map_render import _BUILDING_MIN_ZOOM
 
     assert _building_dots(_BUILDING_MIN_ZOOM) > 100
@@ -143,10 +144,10 @@ def test_buildings_wait_for_the_zoom_that_can_hold_them() -> None:
 
 
 def test_building_fill_is_stippled_so_the_streets_survive_it() -> None:
-    """A braille dot is one bit: a *solid* fill would erase the street grid it covers.
+    """A braille dot is one bit, so a solid fill would erase the street grid under it.
 
-    The stipple is what keeps a building a shade rather than an eraser — every cell it
-    touches keeps free dots for a road to be drawn through.
+    The stipple makes a building a shade, not an eraser. Each cell that the building
+    touches keeps free dots, so a road can be drawn through the cell.
     """
     from meshterm.ui.map_render import _BUILDING_MIN_ZOOM, render_map
 
@@ -158,11 +159,12 @@ def test_building_fill_is_stippled_so_the_streets_survive_it() -> None:
 
 
 def test_offscreen_buildings_do_not_change_the_frame() -> None:
-    """The bbox reject is an optimisation, so it must be invisible in the output.
+    """The bbox reject is an optimisation, so it must not change the output.
 
-    A downtown tile carries thousands of footprints and a zoomed-in view holds a few
-    dozen; each one is rejected on its own tile-local bounds before a single point of it
-    is projected. Adding a footprint the view cannot reach must render byte-identically.
+    A downtown tile has thousands of footprints, and a view at a high zoom holds a few
+    dozen. The renderer rejects each footprint on its own tile-local bounds before it
+    projects a point of the footprint. If the test adds a footprint that the view cannot
+    reach, the render must be identical byte for byte.
     """
     from meshterm.core.mvt import Feature
     from meshterm.ui.map_render import _BUILDING_MIN_ZOOM, render_map
@@ -191,19 +193,21 @@ def test_offscreen_buildings_do_not_change_the_frame() -> None:
 
 
 def test_offscreen_rings_do_not_change_the_frame() -> None:
-    """Every layer skips the rings its view cannot reach, and the skip is just as invisible.
+    """Each layer skips the rings that its view cannot reach. The output does not change.
 
-    A zoomed-out view sees a sliver of tiles whose coastlines and land cover run to tens of
-    thousands of points, and projecting every one of them was half of a z7 frame on the
-    PicoCalc. A hole far off screen in a lake that covers the view, and a road and a river
-    that never come near it, must render byte-identically to their absence — the hole most
-    of all, since it shares an even-odd fill with the lake around it.
+    A view at a low zoom sees a thin part of many tiles. Their coastlines and land cover
+    have tens of thousands of points. To project each point was half of a z7 frame on the
+    PicoCalc. Three things must render the same, byte for byte, as their absence: a hole far
+    off the display in a lake that covers the view, and a road and a river that do not come
+    near the view. The hole is the most important, because it shares an even-odd fill with
+    the lake around it.
     """
     from meshterm.core.mvt import Feature
     from meshterm.ui.map_render import render_map
 
-    # At z16 a z14 tile is 1024 dots across, four tile units a dot: the 106x104-dot view
-    # spans 424x416 units around its centre, so 400 units out is beyond it on every side.
+    # At z16, a z14 tile is 1024 dots wide, and one dot is four tile units. The view of
+    # 106x104 dots spans 424x416 units around its centre. Thus a point 400 units out is
+    # beyond the view on each side.
     vp = Viewport(45.4995, -73.5690, 16, 53 * 2, 26 * 4)
     cx, cy = _tile_local_of_view_centre(vp, 14, 4843, 5861)
 
@@ -211,7 +215,7 @@ def test_offscreen_rings_do_not_change_the_frame() -> None:
         return [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)]
 
     lake = square(cx - 600, cy - 600, cx + 600, cy + 600)
-    island = square(cx - 20, cy - 20, cx + 20, cy + 20)  # a hole the view does show
+    island = square(cx - 20, cy - 20, cx + 20, cy + 20)  # a hole that the view shows
     far_hole = square(cx - 590, cy - 590, cx - 500, cy - 500)
     far_road = [(cx - 590, cy + 300), (cx - 400, cy + 590)]
     far_river = [(cx + 450, cy - 590), (cx + 590, cy + 590)]
@@ -232,11 +236,11 @@ def test_offscreen_rings_do_not_change_the_frame() -> None:
 
 
 def test_polygon_fill_lights_exactly_the_dots_a_scan_of_every_edge_would() -> None:
-    """Filing each edge under the rows it crosses is a speed-up, so it must not move a dot.
+    """The renderer files each edge under the rows that it crosses. This must not move a dot.
 
-    The reference is the fill as it was: every scanline asking every edge whether it is
-    crossed. That costs rows times edges, which a coastline at z7 made 6.8 s of a frame on
-    the PicoCalc; the answer it gave is the specification.
+    The filing is a speed-up. The reference is the old fill, where each scanline asks each
+    edge if the edge crosses the line. This costs rows times edges. A coastline at z7 made
+    this 6.8 s of a frame on the PicoCalc. The answer of the old fill is the specification.
     """
     import random
     from itertools import pairwise
@@ -261,8 +265,8 @@ def test_polygon_fill_lights_exactly_the_dots_a_scan_of_every_edge_would() -> No
                     canvas.plot(x, y, (1, 2, 3), 5)
 
     def coordinate(rnd: random.Random) -> float:
-        # Mostly anywhere, including well off the canvas; sometimes exactly on a row's
-        # middle or a dot's edge, which is where an off-by-one would show.
+        # Most points are anywhere, also far off the canvas. Some points are exactly on the
+        # middle of a row or on the edge of a dot. An off-by-one error shows there.
         if rnd.random() < 0.5:
             return rnd.uniform(-30.0, 110.0)
         return rnd.randint(-5, 90) + rnd.choice((0.0, 0.5, -0.5))
@@ -285,7 +289,7 @@ def test_polygon_fill_lights_exactly_the_dots_a_scan_of_every_edge_would() -> No
 
 
 def test_world_projection_round_trips() -> None:
-    """lon/lat -> world pixels -> lon/lat recovers the original coordinate."""
+    """A conversion from lon/lat to world pixels and back gives the original coordinate."""
     for lat, lon, z in [(45.5, -73.6, 14), (0.0, 0.0, 3), (-33.9, 151.2, 12)]:
         wx, wy = lonlat_to_world(lat, lon, z)
         rlat, rlon = world_to_lonlat(wx, wy, z)
@@ -294,34 +298,34 @@ def test_world_projection_round_trips() -> None:
 
 
 def test_haversine_known_distance() -> None:
-    """One degree of longitude at the equator is ~111 km; identical points are 0."""
+    """One degree of longitude at the equator is approximately 111 km. Identical points are 0."""
     assert haversine_km(0.0, 0.0, 0.0, 1.0) == pytest.approx(111.19, abs=0.5)
     assert haversine_km(45.0, -73.0, 45.0, -73.0) == 0.0
 
 
 def test_viewport_center_projects_to_the_middle() -> None:
-    """The viewport's centre lands at the middle dot; north is up."""
+    """The centre of the viewport is at the middle dot, and north is up."""
     vp = Viewport(45.5, -73.6, 13, 200, 120)
     cx, cy = vp.lonlat_to_dot(45.5, -73.6)
     assert cx == pytest.approx(100, abs=0.5) and cy == pytest.approx(60, abs=0.5)
-    # A point due north projects above the centre (smaller y).
+    # A point north of the centre projects above it (smaller y).
     _, ny = vp.lonlat_to_dot(45.6, -73.6)
     assert ny < cy
 
 
 def test_viewport_fit_frames_all_points() -> None:
-    """A fitted viewport is centred on the points and zoomed so they share a tile scale."""
+    """A fitted viewport has its centre on the points, and it has a zoom that shows them all."""
     pts = [(45.5019, -73.5674), (45.4768, -73.5990)]
     vp = Viewport.fit(pts, 200, 120, max_zoom=14)
     assert 8 <= vp.zoom <= 14
     for lat, lon in pts:
         x, y = vp.lonlat_to_dot(lat, lon)
-        assert 0 <= x < vp.dot_w and 0 <= y < vp.dot_h  # every point is on-canvas
+        assert 0 <= x < vp.dot_w and 0 <= y < vp.dot_h  # each point is on the canvas
 
 
 def test_viewport_fit_fraction_ignores_outliers() -> None:
-    """Framing half the nodes zooms to the dense core, letting far outliers fall off-canvas."""
-    # A tight downtown cluster of five nodes (~50 m across) plus one distant outlier.
+    """If the view frames half the nodes, it zooms to the dense core. Far outliers fall off."""
+    # A tight downtown group of five nodes (approximately 50 m wide) and one distant outlier.
     core = [
         (45.5000, -73.5600),
         (45.5003, -73.5602),
@@ -335,9 +339,9 @@ def test_viewport_fit_fraction_ignores_outliers() -> None:
     full = Viewport.fit(pts, 200, 120, max_zoom=16)
     half = Viewport.fit(pts, 200, 120, max_zoom=16, fraction=0.5)
 
-    # The core-only frame is zoomed in tighter than the frame that must hold the outlier.
+    # The frame of the core only has a higher zoom than the frame that must hold the outlier.
     assert half.zoom > full.zoom
-    # Every clustered node stays on-canvas; the outlier is pushed off.
+    # Each node of the group stays on the canvas. The outlier is off the canvas.
     for lat, lon in core:
         x, y = half.lonlat_to_dot(lat, lon)
         assert 0 <= x < half.dot_w and 0 <= y < half.dot_h
@@ -346,7 +350,7 @@ def test_viewport_fit_fraction_ignores_outliers() -> None:
 
 
 def test_viewport_fit_fraction_keeps_small_sets_whole() -> None:
-    """With only two nodes there is no core to isolate — both are still framed."""
+    """With only two nodes, there is no core to isolate. The view frames both nodes."""
     pts = [(45.5019, -73.5674), (45.4768, -73.5990)]
     half = Viewport.fit(pts, 200, 120, max_zoom=14, fraction=0.5)
     full = Viewport.fit(pts, 200, 120, max_zoom=14)
@@ -358,23 +362,23 @@ def test_viewport_fit_fraction_keeps_small_sets_whole() -> None:
 
 
 def test_viewport_zoom_and_pan() -> None:
-    """Zooming and panning return new viewports; zoom clamps to its bounds."""
+    """Zooming and panning return new viewports. The zoom stays between its limits."""
     vp = Viewport(45.5, -73.6, 10, 200, 120)
     assert vp.zoomed(2).zoom == 12
     assert vp.zoomed(50, max_zoom=16).zoom == 16  # clamped
     assert vp.zoomed(-50, min_zoom=3).zoom == 3
     east = vp.panned(0.5, 0)
-    assert east.center_lon > vp.center_lon  # panning east increases longitude
+    assert east.center_lon > vp.center_lon  # a pan to the east increases the longitude
     north = vp.panned(0, -0.5)
-    assert north.center_lat > vp.center_lat  # panning north increases latitude
+    assert north.center_lat > vp.center_lat  # a pan to the north increases the latitude
 
 
 def test_viewport_tiles_cover_the_view() -> None:
-    """The viewport reports the handful of tiles overlapping it at the tile zoom."""
+    """The viewport reports the few tiles that overlap it at the tile zoom."""
     vp = Viewport(45.5019, -73.5674, 14, 200, 120)
     tiles = vp.tiles(14)
     assert tiles and all(z == 14 for z, _, _ in tiles)
-    # The fixture tile for this centre must be among them.
+    # The fixture tile for this centre must be one of them.
     assert (14, 4843, 5861) in tiles
 
 
@@ -382,7 +386,7 @@ def test_viewport_tiles_cover_the_view() -> None:
 
 
 def test_canvas_plots_dots_as_braille() -> None:
-    """A single plotted dot renders as a braille glyph in the top-left cell."""
+    """A plotted dot renders as a braille glyph in the top-left cell."""
     canvas = MapCanvas(4, 2)
     canvas.plot(0, 0, (255, 0, 0), 1)
     out = _plain(canvas.to_ansi_lines())
@@ -390,45 +394,46 @@ def test_canvas_plots_dots_as_braille() -> None:
 
 
 def test_canvas_priority_decides_cell_colour() -> None:
-    """When dots from two features share a cell, the higher priority sets its colour."""
+    """If dots from two features share a cell, the higher priority sets the colour of the cell."""
     canvas = MapCanvas(1, 1)
     canvas.plot(0, 0, (10, 20, 30), 1)  # low priority
     canvas.plot(1, 0, (200, 100, 50), 9)  # high priority, same cell
     ansi = "".join(canvas.to_ansi_lines())
-    assert "38;2;200;100;50" in ansi  # the high-priority colour won
+    assert "38;2;200;100;50" in ansi  # the colour of the high priority wins
     assert "38;2;10;20;30" not in ansi
 
 
 def test_canvas_marker_and_label_do_not_overprint() -> None:
-    """A marker keeps its glyph and places its label in a neighbouring cell."""
+    """A marker keeps its glyph and puts its label in a cell next to it."""
     canvas = MapCanvas(20, 3)
     canvas.marker(4, 4, "★", (255, 255, 255))
     assert canvas.marker_label(4, 4, "me", (255, 255, 255))
     out = _plain(canvas.to_ansi_lines())
     assert "★" in out and "me" in out
     row = out.splitlines()[1]
-    assert "★me" not in row  # a gap sits between the marker and its label
+    assert "★me" not in row  # a gap is between the marker and its label
 
 
 def test_canvas_label_collision_is_avoided() -> None:
-    """A checked label is skipped when it would overlap an already-placed one."""
+    """The canvas skips a checked label if the label overlaps a label that the canvas placed."""
     canvas = MapCanvas(20, 1)
     assert canvas.place_label(10, 0, "First", (200, 200, 200))
-    assert not canvas.place_label(10, 0, "Second", (200, 200, 200))  # overlaps → skipped
+    assert not canvas.place_label(10, 0, "Second", (200, 200, 200))  # it overlaps: skipped
 
 
 def test_canvas_labels_keep_a_vertical_gap() -> None:
-    """A checked label is skipped when it would sit flush above/below existing text."""
+    """The canvas skips a checked label if the label is directly above or below existing text."""
     canvas = MapCanvas(20, 3)
-    assert canvas.place_label(20, 4, "Row1", (200, 200, 200))  # dot y=4 → cell row 1
-    # Directly below (cell row 2) with overlapping columns: rejected for lack of a gap.
+    assert canvas.place_label(20, 4, "Row1", (200, 200, 200))  # dot y=4, cell row 1
+    # Directly below (cell row 2) with columns that overlap: the canvas rejects it, because
+    # there is no gap.
     assert not canvas.place_label(20, 8, "Row2", (200, 200, 200))
-    # Same row but clear of the horizontal span still fits.
+    # In the same row, but away from the horizontal span, a label fits.
     assert canvas.place_label(2, 4, "Far", (200, 200, 200))
 
 
 def _dot_colors(lines: list[str]) -> set[tuple[int, int, int]]:
-    """Every truecolour a braille run was drawn in (the ground's colours, not the text's)."""
+    """Each truecolour of a braille run (the colours of the ground, not of the text)."""
     return {
         (int(r), int(g), int(b))
         for r, g, b in re.findall(r"38;2;(\d+);(\d+);(\d+)m(?:\x1b\[1m)?[⠀-⣿]", "".join(lines))
@@ -436,10 +441,10 @@ def _dot_colors(lines: list[str]) -> set[tuple[int, int, int]]:
 
 
 def test_canvas_paste_raster_offsets_fades_and_yields_the_cell() -> None:
-    """A pasted raster lands where the caller's index tables put it, dimmed, underneath.
+    """A pasted raster goes where the index tables of the caller put it, dimmed, underneath.
 
-    ``-1`` is a cell with no source — the ground a pan has just moved onto — and the
-    pasted cell keeps the empty-cell priority so anything drawn afterwards wins it.
+    ``-1`` is a cell with no source: the ground that a pan just moved onto. The pasted cell
+    keeps the empty-cell priority, so anything drawn afterwards wins the cell.
     """
     from meshterm.ui.mapcanvas import MapCanvas
 
@@ -450,38 +455,38 @@ def test_canvas_paste_raster_offsets_fades_and_yields_the_cell() -> None:
     canvas = MapCanvas(3, 1)
     canvas.paste_raster(src.raster(), [(-1, 0), (0, 0), (2, 0)], [(0, 0)], fade=0.5)
     out = "".join(canvas.to_ansi_lines())
-    assert _plain([out]) == " ⠁⠁"  # shifted one cell right; the gap has no source
+    assert _plain([out]) == " ⠁⠁"  # shifted one cell right, and the gap has no source
     assert _dot_colors([out]) == {(100, 50, 25), (30, 60, 120)}
 
-    canvas.plot(2, 0, (10, 20, 30), 0)  # a real feature, drawn after, takes the cell
+    canvas.plot(2, 0, (10, 20, 30), 0)  # a real feature that the test draws after takes the cell
     assert _dot_colors(["".join(canvas.to_ansi_lines())]) >= {(10, 20, 30)}
 
 
 def test_canvas_paste_raster_magnifies_by_the_dot_not_by_the_glyph() -> None:
-    """A zoomed-in stand-in shows each cell its own share of the source, enlarged.
+    """A stand-in at a higher zoom shows each cell its own part of the source, enlarged.
 
-    Stamping the whole source glyph into every cell of the block it grew into is double
-    vision — the same 2x4 pattern side by side and one above the other, which reads as a
-    fault rather than as a coarse preview (JP, 2026-08-18).
+    If the renderer stamps the whole source glyph into each cell of the block that it grew
+    into, the result is double vision. The same 2x4 pattern shows side by side and one
+    above the other. This reads as a fault, not as a coarse preview (JP, 2026-08-18).
     """
     from meshterm.ui.mapcanvas import MapCanvas
 
     src = MapCanvas(1, 1)
-    src.plot(0, 0, (200, 100, 50), 5)  # the cell's top-left dot, and nothing else
+    src.plot(0, 0, (200, 100, 50), 5)  # the top-left dot of the cell, and nothing else
 
     canvas = MapCanvas(2, 2)
     cols = [(0, 0), (0, 1)]
     canvas.paste_raster(src.raster(), cols, cols, magnify=2)
     rendered = [_plain([line]) for line in canvas.to_ansi_lines()]
 
-    # A source cell is 2x4 dots, so at 2x it becomes the 2x2 block of cells drawn here,
-    # and its one top-left dot becomes a 2x2 block of dots: the top half of the top-left
-    # cell alone. The glyph repeated four times would be the bug.
+    # A source cell is 2x4 dots. At 2x, it becomes the block of 2x2 cells that is drawn
+    # here. Its one top-left dot becomes a block of 2x2 dots: the top half of the top-left
+    # cell only. The bug is the glyph repeated four times.
     assert rendered == ["⠛ ", "  "], rendered
 
 
 def test_parse_hex() -> None:
-    """Hex colours parse to RGB triples, with or without the leading hash."""
+    """Hex colours parse to RGB triples, with or without the hash at the start."""
     assert parse_hex("#38bdf8") == (0x38, 0xBD, 0xF8)
     assert parse_hex("ffffff") == (255, 255, 255)
 
@@ -490,7 +495,7 @@ def test_parse_hex() -> None:
 
 
 def test_render_map_draws_basemap_streets_and_labels() -> None:
-    """Rendering the real fixture yields braille geometry and a place label."""
+    """A render of the real fixture gives braille geometry and a place label."""
     from meshterm.ui.map_render import MapMarker, render_map
 
     vp = Viewport(45.5019, -73.5674, 14, 180, 120)
@@ -498,13 +503,13 @@ def test_render_map_draws_basemap_streets_and_labels() -> None:
     tiles = {(14, 4843, 5861): layers}
     markers = [MapMarker("Yagi", 45.5019, -73.5674, is_repeater=True)]
     out = _plain(render_map(vp, tiles, markers))
-    assert any(0x2800 <= ord(ch) <= 0x28FF for ch in out)  # braille was drawn
-    assert "▲" in out and "Yagi" in out  # the repeater marker + label
+    assert any(0x2800 <= ord(ch) <= 0x28FF for ch in out)  # the render has braille
+    assert "▲" in out and "Yagi" in out  # the repeater marker and its label
     assert "Montréal" in out  # a place label from the tile
 
 
 def test_render_map_prioritises_repeater_glyph() -> None:
-    """A repeater and a node at the same spot resolve to the repeater's marker on top."""
+    """A repeater and a node at the same place show the marker of the repeater on top."""
     from meshterm.ui.map_render import MapMarker, render_map
 
     vp = Viewport(45.50, -73.57, 14, 60, 40)
@@ -517,7 +522,7 @@ def test_render_map_prioritises_repeater_glyph() -> None:
 
 
 def _street_labels_placed(cols: int, rows: int, zoom: int) -> int:
-    """How many street names actually reach the canvas at this size and zoom."""
+    """The number of street names that reach the canvas at this size and zoom."""
     from meshterm.ui.map_render import DRAWN_LAYERS, _draw_tile, _Frame
     from meshterm.ui.mapcanvas import MapCanvas
 
@@ -533,35 +538,35 @@ def _street_labels_placed(cols: int, rows: int, zoom: int) -> int:
             continue
         for ax, ay in ((label.x, label.y), *label.alts):
             if canvas.place_label(ax, ay, label.text, label.color, bold=label.bold):
-                placed += label.min_zoom == 15  # the street-label gate identifies them
+                placed += label.min_zoom == 15  # the street-label gate identifies street names
                 break
     return placed
 
 
 def test_street_labels_get_denser_as_you_zoom_in() -> None:
-    """Zooming toward a street must not make its name less likely to appear.
+    """If the user zooms in to a street, its name must not become less likely to appear.
 
-    Anchoring a label to the feature's own midpoint pinned it to a fixed geographic
-    point, so the tighter the view the less often that point was still on screen — the
-    fixture's 265 named streets yielded 2 labels at zoom 16 and 10 at zoom 15.
+    The renderer once anchored a label to the midpoint of the feature. This fixed the label
+    to one geographic point. Thus at a higher zoom, that point was less often on the
+    display. The 265 named streets of the fixture gave 2 labels at zoom 16 and 10 at zoom 15.
     """
     assert _street_labels_placed(53, 26, 16) >= 5
     assert _street_labels_placed(53, 26, 15) >= 10
-    # A wider terminal sees more of the same ground, so it may name more -- never fewer.
+    # A wider terminal shows more of the same ground, so it can name more streets, but not fewer.
     assert _street_labels_placed(72, 24, 16) >= _street_labels_placed(53, 26, 16)
 
 
 def test_street_labels_are_not_built_below_the_zoom_that_can_place_them() -> None:
-    """The expensive half of a named road is the label, and below the gate it was binned.
+    """The label is the expensive part of a named road, and below the gate the app discards it.
 
-    ``_compose`` never places a label under its own ``min_zoom``; ``_draw_tile`` used to
-    build one anyway — clipping the line segment by segment, measuring each surviving
-    piece and sorting them, 270 times over for a central tile. Measured at 16.8 ms of a
-    46 ms frame on the desktop, so upwards of a third of a second on the PicoCalc, at the
-    two zooms the map most often sits at.
+    ``_compose`` never places a label below its own ``min_zoom``. But ``_draw_tile`` once
+    built the label anyway. It clipped the line segment by segment, measured each piece
+    that stayed, and sorted the pieces, 270 times for a central tile. This took 16.8 ms of
+    a 46 ms frame on the desktop. On the PicoCalc it took more than a third of a second, at
+    the two zooms where the map most often is.
 
-    The gate must be invisible in the picture: what it drops is exactly what was thrown
-    away a moment later, so the frame either side of it is the same frame.
+    The gate must not change the picture. What the gate removes is what the app threw away
+    a moment later, so the frame on each side of the gate is the same frame.
     """
     from meshterm.ui.map_render import (
         _STREET_LABEL_MIN_ZOOM,
@@ -579,24 +584,24 @@ def test_street_labels_are_not_built_below_the_zoom_that_can_place_them() -> Non
     assert _street_labels_queued(_STREET_LABEL_MIN_ZOOM, tiles) > 0, (
         "the gate swallowed the labels at the zoom that wants them"
     )
-    # Overzoom: the display is past the source's max, so the ground comes off a z14 tile —
-    # but the reader is still zoomed in, and still wants the names.
+    # Overzoom: the display is past the maximum zoom of the source, so the ground comes from
+    # a z14 tile. But the user is still zoomed in, and still wants the names.
     assert _street_labels_queued(_STREET_LABEL_MIN_ZOOM + 2, tiles) > 0, (
         "an overzoomed view lost its street names to the tile's zoom"
     )
 
-    # And the picture is untouched either side of the gate, coarse pass included.
+    # Also, the picture does not change on either side of the gate, with the coarse pass.
     for zoom in (below - 2, below, _STREET_LABEL_MIN_ZOOM, _STREET_LABEL_MIN_ZOOM + 2):
         vp = Viewport(45.5019, -73.5674, zoom, 53 * 2, 26 * 4)
         for coarse in (False, True):
             lines, ghost = render_ground(vp, tiles, markers, coarse=coarse)
             assert lines, f"nothing drawn at z{zoom}"
-            # The ghost is the braille layer alone: a label never reached it anyway.
+            # The ghost is the braille layer only. A label did not reach it before.
             assert ghost.raster.cell_w == vp.dot_w // 2
 
 
 def _street_labels_queued(zoom: int, tiles) -> int:
-    """How many street-name candidates a frame at ``zoom`` builds before placing anything."""
+    """The number of street-name candidates that a frame at ``zoom`` builds before it places any."""
     from meshterm.ui.map_render import _STREET_LABEL, _draw_tile, _Frame
     from meshterm.ui.mapcanvas import MapCanvas
 
@@ -608,7 +613,7 @@ def _street_labels_queued(zoom: int, tiles) -> int:
 
 
 def _tile_local_of_view_centre(vp: Viewport, tz: int, tx: int, ty: int, extent: int = 4096):
-    """The tile-local point that lands in the middle of this viewport (inverts feature_to_dot)."""
+    """The tile-local point at the middle of this viewport (the inverse of feature_to_dot)."""
     from meshterm.core.geo import TILE_PX
 
     ox, oy = vp.origin_world
@@ -619,7 +624,7 @@ def _tile_local_of_view_centre(vp: Viewport, tz: int, tx: int, ty: int, extent: 
 
 
 def test_street_name_is_drawn_only_once() -> None:
-    """OSM splits a long street into several features; the map names it once."""
+    """OSM splits a long street into several features, but the map names the street once."""
     from meshterm.ui.map_render import DRAWN_LAYERS, MapMarker, render_map
 
     layers = decode_tile(_FIXTURE.read_bytes(), layers=DRAWN_LAYERS)
@@ -630,20 +635,20 @@ def test_street_name_is_drawn_only_once() -> None:
         )
     )
 
-    # René-Lévesque arrives as several segments and used to be drawn twice on one screen.
+    # René-Lévesque arrives as several segments. The map once drew it two times on one screen.
     assert out.count("René-Lévesque") <= 1, "a street was named more than once"
 
 
 def test_line_label_anchors_on_the_visible_stretch() -> None:
-    """A street crossing the view is named even with both its endpoints off screen."""
+    """A street that crosses the view gets a name, also when both its ends are off the display."""
     from meshterm.ui.map_render import _add_line_label, _Frame
     from meshterm.ui.mapcanvas import MapCanvas
 
     vp = Viewport(45.5019, -73.5674, 14, 120, 80)
     frame = _Frame(canvas=MapCanvas(60, 20), viewport=vp)
     _, cy = _tile_local_of_view_centre(vp, 14, 4843, 5861)
-    # A line spanning the whole tile at the view's latitude: its own midpoint is far away,
-    # but it crosses the canvas, so the clip must find it.
+    # A line across the whole tile at the latitude of the view. Its midpoint is far away, but
+    # it crosses the canvas, so the clip must find it.
     _add_line_label(
         frame, [[(0, cy), (4096, cy)]], 4096, 14, 4843, 5861, "Rue Long", ("#9aa0aa", False, 7)
     )
@@ -654,13 +659,13 @@ def test_line_label_anchors_on_the_visible_stretch() -> None:
 
 
 def test_line_label_off_screen_is_not_queued() -> None:
-    """A feature with nothing on screen costs no label slot at all."""
+    """A feature with nothing on the display uses no label slot."""
     from meshterm.ui.map_render import _add_line_label, _Frame
     from meshterm.ui.mapcanvas import MapCanvas
 
     vp = Viewport(45.5019, -73.5674, 16, 120, 80)
     frame = _Frame(canvas=MapCanvas(60, 20), viewport=vp)
-    # A short line in the far corner of the tile, well outside a zoom-16 window.
+    # A short line in the far corner of the tile, far outside a window at zoom 16.
     _add_line_label(
         frame, [[(0, 0), (8, 8)]], 4096, 14, 4843, 5861, "Nowhere", ("#9aa0aa", False, 7)
     )
@@ -669,14 +674,14 @@ def test_line_label_off_screen_is_not_queued() -> None:
 
 
 def test_line_label_offers_alternates_along_the_visible_run() -> None:
-    """A crowded first choice falls back further along the street rather than vanishing."""
+    """If the first choice is crowded, the label moves along the street. It does not disappear."""
     from meshterm.ui.map_render import _add_line_label, _Frame
     from meshterm.ui.mapcanvas import MapCanvas
 
     vp = Viewport(45.5019, -73.5674, 14, 120, 80)
     frame = _Frame(canvas=MapCanvas(60, 20), viewport=vp)
     cx, cy = _tile_local_of_view_centre(vp, 14, 4843, 5861)
-    # A zig-zag across the view gives several visible pieces to choose between.
+    # A zig-zag across the view gives several visible pieces to choose from.
     ring = [(cx - 120 + i * 40, cy - 40 + (i % 2) * 80) for i in range(8)]
     _add_line_label(frame, [ring], 4096, 14, 4843, 5861, "Rue Zig", ("#9aa0aa", False, 7))
 
@@ -685,11 +690,11 @@ def test_line_label_offers_alternates_along_the_visible_run() -> None:
 
 
 def test_render_map_drops_crowded_labels_favouring_repeaters() -> None:
-    """When labels can't all fit, the repeater's wins and a crowded node's is dropped."""
+    """If the labels do not all fit, the label of the repeater wins and a crowded node loses."""
     from meshterm.ui.map_render import MapMarker, render_map
 
-    # Three nodes stacked on one spot: only the two sides (left/right) can hold a label,
-    # so one of the three must show as a bare marker — and the repeater must not be it.
+    # Three nodes at one place: only the two sides (left and right) can hold a label. Thus
+    # one of the three must show as a bare marker, and it must not be the repeater.
     vp = Viewport(45.50, -73.57, 14, 40, 8)
     markers = [
         MapMarker("NODEONE", 45.50, -73.57),
@@ -697,21 +702,21 @@ def test_render_map_drops_crowded_labels_favouring_repeaters() -> None:
         MapMarker("REPEATER", 45.50, -73.57, is_repeater=True),
     ]
     out = _plain(render_map(vp, {}, markers))
-    assert "▲" in out  # the repeater's glyph is on top
+    assert "▲" in out  # the glyph of the repeater is on top
     assert "REPEATER" in out  # and it keeps its label (placed first)
-    # Only one of the two leaf nodes could fit a label; the other is a bare marker.
+    # Only one of the two other nodes can have a label. The other is a bare marker.
     assert ("NODEONE" in out) != ("NODETWO" in out)
 
 
 def _glyph_color(lines: list[str], glyph: str) -> tuple[int, int, int]:
-    """Extract the truecolour ``(r, g, b)`` the given glyph was rendered with."""
+    """Get the truecolour ``(r, g, b)`` of the render of the given glyph."""
     m = re.search(r"38;2;(\d+);(\d+);(\d+)m(?:\x1b\[1m)?" + re.escape(glyph), "".join(lines))
     assert m, f"glyph {glyph!r} not found with a colour"
     return int(m.group(1)), int(m.group(2)), int(m.group(3))
 
 
 def test_render_map_brightens_piled_markers() -> None:
-    """A cell many nodes share renders its glyph brighter than a lone node's."""
+    """A cell that many nodes share renders its glyph brighter than the glyph of one node."""
     from meshterm.ui.map_render import MapMarker, render_map
     from meshterm.ui.marks import NODE_MARK
 
@@ -719,17 +724,17 @@ def test_render_map_brightens_piled_markers() -> None:
     vp = Viewport(45.50, -73.57, 14, 60, 40)
 
     lone = render_map(vp, {}, [MapMarker("solo", 45.50, -73.57)])
-    assert _glyph_color(lone, "●") == base  # a single node keeps its base colour
+    assert _glyph_color(lone, "●") == base  # one node keeps its base colour
 
     crowd = [MapMarker(f"n{i}", 45.50, -73.57) for i in range(8)]
     piled = _glyph_color(render_map(vp, {}, crowd), "●")
-    # Washed toward white: every channel is brighter than the base cyan.
+    # The colour goes toward white: each channel is brighter than the base cyan.
     assert all(p > b for p, b in zip(piled, base, strict=True))
     assert piled != base
 
 
 def test_render_map_works_without_basemap() -> None:
-    """With no tiles the nodes still render on a blank grid (the offline fallback)."""
+    """With no tiles, the nodes still render on a blank grid (the offline fallback)."""
     from meshterm.ui.map_render import MapMarker, render_map
 
     vp = Viewport.fit([(45.5, -73.6), (45.4, -73.5)], 120, 80, max_zoom=14)
@@ -745,7 +750,7 @@ def test_render_map_works_without_basemap() -> None:
 
 
 def _dot_rows(lines: list[str]) -> list[str]:
-    """Each rendered row reduced to its braille dots (labels and markers blanked out)."""
+    """Each rendered row, with only its braille dots (labels and markers are blank)."""
     return [
         "".join(ch if 0x2800 <= ord(ch) <= 0x28FF else " " for ch in row)
         for row in _plain(lines).split("\n")
@@ -753,7 +758,7 @@ def _dot_rows(lines: list[str]) -> list[str]:
 
 
 def _ghosted(zoom: int = 14, *, dlon: float = 0.0, dlat: float = 0.0, dz: int = 0):
-    """Draw the fixture, then paint a moved view standing on that frame's ground."""
+    """Draw the fixture, then paint a moved view that uses the ground of that frame."""
     from meshterm.ui.map_render import MapMarker, render_ground, render_map
 
     vp = Viewport(45.5019, -73.5674, zoom, 106, 104)
@@ -765,11 +770,11 @@ def _ghosted(zoom: int = 14, *, dlon: float = 0.0, dlat: float = 0.0, dz: int = 
 
 
 def test_a_panned_view_stands_on_the_ground_it_just_had() -> None:
-    """Panning slides the last frame's streets across rather than blanking to black.
+    """A pan slides the streets of the last frame across. It does not blank the map to black.
 
-    Rasterizing takes far too long to sit on a keypress, so the paint that answers a pan
-    has no ground of its own. Without the ghost it drew the markers on an empty canvas —
-    the map going black between every step and flashing back when the frame landed.
+    The rasterizing takes too long to run on a key press, so the paint that answers a pan
+    has no ground of its own. Without the ghost, the app drew the markers on an empty
+    canvas. The map went black between each step and flashed back when the frame arrived.
     """
     from meshterm.ui.map_render import MapMarker, render_map
 
@@ -784,10 +789,10 @@ def test_a_panned_view_stands_on_the_ground_it_just_had() -> None:
 
 
 def test_the_ghost_ground_lands_where_the_pan_put_it() -> None:
-    """The reused dots move by exactly the cells the view moved, to within one cell."""
+    """The reused dots move by the same number of cells as the view, within one cell."""
     drawn, moved = _ghosted(dlon=0.004)
     # 0.004° of longitude at zoom 14: dots per degree = 256 * 2^14 / 360.
-    shift = round(0.004 * 256 * (2**14) / 360 / 2)  # → cells (2 dots wide)
+    shift = round(0.004 * 256 * (2**14) / 360 / 2)  # in cells (2 dots wide)
 
     before, after = _dot_rows(drawn), _dot_rows(moved)
     assert len(before) == len(after)
@@ -800,18 +805,18 @@ def test_the_ghost_ground_lands_where_the_pan_put_it() -> None:
 
 
 def test_the_ghost_ground_carries_no_stale_text() -> None:
-    """Only the dots come along: a label pinned to old ground would name the wrong place."""
+    """Only the dots move with the ghost. A label on old ground would name the wrong place."""
     drawn, moved = _ghosted(dlon=0.004)
     assert "Montréal" in _plain(drawn)
     assert "Montréal" not in _plain(moved)
-    assert "Yagi" in _plain(moved)  # the markers are redrawn where they really are
+    assert "Yagi" in _plain(moved)  # the markers are drawn again where they are now
 
 
 def test_the_ghost_ground_dims_while_its_replacement_is_drawn() -> None:
-    """Reused ground reads as provisional — it is stale, and short of the leading edge."""
+    """Reused ground reads as provisional: it is old, and it does not reach the leading edge."""
     from meshterm.ui.map_render import _GHOST_FADE
 
-    assert 0 < _GHOST_FADE < 1  # the desktop default; the 16-slot console binds it to 1.0
+    assert 0 < _GHOST_FADE < 1  # the desktop default. The 16-slot console sets it to 1.0
     drawn, moved = _ghosted(dlon=0.004)
     faded = {tuple(round(c * _GHOST_FADE) for c in rgb) for rgb in _dot_colors(drawn)}
     ghost = _dot_colors(moved)
@@ -820,12 +825,12 @@ def test_the_ghost_ground_dims_while_its_replacement_is_drawn() -> None:
 
 
 def test_the_ghost_ground_is_dropped_once_it_says_nothing() -> None:
-    """A view that has left the old frame behind gets the honest empty canvas."""
-    _, far = _ghosted(dlon=4.0)  # panned clean off the ground we had
+    """A view that has left the old frame gets an empty canvas, because it has no ground."""
+    _, far = _ghosted(dlon=4.0)  # panned far from the ground that the app had
     assert not any(row.strip() for row in _dot_rows(far))
-    _, deep = _ghosted(dz=3)  # zoomed past what a cell-coarse stand-in can say
+    _, deep = _ghosted(dz=3)  # zoomed past what a stand-in of coarse cells can show
     assert not any(row.strip() for row in _dot_rows(deep))
-    _, near = _ghosted(dz=1)  # one step is still a readable preview
+    _, near = _ghosted(dz=1)  # one step is still a preview that the user can read
     assert any(row.strip() for row in _dot_rows(near))
 
 
@@ -833,13 +838,13 @@ def test_the_ghost_ground_is_dropped_once_it_says_nothing() -> None:
 
 
 def test_basemap_user_agent_is_contactable() -> None:
-    """The tile user agent names a repository that exists and the version actually running.
+    """The tile user agent names a repository that exists and the version that runs.
 
-    OpenFreeMap issues no API key, so this string is the whole of what a tile operator has
-    to tell one client from another and to reach whoever is costing them bandwidth. It read
-    ``MeshTerm/0.1 (+https://github.com/; mesh node map)`` — a host nobody can visit, and a
-    number that was already wrong — which is the shape of traffic that gets a project
-    blocked rather than emailed.
+    OpenFreeMap issues no API key. Thus this string is all that a tile operator has to tell
+    one client from another, and to contact the client that uses their bandwidth. It once
+    read ``MeshTerm/0.1 (+https://github.com/; mesh node map)``. Nobody can visit that
+    host, and the version number was already wrong. Traffic of this type gets a project
+    blocked, not contacted by email.
     """
     from meshterm import __version__
     from meshterm.services.basemap import _USER_AGENT
@@ -852,7 +857,7 @@ def test_basemap_user_agent_is_contactable() -> None:
 
 
 def test_basemap_sends_its_user_agent_on_every_fetch(tmp_path: Path) -> None:
-    """The string is not decoration: it rides the header of the request that leaves."""
+    """The string is not decoration. It is in the header of the request that leaves."""
     from meshterm.services import basemap as basemap_mod
 
     src = _offline_source(tmp_path / "cache")
@@ -874,7 +879,7 @@ def test_basemap_sends_its_user_agent_on_every_fetch(tmp_path: Path) -> None:
 
 
 def test_basemap_keeps_the_default_tls_context_when_it_works() -> None:
-    """A working platform trust store is left alone — urllib's default is passed through."""
+    """A platform trust store that works stays as it is. The app passes the default of urllib."""
     from meshterm.services import basemap as basemap_mod
 
     basemap_mod._tls_context.cache_clear()
@@ -887,21 +892,21 @@ def test_basemap_keeps_the_default_tls_context_when_it_works() -> None:
 def test_basemap_finds_a_ca_bundle_when_the_default_store_is_empty(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """An empty default store falls back to the OS CA bundle instead of failing every fetch.
+    """If the default store is empty, the app uses the OS CA bundle. It does not fail each fetch.
 
-    THE macOS bug: a frozen build asks OpenSSL for a trust store at a filesystem path baked
-    into the interpreter's own build, which need not exist on a machine that never
-    installed that Python — which is every machine a PyInstaller bundle lands on. Fetches
-    then failed with ``CERTIFICATE_VERIFY_FAILED``, and because a refused fetch is
-    indistinguishable from empty terrain the map drew no ground under the nodes and said
-    nothing. Windows hid it by reading the OS certificate store in its default context.
+    This is the macOS bug. A frozen build asks OpenSSL for a trust store at a file path that
+    is fixed in the build of the interpreter. That path can be absent on a machine that
+    never installed that Python, and a PyInstaller bundle goes to such machines. Then the
+    fetches failed with ``CERTIFICATE_VERIFY_FAILED``. A refused fetch looks the same as
+    empty terrain, so the map drew no ground under the nodes and gave no message. Windows
+    hid the bug, because its default context reads the OS certificate store.
     """
     import ssl
 
     from meshterm.services import basemap as basemap_mod
 
-    # The file only has to exist: loading is recorded below rather than really parsed,
-    # so the test pins *which path is chosen* without depending on a PEM being around.
+    # The file only has to exist. The test records the load below and does not parse the
+    # file. Thus the test checks which path the app chooses, and it does not need a PEM file.
     bundle = tmp_path / "cert.pem"
     bundle.write_text("# stand-in for the OS bundle\n", encoding="utf-8")
 
@@ -923,14 +928,14 @@ def test_basemap_finds_a_ca_bundle_when_the_default_store_is_empty(
     try:
         ctx = basemap_mod._tls_context()
         assert ctx is not None, "no context built despite a readable bundle"
-        assert loaded == [str(bundle)]  # skipped the missing path, used the present one
-        assert ctx.verify_mode == ssl.CERT_REQUIRED  # never verified away to make it work
+        assert loaded == [str(bundle)]  # skipped the missing path, used the path that exists
+        assert ctx.verify_mode == ssl.CERT_REQUIRED  # the app does not turn off verification
     finally:
         basemap_mod._tls_context.cache_clear()
 
 
 def test_basemap_never_disables_verification(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With no bundle anywhere, the fetch still verifies — it fails rather than trusts."""
+    """With no bundle in any place, the fetch still verifies. It fails and does not trust."""
     import ssl
 
     from meshterm.services import basemap as basemap_mod
@@ -946,20 +951,20 @@ def test_basemap_never_disables_verification(monkeypatch: pytest.MonkeyPatch) ->
 
     basemap_mod._tls_context.cache_clear()
     try:
-        assert basemap_mod._tls_context() is None  # urllib's default, still verifying
+        assert basemap_mod._tls_context() is None  # the default of urllib, which still verifies
     finally:
         basemap_mod._tls_context.cache_clear()
 
 
 def test_basemap_user_agent_needs_no_installed_distribution() -> None:
-    """Importing the module must not depend on package metadata being on disk.
+    """The import of the module must not depend on package metadata on the disk.
 
-    MeshTerm is run straight from a checkout as often as from a wheel — this repo's own
-    venv and the PicoCalc's deploy both are — so a version read through
-    ``importlib.metadata`` would raise :class:`PackageNotFoundError` on the tile path in
-    exactly the setups it is developed in. The version comes from the package instead, and
-    this pins that: with the metadata lookup made to fail outright, the module still
-    imports and still carries a real version.
+    MeshTerm often runs straight from a checkout, as often as from a wheel. The venv of
+    this repository and the deploy on the PicoCalc are both checkouts. If the app read the
+    version through ``importlib.metadata``, it would raise :class:`PackageNotFoundError` on
+    the tile path in the setups where the developers work. Thus the version comes from the
+    package. This test checks that. When the metadata lookup always fails, the module still
+    imports and still has a real version.
     """
     import importlib
     import importlib.metadata
@@ -981,17 +986,17 @@ def test_basemap_user_agent_needs_no_installed_distribution() -> None:
 
 
 def test_basemap_source_offline_is_graceful(tmp_path: Path) -> None:
-    """An unreachable source reports unavailable and returns no tiles, never raising."""
+    """A source that is not reachable reports unavailable and returns no tiles. It never raises."""
     from meshterm.services.basemap import BasemapSource
 
     src = BasemapSource(tmp_path / "cache", tilejson_url="http://127.0.0.1:1/none", timeout=0.2)
     assert src.available is False
-    assert src.max_zoom == 14  # sensible default when the TileJSON can't be fetched
+    assert src.max_zoom == 14  # a good default when the app cannot get the TileJSON
     assert src.load_tile(14, 4843, 5861) is None
 
 
 def test_basemap_source_reads_cached_tile(tmp_path: Path) -> None:
-    """A tile already on disk is decoded without any network access."""
+    """A tile that is already on the disk is decoded without the network."""
     from meshterm.services.basemap import BasemapSource
 
     cache = tmp_path / "cache"
@@ -1005,24 +1010,24 @@ def test_basemap_source_reads_cached_tile(tmp_path: Path) -> None:
 
 
 def _offline_source(cache: Path):
-    """A source that can't reach anything — every fetch is silence, not an empty tile."""
+    """A source that cannot reach anything. Each fetch gets no answer, not an empty tile."""
     from meshterm.services.basemap import BasemapSource
 
     return BasemapSource(cache, tilejson_url="http://127.0.0.1:1/none", timeout=0.2)
 
 
 def test_basemap_source_never_caches_an_unanswered_fetch(tmp_path: Path) -> None:
-    """A timeout writes nothing: a blank square now must not become a blank square for ever."""
+    """A timeout writes nothing. A blank square now must not become a blank square for ever."""
     from meshterm.services import basemap as basemap_mod
 
     cache = tmp_path / "cache"
     assert _offline_source(cache).load_tile(14, 4843, 5861) is None
     assert list(cache.rglob("*.pbf")) == []
 
-    # The same, with the source resolved and the *fetch* the thing that fails — the flaky
-    # link the PicoCalc lives on. The tile stays unknown, so the next pan asks again.
+    # The same, but the source is resolved and the fetch fails. This is the weak link that
+    # the PicoCalc uses. The tile stays unknown, so the next pan asks again.
     src = _offline_source(cache)
-    src._template = "http://tiles.invalid/{z}/{x}/{y}.pbf"  # resolved: the fetch is what fails
+    src._template = "http://tiles.invalid/{z}/{x}/{y}.pbf"  # resolved: the fetch fails
     calls: list[str] = []
 
     def _get(url: str):
@@ -1032,31 +1037,32 @@ def test_basemap_source_never_caches_an_unanswered_fetch(tmp_path: Path) -> None
     src._http_get = _get  # type: ignore[method-assign]
     assert src.load_tile(14, 4843, 5861) is None
     assert src.load_tile(14, 4843, 5861) is None
-    assert len(calls) == 2  # retried, not written off as empty
+    assert len(calls) == 2  # tried again, not treated as empty
     assert list(cache.rglob("*.pbf")) == []
 
 
 def test_basemap_source_asks_again_after_a_failed_resolve(tmp_path: Path) -> None:
-    """Offline at open is a moment, not a verdict — the PicoCalc's Wi-Fi lands after boot.
+    """Offline at open is a short event, not a final state.
 
-    Latching the first failure meant an app started alongside the device's network drew
-    every tile of every session from whatever the cache already held (JP, 2026-08-18).
+    The Wi-Fi of the PicoCalc starts after boot. The source once kept the first failure.
+    Thus an app that started with the network of the device drew each tile of each session
+    from the cache only (JP, 2026-08-18).
     """
     from meshterm.services import basemap as basemap_mod
 
     src = _offline_source(tmp_path / "cache")
     assert src.available is False
-    assert src.max_zoom == 14  # the default, because nothing was resolved
+    assert src.max_zoom == 14  # the default, because the source resolved nothing
 
     doc = b'{"tiles": ["http://tiles.invalid/{z}/{x}/{y}.pbf"], "maxzoom": 14}'
     src._http_get = lambda url: basemap_mod._Response(True, doc)  # type: ignore[method-assign]
-    src._resolve_after = 0.0  # the cooldown, stepped over rather than slept through
+    src._resolve_after = 0.0  # the cooldown: the test skips it, and does not wait for it
     assert src.max_zoom == 14
     assert src.available is True, "the source never asked again"
 
 
 def test_basemap_source_holds_a_failed_resolve_for_its_cooldown(tmp_path: Path) -> None:
-    """Asking again is not asking constantly: a genuinely offline map isn't a retry loop."""
+    """To ask again is not to ask all the time. A map that is really offline is not a retry loop."""
     from meshterm.services import basemap as basemap_mod
 
     src = _offline_source(tmp_path / "cache")
@@ -1067,36 +1073,36 @@ def test_basemap_source_holds_a_failed_resolve_for_its_cooldown(tmp_path: Path) 
     )[1]
     for _ in range(5):
         assert src.available is False
-    assert calls == []  # the constructor's own failed resolve still stands
+    assert calls == []  # the failed resolve of the constructor still stands
 
 
 def test_basemap_source_tells_an_empty_answer_from_silence(tmp_path: Path) -> None:
-    """The two ``None`` returns of ``load_tile``, told apart — a caching caller needs it."""
+    """The two ``None`` results of ``load_tile`` are different. A caller that caches needs this."""
     from meshterm.services import basemap as basemap_mod
 
     src = _offline_source(tmp_path / "cache")
     src._template = "http://tiles.invalid/{z}/{x}/{y}.pbf"
     src._http_get = lambda url: basemap_mod._Response(False, b"")  # type: ignore[method-assign]
     assert src.load_tile(14, 4843, 5861) is None
-    assert src.answered_empty(14, 4843, 5861) is False  # no answer — worth asking again
+    assert src.answered_empty(14, 4843, 5861) is False  # no answer: ask again
 
     src._http_get = lambda url: basemap_mod._Response(True, b"")  # type: ignore[method-assign]
     assert src.load_tile(14, 1, 1) is None
-    assert src.answered_empty(14, 1, 1) is True  # the source said so; that settles it
+    assert src.answered_empty(14, 1, 1) is True  # the source said so, and that is final
 
 
 def test_basemap_source_prunes_a_blank_cached_tile(tmp_path: Path) -> None:
-    """A zero-byte entry (an older build's failure marker) is dropped rather than drawn."""
+    """A zero-byte entry (the failure marker of an older build) is removed, not drawn."""
     cache = tmp_path / "cache"
     tile = cache / "tiles" / "14" / "4843" / "5861.pbf"
     tile.parent.mkdir(parents=True)
     tile.write_bytes(b"")
     assert _offline_source(cache).load_tile(14, 4843, 5861) is None
-    assert not tile.exists()  # pruned, so a session with network re-fetches it
+    assert not tile.exists()  # pruned, so a session with a network gets it again
 
 
 def test_basemap_source_prunes_a_corrupt_cached_tile(tmp_path: Path) -> None:
-    """Bytes cut short mid-write don't decode, so they're pruned instead of kept blank."""
+    """Bytes that a write cut short do not decode, so the source prunes them."""
     cache = tmp_path / "cache"
     tile = cache / "tiles" / "14" / "4843" / "5861.pbf"
     tile.parent.mkdir(parents=True)
@@ -1106,12 +1112,12 @@ def test_basemap_source_prunes_a_corrupt_cached_tile(tmp_path: Path) -> None:
 
 
 def test_basemap_source_caches_only_tiles_with_content(tmp_path: Path) -> None:
-    """The disk cache holds decodable geometry — never an empty or unparseable answer."""
+    """The disk cache holds geometry that decodes. It never holds an empty or unparseable answer."""
     from meshterm.services import basemap as basemap_mod
 
     cache = tmp_path / "cache"
     src = _offline_source(cache)
-    src._template = "http://tiles.invalid/{z}/{x}/{y}.pbf"  # skip TileJSON resolution
+    src._template = "http://tiles.invalid/{z}/{x}/{y}.pbf"  # skip the TileJSON resolution
     src._resolved = True
 
     bodies = iter([b"", b"not a vector tile at all", _FIXTURE.read_bytes()])
@@ -1126,11 +1132,11 @@ def test_basemap_source_caches_only_tiles_with_content(tmp_path: Path) -> None:
 
 
 def test_basemap_source_keeps_a_tile_whose_layers_are_all_undrawn(tmp_path: Path) -> None:
-    """Narrowing the decode must not make a good cached tile look blank and get pruned.
+    """A narrowed decode must not make a good cached tile look blank and get pruned.
 
-    A source told to decode a layer the tile doesn't carry sees no features at all. If
-    that were read as "nothing here", the entry would be deleted and re-downloaded on
-    every session — the cache paying for a rendering decision.
+    A source that decodes a layer that the tile does not have sees no features at all. If
+    the source read this as "nothing here", it would delete the entry and download it again
+    in each session. Then the cache would pay for a decision about the rendering.
     """
     from meshterm.services.basemap import BasemapSource
 
@@ -1148,12 +1154,12 @@ def test_basemap_source_keeps_a_tile_whose_layers_are_all_undrawn(tmp_path: Path
     layers = src.load_tile(14, 4843, 5861)
 
     assert layers, "a real tile must still read as real"
-    assert not any(layer.features for layer in layers)  # nothing was decoded
+    assert not any(layer.features for layer in layers)  # the source decoded nothing
     assert tile.exists(), "the cache entry must survive"
 
 
 def test_decoded_layers_survive_a_round_trip() -> None:
-    """The sidecar encoding restores exactly what the decoder produced."""
+    """The sidecar encoding restores exactly the result of the decoder."""
     from meshterm.core.mvt import dumps_layers, loads_layers
     from meshterm.ui.map_render import DRAWN_LAYERS
 
@@ -1171,7 +1177,7 @@ def test_decoded_layers_survive_a_round_trip() -> None:
 
 
 def test_decoded_layers_refuse_a_blob_from_another_layer_set() -> None:
-    """A narrowed blob must never be served to a caller that wants more of the tile."""
+    """The source must not give a narrowed blob to a caller that wants more of the tile."""
     from meshterm.core.mvt import dumps_layers, loads_layers
 
     blob = dumps_layers(decode_tile(_FIXTURE.read_bytes(), layers={"water"}), stamp="water")
@@ -1180,7 +1186,7 @@ def test_decoded_layers_refuse_a_blob_from_another_layer_set() -> None:
 
 
 def test_decoded_layers_treat_damage_as_a_miss() -> None:
-    """A truncated or foreign sidecar is a cache miss, never an exception."""
+    """A sidecar that is truncated or foreign is a cache miss. It is not an exception."""
     from meshterm.core.mvt import dumps_layers, loads_layers
 
     blob = dumps_layers(decode_tile(_FIXTURE.read_bytes(), layers={"water"}), stamp="s")
@@ -1190,7 +1196,7 @@ def test_decoded_layers_treat_damage_as_a_miss() -> None:
 
 
 def test_basemap_source_writes_and_reuses_a_decoded_sidecar(tmp_path: Path) -> None:
-    """The second load parses nothing: it comes back from the sidecar."""
+    """The second load parses nothing. Its result comes from the sidecar."""
     cache = tmp_path / "cache"
     tile = cache / "tiles" / "14" / "4843" / "5861.pbf"
     tile.parent.mkdir(parents=True)
@@ -1202,7 +1208,7 @@ def test_basemap_source_writes_and_reuses_a_decoded_sidecar(tmp_path: Path) -> N
     assert first is not None
     assert sidecar.exists(), "decoding should have been written down"
 
-    # Break the raw tile: a second load that still works can only have used the sidecar.
+    # Break the raw tile. If a second load still works, it can only use the sidecar.
     tile.write_bytes(b"junk that cannot decode")
     second = src.load_tile(14, 4843, 5861)
     assert second is not None
@@ -1212,7 +1218,7 @@ def test_basemap_source_writes_and_reuses_a_decoded_sidecar(tmp_path: Path) -> N
 
 
 def test_basemap_source_ignores_a_sidecar_from_another_layer_set(tmp_path: Path) -> None:
-    """Widening what the map draws re-decodes rather than serving the narrower blob."""
+    """If the map draws more layers, the source decodes again. It does not use the narrower blob."""
     from meshterm.services.basemap import BasemapSource
 
     cache = tmp_path / "cache"
@@ -1234,7 +1240,7 @@ def test_basemap_source_ignores_a_sidecar_from_another_layer_set(tmp_path: Path)
 
 
 def test_basemap_source_prunes_the_decoded_cache_to_its_budget(tmp_path: Path) -> None:
-    """The sidecar half of the cache is bounded; the raw tiles it derives from are not."""
+    """The sidecar half of the cache has a limit. The raw tiles that it comes from have none."""
     from meshterm.services.basemap import BasemapSource
 
     cache = tmp_path / "cache"
@@ -1245,7 +1251,7 @@ def test_basemap_source_prunes_the_decoded_cache_to_its_budget(tmp_path: Path) -
         blob.write_bytes(b"x" * 1000)
         os.utime(blob, (i, i))  # oldest first
 
-    # 6 KB present, 3 KB allowed: the three oldest go, the three newest stay.
+    # 6 KB is present and 3 KB is the limit. The three oldest go, and the three newest stay.
     src = BasemapSource(cache, tilejson_url="http://127.0.0.1:1/none", max_decoded_bytes=3000)
     src._prune_decoded()
 
@@ -1254,11 +1260,11 @@ def test_basemap_source_prunes_the_decoded_cache_to_its_budget(tmp_path: Path) -
 
 
 def test_resident_bytes_tracks_what_a_decoded_tile_really_holds() -> None:
-    """The memory budget is only as good as its scale, so the scale is checked against RAM.
+    """The memory budget is only as good as its scale, so the test checks the scale against RAM.
 
-    A count of tiles was the old measure, and a tile weighs anywhere from 1 to 4.6 MB on the
-    PicoCalc; the estimate has to land near what ``tracemalloc`` sees, on this build's word
-    size, or the budget it feeds is a guess.
+    The old measure was a count of tiles. But a tile weighs between 1 MB and 4.6 MB on the
+    PicoCalc. The estimate must be near the value that ``tracemalloc`` shows, on the word
+    size of this build. If it is not, the budget that uses the estimate is a guess.
     """
     import gc
     import tracemalloc
@@ -1279,7 +1285,7 @@ def test_resident_bytes_tracks_what_a_decoded_tile_really_holds() -> None:
 
 
 def test_basemap_source_holds_decoded_tiles_to_a_byte_budget(tmp_path: Path) -> None:
-    """Decoded tiles in RAM are budgeted in bytes: the oldest go first, the newest always stays."""
+    """Decoded tiles in RAM have a budget in bytes. The oldest go first, and the newest stays."""
     from meshterm.core.mvt import resident_bytes
     from meshterm.services.basemap import BasemapSource
 
@@ -1296,7 +1302,7 @@ def test_basemap_source_holds_decoded_tiles_to_a_byte_budget(tmp_path: Path) -> 
     assert src.resident(14, 4, 0) is tile
     assert src.resident(14, 0, 0) is None
 
-    # A tile heavier than the whole budget is still kept, alone: a view asked for it.
+    # A tile that is heavier than the whole budget stays, alone, because a view asked for it.
     tight = BasemapSource(tmp_path / "cache", tilejson_url="http://127.0.0.1:1/none", memo_bytes=1)
     tight._remember((14, 0, 0), tile)
     tight._remember((14, 1, 0), tile)
@@ -1304,25 +1310,25 @@ def test_basemap_source_holds_decoded_tiles_to_a_byte_budget(tmp_path: Path) -> 
 
 
 def test_basemap_memory_budget_scales_with_the_machine(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An eighth of the RAM, within bounds — the PicoCalc's 100 MB gets ~13 MB of tiles."""
+    """The budget is an eighth of the RAM, within limits (the PicoCalc gets 13 MB of its 100 MB)."""
     from meshterm.services import basemap
 
     def machine(pages: int):
         sizes = {"SC_PAGE_SIZE": 4096, "SC_PHYS_PAGES": pages}
         monkeypatch.setattr(basemap.os, "sysconf", sizes.__getitem__, raising=False)
 
-    machine(26142)  # the PicoCalc's 104568 kB
+    machine(26142)  # the 104568 kB of the PicoCalc
     assert basemap._memo_budget() == 4096 * 26142 // basemap._MEMO_SHARE
     machine(4 * 1024 * 1024)  # a 16 GB desktop
     assert basemap._memo_budget() == basemap._MEMO_CEILING
-    machine(1024)  # 4 MB: too small to hold a view at an eighth
+    machine(1024)  # 4 MB: too small to hold a view at an eighth of the RAM
     assert basemap._memo_budget() == basemap._MEMO_FLOOR
     monkeypatch.delattr(basemap.os, "sysconf", raising=False)  # Windows
     assert basemap._memo_budget() == basemap._MEMO_CEILING
 
 
 def test_basemap_warm_writes_a_tile_down_and_holds_nothing(tmp_path: Path) -> None:
-    """A prefetch buys the decode, on disk, and leaves the RAM to where the reader has been."""
+    """A prefetch stores the decode on the disk. It leaves the RAM for where the user went."""
     cache = tmp_path / "cache"
     tile = cache / "tiles" / "14" / "4843" / "5861.pbf"
     tile.parent.mkdir(parents=True)
@@ -1333,7 +1339,7 @@ def test_basemap_warm_writes_a_tile_down_and_holds_nothing(tmp_path: Path) -> No
     assert (cache / "decoded" / "14" / "4843" / "5861.bin").exists()
     assert src.resident(14, 4843, 5861) is None, "a guess was held in RAM"
 
-    # A tile already written down costs a second guess nothing: not even a read.
+    # A tile that is already stored costs a second guess nothing, not even a read.
     reads: list[Path] = []
     src._read_cached = lambda path: reads.append(path)  # type: ignore[method-assign]
     src.warm(14, 4843, 5861)
@@ -1341,7 +1347,7 @@ def test_basemap_warm_writes_a_tile_down_and_holds_nothing(tmp_path: Path) -> No
 
 
 def test_basemap_source_remembers_a_blank_tile_for_the_session(tmp_path: Path) -> None:
-    """An answered-empty tile isn't re-requested this session (but isn't written down)."""
+    """The source does not request an answered-empty tile again in this session (or store it)."""
     from meshterm.services import basemap as basemap_mod
 
     src = _offline_source(tmp_path / "cache")
@@ -1360,7 +1366,7 @@ def test_basemap_source_remembers_a_blank_tile_for_the_session(tmp_path: Path) -
 
 
 def test_basemap_http_get_separates_an_answer_from_silence(tmp_path: Path) -> None:
-    """404 is an answer; a 500, and a body short of Content-Length, are not."""
+    """A 404 is an answer. A 500, and a body shorter than Content-Length, are not answers."""
     import urllib.error
 
     from meshterm.services.basemap import BasemapSource
@@ -1368,7 +1374,7 @@ def test_basemap_http_get_separates_an_answer_from_silence(tmp_path: Path) -> No
     src = BasemapSource(tmp_path / "cache")
 
     class _Resp:
-        """The slice of an ``http.client.HTTPResponse`` the fetcher touches."""
+        """The part of an ``http.client.HTTPResponse`` that the fetcher uses."""
 
         def __init__(self, body: bytes, declared: str | None) -> None:
             self._body, self.headers = body, {"Content-Length": declared}
@@ -1404,9 +1410,9 @@ def test_basemap_http_get_separates_an_answer_from_silence(tmp_path: Path) -> No
     assert _get(_Resp(b"tile-bytes", "10")) == (True, b"tile-bytes")
     assert _get(_Resp(b"tile-b", "10")) == (False, b"")  # truncated read
     assert _get(_Resp(b"anything", None)) == (True, b"anything")  # no declared length
-    assert _get(err(404)) == (True, b"")  # "no tile here" — an answer
-    assert _get(err(500)) == (False, b"")  # server fault — no answer
-    assert _get(err(429)) == (False, b"")  # throttled — no answer
+    assert _get(err(404)) == (True, b"")  # "no tile here": an answer
+    assert _get(err(500)) == (False, b"")  # server fault: no answer
+    assert _get(err(429)) == (False, b"")  # throttled: no answer
     assert _get(TimeoutError("timed out")) == (False, b"")
 
 
@@ -1415,7 +1421,7 @@ def test_basemap_http_get_separates_an_answer_from_silence(tmp_path: Path) -> No
 
 @pytest.fixture()
 def ctx(tmp_path: Path):
-    """A mock-backed application context with the plain (console) UI surface."""
+    """An application context with a mock device and the plain (console) UI surface."""
     from meshterm.context import AppContext
     from meshterm.core.admin_store import AdminStore
     from meshterm.core.config import Settings
@@ -1437,22 +1443,22 @@ def ctx(tmp_path: Path):
 
 
 def test_usable_fix_rejects_out_of_range_and_null_island() -> None:
-    """A fix is usable only in valid lat/lon range and away from the 0/0 no-GPS sentinel."""
+    """A fix is usable only in the valid lat/lon range and away from the 0/0 no-GPS sentinel."""
     from meshterm.core.geo import usable_fix
 
     assert usable_fix(45.5, -73.6) is True
     assert usable_fix(90.0, 180.0) is True and usable_fix(-90.0, -180.0) is True  # extremes
-    assert usable_fix(0.0, 0.0) is False  # null island (a no-GPS companion reports this)
-    assert usable_fix(-97.0, -1041.97) is False  # out of range (a real advert seen in the wild)
+    assert usable_fix(0.0, 0.0) is False  # null island (a companion with no GPS reports this)
+    assert usable_fix(-97.0, -1041.97) is False  # out of range (a real advert that we heard)
     assert usable_fix(45.0, 181.0) is False and usable_fix(-91.0, -73.0) is False
 
 
 async def test_gather_markers_drops_out_of_range_fix(ctx) -> None:
-    """A node advertising nonsense coordinates is never plotted, only the real one is.
+    """The map does not plot a node with invalid coordinates. It plots the node with a real fix.
 
-    Some firmware reports an out-of-range fix (a companion has advertised ``lat -97,
-    lon -1042``); projecting it flings the view off the world, leaving the map an all-black
-    off-world frame. It is treated as no fix at all, the same guard the 0/0 null island gets.
+    Some firmware reports a fix that is out of range (a companion advertised ``lat -97,
+    lon -1042``). If the map projects it, the view goes off the world, and the map is an
+    all-black frame of nothing. The map treats it as no fix, the same as the 0/0 null island.
     """
     from meshterm.services.markers import gather_markers
 
@@ -1485,19 +1491,19 @@ async def test_gather_markers_drops_out_of_range_fix(ctx) -> None:
 
 
 def test_repository_round_trips_map_view(ctx) -> None:
-    """The saved map viewport persists and reads back; absent by default."""
+    """The repository stores the map viewport and reads it back. At the start, it is absent."""
     assert ctx.repo.get_map_view() is None
     ctx.repo.set_map_view(45.51, -73.57, 13)
     lat, lon, zoom = ctx.repo.get_map_view()
     assert (lat, lon) == pytest.approx((45.51, -73.57))
     assert zoom == 13
-    # A later save overwrites the single stored view.
+    # A later save replaces the one stored view.
     ctx.repo.set_map_view(40.0, -74.0, 9)
     assert ctx.repo.get_map_view() == pytest.approx((40.0, -74.0, 9))
 
 
 async def test_map_tool_reports_nothing_to_plot(ctx, monkeypatch) -> None:
-    """With no located contacts and no located history the tool returns cleanly."""
+    """If no contact and no history has a position, the tool returns without an error."""
 
     async def _no_contacts(_ctx):
         return []
@@ -1508,11 +1514,11 @@ async def test_map_tool_reports_nothing_to_plot(ctx, monkeypatch) -> None:
 
 
 async def test_gather_markers_drops_null_island_fixes(ctx, monkeypatch) -> None:
-    """A node advertising a 0/0 fix (no GPS lock) is not plotted at null island.
+    """The map does not plot a node that advertises a 0/0 fix (no GPS lock) at null island.
 
-    Framing such a marker (filter to it, press Enter) would drop the map onto the empty
-    mid-Atlantic — a screen of solid water fill — so a both-near-zero fix is treated as no
-    fix at all, exactly as our own node's marker already is.
+    Suppose the user frames such a marker (filters to it and presses Enter). The map would
+    go to the empty mid-Atlantic, a screen of solid water fill. Thus the map treats a fix
+    where both values are near zero as no fix, as it already does for our own node.
     """
     from meshterm.core.models import Contact
     from meshterm.services.markers import gather_markers
@@ -1526,11 +1532,11 @@ async def test_gather_markers_drops_null_island_fixes(ctx, monkeypatch) -> None:
     monkeypatch.setattr("meshterm.services.markers._contacts", _contacts)
     labels = [m.label for m in await gather_markers(ctx)]
     assert "Real" in labels
-    assert "NoFix" not in labels  # the null-island node is dropped
+    assert "NoFix" not in labels  # the map removes the null-island node
 
 
 class _StubSession:
-    """Minimal stand-in for :class:`TuiSession` for driving :class:`MapScreen`."""
+    """Minimal stand-in for :class:`TuiSession`, to drive :class:`MapScreen`."""
 
     def __init__(self, cols: int, rows: int) -> None:
         self._cols, self._rows = cols, rows
@@ -1544,7 +1550,7 @@ class _StubSession:
 
 
 class _StubSource:
-    """An always-offline tile source, so the screen renders nodes only (no network)."""
+    """A tile source that is always offline, so the screen renders only nodes (no network)."""
 
     available = False
     max_zoom = 14
@@ -1553,22 +1559,22 @@ class _StubSource:
         return None
 
     def answered_empty(self, z: int, x: int, y: int) -> bool:
-        return False  # offline is silence, never the source saying "nothing there"
+        return False  # offline means no answer, not that the source says "nothing there"
 
     def resident(self, z: int, x: int, y: int):
-        return None  # nothing is ever held in RAM
+        return None  # the source holds nothing in RAM
 
     def warm(self, z: int, x: int, y: int) -> None:
         return None
 
 
 def _loaded_tile() -> list[Layer]:
-    """A stand-in for a decoded tile: truthy, which is all the budget cares about."""
+    """A stand-in for a decoded tile. It is true in a boolean test, which the budget needs."""
     return [Layer(name="water", extent=4096)]
 
 
 def _map_screen_with_tiles(count: int) -> MapScreen:
-    """A rendered map screen carrying ``count`` tiles' worth of pan history."""
+    """A rendered map screen with the pan history of ``count`` tiles."""
     from meshterm.ui.map_render import MapMarker
     from meshterm.ui.map_screen import MapScreen
 
@@ -1580,11 +1586,12 @@ def _map_screen_with_tiles(count: int) -> MapScreen:
 
 
 def test_map_holds_only_the_tiles_its_view_shows() -> None:
-    """Panning far leaves no decoded ground behind on the screen.
+    """After a long pan, the screen does not keep decoded ground that it does not show.
 
-    A decoded tile is 1-4.6 MB on the PicoCalc, which has ~100 MB in total. The history a
-    pan back needs is the source's, budgeted in bytes; a tile the screen kept as well would
-    sit outside that budget, which is how a fast map once swapped the device to a standstill.
+    A decoded tile is 1 MB to 4.6 MB on the PicoCalc, which has approximately 100 MB in
+    total. The source keeps the history that a pan back needs, with a budget in bytes. If
+    the screen also kept a tile, the tile would be outside that budget. This is how a fast
+    map once made the device swap until it stopped.
     """
     screen = _map_screen_with_tiles(200)
     for _ in range(12):
@@ -1597,7 +1604,7 @@ def test_map_holds_only_the_tiles_its_view_shows() -> None:
 
 
 def test_map_tile_cache_never_drops_what_is_on_screen() -> None:
-    """Whatever the view needs survives the trim — eviction starts at the far end."""
+    """The tiles that the view needs stay after the trim. The eviction starts at the far end."""
     from meshterm.ui.map_render import MapMarker
     from meshterm.ui.map_screen import MapScreen
 
@@ -1606,7 +1613,7 @@ def test_map_tile_cache_never_drops_what_is_on_screen() -> None:
     visible = list(screen._viewport.tiles(14))
     for t in visible:
         screen._tiles[t] = _loaded_tile()
-    for i in range(200):  # a long pan's worth of history arriving after them
+    for i in range(200):  # the history of a long pan arrives after them
         screen._tiles[(14, 9000 + i, 9000 + i)] = _loaded_tile()
 
     screen.render_body(80)
@@ -1616,9 +1623,10 @@ def test_map_tile_cache_never_drops_what_is_on_screen() -> None:
 
 
 def test_map_tile_cache_keeps_the_absent_tile_markers() -> None:
-    """A ``None`` is the memory of having asked; it costs a slot, so it is never evicted.
+    """A ``None`` is the memory that the screen asked. The cache never evicts it.
 
-    Dropping one would buy nothing back and cost a re-request on the very next repaint.
+    It uses a slot. If the cache removed one, it would gain nothing, and the next paint
+    would request the tile again.
     """
     screen = _map_screen_with_tiles(200)
     for i in range(30):
@@ -1631,11 +1639,11 @@ def test_map_tile_cache_keeps_the_absent_tile_markers() -> None:
 
 
 class _CapturingSession(_StubSession):
-    """Drives :func:`open_map` headless, so a test can watch what it does.
+    """Drives :func:`open_map` headless, so that a test can watch what it does.
 
-    Captures the pushed screen, renders it once, then replays a canned key sequence —
-    which is enough to assert on where the map opened and what it did (or didn't)
-    persist as the view moves.
+    It captures the pushed screen, renders it one time, and then plays a fixed key sequence.
+    This is enough to assert where the map opened, and what the map stored (or did not
+    store) when the view moved.
     """
 
     def __init__(self, cols: int, rows: int, keys: tuple[str, ...] = ()) -> None:
@@ -1656,7 +1664,7 @@ class _CapturingSession(_StubSession):
 
 
 def test_map_screen_renders_pans_zooms_and_resets() -> None:
-    """The interactive screen fills its body, and wasd/zoom/reset move the viewport."""
+    """The interactive screen fills its body. The wasd keys, zoom, and reset move the viewport."""
     from meshterm.core.geo import Viewport
     from meshterm.ui.map_render import MapMarker
     from meshterm.ui.map_screen import MapScreen
@@ -1669,12 +1677,12 @@ def test_map_screen_renders_pans_zooms_and_resets() -> None:
     screen = MapScreen(session, markers, _StubSource(), 14)
 
     lines = screen.render_body(80)
-    assert len(lines) == 24  # fills the body height reported by the session
+    assert len(lines) == 24  # fills the body height that the session reports
     start = screen._viewport
 
-    screen.handle("right")  # pan east → longitude increases
+    screen.handle("right")  # pan east: the longitude increases
     assert screen._viewport.center_lon > start.center_lon
-    screen.handle("up")  # pan north → latitude increases
+    screen.handle("up")  # pan north: the latitude increases
     assert screen._viewport.center_lat > start.center_lat
 
     z = screen._viewport.zoom
@@ -1683,28 +1691,28 @@ def test_map_screen_renders_pans_zooms_and_resets() -> None:
     screen.handle("pagedown")
     assert screen._viewport.zoom == z
 
-    screen.handle("home")  # reset refits to the nodes
+    screen.handle("home")  # reset fits the view to the nodes again
     refit = Viewport.fit([(m.lat, m.lon) for m in markers], start.dot_w, start.dot_h, max_zoom=14)
     assert screen._viewport.zoom == refit.zoom
     assert screen._viewport.center_lat == pytest.approx(refit.center_lat)
 
-    # Letters never pan or zoom — they feed the find filter instead.
+    # A letter does not pan or zoom. It goes to the find filter.
     view = screen._viewport
     screen.handle("text", "d")
     assert screen._viewport is view and screen._filter == "d"
     screen.handle("backspace")
 
-    # Offline source: nodes still render and both markers are present.
+    # Offline source: the nodes still render, and both markers are present.
     assert "▲" in _plain(screen.render_body(80)) and "●" in _plain(screen.render_body(80))
-    # The basemap's state is a status atom, so it rides the title's `·` chain (standing in
-    # for the scale) and leaves the footer a pure key line inside its 72-cell budget.
+    # The state of the basemap is a status atom. It is in the `·` chain of the title (in the
+    # place of the scale). Thus the footer is a line of keys only, within its 72-cell budget.
     assert screen.title.endswith("· offline")
     assert "offline" not in screen.footer_hint
     assert cell_len(screen.footer_hint) <= 72
 
 
 def test_map_screen_shift_pans_by_a_single_cell() -> None:
-    """Holding Shift with an arrow pans finely, by one character cell."""
+    """Shift with an arrow makes a fine pan, by one character cell."""
     from meshterm.core.geo import lonlat_to_world, world_to_lonlat
     from meshterm.ui.map_render import MapMarker
     from meshterm.ui.map_screen import MapScreen
@@ -1714,7 +1722,7 @@ def test_map_screen_shift_pans_by_a_single_cell() -> None:
     screen.render_body(80)
     start = screen._viewport
 
-    # A coarse east pan (30% of the view) moves much further than a fine one.
+    # A coarse pan to the east (30% of the view) moves much more than a fine pan.
     screen.handle("right")
     coarse = screen._viewport.center_lon - start.center_lon
 
@@ -1723,14 +1731,14 @@ def test_map_screen_shift_pans_by_a_single_cell() -> None:
     fine = screen._viewport.center_lon - start.center_lon
     assert 0 < fine < coarse
 
-    # The fine step is exactly one cell (2 dots) east at the current zoom.
+    # The fine step is one cell (2 dots) to the east at the current zoom.
     cx, cy = lonlat_to_world(start.center_lat, start.center_lon, start.zoom)
     _, expected_lon = world_to_lonlat(cx + 2, cy, start.zoom)
     assert screen._viewport.center_lon == pytest.approx(expected_lon)
 
 
 def test_map_fkey_lane_names_its_three_destinations_and_the_zoom() -> None:
-    """The map repurposes the nav keys, so its lane labels them — and offers no dead key."""
+    """The map uses the navigation keys for other actions, so its lane labels them. No dead key."""
     from meshterm.ui.map_render import MapMarker
     from meshterm.ui.map_screen import MapScreen
     from meshterm.ui.tui.fkeys import PICOCALC_LYRA_DECK
@@ -1738,9 +1746,9 @@ def test_map_fkey_lane_names_its_three_destinations_and_the_zoom() -> None:
     screen = MapScreen(_StubSession(80, 24), [MapMarker("A", 45.5, -73.6)], _StubSource(), 14)
     lane = screen.picocalc_lyra_lane
 
-    # PgUp/PgDn zoom here and Home reframes — the shared paging labels would all be lies,
-    # and "end" is bound to nothing at all, so no jump rides the zoom rocker's Shift bank.
-    # The zoom pair rises to the right, like every right-hand directional pair.
+    # PgUp and PgDn zoom here, and Home frames the view again. The shared paging labels would
+    # be false. The "end" key has no action, so no jump is on the Shift bank of the zoom
+    # rocker. The zoom pair rises to the right, as each directional pair on the right does.
     assert [pair.label if pair else None for pair in lane] == [
         "Region",
         "You",
@@ -1756,21 +1764,21 @@ def test_map_fkey_lane_names_its_three_destinations_and_the_zoom() -> None:
         PICOCALC_LYRA_DECK.action_for(lane, 2) == "locate"
         and PICOCALC_LYRA_DECK.action_for(lane, 3) == "frame"
     )
-    # Two slots carry a Shift half along their own axis: You + homes in on us zoomed,
-    # Clear drops the find query. The other three Shift keys stay unbound.
+    # Two slots have a Shift half on their own axis: You + goes to our node, zoomed in, and
+    # Clear removes the find query. The other three Shift keys have no action.
     assert (
         PICOCALC_LYRA_DECK.action_for(lane, 7) == "locate_zoom"
         and PICOCALC_LYRA_DECK.action_for(lane, 8) == "clear_find"
     )
     assert all(PICOCALC_LYRA_DECK.action_for(lane, n) is None for n in (6, 9, 10))
-    # Region and the zoom always act; the other two only where they'd land somewhere —
-    # and each Shift half gates with its own axis (no self marker, no query typed).
+    # Region and the zoom always act. The other two act only where they go to a place. Each
+    # Shift half depends on its own axis (no marker of our node, no query typed).
     assert [pair.enabled for pair in lane] == [True, False, False, True, True]
     assert lane[1].opp_enabled is False and lane[2].opp_enabled is False
 
 
 def test_map_locate_recenters_on_our_own_node_at_the_current_zoom() -> None:
-    """``You`` moves the view to us and changes nothing else — not even the zoom."""
+    """``You`` moves the view to us and changes nothing else, not even the zoom."""
     from meshterm.ui.map_render import MapMarker
     from meshterm.ui.map_screen import MapScreen
 
@@ -1780,17 +1788,18 @@ def test_map_locate_recenters_on_our_own_node_at_the_current_zoom() -> None:
     ]
     screen = MapScreen(_StubSession(80, 24), markers, _StubSource(), 14)
     screen.render_body(80)
-    screen.handle("pageup")  # zoom in one step, so the recentre has a zoom to preserve
+    screen.handle("pageup")  # zoom in one step, so the new centre has a zoom to keep
     zoom = screen._viewport.zoom
-    screen.handle("left")  # and pan away from wherever we are
+    screen.handle("left")  # and pan away from our node
 
-    assert screen.picocalc_lyra_lane[1].enabled is True  # we're on the map, so You can act
+    assert screen.picocalc_lyra_lane[1].enabled is True  # we are on the map, so You can act
     screen.handle("locate")
     assert screen._viewport.center_lat == pytest.approx(45.40)
     assert screen._viewport.center_lon == pytest.approx(-73.50)
     assert screen._viewport.zoom == zoom
 
-    # A mesh we aren't located in has nowhere to go: the chip dims and the key no-ops.
+    # If our node has no position on the map, there is no place to go. The chip is dim, and
+    # the key does nothing.
     away = MapScreen(_StubSession(80, 24), markers[:1], _StubSource(), 14)
     away.render_body(80)
     before = away._viewport
@@ -1799,7 +1808,7 @@ def test_map_locate_recenters_on_our_own_node_at_the_current_zoom() -> None:
 
 
 def test_map_echoes_the_find_query_in_the_body_only_where_the_footer_is_gone() -> None:
-    """The PicoCalc draws no hint line, so the query it carries moves into the body."""
+    """The PicoCalc draws no hint line, so the query that the hint has moves into the body."""
     from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
     from meshterm.ui.attribution import CREDIT_SHORT
     from meshterm.ui.map_render import MapMarker
@@ -1813,7 +1822,7 @@ def test_map_echoes_the_find_query_in_the_body_only_where_the_footer_is_gone() -
         assert len(desktop.render_body(72)) == 20
         for ch in "hil":
             desktop.handle("text", ch)
-        # Unchanged: the footer already shows it, so the canvas keeps the whole body.
+        # No change: the footer shows the query, so the canvas keeps the whole body.
         assert "/hil" not in _plain(desktop.render_body(72))
         assert len(desktop.render_body(72)) == 20
         assert "find: hil" in desktop.footer_hint
@@ -1824,15 +1833,15 @@ def test_map_echoes_the_find_query_in_the_body_only_where_the_footer_is_gone() -
         for ch in "hil":
             device.handle("text", ch)
         lines = device.render_body(53)
-        # The echo overlays the canvas's *last* row — directly above the F-key lane —
-        # so the ground never shifts: same body height, same viewport, top anchor held.
-        # The basemap credit is pinned to that same row's other end (it is chrome on the
-        # drawing, not a body line of its own), so the echo takes what is left of it.
+        # The echo goes over the last row of the canvas, directly above the F-key lane. Thus
+        # the ground does not move: the body height, the viewport, and the top anchor stay
+        # the same. The basemap credit is at the other end of the same row. (It is chrome on
+        # the drawing, not a body line of its own.) The echo takes the space that remains.
         assert _plain(lines[-1]).strip().startswith("/hil")
         assert _plain(lines[-1]).rstrip().endswith(CREDIT_SHORT)
         assert "/hil" not in _plain(lines[0])
         assert len(lines) == 23
-        # Clearing the find hands the row back to the canvas, still without a reflow.
+        # If the user clears the find, the row goes back to the canvas, again with no reflow.
         for _ in "hil":
             device.handle("backspace")
         assert len(device.render_body(53)) == 23
@@ -1842,10 +1851,10 @@ def test_map_echoes_the_find_query_in_the_body_only_where_the_footer_is_gone() -
 
 
 def test_map_shifted_vertical_arrows_survive_the_console_keymap(monkeypatch) -> None:
-    """Shifted vertical arrows survive the console keymap flattening them.
+    """A vertical arrow with Shift still works when the console keymap flattens it.
 
-    Shift+↑ arrives as PgUp on the PicoCalc console; with Shift physically down it
-    must fine-pan, not zoom — and plain PgUp (the F-lane's zoom) stays a zoom.
+    Shift+↑ arrives as PgUp on the PicoCalc console. When the Shift key is down, the key
+    must make a fine pan and not a zoom. A plain PgUp (the zoom of the F-key lane) stays a zoom.
     """
     from meshterm.services import modifier_watch
     from meshterm.ui.map_render import MapMarker
@@ -1857,17 +1866,17 @@ def test_map_shifted_vertical_arrows_survive_the_console_keymap(monkeypatch) -> 
     lat = screen._viewport.center_lat
 
     monkeypatch.setattr(modifier_watch, "_shift_down", True)
-    screen.handle("pageup")  # the keymap's Shift+↑, rescued by the watcher
-    assert screen._viewport.zoom == zoom  # no zoom happened
-    assert screen._viewport.center_lat > lat  # …the view nudged north instead
+    screen.handle("pageup")  # the Shift+↑ of the keymap, which the watcher repairs
+    assert screen._viewport.zoom == zoom  # no zoom
+    assert screen._viewport.center_lat > lat  # …the view moved a little to the north instead
 
     monkeypatch.setattr(modifier_watch, "_shift_down", False)
-    screen.handle("pageup")  # a real zoom press (the F5 chip's action)
+    screen.handle("pageup")  # a real zoom key press (the action of the F5 chip)
     assert screen._viewport.zoom == zoom + 1
 
 
 def test_map_frame_chip_lights_only_with_matches_to_frame() -> None:
-    """``Frame`` is the find's Enter under another name — dim, and inert, without a query."""
+    """``Frame`` is the Enter of the find with another name. With no query, it is dim and inert."""
     from meshterm.ui.map_render import MapMarker
     from meshterm.ui.map_screen import MapScreen
 
@@ -1878,7 +1887,7 @@ def test_map_frame_chip_lights_only_with_matches_to_frame() -> None:
     screen = MapScreen(_StubSession(80, 24), markers, _StubSource(), 14)
     screen.render_body(80)
     before = screen._viewport
-    screen.handle("frame")  # no query typed: nothing to frame, so nothing moves
+    screen.handle("frame")  # no query typed: nothing to frame, so the view does not move
     assert screen.picocalc_lyra_lane[2].enabled is False and screen._viewport is before
 
     for ch in "ali":
@@ -1887,14 +1896,14 @@ def test_map_frame_chip_lights_only_with_matches_to_frame() -> None:
     screen.handle("frame")
     assert screen._viewport.center_lat == pytest.approx(45.40)
 
-    # A query nothing matches has no extent either — the chip goes back to dim.
+    # A query that matches nothing has no extent either. The chip goes back to dim.
     for ch in "zzz":
         screen.handle("text", ch)
     assert screen._matches() == [] and screen.picocalc_lyra_lane[2].enabled is False
 
 
 def test_map_screen_find_filters_frames_and_clears() -> None:
-    """Typing builds the query; ^Enter frames matches; Enter/Esc drop it; Esc then leaves."""
+    """Typing builds the query. ^Enter frames the matches. Enter and Esc clear it. Esc leaves."""
     from meshterm.ui.map_render import MapMarker
     from meshterm.ui.map_screen import MapScreen
 
@@ -1914,25 +1923,25 @@ def test_map_screen_find_filters_frames_and_clears() -> None:
     assert "1 of 3 match" in screen.title
     assert "find: hi" in screen.footer_hint
 
-    # Only the match keeps a label; the others dim to bare context glyphs.
+    # Only the match keeps a label. The others become dim glyphs without labels.
     body = _plain(screen.render_body(80))
     assert "Hilltop-Repeater" in body
     assert "Alice" not in body and "Yagi-North" not in body
 
-    # ^Enter frames the matches: the view centres on the repeater, and the query survives.
+    # ^Enter frames the matches. The view centres on the repeater, and the query stays.
     screen.handle("ctrl_enter")
     assert screen._viewport.center_lat == pytest.approx(45.53, abs=0.05)
     assert screen._viewport.center_lon == pytest.approx(-73.71, abs=0.05)
     assert screen._filter == "hi"
 
-    # Plain Enter is the other way out: the query goes, the view stays exactly where the
-    # frame left it.
+    # A plain Enter is the other way out. The query goes, and the view stays where the
+    # frame put it.
     centre = (screen._viewport.center_lat, screen._viewport.center_lon)
     screen.handle("enter")
     assert screen._filter == ""
     assert (screen._viewport.center_lat, screen._viewport.center_lon) == centre
 
-    # Backspace edits; Esc clears the filter first and only then dismisses.
+    # Backspace edits the query. Esc first clears the filter, and then it closes the screen.
     for ch in "hi":
         screen.handle("text", ch)
     screen.handle("backspace")
@@ -1949,7 +1958,7 @@ def test_map_screen_find_filters_frames_and_clears() -> None:
 
 
 def test_map_screen_frame_zooms_in_on_a_single_match() -> None:
-    """^Enter on a lone filtered node homes in close on it, not the fit's neutral default."""
+    """^Enter on one filtered node zooms in close on it, not to the neutral default of the fit."""
     from meshterm.ui.map_render import MapMarker
     from meshterm.ui.map_screen import _FIND_ZOOM, MapScreen
 
@@ -1965,11 +1974,11 @@ def test_map_screen_frame_zooms_in_on_a_single_match() -> None:
     screen.handle("ctrl_enter")
     assert screen._viewport.center_lat == pytest.approx(45.53, abs=0.01)
     assert screen._viewport.center_lon == pytest.approx(-73.71, abs=0.01)
-    assert screen._viewport.zoom == _FIND_ZOOM  # zoomed in, not the fit's default 14
+    assert screen._viewport.zoom == _FIND_ZOOM  # zoomed in, not the default 14 of the fit
 
 
 def test_map_screen_restores_and_persists_view() -> None:
-    """The screen reopens on a saved view and reports every centre/zoom change."""
+    """The screen reopens on a saved view and reports each change of the centre or the zoom."""
     from meshterm.ui.map_render import MapMarker
     from meshterm.ui.map_screen import MapScreen
 
@@ -1985,28 +1994,28 @@ def test_map_screen_restores_and_persists_view() -> None:
     )
 
     screen.render_body(80)
-    # Restored to the saved centre/zoom, not a fit of the markers.
+    # The screen restores the saved centre and zoom. It does not fit the markers.
     assert screen._viewport.zoom == 12
     assert screen._viewport.center_lat == pytest.approx(46.80)
     assert screen._viewport.center_lon == pytest.approx(-71.20)
-    assert saved == []  # reopening unchanged doesn't rewrite the stored view
+    assert saved == []  # a reopen with no change does not write the stored view again
 
-    screen.handle("right")  # pan east persists the moved view
-    assert saved and saved[-1][2] == 12  # zoom unchanged
-    assert saved[-1][1] > -71.20  # centre moved east
+    screen.handle("right")  # a pan to the east stores the moved view
+    assert saved and saved[-1][2] == 12  # the zoom did not change
+    assert saved[-1][1] > -71.20  # the centre moved east
 
-    screen.handle("pageup")  # zooming in persists too
+    screen.handle("pageup")  # a zoom in also stores the view
     assert saved[-1][2] == 13
 
 
 async def test_open_map_focus_centres_on_the_node_without_clobbering_the_saved_view(
     ctx, monkeypatch
 ) -> None:
-    """A focused map centres on its node without clobbering the saved view.
+    """A focused map centres on its node and does not overwrite the saved view.
 
-    Opening the full map from a node's detail page centres there at the inline
-    preview's zoom and, being a transient peek, never overwrites the persisted "where
-    you left the map" global view — even as the peek is panned and zoomed.
+    The user can open the full map from the detail page of a node. The map centres there at
+    the zoom of the inline preview. It is a short look, so it never overwrites the stored
+    global view ("where you left the map"), also when the user pans and zooms the look.
     """
     from meshterm.core.geo import clamp_lat
     from meshterm.ui.map_render import MapMarker
@@ -2014,9 +2023,9 @@ async def test_open_map_focus_centres_on_the_node_without_clobbering_the_saved_v
     from meshterm.ui.surface import TuiUi
 
     monkeypatch.setattr("meshterm.ui.map_screen.basemap_source", lambda _c: _StubSource())
-    ctx.repo.set_map_view(10.0, 20.0, 8)  # where the user last left the global map
+    ctx.repo.set_map_view(10.0, 20.0, 8)  # where the user left the global map
 
-    session = _CapturingSession(80, 24, keys=("right", "pageup"))  # pan + zoom the peek
+    session = _CapturingSession(80, 24, keys=("right", "pageup"))  # pan and zoom the look
     ctx.ui = TuiUi(session)
     await open_map(
         ctx,
@@ -2025,53 +2034,53 @@ async def test_open_map_focus_centres_on_the_node_without_clobbering_the_saved_v
         find="Hub",
     )
 
-    # Opened on the node, at the detail preview's zoom (min(13, max_zoom)).
+    # The map opened on the node, at the zoom of the detail preview (min(13, max_zoom)).
     assert session.screen._saved_view == (clamp_lat(45.5), -73.6, 13)
-    assert session.screen._on_view_change is None  # a focused peek wires no persistence
-    assert session.screen._filter == "Hub"  # the find opens seeded to the focused node
-    # Panning/zooming the peek left the global 'where you left the map' view untouched.
+    assert session.screen._on_view_change is None  # a focused look has no storage
+    assert session.screen._filter == "Hub"  # the find starts with the focused node
+    # The pan and the zoom of the look did not change the global "where you left the map" view.
     assert ctx.repo.get_map_view() == pytest.approx((10.0, 20.0, 8))
-    assert session.repainted  # cleaned the terminal on the way out, like the plain open
+    assert session.repainted  # cleaned the terminal on the way out, as the plain open does
 
 
 async def test_open_map_without_focus_restores_and_persists_the_global_view(
     ctx, monkeypatch
 ) -> None:
-    """With no focus, the full map restores and persists the global view.
+    """With no focus, the full map restores and stores the global view.
 
-    It reopens where the user left it, and pans persist straight back to that view.
+    It reopens where the user left it, and each pan is stored back to that view.
     """
     from meshterm.ui.map_render import MapMarker
     from meshterm.ui.map_screen import open_map
     from meshterm.ui.surface import TuiUi
 
     monkeypatch.setattr("meshterm.ui.map_screen.basemap_source", lambda _c: _StubSource())
-    ctx.repo.set_map_view(46.80, -71.20, 12)  # the saved view to reopen on
+    ctx.repo.set_map_view(46.80, -71.20, 12)  # the saved view for the reopen
 
     session = _CapturingSession(80, 24, keys=("right",))  # pan east
     ctx.ui = TuiUi(session)
     await open_map(ctx, [MapMarker("Hub", 46.8, -71.2)])
 
-    assert session.screen._viewport.zoom == 12  # reopened on the saved view, not a node fit
+    assert session.screen._viewport.zoom == 12  # reopened on the saved view, not on a fit to a node
     lat, lon, zoom = ctx.repo.get_map_view()
-    assert zoom == 12 and lon > -71.20  # the eastward pan persisted back to the global view
+    assert zoom == 12 and lon > -71.20  # the pan to the east was stored in the global view
 
 
 def test_map_screen_seeded_find_behaves_like_a_typed_one() -> None:
-    """A seeded find matches, titles, and clears exactly as if the user had typed it."""
+    """A find that the app starts matches, titles, and clears as if the user typed it."""
     from meshterm.ui.map_render import MapMarker
     from meshterm.ui.map_screen import MapScreen
 
     markers = [MapMarker("Hub", 45.5, -73.6), MapMarker("Far", 45.6, -73.5)]
     screen = MapScreen(_StubSession(80, 24), markers, _StubSource(), 14, find="Hub")
-    assert [m.label for m in screen._matches()] == ["Hub"]  # only the seed's node lights
-    assert "find: Hub" in screen.footer_hint  # the query shows, editable, as ever
-    screen.handle("escape")  # first Esc clears the find (not the map)
+    assert [m.label for m in screen._matches()] == ["Hub"]  # only the node of the seed lights
+    assert "find: Hub" in screen.footer_hint  # the query shows, and the user can edit it
+    screen.handle("escape")  # the first Esc clears the find (not the map)
     assert screen._filter == "" and len(screen._matches()) == 2
 
 
 def test_map_screen_scrubs_right_edge_after_move() -> None:
-    """A move asks the session to scrub the right edge once, to clear any braille smear."""
+    """A move asks the session to scrub the right edge one time, to clear any braille smear."""
     from meshterm.ui.map_render import MapMarker
     from meshterm.ui.map_screen import MapScreen
 
@@ -2079,12 +2088,12 @@ def test_map_screen_scrubs_right_edge_after_move() -> None:
     braille = MapScreen(_StubSession(80, 24), markers, _StubSource(), 14)
     braille.render_body(80)
     braille.handle("right")  # a move flags the edge for a scrub
-    assert braille.consume_edge_scrub() == 1  # the border column: the map is flush
-    assert braille.consume_edge_scrub() == 0  # consumed — not repeated without another move
+    assert braille.consume_edge_scrub() == 1  # the border column: the map is at the edge
+    assert braille.consume_edge_scrub() == 0  # consumed: no repeat without another move
 
 
 def test_map_screen_escape_dismisses() -> None:
-    """Esc resolves the screen's future with None (backs out to the menu)."""
+    """Esc resolves the future of the screen with None (and goes back to the menu)."""
     from meshterm.ui.map_render import MapMarker
     from meshterm.ui.map_screen import MapScreen
 
@@ -2099,7 +2108,7 @@ def test_map_screen_escape_dismisses() -> None:
 
 
 def test_map_observation_round_trips_node_type(ctx) -> None:
-    """A stored observation's advert type survives persistence and aggregation."""
+    """The advert type of a stored observation stays through storage and aggregation."""
     run_id = ctx.repo.start_run("monitor", {})
     ctx.repo.record_observation(
         run_id,
@@ -2112,10 +2121,9 @@ def test_map_observation_round_trips_node_type(ctx) -> None:
 
 
 def test_render_map_labels_take_the_name_hue_ours_white() -> None:
-    """Map labels take the node hue, and ours takes the you white.
+    """A map label takes the hue of its node, and our label takes the white of you.
 
-    Our own label is white while the ★ glyph stays yellow, and a keyless label lands
-    on the muted grey.
+    Our label is white, and the ★ glyph stays yellow. A label with no key gets the muted grey.
     """
     from meshterm.ui.map_render import MapMarker, render_map
     from meshterm.ui.marks import SELF_MARK
@@ -2129,13 +2137,13 @@ def test_render_map_labels_take_the_name_hue_ours_white() -> None:
     ]
     lines = render_map(vp, {}, markers)
     assert _glyph_color(lines, "★") == parse_hex(SELF_MARK[1])  # the glyph keeps its yellow
-    assert _glyph_color(lines, "US") == (255, 255, 255)  # ...the label goes you-white
+    assert _glyph_color(lines, "US") == (255, 255, 255)  # ...the label is the white of you
     assert _glyph_color(lines, "KEYED") == name_rgb("KEYED", "d4" * 32)
-    assert _glyph_color(lines, "BARE") == (148, 163, 184)  # no key, the muted grey
+    assert _glyph_color(lines, "BARE") == (148, 163, 184)  # no key: the muted grey
 
 
 def test_render_map_find_matches_still_label_white() -> None:
-    """An active find filter keeps forcing matching labels to full white."""
+    """An active find filter still makes the matching labels full white."""
     from meshterm.ui.map_render import MapMarker, render_map
 
     vp = Viewport.fit([(45.5, -73.6), (45.4, -73.5)], 120, 80, max_zoom=14)
@@ -2144,11 +2152,11 @@ def test_render_map_find_matches_still_label_white() -> None:
     assert _glyph_color(lines, "TARGET") == (255, 255, 255)
 
 
-# --- a tile nobody answered about is asked for again ----------------------------------
+# --- the map asks again for a tile that had no answer ---------------------------------
 
 
 def _map_over(source) -> MapScreen:  # noqa: ANN001
-    """A map screen fetching from ``source``, with an event loop it can hand work to."""
+    """A map screen that fetches from ``source``, with an event loop that can take its work."""
     from meshterm.ui.map_render import MapMarker
     from meshterm.ui.map_screen import MapScreen
 
@@ -2156,11 +2164,12 @@ def _map_over(source) -> MapScreen:  # noqa: ANN001
 
 
 async def _drawn(screen) -> None:  # noqa: ANN001
-    """Paint until the view's tiles have answered and its raster has landed.
+    """Paint until the tiles of the view have answered and its raster has arrived.
 
-    Real sleeps, not ``sleep(0)``: a tile load goes through a thread. And no raster is
-    asked for while a tile of the view is on its way, so a test of the raster has to let
-    the loads finish first — the stub sources answer at once, with silence.
+    The function uses real sleeps, not ``sleep(0)``, because a tile load goes through a
+    thread. The screen does not ask for a raster while a tile of the view is on its way.
+    Thus a test of the raster must let the loads finish first. (The stub sources answer at
+    once, with no data.)
     """
     for _ in range(400):
         screen.render_body(80)
@@ -2175,7 +2184,7 @@ async def _drawn(screen) -> None:  # noqa: ANN001
 
 
 class _SilentSource(_StubSource):
-    """A source that never answers — the flaky Wi-Fi, not an empty planet."""
+    """A source that never answers. This is a weak Wi-Fi link, not an empty planet."""
 
     def __init__(self) -> None:
         self.asked: list[tuple[int, int, int]] = []
@@ -2186,17 +2195,17 @@ class _SilentSource(_StubSource):
 
 
 class _EmptySource(_SilentSource):
-    """A source that answers, and the answer is that there is nothing at those tiles."""
+    """A source that answers, and the answer is that those tiles have nothing."""
 
     def answered_empty(self, z: int, x: int, y: int) -> bool:
         return True
 
 
 def test_map_asks_again_for_a_tile_it_got_no_answer_about(monkeypatch) -> None:  # noqa: ANN001
-    """One Wi-Fi blip must not black out that ground until the app is restarted.
+    """One short Wi-Fi failure must not black out that ground until the app restarts.
 
-    On the PicoCalc a missing z14 tile *is* the picture at the two highest zooms, where
-    one tile covers the whole screen many times over (JP, 2026-08-18).
+    On the PicoCalc, a missing z14 tile is the whole picture at the two highest zooms. At
+    these zooms, one tile covers the whole screen many times (JP, 2026-08-18).
     """
     from meshterm.ui import map_screen as ms
 
@@ -2210,7 +2219,7 @@ def test_map_asks_again_for_a_tile_it_got_no_answer_about(monkeypatch) -> None: 
         first = len(source.asked)
         assert first, "no tile was ever asked for"
 
-        screen.render_body(80)  # still inside the cooldown
+        screen.render_body(80)  # still in the cooldown
         await asyncio.sleep(0)
         assert len(source.asked) == first, "the source is being hammered"
 
@@ -2224,7 +2233,7 @@ def test_map_asks_again_for_a_tile_it_got_no_answer_about(monkeypatch) -> None: 
 
 
 def test_map_takes_the_sources_word_that_a_tile_is_empty(monkeypatch) -> None:  # noqa: ANN001
-    """An answer settles it: ocean tiles must not be re-requested for ever."""
+    """An answer is final. The map must not request ocean tiles again for ever."""
     from meshterm.ui import map_screen as ms
 
     source = _EmptySource()
@@ -2245,9 +2254,9 @@ def test_map_takes_the_sources_word_that_a_tile_is_empty(monkeypatch) -> None:  
 
 
 def test_map_fetches_before_the_source_has_resolved(monkeypatch) -> None:  # noqa: ANN001
-    """``available`` says "not yet", never "don't bother" — a fetch is what resolves it."""
+    """``available`` means "not yet", not "do not try". A fetch is what resolves it."""
     source = _SilentSource()
-    assert source.available is False  # nothing has reached the network at open time
+    assert source.available is False  # nothing used the network at open time
     screen = _map_over(source)
 
     async def drive() -> None:
@@ -2259,11 +2268,11 @@ def test_map_fetches_before_the_source_has_resolved(monkeypatch) -> None:  # noq
     asyncio.run(drive())
 
 
-# --- anticipating the next move ------------------------------------------------------
+# --- the map expects the next move ---------------------------------------------------
 
 
 class _CountingSource(_StubSource):
-    """A source that answers instantly and remembers everything it was asked for."""
+    """A source that answers at once and remembers each request that it got."""
 
     available = True
 
@@ -2275,11 +2284,11 @@ class _CountingSource(_StubSource):
         return _loaded_tile()
 
     def warm(self, z: int, x: int, y: int) -> None:
-        self.asked.append((z, x, y))  # a guess is an ask too, just one that holds nothing
+        self.asked.append((z, x, y))  # a guess is also a request, but it holds nothing
 
 
 def _settled_map(source, zoom: int = 13):
-    """A map screen with its own view drawn and every visible tile in hand."""
+    """A map screen with its view drawn and each visible tile loaded."""
     from meshterm.ui.map_render import MapMarker
     from meshterm.ui.map_screen import MapScreen
 
@@ -2294,14 +2303,14 @@ def _settled_map(source, zoom: int = 13):
 
 
 async def _quiet(screen, source) -> list:
-    """Paint until the prefetcher runs dry, and report what it went and got.
+    """Paint until the prefetcher has nothing more to do, and report what it requested.
 
-    Real sleeps, not ``sleep(0)``: both the raster and every tile load go through
-    ``asyncio.to_thread``, and a thread does not finish on a bare loop turn.
+    The function uses real sleeps, not ``sleep(0)``. The raster and each tile load go
+    through ``asyncio.to_thread``, and a thread does not finish in one turn of the loop.
     """
     for _ in range(200):
         screen.render_body(80)
-        screen._settled_at = 0.0  # the settle wait has its own test; don't sleep it out
+        screen._settled_at = 0.0  # the settle wait has its own test, so do not wait for it
         await asyncio.sleep(0.005)
         if (
             not screen._pending
@@ -2315,7 +2324,7 @@ async def _quiet(screen, source) -> list:
 
 
 def test_map_fetches_ahead_of_the_way_it_is_being_panned() -> None:
-    """Two steps one way is a heading, and ground is bought in front of it."""
+    """Two steps in one direction are a heading, and the map fetches the ground ahead of it."""
     source = _CountingSource()
     screen = _settled_map(source)
 
@@ -2323,7 +2332,7 @@ def test_map_fetches_ahead_of_the_way_it_is_being_panned() -> None:
         await _quiet(screen, source)
         source.asked.clear()
         screen._speculated.clear()
-        for _ in range(2):  # two steps east: a heading, not a nudge
+        for _ in range(2):  # two steps east: a heading, not a small move
             screen.handle("right")
         return await _quiet(screen, source)
 
@@ -2333,12 +2342,12 @@ def test_map_fetches_ahead_of_the_way_it_is_being_panned() -> None:
     west = set(vp.panned(-_PAN_STEP, 0).tiles(14)) - set(vp.tiles(14))
     assert east, "the fixture leaves no tile to the east to fetch"
     assert east <= set(ahead), "the ground ahead of the pan was not fetched"
-    if west & set(ahead):  # a hedge is allowed, but it comes after the heading
+    if west & set(ahead):  # a hedge is permitted, but it comes after the heading
         assert ahead.index(next(iter(east))) < ahead.index(next(iter(west & set(ahead))))
 
 
 def test_map_fetches_the_step_out_it_has_no_tiles_for() -> None:
-    """Zooming out is the one move whose tiles were never on screen."""
+    """A zoom out is the one move whose tiles were not on the display before."""
     source = _CountingSource()
     screen = _settled_map(source)
 
@@ -2351,12 +2360,12 @@ def test_map_fetches_the_step_out_it_has_no_tiles_for() -> None:
 
 
 def test_map_does_not_fetch_ahead_while_the_view_is_still_arriving() -> None:
-    """Speculation must never be the thing in the way of the view being looked at."""
+    """A speculative fetch must not get in the way of the view that the user looks at."""
     source = _CountingSource()
     screen = _settled_map(source)
 
     async def drive() -> None:
-        screen.render_body(80)  # visible tiles now pending, nothing drawn
+        screen.render_body(80)  # the visible tiles are pending, and nothing is drawn
         assert screen._pending, "the fixture settled too early to test this"
         screen._ensure_prefetch(screen._viewport)
         assert not screen._speculating, "fetched ahead while the visible tiles were in flight"
@@ -2370,23 +2379,23 @@ def test_map_does_not_fetch_ahead_while_the_view_is_still_arriving() -> None:
 
 
 def test_map_waits_for_the_view_to_settle_before_it_guesses() -> None:
-    """A raster landing between two keypresses of a pan is a gap, not a pause.
+    """A raster that arrives between two key presses of a pan is a gap, not a pause.
 
-    Starting a fetch there puts a tile decode in front of the next frame — measured at
-    ~110 ms on the device, which is exactly what the prefetcher must never cost.
+    If a fetch starts there, a tile decode goes in front of the next frame. This took
+    approximately 110 ms on the handheld, and the prefetcher must never cost that.
     """
     source = _CountingSource()
     screen = _settled_map(source)
 
     async def drive() -> None:
         screen.render_body(80)  # builds the viewport
-        screen._pending.clear()  # ...and here it is, arrived and drawn this instant
+        screen._pending.clear()  # ...and now the view has arrived and is drawn
         screen._drawing = screen._wanted = None
 
-        screen._ensure_prefetch(screen._viewport)  # stamps the view as newly arrived
+        screen._ensure_prefetch(screen._viewport)  # marks the view as new
         assert not screen._speculating, "guessed while the view was still moving"
 
-        screen._settled_at = 0.0  # ...and now it has been still for a while
+        screen._settled_at = 0.0  # ...and now the view has been still for some time
         screen._ensure_prefetch(screen._viewport)
         assert screen._speculating, "never got round to guessing at all"
 
@@ -2394,7 +2403,7 @@ def test_map_waits_for_the_view_to_settle_before_it_guesses() -> None:
 
 
 def test_map_forgets_its_heading_when_the_reader_reframes() -> None:
-    """A zoom or a jump home is looking around, not travelling on."""
+    """A zoom, or a jump to home, is a look around. It is not a continued travel."""
     screen = _settled_map(_CountingSource())
     screen.render_body(80)
     screen.handle("right")
@@ -2413,12 +2422,13 @@ def test_map_forgets_its_heading_when_the_reader_reframes() -> None:
 
 
 def test_map_does_not_guess_in_the_paint_that_queues_a_raster() -> None:
-    """The pacing rule is read at the end of a paint, not off the last one's answer.
+    """The map reads the pacing rule at the end of a paint, not from the answer of the last paint.
 
-    A find keystroke moves the view nowhere, so this is still the settled view the
-    prefetcher is entitled to guess from — but the paint it triggers queues the raster
-    the reader is waiting for. Asked a step earlier, from inside ``_ensure_tiles``, the
-    prefetcher saw the *previous* paint's quiet and started a tile decode alongside it.
+    A key press in the find does not move the view. Thus this is still the settled view
+    that the prefetcher can use for a guess. But the paint that the key press causes queues
+    the raster that the user waits for. If the map asks one step earlier, from inside
+    ``_ensure_tiles``, the prefetcher sees the quiet of the previous paint. Then it starts
+    a tile decode at the same time as the raster.
     """
     source = _CountingSource()
     screen = _settled_map(source)
@@ -2426,7 +2436,7 @@ def test_map_does_not_guess_in_the_paint_that_queues_a_raster() -> None:
     async def drive() -> None:
         await _quiet(screen, source)
         screen._speculated.clear()
-        screen._settled_at = 0.0  # settled, quiet, and entitled to guess
+        screen._settled_at = 0.0  # settled, quiet, and ready to guess
 
         screen.handle("text", "a")
         screen.render_body(80)
@@ -2437,7 +2447,7 @@ def test_map_does_not_guess_in_the_paint_that_queues_a_raster() -> None:
 
 
 def test_map_leaves_a_cooling_tile_alone_when_it_guesses() -> None:
-    """A source that has just gone quiet is the last one a guess should be poking."""
+    """A guess must not touch a source that has just gone quiet."""
     screen = _settled_map(_CountingSource())
     screen.render_body(80)  # builds the viewport
     vp = screen._viewport
@@ -2447,12 +2457,12 @@ def test_map_leaves_a_cooling_tile_alone_when_it_guesses() -> None:
     screen._unanswered = {t: monotonic() + 20.0 for t in plan}
     assert screen._next_speculation(vp) is None, "guessed at a tile serving out its silence"
 
-    screen._unanswered.clear()  # the cooldown expires and the plan is a plan again
+    screen._unanswered.clear()  # the cooldown ends, and the plan is valid again
     assert screen._next_speculation(vp) in plan
 
 
 def test_map_keeps_no_speculated_tile_of_its_own() -> None:
-    """A prefetch warms the source's cache; the screen holds only what it draws."""
+    """A prefetch warms the cache of the source. The screen holds only what it draws."""
     source = _CountingSource()
     screen = _settled_map(source)
 
@@ -2466,7 +2476,7 @@ def test_map_keeps_no_speculated_tile_of_its_own() -> None:
 
 
 def test_map_takes_a_tile_already_in_memory_without_a_round_trip() -> None:
-    """Ground panned back onto is in the very first raster, not a thread hop later."""
+    """Ground that the user pans back to is in the first raster, not one thread step later."""
 
     class _HeldSource(_CountingSource):
         def resident(self, z: int, x: int, y: int):
@@ -2486,18 +2496,18 @@ def test_map_takes_a_tile_already_in_memory_without_a_round_trip() -> None:
 
 
 def test_map_drops_a_tile_the_view_left_before_its_turn() -> None:
-    """A fast pan asks for every view it passes; only where it stopped is worth loading.
+    """A fast pan asks for each view that it passes. Only the view where it stops is worth loading.
 
-    Loading the rest — a decode of a second or more each, on the PicoCalc — was the backlog
-    that kept the map behind the keys long after they stopped.
+    To load the others was a backlog. On the PicoCalc, each decode took one second or more.
+    The map stayed behind the keys for a long time after the keys stopped.
     """
     source = _CountingSource()
 
     async def drive():
         screen = _settled_map(source)
-        screen.render_body(80)  # asks for the opening view's tiles
+        screen.render_body(80)  # asks for the tiles of the opening view
         opening = set(screen._pending)
-        for _ in range(8):  # gone, before any load has had its turn
+        for _ in range(8):  # gone, before any load has its turn
             screen.handle("right")
         await asyncio.sleep(0.05)
         return screen, opening
@@ -2513,7 +2523,7 @@ def test_map_drops_a_tile_the_view_left_before_its_turn() -> None:
 
 
 def test_coarse_ground_keeps_the_shape_and_drops_the_detail() -> None:
-    """The quick pass draws water, parks and through-roads — no buildings, no text."""
+    """The quick pass draws water, parks, and through roads. It draws no buildings and no text."""
     from meshterm.ui.map_render import MapMarker, render_ground
 
     vp = Viewport(45.5019, -73.5674, 15, 160, 96)
@@ -2528,21 +2538,21 @@ def test_coarse_ground_keeps_the_shape_and_drops_the_detail() -> None:
 
     assert ink(coarse), "the coarse pass drew nothing at all"
     assert ink(coarse) < ink(full), "the coarse pass drew as much as the full one"
-    # Our own marker label is overlaid on every paint; the basemap's text is not.
+    # The label of our marker goes over each paint. The text of the basemap does not.
     assert "Yagi" in _plain(coarse)
     assert not (_street_names(full) & _street_names(coarse)), "text came with the quick pass"
 
 
 def _street_names(lines: list[str]) -> set:
-    """Words in a frame that are basemap text rather than a node marker's label."""
+    """The words in a frame that are basemap text, not the label of a node marker."""
     return {w for w in re.findall(r"[A-Za-zÀ-ÿ]{4,}", _plain(lines))} - {"Yagi"}
 
 
 def test_map_draws_a_coarse_frame_before_the_finished_one(monkeypatch) -> None:  # noqa: ANN001
-    """A view with no ground under it must not sit black for a whole raster.
+    """A view with no ground under it must not stay black for the time of a whole raster.
 
-    A coarse pan step is 30% of the screen, so four keypresses leave nothing of the last
-    frame to reproject — and a full raster is most of a second on the PicoCalc (JP,
+    A coarse pan step is 30% of the screen, so four key presses leave nothing of the last
+    frame to project again. A full raster takes most of a second on the PicoCalc (JP,
     2026-08-18).
     """
     from meshterm.ui import map_screen as ms
@@ -2556,7 +2566,7 @@ def test_map_draws_a_coarse_frame_before_the_finished_one(monkeypatch) -> None: 
     screen = _map_over(_StubSource())
 
     async def drive() -> None:
-        screen.render_body(80)  # builds the viewport, and asks for its own first draw
+        screen.render_body(80)  # builds the viewport, and asks for its first draw
         while screen._drawing is not None:
             await asyncio.sleep(0)
         passes.clear()
@@ -2568,7 +2578,7 @@ def test_map_draws_a_coarse_frame_before_the_finished_one(monkeypatch) -> None: 
 
 
 def test_map_abandons_the_finished_pass_for_a_view_that_moved(monkeypatch) -> None:  # noqa: ANN001
-    """Between the passes is where a held key gets off: don't finish a stale frame."""
+    """A held key takes effect between the passes, so the map must not finish an old frame."""
     from meshterm.ui import map_screen as ms
 
     screen = _map_over(_StubSource())
@@ -2578,7 +2588,7 @@ def test_map_abandons_the_finished_pass_for_a_view_that_moved(monkeypatch) -> No
         coarse = k.get("coarse", False)
         passes.append(coarse)
         if coarse and len(passes) == 1:
-            # The user pans on while the coarse pass is being drawn.
+            # The user pans further while the coarse pass is drawn.
             screen._wanted = (("newer",), screen._viewport, [], "")
         return ["x"], None
 
@@ -2591,9 +2601,9 @@ def test_map_abandons_the_finished_pass_for_a_view_that_moved(monkeypatch) -> No
         passes.clear()
         screen._drawing = ("k",)
         await screen._draw_ground(("k",), screen._viewport, {}, [], "", True)
-        # Read here, not after the loop closes: the newer view's own draw is a task of its
-        # own by now, and what it goes on to ask for is that view's business, not this
-        # one's. The question is only what the *abandoned* key got.
+        # Read the values here, and not after the loop closes. The draw of the newer view
+        # is its own task by now, and what it asks for is not part of this test. The test
+        # asks only what the abandoned key got.
         return list(passes), screen._frame_coarse
 
     stale, rough_on_screen = asyncio.run(drive())
@@ -2602,7 +2612,7 @@ def test_map_abandons_the_finished_pass_for_a_view_that_moved(monkeypatch) -> No
 
 
 def test_map_skips_the_coarse_pass_over_a_picture_already_drawn(monkeypatch) -> None:  # noqa: ANN001
-    """A tile landing must refine the frame, never coarsen it."""
+    """A tile that arrives must refine the frame. It must not make the frame coarser."""
     from meshterm.ui import map_screen as ms
 
     screen = _map_over(_StubSource())
@@ -2616,7 +2626,8 @@ def test_map_skips_the_coarse_pass_over_a_picture_already_drawn(monkeypatch) -> 
     async def drive() -> None:
         await _drawn(screen)
         coarse_asked.clear()
-        # A tile lands: same view, more detail. The frame on screen is still aligned.
+        # A tile arrives: the same view, with more detail. The frame on the display is still
+        # aligned.
         screen._tiles[screen._viewport.tiles(14)[0]] = _loaded_tile()
         screen.render_body(80)
         while screen._drawing is not None:
@@ -2627,17 +2638,18 @@ def test_map_skips_the_coarse_pass_over_a_picture_already_drawn(monkeypatch) -> 
 
 
 def test_the_rough_pass_is_a_switch_the_map_reads(monkeypatch) -> None:  # noqa: ANN001
-    """Both passes work; whether a moved view is offered the first one is a knob.
+    """Both passes work. A switch sets whether a moved view gets the first pass.
 
-    Off, every view waits for the whole picture and stands on the last frame's ground
-    until it lands. The machinery is :meth:`MapScreen._draw_ground`'s either way — what
-    the switch decides is the *asking*, which is why it is read where the raster is
-    requested and not inside the renderer.
+    If the switch is off, each view waits for the whole picture. It uses the ground of the
+    last frame until the picture arrives. The mechanism is in
+    :meth:`MapScreen._draw_ground` in both cases. The switch decides only the request. For
+    this reason the app reads the switch where it requests the raster, and not in the
+    renderer.
     """
     from meshterm.ui import map_screen as ms
 
     def first_draw() -> list:
-        """The passes a view with nothing drawn under it asks for."""
+        """The passes that a view with nothing drawn under it requests."""
         asked: list = []
         monkeypatch.setattr(
             ms,
@@ -2657,12 +2669,12 @@ def test_the_rough_pass_is_a_switch_the_map_reads(monkeypatch) -> None:  # noqa:
 
 
 def test_map_keeps_its_detail_while_a_find_is_typed(monkeypatch) -> None:  # noqa: ANN001
-    """Typing a node name moves the view nowhere, so the streets must not flatten.
+    """If the user types a node name, the view does not move, so the streets must keep their detail.
 
-    A find query changes which markers are bright — the *overlay* — while the ground
-    under them is the same ground, already drawn and reprojected at zero offset as the
-    stand-in. Deciding the rough pass on the whole picture rather than on the view meant
-    every letter replaced the streets with the coarse pass and drew them back.
+    A find query changes which markers are bright (the overlay). The ground under them is
+    the same ground. The app already drew it, and it projects it again at zero offset as the
+    stand-in. The app once decided on the rough pass from the whole picture and not from the
+    view. Then each letter replaced the streets with the coarse pass and drew them again.
     """
     from meshterm.ui import map_screen as ms
 
@@ -2677,7 +2689,7 @@ def test_map_keeps_its_detail_while_a_find_is_typed(monkeypatch) -> None:  # noq
     async def drive() -> None:
         await _drawn(screen)
         coarse_asked.clear()
-        screen.handle("text", "a")  # one letter of a find query; the view does not move
+        screen.handle("text", "a")  # one letter of a find query, and the view does not move
         screen.render_body(80)
         while screen._drawing is not None:
             await asyncio.sleep(0)
@@ -2690,10 +2702,11 @@ def test_map_keeps_its_detail_while_a_find_is_typed(monkeypatch) -> None:  # noq
 
 
 def _async_map(monkeypatch, drawn: list):
-    """A map screen whose rasters are captured instead of run, with a live event loop.
+    """A map screen with a live event loop. The test captures its rasters and does not run them.
 
-    Its tile loads answer the moment they are asked, with silence: a captured load would
-    otherwise be on its way for ever, and no raster is asked for while one is.
+    Its tile loads answer when the screen asks, with no data. If the test captured a load,
+    the load would be in progress for ever, and the screen does not ask for a raster while
+    a load is in progress.
     """
     from meshterm.ui import map_screen as ms
     from meshterm.ui.map_render import MapMarker
@@ -2704,10 +2717,10 @@ def _async_map(monkeypatch, drawn: list):
         ms.asyncio, "ensure_future", lambda coro: (coro.close(), started.append(coro))[0]
     )
 
-    def answered_at_once(self, t):  # noqa: ANN001 - MapScreen._load, minus the thread
+    def answered_at_once(self, t):  # noqa: ANN001 - MapScreen._load, without the thread
         self._pending.discard(t)
         self._unanswered[t] = monotonic() + _TILE_RETRY
-        return asyncio.sleep(0)  # a coroutine for the captured ensure_future to close
+        return asyncio.sleep(0)  # a coroutine that the captured ensure_future closes
 
     monkeypatch.setattr(ms.MapScreen, "_load", answered_at_once)
     screen = ms.MapScreen(_StubSession(80, 24), [MapMarker("A", 45.5, -73.6)], _StubSource(), 14)
@@ -2716,7 +2729,7 @@ def _async_map(monkeypatch, drawn: list):
 
 
 def test_map_paints_without_waiting_for_the_ground(monkeypatch) -> None:  # noqa: ANN001
-    """A pan must answer the keystroke now — rasterizing takes ~1 s on the PicoCalc."""
+    """A pan must answer the key press at once. The rasterizing takes approximately 1 s there."""
     from meshterm.ui import map_screen as ms
 
     calls: list[tuple] = []
@@ -2730,19 +2743,19 @@ def test_map_paints_without_waiting_for_the_ground(monkeypatch) -> None:  # noqa
     screen = _async_map(monkeypatch, started)
 
     screen.render_body(80)
-    # Whatever ran on the paint path drew no tiles: the ground is somebody else's job.
+    # The code on the paint path drew no tiles. The ground is the job of another task.
     assert calls, "the paint drew nothing at all"
     assert all(tiles == {} for tiles in calls), calls
     assert screen._drawing is not None, "no background raster was scheduled"
 
 
 def _rasters(started: list) -> list:
-    """Just the ground-rasterizing coroutines — a pan also schedules its tile fetches."""
+    """Only the coroutines that rasterize the ground. A pan also schedules its tile fetches."""
     return [c for c in started[0] if "_draw_ground" in c.__qualname__]
 
 
 def test_map_keeps_one_raster_in_flight_while_panning(monkeypatch) -> None:  # noqa: ANN001
-    """A held arrow key must not queue a second of thread work per keypress."""
+    """A held arrow key must not queue a second of thread work for each key press."""
     started: list = []
     screen = _async_map(monkeypatch, started)
     screen.render_body(80)
@@ -2757,39 +2770,39 @@ def test_map_keeps_one_raster_in_flight_while_panning(monkeypatch) -> None:  # n
 
 
 def test_map_holds_an_aligned_frame_while_a_tile_lands(monkeypatch) -> None:  # noqa: ANN001
-    """A tile arriving must not blank streets that are still in the right place.
+    """A tile that arrives must not blank the streets that are still in the correct place.
 
-    The view has not moved, so the finished raster is still correctly aligned — it is only
-    missing the newcomer's detail. Redrawing from nothing would flash the ground away for
-    the second it takes to draw the same picture again.
+    The view did not move, so the finished raster is still aligned. It only lacks the
+    detail of the new tile. If the map draws again from nothing, the ground disappears for
+    the second that the app needs to draw the same picture again.
     """
     started: list = []
     screen = _async_map(monkeypatch, started)
     screen.render_body(80)
-    # Pretend the scheduled raster finished.
+    # Act as if the scheduled raster finished.
     screen._frame = ["ground"] * 20
     screen._frame_key = screen._ground_key(screen._viewport)
     screen._drawing = None
-    # All but the bottom row is the frame verbatim; that one also carries the basemap
-    # credit, which is stamped at paint time rather than baked into a raster served
-    # across many paints (see meshterm/ui/attribution.py).
+    # All the rows but the bottom row are the frame exactly. The bottom row also has the
+    # basemap credit. The app stamps it at paint time. It is not part of a raster that the
+    # app uses for many paints (refer to meshterm/ui/attribution.py).
     painted = screen.render_body(80)
     assert painted[:-1] == ["ground"] * 19
     assert _plain(painted[-1]).startswith("ground")
 
     in_view = screen._viewport.tiles(14)[0]
-    screen._tiles[in_view] = _loaded_tile()  # a tile lands, view unmoved
+    screen._tiles[in_view] = _loaded_tile()  # a tile arrives, and the view does not move
     assert screen.render_body(80)[:-1] == ["ground"] * 19, "dropped an aligned frame"
     assert screen._drawing is not None, "did not redraw for the new tile"
 
 
 def test_map_stands_on_its_ghost_until_the_view_tiles_are_in(monkeypatch) -> None:  # noqa: ANN001
-    """A zoom shows the ghost, then the map — never a black screen in between.
+    """A zoom shows the ghost, then the map. There is no black screen between them.
 
-    A raster drawn while the new zoom's tiles were still loading painted their ground
-    black, and being the view's own frame it replaced the ghost: ghost, black, then the
-    streets drawn in (JP, 2026-10-04). It was a raster thrown away besides, since the tiles
-    landing ask for another.
+    The app once drew a raster while the tiles of the new zoom were still loading. This
+    painted their ground black. It was the frame of the view, so it replaced the ghost. The
+    user saw the ghost, then black, then the streets (JP, 2026-10-04). Also, the raster was
+    wasted, because the tiles that arrive ask for another one.
     """
     from meshterm.ui import map_screen as ms
     from meshterm.ui.map_render import MapMarker
@@ -2804,18 +2817,18 @@ def test_map_stands_on_its_ghost_until_the_view_tiles_are_in(monkeypatch) -> Non
         ms, "render_map", lambda vp, tiles, m, **k: stood_on.append(k.get("ghost")) or [""]
     )
     screen = ms.MapScreen(_StubSession(80, 24), [MapMarker("A", 45.5, -73.6)], _StubSource(), 14)
-    screen._ghost = ghost = object()  # the ground the last view left behind
+    screen._ghost = ghost = object()  # the ground that the last view left
 
     def rasters() -> list:
         return [c for c in started if "_draw_ground" in c.__qualname__]
 
-    screen.handle("pageup")  # zoom in: a tile zoom whose tiles are not in hand
+    screen.handle("pageup")  # zoom in: a tile zoom whose tiles are not loaded
     screen.render_body(80)
     assert screen._pending, "the fixture's view asked for no tiles"
     assert not rasters(), "a raster was drawn before the view's tiles were in"
     assert stood_on == [ghost], "the paint did not stand on the ghost"
 
-    for t in list(screen._pending):  # the tiles land
+    for t in list(screen._pending):  # the tiles arrive
         screen._pending.discard(t)
         screen._tiles[t] = _loaded_tile()
     screen.render_body(80)
@@ -2823,7 +2836,7 @@ def test_map_stands_on_its_ghost_until_the_view_tiles_are_in(monkeypatch) -> Non
 
 
 def test_map_drops_a_stale_frame_once_the_view_moves(monkeypatch) -> None:  # noqa: ANN001
-    """Streets drawn for somewhere else are a lie about where you are looking."""
+    """Streets that the map drew for another place are false for the place that the user sees."""
     started: list = []
     screen = _async_map(monkeypatch, started)
     screen.render_body(80)
@@ -2836,10 +2849,10 @@ def test_map_drops_a_stale_frame_once_the_view_moves(monkeypatch) -> None:  # no
 
 
 async def test_map_pans_on_the_ground_its_last_raster_left(monkeypatch) -> None:  # noqa: ANN001
-    """A misaligned frame is dropped, but the ground it drew is kept and reprojected.
+    """The map removes a frame that is not aligned, but it keeps the ground and projects it again.
 
-    It is the only ground anyone has until the next raster lands, and a pan that answers
-    with an empty canvas blanks the map to black between every keypress.
+    This is the only ground that the map has until the next raster arrives. A pan that
+    answers with an empty canvas blanks the map to black between each key press.
     """
     from meshterm.ui import map_screen as ms
 
@@ -2871,12 +2884,12 @@ async def test_map_pans_on_the_ground_its_last_raster_left(monkeypatch) -> None:
 
 
 def test_each_road_class_keeps_its_own_colour_through_the_per_tile_style_memo() -> None:
-    """The tile's palette is resolved once per class, not once per feature.
+    """The app resolves the palette of the tile one time for each class, not for each feature.
 
-    ``mark_rgb`` was reached ~30 000 times a frame and ``Feature.get`` ~32 000 — both
-    answering the same handful of questions. Hoisting them behind a per-tile memo is only
-    sound while every class still resolves to exactly the colour it did: a motorway must
-    not inherit the footway's grey because it drew second.
+    A frame called ``mark_rgb`` approximately 30 000 times and ``Feature.get``
+    approximately 32 000 times. Both answered the same few questions. A memo for each tile
+    replaces them. This is correct only if each class still resolves to the same colour as
+    before. A motorway must not get the grey of the footway because it was drawn second.
     """
     from meshterm.core.mvt import GEOM_LINE, Feature, Layer
     from meshterm.ui.map_render import (
@@ -2893,13 +2906,13 @@ def test_each_road_class_keeps_its_own_colour_through_the_per_tile_style_memo() 
     features = [
         Feature(
             geom_type=GEOM_LINE,
-            # One short horizontal run per class, each on its own row of the tile.
+            # One short horizontal line for each class, each on its own row of the tile.
             rings=[[(200, 500 + i * 500), (3900, 500 + i * 500)]],
             tags={} if cls is None else {"class": cls},
         )
         for i, cls in enumerate(classes)
     ]
-    # Wide enough that the whole tile lands on the canvas, so every class gets drawn.
+    # Wide enough that the whole tile is on the canvas, so the map draws each class.
     vp = Viewport(45.5019, -73.5674, 14, 512, 512)
     canvas = MapCanvas(vp.dot_w // 2, vp.dot_h // 4)
     frame = _Frame(canvas=canvas, viewport=vp)
@@ -2921,12 +2934,12 @@ def test_each_road_class_keeps_its_own_colour_through_the_per_tile_style_memo() 
 
 
 def test_the_map_registers_no_cli_command() -> None:
-    """The map is menu-only: a picture has no scripted face.
+    """The map is only in the menu. A picture has no scripted face.
 
-    Its answer is a drawing whose nodes are told apart by colour, which the scripted CLI
-    does not have (see :mod:`meshterm.ui.script`) — so the tool registers nothing rather
-    than printing an unparseable block of braille. The located nodes stay scriptable
-    through ``meshterm contacts``.
+    Its answer is a drawing in which the colour shows the difference between nodes. The
+    scripted CLI does not have colour (refer to :mod:`meshterm.ui.script`). Thus the tool
+    registers nothing, and it does not print a block of braille that no program can parse.
+    The nodes with a position stay available to scripts through ``meshterm contacts``.
     """
     import typer
 
@@ -2937,20 +2950,20 @@ def test_the_map_registers_no_cli_command() -> None:
 
 # -- the basemap credit -------------------------------------------------------
 #
-# The OpenStreetMap Foundation's Attribution Guideline is what these pin (quoted in
-# meshterm/ui/attribution.py): the credit sits in a corner of the map, names
-# "OpenStreetMap" rather than an abbreviation, is visible without interacting, and may
-# collapse once the map is used — to a form that is still a complete OSM attribution.
+# These tests check the Attribution Guideline of the OpenStreetMap Foundation (quoted in
+# meshterm/ui/attribution.py). The credit is in a corner of the map. It names
+# "OpenStreetMap" and not an abbreviation. It is visible without an interaction. It can
+# collapse after the user uses the map, to a form that is still a complete OSM attribution.
 #
-# Which corner is the *frame's*, and the two platforms' frames differ: a bordered one sets
-# the credit into its bottom border rule and leaves the drawing alone, while the
-# borderless one has no rule and stamps the drawing's own last row instead. So most of
-# these run twice, once per platform, and assert on the surface that platform actually
-# marks.
+# The frame decides which corner, and the frames of the two platforms are different. A
+# bordered frame puts the credit in its bottom border rule and does not change the
+# drawing. A borderless frame has no rule, so it stamps the last row of the drawing. Thus
+# most of these tests run two times, one time for each platform, and they assert on the
+# surface that the platform marks.
 
 
 def _credited_map(cols: int = 80) -> MapScreen:
-    """A map screen over the offline source, arrived at and not yet touched."""
+    """A map screen with the offline source. The user just arrived and did not touch it."""
     from meshterm.ui.map_render import MapMarker
     from meshterm.ui.map_screen import MapScreen
 
@@ -2958,18 +2971,19 @@ def _credited_map(cols: int = 80) -> MapScreen:
 
 
 def _last_row(screen: MapScreen, cols: int = 80) -> str:
-    """The bottom row of a rendered map body, stripped to plain text."""
+    """The bottom row of a rendered map body, as plain text."""
     return _plain(screen.render_body(cols)).splitlines()[-1]
 
 
-#: A panel's bottom corners, in both shapes Rich draws them: rounded wherever the console
-#: can take them, square where it judges the console a legacy Windows one — which a
-#: captured pytest run on Windows is. Asserting one shape passes on one OS only.
+#: The bottom corners of a panel, in the two shapes that Rich draws. They are rounded where
+#: the console can show them. They are square where Rich judges that the console is an old
+#: Windows console, and a captured pytest run on Windows is such a console. A test for one
+#: shape passes on one OS only.
 _BOTTOM_CORNERS = ("╰╯", "└┘")
 
 
 def _bottom_rule(screen: MapScreen, cols: int = 80, rows: int = 24) -> str:
-    """The composed frame's bottom border rule — the line the caption is set into."""
+    """The bottom border rule of the composed frame, the line that has the caption."""
     from rich.text import Text
 
     from meshterm.ui.tui import frame
@@ -2984,12 +2998,12 @@ def _bottom_rule(screen: MapScreen, cols: int = 80, rows: int = 24) -> str:
 
 
 def _mark(screen: MapScreen, cols: int = 80) -> str:
-    """Wherever this platform puts the credit: the bottom rule, else the drawing's last row."""
+    """Where this platform puts the credit: the bottom rule, or the last row of the drawing."""
     return _bottom_rule(screen, cols) if screen.bottom_caption else _last_row(screen, cols)
 
 
 def _both_platforms():
-    """The two platforms, restoring REGULAR afterwards — the credit differs across them."""
+    """The two platforms. The generator sets REGULAR again at the end. The credit differs."""
     from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 
     try:
@@ -3001,22 +3015,22 @@ def _both_platforms():
 
 
 def test_credit_names_openstreetmap_in_full_never_an_abbreviation() -> None:
-    """OSMF: "Attribution must be to 'OpenStreetMap'" — so neither form may abbreviate it."""
+    """OSMF: "Attribution must be to 'OpenStreetMap'". Thus neither form can abbreviate it."""
     from meshterm.ui import attribution
 
     for text in (attribution.CREDIT_FULL, attribution.CREDIT_SHORT):
         assert "OpenStreetMap" in text
         assert not re.search(r"\bOSM\b", text), text
-    # The remnant is one of the two historical forms OSMF names as acceptable outright,
-    # so collapsing never costs the OpenStreetMap credit itself.
+    # The short form is one of the two older forms that OSMF names as acceptable, so the
+    # collapse never removes the OpenStreetMap credit itself.
     assert attribution.CREDIT_SHORT in ("© OpenStreetMap", "© OpenStreetMap contributors")
-    # OpenFreeMap's required line, less only the half it calls optional.
+    # The line that OpenFreeMap requires, without the half that it calls optional.
     assert "OpenMapTiles" in attribution.CREDIT_FULL
     assert "Data from OpenStreetMap" in attribution.CREDIT_FULL
 
 
 def test_an_untouched_map_shows_the_whole_credit_on_every_platform() -> None:
-    """The attribution may not be something you have to interact with the map to see."""
+    """The user must not need to interact with the map to see the attribution."""
     from meshterm.ui import attribution
 
     for platform in _both_platforms():
@@ -3025,57 +3039,60 @@ def test_an_untouched_map_shows_the_whole_credit_on_every_platform() -> None:
 
 
 def test_a_bordered_frame_sets_the_credit_in_its_bottom_rule_and_spares_the_drawing() -> None:
-    """JP, 2026-09-13: "that way it's not in the map" — the rule carries it, the map doesn't."""
+    """JP, 2026-09-13: "that way it's not in the map". The rule has the credit, the map does not."""
     from meshterm.platforms import REGULAR, set_platform
     from meshterm.ui import attribution
 
     set_platform(REGULAR)
     screen = _credited_map(72)
-    # Right-justified with exactly one rule cell before the corner, as a title sits in the
+    # The credit is at the right, with one rule cell before the corner, as a title is in the
     # top rule: "╰──… © OpenMapTiles · Data from OpenStreetMap ─╯".
     rule = _bottom_rule(screen, 72)
     assert rule[0] + rule[-1] in _BOTTOM_CORNERS, rule
     assert rule[:-1].endswith(f" {attribution.CREDIT_FULL} ─"), rule
     assert cell_len(rule) == 72
-    # And nothing of it reached the drawing: the map's own rows are pure picture.
+    # Also, none of it is in the drawing: the rows of the map are only picture.
     assert "OpenStreetMap" not in _plain(screen.render_body(72))
 
 
 def test_a_frame_with_no_bottom_rule_stamps_the_drawing_instead() -> None:
-    """The PicoCalc has a title bar and an F-key lane, and no rule to set a caption into."""
+    """The PicoCalc has a title bar and an F-key lane. It has no rule for a caption."""
     from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
     from meshterm.ui import attribution
 
     try:
         set_platform(PICOCALC_LYRA)
         screen = _credited_map(53)
-        assert screen.bottom_caption == ""  # nowhere to put it but the map
+        assert screen.bottom_caption == ""  # the only place for the credit is the map
         assert _last_row(screen, 53).endswith(attribution.CREDIT_FULL)
     finally:
         set_platform(REGULAR)
 
 
 def test_the_credit_collapses_once_the_map_is_used_and_stays_collapsed() -> None:
-    """OSMF allows a collapse "automatically on map interaction such as panning … zooming"."""
+    """After the user uses the map, the credit collapses and stays collapsed.
+
+    OSMF permits a collapse "automatically on map interaction such as panning … zooming".
+    """
     from meshterm.ui import attribution
 
     for platform in _both_platforms():
         cols = platform.readable_cols
         for action in ("right", "pageup", "home", "text"):
             screen = _credited_map(cols)
-            screen.render_body(cols)  # the arrival paint the reader is answering
+            screen.render_body(cols)  # the arrival paint that the key press answers
             assert attribution.CREDIT_FULL in _mark(screen, cols), (platform.name, action)
             screen.handle(action, "a" if action == "text" else "")
             mark = _mark(screen, cols)
             assert attribution.CREDIT_SHORT in mark, (platform.name, action)
             assert attribution.CREDIT_FULL not in mark, (platform.name, action)
-            # A repaint never brings the whole line back — including through the frame's
-            # own composition memo, which has to key on the caption to notice.
+            # A paint never brings the whole line back. This includes the composition memo of
+            # the frame, which must use the caption as a key to find the change.
             assert attribution.CREDIT_FULL not in _mark(screen, cols), (platform.name, action)
 
 
 def test_a_reopened_map_arrives_with_the_whole_credit_again() -> None:
-    """The collapse is a visit's state, not a session's — a new map is arrived at anew."""
+    """The collapse is the state of a visit, not of a session. A new map starts as new."""
     from meshterm.ui import attribution
 
     used = _credited_map()
@@ -3086,7 +3103,7 @@ def test_a_reopened_map_arrives_with_the_whole_credit_again() -> None:
 
 
 def test_the_credit_costs_no_chrome_row_and_no_footer_character() -> None:
-    """It rides the frame, so the body keeps its height and the hint keeps its wording."""
+    """The credit is in the frame, so the body keeps its height and the hint keeps its wording."""
     for platform in _both_platforms():
         cols = platform.readable_cols
         screen = _credited_map(cols)
@@ -3097,18 +3114,18 @@ def test_the_credit_costs_no_chrome_row_and_no_footer_character() -> None:
 
 
 def test_the_bottom_rule_keeps_its_clip_arrows_when_a_caption_shares_it() -> None:
-    """Neither half is dropped: the arrows lead, the caption follows, the run moves right."""
+    """The rule keeps both parts: the arrows are first, the caption follows, and both move right."""
     from meshterm.ui.tui.frame import _panel_box
 
     panel = _panel_box("Map", ["body"], True, True, "accent", "© OpenStreetMap")
     assert "↑↓ more · © OpenStreetMap" in (panel.subtitle or "")
     assert panel.subtitle_align == "right"
-    # With no caption the arrows keep the centre they have always had.
+    # With no caption, the arrows keep the centre that they always had.
     assert _panel_box("Map", ["body"], False, True, "accent", "").subtitle_align == "center"
 
 
 def test_the_find_query_and_the_credit_share_the_row_with_the_credit_kept_whole() -> None:
-    """Where the F-key lane replaces the hint, the echo yields its right end to the credit."""
+    """Where the F-key lane replaces the hint, the echo gives its right end to the credit."""
     from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
     from meshterm.ui import attribution
 
@@ -3120,7 +3137,7 @@ def test_the_find_query_and_the_credit_share_the_row_with_the_credit_kept_whole(
         for ch in "Hilltop-Repeater-With-A-Very-Long-Name":
             screen.handle("text", ch)
         row = _last_row(screen, 53)
-        assert row.lstrip().startswith("/Hilltop")  # the query, cropped to what is left
+        assert row.lstrip().startswith("/Hilltop")  # the query, cut to the space that remains
         assert row.endswith(attribution.CREDIT_SHORT)  # the credit, whole
         assert cell_len(row) <= 53
     finally:
@@ -3128,10 +3145,10 @@ def test_the_find_query_and_the_credit_share_the_row_with_the_credit_kept_whole(
 
 
 def test_the_location_preview_credits_the_basemap_in_its_short_form() -> None:
-    """A produced work too — and a non-interactive one, so its mark must stand still.
+    """The preview is also a produced work, and it is not interactive, so its mark must not change.
 
-    The preview is embedded in somebody else's body, with no frame of its own to set a
-    caption into, so it stamps on both platforms — unlike the full-screen map.
+    The app puts the preview in the body of another screen. It has no frame of its own with
+    a caption. Thus it stamps the credit on both platforms, unlike the full-screen map.
     """
     from meshterm.ui import attribution
     from meshterm.ui.map_render import MapMarker
@@ -3149,14 +3166,14 @@ def test_the_location_preview_credits_the_basemap_in_its_short_form() -> None:
             markers=[MapMarker("A", 45.5, -73.6)],
         )
         rows = preview.render(cols, 6)
-        assert len(rows) == 6, platform.name  # the credit takes no row of its own
+        assert len(rows) == 6, platform.name  # the credit does not use a row of its own
         last = _plain(rows).splitlines()[-1]
         assert last.endswith(attribution.CREDIT_SHORT), platform.name
         assert attribution.CREDIT_FULL not in last, platform.name
 
 
 def test_the_credit_glyphs_are_in_the_picocalc_console_font() -> None:
-    """The mark is drawn on the device, so its glyphs must be in the 512-glyph font."""
+    """The handheld draws the mark, so its glyphs must be in the 512-glyph font."""
     from meshterm.ui import attribution
     from meshterm.ui.fontset import FONT_CODEPOINTS
 
@@ -3167,18 +3184,21 @@ def test_the_credit_glyphs_are_in_the_picocalc_console_font() -> None:
 
 
 def test_a_row_too_narrow_for_the_remnant_takes_no_credit_rather_than_a_cut_one() -> None:
-    """A truncated credit would claim something untrue; the About page still carries it."""
+    """A row that is too narrow for the short form gets no credit. A cut credit would be untrue.
+
+    The About page still has the credit.
+    """
     from meshterm.ui import attribution
 
     rows = ["x" * 8]
     assert attribution.stamp(rows, 8, full=True) == rows
-    # And a row with room for the remnant but not the whole line falls back to it.
+    # A row with room for the short form, but not for the whole line, uses the short form.
     stamped = _plain(attribution.stamp(["x" * 20], 20, full=True)).splitlines()[-1]
     assert stamped.endswith(attribution.CREDIT_SHORT)
 
 
 def test_stamping_leaves_the_callers_rows_untouched() -> None:
-    """The map serves one cached raster across many paints; stamping may not edit it."""
+    """The map uses one cached raster for many paints, so the stamping must not change it."""
     from meshterm.ui import attribution
 
     rows = ["street " * 10, "more ground here"]

@@ -1,18 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Reserve-two emoji widths: one rule in every width authority, and every glyph kept whole.
+"""Reserve-two emoji widths: one rule in each width authority, and each glyph kept whole.
 
-The measuring story lives in :mod:`meshterm.ui.tui.emoji_width`, and the placement half in
-:mod:`meshterm.ui.tui.colsnap`. What these tests pin:
+:mod:`meshterm.ui.tui.emoji_width` explains how MeshTerm measures a width.
+:mod:`meshterm.ui.tui.colsnap` places the glyphs. These tests prove that:
 
-* every glyph that may be drawn as an emoji is reserved two cells, in Rich and in prompt_toolkit;
-* the app's own marks, Rich's single-cell ranges and ordinary text keep their stock widths;
-* Rich's three measurements and prompt_toolkit's agree about every string, which is what keeps
-  Rich's segment splitter from walking past a cut it can never meet;
-* the app's source draws no text-default emoji its vocabulary does not name;
-* a glyph built from several codepoints is split, cut and laid out as the one glyph it is.
+* Each glyph that a terminal can draw as an emoji has a reserve of two cells, in Rich and in
+  prompt_toolkit.
+* The marks of the app, the single-cell ranges of Rich, and ordinary text keep their stock
+  widths.
+* The three measurements of Rich and the measurement of prompt_toolkit agree for each
+  string. Thus the segment splitter of Rich does not walk past a cut that it can never meet.
+* The source of the app draws no text-default emoji that its vocabulary does not name.
+* A glyph that has several codepoints is split, cut, and laid out as the one glyph that it is.
 
-:func:`~meshterm.ui.tui.emoji_width.install` patches process-global tables, so every test that
-needs it goes through the ``installed`` fixture, which puts every table and cache back afterwards.
+:func:`~meshterm.ui.tui.emoji_width.install` patches tables that are global to the process.
+Thus each test that needs it uses the ``installed`` fixture, which puts each table and cache
+back afterwards.
 """
 
 from __future__ import annotations
@@ -30,29 +33,29 @@ from prompt_toolkit.utils import get_cwidth
 
 from meshterm.ui.tui import emoji_width as ew
 
-_ZWJ = "\u200d"  # the joiner: the tell that its neighbours are a single glyph
-_VS16 = "\ufe0f"  # the request for emoji presentation
-_WAVE = "\U0001f44b"  # 👋 emoji presentation by default: two cells by the stock tables already
-_DISH = "\U0001f4e1"  # 📡 a menu icon, the same
+_ZWJ = "\u200d"  # the joiner: it shows that the characters next to it are one glyph
+_VS16 = "\ufe0f"  # the request for the emoji presentation
+_WAVE = "\U0001f44b"  # 👋 emoji presentation by default: the stock tables already give two cells
+_DISH = "\U0001f4e1"  # 📡 a menu icon, with the same width
 _CA = "\U0001f1e8\U0001f1e6"  # 🇨🇦 a flag: two Regional Indicators, one glyph
-_CN = "\U0001f1e8\U0001f1f3"  # 🇨🇳 a second flag sharing the "C" indicator
-_SUN = "☀"  # ☀ a text-default emoji, alone
-_PLANE = "\U0001f6e9"  # 🛩 another, which a font draws either way
-_HEART = "❤"  # ❤ another
-_ROAD = "\U0001f6e3"  # 🛣 text-default too, but one of the app's own marks
+_CN = "\U0001f1e8\U0001f1f3"  # 🇨🇳 a second flag with the same "C" indicator
+_SUN = "☀"  # ☀ a text-default emoji, by itself
+_PLANE = "\U0001f6e9"  # 🛩 another one. A font can draw it in either way
+_HEART = "❤"  # ❤ another one
+_ROAD = "\U0001f6e3"  # 🛣 text-default also, but one of the marks of the app
 _WEB = "\U0001f578"  # 🕸 the same
 _BIN = "\U0001f5d1"  # 🗑 the same
 _WARN = "⚠"  # ⚠ the same
 _SHRUG = f"\U0001f937{_ZWJ}♂{_VS16}"  # the shrug: base, joiner, sign, selector
 _FAMILY = f"\U0001f468{_ZWJ}\U0001f469{_ZWJ}\U0001f467"  # the family: three joined people
-_THUMB = "\U0001f44d\U0001f3fd"  # a thumb and its skin tone, no joiner: still one glyph
+_THUMB = "\U0001f44d\U0001f3fd"  # a thumb and its skin tone, no joiner: it is still one glyph
 _TECHIE = f"\U0001f468\U0001f3fb{_ZWJ}\U0001f4bb"  # the technologist: toned, then joined
-_KEYCAP = f"1{_VS16}\u20e3"  # a keycap: a digit, a selector and the enclosing mark
+_KEYCAP = f"1{_VS16}\u20e3"  # a keycap: a digit, a selector, and the enclosing mark
 _FLAG = "\U0001f3f4"  # a black flag, the base of a pirate flag
-_STRANDED = f"{_FLAG}{_ZWJ}"  # a pirate flag cut after its joiner by a name's byte limit
+_STRANDED = f"{_FLAG}{_ZWJ}"  # a pirate flag that the byte limit of a name cut after its joiner
 
-#: Strings every authority has to agree about: emoji of every shape, the app's own marks, and the
-#: scripts and marks that must come through the rule untouched.
+#: Strings that each authority must measure in the same way: emoji of each shape, the marks of
+#: the app, and the scripts and marks that the rule must not change.
 _SAMPLES = (
     "plain ascii",
     f"Bob {_FAMILY} x",
@@ -74,7 +77,7 @@ _SAMPLES = (
 
 @pytest.fixture
 def installed() -> Iterator[None]:
-    """Install the reserve-two rule for one test, and put every table and cache back after."""
+    """Install the reserve-two rule for one test, and put each table and cache back after it."""
     from meshterm.ui.tui import colsnap
     from meshterm.ui.tui.render import _ANSI_CACHE
 
@@ -107,11 +110,12 @@ def installed() -> Iterator[None]:
 
 
 def test_whatever_may_be_drawn_as_an_emoji_is_reserved_two_cells(installed) -> None:  # noqa: ANN001
-    """Every shape of emoji measures two in both authorities, whatever the stock tables said.
+    """Each shape of emoji measures two in both authorities, whatever the stock tables said.
 
-    The stock answers were all over the place — prompt_toolkit gave a flag four, a sun asking
-    for emoji presentation one, a toned thumb four and a family six — and no answer below two
-    is safe for a glyph a font may draw in two: the pin after it would overwrite its right half.
+    The stock answers were not consistent. prompt_toolkit gave a flag four cells, a sun that
+    asks for the emoji presentation one cell, a toned thumb four cells, and a family six
+    cells. An answer below two is not safe for a glyph that a font can draw in two cells,
+    because the pin after the glyph would overwrite its right half.
     """
     for glyph in (
         _WAVE,
@@ -128,19 +132,19 @@ def test_whatever_may_be_drawn_as_an_emoji_is_reserved_two_cells(installed) -> N
         _THUMB,
         _TECHIE,
         _KEYCAP,
-        f"{_WARN}{_VS16}",  # a mark asking for emoji presentation is an emoji like any other
+        f"{_WARN}{_VS16}",  # a mark that asks for the emoji presentation is an emoji
     ):
         assert cells.cell_len(glyph) == 2, f"Rich: {glyph!r}"
         assert get_cwidth(glyph) == 2, f"prompt_toolkit: {glyph!r}"
 
 
 def test_text_the_app_draws_keeps_its_stock_width(installed) -> None:  # noqa: ANN001
-    """The rule reserves nothing it has no reason to: text, chrome and the app's own marks.
+    """The rule reserves nothing without a reason: text, chrome, and the marks of the app.
 
-    The marks are text-default emoji too, but they are the app's own vocabulary, drawn in one
-    cell on the terminals it is used on, so they keep the one cell every screen was laid out
-    with. Rich's single-cell ranges are measured by a fast path no patch reaches, so everything
-    has to agree with it there.
+    The marks are also text-default emoji. But they are the vocabulary of the app, and the
+    terminals that run the app draw them in one cell. Thus they keep the one cell that each
+    screen uses in its layout. Rich measures its single-cell ranges with a fast path that no
+    patch reaches, so all other measurements must agree with that path.
     """
     for text, width in (
         ("a", 1),
@@ -161,17 +165,17 @@ def test_text_the_app_draws_keeps_its_stock_width(installed) -> None:  # noqa: A
         ("↩", 1),
         ("⌨", 1),
         ("⚙", 1),
-        ("a\U0001f3fd", 1),  # a stray skin tone on a letter leaves it a letter
+        ("a\U0001f3fd", 1),  # a skin tone after a letter leaves the letter a letter
     ):
         assert cells.cell_len(text) == width, f"Rich: {text!r}"
         assert get_cwidth(text) == width, f"prompt_toolkit: {text!r}"
 
 
 def test_every_authority_measures_every_string_the_same(installed) -> None:  # noqa: ANN001
-    """Rich's whole-string width, its grapheme spans and prompt_toolkit's cache all agree.
+    """The whole-string width of Rich, its grapheme spans, and the cache of prompt_toolkit agree.
 
-    And every lone character measures the same in all of them. These are the four places a width
-    is read, and a row is only laid out once if they give it one answer.
+    Also, each single character has the same width in all of them. These are the four places
+    that read a width. MeshTerm lays out a row correctly only if they give one answer.
     """
     for text in _SAMPLES:
         spans, total = cells.split_graphemes(text)
@@ -184,13 +188,14 @@ def test_every_authority_measures_every_string_the_same(installed) -> None:  # n
 
 
 def test_no_prefix_outgrows_the_character_that_ends_it(installed) -> None:  # noqa: ANN001
-    """The invariant Rich's segment splitter terminates on, then the splitter itself.
+    """The invariant that the segment splitter of Rich needs to end, then the splitter itself.
 
-    ``Segment.split_cells`` steps a string a codepoint at a time until a whole-string width meets
-    the cut, stepping over a two-cell character only where that character measures two on its
-    own. A prefix that grew by two at a character measuring one would be a cut the walk steps past
-    in both directions forever — which is why the character width is patched alongside the string
-    width, and why this checks the invariant before trusting the splitter with it.
+    ``Segment.split_cells`` steps through a string one codepoint at a time until a whole-string
+    width reaches the cut. It steps over a two-cell character only where that character
+    measures two by itself. Suppose a prefix grew by two at a character that measures one.
+    The cut would be a place that the walk steps past in both directions for ever. Thus the
+    patch changes the character width and the string width. This test checks the invariant
+    before it uses the splitter.
     """
     for text in _SAMPLES:
         for index, char in enumerate(text):
@@ -213,30 +218,33 @@ def test_no_prefix_outgrows_the_character_that_ends_it(installed) -> None:  # no
 def test_a_stranded_joiner_leaves_the_next_character_its_cell(installed) -> None:  # noqa: ANN001
     """A joiner with no pictograph after it joins nothing, in both authorities.
 
-    A MeshCore name is cut at a byte limit, so a name ending on a pirate flag arrives as the
-    black flag and a bare joiner, followed by the lane's padding. Rich's stock loop folded the
-    padding into the flag, so the name lane measured a cell short of what the terminal drew.
+    MeshCore cuts a name at a byte limit. Thus a name that ends with a pirate flag arrives as
+    the black flag and a bare joiner, followed by the padding of the lane. The stock loop of
+    Rich folded the padding into the flag. Thus the name lane measured one cell less than
+    the terminal drew.
     """
-    padded = f"{_STRANDED}  x"  # the flag's two cells, two of padding, then the next lane
+    padded = f"{_STRANDED}  x"  # the two cells of the flag, two of padding, then the next lane
     assert cells.cell_len(padded) == 5 and get_cwidth(padded) == 5
-    # A real sequence still joins: the shrug's male sign is a pictograph, not a padding space.
+    # A real sequence still joins: the male sign of the shrug is a pictograph, not a space.
     assert cells.cell_len(f"{_SHRUG} x") == 4 and get_cwidth(f"{_SHRUG} x") == 4
 
 
 def test_install_happens_once(installed) -> None:  # noqa: ANN001
-    """A second call is a no-op: the tables patched by the first stay exactly as they are."""
+    """A second call does nothing: the tables that the first call patched do not change."""
     patched = (cells._cell_len, ptu._CHAR_SIZES_CACHE)
     ew.install()
     assert (cells._cell_len, ptu._CHAR_SIZES_CACHE) == patched
 
 
 def test_the_app_draws_no_text_default_emoji_its_vocabulary_does_not_name() -> None:
-    """Every text-default emoji the package draws is one of its own marks, and every mark is used.
+    """Each text-default emoji that the package draws is one of its marks, and each mark is used.
 
-    This is what keeps :data:`~meshterm.ui.tui.emoji_width._APP_TEXT_MARKS` a closed vocabulary
-    rather than a list kept by care: a new one-cell mark added to a screen without being named
-    there fails here, instead of quietly gaining a blank cell beside it. Prose is skipped
-    (docstrings and bare strings are read, not drawn), and so is the module that defines the list.
+    This test keeps :data:`~meshterm.ui.tui.emoji_width._APP_TEXT_MARKS` a closed vocabulary.
+    Without it, the list would depend on care. A new one-cell mark that a developer adds to a
+    screen, and does not name in the list, fails here. Without the test, the mark would get
+    a blank cell next to it with no warning. The test skips prose, because MeshTerm reads
+    docstrings and bare strings and does not draw them. It also skips the module that defines
+    the list.
     """
     from rich._unicode_data import load
 
@@ -245,8 +253,8 @@ def test_the_app_draws_no_text_default_emoji_its_vocabulary_does_not_name() -> N
         for char in load("auto").narrow_to_wide
         if not char.isascii() and char not in cells._SINGLE_CELLS
     }
-    # Inputs to the PicoCalc's substitution table, which maps them to glyphs its font has. They
-    # are never drawn on a terminal that shows emoji, so they are not marks.
+    # Inputs to the substitution table of the PicoCalc, which maps them to glyphs that its
+    # font has. A terminal that shows emoji never draws them, so they are not marks.
     fold_inputs = {"↪", "✔", "✖"}
 
     package = pathlib.Path(ew.__file__).parents[2]
@@ -274,36 +282,38 @@ def test_the_app_draws_no_text_default_emoji_its_vocabulary_does_not_name() -> N
 
 
 def test_clusters_split_between_glyphs_and_never_inside_one() -> None:
-    """The unit a lane may cut on and a width is measured by: one entry per glyph drawn.
+    """The unit where a lane can cut and by which a width is measured: one entry for each glyph.
 
-    A joined run, a flag's indicator *pair*, a toned base and a keycap each come back whole,
-    because each is one glyph — while a joiner that joins nothing stands on its own (see
-    :func:`~meshterm.ui.tui.emoji_width._joins`), and so do letters around a joiner.
+    A joined run, the indicator pair of a flag, a toned base, and a keycap each return whole,
+    because each is one glyph. A joiner that joins nothing is a separate entry (refer to
+    :func:`~meshterm.ui.tui.emoji_width._joins`), and the letters around a joiner are also
+    separate entries.
     """
     text = f"a{_FAMILY}{_CA}{_THUMB}{_KEYCAP}b"
     assert list(ew.clusters(text)) == ["a", _FAMILY, _CA, _THUMB, _KEYCAP, "b"]
-    # Two flags in a row pair up one at a time rather than running together into four.
+    # Two flags in a row make two pairs, one at a time, and do not run together into four.
     assert list(ew.clusters(_CA + _CN)) == [_CA, _CN]
-    # A name cut at its byte limit just past a joiner: the joiner is not part of the flag.
+    # A name that the byte limit cut just after a joiner: the joiner is not part of the flag.
     assert list(ew.clusters(_STRANDED)) == [_FLAG, _ZWJ]
-    # A joiner between letters joins nothing a font draws as one emoji.
+    # A joiner between letters joins nothing that a font draws as one emoji.
     assert list(ew.clusters(f"a{_ZWJ}b")) == ["a", _ZWJ, "b"]
 
 
 def test_cut_cells_keeps_every_glyph_whole_and_strands_no_joiner() -> None:
-    """A lane's truncation lands between glyphs, so nothing is measured that is not drawn."""
-    assert ew.cut_cells(f"Bob {_FAMILY}", 6) == f"Bob {_FAMILY}"  # it fits, so it is kept
-    assert ew.cut_cells(f"Bob {_FAMILY}", 5) == "Bob "  # it doesn't: dropped whole
-    assert ew.cut_cells(_CA, 1) == ""  # half a flag is a letter, not half a glyph
-    assert ew.cut_cells(_STRANDED, 4) == _FLAG  # the joiner does not trail the cut
+    """The cut of a lane is between glyphs, so MeshTerm measures nothing that it does not draw."""
+    assert ew.cut_cells(f"Bob {_FAMILY}", 6) == f"Bob {_FAMILY}"  # it fits, so it stays
+    assert ew.cut_cells(f"Bob {_FAMILY}", 5) == "Bob "  # it does not fit: the cut removes it whole
+    assert ew.cut_cells(_CA, 1) == ""  # half of a flag is a letter, not half of a glyph
+    assert ew.cut_cells(_STRANDED, 4) == _FLAG  # the joiner does not stay at the end of the cut
     assert ew.cut_cells("plain name", 5) == "plain"
 
 
 def test_drawable_folds_only_what_no_terminal_can_draw() -> None:
-    """A newline, an escape or a bidi override in an advert name is folded to a space.
+    """A newline, an escape, or a bidi override in an advert name changes to a space.
 
-    None of them is a width question — they are text that must not reach the terminal at all.
-    The joiner is format-class too and is the one kept, because it holds an emoji together.
+    None of them is a question of width. They are text that must not reach the terminal at
+    all. The joiner is also in the format class, but the function keeps it, because it holds
+    an emoji together.
     """
     assert ew.drawable("line\nbreak") == "line break"
     assert ew.drawable("esc\x1b[31mape") == "esc [31mape"
@@ -312,11 +322,12 @@ def test_drawable_folds_only_what_no_terminal_can_draw() -> None:
 
 
 def test_join_clusters_merges_every_multi_codepoint_glyph() -> None:
-    """The fragment merge gathers each glyph built from several codepoints into one fragment.
+    """The fragment merge puts each glyph that has several codepoints into one fragment.
 
-    prompt_toolkit's ANSI text arrives one codepoint per fragment, so a glyph is a run to be
-    gathered — and every such run is merged now, not only the joined ones, because a mark
-    measured one cell and followed by a selector must not be folded into a one-cell slot.
+    The ANSI text of prompt_toolkit arrives with one codepoint in each fragment. Thus a glyph
+    is a run that the merge must gather. The merge now gathers each such run, not only the
+    joined runs. A mark that measures one cell and has a selector after it must not fold
+    into a one-cell slot.
     """
 
     def line(text: str) -> list:
@@ -325,7 +336,7 @@ def test_join_clusters_merges_every_multi_codepoint_glyph() -> None:
     def texts(fragments: list) -> list:
         return [text for _style, text in fragments]
 
-    # A line with nothing to merge is handed straight back — the same object, not a copy.
+    # A line with nothing to merge is returned as it is: the same object, not a copy.
     plain = line(f"hi {_DISH} {_WARN}")
     assert ew._join_clusters(plain) is plain
 
@@ -333,32 +344,34 @@ def test_join_clusters_merges_every_multi_codepoint_glyph() -> None:
     assert texts(ew._join_clusters(line(_FAMILY))) == [_FAMILY]
     burning = f"❤{_VS16}{_ZWJ}\U0001f525"  # ❤\ufe0f\u200d🔥 a selector on the base, then a join
     assert texts(ew._join_clusters(line(burning))) == [burning]
-    # A selector pair, a toned emoji and a keycap are one glyph each, merged like the rest.
+    # A selector pair, a toned emoji, and a keycap are one glyph each. The merge joins them
+    # like the other glyphs.
     assert texts(ew._join_clusters(line(f"{_SUN}{_VS16}{_SHRUG}"))) == [f"{_SUN}{_VS16}", _SHRUG]
     assert texts(ew._join_clusters(line(f"{_WARN}{_VS16}|"))) == [f"{_WARN}{_VS16}", "|"]
     assert texts(ew._join_clusters(line(f"{_THUMB}{_KEYCAP}"))) == [_THUMB, _KEYCAP]
-    # A flag's two indicators are one glyph, written as one: a cursor pin between the halves
-    # would leave a terminal drawing two letters instead of a flag.
+    # The two indicators of a flag are one glyph, and the code writes them as one. If a cursor
+    # pin were between the halves, the terminal would draw two letters instead of a flag.
     assert texts(ew._join_clusters(line(f"|{_CA}|"))) == ["|", _CA, "|"]
     assert texts(ew._join_clusters(line(f"{_CA}{_CN}"))) == [_CA, _CN]
-    # A lone indicator is no pair, and a trailing or stranded joiner joins nothing.
+    # A single indicator is not a pair, and a trailing or stranded joiner joins nothing.
     assert texts(ew._join_clusters(line(f"{_CA[0]} x"))) == [_CA[0], " ", "x"]
     assert texts(ew._join_clusters(line(f"a{_ZWJ}"))) == ["a", _ZWJ]
     assert texts(ew._join_clusters(line(f"{_STRANDED} x"))) == [_FLAG, _ZWJ, " ", "x"]
 
-    # A merged fragment iterates as the whole glyph, which is what makes prompt_toolkit build
-    # one Char of it instead of one per codepoint.
+    # A merged fragment iterates as the whole glyph. Thus prompt_toolkit builds one Char for
+    # it instead of one Char for each codepoint.
     (merged,) = texts(ew._join_clusters(line(_SHRUG)))
     assert list(merged) == [_SHRUG] and merged == _SHRUG
 
 
 def test_cluster_control_lays_each_glyph_into_a_single_screen_cell(installed) -> None:  # noqa: ANN001
-    """The delivery half: one two-cell ``Char`` per glyph, every codepoint still written out.
+    """The delivery half: one two-cell ``Char`` for each glyph, with each codepoint still written.
 
-    Measuring a glyph right is not enough on its own — prompt_toolkit lays out one codepoint at a
-    time, so an unmerged shrug puts its male sign in a cell of its own, and a warning mark with a
-    selector becomes a two-cell glyph in a one-cell slot. Merged, each is one ``Char`` two cells
-    wide, and the text after lands where the pins will put it.
+    A correct measurement of a glyph is not enough. prompt_toolkit lays out one codepoint at
+    a time. Thus an unmerged shrug puts its male sign in a separate cell, and a warning mark
+    with a selector becomes a two-cell glyph in a one-cell slot. When the glyphs are merged,
+    each is one ``Char`` that is two cells wide, and the text after it is where the pins
+    will put it.
     """
     from prompt_toolkit.application import Application
     from prompt_toolkit.application.current import set_app
@@ -382,5 +395,5 @@ def test_cluster_control_lays_each_glyph_into_a_single_screen_cell(installed) ->
     assert (row[4].char, row[4].width) == (_FAMILY, 2)
     assert (row[7].char, row[7].width) == (warn, 2)
     assert "".join(row[x].char for x in range(9, 13)) == "|end"
-    # Nothing was dropped on the way: the row still spells the source exactly.
+    # Nothing was lost: the row still spells the source exactly.
     assert "".join(row[x].char for x in range(40)).rstrip() == text

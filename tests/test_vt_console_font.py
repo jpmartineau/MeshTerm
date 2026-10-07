@@ -1,15 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for the PicoCalc's console-font switch: the gate, the three verbs, and the wiring.
+"""Tests for the console-font switch of the PicoCalc: the gate, the three verbs, and the wiring.
 
-Nothing here runs ``setfont`` — the point of the module under test is that it shells out,
-so what is pinned is *which command line* it builds and that it never builds one on a
-machine it has no business touching. :func:`subprocess.run` is replaced by a recorder
-throughout; a real call would be a test changing the developer's console.
+No test here runs ``setfont``. The module under test starts another program, so the tests
+check which command line the module builds. They also check that it never builds a command
+line on a machine that it must not change. A recorder replaces :func:`subprocess.run` in
+all the tests. A real call would make a test change the console of the developer.
 
-Three questions, in order: does :func:`~meshterm.services.consolefont.applies` say no
-everywhere it should; do the verbs say the right thing to ``setfont`` and shrug off a
-failure; and is the switch wired to the *menu* only, so a scripted command typed into
-somebody else's terminal never repaints it.
+The tests ask three questions, in this order:
+
+1. Does :func:`~meshterm.services.consolefont.applies` return false in each case where it
+   must?
+2. Do the verbs give the correct arguments to ``setfont``, and do they ignore a failure?
+3. Is the switch connected to the menu only? Then a scripted command that the user types
+   into the terminal of another person never repaints it.
 """
 
 from __future__ import annotations
@@ -34,12 +37,15 @@ from meshterm.services import consolefont
 from meshterm.tools.preferences import PreferencesTool
 from meshterm.ui.theme import active_theme
 
-#: What a successful ``setfont`` looks like coming back from :func:`subprocess.run`.
+#: The result that :func:`subprocess.run` returns for a ``setfont`` that succeeded.
 _OK = subprocess.CompletedProcess(["setfont"], 0, "", "")
 
 
 class _Recorder:
-    """Stands in for :func:`subprocess.run`, remembering every argv and answering to script."""
+    """A substitute for :func:`subprocess.run`.
+
+    It stores each argv and gives the scripted answers.
+    """
 
     def __init__(self, answers: list[subprocess.CompletedProcess] | None = None) -> None:
         self.calls: list[list[str]] = []
@@ -52,7 +58,7 @@ class _Recorder:
 
 @pytest.fixture
 def device(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
-    """Make the process look like MeshTerm running on the handheld's own VT."""
+    """Make the process look like MeshTerm that runs on the own VT of the handheld."""
     set_platform(PICOCALC_LYRA)
     monkeypatch.setattr(os, "ttyname", lambda fd: "/dev/tty1", raising=False)
     monkeypatch.setattr(consolefont.shutil, "which", lambda name: "/usr/bin/setfont")
@@ -65,12 +71,19 @@ def device(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
 
 
 def test_the_switch_applies_on_the_handhelds_own_console(device: _Recorder) -> None:
-    """Picocalc, a Linux VT on stdin, and a setfont to run: all three, so it applies."""
+    """The switch applies when all three conditions are true.
+
+    The conditions are: the platform is the PicoCalc, stdin is a Linux VT, and a ``setfont``
+    is available to run.
+    """
     assert consolefont.applies() is True
 
 
 def test_a_desktop_never_touches_a_console_font(device: _Recorder) -> None:
-    """The fonts are the PicoCalc's; no other platform has them or wants them."""
+    """A desktop never changes a console font.
+
+    The fonts belong to the PicoCalc. No other platform has them or needs them.
+    """
     set_platform(REGULAR)
     assert consolefont.applies() is False
 
@@ -79,13 +92,20 @@ def test_a_desktop_never_touches_a_console_font(device: _Recorder) -> None:
 def test_anything_that_is_not_a_linux_vt_is_left_alone(
     device: _Recorder, monkeypatch: pytest.MonkeyPatch, tty: str
 ) -> None:
-    """An ssh pty has no font of its own, and a serial line is not a console we own."""
+    """The switch leaves alone each tty that is not a Linux VT.
+
+    An ssh pty has no font of its own. A serial line is not a console that MeshTerm owns.
+    """
     monkeypatch.setattr(os, "ttyname", lambda fd: tty, raising=False)
     assert consolefont.applies() is False
 
 
 def test_a_redirected_stdin_is_not_a_vt(device: _Recorder, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``os.ttyname`` raising (a pipe, or Windows, which has no such call) means no."""
+    """A redirected stdin is not a VT.
+
+    If ``os.ttyname`` raises an exception (for a pipe, or on Windows, which has no such
+    call), the answer is no.
+    """
 
     def _no_tty(fd: int) -> str:
         raise OSError(25, "not a tty")
@@ -95,13 +115,20 @@ def test_a_redirected_stdin_is_not_a_vt(device: _Recorder, monkeypatch: pytest.M
 
 
 def test_no_setfont_means_no_switching(device: _Recorder, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The kbd tools are what the font build needs too; without them there is no verb."""
+    """If there is no ``setfont``, there is no switch.
+
+    The font build also needs the kbd tools. Without them, no verb works.
+    """
     monkeypatch.setattr(consolefont.shutil, "which", lambda name: None)
     assert consolefont.applies() is False
 
 
 def test_a_gated_out_machine_runs_nothing_at_all(device: _Recorder) -> None:
-    """Every verb asks the gate first, so a no is a no-op and not a stray subprocess."""
+    """A machine that the gate excludes runs nothing.
+
+    Each verb asks the gate first. Thus a no does nothing, and it does not start a
+    subprocess by mistake.
+    """
     set_platform(REGULAR)
     assert consolefont.remember() is None
     assert consolefont.apply("6x8") is False
@@ -112,7 +139,10 @@ def test_a_gated_out_machine_runs_nothing_at_all(device: _Recorder) -> None:
 
 
 def test_remember_saves_the_font_the_shell_had(device: _Recorder) -> None:
-    """``setfont -O`` writes the current font, unicode table and all, under the app's home."""
+    """``setfont -O`` writes the current font and its unicode table.
+
+    The file goes in the home directory of the app.
+    """
     saved = consolefont.remember()
     assert saved is not None
     assert saved.name == consolefont.SAVED_NAME
@@ -120,7 +150,11 @@ def test_remember_saves_the_font_the_shell_had(device: _Recorder) -> None:
 
 
 def test_apply_loads_the_file_the_preference_names(device: _Recorder) -> None:
-    """The value is a cell size; the path it maps to is this module's business, not a preference."""
+    """Apply loads the file that the preference names.
+
+    The value is a cell size. This module owns the path that the value maps to. The path is
+    not a preference.
+    """
     assert consolefont.apply("6x8") is True
     assert device.calls == [["setfont", "/usr/share/consolefonts/meshterm8.psf.gz"]]
     assert consolefont.apply("6x12") is True
@@ -128,14 +162,21 @@ def test_apply_loads_the_file_the_preference_names(device: _Recorder) -> None:
 
 
 def test_no_call_ever_names_a_tty(device: _Recorder) -> None:
-    """Never ``-C``: setfont with no tty named acts on the console the reader is looking at."""
+    """No call names a tty. It never uses ``-C``.
+
+    ``setfont`` with no tty name acts on the console that the user looks at.
+    """
     consolefont.remember()
     consolefont.apply("6x8")
     assert not any("-C" in argv for argv in device.calls)
 
 
 def test_a_value_with_no_font_behind_it_changes_nothing(device: _Recorder) -> None:
-    """A key from a hand-edited file that names no font is a no-op, not a crash."""
+    """A value that names no font changes nothing.
+
+    A key from a file that the user edited by hand can name no font. The result is that
+    nothing happens, and there is no crash.
+    """
     assert consolefont.apply("8x16") is False
     assert device.calls == []
 
@@ -143,7 +184,7 @@ def test_a_value_with_no_font_behind_it_changes_nothing(device: _Recorder) -> No
 def test_restore_reloads_the_saved_font_and_drops_the_file(
     device: _Recorder, tmp_path: Path
 ) -> None:
-    """The way out: put back exactly what was saved, then leave nothing behind."""
+    """The way out: load again exactly the font that the app saved, then leave no file."""
     saved = tmp_path / consolefont.SAVED_NAME
     saved.write_bytes(b"PSF")
     consolefont.restore(saved)
@@ -152,7 +193,11 @@ def test_restore_reloads_the_saved_font_and_drops_the_file(
 
 
 def test_restoring_twice_is_harmless(device: _Recorder, tmp_path: Path) -> None:
-    """The session's ``finally`` and the atexit hook both fire; the second finds nothing."""
+    """A second restore does no harm.
+
+    The ``finally`` of the session and the atexit hook both run. The second one finds
+    nothing to do.
+    """
     saved = tmp_path / consolefont.SAVED_NAME
     saved.write_bytes(b"PSF")
     consolefont.restore(saved)
@@ -164,7 +209,11 @@ def test_restoring_twice_is_harmless(device: _Recorder, tmp_path: Path) -> None:
 def test_a_setfont_that_fails_is_swallowed(
     device: _Recorder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A font is cosmetic: a non-zero exit is a log line, never an exception."""
+    """A ``setfont`` that fails is ignored.
+
+    A font is only cosmetic. A non-zero exit status gives a log line and never an
+    exception.
+    """
     monkeypatch.setattr(
         consolefont.subprocess,
         "run",
@@ -176,7 +225,11 @@ def test_a_setfont_that_fails_is_swallowed(
 def test_a_setfont_that_cannot_be_run_is_swallowed(
     device: _Recorder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Same for a binary that vanishes between the which() and the exec, and for a timeout."""
+    """A ``setfont`` that cannot run is ignored.
+
+    The same rule applies to a binary that disappears between the ``which()`` and the exec,
+    and to a timeout.
+    """
 
     def _boom(argv: list[str], **kwargs: Any) -> Any:
         raise OSError(2, "No such file or directory")
@@ -189,7 +242,11 @@ def test_a_setfont_that_cannot_be_run_is_swallowed(
 def test_a_failed_remember_leaves_nothing_to_restore(
     device: _Recorder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Nothing saved means nothing to put back — the caller's ``finally`` gets a None."""
+    """A ``remember`` that fails leaves nothing to restore.
+
+    If nothing is saved, there is nothing to load again. The ``finally`` of the caller gets
+    a None.
+    """
     monkeypatch.setattr(
         consolefont.subprocess,
         "run",
@@ -202,18 +259,26 @@ def test_a_failed_remember_leaves_nothing_to_restore(
 
 
 def test_the_preference_is_offered_on_the_handheld_only() -> None:
-    """A row about hardware the desktop does not have is a question it cannot answer."""
+    """The preference is offered on the handheld only.
+
+    A row about hardware that the desktop does not have is a question that the desktop
+    cannot answer.
+    """
     spec = get_spec("console_font")
     assert spec.offered_on("picocalc-lyra") is True
     assert spec.offered_on("regular") is False
-    # Everything else is offered everywhere; the gate is the exception, not the rule.
+    # All other preferences are offered on all platforms. The gate is the exception.
     gated = {s.key for _, specs in by_group() for s in specs if s.platforms is not None}
     assert gated == {"console_font"}
 
 
 @pytest.mark.parametrize("platform", [REGULAR, PICOCALC_LYRA])
 def test_the_preference_round_trips_on_every_platform(tmp_path: Path, platform: Any) -> None:
-    """A file written on the handheld loads, keeps its value, and saves back on a desktop."""
+    """The preference makes a round trip on each platform.
+
+    A file that was written on the handheld loads, keeps its value, and saves again on a
+    desktop.
+    """
     set_platform(platform)
     path = tmp_path / "preferences.toml"
     written = Preferences(path)
@@ -222,14 +287,17 @@ def test_the_preference_round_trips_on_every_platform(tmp_path: Path, platform: 
 
     reread = Preferences.load(path)
     assert reread.get("console_font") == "6x8"
-    # And saving again keeps it: the gate hides a row, it never drops a value.
+    # A second save keeps it. The gate hides a row, and it never removes a value.
     reread.save()
     assert "console_font" in path.read_text(encoding="utf-8")
     assert Preferences.load(path).get("console_font") == "6x8"
 
 
 def test_the_page_draws_the_row_on_the_handheld_and_not_on_the_desktop() -> None:
-    """The gate's one visible effect: a Display row that exists on one platform."""
+    """The page draws the row on the handheld and not on the desktop.
+
+    This is the one visible effect of the gate: a Display row that exists on one platform.
+    """
     from meshterm.ui.preferences import _menu_items
 
     set_platform(PICOCALC_LYRA)
@@ -242,7 +310,11 @@ def test_the_page_draws_the_row_on_the_handheld_and_not_on_the_desktop() -> None
 
 
 def test_the_printed_table_still_names_every_preference() -> None:
-    """The CLI's listing is platform-blind on purpose: a hidden key is one nobody would set."""
+    """The printed table still names each preference.
+
+    The listing of the CLI does not depend on the platform. This is on purpose, because
+    nobody could set a key that the listing hides.
+    """
     from meshterm.ui.preferences import preferences_table
 
     set_platform(REGULAR)
@@ -257,7 +329,7 @@ def test_the_printed_table_still_names_every_preference() -> None:
 
 @pytest.fixture
 def ctx(tmp_path: Path) -> Any:
-    """A mock-backed context whose preferences live in a throwaway file."""
+    """A context that uses the mock device. Its preferences are in a temporary file."""
     settings = Settings(config_dir=tmp_path, db_path=tmp_path / "prefs.db")
     context = AppContext(
         console=Console(file=io.StringIO()),
@@ -274,10 +346,11 @@ def ctx(tmp_path: Path) -> Any:
 async def test_the_command_line_never_repaints_the_console(
     device: _Recorder, ctx: AppContext
 ) -> None:
-    """`meshterm preferences set console_font 6x8` writes the file and touches nothing else.
+    """`meshterm preferences set console_font 6x8` writes the file and changes nothing else.
 
-    A scripted run was typed into a console MeshTerm was invited into and does not own —
-    and half the time it is an ssh session onto the handheld from somewhere else entirely.
+    The user types a scripted run into a console that MeshTerm does not own. MeshTerm is
+    there as a guest. In half of the cases, it is an ssh session onto the handheld from
+    another place.
     """
     result = await PreferencesTool().run(ctx, {"ops": [("set", "console_font", "6x8")]})
     assert result.summary == {"changes": 1}
@@ -286,7 +359,10 @@ async def test_the_command_line_never_repaints_the_console(
 
 
 async def test_the_page_switches_the_font_as_it_saves(device: _Recorder, ctx: AppContext) -> None:
-    """On the menu path the new font is loaded there and then, not next launch."""
+    """The page switches the font when it saves.
+
+    On the menu path, the app loads the new font at once, and not at the next start.
+    """
     from meshterm.ui.surface import TuiUi
 
     ctx.ui = TuiUi(object())  # type: ignore[arg-type]
@@ -295,7 +371,10 @@ async def test_the_page_switches_the_font_as_it_saves(device: _Recorder, ctx: Ap
 
 
 async def test_another_preference_leaves_the_font_alone(device: _Recorder, ctx: AppContext) -> None:
-    """Only the one preference reaches outside the app; the rest just get written."""
+    """Another preference leaves the font alone.
+
+    Only the one preference has an effect outside the app. The app only writes the others.
+    """
     from meshterm.ui.surface import TuiUi
 
     ctx.ui = TuiUi(object())  # type: ignore[arg-type]

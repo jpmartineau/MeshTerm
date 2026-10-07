@@ -1,13 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 """About MeshTerm tests: the four pages, their placeholders, and their menu section.
 
-The pages carry no state and no controls, so what is worth pinning is what they *say*
-and how they are framed: the live package facts they must never drift from, the
-indent block their prose hangs in, the derived footer that only names the pager when
-there is something to page, the landmarks their sections leave for the sticky heading
-and the section jump, and the section they hang under in the main menu. How markdown
-itself is drawn is ``test_markdown``'s subject; width discipline on both platforms is
-the gallery's (``test_gallery``).
+The pages have no state and no controls. Thus the tests check what the pages say and how
+they are framed. These are the things that the tests check:
+
+- The live package facts, which the pages must always agree with.
+- The indent block in which the prose hangs.
+- The derived footer, which names the pager only when there is something to page.
+- The landmarks that the sections leave for the sticky heading and for the section jump.
+- The section of the main menu that contains the pages.
+
+``test_markdown`` tests how markdown is drawn. ``test_gallery`` tests the width on both
+platforms.
 """
 
 from __future__ import annotations
@@ -26,7 +30,7 @@ from tests.conftest import plain
 
 
 def _page(builder, *, viewport: int = 40, width: int = 72) -> str:
-    """Render one page as a reader sees it, with the frame's viewport already recorded."""
+    """Render one page as the user sees it, with the viewport of the frame already noted."""
     screen = AboutPage("About MeshTerm", builder())
     screen.note_viewport(viewport)
     lines = screen.render_body(width)
@@ -35,10 +39,10 @@ def _page(builder, *, viewport: int = 40, width: int = 72) -> str:
 
 
 def test_about_meshterm_leads_with_live_package_facts() -> None:
-    """The About page leads with facts read live from the package.
+    """The About page starts with facts that it reads live from the package.
 
-    The version and copyright come from the package itself, so the page can't
-    describe a build it isn't running inside.
+    The version and the copyright come from the package itself. Thus the page cannot
+    describe a build that is not the build that runs it.
     """
     text = _page(about_meshterm)
 
@@ -47,13 +51,13 @@ def test_about_meshterm_leads_with_live_package_facts() -> None:
 
 
 def test_about_author_names_the_author_from_the_package() -> None:
-    """The author line is package metadata too — one spelling, one place to change it."""
+    """The author line is also package metadata: it has one spelling and one place to change."""
     assert __author__ in _page(about_author)
 
 
-#: Every ``##`` a written page carries, in the order the reader meets them. These are
-#: the page's landmarks, so one list answers both questions asked of them below: that
-#: they render in order, and that each one is a stop the sticky heading can pin.
+#: Each ``##`` heading of a written page, in the order in which the user meets them. These
+#: are the landmarks of the page. One list answers both questions that the tests ask about
+#: them: do they render in order, and can the sticky heading pin each one?
 PAGE_HEADINGS = [
     (
         about_meshterm,
@@ -80,7 +84,7 @@ PAGE_HEADINGS = [
 
 @pytest.mark.parametrize(("builder", "headings"), PAGE_HEADINGS)
 def test_each_page_shows_its_sections(builder, headings) -> None:  # noqa: ANN001
-    """The headings are the shape a page is written into — they render, in order."""
+    """The headings are the shape of a page, and they render in order."""
     text = _page(builder)
 
     at = [text.index(heading) for heading in headings]
@@ -88,16 +92,16 @@ def test_each_page_shows_its_sections(builder, headings) -> None:  # noqa: ANN00
 
 
 def test_prose_wraps_into_its_own_indented_block() -> None:
-    """A wrapped paragraph hangs under its heading rather than falling to column 0.
+    """A wrapped paragraph hangs under its heading and does not fall to column 0.
 
-    *Support MeshTerm* is the page to ask: every one of its sections is plain prose and
-    it carries neither of the two blocks that are page frame rather than body (the
-    standfirst and the colophon, which sit flush by design), so the only thing entitled
-    to column 0 there is a ``##`` heading.
+    The test uses *Support MeshTerm*, because each section of this page is plain prose.
+    The page has neither of the two blocks that are page frame and not body (the
+    standfirst and the colophon, which sit flush on purpose). Thus only a ``##`` heading
+    can be at column 0 on this page.
     """
     screen = AboutPage("Support MeshTerm", support_project())
     screen.note_viewport(40)
-    # Narrow enough to force every paragraph to wrap several times.
+    # The width is narrow, so that each paragraph wraps more than one time.
     lines = plain(screen.render_body(28)).splitlines()
 
     headings = {lines[at].strip() for at, _ in screen._sticky_headers}
@@ -107,27 +111,27 @@ def test_prose_wraps_into_its_own_indented_block() -> None:
 
 
 def test_footer_names_the_pager_only_when_there_is_something_to_page() -> None:
-    """The derived hint obeys the rule that a footer never advertises a dead key."""
+    """The derived hint obeys the rule that a footer never advertises a key that does nothing."""
     screen = AboutPage("About MeshTerm", about_meshterm())
 
-    screen.note_metrics(12, 40)  # the whole page fits — nothing to scroll
+    screen.note_metrics(12, 40)  # The whole page fits, so there is nothing to scroll.
     assert screen.footer_hint == "Esc back"
 
-    screen.note_metrics(60, 20)  # taller than the viewport — the pager is live
+    screen.note_metrics(60, 20)  # The page is taller than the viewport, so the pager is live.
     assert screen.footer_hint == "↑↓ PgUp/PgDn scroll · Esc back"
 
 
 def test_page_is_a_full_screen_not_a_floating_view() -> None:
-    """These are pages, so Esc reads *back*; a floating read-only view would say *close*."""
+    """These are pages, so the Esc verb is "back". A floating read-only view has "close"."""
     assert AboutPage("About MeshTerm", about_meshterm()).floating is False
 
 
 def test_the_licence_section_states_the_terms_and_the_credit_it_owes() -> None:
-    """This page is where a reader with no shell finds them.
+    """This page is where a user who has no shell finds the terms and the credit.
 
-    The terms MeshTerm ships under, the project it stands on, and the map data it draws
-    with — the ODbL asks for that credit by name, and a page nobody can read it on is no
-    credit at all.
+    The page names the terms under which MeshTerm ships, the project on which it is
+    built, and the map data with which it draws. The ODbL asks for that credit by name.
+    A credit on a page that nobody can read is not a credit.
     """
     prose = " ".join(_page(about_meshterm).split())
 
@@ -145,8 +149,8 @@ def test_the_licence_section_states_the_terms_and_the_credit_it_owes() -> None:
 def test_the_discord_page_carries_the_invite_link_and_a_code_to_scan_it_with() -> None:
     """The Discord page carries both the invite link and a QR code for it.
 
-    The link is the whole page, and on a console with no clipboard the QR is how it
-    leaves the screen, so both have to survive the render.
+    The link is the whole page. On a console that has no clipboard, the QR code is the
+    way for the link to leave the screen. Thus both must stay in the render.
     """
     text = _page(join_discord)
 
@@ -155,7 +159,7 @@ def test_the_discord_page_carries_the_invite_link_and_a_code_to_scan_it_with() -
 
 
 def test_pages_are_written_markdown_that_ships_with_the_package() -> None:
-    """Filling a page in is editing its ``.md`` file — no Python has to follow."""
+    """To fill a page in, edit its ``.md`` file. No Python change is necessary."""
     from meshterm.ui.about import _PAGES
 
     for name in ("about", "author", "discord", "support"):
@@ -164,7 +168,7 @@ def test_pages_are_written_markdown_that_ships_with_the_package() -> None:
 
 
 def test_no_package_placeholder_survives_into_the_rendered_page() -> None:
-    """The live facts are filled in as the page opens, so none of the braces reach a reader."""
+    """MeshTerm fills in the live facts as the page opens, so no brace reaches the user."""
     for builder in (about_meshterm, about_author, join_discord, support_project):
         text = _page(builder)
         assert "{" not in text and "}" not in text, text
@@ -172,18 +176,18 @@ def test_no_package_placeholder_survives_into_the_rendered_page() -> None:
 
 @pytest.mark.parametrize(("builder", "headings"), PAGE_HEADINGS)
 def test_each_section_heading_is_a_landmark_the_page_can_pin(builder, headings) -> None:  # noqa: ANN001
-    """A page is a document, so its ``##`` headings pin and its ^PgUp/^PgDn steps by them.
+    """A page is a document, so its ``##`` headings pin and ^PgUp/^PgDn step by them.
 
-    The screen records where each one landed while rendering (the same machinery a
-    grouped select list uses), which is what makes a heading stay on the top row while
-    its own prose scrolls under it.
+    While the screen renders, it records where each heading is. A grouped select list
+    uses the same machinery. Thus a heading stays on the top row while its prose scrolls
+    under it.
     """
     screen = AboutPage("About MeshTerm", builder())
     screen.note_viewport(40)
     lines = plain(screen.render_body(72)).splitlines()
 
     assert [lines[at].strip() for at, _ in screen._sticky_headers] == list(headings)
-    # Scrolled one line past its heading, the page pins that heading and nothing else.
+    # When the page scrolls one line past a heading, it pins that heading and no other.
     at = screen._sticky_headers[1][0]
     assert plain(screen.sticky_block(at + 1)) == headings[1]
 
@@ -191,20 +195,20 @@ def test_each_section_heading_is_a_landmark_the_page_can_pin(builder, headings) 
 def test_the_console_lane_claims_the_section_step_only_while_the_page_scrolls() -> None:
     """The console lane claims the section step only while the page actually scrolls.
 
-    On the PicoCalc the lane is the only place a chord can advertise itself, but it
-    never advertises a key that would do nothing (``CLAUDE.md``) — and a page you can
-    see whole has no section to step to.
+    On the PicoCalc, the lane is the only place where a chord can advertise itself. But
+    the lane never advertises a key that does nothing (``CLAUDE.md``). A page that is
+    visible whole has no section to step to.
     """
     from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 
     set_platform(PICOCALC_LYRA)
     try:
         screen = AboutPage("About MeshTerm", about_meshterm())
-        screen.note_metrics(12, 40)  # the whole page fits
+        screen.note_metrics(12, 40)  # The whole page fits.
         assert [pair.label for pair in screen.picocalc_lyra_lane[:2]] == ["Sect ↑", "Sect ↓"]
         assert not any(pair.enabled for pair in screen.picocalc_lyra_lane[:2])
 
-        screen.note_metrics(60, 20)  # taller than the viewport
+        screen.note_metrics(60, 20)  # The page is taller than the viewport.
         assert all(pair.enabled for pair in screen.picocalc_lyra_lane[:2])
         assert [pair.action for pair in screen.picocalc_lyra_lane[:2]] == [
             "ctrl_pageup",
@@ -215,7 +219,7 @@ def test_the_console_lane_claims_the_section_step_only_while_the_page_scrolls() 
 
 
 def test_menu_rows_carry_the_icon_and_the_titles_do_not() -> None:
-    """Each page has a menu icon; none of it leaks into the title the screen draws."""
+    """Each page has a menu icon, and the icon does not leak into the title of the screen."""
     from meshterm.tools import get_tool
 
     for name in ("about", "about-author", "discord", "support"):
@@ -227,7 +231,7 @@ def test_menu_rows_carry_the_icon_and_the_titles_do_not() -> None:
 
 
 def test_every_page_icon_has_a_picocalc_glyph() -> None:
-    """No emoji reaches the console: each icon folds to a font character (CLAUDE.md)."""
+    """No emoji reaches the console. Each icon folds to a character of the font (CLAUDE.md)."""
     from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
     from meshterm.tools import get_tool
     from meshterm.ui.fontset import FONT_CODEPOINTS

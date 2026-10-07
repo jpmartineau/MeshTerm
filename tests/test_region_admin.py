@@ -1,11 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
-"""A repeater's region table: the dump parser, the commands, the editor, the node page.
+"""Tests for the region table of a repeater.
 
-The parser is pinned against dumps spelled the way ``RegionMap::printChildRegions`` spells
-them — including the ones the 160-byte reply buffer cuts mid-name — and against the
-simulator (:mod:`meshterm.core.region_sim`), which transcribes the firmware's CLI. Every
-editor action is checked for the one command it sends, and the table it leaves behind is
-checked against what the repeater itself would dump next.
+The tests cover the dump parser, the commands, the editor, and the node page.
+
+The tests check the parser against dumps that have the same spelling as
+``RegionMap::printChildRegions``. This includes the dumps that the reply buffer of 160
+bytes cuts in the middle of a name. The tests also check the parser against the simulator
+(:mod:`meshterm.core.region_sim`), which is a transcription of the CLI of the firmware.
+The tests check that each editor action sends the one command that it must send. They
+also check that the table that the action leaves is the same as the next dump from the
+repeater.
 """
 
 from __future__ import annotations
@@ -50,7 +54,7 @@ from meshterm.ui.region_editor import RegionMenu, RegionPick, region_items
 NODE = Contact(name="Yagi-Repeater", public_key="a1" * 32, key_prefix="a1b2c3d4", node_type=2)
 BIG = Contact(name="Local-Repeater", public_key="b2" * 32, key_prefix="b2c3d4e5", node_type=2)
 
-#: A small table, dumped exactly as the firmware prints it.
+#: A small table, dumped in exactly the same way as the firmware prints it.
 SMALL_DUMP = "*^ F\n lakeside F\n  lakeside-north F\n  lakeside-south\n harbour F\n"
 
 _TREE = [
@@ -69,7 +73,10 @@ def _rows(table: RegionTable) -> list[tuple]:
 
 
 def test_a_dump_reads_as_a_tree_with_its_flags() -> None:
-    """Indentation is the parent, ``F`` is flood allowed, ``^`` is home."""
+    """The indentation shows the parent.
+
+    ``F`` shows that a flood is allowed, and ``^`` shows home.
+    """
     table = parse_region_dump(SMALL_DUMP)
     assert _rows(table) == [
         ("*", None, 0, True, True, True),
@@ -85,7 +92,7 @@ def test_a_dump_reads_as_a_tree_with_its_flags() -> None:
 
 
 def test_a_home_region_and_a_denied_wildcard() -> None:
-    """A region marked ``^`` is home; a wildcard without ``F`` relays no unscoped floods."""
+    """A region with ``^`` is home. A wildcard without ``F`` relays no unscoped floods."""
     table = parse_region_dump("*\n yul^ F\n  yul-east\n")
     assert table.home == "yul"
     assert table.wildcard is not None and not table.wildcard.flood
@@ -93,17 +100,18 @@ def test_a_home_region_and_a_denied_wildcard() -> None:
 
 
 def test_the_dump_survives_a_transport_that_stripped_its_last_newline() -> None:
-    """A short reply without its trailing newline is still whole — it never reached the cap."""
+    """A short reply without its last newline is still whole, because it did not reach the cap."""
     assert _rows(parse_region_dump(SMALL_DUMP.rstrip("\n"))) == _rows(parse_region_dump(SMALL_DUMP))
     assert not parse_region_dump(SMALL_DUMP.rstrip("\n")).cut
 
 
 def test_a_dump_at_the_cap_is_cut_and_its_half_line_dropped() -> None:
-    """The buffer stops mid-name; that name must not become a region with half a name.
+    """The buffer stops in the middle of a name.
 
-    The last line here reads ``riverside-upper`` with no ``F`` — as a region it would be a
-    denied one called by a prefix of its name. It is dropped and the table says where the
-    tree stopped.
+    That name must not become a region with half a name. The last line here is
+    ``riverside-upper`` with no ``F``. As a region, it would be a denied region with a
+    prefix of its name as the name. The parser removes it, and the table says where the tree
+    stopped.
     """
     sim = SimulatedRegionMap(
         [
@@ -126,7 +134,10 @@ def test_a_dump_at_the_cap_is_cut_and_its_half_line_dropped() -> None:
 
 
 def test_a_cut_line_that_ended_on_its_newline_is_kept() -> None:
-    """Near the cap but ending on a newline: the last line is whole, a next one may be lost."""
+    """If the dump is near the cap and ends on a newline, the last line is whole.
+
+    But a next line can be lost.
+    """
     dump = SMALL_DUMP
     while len(dump.encode()) < REPLY_CAP_BYTES - 4:
         dump += f" r{len(dump):03d} F\n"
@@ -137,27 +148,33 @@ def test_a_cut_line_that_ended_on_its_newline_is_kept() -> None:
 
 
 def test_a_cut_inside_a_multibyte_name_still_counts_as_cut() -> None:
-    """A UTF-8 name split by the buffer decodes a few bytes short — still read as cut."""
+    """A UTF-8 name that the buffer splits decodes a few bytes short.
+
+    The parser still reads it as cut.
+    """
     dumps = (
         SimulatedRegionMap([(f"{i:02d}" + "é" * k, "*", True) for i in range(20)]).command("region")
         for k in range(1, 12)
     )
-    # Slide the name length until the cap lands inside an "é" and the decode loses a byte.
+    # Change the name length until the cap is inside an "é" and the decode loses a byte.
     dump = next(d for d in dumps if len(d.encode()) < REPLY_CAP_BYTES - 1)
     table = parse_region_dump(dump)
     assert table.cut and not dump.endswith("\n")
-    assert len({len(r.name) for r in table.regions()}) == 1  # no half-name among them
+    assert len({len(r.name) for r in table.regions()}) == 1  # no half name among them
 
 
 def test_a_line_that_breaks_the_grammar_ends_the_tree_there() -> None:
-    """A dump that stops making sense stops being the dump: no guessing, marked cut."""
+    """A dump that has no sense stops being the dump.
+
+    The parser does not guess, and it marks the table as cut.
+    """
     table = parse_region_dump("*^ F\n lakeside F\n   skipped-a-level F\n harbour F\n")
     assert [r.name for r in table.rows] == ["*", "lakeside"]
     assert table.cut and table.cut_after == "lakeside"
 
 
 def test_an_empty_reply_is_an_empty_table() -> None:
-    """No reply, no rows — and nothing to call cut."""
+    """If there is no reply, there are no rows, and nothing is cut."""
     assert parse_region_dump("").rows == ()
     assert parse_region_dump(None).rows == ()
 
@@ -166,7 +183,10 @@ def test_an_empty_reply_is_an_empty_table() -> None:
 
 
 def test_the_flat_lists_recover_what_the_cut_hid() -> None:
-    """Names past the cut join unplaced, flooded as their list says; the tree keeps its own."""
+    """The names after the cut are added as unplaced.
+
+    They get the flood flag that their list gives. The tree keeps its own flags.
+    """
     table = replace(parse_region_dump("*^ F\n lakeside F\n"), cut=True, cut_after="lakeside")
     assert not table.complete
     table = table.with_lists("*,lakeside,lakeside-north,hilltop", "old-town")
@@ -180,22 +200,25 @@ def test_the_flat_lists_recover_what_the_cut_hid() -> None:
 
 
 def test_a_list_near_its_cap_may_have_skipped_a_name() -> None:
-    """The firmware skips a name that won't fit and carries on — so a long list is flagged."""
+    """The firmware skips a name that does not fit and continues.
+
+    Thus the parser flags a long list.
+    """
     names = [f"region-number-{i:02d}" for i in range(12)]
     sim = SimulatedRegionMap([(n, "*", True) for n in names])
     listed = sim.command("region list allowed")
-    assert parse_name_list(listed) != ["*", *names]  # some were skipped
+    assert parse_name_list(listed) != ["*", *names]  # the firmware skipped some names
     assert list_may_be_incomplete(listed)
     assert not list_may_be_incomplete("*,lakeside,harbour")
     assert parse_name_list("-none-") == []
 
 
 def test_the_default_scope_reply() -> None:
-    """``region default`` names the region, ``<null>``, or is not understood."""
+    """The reply to ``region default`` names the region, gives ``<null>``, or is not understood."""
     assert parse_default_reply(" default scope is harbour") == "harbour"
     assert parse_default_reply(" default scope is now harbour") == "harbour"
     assert parse_default_reply(" default scope is <null>") == ""
-    assert parse_default_reply("Err - ??") is None  # pre-1.15 has no such query
+    assert parse_default_reply("Err - ??") is None  # firmware before 1.15 has no such query
     assert parse_default_reply(None) is None
     table = parse_region_dump(SMALL_DUMP)
     assert not table.with_default("Err - ??").default_known
@@ -204,7 +227,7 @@ def test_the_default_scope_reply() -> None:
 
 
 def test_refusals_are_the_region_verbs_own_words() -> None:
-    """``Err - …`` is a refusal; a reply naming a region is not."""
+    """``Err - …`` is a refusal. A reply that names a region is not a refusal."""
     for reply in ("Err - not empty", "Err - unknown region", "Err - ??", "Unknown command"):
         assert region_refused(reply)
     for reply in ("OK", "OK - (flood allowed)", " home is now harbour", "lakeside,harbour"):
@@ -216,7 +239,7 @@ def test_refusals_are_the_region_verbs_own_words() -> None:
 
 
 def test_every_edit_is_one_command_spelled_once() -> None:
-    """The exact text each editor action sends."""
+    """The exact text that each editor action sends."""
     assert allow_command("lakeside") == "region allowf lakeside"
     assert deny_command("*") == "region denyf *"
     assert home_command("harbour") == "region home harbour"
@@ -229,7 +252,10 @@ def test_every_edit_is_one_command_spelled_once() -> None:
 
 
 def test_saving_is_region_save_or_a_default_that_saved_itself() -> None:
-    """Only a save, or a 1.15+ default change, clears the unsaved count."""
+    """Only a save clears the count of unsaved edits.
+
+    A change of the default on 1.15 and later also clears it, because it saves itself.
+    """
     assert saves_table("region save", "OK")
     assert not saves_table("region save", "Err - save failed")
     assert saves_table("region default harbour", " default scope is now harbour")
@@ -237,10 +263,13 @@ def test_saving_is_region_save_or_a_default_that_saved_itself() -> None:
 
 
 def test_a_new_name_follows_the_firmware_and_never_moves_a_region() -> None:
-    """A put of a taken name would move it; punctuation the firmware refuses is refused first."""
+    """A put with a name that is taken would move that region.
+
+    MeshTerm refuses the punctuation that the firmware refuses, before it sends.
+    """
     assert validate_new_name(" bay-2 ") == "bay-2"
     with pytest.raises(RegionNameError, match="already"):
-        validate_new_name("harbour", ["*", "harbour"])  # region put would move it
+        validate_new_name("harbour", ["*", "harbour"])  # region put would move the region
     with pytest.raises(RegionNameError, match="letters, digits"):
         validate_new_name("old.town")
     with pytest.raises(RegionNameError):
@@ -250,21 +279,21 @@ def test_a_new_name_follows_the_firmware_and_never_moves_a_region() -> None:
 
 
 def test_the_command_line_completes_the_list_and_def_verbs_but_not_load() -> None:
-    """``region load`` reads lines until a blank one — no remote command line can send that."""
+    """``region load`` reads lines until a blank line. No remote command line can send that."""
     commands = known_commands()
     assert {"region list allowed", "region list denied", "region def "} <= set(commands)
     assert not any(c.startswith("region load") for c in commands)
 
 
-# --- the edits fold into the table the way the firmware applies them -------------------
+# --- the edits change the table in the same way as the firmware applies them -----------
 
 
 def test_each_accepted_edit_leaves_the_table_the_repeater_would_dump() -> None:
-    """Random edits against the simulator: the folded table equals a fresh dump, every time.
+    """Random edits against the simulator: each time, the changed table is the same as a new dump.
 
-    This is the claim the editor rests on — it redraws from a reply instead of re-reading —
-    so it is checked against the firmware transcription over many sequences rather than
-    one example of each verb.
+    The editor depends on this claim. It draws again from a reply, and it does not read the
+    table again. Thus the test checks the claim against the transcription of the firmware
+    in many sequences, and not with one example of each verb.
     """
     rng = random.Random(7)
     pool = ["lakeside", "lakeside-north", "lakeside-south", "harbour", "bay", "cove", "*"]
@@ -303,29 +332,35 @@ def test_each_accepted_edit_leaves_the_table_the_repeater_would_dump() -> None:
 
 
 def test_a_refused_edit_changes_nothing() -> None:
-    """A refusal leaves the very same table."""
+    """A refusal leaves the same table object."""
     table = parse_region_dump(SMALL_DUMP)
     assert table.after("region remove lakeside", "Err - not empty") is table
     assert table.after("region allowf nowhere", "Err - unknown region") is table
 
 
 def test_a_put_on_old_firmware_is_denied_until_allowed() -> None:
-    """Before 1.15 a new region was created denied; the reply says which firmware answered."""
+    """Before 1.15, the firmware created a new region as denied.
+
+    The reply shows which firmware answered.
+    """
     table = parse_region_dump(SMALL_DUMP)
     assert not table.after("region put bay", "OK").get("bay").flood
     assert table.after("region put bay", "OK - (flood allowed)").get("bay").flood
 
 
-# --- the simulator keeps the firmware's awkward edges ---------------------------------
+# --- the simulator keeps the unusual behaviours of the firmware -----------------------
 
 
 def test_the_simulator_behaves_like_the_firmware() -> None:
-    """Prefix matching, a put that moves, a remove that refuses, and a reboot that forgets."""
+    """The simulator matches a prefix, and a put moves a region.
+
+    A remove can refuse, and a reboot forgets the unsaved edits.
+    """
     sim = SimulatedRegionMap(_TREE)
     assert sim.command("region remove lakeside") == "Err - not empty"
     assert sim.command("region allowf lakeside-s") == "OK"  # a prefix is enough on the radio
-    assert sim.command("region put harbour lakeside") == "OK - (flood allowed)"  # moves it
-    assert " harbour" not in sim.command("region").split("\n")  # no longer at the top
+    assert sim.command("region put harbour lakeside") == "OK - (flood allowed)"  # it moves it
+    assert " harbour" not in sim.command("region").split("\n")  # not at the top level now
     assert sim.command("region list denied") == "-none-"
     sim.reboot()  # nothing was saved
     assert sim.command("region") == SMALL_DUMP
@@ -337,7 +372,7 @@ def test_the_simulator_behaves_like_the_firmware() -> None:
 
 
 async def test_the_mock_repeater_answers_the_region_cli_and_the_request_alike() -> None:
-    """The anonymous request reads the same table the CLI edits."""
+    """The anonymous request reads the same table that the CLI edits."""
     device = MockDevice()
     await device.connect()
     assert await device.admin_login(NODE, "admin")
@@ -345,7 +380,7 @@ async def test_the_mock_repeater_answers_the_region_cli_and_the_request_alike() 
     assert await device.request_regions(NODE) == ["*", "lakeside", "lakeside-north", "harbour"]
     await device.send_remote_command(NODE, "region denyf *")
     assert await device.request_regions(NODE) == ["lakeside", "lakeside-north", "harbour"]
-    await device.send_remote_command(NODE, "reboot")  # unsaved, so it comes back
+    await device.send_remote_command(NODE, "reboot")  # not saved, so the wildcard comes back
     assert (await device.request_regions(NODE))[0] == "*"
     await device.disconnect()
 
@@ -354,7 +389,10 @@ async def test_the_mock_repeater_answers_the_region_cli_and_the_request_alike() 
 
 
 def test_the_store_keeps_whether_a_repeater_relays_unscoped_floods(tmp_path: Path) -> None:
-    """The ``*`` names no region, so it is kept beside the regions — and survives a reload."""
+    """The ``*`` is not the name of a region.
+
+    Thus the store keeps it beside the regions, and it stays after a reload.
+    """
     store = RegionStore(tmp_path / "regions.json")
     assert store.answer_of("a1b2c3d4e5f6") is None
     store.learn_carried("a1b2c3d4e5f6aa", ["*", "lakeside"])
@@ -362,7 +400,7 @@ def test_the_store_keeps_whether_a_repeater_relays_unscoped_floods(tmp_path: Pat
     assert answer is not None and answer.unscoped
     assert store.carried_by("a1b2c3d4e5f6") == ["lakeside"]
 
-    again = RegionStore(tmp_path / "regions.json")  # read back from disk
+    again = RegionStore(tmp_path / "regions.json")  # read again from the disk
     assert again.answer_of("a1b2c3d4e5f6").unscoped
     again.learn_carried("a1b2c3d4e5f6", [])
     assert not again.answer_of("a1b2c3d4e5f6").unscoped
@@ -373,7 +411,7 @@ def test_the_store_keeps_whether_a_repeater_relays_unscoped_floods(tmp_path: Pat
 
 
 class _ScriptedUi:
-    """A UI surface that answers each question from a script and records what was asked."""
+    """A UI surface that answers each question from a script and records each question."""
 
     def __init__(self, *answers) -> None:  # noqa: ANN002
         self.answers = list(answers)
@@ -411,7 +449,10 @@ class _ScriptedUi:
 
 @pytest.fixture()
 async def region_device(monkeypatch):
-    """The simulator, logged in to both repeaters, recording every command, unpaced."""
+    """The simulator, with a login on both repeaters.
+
+    It records each command, and it has no pacing.
+    """
     real_sleep = asyncio.sleep
 
     async def no_wait(_delay, result=None):
@@ -461,18 +502,24 @@ async def _table(device) -> RegionTable:  # noqa: ANN001
 async def test_each_region_action_sends_its_one_command(
     tmp_path, region_device, region, pick, command
 ) -> None:
-    """One pick, one command; the folded table matches the repeater's next dump."""
+    """One selection sends one command.
+
+    The changed table is the same as the next dump of the repeater.
+    """
     ctx = _ctx(tmp_path, pick)
     table = await _table(region_device)
     table, unsaved = await region_editor._region_actions(ctx, region_device, NODE, table, 0, region)
     assert region_device.sent == [command]
-    assert unsaved == (0 if pick == "default" else 1)  # a default saves the table itself
+    assert unsaved == (0 if pick == "default" else 1)  # a default saves the table by itself
     fresh = parse_region_dump(await region_device.send_remote_command(NODE, "region"))
     assert _rows(table) == _rows(fresh)
 
 
 async def test_denying_unscoped_floods_asks_first(tmp_path, region_device) -> None:
-    """Every plain flood would stop at this repeater: Cancel sends nothing at all."""
+    """Each plain flood would stop at this repeater, so the editor asks first.
+
+    Cancel sends nothing.
+    """
     ctx = _ctx(tmp_path, "deny", None)
     table = await _table(region_device)
     await region_editor._region_actions(ctx, region_device, NODE, table, 0, "*")
@@ -486,7 +533,7 @@ async def test_denying_unscoped_floods_asks_first(tmp_path, region_device) -> No
 
 
 async def test_the_wildcard_clears_a_home_elsewhere(tmp_path, region_device) -> None:
-    """Home on the wildcard means no home region: ``region home *``."""
+    """Home on the wildcard means that there is no home region: ``region home *``."""
     await region_device.send_remote_command(NODE, "region home harbour")
     table = await _table(region_device)
     ctx = _ctx(tmp_path, "home")
@@ -495,7 +542,7 @@ async def test_the_wildcard_clears_a_home_elsewhere(tmp_path, region_device) -> 
 
 
 async def test_clearing_the_default_sends_null(tmp_path, region_device) -> None:
-    """Clearing the default saves the table too, so nothing is left unsaved."""
+    """If the user clears the default, this also saves the table, so no edit is unsaved."""
     await region_device.send_remote_command(NODE, "region default harbour")
     table = await _table(region_device)
     ctx = _ctx(tmp_path, "undefault")
@@ -507,7 +554,7 @@ async def test_clearing_the_default_sends_null(tmp_path, region_device) -> None:
 
 
 async def test_adding_under_a_region_puts_it_there(tmp_path, region_device) -> None:
-    """Asked from a row, only the name is asked; the parent is the row."""
+    """If the user adds from a row, the editor asks only for the name. The parent is the row."""
     ctx = _ctx(tmp_path, "add", "harbour-bay")
     table = await _table(region_device)
     table, unsaved = await region_editor._region_actions(
@@ -519,7 +566,7 @@ async def test_adding_under_a_region_puts_it_there(tmp_path, region_device) -> N
 
 
 async def test_adding_from_the_actions_asks_where_then_the_name(tmp_path, region_device) -> None:
-    """Asked from Actions, the parent comes first, then the name."""
+    """If the user adds from Actions, the editor asks for the parent first, then for the name."""
     ctx = _ctx(tmp_path, "*", "cove")
     table = await _table(region_device)
     table, _ = await region_editor._add_region(ctx, region_device, NODE, table, 0, None)
@@ -528,7 +575,10 @@ async def test_adding_from_the_actions_asks_where_then_the_name(tmp_path, region
 
 
 async def test_esc_on_the_name_steps_back_to_where(tmp_path, region_device) -> None:
-    """The add flow is a stack: Esc on the name re-asks the parent, then Esc abandons."""
+    """The add flow is a stack.
+
+    Esc on the name asks for the parent again, then Esc abandons the flow.
+    """
     ctx = _ctx(tmp_path, "harbour", None, None)
     table = await _table(region_device)
     await region_editor._add_region(ctx, region_device, NODE, table, 0, None)
@@ -537,7 +587,7 @@ async def test_esc_on_the_name_steps_back_to_where(tmp_path, region_device) -> N
 
 
 async def test_removing_asks_in_red_and_sends_remove(tmp_path, region_device) -> None:
-    """A single-record delete: a red Cancel/Remove confirm, then one command."""
+    """A delete of one record has a red Cancel and Remove confirm, then one command."""
     ctx = _ctx(tmp_path, "remove", "remove")
     table = await _table(region_device)
     table, unsaved = await region_editor._region_actions(
@@ -549,20 +599,20 @@ async def test_removing_asks_in_red_and_sends_remove(tmp_path, region_device) ->
 
 
 async def test_a_region_with_sub_regions_is_not_removed(tmp_path, region_device) -> None:
-    """The firmware refuses it, so the page never sends it and says why."""
+    """The firmware refuses the remove, so the page never sends it and shows the reason."""
     ctx = _ctx(tmp_path, "blocked")
     table = await _table(region_device)
     await region_editor._region_actions(ctx, region_device, NODE, table, 0, "lakeside")
     assert region_device.sent == []
     assert "lakeside-north" in ctx.ui.messages[0]
-    # …and Del on it asks nothing and sends nothing either.
+    # Del on the region also asks nothing and sends nothing.
     ctx = _ctx(tmp_path)
     await region_editor._remove(ctx, region_device, NODE, table, 0, "lakeside")
     assert region_device.sent == [] and ctx.ui.asked == []
 
 
 async def test_saving_clears_the_unsaved_count(tmp_path, region_device) -> None:
-    """``region save`` is the commit."""
+    """``region save`` is the commit. It clears the count of unsaved edits."""
     ctx = _ctx(tmp_path)
     table = await _table(region_device)
     _, unsaved = await region_editor._edit(ctx, region_device, NODE, table, 3, "region save")
@@ -570,7 +620,7 @@ async def test_saving_clears_the_unsaved_count(tmp_path, region_device) -> None:
 
 
 async def test_a_refused_edit_says_so_and_changes_nothing(tmp_path, region_device) -> None:
-    """The repeater's own words are shown, and the table stays as it was."""
+    """The editor shows the words of the repeater, and the table does not change."""
     ctx = _ctx(tmp_path)
     table = await _table(region_device)
     after, unsaved = await region_editor._edit(
@@ -581,7 +631,7 @@ async def test_a_refused_edit_says_so_and_changes_nothing(tmp_path, region_devic
 
 
 async def test_an_accepted_edit_teaches_the_store(tmp_path, region_device) -> None:
-    """What the table says it relays is what the node page will show."""
+    """The node page shows what the table says that the repeater relays."""
     ctx = _ctx(tmp_path)
     table = await _table(region_device)
     await region_editor._edit(ctx, region_device, NODE, table, 0, "region allowf lakeside-south")
@@ -591,14 +641,17 @@ async def test_an_accepted_edit_teaches_the_store(tmp_path, region_device) -> No
 
 
 async def test_reading_a_table_that_fits_asks_two_questions(tui_ctx, region_device) -> None:
-    """The dump and the default — no list reads when nothing was cut."""
+    """MeshTerm reads the dump and the default. It does not read the lists if nothing was cut."""
     table = await region_editor.read_table(tui_ctx, region_device, NODE)
     assert region_device.sent == ["region", "region default"]
     assert table is not None and table.complete and table.default_known
 
 
 async def test_reading_a_cut_table_recovers_the_rest_from_the_lists(tui_ctx, region_device) -> None:
-    """Cut at the cap: the lists are asked, the rest joins unplaced, the store learns all."""
+    """The dump is cut at the cap. MeshTerm asks for the lists.
+
+    The other names are added as unplaced, and the store learns all of them.
+    """
     table = await region_editor.read_table(tui_ctx, region_device, BIG)
     assert region_device.sent == [
         "region",
@@ -625,19 +678,22 @@ def _plain_rows(items: list) -> list[str]:
 
 
 def test_the_page_draws_the_tree_and_says_where_it_was_cut() -> None:
-    """A cut table says where, and that ^R reads again when the lists never came."""
+    """A table that is cut shows where.
+
+    If the lists did not arrive, it also shows that ^R reads again.
+    """
     sim = SimulatedRegionMap([(f"region-number-{i:02d}", "*", i % 2 == 0) for i in range(10)])
     table = parse_region_dump(sim.command("region"))
     title, items = region_items(BIG, table, 0)
     rows = _plain_rows(items)
     assert title == "Regions — Local-Repeater"
     assert any("⚠ the reply ran out at 160 bytes after" in r for r in rows)
-    assert any("^R reads again" in r for r in rows)  # the lists never came
-    assert not any("Save" in r for r in rows)  # nothing unsaved, no save pair
+    assert any("^R reads again" in r for r in rows)  # the lists did not arrive
+    assert not any("Save" in r for r in rows)  # no unsaved edit, so no save pair
 
 
 def test_unsaved_edits_put_the_save_pair_on_the_page() -> None:
-    """The Apply/discard pair, worded for a table that is live but not saved."""
+    """The Apply and discard pair, with words for a table that is live but not saved."""
     table = parse_region_dump(SMALL_DUMP)
     title, items = region_items(NODE, table, 2)
     rows = _plain_rows(items)
@@ -646,7 +702,7 @@ def test_unsaved_edits_put_the_save_pair_on_the_page() -> None:
 
 
 def test_only_a_childless_region_is_deletable() -> None:
-    """Del lights only where ``region remove`` would succeed."""
+    """Del is lit only where ``region remove`` would succeed."""
     table = parse_region_dump(SMALL_DUMP)
     _, items = region_items(NODE, table, 0)
     deletable = {
@@ -658,7 +714,10 @@ def test_only_a_childless_region_is_deletable() -> None:
 
 
 async def test_ctrl_r_reads_again_and_f3_is_read_over_remove() -> None:
-    """A full-screen page; ``^R`` re-reads; the Shift half of F3 lights only on a removable row."""
+    """The page is a full-screen page. ``^R`` reads again.
+
+    The Shift half of F3 is lit only on a row that the user can remove.
+    """
     table = parse_region_dump(SMALL_DUMP)
     title, items = region_items(NODE, table, 0)
     menu = RegionMenu(title, items)
@@ -666,7 +725,7 @@ async def test_ctrl_r_reads_again_and_f3_is_read_over_remove() -> None:
     assert not menu.floating
     lane = menu.picocalc_lyra_lane
     assert (lane[2].label, lane[2].opp_label) == ("Read", "Remove")
-    assert not lane[2].opp_enabled  # the wildcard row is highlighted first
+    assert not lane[2].opp_enabled  # the highlight is on the wildcard row first
     assert "Del remove" not in menu.footer_hint
     menu.handle("down")
     menu.handle("down")  # lakeside-north
@@ -677,7 +736,7 @@ async def test_ctrl_r_reads_again_and_f3_is_read_over_remove() -> None:
 
 
 async def _step_until(predicate, *, limit: int = 2000):  # noqa: ANN001, ANN202
-    """Yield to the event loop until ``predicate()`` is truthy; return its value."""
+    """Yield to the event loop until ``predicate()`` is true, then return its value."""
     value = predicate()
     for _ in range(limit):
         if value:
@@ -690,10 +749,10 @@ async def _step_until(predicate, *, limit: int = 2000):  # noqa: ANN001, ANN202
 async def test_a_visit_is_one_page_that_asks_before_leaving_edits_unsaved(
     tui_ctx, region_device
 ) -> None:
-    """The page stays pushed for the visit; Esc with an edit live but unsaved asks first.
+    """The page stays pushed for the visit. If an edit is live but not saved, Esc asks first.
 
-    Keep editing leaves the page where it was; Leave then ends the visit with the stack
-    exactly as it was found.
+    "Keep editing" leaves the page where it was. Then "Leave" ends the visit, and the stack
+    is exactly the same as before the visit.
     """
     from meshterm.ui.tui.prompt import ButtonDialog
 
@@ -706,11 +765,11 @@ async def test_a_visit_is_one_page_that_asks_before_leaving_edits_unsaved(
         assert page.title == "Regions — Yagi-Repeater"
 
         region_device.sent.clear()
-        page.resolve(region_editor._SAVE)  # nothing is unsaved, but a save is still a save
+        page.resolve(region_editor._SAVE)  # no edit is unsaved, but a save is still a save
         await _step_until(lambda: region_device.sent)
         assert region_device.sent == ["region save"]
 
-        # An edit through the row's own popup: deny lakeside.
+        # An edit through the dialog of the row: deny lakeside.
         await _step_until(lambda: session.top is page)
         page.resolve(RegionPick("lakeside"))
         popup = await _step_until(
@@ -744,7 +803,10 @@ async def test_a_visit_is_one_page_that_asks_before_leaving_edits_unsaved(
 
 
 def test_the_node_page_row_says_each_state_in_its_own_words(tmp_path: Path) -> None:
-    """Answered, not asked, no answer — never one read as another."""
+    """The row has words for each state: answered, not asked, and no answer.
+
+    No state looks like another.
+    """
     from meshterm.ui.node_detail_screen import regions_value
 
     store = RegionStore(tmp_path / "regions.json")
@@ -764,7 +826,7 @@ def test_the_node_page_row_says_each_state_in_its_own_words(tmp_path: Path) -> N
 
 
 async def test_asking_from_the_node_page_learns_or_says_why_not(tmp_path: Path) -> None:
-    """One request: learned on an answer, explained on silence, the old answer kept."""
+    """One request: MeshTerm learns from an answer, explains a silence, and keeps the old answer."""
     from meshterm.ui import node_detail_screen
 
     device = MockDevice()
@@ -783,12 +845,15 @@ async def test_asking_from_the_node_page_learns_or_says_why_not(tmp_path: Path) 
     device._unreachable.add(NODE.name)
     failed = await node_detail_screen._ask_regions(ctx, NODE, node_id, NODE.name, routed=False)
     assert failed and "only a neighbour answers" in ctx.ui.messages[0]
-    assert ctx.region_store.carried_by(node_id)  # the earlier answer is kept
+    assert ctx.region_store.carried_by(node_id)  # the store keeps the earlier answer
     await device.disconnect()
 
 
 async def test_an_unreachable_repeater_raises_rather_than_answering_empty() -> None:
-    """Silence is not "carries nothing": the request raises, and nothing is learned."""
+    """Silence does not mean "carries nothing".
+
+    The request raises an error, and MeshTerm learns nothing.
+    """
     device = MockDevice()
     await device.connect()
     device._unreachable.add(NODE.name)
@@ -802,7 +867,7 @@ async def test_an_unreachable_repeater_raises_rather_than_answering_empty() -> N
 
 @pytest.fixture()
 def tui_ctx(tmp_path: Path):  # noqa: ANN201
-    """A mock-backed context wired to a headless TUI session (as the admin tests use)."""
+    """A context with a mock, connected to a headless TUI session (the admin tests use the same)."""
     import io
 
     from rich.console import Console
@@ -830,7 +895,10 @@ def tui_ctx(tmp_path: Path):  # noqa: ANN201
 
 
 def test_the_wildcard_row_says_when_no_home_region_is_set() -> None:
-    """``*^`` is the firmware parking its home mark on the wildcard: no home region set."""
+    """``*^`` is the home mark that the firmware puts on the wildcard.
+
+    It means that no home region is set.
+    """
     from meshterm.ui.region_editor import _row_note
 
     unset = parse_region_dump("*^ F\n lakeside F\n")

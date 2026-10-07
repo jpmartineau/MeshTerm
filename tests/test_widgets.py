@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Shared-widget helper tests: the canonical formatting primitives every screen leans on.
+"""Tests for the helpers of the shared widgets: the standard formatting functions of each screen.
 
-Most widgets are exercised through their host screens' tests; what lives here are the
-pure text helpers whose exact output *is* the app-wide convention — get these right once
-and every caller inherits it.
+The tests of the host screens test most widgets. The tests here are for the pure text
+helpers. Their exact output *is* the convention of the whole app. If these are correct one
+time, each caller gets the correct output.
 """
 
 from __future__ import annotations
@@ -30,12 +30,12 @@ from meshterm.ui.widgets import (
 
 
 def _span_style(text: Text, run: str) -> Style:
-    """The style over ``run`` in ``text``, parsed — pathline spans carry style *strings*."""
+    """The parsed style over ``run`` in ``text``. The spans of pathline have style *strings*."""
     return Style.parse(next(str(s.style) for s in text.spans if text.plain[s.start : s.end] == run))
 
 
 def test_format_age_is_the_bare_column_form() -> None:
-    """The lane form stays suffix-free at every magnitude, for aligned age columns."""
+    """The lane form has no suffix at each magnitude, for aligned age columns."""
     assert format_age(None) == "never"
     assert format_age(5) == "now"
     assert format_age(90) == "1m"
@@ -45,7 +45,7 @@ def test_format_age_is_the_bare_column_form() -> None:
 
 
 def test_format_ago_speaks_grammatical_prose() -> None:
-    """The prose form says "5m ago" but bare "now"/"never" — never "now ago"."""
+    """The prose form says "5m ago" but bare "now" and "never". It never says "now ago"."""
     assert format_ago(5) == "now"
     assert format_ago(None) == "never"
     assert format_ago(90) == "1m ago"
@@ -57,13 +57,13 @@ def _resolve(hop: str) -> str:
 
 
 def test_path_text_names_hops_and_keeps_hashes_bare() -> None:
-    """Named hops read as their name alone; unnamed ones as their bare hash."""
+    """Named hops read as their name alone, and unnamed hops read as their bare hash."""
     text = path_text(["aa", "77", "3d"], _resolve)
-    assert text.plain == "Alice → 77 → Hub"  # no parenthesized hash after a name
+    assert text.plain == "Alice → 77 → Hub"  # no hash in parentheses after a name
 
 
 def test_path_text_marks_us_white_and_names_in_their_hue() -> None:
-    """Our own node takes the white ``you`` style; other names their palette hue."""
+    """Our node has the white ``you`` style, and other names have their palette hue."""
     text = path_text(["aa", "3d"], _resolve, self_name="Alice")
     styles = {text.plain[s.start : s.end]: str(s.style) for s in text.spans}
     assert styles.get("Alice") == "you"
@@ -71,18 +71,18 @@ def test_path_text_marks_us_white_and_names_in_their_hue() -> None:
 
 
 def test_path_text_empty_reads_as_direct() -> None:
-    """No hops (or only empty tokens) renders the caller's empty word, muted."""
+    """No hops (or only empty tokens) render the empty word of the caller, muted."""
     assert path_text([], _resolve).plain == "direct"
     assert path_text(["", ""], _resolve).plain == "direct"
     assert path_text([], _resolve, empty="direct — no relays").plain == "direct — no relays"
 
 
 def test_path_text_greys_an_unnamed_hop_whole() -> None:
-    """``path_text`` greys an unnamed hop whole.
+    """``path_text`` makes an unnamed hop fully grey.
 
-    An unresolvable hop is an unknown node: its hash reads ``node.unknown`` end to
-    end, the prefix never lit, because colour marks an identified node — the path
-    graph's rule.
+    A hop that MeshTerm cannot resolve is an unknown node. Its hash reads ``node.unknown``
+    from end to end, and the prefix is never lit, because colour marks an identified node.
+    This is the rule of the path graph.
     """
     from meshterm.ui.theme import node_style
 
@@ -93,7 +93,7 @@ def test_path_text_greys_an_unnamed_hop_whole() -> None:
 
 
 def test_path_text_hash_as_name_shows_grey_identity_hash() -> None:
-    """An unnamed hop stands in its own hash at the mode width, muted, plus its byte."""
+    """An unnamed hop shows its own hash at the width of the mode, muted, plus its byte."""
     text = path_text(
         ["e839f2ab"],
         _resolve,
@@ -102,16 +102,16 @@ def test_path_text_hash_as_name_shows_grey_identity_hash() -> None:
         hash_bytes=1,
         hash_as_name=True,
     )
-    assert text.plain == "e839f2 (e8)"  # mode width identity, then the addressed byte
+    assert text.plain == "e839f2 (e8)"  # the identity at the mode width, then the addressed byte
     styles = {text.plain[s.start : s.end]: str(s.style) for s in text.spans}
-    assert styles.get("e839f2") == "node.unknown"  # grey — colour is the "this is a name" cue
+    assert styles.get("e839f2") == "node.unknown"  # grey: colour is the cue "this is a name"
     from meshterm.ui.theme import node_style
 
     assert not any(str(s.style) == node_style("e839f2ab") for s in text.spans)  # no prefix lit
 
 
 def test_path_text_hash_as_name_drops_the_byte_when_it_is_the_whole_hash() -> None:
-    """When the mode width is one byte, the identity already is the byte — no ``(e8)``."""
+    """When the mode width is one byte, the identity is the byte, so there is no ``(e8)``."""
     text = path_text(
         ["e839f2ab"],
         _resolve,
@@ -124,7 +124,7 @@ def test_path_text_hash_as_name_drops_the_byte_when_it_is_the_whole_hash() -> No
 
 
 def test_path_text_trace_flavour_annotates_hashes_and_brackets_us() -> None:
-    """show_hash appends the addressed hash to names; None hops are our device."""
+    """show_hash adds the addressed hash to names, and None hops are our device."""
     text = path_text(
         [None, "aa", "77bb", None],
         _resolve,
@@ -137,7 +137,7 @@ def test_path_text_trace_flavour_annotates_hashes_and_brackets_us() -> None:
 
 
 def test_path_text_dims_the_tail_from_dim_from() -> None:
-    """The mirrored return leg (and the arrows into it) render faint."""
+    """The mirrored return leg (and the arrows into it) renders faint."""
     text = path_text(
         [None, "aa", "3d", "aa", None],
         _resolve,
@@ -147,30 +147,30 @@ def test_path_text_dims_the_tail_from_dim_from() -> None:
     )
     styles = [(text.plain[s.start : s.end], str(s.style)) for s in text.spans]
     assert ("us", "you") in styles  # the departure keeps the white you
-    assert ("us", "faint") in styles  # the landing back on us is faint
+    assert ("us", "faint") in styles  # the return to us is faint
     assert any(run.startswith("Alice") and style == "faint" for run, style in styles)
     assert any(run.startswith("Hub") and style != "faint" for run, style in styles)
 
 
-# --- the name→key resolver and the keyless-stays-muted rule --------------------------
+# --- the name→key resolver and the rule that a keyless name stays muted --------------
 
 
 def test_make_name_key_resolver_contacts_win_over_stored_names() -> None:
-    """Contacts resolve first; stored advert names fill in strangers; misses are None."""
+    """Contacts resolve first, stored advert names resolve strangers, and misses are None."""
     from meshterm.core.models import Contact
     from meshterm.services.trace_runner import make_name_key_resolver
 
     contacts = [Contact(name="Alice", public_key="d4" + "0" * 62)]
-    stored = {"60aabbccdd11": "Bob", "77ee00112233": "Alice"}  # a stale stored Alice
+    stored = {"60aabbccdd11": "Bob", "77ee00112233": "Alice"}  # an old stored Alice
     key_of = make_name_key_resolver(contacts, stored)
-    assert key_of("Alice") == "d4" + "0" * 62  # the contact's key, not the stored id
-    assert key_of("alice") == "d4" + "0" * 62  # casefolded
-    assert key_of("Bob") == "60aabbccdd11"  # a stored-name stranger still lands
-    assert key_of("Zed") is None  # nobody carries the name
+    assert key_of("Alice") == "d4" + "0" * 62  # the key of the contact, not the stored id
+    assert key_of("alice") == "d4" + "0" * 62  # case-folded
+    assert key_of("Bob") == "60aabbccdd11"  # a stranger with a stored name still resolves
+    assert key_of("Zed") is None  # no node has the name
 
 
 def test_name_style_without_a_key_is_the_unknown_grey() -> None:
-    """A keyless name has no hue — colour is reserved for keyed identities."""
+    """A keyless name has no hue, because colour is only for identities that have a key."""
     from meshterm.ui.theme import name_style, node_style
 
     assert name_style("Stranger") == "node.unknown"
@@ -179,7 +179,7 @@ def test_name_style_without_a_key_is_the_unknown_grey() -> None:
 
 
 def test_name_rgb_keyless_lands_on_the_muted_grey() -> None:
-    """The raster twin: a keyless name's RGB is the muted grey, never a crash."""
+    """The raster twin: the RGB of a keyless name is the muted grey, and never a crash."""
     from meshterm.ui.widgets import name_rgb
 
     assert name_rgb("Stranger") == (148, 163, 184)
@@ -187,7 +187,7 @@ def test_name_rgb_keyless_lands_on_the_muted_grey() -> None:
 
 
 def test_route_graph_source_label_takes_its_resolved_keys_hue() -> None:
-    """The graph's left endpoint hue rides key_of: resolved → the key's hue, else muted."""
+    """The hue of the left endpoint of the graph comes from key_of, or else it is muted."""
     from meshterm.ui.widgets import name_rgb, route_graph_style
 
     _, _, rgb_known = route_graph_style(
@@ -205,35 +205,35 @@ def test_route_graph_source_label_takes_its_resolved_keys_hue() -> None:
         self_name="us",
         source="Alice",
     )
-    assert rgb_unknown(SRC_NODE) == (148, 163, 184)  # unresolvable origin stays muted
+    assert rgb_unknown(SRC_NODE) == (148, 163, 184)  # an origin that cannot be resolved stays muted
 
 
 def test_revisit_note_names_the_repeats_and_refuses_to_guess_why() -> None:
-    """The one line a graph drawing a node twice owes its reader — both readings, neither picked."""
+    """The one line for a graph that draws a node twice: both readings, and neither is chosen."""
     note = revisit_note(["aa"], _resolve)
     assert note is not None
     assert note.plain == "⚠ Alice repeats — a loop, or two nodes sharing one hash"
     styles = {note.plain[s.start : s.end]: str(s.style) for s in note.spans}
-    assert styles.get("⚠ ") == "warn"  # the app's warn mark, themed
+    assert styles.get("⚠ ") == "warn"  # the warn mark of the app, with the theme
     assert styles.get("Alice") not in (None, "warn")  # the name keeps its own node hue
 
 
 def test_revisit_note_lists_every_repeated_hop() -> None:
-    """More than one hop repeated names them all, comma-joined, still one sentence."""
+    """If more than one hop repeats, the note names them all, joined by commas."""
     note = revisit_note(["aa", "3d"], _resolve)
     assert note is not None
     assert note.plain.startswith("⚠ Alice, Hub repeats — ")
-    assert len(note.plain) <= 72  # the footer/row budget every surface renders it inside
+    assert len(note.plain) <= 72  # the budget of the footer and the row of each surface
 
 
 def test_revisit_note_is_absent_when_nothing_repeats() -> None:
-    """No repeats, no line — the warning is evidence, never chrome."""
+    """If nothing repeats, there is no line. The warning is evidence, and never chrome."""
     assert revisit_note([], _resolve) is None
     assert revisit_note(()) is None
 
 
 def test_name_chip_is_a_path_line_of_one_hop() -> None:
-    """The framing isn't imitated — it *is* the route language, so it can't drift from it."""
+    """The frame is not an imitation. It *is* the route language, so it cannot differ from it."""
     chip = name_chip("Alice", "a1b2")
     hop = PathLine([PathHop("Alice", key="a1b2")]).text()
 
@@ -244,7 +244,7 @@ def test_name_chip_is_a_path_line_of_one_hop() -> None:
 
 
 def test_name_chip_wears_the_hue_as_its_label_padded_like_every_chip(powerline) -> None:
-    """A route's colour scheme: the name is in its hue, on a darker fill of that hue."""
+    """The colour scheme of a route: the name has its hue, on a darker fill of that hue."""
     powerline(True)
     chip = name_chip("Alice", "a1b2")
 
@@ -256,16 +256,16 @@ def test_name_chip_wears_the_hue_as_its_label_padded_like_every_chip(powerline) 
 
 
 def test_name_chip_draws_us_as_the_star_never_as_our_name(powerline) -> None:
-    """Our end of a route is the map's own marker; a sender label is no different."""
+    """Our end of a route is the own marker of the map, and a sender label is the same."""
     powerline(True)
     chip = name_chip("you", you=True)
 
     assert "★" in chip.plain and "you" not in chip.plain
-    assert _span_style(chip, "★").bgcolor.name == "#3f3f46"  # neutral grey, not a hue
+    assert _span_style(chip, "★").bgcolor.name == "#3f3f46"  # a neutral grey, not a hue
 
 
 def test_name_chip_greys_a_node_it_cannot_place(powerline) -> None:
-    """No key, no hue — colour is reserved for keyed identities, in a chip as in a route."""
+    """With no key there is no hue. Only identities that have a key get colour, in a chip too."""
     powerline(True)
     keyless = name_chip("·")
 
@@ -273,26 +273,29 @@ def test_name_chip_greys_a_node_it_cannot_place(powerline) -> None:
 
 
 def test_name_chip_falls_back_to_the_bare_name_without_powerline(powerline) -> None:
-    """No separator glyph to draw a chip with — the PicoCalc's console font among them."""
+    """If there is no separator glyph to draw a chip, the chip is the bare name.
+
+    The console font of the PicoCalc is one of these cases.
+    """
     powerline(False)
     chip = name_chip("Alice", "a1b2")
 
-    assert chip.plain == "Alice"  # exactly what an arrow-mode path line makes of one hop
+    assert chip.plain == "Alice"  # the same as a path line in arrow mode makes of one hop
     assert str(next(iter(chip.spans)).style) == node_style("a1b2")  # still its own hue
 
 
 def test_every_advert_type_has_one_name() -> None:
-    """Type 1 is a companion everywhere: info, diagnostics, contacts and the legend agree."""
+    """Type 1 is a companion everywhere: the info page, diagnostics, contacts, and legend agree."""
     assert node_type_label(1) == "companion"
     assert node_type_label(2) == "repeater"
     assert node_type_label(3) == "room server"
     assert node_type_label(4) == "sensor"
-    assert node_type_label(9) == "type 9"  # an advert type MeshTerm does not know yet
+    assert node_type_label(9) == "type 9"  # an advert type that MeshTerm does not know yet
     assert node_type_label(None) is None
 
 
 def test_a_compact_tab_strip_is_one_row_and_never_moves_a_label() -> None:
-    """Below SHORT_FRAME_BELOW rows the strip draws on its rule, every tab a fixed width."""
+    """Below SHORT_FRAME_BELOW rows the strip draws on its rule, and each tab has a fixed width."""
     from meshterm.ui.widgets import SHORT_FRAME_BELOW, short_frame, tab_strip
 
     assert short_frame(SHORT_FRAME_BELOW - 1) and not short_frame(SHORT_FRAME_BELOW)

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""P4 chrome contracts: borderless frame, slim header, the F-key lane, dialog gate."""
+"""P4 chrome contracts: the borderless frame, the slim header, the F-key lane, the dialog gate."""
 
 from __future__ import annotations
 
@@ -28,47 +28,50 @@ def _screen(lines: int = 40) -> ScrollScreen:
 
 
 def _slot_style(row: Text, index: int) -> str:
-    """The style the lane painted onto slot ``index``'s chip (slots are 9 cells + 2 gap)."""
+    """The style that the lane painted on the chip of slot ``index``.
+
+    A slot is 9 cells and a gap of 2 cells.
+    """
     start = index * 11
     return next(str(span.style) for span in row.spans if span.start <= start < span.end)
 
 
 def test_borderless_frame_swaps_the_panel_for_a_title_bar() -> None:
-    """On the PicoCalc there is no Panel; a one-row title bar stands in for the whole border.
+    """On the PicoCalc there is no Panel. A title bar of one row replaces the whole border.
 
-    It carries the rule, the title, and the clip arrow. No border column is spent, so the
-    body starts at column 0 and owns all 53 cells.
+    The bar has the rule, the title, and the clip arrow. The frame uses no column for a
+    border, so the body starts at column 0 and has all 53 cells.
     """
     set_platform(PICOCALC_LYRA)
     composed = frame.compose_base(Text("hdr"), _screen(), "hint", 53, 26).split("\n")
     assert len(composed) == 26
     plain = [_plain(line) for line in composed]
-    # Row 1 (under the one-line header) is the title bar: rule + title + clip arrow.
+    # Row 1 (under the header of one line) is the title bar: rule, title, and clip arrow.
     assert "Chrome probe" in plain[1] and "─" in plain[1]
-    assert "↓" in plain[1]  # 40 rows into a 23-row viewport: more below
-    # No Panel borders anywhere — the body owns the full width.
+    assert "↓" in plain[1]  # 40 rows in a viewport of 23 rows: more below
+    # There are no Panel borders, and the body has the full width.
     assert not any("│" in line or "╭" in line for line in plain)
     assert all(cell_len(line) <= 53 for line in plain)
-    # The body's first row starts at column 0 of row 2 (no panel padding).
+    # The first row of the body starts at column 0 of row 2 (no panel padding).
     assert plain[2].startswith("row 0")
 
 
 def _bar_text(
     title: str, hint: str, cols: int = 53, *, above: bool = False, below: bool = True
 ) -> Text:
-    """The borderless title bar for a screen with ``title`` and ``hint``, as styled Text."""
+    """The borderless title bar for a screen with ``title`` and ``hint``, as styled text."""
     screen = ScrollScreen(Text("x"), title=title, floating=False)
     screen._footer_hint = hint
     return frame._title_bar(screen, cols, above, below)
 
 
 def _bar(title: str, hint: str, cols: int = 53, *, below: bool = True) -> str:
-    """The borderless title bar's plain text for a screen with ``title`` and ``hint``."""
+    """The plain text of the borderless title bar for a screen with ``title`` and ``hint``."""
     return _bar_text(title, hint, cols, below=below).plain
 
 
 def _arrow_styles(bar: Text) -> tuple[str, str]:
-    """The styles the bar painted on its two clip arrows, ``(up, down)``."""
+    """The styles that the bar painted on its two clip arrows, ``(up, down)``."""
     return tuple(
         next(
             str(span.style)
@@ -80,12 +83,12 @@ def _arrow_styles(bar: Text) -> tuple[str, str]:
 
 
 def test_the_title_bar_says_how_to_leave_the_screen() -> None:
-    """This platform has no footer hint line, so the way out rides the bar's tail.
+    """This platform has no footer hint line, so the way out is at the end of the bar.
 
-    The F-key lane stands where the footer would be and only advertises what its slots do,
-    which left Esc — the key every screen answers to, and the reason no screen carries a
-    *Back* row — completely unadvertised (JP, 2026-08-30). It lands last, past the title,
-    with the clip arrows holding the row's other end.
+    The F-key lane is where the footer would be, and it shows only what its slots do. Thus
+    the Esc key had no hint at all. Each screen answers to Esc, and this is the reason that
+    no screen has a Back row (JP, 2026-08-30). The way out is last, after the title, and the
+    clip arrows are at the other end of the row.
     """
     bar = _bar("Chrome probe", "↑↓ move · Enter open · Esc back")
 
@@ -95,13 +98,14 @@ def test_the_title_bar_says_how_to_leave_the_screen() -> None:
 
 
 def test_the_clip_arrows_are_always_drawn_and_say_it_in_colour() -> None:
-    """Both arrows are fixed furniture at the row's left edge; colour reads the scroll.
+    """Both arrows are fixed at the left edge of the row, and the colour shows the scroll.
 
-    They used to appear and vanish, and a half-shown pair left a blank cell standing in
-    for the missing one — the reader had to compare the row against a memory of itself
-    (JP, 2026-08-31). Now the pair never moves and never changes width, and an arrow
-    whose direction has more takes the border's own accent while one with nothing that way
-    drops to muted: the F-key lane's live/dim language, one row up.
+    The arrows once appeared and disappeared. A pair that was half shown left a blank cell
+    for the missing arrow, and the user had to compare the row with a memory of the row
+    (JP, 2026-08-31). Now the pair never moves and never changes width. An arrow for a
+    direction with more content has the accent colour of the border. An arrow for a
+    direction with no more content is muted. This is the live and dim language of the F-key
+    lane, one row up.
     """
     hint = "↑↓ move · Esc back"
     assert _arrow_styles(_bar_text("Contacts", hint, above=True, below=True)) == (
@@ -116,7 +120,7 @@ def test_the_clip_arrows_are_always_drawn_and_say_it_in_colour() -> None:
         "accent",
         "muted",
     )
-    # A body that fits whole keeps the pair, both dim — nothing appears or disappears.
+    # A body that fits keeps the pair, and both are dim. Nothing appears or disappears.
     assert _arrow_styles(_bar_text("Contacts", hint, above=False, below=False)) == (
         "muted",
         "muted",
@@ -131,37 +135,44 @@ def test_the_clip_arrows_are_always_drawn_and_say_it_in_colour() -> None:
 
 
 def test_the_bar_speaks_the_screen_s_own_esc_verb() -> None:
-    """Lifted off the screen's own footer hint, so each surface keeps its true verb."""
+    """The bar takes the Esc verb from the footer hint of the screen.
+
+    Thus each surface keeps its true verb.
+    """
     assert _bar("Contacts", "↑↓ move · Enter open · Esc back").endswith("Esc back")
     assert _bar("Path width", "↑↓ move · Enter set · Esc keep").endswith("Esc keep")
-    # A hint that names no way out advertises none — the lane's rule, one row up.
+    # A hint with no way out shows no way out. This is the rule of the lane, one row up.
     assert "Esc" not in _bar("Working", "↑↓ move")
 
 
 def test_the_main_menu_s_way_out_is_the_quit_chord_until_a_filter_stands() -> None:
-    """Esc is inert at the menu, so the bar carries ^Q there — and Esc clear over it.
+    """Esc does nothing at the menu, so the bar has ^Q there, and ``Esc clear`` replaces it.
 
-    The menu's hint ends on ``^Q quit?`` rather than an Esc clause (issue #22); the tail
-    lifts whichever way out the hint ends on, so a typed filter's ``Esc clear`` wins while
-    it stands, because that is the key that does something then.
+    ``Esc clear`` replaces ``^Q quit?`` while a filter is typed.
+
+    The hint of the menu ends with ``^Q quit?`` instead of an Esc clause (issue #22). The
+    end of the bar takes the way out with which the hint ends. Thus ``Esc clear`` of a typed
+    filter takes the place of ``^Q quit?`` while the filter is there, because Esc does
+    something then.
     """
     title = "What would you like to do?"
     idle = "↑↓ move · type to filter · Enter select · ^Q quit?"
     assert _bar(title, idle).endswith(" ^Q quit?")
     assert _bar(title, f"{idle} · Esc clear").endswith(" Esc clear")
-    # Crowded, it gives way the way Esc does: its bare key first, never a stray "Esc".
+    # If the bar is full, the atom gives way as Esc does: its bare key stays first, and there is
+    # never an "Esc" that is alone.
     verbless = _bar("Trace — Hilltop-Repeater over a spec", "↑↓ move · ^Q quit?")
     assert verbless.rstrip().endswith(" ^Q") and "Esc" not in verbless
 
 
 def test_the_esc_hint_gives_way_before_it_crowds_the_title() -> None:
-    """Compact by construction: the verb goes first, then the atom, and the title stays.
+    """The bar is compact by design: the verb goes first, then the atom, and the title stays.
 
-    Two rungs down, in order — a long title keeps the key without its verb, a longer one
-    takes the cells back altogether. The title is what the reader came for.
+    There are two steps, in this order. A long title keeps the key without its verb. A
+    longer title takes all the cells of the atom. The title is what the user needs.
     """
     verbless = _bar("Trace — Hilltop-Repeater over a spec", "↑↓ move · Esc back")
-    assert verbless.rstrip().endswith(" Esc")  # the verb went, the key stayed
+    assert verbless.rstrip().endswith(" Esc")  # the verb went, but the key stayed
     assert "Esc back" not in verbless
 
     crowded = _bar("Trace — Hilltop-Repeater over a longer spec", "↑↓ move · Esc back")
@@ -172,7 +183,7 @@ def test_the_esc_hint_gives_way_before_it_crowds_the_title() -> None:
 
 
 def test_bordered_frame_is_unchanged_on_regular() -> None:
-    """Regular keeps its Panel — the borderless frame is the console's shape, not the app's."""
+    """Regular keeps its Panel. The borderless frame is the shape of the console, not of the app."""
     set_platform(REGULAR)
     composed = frame.compose_base(Text("hdr"), _screen(), "hint", 72, 24).split("\n")
     plain = [_plain(line) for line in composed]
@@ -182,9 +193,9 @@ def test_bordered_frame_is_unchanged_on_regular() -> None:
 def test_picocalc_header_brands_the_app_not_the_device() -> None:
     """The PicoCalc header brands the app, not the device.
 
-    Per JP's spec for the ``header_atoms`` wiring: picocalc-lyra shows ``MeshTerm vX``,
-    because a soldered radio's port never changes and so the device segment earns
-    nothing. Regular keeps both.
+    This is the spec of JP for the ``header_atoms`` wiring. The picocalc-lyra platform shows
+    ``MeshTerm vX``. The port of a soldered radio never changes, so the device segment gives
+    no information. Regular keeps both.
     """
     from meshterm.ui.menu import _header_segments
 
@@ -203,22 +214,23 @@ def test_picocalc_header_brands_the_app_not_the_device() -> None:
     set_platform(PICOCALC_LYRA)
     text = "".join(seg.plain for seg in _header_segments(_Ctx(), {}))
     assert "MeshTerm" in text
-    assert "simulator" not in text  # the device atom is composed out
-    assert "pulse" in PICOCALC_LYRA.header_atoms  # the sparkline takes the remaining room
+    assert "simulator" not in text  # the device atom is not in the header
+    assert "pulse" in PICOCALC_LYRA.header_atoms  # the sparkline uses the room that is left
     set_platform(REGULAR)
     text = "".join(seg.plain for seg in _header_segments(_Ctx(), {}))
     assert "MeshTerm" in text and "simulator" in text
 
 
 def test_fkey_lane_resolution_and_banks() -> None:
-    """What the shared lane claims, and what it leaves alone.
+    """The shared lane has some slots, and it leaves the other slots free.
 
-    The pager takes F4/F5, each jump rides the Shift half of the pager heading for it,
-    F1-F3 stay free for the screen's own verbs, and neither Enter nor Esc takes a slot.
+    The pager takes F4 and F5. Each jump is on the Shift half of the pager that goes toward
+    it. F1 to F3 stay free for the own verbs of the screen. Neither Enter nor Esc takes a
+    slot.
     """
     lane = DEFAULT_LANE
-    # F4/F5 (paging — no physical key at all) carry the pager, and each jump rides the
-    # Shift half of the very pager heading for it: Home behind Page ↑, End behind Page ↓.
+    # F4 and F5 (paging, with no physical key at all) carry the pager. Each jump is on the
+    # Shift half of the pager that goes toward it: Home behind Page ↑, End behind Page ↓.
     assert (
         PICOCALC_LYRA_DECK.action_for(lane, 4) == "pagedown"
         and PICOCALC_LYRA_DECK.action_for(lane, 9) == "end"
@@ -227,55 +239,59 @@ def test_fkey_lane_resolution_and_banks() -> None:
         PICOCALC_LYRA_DECK.action_for(lane, 5) == "pageup"
         and PICOCALC_LYRA_DECK.action_for(lane, 10) == "home"
     )
-    # F1-F3 are free on every screen — the shared lane claims none of them.
+    # F1 to F3 are free on each screen. The shared lane has none of them.
     for number in (1, 2, 3, 6, 7, 8):
         assert PICOCALC_LYRA_DECK.action_for(lane, number) is None
-    # Enter/Esc never occupy a slot — both keys are already close at hand.
+    # Enter and Esc never use a slot, because both keys are already easy to reach.
     assert "enter" not in {PICOCALC_LYRA_DECK.action_for(lane, n) for n in range(1, 11)}
     assert "escape" not in {PICOCALC_LYRA_DECK.action_for(lane, n) for n in range(1, 11)}
 
 
 def test_fkey_lane_text_fits_and_flips() -> None:
-    """The lane fills exactly 53 cells in both banks, and a long label is clipped, not wrapped.
+    """The lane fills exactly 53 cells in both banks, and a long label is cut, not wrapped.
 
-    The directional pair rises toward its outer key, and a free slot draws as a bare
-    key number rather than an empty gap.
+    The directional pair rises toward its outer key. A free slot draws as a bare key number
+    instead of an empty gap.
     """
     primary = PICOCALC_LYRA_DECK.lane_text(DEFAULT_LANE)
     shifted = PICOCALC_LYRA_DECK.lane_text(DEFAULT_LANE, shifted=True)
     assert cell_len(primary.plain) == 53 and cell_len(shifted.plain) == 53
-    # A directional pair rises to the right: down/out left, up/in right — and each
-    # companion keeps its slot's end of that axis.
+    # A directional pair rises to the right: down and out on the left, up and in on the
+    # right. Each companion keeps the end of the axis of its own slot.
     assert "F4 Page ↓" in primary.plain and "F5 Page ↑" in primary.plain
     assert "F9 Bottom" in shifted.plain and "10 Top" in shifted.plain
-    # The free bank renders as bare, unfilled key numbers in both banks.
+    # The free slots render as bare key numbers with no fill, in both banks.
     for number in (1, 2, 3):
         assert f"F{number}    " in primary.plain
         assert f"F{number + 5}    " in shifted.plain
     wide = [FPair("Muchtoolonglabel", "a", "Muchtoolonglabel", "b")] * 5
-    assert cell_len(PICOCALC_LYRA_DECK.lane_text(wide).plain) == 53  # clipped to the slot budget
+    assert cell_len(PICOCALC_LYRA_DECK.lane_text(wide).plain) == 53  # cut to the slot budget
     assert cell_len(PICOCALC_LYRA_DECK.lane_text(wide, shifted=True).plain) == 53
 
 
 def test_fkey_slot_dims_when_its_action_is_unavailable() -> None:
-    """An unavailable slot keeps its label and drops its fill — it never offers a dead key."""
+    """A slot that is not available keeps its label and loses its fill.
+
+    It never shows a dead key.
+    """
     lane = [FPair("Paths", "paths", "Retry", "retry", enabled=False)] + [None] * 4
     primary = PICOCALC_LYRA_DECK.lane_text(lane)
     shifted = PICOCALC_LYRA_DECK.lane_text(lane, shifted=True)
 
-    # The label survives: the lane still says what F1 is for, just not that it acts now.
+    # The label stays: the lane still shows what F1 is for, but not that F1 acts now.
     assert "F1 Paths" in primary.plain and _slot_style(primary, 0) == "muted"
-    # Its Shift companion is untouched — the two banks gate independently.
+    # Its Shift companion does not change. The two banks are gated separately.
     assert "F6 Retry" in shifted.plain and _slot_style(shifted, 0) == "fkey.chip.shift"
-    # The row is still exactly the lane's width, dim chips and all.
+    # The row is still exactly the width of the lane, with the dim chips.
     assert cell_len(primary.plain) == 53 and cell_len(shifted.plain) == 53
-    # Dimming is presentational: the key still resolves, and the screen's handler no-ops.
+    # Dimming is only how the slot looks. The key still resolves, and the handler of the
+    # screen does nothing.
     assert PICOCALC_LYRA_DECK.action_for(lane, 1) == "paths"
 
 
 def test_default_lane_dims_every_nav_slot_when_nothing_moves() -> None:
-    """A screen with nothing to move gets the shared lane back inert, not absent."""
-    assert default_lane() is DEFAULT_LANE  # the live lane is the constant itself
+    """A screen with nothing to move gets the shared lane with inactive slots, not no lane."""
+    assert default_lane() is DEFAULT_LANE  # the live lane is the constant
     dim = default_lane(nav=False)
 
     assert [pair.label for pair in dim if pair] == ["Page ↓", "Page ↑"]
@@ -283,16 +299,19 @@ def test_default_lane_dims_every_nav_slot_when_nothing_moves() -> None:
     row = PICOCALC_LYRA_DECK.lane_text(dim)
     assert cell_len(row.plain) == 53 and "F4 Page ↓" in row.plain and "F5 Page ↑" in row.plain
     assert {str(span.style) for span in row.spans} == {"muted"}
-    # Both banks dim together: the jump behind a dead pager is just as dead.
+    # Both banks dim together: the jump behind a pager that is not active is not active too.
     assert {str(span.style) for span in PICOCALC_LYRA_DECK.lane_text(dim, shifted=True).spans} == {
         "muted"
     }
 
 
 def test_lane_is_built_after_the_body_renders() -> None:
-    """The frame defers the lane, so its gates read this paint's metrics, not the last one's."""
+    """The frame builds the lane later, so its gates read the metrics of this paint.
+
+    The gates do not read the metrics of the last paint.
+    """
     set_platform(PICOCALC_LYRA)
-    screen = _screen()  # 40 body rows into a 23-row viewport: it overflows
+    screen = _screen()  # 40 body rows in a viewport of 23 rows: it overflows
     seen: dict[str, bool] = {}
 
     def build() -> Text:
@@ -301,26 +320,26 @@ def test_lane_is_built_after_the_body_renders() -> None:
 
     composed = frame.compose_base(Text("hdr"), screen, "hint", 53, 26, footer_lane=build)
 
-    assert seen["nav"] is True  # lit on the very first paint, with no stale frame to lag
+    assert seen["nav"] is True  # lit on the first paint, with no old paint to lag behind
     assert "F4 Page ↓" in _plain(composed.split("\n")[-1])
 
 
 def test_scroll_screen_lane_tracks_whether_its_body_overflows() -> None:
-    """The result window's nav slots light only once there is something to scroll to."""
+    """The navigation slots of the result screen light only when there is more to scroll to."""
     screen = _screen()
-    screen.note_metrics(4, 20)  # the whole body fits the viewport
+    screen.note_metrics(4, 20)  # the whole body fits in the viewport
     assert not any(pair.enabled for pair in screen.picocalc_lyra_lane if pair)
     screen.note_metrics(80, 20)  # taller than the viewport
     assert all(pair.enabled for pair in screen.picocalc_lyra_lane if pair)
 
 
 def test_select_lane_promotes_the_section_jumps_only_where_there_are_sections() -> None:
-    """Ctrl+PgUp/PgDn is unreachable on a keyboard with no PgUp, so a grouped list lanes it."""
+    """The keyboard has no PgUp key, so a grouped list puts Ctrl+PgUp/PgDn on the lane."""
     from meshterm.ui.tui.select import Choice, SelectScreen, Separator
 
     flat = SelectScreen("Flat", [Choice("one", 1), Choice("two", 2)])
-    # No headings anywhere: sections are not a thing on this list, so the slots are empty
-    # rather than dim — and F1/F2 resolve to nothing at all.
+    # There are no headings. This list has no sections, so the slots are empty instead of
+    # dim, and F1 and F2 resolve to nothing.
     assert flat.picocalc_lyra_lane[0] is None and flat.picocalc_lyra_lane[1] is None
     assert PICOCALC_LYRA_DECK.action_for(flat.picocalc_lyra_lane, 1) is None
 
@@ -336,15 +355,15 @@ def test_select_lane_promotes_the_section_jumps_only_where_there_are_sections() 
     )
     lane = grouped.picocalc_lyra_lane
     assert [pair.label for pair in lane[:2]] == ["Sect ↑", "Sect ↓"]
-    # A pair rises toward its outer key: on this left-edge pair, up takes F1.
+    # A pair rises toward its outer key: on this pair at the left edge, up takes F1.
     assert (
         PICOCALC_LYRA_DECK.action_for(lane, 1) == "ctrl_pageup"
         and PICOCALC_LYRA_DECK.action_for(lane, 2) == "ctrl_pagedown"
     )
     assert all(pair.enabled for pair in lane[:2])
 
-    # A filter that collapses the list onto one section keeps the labels and dims them:
-    # the sections are still a thing here, they just have nowhere to jump right now.
+    # A filter that reduces the list to one section keeps the labels and dims them. The list
+    # still has sections, but there is no other section to jump to now.
     for ch in "gam":
         grouped.handle("text", ch)
     dim = grouped.picocalc_lyra_lane
@@ -353,7 +372,7 @@ def test_select_lane_promotes_the_section_jumps_only_where_there_are_sections() 
 
 
 def test_dialogs_draw_no_lane_at_all() -> None:
-    """A prompt has nothing to page, so it shows bare key numbers, not a dim pager."""
+    """A prompt has nothing to page, so it shows bare key numbers and not a dim pager."""
     from meshterm.ui.tui.fkeys import EMPTY_LANE
     from meshterm.ui.tui.prompt import ButtonDialog, ConfirmScreen, TextScreen
 
@@ -369,21 +388,23 @@ def test_dialogs_draw_no_lane_at_all() -> None:
 
 
 def test_map_locate_is_reachable_from_both_control_keys() -> None:
-    """``locate`` is bound as a chord app-wide, so both Ctrl keys and F2 reach the same action.
+    """``locate`` is bound as a chord in the whole app.
 
-    The letter is the mnemonic of the action — ^Y for *you* — so it is the same chord on
-    every screen that can point at our own node, not one screen's initial.
+    Thus both Ctrl keys and F2 do the same action.
+
+    The letter is the mnemonic of the action: ^Y for "you". Thus it is the same chord on each
+    screen that can point to our node. It is not the initial of one screen.
     """
     from prompt_toolkit.keys import Keys
 
     from meshterm.ui.tui.session import _CTRL_LETTER_CHORDS, _KEY_ACTIONS
 
-    assert _CTRL_LETTER_CHORDS["y"] == "locate"  # the right-Ctrl rescue's half
-    assert _KEY_ACTIONS[Keys.ControlY] == "locate"  # the ordinary binding, generated from it
+    assert _CTRL_LETTER_CHORDS["y"] == "locate"  # the half for the right-Ctrl rescue
+    assert _KEY_ACTIONS[Keys.ControlY] == "locate"  # the ordinary binding, made from it
 
 
 def test_host_battery_reads_the_sysfs_supply(tmp_path, monkeypatch) -> None:
-    """The PicoCalc battery path: a true percent and charging flag straight from sysfs."""
+    """The PicoCalc battery path gets the true percent and the charging flag from sysfs."""
     from meshterm.services import battery_service
 
     supply = tmp_path / "picocalc"
@@ -406,11 +427,11 @@ def test_host_battery_reads_the_sysfs_supply(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(battery_service, "_POWER_SUPPLIES", tmp_path / "gone")
     for _ in range(battery_service._HOST_MISSES_KEPT + 1):
         asyncio.run(service._poll_host())
-    assert service.reading() is None  # unreadable supply = absent, header draws nothing
+    assert service.reading() is None  # an unreadable supply is absent, so the header draws nothing
 
 
 def test_dialog_wrap_shrinks_on_picocalc() -> None:
-    """A dialog message wraps to fewer cells on the PicoCalc, the screen being narrower."""
+    """A dialog message wraps to fewer cells on the PicoCalc, because the display is narrower."""
     from meshterm.ui.surface import _dialog_wrap_cells
 
     set_platform(PICOCALC_LYRA)
@@ -419,22 +440,22 @@ def test_dialog_wrap_shrinks_on_picocalc() -> None:
     assert _dialog_wrap_cells() == 54  # 72 readable - 6 margin - 12 chrome
 
 
-# --- the dialog border's hint, against the lane one row below it ------------------------
+# --- the hint in the border of a dialog, and the lane one row below it -----------------
 
 
 def _dialog(hint: str) -> ScrollScreen:
-    """A floating screen carrying ``hint``, on the shared pager lane."""
+    """A floating screen with ``hint``, on the shared pager lane."""
     screen = ScrollScreen(Text("body"), title="Probe")
     screen._footer_hint = hint
     return screen
 
 
 def test_a_dialog_keeps_its_hint_where_the_lane_is_the_footer() -> None:
-    """There is no hint line here, so a floating box's border is the only place keys read.
+    """This platform has no hint line, so the border of a floating box has the keys.
 
-    The desktop drops the border hint entirely (the footer row below repeats it word for
-    word); this platform's footer row is the lane, which speaks only for its five chips,
-    so Enter, Esc and the arrows have nowhere else to be said.
+    The desktop platform does not draw the hint in the border, because the footer row below
+    has the same words. On this platform the footer row is the lane. It shows only its five
+    chips, so there is no other place for Enter, Esc, and the arrows.
     """
     screen = _dialog("↑↓ move · Enter select · Esc back")
     set_platform(REGULAR)
@@ -444,19 +465,20 @@ def test_a_dialog_keeps_its_hint_where_the_lane_is_the_footer() -> None:
 
 
 def test_the_dialog_hint_drops_what_the_lane_already_says() -> None:
-    """An atom whose every key is a chip on the very next row is the same claim twice."""
+    """The hint does not repeat an atom when each key of the atom is a chip on the next row."""
     set_platform(PICOCALC_LYRA)
     screen = _dialog("↑↓ move · PgUp/PgDn scroll · Home/End ends · Enter select · Esc back")
-    # The shared lane pages on F4/F5 and jumps to either end behind their Shift halves.
+    # The shared lane pages on F4 and F5, and it jumps to either end on their Shift halves.
     assert frame._dialog_hint(screen) == "↑↓ move · Enter select · Esc back"
     assert "PgUp" not in _plain(frame.compose_dialog(screen, 53, 26))
 
 
 def test_the_dialog_hint_is_resolved_on_every_paint() -> None:
-    """Never folded into a screen's hint once: both halves move while the screen is up.
+    """The dialog hint is never built one time into the hint of a screen.
 
-    The packet viewer rewrites its own hint as the list it pages through grows past one
-    entry (JP, 2026-08-31), and every screen reads its lane fresh each frame.
+    Both halves change while the screen is open. The packet viewer writes its hint again
+    when the list that it pages through grows to more than one entry (JP, 2026-08-31). Each
+    screen reads its lane again on each paint.
     """
     set_platform(PICOCALC_LYRA)
     screen = _dialog("Esc close")
@@ -466,17 +488,24 @@ def test_the_dialog_hint_is_resolved_on_every_paint() -> None:
 
 
 def test_an_atom_the_lane_only_half_covers_stands() -> None:
-    """Half a truth is worse than the whole atom: it survives unless every key is a chip."""
+    """An atom that the lane covers only in part stays.
+
+    A half truth is worse than the whole atom, so the atom is removed only when each key is
+    a chip.
+    """
     pager_only = (None, None, None, FPair("Page ↓", "pagedown"), FPair("Page ↑", "pageup"))
     assert strip_lane_atoms("PgUp/PgDn scroll", pager_only) == ""
-    # No Shift bank here, so Home/End are nowhere on the lane.
+    # This lane has no Shift bank, so Home/End are not on the lane.
     assert strip_lane_atoms("Home/End ends", pager_only) == "Home/End ends"
-    # The atom documents the arrows too, and no slot ever claims those.
+    # The atom also describes the arrows, and no slot has them.
     assert strip_lane_atoms("↑↓ PgUp/PgDn scroll", DEFAULT_LANE) == "↑↓ PgUp/PgDn scroll"
-    # A second key riding in the verb half keeps the atom whole (the map's region/you).
+    # A second key in the verb half keeps the whole atom (region/you of the map).
     assert strip_lane_atoms("Home/^Y region/you", DEFAULT_LANE) == "Home/^Y region/you"
 
 
 def test_a_dimmed_chip_still_covers_its_atom() -> None:
-    """Dim says *a thing here, just not right now* — the reader has been told where it is."""
+    """A dim chip means that the action exists but is not available now.
+
+    The user already knows where the action is, so the chip still covers its atom.
+    """
     assert strip_lane_atoms("PgUp/PgDn scroll", default_lane(nav=False)) == ""

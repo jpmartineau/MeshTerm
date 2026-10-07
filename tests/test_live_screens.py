@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit tests for the live Trace and TX-optimize screens.
 
-These drive the two full-screen tools' pure logic — trace/sweep state machines, key
-handling, and rendering — against fake sessions and injected runners, so they run fast
-and headless (the same approach as ``test_tui``).
+These tests run the pure logic of the two full-screen tools: the state machines of the
+trace and the sweep, the key handling, and the rendering. They use fake sessions and
+injected runners, so they run fast and with no terminal. ``test_tui`` uses the same method.
 """
 
 from __future__ import annotations
@@ -35,20 +35,20 @@ from meshterm.ui.trace_screen import (
     snr_bar,
 )
 from meshterm.ui.tx_screen import TxSweepScreen
-from tests.conftest import plain as _plain  # THE strip-and-join screen reader
+from tests.conftest import plain as _plain  # the only helper that strips and joins the screen text
 
-# The slim meter's fill glyphs (the SNR bar draws through the shared braille meter).
+# The fill glyphs of the slim meter (the SNR bar draws through the shared braille meter).
 _BAR_FULL, _BAR_HALF = _METER_SLIM
 
 
 class _FakeSession:
-    """The session capabilities the screens use directly: repaints and the dialog stack."""
+    """The session functions that the screens use directly: paints and the dialog stack."""
 
     def __init__(self) -> None:
         self.repaints = 0
         self.stack: list = []
-        #: Every button_dialog floated, as ``(prompt, buttons, kwargs)``; the next
-        #: one resolves with ``dialog_answer`` (``None`` = the Esc/idle-cancel path).
+        #: Each button_dialog that the screen floated, as ``(prompt, buttons, kwargs)``. The
+        #: next one resolves with ``dialog_answer`` (``None`` is the Esc or idle-cancel path).
         self.dialogs: list = []
         self.dialog_answer = None
 
@@ -69,12 +69,12 @@ class _FakeSession:
         return self.dialog_answer
 
     def run_detached(self, work):  # noqa: ANN001, ANN201
-        """Start a key handler's flow as a task, as ``TuiSession.run_detached`` does."""
+        """Start the flow of a key handler as a task, as ``TuiSession.run_detached`` does."""
         return asyncio.ensure_future(work)
 
 
 def _trace(*snrs: float, success: bool = True, target: str = "Alice") -> TraceResult:
-    """Build a trace with one hop per SNR reading."""
+    """A trace with one hop for each SNR reading."""
     hops = [Hop(index=i, node=f"{i:02x}{i:02x}", snr=snr) for i, snr in enumerate(snrs)]
     return TraceResult(
         target=target, success=success, hops=hops, round_trip_ms=200.0, path_hash_bytes=2
@@ -85,11 +85,11 @@ def _trace(*snrs: float, success: bool = True, target: str = "Alice") -> TraceRe
 
 
 def _lit_plain(bar) -> str:  # noqa: ANN001
-    """The reading's own coloured prefix, stripped of the dimmed unlit track.
+    """The prefix of the reading that has colour, without the dim track that is not lit.
 
-    The unlit remainder reuses :data:`_BAR_FULL` too (dimmed to the ``track`` style
-    instead of a distinct glyph), so telling lit from unlit means reading which
-    style each character actually landed in, not just which glyph it is.
+    The part that is not lit also uses :data:`_BAR_FULL`. It has the ``track`` style, which
+    is dim, and not a different glyph. Thus, to find the lit part and the part that is not
+    lit, the test must read the style of each character, not only its glyph.
     """
     if bar.style == "track":
         return ""
@@ -99,33 +99,33 @@ def _lit_plain(bar) -> str:  # noqa: ANN001
 
 
 def _filled_steps(bar) -> int:  # noqa: ANN001
-    """Count a rendered bar's fill steps — two per full braille cell, one per half."""
+    """Count the fill steps of a rendered bar: two for each full braille cell, one for a half."""
     plain = _lit_plain(bar)
     return plain.count(_BAR_FULL) * 2 + plain.count(_BAR_HALF)
 
 
 def test_snr_bar_scales_with_signal_quality() -> None:
-    """A stronger signal fills more of the track; None renders an entirely unlit one."""
+    """A stronger signal fills more of the track. None gives a track that is not lit at all."""
     weak = snr_bar(-12.0)
     strong = snr_bar(8.0)
     assert _filled_steps(weak) < _filled_steps(strong)
-    assert len(weak.plain) == len(strong.plain) == _BAR_WIDTH  # track width is constant
+    assert len(weak.plain) == len(strong.plain) == _BAR_WIDTH  # the track width is constant
     none_bar = snr_bar(None)
     assert _filled_steps(none_bar) == 0
-    assert none_bar.style == "track"  # the whole track dims, not a separate faint dot run
+    assert none_bar.style == "track"  # the whole track is dim, not a run of faint dots
 
 
 def test_snr_bar_clamps_out_of_range_readings() -> None:
-    """Readings beyond the display range clamp to the ends instead of over/underflowing."""
+    """Readings beyond the display range clamp to the ends. They do not overflow or underflow."""
     assert _filled_steps(snr_bar(99.0)) == _filled_steps(snr_bar(10.0))
-    assert _filled_steps(snr_bar(-99.0)) == 1  # a heard hop always shows something
+    assert _filled_steps(snr_bar(-99.0)) == 1  # a hop that was heard always shows something
 
 
 def test_snr_bar_packs_two_steps_per_character() -> None:
-    """16 steps of resolution pack into 8 characters: full cells, then one trailing half."""
+    """16 steps of resolution fit in 8 characters: full cells, then one half at the end."""
     one_step = snr_bar(-13.4375)  # frac = 1/16 of the -15..+10 span
     assert one_step.plain[0] == _BAR_HALF
-    assert one_step.plain[1:] == _BAR_FULL * (_BAR_WIDTH - 1)  # unlit track, same glyph
+    assert one_step.plain[1:] == _BAR_FULL * (_BAR_WIDTH - 1)  # track that is not lit, same glyph
     track_spans = [(s.start, s.end) for s in one_step.spans if s.style == "track"]
     assert track_spans == [(1, _BAR_WIDTH)]
 
@@ -135,12 +135,15 @@ def test_snr_bar_packs_two_steps_per_character() -> None:
 
 
 def test_snr_bar_unlit_track_dims_to_a_distinct_style() -> None:
-    """The unlit track renders in ``track``, not the reading's colour or old ``faint`` dots."""
+    """The track that is not lit has the ``track`` style.
+
+    It does not have the colour of the reading or the old ``faint`` dots.
+    """
     bar = snr_bar(-10.3125)
-    assert "·" not in bar.plain  # no more plain-dot placeholder
+    assert "·" not in bar.plain  # there is no plain-dot placeholder now
     track_span = next(s for s in bar.spans if s.style == "track")
     assert bar.plain[track_span.start : track_span.end] == _BAR_FULL * (_BAR_WIDTH - 2)
-    assert bar.style == snr_style(-10.3125)  # the lit prefix still carries the reading's colour
+    assert bar.style == snr_style(-10.3125)  # the lit prefix still has the colour of the reading
 
     assert snr_bar(10.0).plain == _BAR_FULL * _BAR_WIDTH  # top of range: every cell full
 
@@ -149,7 +152,7 @@ def test_snr_bar_unlit_track_dims_to_a_distinct_style() -> None:
 
 
 def _walk(*nodes: str, success: bool = True) -> TraceResult:
-    """A stored walk whose hop hashes are ``nodes`` (plus the final hash-less us)."""
+    """A stored walk where the hop hashes are ``nodes`` (and the last hop is us, with no hash)."""
     hops = [Hop(index=i, node=n, snr=1.0) for i, n in enumerate(nodes)]
     hops.append(Hop(index=len(nodes), node=None, snr=1.0))
     return TraceResult(
@@ -158,11 +161,11 @@ def _walk(*nodes: str, success: bool = True) -> TraceResult:
 
 
 def test_previous_outbound_extracts_the_proven_route() -> None:
-    """The last successful boomerang's first half is the reusable outbound leg.
+    """The first half of the last successful boomerang is the outbound leg to use again.
 
-    Verified on hardware that the device itself almost never has a learned route
-    (contacts report flood), so this stored evidence is what auto mode actually
-    walks for a multi-hop target.
+    We checked on hardware that the device almost never has a learned route (contacts
+    report flood). Thus this stored evidence is what auto mode walks for a target that
+    has more than one hop.
     """
     from meshterm.ui.trace_screen import _previous_outbound
 
@@ -171,22 +174,22 @@ def test_previous_outbound_extracts_the_proven_route() -> None:
 
 
 def test_previous_outbound_direct_walk_yields_no_repeaters() -> None:
-    """A direct answer (target only) extracts an empty outbound leg — dest-only again."""
+    """A direct answer (the target only) gives an empty outbound leg: destination only again."""
     from meshterm.ui.trace_screen import _previous_outbound
 
     assert _previous_outbound(_walk("aabb"), "aabb" + "00" * 30) == ()
 
 
 def test_previous_outbound_rejects_unusable_history() -> None:
-    """Failures, asymmetric walks, and walks that turned elsewhere are never reused."""
+    """MeshTerm never reuses failures, asymmetric walks, and walks that turned elsewhere."""
     from meshterm.ui.trace_screen import _previous_outbound
 
     target = "aabb" + "00" * 30
     assert _previous_outbound(None, target) is None
     assert _previous_outbound(_walk("3d63", "aabb", "3d63", success=False), target) is None
-    # Asymmetric: came home a different way — not a boomerang to this target.
+    # Asymmetric: it came home a different way, so it is not a boomerang to this target.
     assert _previous_outbound(_walk("3d63", "aabb", "f2c2"), target) is None
-    # Palindromic, but it turned at some other node, not our target.
+    # Palindromic, but it turned at some other node and not at our target.
     assert _previous_outbound(_walk("3d63", "9999", "3d63"), target) is None
 
 
@@ -194,11 +197,11 @@ def test_previous_outbound_rejects_unusable_history() -> None:
 
 
 def test_previous_walk_returns_the_whole_proven_route() -> None:
-    """The last successful path walk comes back verbatim — it's a whole spec already.
+    """The last successful path walk is returned with no change, because it is already a whole spec.
 
-    Unlike a target-mode boomerang there is no shape to recognise: whatever route
-    the mesh carried end to end is the route to offer again, hop hashes at the
-    width they were transmitted.
+    A boomerang in target mode has a shape that MeshTerm must recognise. A path walk has no
+    such shape. The route that the mesh carried from end to end is the route to offer again,
+    with the hop hashes at the width that MeshTerm transmitted.
     """
     from meshterm.ui.trace_screen import _previous_walk
 
@@ -207,12 +210,12 @@ def test_previous_walk_returns_the_whole_proven_route() -> None:
 
 
 def test_previous_walk_rejects_unusable_history() -> None:
-    """No history, a failed walk, or one with no addressable hops is never reused."""
+    """MeshTerm never reuses an empty history, a failed walk, or a walk with no hop to address."""
     from meshterm.ui.trace_screen import _previous_walk
 
     assert _previous_walk(None) is None
     assert _previous_walk(_walk("3d63", success=False)) is None
-    assert _previous_walk(_walk()) is None  # only the hash-less final hop (us)
+    assert _previous_walk(_walk()) is None  # only the last hop (us), which has no hash
 
 
 # --- TraceScreen ----------------------------------------------------------------
@@ -253,21 +256,21 @@ def _trace_screen(
         pick_samples=pick_samples or default_flow,
         width_bytes=lambda: 2,
         sample_count=lambda: samples,
-        pace_s=0.0,  # tests never sleep; pacing is asserted through the statuses
+        pace_s=0.0,  # tests never sleep. The tests check the pacing through the statuses
         previous=previous,
         auto_spec=auto_spec or (lambda: ""),
         auto_source=auto_source,
         open_trophy_case=open_trophy_case,
     )
-    screen.note_viewport(40)  # the frame records this before every real paint
+    screen.note_viewport(40)  # the frame records this before each real paint
     return screen, session
 
 
 async def test_trace_screen_one_trace_per_enter_accumulates() -> None:
-    """At the default sample count, each Enter transmits exactly one trace.
+    """At the default sample count, each Enter key press transmits exactly one trace.
 
-    Repeat sampling stays a human decision unless a bigger sample count is chosen
-    explicitly, so three keypresses mean three traces and a three-sample median.
+    Repeated samples are a decision of the user, unless the user chooses a bigger sample
+    count. Thus three key presses give three traces and a median of three samples.
     """
     screen, _ = _trace_screen()
     for _ in range(3):
@@ -275,13 +278,13 @@ async def test_trace_screen_one_trace_per_enter_accumulates() -> None:
         await screen._worker
     body = _plain(screen.render_body(100))
     assert "success rate" in body and "3/3" in body
-    assert "#3" in body  # newest-first numbering
+    assert "#3" in body  # numbering with the newest first
     assert "Per-hop medians" in body
-    assert "burst" not in body.lower()  # no burst configuration is offered anywhere
+    assert "burst" not in body.lower()  # no burst setting is offered anywhere
 
 
 async def test_trace_screen_runs_the_chosen_sample_count() -> None:
-    """One Enter runs the whole chosen sample count, every trace recorded."""
+    """One Enter key press runs the whole sample count that the user chose. It stores each trace."""
     ran: list[str] = []
 
     async def trace(path_spec, on_trace):  # noqa: ANN001
@@ -293,11 +296,11 @@ async def test_trace_screen_runs_the_chosen_sample_count() -> None:
     await screen._worker
     assert len(ran) == 3
     assert len(screen._traces) == 3
-    assert session.stack == []  # the dialog was popped with the run
+    assert session.stack == []  # the dialog was popped when the run ended
 
 
 async def test_trace_screen_multi_trace_reports_progress_and_abort_keeps_landed() -> None:
-    """A multi-trace run counts itself off; aborting keeps what already landed."""
+    """A run of many traces shows its count. If the user aborts, the traces that arrived stay."""
     release = asyncio.Event()
     ran = 0
 
@@ -306,33 +309,33 @@ async def test_trace_screen_multi_trace_reports_progress_and_abort_keeps_landed(
         ran += 1
         on_trace(_trace(5.0))
         if ran == 2:
-            await release.wait()  # hold the run mid-flight on the second trace
+            await release.wait()  # hold the run in the middle, at the second trace
 
     screen, session = _trace_screen(trace=trace, samples=5)
     screen.start_trace()
     await asyncio.sleep(0)
     dialog = session.stack[0]
-    assert "2/5" in dialog.status  # the dialog counts the run off
+    assert "2/5" in dialog.status  # the dialog shows the count of the run
     assert "2/5" in screen.footer_hint
-    assert "2/5" in _plain(screen.render_body(100))  # the log spinner row too
+    assert "2/5" in _plain(screen.render_body(100))  # the spinner row of the log also shows it
     screen.cancel()
     with pytest.raises(asyncio.CancelledError):
         await screen._worker
-    assert len(screen._traces) == 2  # already-recorded traces are kept
+    assert len(screen._traces) == 2  # the traces that were already stored stay
     assert session.stack == []
 
 
 async def test_trace_results_are_page_that_edge_scroll_reaches() -> None:
-    """Once traced, ↓ on the last action scrolls on down the results to the oldest trace.
+    """After a trace, ↓ on the last action scrolls down the results to the oldest trace.
 
-    The results used to sit in a window of their own, sized to whatever the controls
-    left: the page was then exactly the screen's height, so the frame had nothing to
-    scroll and ↓ on Trace did nothing while ``↓ n more`` sat under it.
+    The results were once in a list window of their own, and the controls set its size. The
+    page was then exactly the height of the screen, so the frame had nothing to scroll. ↓ on
+    Trace did nothing while ``↓ n more`` was under it.
     """
     from meshterm.ui.tui import frame
 
     screen, _ = _trace_screen()
-    for _ in range(12):  # a log long enough to carry the actions off the top
+    for _ in range(12):  # a log long enough to push the actions off the top
         screen.start_trace()
         await screen._worker
 
@@ -346,22 +349,22 @@ async def test_trace_results_are_page_that_edge_scroll_reaches() -> None:
             screen.handle(action)
 
     body = _plain(screen.render_body(72))
-    assert "more" not in body  # every result is on the page; nothing is windowed off
+    assert "more" not in body  # each result is on the page, and no list window hides one
     view()
-    press("down")  # Trace is the last action: the cursor pins on it…
+    press("down")  # Trace is the last action: the highlight stays on it…
     view()
     for _ in range(30):
-        press("down")  # …and each further ↓ scrolls the page a line
+        press("down")  # …and each more ↓ scrolls the page one line
         view()
     page = view()
-    assert page[-1].startswith("#1")  # the oldest trace closes the page
+    assert page[-1].startswith("#1")  # the oldest trace is the end of the page
     assert not any("❯" in line for line in page)  # the actions scrolled off the top
-    press("up")  # the snap-back: Trace comes back before anything moves
+    press("up")  # the snap-back: Trace returns before anything moves
     assert any("❯" in line and "Trace" in line for line in view())
 
 
 def _hop_rows_screen() -> TraceScreen:
-    """A trace screen holding one walk out over two named relays and home."""
+    """A trace screen with one walk that goes out through two relays that have names, and home."""
     names = {"3d63": "Lakeside", "f2c2": "Mont-Royal Summit Relay"}
     screen, _ = _trace_screen()
     screen._resolve = lambda hop: names.get(hop, hop)
@@ -378,7 +381,7 @@ def _hop_rows_screen() -> TraceScreen:
 
 
 def _hop_rows(screen: TraceScreen, width: int) -> list[str]:
-    """The per-hop medians' rows as drawn, heading and the trace log left off."""
+    """The rows of the per-hop medians as drawn, without the heading and the trace log."""
     lines = [_plain([line]) for line in screen.render_body(width)]
     start = next(i for i, line in enumerate(lines) if line.strip() == "Per-hop medians") + 1
     end = next(i for i, line in enumerate(lines) if line.strip() == "Traces") - 1
@@ -386,81 +389,81 @@ def _hop_rows(screen: TraceScreen, width: int) -> list[str]:
 
 
 def test_hop_rows_name_their_link_on_one_line_where_it_fits() -> None:
-    """Each hop is ``n  origin → destination  reading  meter`` — names, never a hash."""
+    """Each hop is ``n  origin → destination  reading  meter``, with names and never a hash."""
     rows = _hop_rows(_hop_rows_screen(), 100)
-    assert len(rows) == 3  # one line a hop
+    assert len(rows) == 3  # one line for each hop
     assert "-3.5 dB" in rows[1] and _BAR_FULL in rows[1]
     assert not any("(3d" in row or "(f2" in row for row in rows)
-    # Only the route's own ends are bare; every end it runs on through keeps its arrow.
+    # Only the ends of the route are bare. Each end where the route continues keeps its arrow.
     assert rows[0].startswith("0 ★ → Lakeside → ")  # our end is the bare star
     assert rows[1].startswith("1 → Lakeside → Mont-Royal Summit Relay → ")
     assert rows[2].startswith("2 → Mont-Royal Summit Relay → ★ ")
-    # A four-column table: every reading ends in the same column.
+    # A table of four columns: each reading ends in the same column.
     assert len({row.index(" dB") for row in rows}) == 1
 
 
 def test_hop_rows_square_only_the_routes_own_ends(powerline) -> None:  # noqa: ANN001
-    """As chips, the first hop opens square and the last closes square — nothing else.
+    """As chips, the first hop opens square and the last hop closes square. Nothing else is square.
 
-    A hop is one link of the walk, so its far ends are nodes the route runs on through:
-    those wear the notch and the point, the marks a path line uses for "this goes on".
+    A hop is one link of the walk, so its far ends are nodes where the route continues.
+    These have the notch and the point, the marks that a path line uses for "this goes on".
     """
     from meshterm.ui.pathline import POWERLINE_SEP
 
     powerline(True)
-    rows = _hop_rows(_hop_rows_screen(), 50)  # chips are wider: every hop folds
+    rows = _hop_rows(_hop_rows_screen(), 50)  # chips are wider: each hop folds
     paths = [row[2:].rstrip() for row in rows[::2]]
     assert [p.startswith(POWERLINE_SEP) for p in paths] == [False, True, True]
     assert [p.endswith(POWERLINE_SEP) for p in paths] == [True, True, False]
 
 
 def test_hop_rows_fold_under_their_path_and_slide_where_it_does_not() -> None:
-    """Too narrow for a row, every hop takes two lines; ←→ slide the paths alone.
+    """If the width is too narrow for a row, each hop has two lines. ←→ slide only the paths.
 
-    The reading and its meter sit flush right on the line under the path, and the path
-    that runs past the edge cracks there and slides — the hop number pinned, the path
-    that already fits staying put.
+    The reading and its meter are at the right on the line under the path. A path that goes
+    past the edge has a crack there and slides. The hop number stays pinned, and a path that
+    already fits does not move.
     """
     screen = _hop_rows_screen()
     rows = _hop_rows(screen, 30)
-    assert len(rows) == 6  # two lines a hop, all alike
+    assert len(rows) == 6  # two lines for each hop, all the same
     assert rows[2].startswith("1 → Lakeside → Mont-Royal")
-    assert rows[2].rstrip().endswith("…")  # cut where it runs on
+    assert rows[2].rstrip().endswith("…")  # cut where it continues
     assert "-3.5 dB" in rows[3] and cell_len(rows[3].rstrip()) == 30  # flush right
     assert "←→ scroll" in screen.footer_hint
 
-    screen.handle("down")  # the action cursor pins the page…
+    screen.handle("down")  # the highlight on the actions pins the page…
     screen.handle("right")
-    assert screen.cursor_line() is None  # …and sliding the paths lets it go again
+    assert screen.cursor_line() is None  # …and when the paths slide, the pin is released
     screen.handle("right")
     rows = _hop_rows(screen, 30)
     assert rows[2].startswith("1 …") and rows[2].rstrip().endswith("Summit Relay →")
-    assert rows[0].startswith("0 ★ → Lakeside →")  # a path in view whole never moves
+    assert rows[0].startswith("0 ★ → Lakeside →")  # a path that is whole on screen does not move
     screen.handle("right")  # already at the tail: clamped
     assert _hop_rows(screen, 30)[2] == rows[2]
     screen.handle("left")
     screen.handle("left")
     assert _hop_rows(screen, 30)[2].startswith("1 → Lakeside")
 
-    _hop_rows(screen, 100)  # wide enough again: nothing to slide, nothing advertised
+    _hop_rows(screen, 100)  # wide enough again: nothing to slide, so the hint does not show it
     assert "←→ scroll" not in screen.footer_hint
 
 
 async def test_trace_screen_seeds_route_from_previous_trace() -> None:
-    """Before any fresh reply, the stored route shows, marked as previous."""
+    """Before a new reply, the stored route shows, with the mark "previous"."""
     old = _trace(4.0)
     old.timestamp = utcnow() - timedelta(hours=3)
     screen, _ = _trace_screen(previous=old)
     body = _plain(screen.render_body(100))
     assert "(previous" in body
-    # A fresh success replaces the seeded route and drops the marker.
+    # A new success replaces the route that the screen started with, and removes the mark.
     screen._on_trace(_trace(6.0))
     body = _plain(screen.render_body(100))
     assert "(previous" not in body
 
 
 async def test_previous_stamp_sits_on_its_own_line() -> None:
-    """The (previous · …) marker renders under the route, never squeezed beside it."""
+    """The (previous · …) mark renders under the route. It is never pushed beside the route."""
     old = _trace(4.0)
     old.timestamp = utcnow() - timedelta(hours=3)
     screen, _ = _trace_screen(previous=old)
@@ -469,7 +472,7 @@ async def test_previous_stamp_sits_on_its_own_line() -> None:
 
 
 async def test_trace_screen_only_one_trace_at_a_time() -> None:
-    """Enter during an in-flight trace is a no-op; the running flag gates re-entry."""
+    """The Enter key during a trace in progress does nothing. The running flag stops a new run."""
     started = 0
     release = asyncio.Event()
 
@@ -481,7 +484,7 @@ async def test_trace_screen_only_one_trace_at_a_time() -> None:
     screen, _ = _trace_screen(trace=trace)
     screen.start_trace()
     assert screen._running
-    screen.handle("enter")  # ignored while running
+    screen.handle("enter")  # the screen ignores it while a trace runs
     release.set()
     await screen._worker
     assert started == 1
@@ -489,7 +492,7 @@ async def test_trace_screen_only_one_trace_at_a_time() -> None:
 
 
 async def test_trace_screen_failure_reads_inline() -> None:
-    """A failed trace reports its error in the log area instead of crashing the screen."""
+    """A trace that failed shows its error in the log area. The screen does not crash."""
 
     async def trace(path_spec, on_trace):  # noqa: ANN001
         raise RuntimeError("no route")
@@ -501,7 +504,7 @@ async def test_trace_screen_failure_reads_inline() -> None:
 
 
 async def test_trace_screen_composer_updates_the_spec() -> None:
-    """Committing Compose path runs the flow; its result becomes the next trace's path."""
+    """If the user commits Compose path, the flow runs. Its result is the path of the next trace."""
     asked: list[str] = []
 
     async def compose(current: str):  # noqa: ANN001
@@ -510,31 +513,31 @@ async def test_trace_screen_composer_updates_the_spec() -> None:
 
     screen, _ = _trace_screen(compose_path=compose)
     for _ in range(len(screen._actions) - 1):
-        screen.handle("up")  # the cursor opens on Trace, the last row; walk it up to Compose
+        screen.handle("up")  # the highlight starts on Trace, the last row. Move it up to Compose
     screen.handle("enter")
     await asyncio.sleep(0)
     assert asked == [""]
     assert screen._path_spec == "3d,f2,3d"
     body = _plain(screen.render_body(100))
     assert "3d,f2,3d" in body
-    # the planned route previews outbound *and* the resolved, dimmed return leg,
-    # our own ends spending no words — just the star that stands for us
+    # the planned route previews the outbound leg and the return leg (resolved, and dim).
+    # Our ends have no words: only the star that stands for us
     assert "route  ★ → 3d → f2 → 3d → ★" in body
     assert body.count("3d") >= 2
 
 
 async def test_compose_seeds_from_the_visible_route_not_the_empty_spec() -> None:
-    """Opening Compose resumes from the route on screen, not the stored spec.
+    """Compose starts from the route that is on the screen, not from the stored spec.
 
-    On first open nothing has been composed, but the screen already shows the
-    auto-resolved plan; the composer must open seeded with that plan's hops so the
-    user edits the route they see rather than starting from a blank path.
+    At the first open, the user composed nothing, but the screen already shows the plan that
+    MeshTerm resolved. The composer must start with the hops of that plan. Thus the user
+    edits the route that the user sees and does not start from a blank path.
     """
     asked: list[str] = []
 
     async def compose(current: str):  # noqa: ANN001
         asked.append(current)
-        return None  # observe the seed only; leave the (auto) plan untouched
+        return None  # check only the seed. The (auto) plan does not change
 
     screen, _ = _trace_screen(
         mode="path",
@@ -545,12 +548,12 @@ async def test_compose_seeds_from_the_visible_route_not_the_empty_spec() -> None
     screen._index = screen._actions.index("compose")
     screen.handle("enter")
     await asyncio.sleep(0)
-    assert asked == ["3d,f2"]  # seeded from the visible auto plan, not ""
-    assert screen._path_spec == ""  # None keeps the plan auto (nothing pinned)
+    assert asked == ["3d,f2"]  # it starts from the auto plan that is visible, not ""
+    assert screen._path_spec == ""  # None keeps the plan auto (nothing is pinned)
 
 
 async def test_trace_screen_explore_adopts_a_scenario_path() -> None:
-    """Committing Explore paths runs the flow; adopting sets the spec, None keeps it."""
+    """If the user commits Explore paths, the flow runs. An adopted path sets the spec."""
 
     async def adopt(current: str):  # noqa: ANN001
         return "3d63,f2c2"
@@ -566,16 +569,17 @@ async def test_trace_screen_explore_adopts_a_scenario_path() -> None:
         return None
 
     screen._explore = keep
-    screen.handle("enter")  # the cursor is still on Explore paths
+    screen.handle("enter")  # the highlight is still on Explore paths
     await asyncio.sleep(0)
     assert screen._path_spec == "3d63,f2c2"  # None leaves the spec untouched
 
 
 async def test_trace_screen_action_labels_share_one_column() -> None:
-    """Every action's label starts in the same column, wide mark or narrow.
+    """The label of each action starts in the same column, with a wide mark or a narrow mark.
 
-    ``⚡`` is an emoji — two cells where ``✎``/``⚙``/``#``/``▶`` are one — so a fixed
-    ``"icon "`` prefix would start Explore's label a column right of the rest.
+    ``⚡`` is an emoji. It uses two cells, and ``✎``, ``⚙``, ``#``, and ``▶`` use one. Thus a
+    fixed prefix ``"icon "`` starts the label of Explore one column to the right of the
+    other labels.
     """
     screen, _ = _trace_screen()
     labels = ["Compose path", "Explore paths", "Path width", "Sample count", "Trace —"]
@@ -588,30 +592,31 @@ async def test_trace_screen_action_labels_share_one_column() -> None:
 
 
 def _words_start(row: str) -> int:
-    """The display cell an action row's words begin in — past its pointer and its mark.
+    """The cell where the words of an action row start, after its pointer and its mark.
 
-    Measured in *cells* over the text before the first letter or digit, never as a
-    character index: ``⚡`` is one character drawn in two cells, so a character count
-    would call a misaligned row aligned (and ``#``, the sample-count mark, is no letter).
+    The function measures in cells the text before the first letter or digit. It never
+    uses a character index. ``⚡`` is one character that uses two cells, so a count of
+    characters says that a row that is not aligned is aligned. Also, ``#``, the mark of the
+    sample count, is not a letter.
     """
     return cell_len(row[: next(i for i, ch in enumerate(row) if ch.isalnum())])
 
 
 @pytest.mark.parametrize("platform_name", ["regular", "picocalc-lyra"])
 def test_every_action_row_starts_its_words_in_one_cell_in_both_modes(platform_name: str) -> None:
-    """Every action the screen can draw, in either mode, lit or not, shares one word column.
+    """Each action that the screen can draw, in each mode, lit or not, has one word column.
 
-    The rendered test above reads target mode only, and only the rows it names — so the
-    path walk's ``⇄ Reverse path`` row, which exists nowhere else, was never measured. This
-    asks the screen for its own action list instead, which also pins the other half of the
-    contract: the one column holds *across* modes. ``_ACTION_ICONS`` declares ``⚡`` even in
-    path mode, where no row draws it, so toggling a walk into a target (or back) never nudges
-    the labels sideways under the reader.
+    The rendered test above reads only target mode, and only the rows that it names. Thus
+    it never measured the ``⇄ Reverse path`` row of the path walk, which exists only in
+    path mode. This test asks the screen for its own action list. It also checks the other
+    half of the contract: the one column is the same in both modes. ``_ACTION_ICONS``
+    declares ``⚡`` also in path mode, where no row draws it. Thus when the user changes a
+    walk to a target (or back), the labels do not move to the side.
 
-    The column is measured from the marks the rows actually draw, and every one of those
-    must be in ``_ACTION_ICONS`` — a new action with a mark the tuple doesn't know about is
-    how a two-cell icon lands in a one-cell column. On the PicoCalc the lane is dropped
-    whole, so every word starts straight after the pointer.
+    The test measures the column from the marks that the rows draw. Each of these marks
+    must be in ``_ACTION_ICONS``. If a new action has a mark that the tuple does not know,
+    an icon of two cells goes into a column of one cell. On the PicoCalc the whole lane is
+    removed, so each word starts straight after the pointer.
     """
     from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
     from meshterm.ui.trace_screen import _ACTION_ICONS
@@ -626,24 +631,25 @@ def test_every_action_row_starts_its_words_in_one_cell_in_both_modes(platform_na
             for selected in (False, True):
                 row = screen._action_text(key, selected).plain
                 starts.add(_words_start(row))
-                if platform is REGULAR:  # the mark sits between the pointer and its gap
+                if platform is REGULAR:  # the mark is between the pointer and its gap
                     marks.add(row[2:].split(" ", 1)[0])
     pointer = cell_len("❯ ")
     if platform is REGULAR:
-        # Declared-ness first: an undeclared wide mark eats its own gap ("⚡Explore"), and
-        # that is the diagnosis to read — not the width premise it would also break.
+        # Check the declarations first: a wide mark that is not declared uses its own gap
+        # ("⚡Explore"). This is the diagnosis that the developer must read, not the width
+        # premise that it also breaks.
         assert marks == set(_ACTION_ICONS), "every drawn mark is declared, and nothing else"
         assert {cell_len(mark) for mark in marks} == {1, 2}, "a list of one width proves nothing"
         assert starts == {pointer + 2 + 1}, starts  # the widest mark, then its space
     else:
-        assert starts == {pointer}, starts  # no icon lane, no padding left behind
+        assert starts == {pointer}, starts  # no icon lane, and no padding is left
 
 
 async def test_trace_screen_action_cursor_commits_the_selected_row() -> None:
-    """↑↓ move over the action rows; Enter commits the one under the cursor.
+    """↑↓ move over the action rows. Enter commits the row that has the highlight.
 
-    The rows are the screen's own verbs and nothing else — no exit row closes them, so
-    Trace is the last stop and ↓ from it wraps straight back to Compose path.
+    The rows are only the own verbs of the screen. No exit row ends them, so Trace is the
+    last stop.
     """
     opened: list[str] = []
 
@@ -653,7 +659,7 @@ async def test_trace_screen_action_cursor_commits_the_selected_row() -> None:
 
     screen, _ = _trace_screen(pick_width=width_flow)
     body = _plain(screen.render_body(100))
-    # The menu order the actions read in: build first, tune, then transmit.
+    # The menu order of the actions: build first, then tune, then transmit.
     labels = [
         "Compose path",
         "Explore paths",
@@ -672,7 +678,7 @@ async def test_trace_screen_action_cursor_commits_the_selected_row() -> None:
 
 
 async def test_trace_screen_sample_count_row_opens_its_dialog() -> None:
-    """Committing Sample count floats the flow; its None resolution keeps the spec."""
+    """If the user commits Sample count, the flow floats. If it resolves to None, the spec stays."""
     opened: list[str] = []
 
     async def samples_flow(current):  # noqa: ANN001
@@ -685,11 +691,11 @@ async def test_trace_screen_sample_count_row_opens_its_dialog() -> None:
     screen.handle("enter")
     await asyncio.sleep(0)
     assert opened == ["3d,f2,3d"]
-    assert screen._path_spec == "3d,f2,3d"  # the count is not a spec: nothing changes
+    assert screen._path_spec == "3d,f2,3d"  # the count is not a spec, so nothing changes
 
 
 async def test_trace_screen_hotkeys_are_retired() -> None:
-    """The old w/p/x shortcuts are gone: typing must not float any flow."""
+    """The old shortcuts w, p, and x are removed. If the user types them, no flow floats."""
     opened: list[str] = []
 
     async def flow(current):  # noqa: ANN001
@@ -705,18 +711,18 @@ async def test_trace_screen_hotkeys_are_retired() -> None:
 
 
 async def test_trace_screen_carries_no_exit_row() -> None:
-    """The screen offers only its own verbs; Esc is the way out, and Enter never is."""
+    """The screen offers only its own verbs. Esc is the way out, and Enter is never the way out."""
     screen, _ = _trace_screen()
     screen.future = asyncio.get_running_loop().create_future()
     assert "Back" not in _plain(screen.render_body(100))
-    screen.handle("down")  # Trace wraps to Compose path, not onto an exit row
+    screen.handle("down")  # the highlight stays on Trace and does not go to an exit row
     assert not screen.future.done()
     screen.handle("escape")
     assert screen.future.result() is None
 
 
 async def test_composer_commit_parks_the_cursor_on_trace() -> None:
-    """Committing the composer hands the cursor to Trace, so plain Enter walks it."""
+    """If the user commits the composer, the highlight goes to Trace, so a plain Enter walks it."""
 
     async def compose(current):  # noqa: ANN001
         return "3d,f2,3d"
@@ -727,7 +733,7 @@ async def test_composer_commit_parks_the_cursor_on_trace() -> None:
     await asyncio.sleep(0)
     assert screen._actions[screen._index] == "trace"
 
-    # The hand-back is the composer's alone: the width flow keeps the cursor put.
+    # Only the composer moves the highlight: the width flow keeps it where it is.
     async def width(current):  # noqa: ANN001
         return "3d63,f2c2,3d63"
 
@@ -739,10 +745,10 @@ async def test_composer_commit_parks_the_cursor_on_trace() -> None:
 
 
 async def test_composer_escape_leaves_the_cursor_where_it_was() -> None:
-    """Backing out of the composer with Esc moves nothing."""
+    """If the user leaves the composer with Esc, the highlight does not move."""
 
     async def compose(current):  # noqa: ANN001
-        return None  # the composer's Esc resolution
+        return None  # the result of the composer when the user presses Esc
 
     screen, _ = _trace_screen(compose_path=compose)
     screen._index = screen._actions.index("compose")
@@ -751,11 +757,11 @@ async def test_composer_escape_leaves_the_cursor_where_it_was() -> None:
     assert screen._actions[screen._index] == "compose"
 
 
-# --- the no-cheat rule on Trace ------------------------------------------------------
+# --- the rule on Trace that forbids cheating -----------------------------------------
 
 
 async def _settle(screen) -> None:  # noqa: ANN001
-    """Let a just-committed dialog task run, then any trace worker it started."""
+    """Let the task of a dialog that was just committed run, then the trace worker it started."""
     for _ in range(5):
         await asyncio.sleep(0)
     if screen._worker is not None:
@@ -763,7 +769,10 @@ async def _settle(screen) -> None:  # noqa: ANN001
 
 
 async def test_ineligible_walk_gates_trace_behind_an_amber_confirm() -> None:
-    """A same-direction link recross floats Cancel/Trace and cancels cleanly."""
+    """A walk that crosses a link again in the same direction floats Cancel and Trace.
+
+    Cancel has no side effect.
+    """
     ran: list[str] = []
 
     async def trace(path_spec, on_trace):  # noqa: ANN001
@@ -771,25 +780,25 @@ async def test_ineligible_walk_gates_trace_behind_an_amber_confirm() -> None:
         on_trace(_trace(5.0))
 
     screen, session = _trace_screen(trace=trace, mode="path")
-    screen._path_spec = "3d,f2,3d,f2"  # rides 3d → f2 twice the same way
+    screen._path_spec = "3d,f2,3d,f2"  # it goes 3d → f2 two times in the same direction
     screen._index = screen._actions.index("trace")
-    screen.handle("enter")  # dialog_answer None = Cancel/Esc
+    screen.handle("enter")  # dialog_answer None means Cancel or Esc
     await _settle(screen)
     prompt, buttons, kwargs = session.dialogs[0]
     assert [label for label, _ in buttons] == ["Cancel", "Trace"]
-    assert kwargs["default"] == 1  # Trace on the right and default: Enter commits it
+    assert kwargs["default"] == 1  # Trace is on the right and is the default: Enter commits it
     assert kwargs["border_style"] == "warn"  # the amber caution tier
-    assert "trail" in prompt.plain  # the graph-theory name reaches the user
-    assert ran == []  # cancelled: nothing transmitted
+    assert "trail" in prompt.plain  # the user sees the graph-theory name
+    assert ran == []  # cancelled: nothing was transmitted
 
     session.dialog_answer = "trace"
     screen.handle("enter")
     await _settle(screen)
-    assert ran == ["3d,f2,3d,f2"]  # confirmed: the walk still flies
+    assert ran == ["3d,f2,3d,f2"]  # confirmed: the walk is still transmitted
 
 
 async def test_eligible_walk_traces_without_a_confirm() -> None:
-    """An out-and-back walk recrosses links the other way only — no dialog, no nag."""
+    """An out-and-back walk crosses links again only the other way, so there is no dialog."""
     screen, session = _trace_screen(mode="path")
     screen._path_spec = "3d,f2,3d"
     screen._index = screen._actions.index("trace")
@@ -803,7 +812,7 @@ async def test_eligible_walk_traces_without_a_confirm() -> None:
 
 
 async def test_record_run_floats_the_new_record_dialog() -> None:
-    """A run that placed floats one dialog; Close (the default) keeps the screen up."""
+    """A run that placed floats one dialog. Close (the default) keeps the screen open."""
 
     async def trace(path_spec, on_trace):  # noqa: ANN001
         on_trace(_trace(5.0), ["Most nodes — 4 nodes"])
@@ -812,23 +821,23 @@ async def test_record_run_floats_the_new_record_dialog() -> None:
     screen.future = asyncio.get_running_loop().create_future()
     screen.start_trace()
     await screen._worker
-    await _settle(screen)  # the announcement task floats after the run settles
+    await _settle(screen)  # the task for the announcement floats after the run settles
     prompt, buttons, kwargs = session.dialogs[0]
     assert "Most nodes — 4 nodes" in prompt.plain
     assert [label for label, _ in buttons] == ["Trophy case", "Close"]
-    assert kwargs["default"] == 1  # Close is the default: Enter simply dismisses
+    assert kwargs["default"] == 1  # Close is the default: Enter closes the dialog
     assert kwargs["title"] == "New record"
-    assert not screen.future.done()  # Close/Esc: the screen stays up
-    assert screen._run_placed == {}  # announced once, not again on the next run
+    assert not screen.future.done()  # Close or Esc: the screen stays open
+    assert screen._run_placed == {}  # announced once, and not again at the next run
 
 
 async def test_record_dialog_trophy_case_opens_over_the_trace_it_was_earned_on() -> None:
-    """Choosing Trophy case opens it *above* the trace screen, which stays up underneath.
+    """If the user selects Trophy case, it opens above the trace screen, which stays open under it.
 
-    It used to resolve the whole screen with a sentinel so the trace unwound away first and
-    the reader landed on the main menu. Navigation is a strict stack now: a sub-view nests,
-    Esc from the trophy case is one pop back onto the trace that earned the record, and ^W is
-    what leaves the whole excursion.
+    Before, the code resolved the whole screen with a sentinel. The trace went away first, and
+    the user came to the main menu. Navigation is now a strict stack: a sub-view nests. Esc
+    from the trophy case is one pop back to the trace that earned the record, and ^W
+    leaves the whole excursion.
     """
     opened: list[str] = []
 
@@ -846,13 +855,16 @@ async def test_record_dialog_trophy_case_opens_over_the_trace_it_was_earned_on()
     await _settle(screen)
     _prompt, _buttons, kwargs = session.dialogs[0]
     assert kwargs["title"] == "2 new records"  # one dialog for the whole run
-    assert len(session.dialogs) == 1  # however many samples scored
+    assert len(session.dialogs) == 1  # for each number of samples that scored
     assert opened == ["trophy case"]
     assert not screen.future.done(), "the trace screen stays up under the trophy case"
 
 
 async def test_escaping_mid_run_skips_the_record_dialog() -> None:
-    """Esc while records are banked leaves quietly — no popup chases the user out."""
+    """If the user presses Esc while the run has records, the screen leaves with no dialog.
+
+    No dialog follows the user out of the screen.
+    """
     release = asyncio.Event()
 
     async def trace(path_spec, on_trace):  # noqa: ANN001
@@ -863,7 +875,7 @@ async def test_escaping_mid_run_skips_the_record_dialog() -> None:
     screen.future = asyncio.get_running_loop().create_future()
     screen.start_trace()
     await asyncio.sleep(0)
-    screen.handle("escape")  # resolves the screen and cancels the run
+    screen.handle("escape")  # it resolves the screen and cancels the run
     with pytest.raises(asyncio.CancelledError):
         await screen._worker
     for _ in range(3):
@@ -872,53 +884,53 @@ async def test_escaping_mid_run_skips_the_record_dialog() -> None:
 
 
 def test_planned_route_dims_only_the_mirrored_return_leg() -> None:
-    """A palindromic target-mode spec dims its second half; hand walks never dim.
+    """A palindromic spec in target mode dims its second half. Walks that the user writes never dim.
 
-    Both ends are ours, so both go bare: the line opens and closes on a lone arrow.
+    Both ends are ours, so both ends are bare: the line starts and ends with a lone arrow.
     """
     screen, _ = _trace_screen()
 
     def faint_cells(text) -> int:  # noqa: ANN001
         return sum(span.end - span.start for span in text.spans if "faint" in str(span.style))
 
-    screen._path_spec = "3d,f2,3d"  # symmetric boomerang: the mirror is dimmed
+    screen._path_spec = "3d,f2,3d"  # a symmetric boomerang: the mirror is dim
     symmetric = screen._planned_route().text()
     assert symmetric.plain == "★ → 3d → f2 → 3d → ★"
-    screen._path_spec = "3d,f2,27"  # a stale hand walk: every hop is the user's
+    screen._path_spec = "3d,f2,27"  # an old walk that the user wrote: each hop is the user's
     custom = screen._planned_route().text()
     assert custom.plain == "★ → 3d → f2 → 27 → ★"
     assert faint_cells(symmetric) > faint_cells(custom)
 
-    # In path mode even a there-and-back-the-same-way walk is fully hand-composed,
-    # so a palindrome must NOT read as "not yours to compose".
+    # In path mode, even a walk that goes there and back the same way is fully composed by
+    # the user. Thus a palindrome must not look "not yours to compose".
     walk, _ = _trace_screen(mode="path")
     walk._path_spec = "3d,f2,3d"
     assert faint_cells(walk._planned_route().text()) == faint_cells(custom)
 
 
 def test_route_lane_wraps_at_hop_boundaries_under_its_own_column() -> None:
-    """A route too wide for the lane breaks between hops, never inside one.
+    """A route that is too wide for the lane breaks between hops, never inside a hop.
 
-    Every continuation hangs under the value column (never back at column zero), the
-    line it continues from ends on the ``→`` cue, and every name survives whole — the
-    lane names nodes and leaves the hex to the ``path`` lane below it.
+    Each continuation line hangs under the value column (never at column zero). The line
+    that it continues from ends with the ``→`` cue. Each name stays whole: the lane has
+    the names of nodes, and the ``path`` lane under it has the hex.
     """
     names = {"3d": "Hilltop-Repeater", "f2": "Mile-End-Rooftop", "27": "Beaubien-Sud"}
     screen, _ = _trace_screen(mode="path")
     screen._resolve = lambda h: names.get(h, h)
     screen._path_spec = "3d,f2,27"
     lines = [line.plain for line in screen._route_value(None, 60)]
-    assert len(lines) > 1  # it really did wrap at this width
+    assert len(lines) > 1  # it did wrap at this width
     assert all(len(line) <= 60 for line in lines)
-    assert all(line.startswith(" " * 7) for line in lines[1:])  # hanging, not column 0
+    assert all(line.startswith(" " * 7) for line in lines[1:])  # hanging, not at column 0
     assert all(line.rstrip().endswith("→") for line in lines[:-1])
-    for hop, name in names.items():  # names whole, and no hash trailing any of them
+    for hop, name in names.items():  # the names are whole, and no hash follows any of them
         assert any(name in line for line in lines)
         assert all(f"({hop})" not in line for line in lines)
 
 
 def test_path_lane_breaks_the_wire_spec_after_a_comma() -> None:
-    """The spec lane stays the verbatim wire string, folding only at its commas."""
+    """The spec lane stays the exact wire string. It folds only at its commas."""
     screen, _ = _trace_screen(mode="path")
     screen._path_spec = "3d63ab99,7f21cd01,27aa1122,f2c20099"
     lines = [line.plain for line in screen._path_value(None, 44)]
@@ -926,40 +938,40 @@ def test_path_lane_breaks_the_wire_spec_after_a_comma() -> None:
     assert all(len(line) <= 44 for line in lines)
     assert lines[0].endswith(",")  # the comma is the cue, not an arrow
     spec = "".join(line.strip() for line in lines)
-    assert spec.startswith(screen._path_spec)  # character for character, hop count after
+    assert spec.startswith(screen._path_spec)  # character for character, then the hop count
 
 
 def test_summary_appends_the_displayed_hop_count() -> None:
-    """The path row ends with how many nodes the displayed route passes through."""
+    """The path row ends with the number of nodes that the displayed route goes through."""
     screen, _ = _trace_screen()
     screen._path_spec = "3d,f2,3d"
     assert "· 3 hops" in _plain(screen.render_body(100))
-    screen._on_trace(_trace(5.0, 2.0))  # a live 2-hop route now outranks the plan
+    screen._on_trace(_trace(5.0, 2.0))  # a live route of 2 hops now has a higher rank than the plan
     assert "· 2 hops" in _plain(screen.render_body(100))
 
 
 def test_auto_resolved_route_renders_with_its_provenance() -> None:
-    """With no composed path, the auto route shows as the plan, labelled with its source.
+    """If the user composed no path, the auto route shows as the plan, with a label for its source.
 
-    What the screen draws is exactly what Trace will put on the air (both read the
-    same resolver), so the user can see the forced boomerang — and where it came
-    from — before committing a transmission.
+    The screen draws exactly what Trace will put on the air, because both read the same
+    resolver. Thus the user can see the forced boomerang, and where it came from, before the
+    user commits a transmission.
     """
     screen, _ = _trace_screen(
         auto_spec=lambda: "3d63,f2c2,aabb,f2c2,3d63", auto_source="last trace · Jul 09 14:32"
     )
     plan = screen._planned_route().text().plain
     assert "→ 3d63 → f2c2 → aabb → f2c2 → 3d63 →" in plan
-    # The provenance hangs on its own line under the route, not inside the path itself.
+    # The source hangs on its own line under the route. It is not inside the path.
     route = "\n".join(line.plain for line in screen._route_value(None, 100))
     assert route.endswith("(auto · last trace · Jul 09 14:32)")
     body = _plain(screen.render_body(100))
-    assert "auto · last trace · Jul 09 14:32" in body  # the summary's path row
+    assert "auto · last trace · Jul 09 14:32" in body  # the path row of the summary
     assert "· 5 hops" in body
 
 
 def test_composed_path_outranks_the_auto_route() -> None:
-    """A hand-composed spec replaces the auto plan everywhere — display and wire."""
+    """A spec that the user composed replaces the auto plan in the display and on the wire."""
     screen, _ = _trace_screen(auto_spec=lambda: "aabb", auto_source="device route")
     screen._path_spec = "3d63,aabb,3d63"
     plan = screen._planned_route().text().plain
@@ -969,25 +981,25 @@ def test_composed_path_outranks_the_auto_route() -> None:
 
 
 def test_unaddressable_target_reads_as_path_less_auto() -> None:
-    """With nothing to force (no target hash), the summary says so instead of lying."""
+    """If there is nothing to force (no target hash), the summary says this and shows no path."""
     screen, _ = _trace_screen()  # auto_spec resolves ""
     assert "auto — path-less (unknown target)" in _plain(screen.render_body(100))
 
 
 def test_trace_log_section_hidden_until_there_is_something_to_log() -> None:
-    """Idle with no traces, the Traces heading (and its old hint) don't render."""
+    """If the screen is idle with no traces, the Traces heading (and its old hint) do not show."""
     screen, _ = _trace_screen()
     assert "Traces" not in _plain(screen.render_body(100))
 
 
 async def test_trace_screen_path_mode_gates_trace_and_drops_explore() -> None:
-    """Path mode: no Explore row, and Trace stays inert until a path exists."""
+    """Path mode has no Explore row, and Trace does nothing until a path exists."""
     screen, _ = _trace_screen(mode="path")
     body = _plain(screen.render_body(100))
     assert "Explore paths" not in body
     assert "Trace — compose a path first" in body
     assert "none — compose a path" in body
-    screen.handle("enter")  # the cursor opens on Trace, but there is nothing to walk
+    screen.handle("enter")  # the highlight starts on Trace, but there is nothing to walk
     assert not screen._running and screen._worker is None
     screen._path_spec = "3d,f2"
     assert "Trace — one transmission" in _plain(screen.render_body(100))
@@ -998,22 +1010,22 @@ async def test_trace_screen_path_mode_gates_trace_and_drops_explore() -> None:
 
 
 async def test_trace_screen_path_mode_arms_from_the_previous_walk() -> None:
-    """The last stored walk isn't just displayed — it's the path Enter walks.
+    """The last stored walk is not only displayed. It is the path that Enter walks.
 
-    Path mode's auto route (the previous successful walk) must arm Trace exactly
-    like a composed spec, and read as the plan with its provenance, so the screen
-    never shows a route it then refuses to trace.
+    The auto route in path mode (the previous successful walk) must prepare Trace in the same
+    way as a composed spec. It must show as the plan with its source. Thus the screen never
+    shows a route that it then refuses to trace.
     """
     screen, _ = _trace_screen(
         mode="path", auto_spec=lambda: "3d,f2", auto_source="last walk · Jul 09 14:32"
     )
     body = _plain(screen.render_body(100))
-    assert "Trace — one transmission" in body  # armed, not "compose a path first"
-    assert "auto · last walk · Jul 09 14:32" in body  # the summary's path row
+    assert "Trace — one transmission" in body  # ready, not "compose a path first"
+    assert "auto · last walk · Jul 09 14:32" in body  # the path row of the summary
     plan = screen._planned_route().text().plain
     assert "→ 3d → f2 →" in plan
     assert "(auto · last walk · Jul 09 14:32)" in body  # hanging under the route
-    screen.handle("enter")  # the cursor opens on Trace
+    screen.handle("enter")  # the highlight starts on Trace
     assert screen._running
     await screen._worker
     assert len(screen._traces) == 1
@@ -1022,8 +1034,8 @@ async def test_trace_screen_path_mode_arms_from_the_previous_walk() -> None:
 def test_reverse_is_a_path_mode_only_action() -> None:
     """A target route is a symmetric boomerang, so only path mode offers Reverse.
 
-    In path mode the row sits in the build-path group, between Compose and the
-    trace-settings, so the whole "define the path" cluster reads together.
+    In path mode the row is in the build-path group, between Compose and the trace settings.
+    Thus the whole group "define the path" is together.
     """
     target, _ = _trace_screen(mode="target")
     assert "reverse" not in target._actions
@@ -1036,47 +1048,47 @@ def test_reverse_is_a_path_mode_only_action() -> None:
 
 
 async def test_reverse_flips_a_path_walk_and_restarts_the_run() -> None:
-    """Reverse flips the hop order and clears the forward run, like any path change."""
+    """Reverse flips the hop order and clears the forward run, as each path change does."""
     screen, _ = _trace_screen(mode="path")
     screen._path_spec = "3d,f2,27"
     screen.start_trace()
     await screen._worker
-    assert screen._traces  # a forward reading stands
+    assert screen._traces  # a forward reading exists
     screen._index = screen._actions.index("reverse")
     screen.handle("enter")
-    assert screen._path_spec == "27,f2,3d"  # end-for-end
-    assert screen._traces == []  # the forward aggregates cleared
-    assert screen._total_traces == 1  # the session count survives the restart
+    assert screen._path_spec == "27,f2,3d"  # from end to end
+    assert screen._traces == []  # the forward aggregates are cleared
+    assert screen._total_traces == 1  # the session count stays after the restart
     assert "→ 27 → f2 → 3d →" in screen._planned_route().text().plain
 
 
 def test_reverse_adopts_and_flips_the_visible_auto_walk() -> None:
-    """With only the auto walk showing, Reverse pins its mirror as the path to walk."""
+    """If only the auto walk shows, Reverse pins its mirror as the path to walk."""
     screen, _ = _trace_screen(mode="path", auto_spec=lambda: "3d,f2", auto_source="last walk")
-    assert screen._path_spec == ""  # nothing composed yet; the plan is auto
+    assert screen._path_spec == ""  # the user composed nothing yet, so the plan is auto
     screen._index = screen._actions.index("reverse")
     screen.handle("enter")
-    assert screen._path_spec == "f2,3d"  # the shown auto walk, flipped and pinned
+    assert screen._path_spec == "f2,3d"  # the auto walk that shows, flipped and pinned
     assert "→ f2 → 3d →" in screen._planned_route().text().plain
 
 
 def test_reverse_is_inert_without_a_reversible_path() -> None:
-    """No path (or a single hop, its own mirror) leaves nothing to flip."""
+    """If there is no path (or only one hop, which is its own mirror), there is nothing to flip."""
     screen, _ = _trace_screen(mode="path")  # no spec, no auto walk
     assert "Reverse path — compose a path first" in _plain(screen.render_body(100))
     screen._index = screen._actions.index("reverse")
     screen.handle("enter")
     assert screen._path_spec == ""
-    screen._path_spec = "3d"  # a lone hop reverses to itself
+    screen._path_spec = "3d"  # one hop reverses to itself
     screen.handle("enter")
     assert screen._path_spec == "3d"
 
 
 async def test_adopting_a_new_path_restarts_the_measurement() -> None:
-    """A different spec clears the aggregates and log, like a freshly opened screen.
+    """A different spec clears the aggregates and the log, as a screen that was just opened.
 
-    The old numbers described the old route; only the screen-lifetime total (what
-    the owner reports as the session's trace count) survives the reset.
+    The old numbers described the old route. Only the total for the life of the screen
+    survives the reset. The owner reports this total as the trace count of the session.
     """
 
     async def compose(current: str):  # noqa: ANN001
@@ -1094,14 +1106,14 @@ async def test_adopting_a_new_path_restarts_the_measurement() -> None:
     assert screen._traces == []
     body = _plain(screen.render_body(100))
     assert "Traces" not in body and "Per-hop medians" not in body
-    assert screen._total_traces == 1  # the session count is not rewritten
+    assert screen._total_traces == 1  # the session count is not written again
 
 
 async def test_keeping_the_same_path_keeps_the_stats() -> None:
-    """Flows that resolve None or the unchanged spec never touch the accumulated run."""
+    """Flows that resolve to None or to the unchanged spec never change the collected run."""
 
     async def keep(current: str):  # noqa: ANN001
-        return current  # e.g. the width dialog re-rendering to an identical spec
+        return current  # for example, the width dialog that renders again to an identical spec
 
     screen, _ = _trace_screen(compose_path=keep)
     screen._path_spec = "3d,f2,3d"
@@ -1116,18 +1128,21 @@ async def test_keeping_the_same_path_keeps_the_stats() -> None:
 
 
 async def test_trace_screen_opens_idle_until_enter() -> None:
-    """Selecting a target must never transmit by itself: nothing flies until Enter."""
+    """If the user selects a target, the screen must not transmit by itself until Enter."""
     screen, session = _trace_screen()
     assert not screen._running and screen._worker is None
     assert "press Enter to trace" in _plain(screen.render_body(100))
     screen.handle("enter")
     assert screen._running
     await screen._worker
-    assert session.stack == []  # the tracing dialog was popped with the trace
+    assert session.stack == []  # the tracing dialog was popped when the trace ended
 
 
 async def test_trace_screen_floats_the_tracing_dialog() -> None:
-    """A trace pushes the abortable dialog for its duration and pops it however it ends."""
+    """A trace pushes the dialog that can abort it for the time of the trace.
+
+    It pops the dialog when the trace ends, in each case.
+    """
     release = asyncio.Event()
 
     async def trace(path_spec, on_trace):  # noqa: ANN001
@@ -1139,7 +1154,7 @@ async def test_trace_screen_floats_the_tracing_dialog() -> None:
     await asyncio.sleep(0)
     assert len(session.stack) == 1
     dialog = session.stack[0]
-    assert dialog.last is not None  # the landed reply echoes on the dialog
+    assert dialog.last is not None  # the reply that arrived shows on the dialog
     body = _plain(dialog.render_body(60))
     assert "Abort" in body
     release.set()
@@ -1148,7 +1163,7 @@ async def test_trace_screen_floats_the_tracing_dialog() -> None:
 
 
 async def test_tracing_dialog_abort_cancels_the_trace() -> None:
-    """Enter/Esc on the tracing dialog cancels the in-flight trace via the screen."""
+    """Enter or Esc on the tracing dialog cancels the trace in progress, through the screen."""
     release = asyncio.Event()
 
     async def trace(path_spec, on_trace):  # noqa: ANN001
@@ -1228,37 +1243,38 @@ def _result(best_tx: int = 19, best_snr: float | None = 8.8) -> TxOptResult:
 
 
 def test_sweep_screen_opens_armed_and_idle_on_sweep() -> None:
-    """The screen opens with the cursor on Sweep and nothing transmitted."""
+    """The screen opens with the highlight on Sweep, and nothing is transmitted."""
     ran: list[bool] = []
     screen, _ = _sweep_screen(run_sweep=lambda: ran.append(True))
     body = _plain(screen.render_body(100))
     assert "Sweep — up to" in body and "Route — direct to Repeater" in body
     assert not screen.running and ran == []
-    screen.handle("enter")  # the cursor opens on Sweep
+    screen.handle("enter")  # the highlight starts on Sweep
     assert ran == [True]
 
 
 def test_sweep_screen_quotes_the_transmission_budget() -> None:
-    """The Sweep row's worst case tracks the window, step, and samples."""
+    """The worst case on the Sweep row follows the window, the step, and the samples."""
     screen, _ = _sweep_screen()
-    # 12–28 step 3 → 7 coarse levels (28 appended); refine ≤ 4; verify 1 → 12 × 3.
+    # 12–28 with step 3 gives 7 coarse levels (28 is added). Refine has a maximum of 4.
+    # Verify is 1. The total is 12 × 3.
     assert screen.estimated_traces() == 36
     screen.samples = 1
     screen.step = 1
-    # Every level measured up front (17), no refine grid, one verify batch.
+    # The sweep measures each level first (17), with no refine grid and one verify batch.
     assert screen.estimated_traces() == 18
     assert "up to 18 paced transmissions" in _plain(screen.render_body(100))
 
 
 def test_sweep_screen_stars_the_running_best() -> None:
-    """Each landed level renders ascending by TX with the current best starred."""
+    """Each level that arrived renders in ascending order of TX, with a star on the current best."""
     screen, _ = _sweep_screen()
     screen.on_phase("coarse")
     screen.on_level(1, 7, _level(12, -2.0))
     screen.on_level(2, 7, _level(18, 7.5))
     assert screen.phase_label() == "coarse sweep · level 2/7"
-    # The route lane wears ★ for our own ends, so the star that marks the winner is the
-    # one in the levels table — a row that also carries the level's reading.
+    # The route lane has ★ for our ends, so the star that marks the winner is the one in the
+    # levels table. That row also has the reading of the level.
     starred = next(
         line
         for line in _plain(screen.render_body(100)).splitlines()
@@ -1268,27 +1284,27 @@ def test_sweep_screen_stars_the_running_best() -> None:
 
 
 def test_sweep_screen_shows_failed_levels_distinctly() -> None:
-    """A level nothing got through at reads as a no-reply row, not an empty bar."""
+    """A level where nothing got through shows as a no-reply row, not as an empty bar."""
     screen, _ = _sweep_screen()
     screen.on_level(1, 7, _level(28, None, successes=0))
     assert "✗ no reply" in _plain(screen.render_body(100))
 
 
 def test_sweep_screen_completion_offers_the_winner() -> None:
-    """Completion lands the cursor on the new Apply row; Enter re-offers the dialog."""
+    """When the sweep completes, the highlight goes to the new Apply row. Enter offers it again."""
     offered: list[bool] = []
     screen, _ = _sweep_screen(apply_winner=lambda: offered.append(True))
-    assert "apply" not in screen._actions  # nothing to apply while measuring
+    assert "apply" not in screen._actions  # nothing to apply while the sweep measures
     screen.complete(_result())
     body = _plain(screen.render_body(100))
     assert "best" in body and "TX 19" in body
     assert "Apply winner — set TX 19 on Repeater" in body
-    screen.handle("enter")  # the cursor parked itself on Apply
+    screen.handle("enter")  # the highlight moved to Apply by itself
     assert offered == [True]
 
 
 def test_sweep_screen_apply_updates_status_and_retires_the_row() -> None:
-    """Marking the winner applied flips the status line and removes the Apply row."""
+    """If the winner is marked as applied, the status line changes and the Apply row goes."""
     offered: list[bool] = []
     screen, _ = _sweep_screen(apply_winner=lambda: offered.append(True))
     screen.complete(_result())
@@ -1301,7 +1317,7 @@ def test_sweep_screen_apply_updates_status_and_retires_the_row() -> None:
 
 
 def test_sweep_screen_no_result_never_offers_apply() -> None:
-    """A sweep where nothing got through warns and never grows an Apply row."""
+    """A sweep where nothing got through shows a warning and never adds an Apply row."""
     screen, _ = _sweep_screen()
     screen.complete(_result(best_snr=None))
     body = _plain(screen.render_body(100))
@@ -1310,7 +1326,7 @@ def test_sweep_screen_no_result_never_offers_apply() -> None:
 
 
 def test_sweep_screen_failure_keeps_measured_levels_on_screen() -> None:
-    """A mid-sweep error is reported while the levels already measured stay visible."""
+    """An error in the middle of a sweep is reported. The levels that were measured stay visible."""
     screen, _ = _sweep_screen()
     screen.on_level(1, 7, _level(12, -2.0))
     screen.fail("link lost")
@@ -1320,7 +1336,7 @@ def test_sweep_screen_failure_keeps_measured_levels_on_screen() -> None:
 
 
 def test_sweep_screen_new_sweep_clears_the_old_evidence() -> None:
-    """Starting another sweep is a new measurement: chart and outcome reset."""
+    """Another sweep is a new measurement, so the chart and the outcome reset."""
     screen, _ = _sweep_screen()
     screen.on_level(1, 7, _level(12, -2.0))
     screen.complete(_result())
@@ -1337,7 +1353,7 @@ def test_sweep_screen_new_sweep_clears_the_old_evidence() -> None:
 
 
 def test_sweep_screen_escape_resolves() -> None:
-    """Esc resolves the screen (the controller then cancels and restores)."""
+    """Esc resolves the screen (the controller then cancels the sweep and restores the setting)."""
     screen, _ = _sweep_screen()
 
     class _Fut:
@@ -1358,17 +1374,17 @@ def test_sweep_screen_escape_resolves() -> None:
 
 
 def test_parse_tx_range_clamps_and_rejects() -> None:
-    """The typed window accepts two ordered numbers and clamps to the remote range."""
+    """The typed window accepts two numbers in order, and clamps to the remote range."""
     from meshterm.ui.tx_screen import parse_tx_range
 
     assert parse_tx_range("14-24") == (14, 24)
     assert parse_tx_range("14 24") == (14, 24)
-    assert parse_tx_range("2-99") == (12, 28)  # clamped to the firmware window
+    assert parse_tx_range("2-99") == (12, 28)  # it clamps to the firmware window
     assert parse_tx_range("24-14") is None
     assert parse_tx_range("banana") is None
 
 
-# --- explore-paths scenario rows --------------------------------------------------
+# --- the scenario rows of explore paths --------------------------------------------
 
 _US = "aaaaaaaaaaaa"
 _HUB = Contact(name="Hub", public_key="3d63c6429436" + "0" * 52, key_prefix="3d63c6429436")
@@ -1386,10 +1402,10 @@ def _scenario_topo() -> object:
 
 
 def test_scenario_path_leads_and_ends_with_us_and_the_target() -> None:
-    """A scenario path leads and ends with us and the target.
+    """A scenario path starts with us and ends with the target.
 
-    The pathline draws the whole boomerang leg, not just the stored intermediate hops,
-    with our own end bare since every candidate starts from us.
+    The path line draws the whole boomerang leg, not only the stored hops between. Our end
+    is bare, because each candidate starts from us.
     """
     topo = _scenario_topo()
     scenario = PathScenario(
@@ -1403,7 +1419,7 @@ def test_scenario_path_leads_and_ends_with_us_and_the_target() -> None:
 
 
 def test_scenario_path_direct_scenario_still_names_both_endpoints() -> None:
-    """A direct (no-repeaters) scenario's pathline is just our star and the target."""
+    """The path line of a direct scenario (no repeaters) is only our star and the target."""
     topo = _scenario_topo()
     scenario = PathScenario(label="direct", hops=(), source="direct", score=0.0)
     text = _scenario_path(scenario, topo, "f2c24f54551e", device_label="Hub-Me", width_bytes=1)
@@ -1411,13 +1427,13 @@ def test_scenario_path_direct_scenario_still_names_both_endpoints() -> None:
 
 
 def test_scenario_path_cuts_a_long_candidate_rather_than_eliding_its_middle() -> None:
-    """Every row is cut the way the highlighted one is at shift zero — no ``⋯`` rescue.
+    """Each row is cut as the highlighted row is cut at shift zero. It does not use ``⋯``.
 
-    The middle-elide exists to save a route's two endpoints, and here both endpoints are
-    the same two on every row by construction (our own ``★``, the one target the screen is
-    about), so it would spend cells on what the reader knows and take them off the
-    candidates' *front* — the only part that differs. Cutting also stops the row being
-    redrawn the moment the cursor lands on it (JP, 2026-08-10).
+    The elision in the middle exists to keep the two ends of a route. Here both ends are the
+    same on each row by design (our ``★``, and the one target that the screen is about). If
+    the elision ran, it used cells for what the user already knows, and it took them from the
+    front of the candidates, which is the only part that is different. A cut also stops the
+    row from changing when the highlight goes to it (JP, 2026-08-10).
     """
     topo = _scenario_topo()
     scenario = PathScenario(
@@ -1436,12 +1452,12 @@ def test_scenario_path_cuts_a_long_candidate_rather_than_eliding_its_middle() ->
         width=full.cell_len - 3,
     )
     assert narrow.cell_len <= full.cell_len - 3
-    assert "⋯" not in narrow.plain  # nothing elided out of the middle…
-    assert narrow.plain.startswith("★ → Hub")  # …the head is intact, the tail is what went
+    assert "⋯" not in narrow.plain  # nothing is elided from the middle…
+    assert narrow.plain.startswith("★ → Hub")  # …the head is whole, and the tail is cut
 
 
 def test_scenario_detail_leads_with_the_hop_count() -> None:
-    """The stats line under a candidate opens with how long the route is."""
+    """The stats line under a candidate starts with the length of the route."""
     scenario = PathScenario(
         label="observed path",
         hops=("3d63c6429436", "f2c24f54551e"),
@@ -1451,14 +1467,14 @@ def test_scenario_detail_leads_with_the_hop_count() -> None:
         samples=2,
     )
     assert _scenario_detail(scenario).plain.startswith("2 hops  ·  ")
-    # The direct shot's provenance tag *was* this same word, so the atom absorbs it rather
-    # than the row reading "direct  ·  direct".
+    # The source tag of the direct shot is this same word, so the atom takes it in. Thus the
+    # row does not show "direct  ·  direct".
     direct = PathScenario(label="direct", hops=(), source="direct", score=0.0, samples=1)
     assert direct.label == "direct" and _scenario_detail(direct).plain.count("direct") == 1
 
 
 def test_scenario_detail_carries_provenance_snr_and_samples() -> None:
-    """The device/direct provenance tag, weakest SNR, and sample count all show, in order."""
+    """The source tag (device or direct), the weakest SNR, and the sample count show, in order."""
     scenario = PathScenario(
         label="device route",
         hops=("3d63c6429436",),
@@ -1474,7 +1490,7 @@ def test_scenario_detail_carries_provenance_snr_and_samples() -> None:
 
 
 def test_scenario_detail_observed_carries_no_provenance_tag() -> None:
-    """An observed candidate's detail line skips the tag — the route itself is the point."""
+    """The detail line of an observed candidate has no tag, because the route is the point."""
     scenario = PathScenario(
         label="observed path",
         hops=("3d63c6429436",),
@@ -1489,7 +1505,7 @@ def test_scenario_detail_observed_carries_no_provenance_tag() -> None:
 
 
 def test_scenario_detail_unscored_scenario_reads_unobserved() -> None:
-    """A scenario with no evidence at all (score 0, no samples) reads plainly unobserved."""
+    """A scenario with no evidence (score 0, no samples) shows as unobserved."""
     scenario = PathScenario(label="direct", hops=(), source="direct", score=0.0)
     detail = _scenario_detail(scenario)
     assert "direct" in detail.plain

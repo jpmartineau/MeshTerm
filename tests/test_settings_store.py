@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for remembering device settings across sessions (``core.settings_store``).
+"""Tests for the memory of device settings across sessions (``core.settings_store``).
 
-Covers the durable per-device store, the drift detection that compares remembered values to a
-device's live snapshot, and the ``restore``/``adopt`` reconcile actions the startup offer drives.
-The reconcile tests run against the :class:`MockDevice` simulator, whose configuration resets to
-firmware defaults each construction — standing in for the firmware-less radio bridge that forgets
-its settings on restart.
+The tests cover three parts. The first is the durable store for each device. The second is
+the drift detection, which compares the remembered values with the live snapshot of a device.
+The third is the ``restore`` and ``adopt`` reconcile actions that the offer at startup runs.
+The reconcile tests run against the :class:`MockDevice` simulator. Its configuration resets
+to the firmware defaults at each construction. This is like the radio bridge with no firmware,
+which forgets its settings at a restart.
 """
 
 from __future__ import annotations
@@ -38,7 +39,7 @@ PUB_B = "bb" * 32
 
 @pytest.fixture()
 def ctx(tmp_path: Path) -> AppContext:
-    """A mock-backed application context with the plain (console) UI surface."""
+    """An application context that uses the mock, with the plain (console) UI surface."""
     settings = Settings(config_dir=tmp_path, db_path=tmp_path / "cfg.db")
     context = AppContext(
         console=Console(file=io.StringIO()),
@@ -56,7 +57,10 @@ def ctx(tmp_path: Path) -> AppContext:
 
 
 def test_store_round_trips_and_persists(tmp_path: Path) -> None:
-    """Remembered settings survive a fresh store instance, kept per device."""
+    """Remembered settings stay in a new store instance.
+
+    The store keeps them for each device.
+    """
     path = tmp_path / "settings.json"
     store = SettingsStore(path)
     store.remember(PUB_A, "name", "Ops-Node")
@@ -65,14 +69,14 @@ def test_store_round_trips_and_persists(tmp_path: Path) -> None:
 
     reloaded = SettingsStore(path)  # a new process reads the same file
     assert reloaded.settings(PUB_A) == {"name": "Ops-Node", "radio_freq": 915.0}
-    assert reloaded.settings(PUB_B) == {"tx_power": 20}  # a second device keeps its own set
+    assert reloaded.settings(PUB_B) == {"tx_power": 20}  # a second device has its own set
 
 
 def test_store_replace_forget_and_forget_all(tmp_path: Path) -> None:
-    """Re-remembering a key replaces it; forget drops one; forget_all clears the device."""
+    """A new remember of a key replaces it. forget removes one key. forget_all clears the device."""
     store = SettingsStore(tmp_path / "settings.json")
     store.remember(PUB_A, "name", "First")
-    store.remember(PUB_A, "name", "Second")  # same key, new value
+    store.remember(PUB_A, "name", "Second")  # the same key, a new value
     store.remember(PUB_A, "tx_power", 20)
     assert store.settings(PUB_A) == {"name": "Second", "tx_power": 20}
 
@@ -81,29 +85,29 @@ def test_store_replace_forget_and_forget_all(tmp_path: Path) -> None:
 
     store.forget_all(PUB_A)
     assert store.settings(PUB_A) == {}
-    # The device drops out of the persisted file entirely once it has nothing remembered.
+    # When the device has nothing remembered, the stored file does not have the device.
     assert json.loads((tmp_path / "settings.json").read_text())["devices"] == {}
 
 
 def test_store_normalises_device_key(tmp_path: Path) -> None:
-    """A device key is matched case-insensitively and with an optional 0x prefix stripped."""
+    """A device key matches in any case, and the store removes an optional 0x prefix."""
     store = SettingsStore(tmp_path / "settings.json")
     store.remember("AABB", "name", "Ops")
     assert store.settings("0xaabb") == {"name": "Ops"}
 
 
 def test_store_ignores_corrupt_file(tmp_path: Path) -> None:
-    """A garbage file reads as empty rather than raising, and stays writable."""
+    """A file with invalid data reads as empty instead of raising an error, and stays writable."""
     path = tmp_path / "settings.json"
     path.write_text("not json at all", encoding="utf-8")
     store = SettingsStore(path)
     assert store.settings(PUB_A) == {}
-    store.remember(PUB_A, "name", "Ops")  # recovers and persists
+    store.remember(PUB_A, "name", "Ops")  # the store recovers and stores the value
     assert SettingsStore(path).settings(PUB_A) == {"name": "Ops"}
 
 
 def test_store_drops_malformed_values(tmp_path: Path) -> None:
-    """Non-scalar values (a container, a null) are skipped; scalar ones are kept."""
+    """The store skips non-scalar values (a container, a null). It keeps scalar values."""
     path = tmp_path / "settings.json"
     path.write_text(
         json.dumps(
@@ -119,7 +123,10 @@ def test_store_drops_malformed_values(tmp_path: Path) -> None:
 
 
 def test_store_ignores_non_scalar_remember(tmp_path: Path) -> None:
-    """Remembering a non-scalar value is a no-op — only strings, numbers, and bools persist."""
+    """A remember of a non-scalar value does nothing.
+
+    The store keeps only strings, numbers, and bools.
+    """
     store = SettingsStore(tmp_path / "settings.json")
     store.remember(PUB_A, "name", ["not", "a", "scalar"])
     assert store.settings(PUB_A) == {}
@@ -136,11 +143,11 @@ async def _mock_device():
 
 
 async def test_drift_reports_only_changed_settings(tmp_path: Path) -> None:
-    """Drift lists remembered settings that differ from the device, in registry order."""
+    """Drift lists the remembered settings that are different from the device, in registry order."""
     device, pubkey = await _mock_device()
     store = SettingsStore(tmp_path / "settings.json")
-    store.remember(pubkey, "radio_freq", 915.0)  # device default is 869.618 — drifts
-    store.remember(pubkey, "name", "MockCompanion")  # equals the device default — no drift
+    store.remember(pubkey, "radio_freq", 915.0)  # the device default is 869.618: drift
+    store.remember(pubkey, "name", "MockCompanion")  # the same as the device default: no drift
 
     snapshot = await build_snapshot(device)
     drifted = settings_drift(store, pubkey, snapshot)
@@ -149,7 +156,7 @@ async def test_drift_reports_only_changed_settings(tmp_path: Path) -> None:
 
 
 async def test_drift_empty_when_nothing_remembered(tmp_path: Path) -> None:
-    """A device with no remembered settings never shows drift (firmware radios pay nothing)."""
+    """A device with no remembered settings never shows drift. Firmware radios have no cost."""
     device, pubkey = await _mock_device()
     store = SettingsStore(tmp_path / "settings.json")
     snapshot = await build_snapshot(device)
@@ -157,7 +164,10 @@ async def test_drift_empty_when_nothing_remembered(tmp_path: Path) -> None:
 
 
 async def test_drift_skips_unknown_keys(tmp_path: Path) -> None:
-    """A remembered key the registry no longer defines is ignored, not reported as drift."""
+    """The drift ignores a remembered key that the registry does not define.
+
+    It does not report the key.
+    """
     device, pubkey = await _mock_device()
     store = SettingsStore(tmp_path / "settings.json")
     store.remember(pubkey, "gone_from_registry", "whatever")
@@ -169,12 +179,15 @@ async def test_drift_skips_unknown_keys(tmp_path: Path) -> None:
 
 
 async def test_restore_writes_remembered_values_including_coupled(tmp_path: Path) -> None:
-    """Restore replays saved values onto the device, coupled radio fields rebuilt together."""
+    """Restore writes the saved values to the device.
+
+    It builds the coupled radio fields together.
+    """
     device, pubkey = await _mock_device()
     store = SettingsStore(tmp_path / "settings.json")
     store.remember(pubkey, "name", "Ops-Node")
     store.remember(pubkey, "radio_freq", 915.0)
-    store.remember(pubkey, "radio_sf", 12)  # a second radio field: exercises the coupled apply
+    store.remember(pubkey, "radio_sf", 12)  # a second radio field: this tests the coupled apply
 
     snapshot = await build_snapshot(device)
     drifted = settings_drift(store, pubkey, snapshot)
@@ -185,33 +198,36 @@ async def test_restore_writes_remembered_values_including_coupled(tmp_path: Path
     assert after["name"] == "Ops-Node"
     assert after["radio_freq"] == 915.0
     assert after["radio_sf"] == 12
-    assert after["radio_bw"] == 62.5  # untouched radio field preserved by the coupled rebuild
-    # Idempotent: with the device now matching, there is nothing left to restore.
+    assert after["radio_bw"] == 62.5  # the coupled rebuild keeps a radio field that was not changed
+    # Idempotent: the device now matches, so nothing is left to restore.
     assert settings_drift(store, pubkey, after) == []
 
 
 async def test_adopt_updates_store_to_device_values(tmp_path: Path) -> None:
-    """Adopt takes the device's current values as the new saved truth, clearing the drift."""
+    """Adopt takes the current values of the device as the new saved values.
+
+    This clears the drift.
+    """
     device, pubkey = await _mock_device()
     store = SettingsStore(tmp_path / "settings.json")
-    store.remember(pubkey, "radio_freq", 915.0)  # differs from the device's 869.618
+    store.remember(pubkey, "radio_freq", 915.0)  # different from the 869.618 of the device
 
     snapshot = await build_snapshot(device)
     drifted = settings_drift(store, pubkey, snapshot)
     adopt(store, pubkey, snapshot, [d.key for d in drifted])
 
-    assert store.settings(pubkey)["radio_freq"] == 869.618  # now matches the device
+    assert store.settings(pubkey)["radio_freq"] == 869.618  # now the same as the device
     assert settings_drift(store, pubkey, snapshot) == []
 
 
 async def test_adopt_forgets_a_setting_the_device_no_longer_reports(tmp_path: Path) -> None:
-    """Adopting a key the device reports no value for forgets it rather than storing a null."""
+    """Adopt forgets a key that the device reports with no value. It does not store a null."""
     device, pubkey = await _mock_device()
     store = SettingsStore(tmp_path / "settings.json")
     store.remember(pubkey, "flood_scope", "#ops")
 
     snapshot = await build_snapshot(device)
-    snapshot.pop("flood_scope", None)  # simulate firmware that doesn't report this field
+    snapshot.pop("flood_scope", None)  # simulate firmware that does not report this field
     adopt(store, pubkey, snapshot, ["flood_scope"])
     assert "flood_scope" not in store.settings(pubkey)
 
@@ -220,7 +236,7 @@ async def test_adopt_forgets_a_setting_the_device_no_longer_reports(tmp_path: Pa
 
 
 async def test_apply_setting_remembers_through_the_config_executor(ctx) -> None:
-    """Every setting changed through the config executor is recorded under the device key."""
+    """The store records each setting that the config executor changes, under the device key."""
     device = await ctx.device()
     pubkey = (await device.get_self_info())["public_key"]
     snapshot = await build_snapshot(device)

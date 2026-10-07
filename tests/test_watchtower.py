@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Watchtower tests: the store's persistence and the sentinel's rules.
+"""Watchtower tests: the storage of the store and the rules of the sentinel.
 
-The service is driven synchronously through :meth:`note`/:meth:`evaluate` against a
-stub context (the monitor tests' approach), so no timers or hardware are involved.
+The tests run the service synchronously through :meth:`note` and :meth:`evaluate`, with a
+stub context (the same method as the monitor tests). Thus the tests do not use timers or
+hardware.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ NODE = "3d" * 6
 
 
 class _StubContext:
-    """Minimal stand-in for :class:`~meshterm.context.AppContext` for rule tests."""
+    """A minimal substitute for :class:`~meshterm.context.AppContext` in the rule tests."""
 
     def __init__(self, tmp_path: Path) -> None:
         self.repo = Repository(tmp_path / "wt.db")
@@ -31,7 +32,7 @@ class _StubContext:
 def _service(tmp_path: Path) -> WatchtowerService:
     ctx = _StubContext(tmp_path)
     service = WatchtowerService(ctx)
-    service._known = set()  # what start() seeds from the DB; empty history here
+    service._known = set()  # ``start()`` gets this from the DB. The history is empty here.
     return service
 
 
@@ -49,7 +50,7 @@ def _obs(node=NODE, name="Hub", snr=None, age_s=0, kind="advert") -> Observation
 
 
 def test_store_watch_round_trips_and_persists(tmp_path: Path) -> None:
-    """Watched nodes and their rules survive a fresh store instance."""
+    """Watched nodes and their rules survive a new store instance."""
     path = tmp_path / "watchtower.json"
     store = WatchStore(path)
     seen = utcnow() - timedelta(hours=2)
@@ -66,7 +67,10 @@ def test_store_watch_round_trips_and_persists(tmp_path: Path) -> None:
 
 
 def test_store_alert_log_caps_acks_and_clears(tmp_path: Path) -> None:
-    """Alerts append newest-first, cap, acknowledge, and clear."""
+    """The store adds alerts with the newest first.
+
+    It limits their number, acknowledges them, and clears them.
+    """
     store = WatchStore(tmp_path / "watchtower.json")
     first = store.add_alert("silence", "Hub", "quiet")
     store.add_alert("snr", "Hub", "sagging")
@@ -83,11 +87,14 @@ def test_store_alert_log_caps_acks_and_clears(tmp_path: Path) -> None:
     for i in range(ALERT_CAP + 10):
         store.add_alert("new-node", f"n{i}", "hi")
     assert len(store.alerts()) == ALERT_CAP
-    assert store.alerts()[0].label == f"n{ALERT_CAP + 9}"  # newest survives the cap
+    assert store.alerts()[0].label == f"n{ALERT_CAP + 9}"  # the newest alert stays at the cap
 
 
 def test_store_note_heard_updates_and_refreshes_name(tmp_path: Path) -> None:
-    """Hearing a watched node advances its mark and adopts a fresh name."""
+    """When MeshTerm hears a watched node, the store moves its mark forward.
+
+    The store also takes the new name.
+    """
     store = WatchStore(tmp_path / "watchtower.json")
     store.watch(NODE, NODE)
     later = utcnow() + timedelta(minutes=5)
@@ -100,28 +107,31 @@ def test_store_note_heard_updates_and_refreshes_name(tmp_path: Path) -> None:
 
 
 def test_silence_fires_once_then_rearms_on_recovery(tmp_path: Path) -> None:
-    """Quiet past the threshold alarms once; hearing again notes the recovery."""
+    """The silence rule alarms one time when the node is quiet past the threshold.
+
+    When MeshTerm hears the node again, the rule notes the recovery and arms again.
+    """
     service = _service(tmp_path)
     store = service._ctx.watch_store
     store.watch(NODE, "Hub", last_seen=utcnow() - timedelta(hours=13))
 
-    service.evaluate()  # default threshold is 12 h — already past it
-    service.evaluate()  # latched: no duplicate
+    service.evaluate()  # the default threshold is 12 h, and the node is past it
+    service.evaluate()  # the alarm is latched, so there is no duplicate
     alerts = store.alerts()
     assert [a.kind for a in alerts] == ["silence"]
     assert "12 h" in alerts[0].message
 
-    service.note(_obs())  # the node returns
+    service.note(_obs())  # the node comes back
     alerts = store.alerts()
     assert [a.kind for a in alerts] == ["recovered", "silence"]
-    assert store.watched()[NODE].silent_since is None  # re-armed
+    assert store.watched()[NODE].silent_since is None  # armed again
 
-    service.evaluate()  # freshly heard: quiet again only after another 12 h
+    service.evaluate()  # the node was heard just now, so it is quiet again only after 12 h more
     assert len(store.alerts()) == 2
 
 
 def test_silence_respects_off_and_unheard(tmp_path: Path) -> None:
-    """An OFF rule never alarms, however stale the mark."""
+    """A rule that is OFF never alarms, also when the mark is very old."""
     service = _service(tmp_path)
     store = service._ctx.watch_store
     store.watch(NODE, "Hub", last_seen=utcnow() - timedelta(days=30))
@@ -134,7 +144,7 @@ def test_silence_respects_off_and_unheard(tmp_path: Path) -> None:
 
 
 def test_snr_sag_alerts_with_cooldown(tmp_path: Path) -> None:
-    """A clear drop in median SNR alerts once, not on every subsequent packet."""
+    """A clear drop in the median SNR gives one alert. The next packets do not give more alerts."""
     service = _service(tmp_path)
     store = service._ctx.watch_store
     store.watch(NODE, "Hub")
@@ -147,12 +157,15 @@ def test_snr_sag_alerts_with_cooldown(tmp_path: Path) -> None:
     assert len(sags) == 1
     assert "+8.0" in sags[0].message and "-2.0" in sags[0].message
 
-    service.note(_obs(snr=-2.0))  # still sagging, but inside the cooldown
+    service.note(_obs(snr=-2.0))  # the SNR is still low, but the cooldown is active
     assert len([a for a in store.alerts() if a.kind == "snr"]) == 1
 
 
 def test_snr_ignores_packet_rows_and_disabled_watch(tmp_path: Path) -> None:
-    """Relay-measured packet SNR and an off switch both keep the rule quiet."""
+    """The SNR that a relay measured on a packet keeps the rule quiet.
+
+    A switch that is off also keeps the rule quiet.
+    """
     service = _service(tmp_path)
     store = service._ctx.watch_store
     store.watch(NODE, "Hub")
@@ -171,18 +184,24 @@ def test_snr_ignores_packet_rows_and_disabled_watch(tmp_path: Path) -> None:
 
 
 def test_new_node_announced_once_ever(tmp_path: Path) -> None:
-    """A first-ever id alerts once; repeats and restarts stay quiet."""
+    """An id that MeshTerm hears for the first time gives one alert.
+
+    Repeats and restarts give none.
+    """
     service = _service(tmp_path)
     store = service._ctx.watch_store
     service.note(_obs(node="f7" * 6, name="Newcomer"))
     service.note(_obs(node="f7" * 6, name="Newcomer"))
     news = [a for a in store.alerts() if a.kind == "new-node"]
     assert len(news) == 1 and news[0].label == "Newcomer"
-    assert store.known_contains("f7" * 6)  # persisted: restarts stay quiet too
+    assert store.known_contains("f7" * 6)  # the store keeps it, so restarts give no alert too
 
 
 def test_new_node_rule_can_be_switched_off(tmp_path: Path) -> None:
-    """With the toggle off, first sightings are remembered but never announced."""
+    """If the toggle is off, the store remembers a node that is heard for the first time.
+
+    The store never announces it.
+    """
     service = _service(tmp_path)
     store = service._ctx.watch_store
     store.set_new_node_alerts(False)
@@ -195,11 +214,11 @@ def test_new_node_rule_can_be_switched_off(tmp_path: Path) -> None:
 
 
 def test_store_round_trips_node_type(tmp_path: Path) -> None:
-    """A starred node's advertised type persists; legacy entries load as None."""
+    """The store keeps the advertised type of a starred node. An old entry loads as None."""
     path = tmp_path / "watch.json"
     store = WatchStore(path)
     store.watch("aa" * 6, "Roof", node_type=2)
-    store.watch("bb" * 6, "Old-style")  # no type, like a pre-field entry
+    store.watch("bb" * 6, "Old-style")  # no type, as in an entry from before the field existed
 
     reloaded = WatchStore(path)
     assert reloaded.watched()["aa" * 6].node_type == 2
@@ -207,10 +226,10 @@ def test_store_round_trips_node_type(tmp_path: Path) -> None:
 
 
 def test_watched_row_type_glyph_and_hued_name(tmp_path: Path) -> None:
-    """A watched row leads with its type glyph and hues the name by key.
+    """A watched row starts with its type glyph, and the name has a hue from the key.
 
-    The glyph keeps its own colour and the name takes the entry's key-derived hue;
-    silence still reads from the trailing tail.
+    The glyph keeps its own colour. The name takes the hue that comes from the key of the
+    entry. The silence still shows in the tail at the end.
     """
     from meshterm.core.watch_store import WatchedNode
     from meshterm.ui.theme import name_style
@@ -227,18 +246,21 @@ def test_watched_row_type_glyph_and_hued_name(tmp_path: Path) -> None:
         s.style == name_style("Roof", "a1" * 6) and s.start <= name_at < s.end for s in row.spans
     )
 
-    # A legacy entry (no stored type) falls back to the contact table's resolver.
+    # An old entry (with no stored type) uses the resolver of the contact table.
     legacy = WatchedNode(key="a1" * 6, name="Roof")
     resolved = _watched_row(legacy, lambda key: 2)
     assert resolved.plain.startswith(f"{glyph} ")
 
-    # Silence is signalled by the ⚠ tail, never the glyph colour.
+    # The ⚠ tail shows the silence. The colour of the glyph never shows it.
     quiet = WatchedNode(key="a1" * 6, name="Roof", node_type=2, silent_since=utcnow())
     assert "⚠ silent" in _watched_row(quiet, lambda key: None).plain
 
 
 def test_alert_row_hues_the_label_by_resolved_key(tmp_path: Path) -> None:
-    """An unacked alert's label takes its key-derived hue; acked recedes to muted."""
+    """The label of an alert that is not acknowledged takes its hue from the key.
+
+    An acknowledged alert is muted.
+    """
     from meshterm.core.watch_store import Alert
     from meshterm.ui.theme import name_style
     from meshterm.ui.watchtower_screen import _alert_lanes
@@ -258,7 +280,10 @@ def test_alert_row_hues_the_label_by_resolved_key(tmp_path: Path) -> None:
 
 
 def test_alert_row_leads_node_name_with_type_glyph(tmp_path: Path) -> None:
-    """The node name is preceded by its shared type glyph (own colour, muted when acked)."""
+    """The type glyph that nodes share comes before the node name.
+
+    The glyph has its own colour, and it is muted when the alert is acknowledged.
+    """
     from meshterm.core.watch_store import Alert
     from meshterm.ui.watchtower_screen import _alert_lanes
     from meshterm.ui.widgets import DEFAULT_GLYPH, NODE_GLYPHS
@@ -267,21 +292,21 @@ def test_alert_row_leads_node_name_with_type_glyph(tmp_path: Path) -> None:
         return None
 
     def type_of(label):
-        return 2 if label == "Roof" else None  # Roof advertises as a repeater
+        return 2 if label == "Roof" else None  # Roof advertises itself as a repeater
 
     glyph, glyph_style = NODE_GLYPHS[2]
 
     alert = Alert(ident=1, when=utcnow(), kind="silence", label="Roof", message="quiet")
     row = _alert_lanes(alert, key_of, type_of)
-    assert f"{glyph} Roof" in row.plain  # glyph sits immediately left of the name
+    assert f"{glyph} Roof" in row.plain  # the glyph is directly to the left of the name
     gi = row.plain.index(glyph)
     assert any(s.style == glyph_style and s.start <= gi < s.end for s in row.spans)
 
-    # Unknown type (and a keyless kind like courier) falls back to the plain-node glyph.
+    # An unknown type, and a kind with no key such as courier, use the glyph of a plain node.
     ghost = Alert(ident=2, when=utcnow(), kind="courier", label="Ghost", message="gave up")
     assert f"{DEFAULT_GLYPH[0]} Ghost" in _alert_lanes(ghost, key_of).plain
 
-    # An acked alert mutes the glyph with the rest of its history.
+    # An acknowledged alert mutes the glyph, with the rest of its history.
     acked = Alert(ident=3, when=utcnow(), kind="silence", label="Roof", message="quiet", acked=True)
     acked_row = _alert_lanes(acked, key_of, type_of)
     gi = acked_row.plain.index(glyph)
@@ -289,11 +314,12 @@ def test_alert_row_leads_node_name_with_type_glyph(tmp_path: Path) -> None:
 
 
 def test_alert_rows_pin_their_lanes_and_scroll_only_the_message() -> None:
-    """←→ slide an alert's *message*; the marker, age, kind, glyph and node hold still.
+    """←→ slide the message of an alert. The marker, age, kind, glyph, and node stay in place.
 
-    The lanes in front of the ``—`` are which alert this is (JP, 2026-08-10). Reading a
-    long message to its end is no reason to lose them off the left edge — they are the part
-    that already fits, so scrolling them buys nothing and costs the row its identity.
+    The lanes before the ``—`` show which alert this is (JP, 2026-08-10). The user can read
+    a long message to its end, and the lanes must not go off the left edge. They are the
+    part that already fits. If they scrolled, there would be no gain, and the row would
+    lose its identity.
     """
     from meshterm.core.watch_store import Alert
     from meshterm.ui.tui import Choice
@@ -312,15 +338,16 @@ def test_alert_rows_pin_their_lanes_and_scroll_only_the_message() -> None:
     lanes = _alert_lanes(alert, lambda label: None)
     assert row.hscroll_from == lanes.cell_len
     assert row.label.plain.startswith(lanes.plain)
-    assert lanes.plain.endswith(" — ")  # the lead-in stays with the head it introduces
-    assert row.label.plain[row.hscroll_from :] == alert.message  # …and the run is the message
+    assert lanes.plain.endswith(" — ")  # the lead-in stays with the head that it introduces
+    assert row.label.plain[row.hscroll_from :] == alert.message  # and the scroll run is the text
 
 
 def _word_starts(items: list, words: dict) -> dict:
-    """The display cell each row's first word starts in, by row value.
+    """The display cell where the first word of each row starts, by row value.
 
-    Cells, not characters: a two-cell ``⭐`` and a one-cell ``✓`` are both one character, so
-    counting characters is exactly what hid a label starting a column early.
+    The function counts cells and not characters. A ``⭐`` of two cells and a ``✓`` of one
+    cell are both one character. A count of characters hid a label that started one column
+    too early.
     """
     from rich.cells import cell_len
 
@@ -336,11 +363,11 @@ def _word_starts(items: list, words: dict) -> dict:
 
 
 def test_watchtower_actions_start_every_label_in_the_same_cell() -> None:
-    """The action rows share one icon column, across the list's section headings.
+    """The action rows share one icon column, across the section headings of the list.
 
-    ``✓`` and ``🗑`` draw one cell and ``⭐`` and ``🔔`` two, so the bulk actions started
-    their words a column left of *Watch a node…* and the new-node toggle. On the PicoCalc
-    the icons go and must take their padding with them.
+    ``✓`` and ``🗑`` use one cell, and ``⭐`` and ``🔔`` use two. Thus the bulk actions
+    started their words one column to the left of *Watch a node…* and the new-node toggle.
+    On the PicoCalc the icons are not there, and their padding must go with them.
     """
     from rich.cells import cell_len
 
@@ -368,11 +395,13 @@ def test_watchtower_actions_start_every_label_in_the_same_cell() -> None:
 
 
 def test_node_rules_start_every_label_and_value_in_the_same_cell() -> None:
-    """The rule popover's words share one column, and its values another, on both platforms.
+    """The words of the rule dialog share one column, and its values share another.
 
-    ``🕒`` and ``📶`` draw two cells and ``✗`` one, so *Stop watching this node* started a
-    column early. The values used to be lined up with hand-typed spaces, so they are pinned
-    here too: whatever the icon column measures, the values stay in one column.
+    This is true on both platforms. ``🕒`` and ``📶`` use two cells, and ``✗`` uses one.
+    Thus *Stop watching this node*
+    started one column too early. The code once aligned the values with spaces that a
+    person typed. Thus the test checks the values too: the values stay in one column, for
+    each width of the icon column.
     """
     from meshterm.core.watch_store import WatchedNode
     from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform

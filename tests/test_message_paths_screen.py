@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Message-paths dialog tests: the graph-over-rows view behind the chat's ^P.
+"""Tests for the message-paths dialog: the graph above the rows, which ^P opens in the chat.
 
-Driven headless like the mesh walk tests: render_body is pure lines-out, handle() pure
-state, so the selection cursor, the horizontal line scroll, and the selected-path
-labelling are all assertable without a terminal.
+The tests run without a terminal, in the same way as the mesh walk tests. ``render_body``
+only returns lines, and ``handle()`` only changes state. Thus a test can assert the
+highlight, the horizontal scroll of a line, and the label of the selected path without a
+terminal.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from meshterm.core.models import ChatMessage, utcnow
 from meshterm.services.message_paths import Arrival
 from meshterm.ui.message_paths_screen import MessagePathsScreen
 from meshterm.ui.pathline import CRACK_HEAD, CRACK_TAIL
-from tests.conftest import plain as _plain  # THE strip-and-join screen reader
+from tests.conftest import plain as _plain  # the only function that strips and joins a screen
 
 
 def _resolve(hop: str) -> str:
@@ -34,7 +35,7 @@ def _screen(arrivals: list[Arrival], **kwargs) -> MessagePathsScreen:
     )
     defaults.update(kwargs)
     screen = MessagePathsScreen(message, arrivals, **defaults)
-    screen.note_viewport(40)  # the frame records this before every real paint
+    screen.note_viewport(40)  # the frame records this before each real paint
     return screen
 
 
@@ -47,19 +48,19 @@ def _arrivals() -> list[Arrival]:
 
 
 def test_paths_screen_renders_graph_rows_and_cursor() -> None:
-    """The screen draws the quote, the graph, and two lines for every arrival.
+    """The screen draws the quote, the graph, and two lines for each arrival.
 
-    The route you pick, and the reception facts hanging under it.
+    The two lines are the route that you select, and the reception facts under it.
     """
     screen = _screen(_arrivals())
     body = _plain(screen.render_body(76))
     assert "“on my way”" in body
-    assert "Alice" in body and "Homestead" in body  # origin and us, on the graph
-    assert "via" not in body  # the route lane holds nothing but the route
+    assert "Alice" in body and "Homestead" in body  # the origin and our node, on the graph
+    assert "via" not in body  # the route lane has only the route
     rows = body.split("sensor\n\n")[1].split("\n")
     assert len(rows) == 2 * len(_arrivals())
-    assert rows[0].startswith("❯ ") and "Hilltop-Repeater" in rows[0]  # the picked route
-    # …with its length, time and SNR tucked beneath it, the hop count leading
+    assert rows[0].startswith("❯ ") and "Hilltop-Repeater" in rows[0]  # the selected route
+    # The line below it has its length, time, and SNR, and the hop count is first.
     assert rows[1].strip().startswith("1 hop  ")
     assert _arrivals()[0].when.astimezone().strftime("%H:%M") in rows[1]
     assert "+4.0 dB" in rows[1]
@@ -70,10 +71,11 @@ def test_paths_screen_renders_graph_rows_and_cursor() -> None:
 
 
 def test_paths_screen_warns_once_for_a_path_that_revisits_a_hop() -> None:
-    """A path touching one hop twice draws it twice, warned about once for the whole fan.
+    """A path that has one hop two times draws it two times, with one warning for the whole fan.
 
-    The note belongs to the picture, not to the arrival ↑↓ rest on, so it names every hop
-    repeated anywhere in the fan and says so a single time under the legend.
+    The note is part of the picture, not part of the arrival that ↑↓ select. Thus it names
+    each hop that is repeated anywhere in the fan, and it says this one time under the
+    legend.
     """
     now = utcnow()
     screen = _screen(
@@ -86,69 +88,73 @@ def test_paths_screen_warns_once_for_a_path_that_revisits_a_hop() -> None:
     assert body.count("⚠") == 1
     assert "Hilltop-Repeater repeats — a loop, or two nodes sharing one hash" in body
     graph = body.split("origin →")[0]
-    assert graph.count("3d") == 2  # both visits marked
-    assert graph.count("a1") == 1  # the relay the two paths *share* stays one marker
+    assert graph.count("3d") == 2  # both visits have a marker
+    assert graph.count("a1") == 1  # the relay that the two paths *share* stays one marker
 
 
 def test_paths_screen_stays_quiet_when_no_path_revisits() -> None:
-    """Two paths crossing the same relay is sharing, not revisiting — nothing to warn about."""
+    """Two paths that cross the same relay share it.
+
+    They do not revisit it, so there is no warning.
+    """
     body = _plain(_screen(_arrivals()).render_body(76))
     assert "⚠" not in body
 
 
 def test_paths_screen_labels_every_relay_with_its_hash_byte() -> None:
-    """Graph relays carry their first hash byte, both paths at once.
+    """The relays in the graph have their first hash byte, for both paths at the same time.
 
-    The rows carry the names alone — no hash repeated after one, the two tied
-    together by the node's hue.
+    The rows have only the names. They do not repeat the hash after a name. The hue of the
+    node connects the two.
     """
     screen = _screen(_arrivals())
     body = _plain(screen.render_body(76))
     graph = body.split("origin →")[0]
-    for byte in ("3d", "a1", "77"):  # every relay labelled, selected or not
+    for byte in ("3d", "a1", "77"):  # each relay has a label, selected or not
         assert byte in graph
     assert "Hilltop-Rep" not in graph and "Waymarker" not in graph
     assert "Hilltop-Repeater" in body and "Waymarker" in body
-    assert "(3d)" not in body and "(a1)" not in body  # the hex lives on the graph
+    assert "(3d)" not in body and "(a1)" not in body  # the hex is on the graph
 
 
 def test_paths_screen_shows_unknown_relay_as_grey_mode_width_hash() -> None:
-    """An unnamed relay stands in its own hash, in muted grey.
+    """The screen shows an unnamed relay as its own hash, in muted grey.
 
-    It is drawn at the device's path-hash width — not the bare one-byte prefix, lit,
-    and never a hash annotated onto itself.
+    The screen draws it at the path hash width of the device. It does not draw the bare
+    one-byte prefix, lit, and it never adds a hash to itself.
     """
     now = utcnow()
     arrivals = [
-        Arrival(when=now, hops=("3d63",), snr=4.0),  # selected: a named relay
+        Arrival(when=now, hops=("3d63",), snr=4.0),  # selected: a relay with a name
         Arrival(when=now + timedelta(seconds=2), hops=("e839f2ab",), snr=-2.0),
     ]
-    screen = _screen(arrivals, prefix_bytes=3)  # 3-byte routing → e839f2
+    screen = _screen(arrivals, prefix_bytes=3)  # routing with 3 bytes → e839f2
     lines = screen.render_body(76)
     row = next(ln for ln in lines if "e839f2" in _plain([ln]))
-    assert "(e8)" not in _plain([row])  # the mode-width identity stands alone
+    assert "(e8)" not in _plain([row])  # the identity with the mode width is alone
     assert "38;2;148;163;184" in row  # muted grey over the hash
-    assert not _plain([row]).startswith("❯")  # unselected, so no cursor highlight over it
+    assert not _plain([row]).startswith("❯")  # not selected, so no highlight on it
     graph = _plain(lines).split("origin →")[0]
-    assert "e8" in graph  # the row's byte still cross-references the graph label
+    assert "e8" in graph  # the byte of the row still matches the label in the graph
 
 
 def test_paths_screen_draws_selected_path_white_over_gray() -> None:
-    """The selected path's edges render white; the unused path's edges gray."""
+    """The edges of the selected path render white. The edges of the other path render grey."""
     screen = _screen(_arrivals())
     raw = "\n".join(screen.render_body(76)).split("origin →")[0]
     assert "38;2;255;255;255" in raw  # the selected path, white
-    assert "38;2;110;110;110" in raw  # the other path, gray beneath it
+    assert "38;2;110;110;110" in raw  # the other path, grey under it
     screen.handle("down")  # move the selection to the other path
     raw2 = "\n".join(screen.render_body(76)).split("origin →")[0]
     assert "38;2;255;255;255" in raw2 and "38;2;110;110;110" in raw2
 
 
 def test_paths_screen_graph_geometry_holds_still_across_the_selection() -> None:
-    """↑↓ repaint the fan's colours, never its shape — the Routes tab's rule.
+    """↑↓ paint the colours of the fan again, but never its shape.
 
-    Layout rank is first-heard order, so only ``emphasis`` follows the pick; the drawn
-    glyphs/lanes are byte-identical from every selection.
+    This is the rule of the Routes tab. The layout rank is the order of first heard, so only
+    ``emphasis`` follows the selected row. The glyphs and lanes that the screen draws are the
+    same, byte for byte, for each selection.
     """
     now = utcnow()
     arrivals = [
@@ -162,24 +168,24 @@ def test_paths_screen_graph_geometry_holds_still_across_the_selection() -> None:
         shapes.append(_plain(screen._graph_lines(76, 15)))
         screen.handle("down")
     assert len(set(shapes)) == 1, "the graph's shape moved when the selection did"
-    assert shapes[0].count("\n") > 1  # a genuine multi-lane fan, not one flat line
+    assert shapes[0].count("\n") > 1  # a real fan with many lanes, not one flat line
 
 
 def test_paths_screen_marks_a_repeater_relay_with_its_triangle() -> None:
-    """A relay whose type resolves to a repeater draws ▲, not the generic dot."""
+    """A relay whose type is a repeater draws ▲, not the generic dot."""
     screen = _screen(_arrivals(), type_of=lambda h: 2 if h == "3d63" else None)
     graph = _plain(screen.render_body(76)).split("origin →")[0]
-    assert "▲" in graph  # the repeater relay wears its map glyph
+    assert "▲" in graph  # the repeater relay has its map glyph
     screen.handle("down")
     raw = "\n".join(screen.render_body(76)).split("origin →")[0]
     assert "38;2;255;255;255" in raw and "38;2;110;110;110" in raw
 
 
 def test_paths_screen_scrolls_the_selected_route_sideways() -> None:
-    """→ shifts the selected *route* under a leading …; ↑↓ snap it back.
+    """→ moves the selected *route* sideways, with a … at the start. ↑↓ move it back.
 
-    The reception facts under it never move — they always fit, and a lane that slid
-    with the route would make a long path look like it had lost its timestamp.
+    The reception facts under it never move. They always fit. If the lane moved with the
+    route, a long path would look as if it had no timestamp.
     """
     now = utcnow()
     long = Arrival(when=now, hops=tuple(f"{i:02x}{i:02x}" for i in range(12)), snr=1.0)
@@ -187,7 +193,7 @@ def test_paths_screen_scrolls_the_selected_route_sideways() -> None:
     narrow = 40
     before = _plain(screen.render_body(narrow))
     selected_before = next(ln for ln in before.split("\n") if ln.startswith("❯"))
-    assert screen._hmax > 0  # the route genuinely overflows at this width
+    assert screen._hmax > 0  # the route is too wide at this width
     assert "00" in selected_before and "0b" not in selected_before  # head shown, tail cut
     for _ in range(3):
         screen.handle("right")
@@ -196,16 +202,16 @@ def test_paths_screen_scrolls_the_selected_route_sideways() -> None:
     assert selected_after != selected_before
     assert "…" in selected_after  # the left edge marks the hidden head
     stamp = long.when.astimezone().strftime("%H:%M:%S")
-    assert stamp in after and stamp not in selected_after  # the facts hold their lane
+    assert stamp in after and stamp not in selected_after  # the facts keep their lane
     screen.handle("down")
     assert screen._hshift == 0  # only the selected route stays scrolled
 
 
 def test_paths_screen_cracks_the_chips_the_scroll_cuts(monkeypatch) -> None:  # noqa: ANN001
-    """Where the terminal draws chips, the scroll cracks them rather than ellipsizing.
+    """Where the terminal draws chips, the scroll cracks them. It does not use an ellipsis.
 
-    Each edge the route runs past breaks the chip off on a half block in its own
-    colour: the row is sliding over a route that continues, not shortening a word.
+    At each edge that the route goes past, the chip breaks on a half block in its own
+    colour. The row slides over a route that continues. It does not make a word shorter.
     """
     monkeypatch.setattr(pathline, "powerline_enabled", lambda: True)
     now = utcnow()
@@ -219,34 +225,35 @@ def test_paths_screen_cracks_the_chips_the_scroll_cuts(monkeypatch) -> None:  # 
         )
 
     row = selected()
-    assert row.rstrip().endswith(CRACK_TAIL) and "…" not in row  # only the tail runs on
+    assert row.rstrip().endswith(CRACK_TAIL) and "…" not in row  # only the tail continues
     for _ in range(3):
         screen.handle("right")
     row = selected()
-    assert row.startswith("❯ " + CRACK_HEAD)  # …and now the head is off to the left too
+    assert row.startswith("❯ " + CRACK_HEAD)  # now the head is also off to the left
     assert row.rstrip().endswith(CRACK_TAIL) and "…" not in row
 
 
 def test_paths_screen_route_runs_origin_to_us_not_relay_to_relay() -> None:
-    """A row is the whole route, not the relay chain it rode.
+    """A row is the whole route, not the relay chain that the message used.
 
-    A path's ends are the nodes it went *between*, so the sender leads the line and we
-    close it on the ★ — the same two endpoints the graph one row up draws between, which
-    is what lets the row and the picture cross-read. A chain that opened on its first
-    relay read as a route from a node that had only passed the message on.
+    The ends of a path are the nodes that it went *between*. Thus the sender is at the start
+    of the line, and the line ends on our ★. These are the same two endpoints that the
+    graph one row above draws between, and this lets the user match the row with the
+    picture. A chain that started on its first relay looked like a route from a node that
+    only passed the message on.
     """
     screen = _screen(_arrivals())
     rows = _plain(screen.render_body(76)).split("sensor\n\n")[1].split("\n")
     assert rows[0] == "❯ Alice → Hilltop-Repeater → ★"
-    assert rows[2] == "  Alice → Waymarker → 77 → ★"  # an unnamed relay still stands in its hash
+    assert rows[2] == "  Alice → Waymarker → 77 → ★"  # an unnamed relay is still its hash
 
 
 def test_paths_screen_origin_is_a_star_for_us_and_a_question_for_nobody() -> None:
-    """The origin is a ``★`` for us and a ``?`` for nobody.
+    """The origin is a ``★`` for our node and a ``?`` for nobody.
 
-    The head is named exactly as the graph's left endpoint is: our own star on a
-    message we sent, a bare question mark where the frame named nobody — never a
-    guessed name.
+    The start of the line has the same name as the left endpoint of the graph. It is our
+    star on a message that we sent. It is a bare question mark where the packet gave no
+    name. It is never a name that MeshTerm guessed.
     """
     now = utcnow()
     one = [Arrival(when=now, hops=("3d63",), snr=1.0)]
@@ -257,10 +264,10 @@ def test_paths_screen_origin_is_a_star_for_us_and_a_question_for_nobody() -> Non
 
 
 def test_paths_screen_cuts_unselected_rows_the_same_way(monkeypatch) -> None:  # noqa: ANN001
-    """An unselected row is cut the same way the selected one is.
+    """A row that is not selected is cut in the same way as the selected row.
 
-    It runs off the lane exactly as the selected row does, so it owes the reader the
-    same cracked chip — it just cannot slide to read the rest.
+    It goes past the lane in the same way as the selected row. Thus it must show the same
+    cracked chip to the user. But it cannot slide to show the rest.
     """
     monkeypatch.setattr(pathline, "powerline_enabled", lambda: True)
     now = utcnow()
@@ -274,20 +281,20 @@ def test_paths_screen_cuts_unselected_rows_the_same_way(monkeypatch) -> None:  #
     lines = _plain(screen.render_body(40)).split("\n")
     rows = lines[next(i for i, ln in enumerate(lines) if ln.startswith("❯")) :]
     assert rows[0].rstrip().endswith(CRACK_TAIL)  # the selected row
-    unselected = rows[2]  # row 1 is the selected row's hanging reception facts
+    unselected = rows[2]  # row 1 has the reception facts of the selected row
     assert unselected.rstrip().endswith(CRACK_TAIL) and "…" not in unselected
 
 
 def test_paths_screen_direct_arrival_and_empty_state() -> None:
-    """A hop-less arrival draws its two endpoints and nothing between.
+    """An arrival with no hops draws its two endpoints and nothing between them.
 
-    With no arrivals at all, the screen explains itself instead.
+    If there are no arrivals, the screen explains this instead.
 
-    The route no longer collapses to the word *direct*: with both ends on the line,
-    ``Alice → ★`` **is** what a direct delivery looks like, and it reads on the same rails
-    as every relayed row instead of swapping the picture for a caption. The word survives
-    one row down, where it belongs — as the hop-count stat under the line, saying how far
-    the frame came rather than standing in for the picture of it.
+    The route no longer becomes the word *direct*. Both ends are on the line, and
+    ``Alice → ★`` **is** how a direct delivery looks. It has the same form as each relayed
+    row, and the screen does not replace the picture with a caption. The word is still
+    there, one row below, where it belongs. It is the hop-count statistic under the line,
+    and it shows how far the packet went. It does not replace the picture.
     """
     now = utcnow()
     screen = _screen([Arrival(when=now, hops=(), snr=2.5)])
@@ -303,12 +310,13 @@ def test_paths_screen_direct_arrival_and_empty_state() -> None:
 
 
 def test_an_outgoing_message_ends_on_its_recipient_not_on_us() -> None:
-    """THE round-trip fix: our own sends stopped starting and ending on our own star.
+    """This is the round-trip correction: a message that we send does not start and end on our star.
 
-    The path line always closed on our ``★``, which is right for a message we received and
-    wrong for one we sent — with our star opening it too, every outgoing message drew
-    ``★ ▶ … ▶ ★`` and read as having gone out and come back (JP, 2026-09-02). It is the same
-    rule the head already followed: a path runs between the nodes it went *between*.
+    The path line always ended on our ``★``. This is correct for a message that we received.
+    It is wrong for a message that we sent. Our star was also at the start. Thus each
+    outgoing message drew ``★ ▶ … ▶ ★``, and it looked as if the message went out and came
+    back (JP, 2026-09-02). The start of the line already followed the same rule: a path
+    runs between the nodes that it went *between*.
     """
     now = utcnow()
     sent = ChatMessage(text="on my way", outbound=True, peer="d4e5", created_at=now)
@@ -323,17 +331,17 @@ def test_an_outgoing_message_ends_on_its_recipient_not_on_us() -> None:
         source="Homestead",
         destination="Bob",
     )
-    screen.note_viewport(40)  # the frame records this before every real paint
+    screen.note_viewport(40)  # the frame records this before each real paint
     body = _plain(screen.render_body(72))
     assert "Hilltop-Repeater" in body
     assert body.count("Homestead") == 1, "our name belongs at one end of a send, not both"
     assert "Bob" in body, "the far end is the recipient"
-    # The caption names the same far end the line ends on.
+    # The caption names the same far end that the line ends on.
     assert "origin → Bob" in body
 
 
 def test_a_received_message_still_ends_on_us() -> None:
-    """The default is unchanged: what we receive does end at our own star."""
+    """The default does not change: a message that we receive ends at our own star."""
     now = utcnow()
     got = ChatMessage(text="on my way", outbound=False, peer="d4e5", created_at=now)
     screen = MessagePathsScreen(
@@ -346,18 +354,19 @@ def test_a_received_message_still_ends_on_us() -> None:
         summary="heard once",
         source="Alice",
     )
-    screen.note_viewport(40)  # the frame records this before every real paint
+    screen.note_viewport(40)  # the frame records this before each real paint
     body = _plain(screen.render_body(72))
     assert "Alice" in body and "Homestead" in body
     assert "origin → you" in body
 
 
 def test_a_routed_frame_with_no_path_draws_no_graph_and_says_why() -> None:
-    """An empty routed path is not a zero-hop arrival, and must not be drawn as one.
+    """An empty routed path is not an arrival with zero hops.
 
-    Its route was consumed on the way, so there is nothing to put in the fan — an empty lane
-    would be a claim of adjacency the frame never made — and the row says so in words rather
-    than showing a confident ``0 hops``.
+    The screen must not draw it as one. The route was used on the way, so there is nothing
+    to put in the fan. An empty lane would claim that the nodes are adjacent, and the packet
+    did not make that claim. The row says this in words. It does not show a ``0 hops`` that
+    looks sure.
     """
     now = utcnow()
     got = ChatMessage(text="on my way", outbound=False, peer="d4e5", created_at=now)
@@ -386,19 +395,20 @@ def _many(n: int) -> list[Arrival]:
 
 
 def test_the_arrival_list_windows_and_the_graph_stays_put() -> None:
-    """Only the arrivals scroll: the quote, the fan and its captions are pinned chrome.
+    """Only the arrivals scroll. The quote, the fan, and its captions are fixed chrome.
 
-    Walking to the last arrival slides the window under them — the body still fits the
-    dialog's budget, and the picture the routes are being compared against never leaves it.
+    When the user goes to the last arrival, the list window slides under them. The body
+    still fits in the space of the dialog. The picture that the user compares the routes
+    with never leaves the dialog.
     """
     screen = _screen(_many(12))
     screen.note_viewport(24)
     lines = screen.render_body(72)
-    assert len(lines) <= 24  # nothing scrolls off: the list took what the head left
+    assert len(lines) <= 24  # nothing scrolls off: the list took the space that the head left
     body = _plain(lines)
     assert "“on my way”" in body and "white = selected path" in body
     assert "↓" in body and "more" in body  # the edge marker counts the hidden arrivals
-    assert "PgUp/PgDn scroll" in screen.footer_hint  # paging advertised only when needed
+    assert "PgUp/PgDn scroll" in screen.footer_hint  # the hint shows paging only if necessary
 
     for _ in range(11):
         screen.handle("down")
@@ -406,12 +416,12 @@ def test_the_arrival_list_windows_and_the_graph_stays_put() -> None:
     body = _plain(lines)
     assert len(lines) <= 24
     assert "white = selected path" in body, "the graph is pinned, not scrolled away"
-    assert "↑" in body and "more" in body  # rows now hidden above instead
+    assert "↑" in body and "more" in body  # now the hidden rows are above
     assert screen.cursor_line() is not None
 
 
 def test_paging_moves_the_selection_by_a_windowful() -> None:
-    """PgDn steps the pick by the rows the window actually carried, not by body lines."""
+    """PgDn moves the selection by the rows that the list window had, not by body lines."""
     screen = _screen(_many(12))
     screen.note_viewport(24)
     screen.render_body(72)
@@ -422,7 +432,7 @@ def test_paging_moves_the_selection_by_a_windowful() -> None:
 
 
 def test_a_short_list_advertises_no_paging() -> None:
-    """Every arrival on screen means the pager moves nothing, and the hint says nothing."""
+    """If each arrival is visible, the pager moves nothing, and the hint does not mention it."""
     screen = _screen(_arrivals())
     screen.render_body(72)
     assert "PgUp/PgDn" not in screen.footer_hint
@@ -430,10 +440,10 @@ def test_a_short_list_advertises_no_paging() -> None:
 
 
 def test_the_selection_clamps_at_both_ends() -> None:
-    """↑ on the first arrival and ↓ on the last stay put.
+    """↑ on the first arrival and ↓ on the last arrival do not move the selection.
 
-    The window follows the highlight, so a wrap would haul the whole list end to end
-    instead of moving one row.
+    The list window follows the highlight. Thus a wrap would move the whole list from one
+    end to the other end, and not one row.
     """
     screen = _screen(_many(6))
     screen.note_viewport(24)

@@ -1,11 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
-"""DeviceState session-cache tests: read once, serve cached, invalidate on write.
+"""Tests for the session cache of DeviceState: read once, serve from the cache, invalidate on write.
 
-The cache exists to keep screen navigation off the slow radio round-trips (contacts,
-self-info, the channel probe). These tests pin the two behaviours that make it correct:
-stable facts are fetched once and reused until an in-app write invalidates them, and the
-contacts list refreshes in the background once it ages past the TTL without ever blocking a
-read. A fake device counts round-trips so "served from cache" is assertable without hardware.
+The cache keeps the navigation between screens away from the slow radio round-trips
+(contacts, self-info, the channel probe). These tests check the two behaviours that make
+the cache correct:
+
+* MeshTerm reads the stable facts one time and uses them again until a write in the app
+  invalidates them.
+* The contacts list refreshes in the background when it is older than the TTL, and it
+  never blocks a read.
+
+A fake device counts the round-trips. Thus a test can assert "served from the cache"
+without hardware.
 """
 
 from __future__ import annotations
@@ -20,44 +26,44 @@ from meshterm.services.device_state import _CONTACTS_TTL_S, _SELF_INFO_TTL_S, De
 
 
 class FakeDevice:
-    """A stand-in device that counts how often each cached read hits the wire."""
+    """A stand-in device that counts how often each cached read goes to the wire."""
 
     def __init__(self) -> None:
-        """Start with every call count at zero and no fixed contact table."""
+        """Start with a call count of zero for each read and no fixed contact table."""
         self.contacts_calls = 0
         self.self_info_calls = 0
         self.mode_calls = 0
         self.channel_calls = 0
         self.capacity_calls = 0
-        self.contact_rows: list[Contact] | None = None  # fixed table, when a test needs one
+        self.contact_rows: list[Contact] | None = None  # a fixed table, if a test needs one
 
     async def get_contacts(self) -> list:
-        """The contact list, counting the call.
+        """Return the contact list and count the call.
 
-        Either the fixed table a test installed, or a single contact whose name carries
-        the call number — so a second read is visible in what comes back.
+        The list is the fixed table that a test installed. If there is no table, it is one
+        contact whose name has the call number. Thus a second read is visible in the result.
         """
         self.contacts_calls += 1
         if self.contact_rows is not None:
             return list(self.contact_rows)
-        # a fresh identity per fetch, so a re-read is visible
+        # a new identity for each read, so that a second read is visible
         return [Contact(name=f"contact-{self.contacts_calls}")]
 
     async def get_self_info(self) -> dict:
-        """A fixed self-description, counting the call."""
+        """Return a fixed self-description and count the call."""
         self.self_info_calls += 1
         return {"name": "node", "tx_power": 20}
 
     async def get_path_hash_mode(self) -> int:
-        """A fixed path hash mode, counting the call."""
+        """Return a fixed path hash mode and count the call."""
         self.mode_calls += 1
         return 2
 
     async def get_channel(self, idx: int):
-        """One configured slot at index 0, then a raised error, counting each call.
+        """Return one configured slot at index 0, then raise an error. Count each call.
 
-        Refusing the next index is how the firmware answers a slot it does not have,
-        and it is what stops the caller walking past the last one.
+        The firmware refuses the next index to answer for a slot that it does not have.
+        This stops the caller before it goes past the last slot.
         """
         self.channel_calls += 1
         if idx == 0:
@@ -65,9 +71,10 @@ class FakeDevice:
         raise RuntimeError("out of range")
 
     async def channel_capacity(self) -> int:
-        """The slot count, counting the call.
+        """Return the slot count and count the call.
 
-        A fixed hardware constant, so the cache must read it exactly once per session.
+        The count is a fixed constant of the hardware, so the cache must read it exactly one
+        time in each session.
         """
         self.capacity_calls += 1
         return 8
@@ -78,11 +85,12 @@ def _devstate(
     heard: dict | None = None,
     messaged: dict | None = None,
 ) -> DeviceState:
-    """A DeviceState over a fake ctx: device(), a silent logger, and our reception history.
+    """A DeviceState over a fake ctx: ``device()``, a silent logger, and our reception history.
 
-    ``heard`` is node-id → when we last overheard it; ``messaged`` is peer prefix → when it
-    last sent us a direct message. Together they are the first-hand evidence the contacts
-    merge weighs against the device's advert times.
+    ``heard`` maps a node id to the time when we last heard it. ``messaged`` maps a peer
+    prefix to the time when it last sent us a direct message. Together they are the
+    first-hand evidence that the contacts merge compares with the advert times of the
+    device.
     """
 
     async def device_getter():
@@ -100,7 +108,10 @@ def _devstate(
 
 
 def test_stable_facts_are_fetched_once_and_served_from_cache() -> None:
-    """self-info, path-hash mode, and channels read the radio once, then reuse the value."""
+    """MeshTerm reads self-info, the path hash mode, and channels from the radio one time.
+
+    Then it uses the value again.
+    """
     dev = FakeDevice()
     ds = _devstate(dev)
 
@@ -113,50 +124,55 @@ def test_stable_facts_are_fetched_once_and_served_from_cache() -> None:
     asyncio.run(run())
     assert dev.self_info_calls == 1
     assert dev.mode_calls == 1
-    # The channel probe ran once (idx 0 ok, idx 1 rejected) and was cached wholesale.
+    # The channel probe ran one time (idx 0 correct, idx 1 refused) and the cache kept the
+    # whole result.
     assert dev.channel_calls == 2
 
 
 def test_contacts_served_from_cache_within_ttl() -> None:
-    """Repeated contacts reads inside the TTL hit the wire exactly once."""
+    """Many contacts reads inside the TTL go to the wire exactly one time."""
     dev = FakeDevice()
     ds = _devstate(dev)
 
     async def run() -> None:
         first = await ds.contacts()
         for _ in range(5):
-            assert await ds.contacts() is first  # same cached list object
+            assert await ds.contacts() is first  # the same list object from the cache
 
     asyncio.run(run())
     assert dev.contacts_calls == 1
 
 
 def test_contacts_refresh_in_background_past_ttl() -> None:
-    """Past the TTL a read returns the stale list instantly and refreshes behind it."""
+    """After the TTL, a read returns the old list at once.
+
+    It refreshes the list in the background.
+    """
     dev = FakeDevice()
     ds = _devstate(dev)
 
     async def run() -> None:
-        stale = await ds.contacts()  # first fetch
+        stale = await ds.contacts()  # first read
         assert dev.contacts_calls == 1
-        # Age the cache past the TTL, then read: the read must return immediately (the stale
-        # copy) and schedule a background refresh rather than block on the slow call.
+        # Make the cache older than the TTL, then read. The read must return at once (the
+        # old copy) and schedule a refresh in the background. It must not wait for the slow
+        # call.
         ds._contacts_at = time.monotonic() - _CONTACTS_TTL_S - 1
         served = await ds.contacts()
-        assert served is stale  # served the old list, did not block on a re-fetch
-        # Let the scheduled background refresh run.
+        assert served is stale  # the old list, with no wait for a second read
+        # Let the scheduled refresh in the background run.
         await asyncio.gather(*list(ds._tasks))
-        assert dev.contacts_calls == 2  # refreshed behind the read
-        assert (await ds.contacts())[0].name == "contact-2"  # now serving the fresh list
+        assert dev.contacts_calls == 2  # the refresh happened in the background
+        assert (await ds.contacts())[0].name == "contact-2"  # now the new list
 
     asyncio.run(run())
 
 
 def test_self_info_refreshes_in_background_past_ttl() -> None:
-    """A node with a GPS moves itself, so past its TTL our own self-info is read again.
+    """A node with a GPS can move, so MeshTerm reads our self-info again after its TTL.
 
-    The read past the TTL still answers at once with the copy in hand; the next screen gets
-    the position the node reports now.
+    A read after the TTL still answers at once with the copy that MeshTerm has. The next
+    screen gets the position that the node reports now.
     """
     dev = FakeDevice()
     ds = _devstate(dev)
@@ -165,22 +181,23 @@ def test_self_info_refreshes_in_background_past_ttl() -> None:
         first = await ds.self_info()
         assert await ds.self_info() is first and dev.self_info_calls == 1  # within the TTL
         ds._self_info_at = time.monotonic() - _SELF_INFO_TTL_S - 1
-        assert await ds.self_info() is first  # served at once, not blocked on the re-read
+        assert await ds.self_info() is first  # answered at once, with no wait for the second read
         await asyncio.gather(*list(ds._tasks))
         assert dev.self_info_calls == 2
-        assert await ds.self_info() is not first  # the fresh copy from here on
+        assert await ds.self_info() is not first  # the new copy from this point
 
     asyncio.run(run())
 
 
 def test_heard_time_takes_the_later_of_the_device_and_our_own_receptions() -> None:
-    """A contact's heard time is the latest of the device's advert time and our evidence.
+    """The heard time of a contact is the latest of the advert time of the device and our evidence.
 
-    The device's ``last_advert`` is stamped by the *sender's* clock, so it is hearsay: it can
-    be absent (refused upstream by ``models.advert_time``), or plausible-looking yet days
-    stale because the node's RTC runs behind. Our own history is first-hand — stamped when we
-    received something — so the merge takes whichever is later. A device time still wins
-    whenever the firmware caught an advert we never recorded.
+    The clock of the *sender* gives the ``last_advert`` of the device its time, so it is
+    hearsay. It can be absent (``models.advert_time`` refuses it earlier in the chain). It
+    can look correct but be many days old, because the RTC of the node is slow. Our own
+    history is first-hand: it has the time when we received something. Thus the merge uses
+    the later time. A time from the device still wins if the firmware caught an advert that
+    we did not record.
     """
     dev = FakeDevice()
     stale = datetime(2026, 7, 25, 9, 0, tzinfo=timezone.utc)
@@ -196,20 +213,21 @@ def test_heard_time_takes_the_later_of_the_device_and_our_own_receptions() -> No
     async def run() -> None:
         by_name = {c.name: c for c in await ds.contacts()}
         assert by_name["Bogus-Clock"].last_seen == fresh  # filled from our own history
-        assert by_name["Behind-Clock"].last_seen == fresh  # our proof beats a stale stamp
-        assert by_name["Ahead"].last_seen == fresh  # a newer device time still stands
-        assert by_name["Quiet"].last_seen is None  # truly never heard stays never
+        assert by_name["Behind-Clock"].last_seen == fresh  # our proof is better than an old stamp
+        assert by_name["Ahead"].last_seen == fresh  # a newer time from the device stays
+        assert by_name["Quiet"].last_seen is None  # a node that was never heard stays never heard
 
     asyncio.run(run())
 
 
 def test_a_direct_message_counts_as_hearing_its_sender() -> None:
-    """An inbound DM updates the heard time — "heard" means received from.
+    """An inbound DM updates the heard time. "Heard" means received from.
 
-    A direct message never touches the firmware's ``last_advert`` and is stored as a message
-    rather than an observation, so a node we actively chat with could read days stale (and be
-    swept by the archive ladder's quiet rungs) while talking to us. The peer prefix the wire
-    addressed need not match the contact table's width, so either may be the shorter.
+    A direct message never changes the ``last_advert`` of the firmware. MeshTerm stores it
+    as a message and not as an observation. Thus a node that we talk with could look many
+    days old while it talks to us, and the quiet rungs of the archive ladder could sweep it.
+    The peer prefix of the wire address can have a different width from the contact table.
+    Either of the two can be the shorter one.
     """
     dev = FakeDevice()
     stale = datetime(2026, 7, 25, 9, 0, tzinfo=timezone.utc)
@@ -218,26 +236,27 @@ def test_a_direct_message_counts_as_hearing_its_sender() -> None:
         Contact(name="Chatty", public_key="ab" * 32, key_prefix="ab" * 6, last_seen=stale),
         Contact(name="Silent", public_key="cd" * 32, key_prefix="cd" * 6, last_seen=stale),
     ]
-    # A six-hex peer against a twelve-hex contact id: the shorter one is the wire's.
+    # A peer with six hex digits and a contact id with twelve hex digits: the shorter one is
+    # from the wire.
     ds = _devstate(dev, messaged={"ababab": messaged_at})
 
     async def run() -> None:
         by_name = {c.name: c for c in await ds.contacts()}
         assert by_name["Chatty"].last_seen == messaged_at
-        assert by_name["Silent"].last_seen == stale  # nobody else is credited
+        assert by_name["Silent"].last_seen == stale  # no other contact gets the time
 
     asyncio.run(run())
 
 
 def test_a_naive_stored_stamp_still_compares() -> None:
-    """A tz-less row from an older build reads as the UTC the storage contract says it is.
+    """A row without a time zone from an older build is read as UTC, as the storage contract says.
 
-    Comparing a naive datetime against an aware one raises, which would take the whole
-    contacts fetch down rather than one lane.
+    A comparison of a naive datetime with an aware datetime raises an error. This error
+    would stop the whole contacts read, not only one lane.
     """
     dev = FakeDevice()
     stale = datetime(2026, 7, 25, 9, 0, tzinfo=timezone.utc)
-    naive = datetime(2026, 7, 29, 12, 0)  # written before timestamps carried a zone
+    naive = datetime(2026, 7, 29, 12, 0)  # written before timestamps had a zone
     dev.contact_rows = [
         Contact(name="Legacy", public_key="aa" * 32, key_prefix="aa" * 6, last_seen=stale)
     ]
@@ -250,7 +269,7 @@ def test_a_naive_stored_stamp_still_compares() -> None:
 
 
 def test_a_history_read_failure_leaves_the_contacts_untouched() -> None:
-    """The merge is best-effort: a broken history read never blocks a contacts fetch."""
+    """The merge is best-effort. A history read that fails never blocks a contacts read."""
     dev = FakeDevice()
     device_says = datetime(2026, 7, 28, 9, 0, tzinfo=timezone.utc)
     dev.contact_rows = [
@@ -270,7 +289,7 @@ def test_a_history_read_failure_leaves_the_contacts_untouched() -> None:
 
 
 def test_force_bypasses_the_contacts_cache() -> None:
-    """A forced read always re-fetches, for the rare caller that needs it fresh."""
+    """A forced read always reads again. A caller that needs new data (this is rare) uses it."""
     dev = FakeDevice()
     ds = _devstate(dev)
 
@@ -283,7 +302,7 @@ def test_force_bypasses_the_contacts_cache() -> None:
 
 
 def test_invalidation_forces_a_re_read() -> None:
-    """Each invalidate drops exactly its own entry so the next read re-fetches it."""
+    """Each invalidation removes exactly its own entry. Thus the next read gets it again."""
     dev = FakeDevice()
     ds = _devstate(dev)
 
@@ -292,22 +311,26 @@ def test_invalidation_forces_a_re_read() -> None:
         await ds.path_hash_mode()
         await ds.channel_slots()
         await ds.contacts()
-        # invalidate_config drops self-info + path-hash mode together (the config editor's write).
+        # invalidate_config removes self-info and the path hash mode together (this is the
+        # write of the config editor).
         ds.invalidate_config()
         await ds.self_info()
         await ds.path_hash_mode()
         assert dev.self_info_calls == 2 and dev.mode_calls == 2
-        # channels and contacts were untouched by that invalidation.
+        # This invalidation did not change channels and contacts.
         assert dev.channel_calls == 2 and dev.contacts_calls == 1
         ds.invalidate_channels()
         await ds.channel_slots()
-        assert dev.channel_calls == 4  # probed again
+        assert dev.channel_calls == 4  # the probe ran again
 
     asyncio.run(run())
 
 
 def test_reset_clears_everything() -> None:
-    """A reconnect's reset drops the whole cache so every fact is re-read on next use."""
+    """The reset after a reconnect clears the whole cache.
+
+    Thus MeshTerm reads each fact again at the next use.
+    """
     dev = FakeDevice()
     ds = _devstate(dev)
 
@@ -326,11 +349,14 @@ def test_reset_clears_everything() -> None:
     assert dev.self_info_calls == 2
     assert dev.contacts_calls == 2
     assert dev.mode_calls == 2
-    assert dev.capacity_calls == 2  # capacity is a hardware constant, but a reconnect re-reads it
+    assert dev.capacity_calls == 2  # a hardware constant, but a reconnect reads it again
 
 
 def test_channel_capacity_is_fetched_once_and_served_from_cache() -> None:
-    """Capacity is a hardware constant: probed once, then reused for the session."""
+    """The capacity is a hardware constant.
+
+    MeshTerm probes it one time and uses it for the session.
+    """
     dev = FakeDevice()
     ds = _devstate(dev)
 
@@ -343,23 +369,24 @@ def test_channel_capacity_is_fetched_once_and_served_from_cache() -> None:
 
 
 def test_prewarm_fills_every_cache_off_the_read_path() -> None:
-    """prewarm() warms all five facts, so the first screen open hits no wire at all."""
+    """``prewarm()`` warms all five facts, so the first screen that opens does not use the wire."""
     dev = FakeDevice()
     ds = _devstate(dev)
 
     async def run() -> None:
         ds.prewarm()
-        await asyncio.gather(*list(ds._tasks))  # let the background warm finish
-        # Every cache was filled by the prewarm: self-info and the routing mode once each,
-        # contacts once, the channel probe once (idx 0 ok, idx 1 rejected), capacity once.
+        await asyncio.gather(*list(ds._tasks))  # let the warm in the background finish
+        # The prewarm filled each cache: self-info and the routing mode one time each,
+        # contacts one time, the channel probe one time (idx 0 correct, idx 1 refused), and
+        # the capacity one time.
         assert dev.self_info_calls == 1
         assert dev.mode_calls == 1
         assert dev.contacts_calls == 1
         assert dev.channel_calls == 2
         assert dev.capacity_calls == 1
-        # A screen opening now is served from cache — no additional round-trips. The
-        # path-hash mode belongs in that list: Contacts and Trace both read it to size the
-        # key-hash highlight, and nothing else in the session warms it.
+        # A screen that opens now gets its data from the cache, with no more round-trips.
+        # The path hash mode must be in that list. Contacts and Trace both read it to find
+        # the size of the key hash highlight, and nothing else in the session warms it.
         await ds.contacts()
         await ds.self_info()
         await ds.path_hash_mode()
@@ -375,11 +402,12 @@ def test_prewarm_fills_every_cache_off_the_read_path() -> None:
 
 
 def test_prewarm_reads_the_cheap_facts_before_the_slot_probes() -> None:
-    """Order is the point: the reads share one link, and the probes are the slow ones.
+    """The order is the purpose of this test: the reads share one link, and the probes are slow.
 
-    Both slot reads walk the firmware's slot table an index at a time and are measured in
-    seconds; the facts every list screen needs are single round-trips. Warming them first
-    is what stops a Contacts open a second after connect from queueing behind a slot walk.
+    Both slot reads go through the slot table of the firmware, one index at a time. They
+    take seconds. The facts that each list screen needs are single round-trips. MeshTerm
+    warms them first. Thus Contacts, if it opens one second after the connect, does not
+    wait behind a slot walk.
     """
     dev = FakeDevice()
     ds = _devstate(dev)
@@ -415,7 +443,10 @@ def test_prewarm_reads_the_cheap_facts_before_the_slot_probes() -> None:
 
 
 def test_a_concurrent_path_hash_read_joins_the_warm_instead_of_racing_it() -> None:
-    """The prewarm now reads the mode, so a screen opening beside it must not re-read."""
+    """The prewarm reads the mode now.
+
+    Thus a screen that opens at the same time must not read it again.
+    """
     dev = FakeDevice()
     ds = _devstate(dev)
 

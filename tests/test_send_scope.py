@@ -1,14 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the sending side of region scopes.
 
-A channel's scope is a window on the companion's one *session* scope: set it, send, put it
-back, with nothing else let through in between. These pin that ordering against the
-simulator — including what happens when a step fails — then everything built on it: the
-recorded scope, the chat's title and its unscoped resend, the paths dialog's line, the
-channel page's picker, the CLI, and Device config teaching the default.
+The scope of a channel is a window on the one *session* scope of the companion. MeshTerm
+sets the scope, sends the message, and puts the scope back. No other transmission can go
+out between these steps. First, these tests check this order against the simulator. They
+also check what happens when a step fails. Then they test everything that depends on it:
 
-Everything runs against :class:`~meshterm.core.connection.MockDevice` and scratch files;
-nothing transmits.
+* the scope that MeshTerm records,
+* the title of the chat and its unscoped resend,
+* the line of the paths dialog,
+* the picker on the channel page,
+* the CLI,
+* Device config, which teaches the default.
+
+All the tests run against :class:`~meshterm.core.connection.MockDevice` and scratch files.
+Nothing transmits.
 """
 
 from __future__ import annotations
@@ -41,14 +47,14 @@ from meshterm.services.event_hub import EventHub
 from meshterm.ui.chat import ChatScreen, _sent_scope_line
 from meshterm.ui.tui import Choice, fkeys
 
-# -- a device that writes down what it was asked, in order --------------------------------
+# -- a device that records each command that it gets, in order -----------------------------
 
 
 class _TracingDevice(MockDevice):
-    """The simulator, keeping a log of every scope change and send in the order made.
+    """The simulator, with a log of each scope change and each send, in order.
 
-    ``refuse`` makes the named scope command fail the way old firmware does; ``version``
-    is what the device query reports as its firmware build.
+    ``refuse`` makes the named scope command fail in the same way as old firmware.
+    ``version`` is the firmware build that the device query gives.
     """
 
     def __init__(self, *, refuse: set[str] | None = None, version: str = "mock") -> None:
@@ -82,7 +88,7 @@ class _TracingDevice(MockDevice):
 
 
 async def test_transmit_lock_reenters_for_its_holder_and_blocks_everyone_else() -> None:
-    """The scoped send re-enters its own lock; another task waits for the whole window."""
+    """The scoped send enters its own lock again. Another task waits for the whole window."""
     lock = TransmitLock()
     order: list[str] = []
 
@@ -91,11 +97,11 @@ async def test_transmit_lock_reenters_for_its_holder_and_blocks_everyone_else() 
             order.append("other")
 
     async with lock.held():
-        async with lock.held():  # the same task: must not deadlock
+        async with lock.held():  # the same task: this must not deadlock
             order.append("inner")
         task = asyncio.ensure_future(other())
         await asyncio.sleep(0.01)
-        assert order == ["inner"]  # still waiting behind us
+        assert order == ["inner"]  # the other task still waits for us
         order.append("outer-done")
     await task
     assert order == ["inner", "outer-done", "other"]
@@ -106,7 +112,10 @@ async def test_transmit_lock_reenters_for_its_holder_and_blocks_everyone_else() 
 
 
 async def test_scoped_send_sets_then_sends_then_restores() -> None:
-    """Scope set → channel send (under it) → restored to the default, in that order."""
+    """MeshTerm sets the scope, sends the channel message under it, and restores the default.
+
+    The steps are in this order.
+    """
     device = _TracingDevice()
     await device.send_channel_in_scope(0, "hello", "lakeside")
     assert device.trail == [
@@ -118,14 +127,20 @@ async def test_scoped_send_sets_then_sends_then_restores() -> None:
 
 
 async def test_plain_send_never_touches_the_session_scope() -> None:
-    """No scope asked: the message goes out under the default and nothing is set."""
+    """If the caller gives no scope, the message goes out under the default.
+
+    MeshTerm sets nothing.
+    """
     device = _TracingDevice()
     await device.send_channel_in_scope(0, "hello", None)
     assert device.trail == [("channel", "hello", "")]
 
 
 async def test_a_dm_cannot_interleave_into_the_window() -> None:
-    """A DM started mid-window waits until the scope is restored, then goes out unscoped."""
+    """A DM that starts in the middle of the window waits until the scope is restored.
+
+    Then it goes out unscoped.
+    """
     device = _TracingDevice()
     await device.connect()
     alice = next(c for c in await device.get_contacts() if c.name == "Alice")
@@ -143,7 +158,7 @@ async def test_a_dm_cannot_interleave_into_the_window() -> None:
     await entered.wait()
     dm = asyncio.ensure_future(device.send_direct_message(alice, "dm"))
     await asyncio.sleep(0.01)
-    assert not dm.done()  # held behind the window
+    assert not dm.done()  # the DM waits for the window
     release.set()
     await asyncio.gather(scoped, dm)
     assert device.trail == [
@@ -155,7 +170,10 @@ async def test_a_dm_cannot_interleave_into_the_window() -> None:
 
 
 async def test_a_refused_scope_sends_nothing() -> None:
-    """Old firmware refuses the scope: FloodScopeError, and no message went out at all."""
+    """Old firmware refuses the scope.
+
+    The result is ``FloodScopeError``, and no message goes out.
+    """
     device = _TracingDevice(refuse={"lakeside"})
     with pytest.raises(FloodScopeError) as caught:
         await device.send_channel_in_scope(0, "hello", "lakeside")
@@ -165,7 +183,7 @@ async def test_a_refused_scope_sends_nothing() -> None:
 
 
 async def test_a_send_that_fails_still_restores_the_scope() -> None:
-    """The channel send raising must not leave the session scope on the channel's region."""
+    """If the channel send raises an error, the session scope must not stay on its region."""
     device = _TracingDevice()
 
     async def boom(index: int, text: str) -> None:
@@ -178,10 +196,10 @@ async def test_a_send_that_fails_still_restores_the_scope() -> None:
 
 
 async def test_a_failed_restore_is_repaired_before_the_next_transmission() -> None:
-    """A restore that failed is retried by the next send, before that send goes out."""
+    """The next send tries a restore that failed again, before that send goes out."""
     device = _TracingDevice()
     device.fail_restore = True
-    await device.send_channel_in_scope(0, "first", "lakeside")  # the message did go
+    await device.send_channel_in_scope(0, "first", "lakeside")  # the message went out
     assert device._send_scope == "lakeside"
     device.fail_restore = False
     await device.send_advert()
@@ -190,18 +208,21 @@ async def test_a_failed_restore_is_repaired_before_the_next_transmission() -> No
 
 
 async def test_an_invalid_region_is_refused_before_the_radio_is_asked() -> None:
-    """A name the firmware couldn't hold never reaches the device."""
+    """A name that the firmware cannot hold never reaches the device."""
     device = _TracingDevice()
     with pytest.raises(RegionNameError):
         await device.send_channel_in_scope(0, "hello", "two words")
     assert device.trail == []
 
 
-# -- unscoped (*) and the firmware that can or can't do it ---------------------------------
+# -- unscoped (*) and the firmware that can or cannot do it --------------------------------
 
 
 def test_firmware_version_reads_the_leading_release() -> None:
-    """``v1.15.0``, ``1.16.2-dev`` and ``1.9`` all compare; a non-version is None."""
+    """``v1.15.0``, ``1.16.2-dev``, and ``1.9`` all compare.
+
+    A text that is not a version gives None.
+    """
     assert firmware_version({"ver": "v1.15.0"}) == (1, 15, 0)
     assert firmware_version({"ver": "1.16.2-dev"}) == (1, 16, 2)
     assert firmware_version({"ver": "1.9"}) == (1, 9, 0)
@@ -210,21 +231,27 @@ def test_firmware_version_reads_the_leading_release() -> None:
 
 
 async def test_unscoped_uses_the_override_on_new_firmware() -> None:
-    """1.16+: ``*`` is set as the session scope, the message goes, the scope is restored."""
+    """On 1.16 and later, MeshTerm sets ``*`` as the session scope.
+
+    Then it sends the message and restores the scope.
+    """
     device = _TracingDevice(version="v1.16.0")
     await device.send_channel_in_scope(0, "hello", "*")
     assert device.trail == [("scope", "*"), ("channel", "hello", "*"), ("scope", None)]
 
 
 async def test_unscoped_on_old_firmware_without_a_default_is_the_plain_send() -> None:
-    """1.15 with no default scope: a plain flood already is unscoped, so it just goes."""
+    """On 1.15 with no default scope, a plain flood is already unscoped, so MeshTerm sends it."""
     device = _TracingDevice(version="v1.15.0")
     await device.send_channel_in_scope(0, "hello", "*")
     assert device.trail == [("channel", "hello", "")]
 
 
 async def test_unscoped_on_old_firmware_over_a_default_is_refused() -> None:
-    """1.15 with a default set can't override it: refused, and nothing was sent."""
+    """On 1.15 with a default scope, MeshTerm cannot override it.
+
+    The send is refused, and nothing is sent.
+    """
     device = _TracingDevice(version="v1.15.0")
     await device.set_default_flood_scope("lakeside")
     with pytest.raises(FloodScopeError) as caught:
@@ -233,11 +260,11 @@ async def test_unscoped_on_old_firmware_over_a_default_is_refused() -> None:
     assert device.trail == []
 
 
-# -- the chat service: which scope, and what gets recorded ----------------------------------
+# -- the chat service: which scope, and what MeshTerm records -------------------------------
 
 
 class _Ctx:
-    """The slice of AppContext the chat service reads, with a real region store."""
+    """The part of AppContext that the chat service reads, with a real region store."""
 
     def __init__(self, device: MockDevice, repo: Repository, tmp: Path) -> None:
         self._device = device
@@ -261,7 +288,7 @@ class _Ctx:
 
 @pytest.fixture()
 def repo(tmp_path: Path) -> Repository:
-    """A Repository on a scratch database, closed when the test finishes."""
+    """A Repository on a scratch database. The fixture closes it when the test ends."""
     r = Repository(tmp_path / "scope.db")
     yield r
     r.close()
@@ -270,7 +297,10 @@ def repo(tmp_path: Path) -> Repository:
 async def test_a_channel_send_goes_under_its_scope_and_records_it(
     tmp_path: Path, repo: Repository
 ) -> None:
-    """The channel's scope is looked up by identity, sent under, and kept with the message."""
+    """MeshTerm finds the scope of the channel by identity and sends under it.
+
+    It keeps the scope with the message.
+    """
     device = _TracingDevice()
     ctx = _Ctx(device, repo, tmp_path)
     chat = ChatService(ctx)
@@ -287,7 +317,10 @@ async def test_a_channel_send_goes_under_its_scope_and_records_it(
 async def test_a_channel_without_a_scope_records_the_default_or_unscoped(
     tmp_path: Path, repo: Repository
 ) -> None:
-    """No channel scope: recorded as the device default, or ``*`` when there is none."""
+    """If the channel has no scope, MeshTerm records the default of the device.
+
+    If there is no default, it records ``*``.
+    """
     ctx = _Ctx(_TracingDevice(), repo, tmp_path)
     chat = ChatService(ctx)
     assert (await chat.send_channel(0, "a")).scope == "*"
@@ -296,7 +329,7 @@ async def test_a_channel_without_a_scope_records_the_default_or_unscoped(
 
 
 async def test_the_one_shot_override_sends_unscoped(tmp_path: Path, repo: Repository) -> None:
-    """``scope="*"`` overrides the channel's scope for one message and is recorded."""
+    """``scope="*"`` overrides the scope of the channel for one message, and MeshTerm records it."""
     device = _TracingDevice()
     ctx = _Ctx(device, repo, tmp_path)
     chat = ChatService(ctx)
@@ -307,7 +340,7 @@ async def test_the_one_shot_override_sends_unscoped(tmp_path: Path, repo: Reposi
 
 
 async def test_a_refused_scope_records_nothing(tmp_path: Path, repo: Repository) -> None:
-    """A message the radio wouldn't send under its scope is not in the transcript either."""
+    """A message that the radio does not send under its scope is not in the transcript."""
     ctx = _Ctx(_TracingDevice(refuse={"lakeside"}), repo, tmp_path)
     chat = ChatService(ctx)
     channel_id = await chat.channel_id_for(0)
@@ -321,7 +354,10 @@ async def test_a_refused_scope_records_nothing(tmp_path: Path, repo: Repository)
 
 
 def test_a_v16_database_gains_the_scope_column(tmp_path: Path) -> None:
-    """Opening a database from before v17 adds ``messages.scope``, old rows NULL."""
+    """If MeshTerm opens a database from before v17, it adds ``messages.scope``.
+
+    The old rows are NULL.
+    """
     path = tmp_path / "old.db"
     conn = db_module.connect(path)
     conn.execute("ALTER TABLE messages DROP COLUMN scope")
@@ -374,13 +410,13 @@ def _channel_chat(session, messages, *, scope="lakeside", resend=None) -> ChatSc
 
 
 def test_the_chat_title_carries_the_scope_as_a_status_atom() -> None:
-    """``#ops · lakeside``; no atom at all when the channel has no scope."""
+    """The title is ``#ops · lakeside``. If the channel has no scope, there is no atom."""
     assert _channel_chat(_Session(), []).title == "#ops · lakeside"
     assert _channel_chat(_Session(), [], scope=None).title == "#ops"
 
 
 async def test_resend_unscoped_targets_only_a_newest_scoped_message() -> None:
-    """^R offers the newest sent message when it went under a region, and nothing else."""
+    """^R offers the newest sent message when it went out under a region, and no other message."""
 
     async def resend(message: ChatMessage) -> ChatMessage:
         return ChatMessage(text=message.text, outbound=True, is_channel=True, scope="*")
@@ -395,13 +431,16 @@ async def test_resend_unscoped_targets_only_a_newest_scoped_message() -> None:
     screen.handle("retry")
     await asyncio.sleep(0.05)
     assert screen._messages[-1].scope == "*"
-    assert screen._retry_target() is None  # the unscoped copy is now the newest
+    assert screen._retry_target() is None  # the unscoped copy is the newest message now
     assert "^R" not in screen.footer_hint
     assert "unscoped" in _plain_lines(screen)
 
 
 async def test_resend_unscoped_takes_the_picked_message_over_the_newest() -> None:
-    """With a message picked, ^R resends that one — and only if it is a scoped one of ours."""
+    """If the user selects a message, ^R resends that message.
+
+    This is only true if the message is one of ours and it has a scope.
+    """
     sent: list[str] = []
 
     async def resend(message: ChatMessage) -> ChatMessage:
@@ -412,14 +451,14 @@ async def test_resend_unscoped_takes_the_picked_message_over_the_newest() -> Non
     heard = ChatMessage(text="heard", outbound=False, is_channel=True)
     newest = ChatMessage(text="newest", outbound=True, is_channel=True, scope="lakeside")
     screen = _channel_chat(_Session(), [older, heard, newest], resend=resend)
-    assert screen._retry_target() is newest  # nothing picked: the newest
+    assert screen._retry_target() is newest  # nothing is selected: the newest message
 
-    screen._selected = 0  # the older scoped message
+    screen._selected = 0  # the older message with a scope
     assert screen._retry_target() is older
     assert "^R resend unscoped" in screen.footer_hint
     assert len(screen.footer_hint) <= 72
 
-    screen._selected = 1  # someone else's message: nothing to resend, no fallback
+    screen._selected = 1  # a message from another node: nothing to resend, and no fallback
     assert screen._retry_target() is None
     assert "^R" not in screen.footer_hint
 
@@ -427,12 +466,12 @@ async def test_resend_unscoped_takes_the_picked_message_over_the_newest() -> Non
     screen.handle("retry")
     await asyncio.sleep(0.05)
     assert sent == ["older"]
-    assert screen._selected is None  # the pick is done; the resend is at the tail
+    assert screen._selected is None  # the selection is done, and the resend is at the end
     assert screen._messages[-1].text == "older" and screen._messages[-1].scope == "*"
 
 
 async def test_a_declined_resend_sends_nothing() -> None:
-    """Cancel on the amber confirm leaves the transcript as it was."""
+    """Cancel on the amber confirm does not change the transcript."""
     calls: list[str] = []
 
     async def resend(message: ChatMessage) -> ChatMessage:
@@ -448,7 +487,10 @@ async def test_a_declined_resend_sends_nothing() -> None:
 
 
 def test_a_channel_with_nothing_to_resend_dims_the_chip() -> None:
-    """An unscoped newest message leaves Resend on the lane, dim — present but unavailable."""
+    """If the newest message is unscoped, Resend stays on the lane, dim.
+
+    It is there, but it is not available.
+    """
     unscoped = ChatMessage(text="hi", outbound=True, is_channel=True, scope="*")
 
     async def resend(message: ChatMessage) -> ChatMessage:  # pragma: no cover - never called
@@ -466,11 +508,14 @@ def _plain_lines(screen: ChatScreen) -> str:
     return plain(screen.render_body(72))
 
 
-# -- the paths dialog's line ----------------------------------------------------------------
+# -- the line of the paths dialog -----------------------------------------------------------
 
 
 def test_the_paths_line_says_when_no_known_repeater_carries_the_scope(tmp_path: Path) -> None:
-    """Scoped, nothing relayed, no carrier known: said plainly; a carrier changes the tail."""
+    """If the message has a scope, nothing relayed it, and no carrier is known, the line says this.
+
+    A known carrier changes the end of the line.
+    """
     store = RegionStore(tmp_path / "regions.json")
     ctx = SimpleNamespace(region_store=store)
     sent = ChatMessage(text="hi", outbound=True, is_channel=True, scope="lakeside")
@@ -488,11 +533,14 @@ def test_the_paths_line_says_when_no_known_repeater_carries_the_scope(tmp_path: 
     assert _sent_scope_line(ctx, inbound, relayed=True) is None
 
 
-# -- the channel page's picker ---------------------------------------------------------------
+# -- the picker on the channel page ----------------------------------------------------------
 
 
 class _PickerUi:
-    """Replays scripted select/text answers; records the rows each select offered."""
+    """It plays the scripted select and text answers.
+
+    It records the rows that each select offered.
+    """
 
     def __init__(self, selects: list, texts: list) -> None:
         self._selects = list(selects)
@@ -511,7 +559,10 @@ class _PickerUi:
 
 
 async def test_the_picker_sets_types_steps_back_and_clears(tmp_path: Path) -> None:
-    """Pick a known region; type one (Esc on the field comes back to the list); clear."""
+    """The user can select a known region, type one, or clear it.
+
+    Esc on the field returns to the list.
+    """
     from meshterm.ui.channels import _NO_SCOPE, _TYPE_REGION, _detail_summary, _pick_scope
 
     store = RegionStore(tmp_path / "regions.json")
@@ -535,7 +586,7 @@ async def test_the_picker_sets_types_steps_back_and_clears(tmp_path: Path) -> No
     assert store.channel_scope(slot.identity) is None
 
     ctx.ui = _PickerUi(selects=[None], texts=[])
-    assert await _pick_scope(ctx, slot) is False  # Esc keeps
+    assert await _pick_scope(ctx, slot) is False  # Esc keeps the value
 
     store.set_channel_scope(slot.identity, "yul")
     stats = SimpleNamespace(get=lambda identity: None)
@@ -552,7 +603,7 @@ async def test_the_picker_sets_types_steps_back_and_clears(tmp_path: Path) -> No
 
 @pytest.fixture()
 def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
-    """The real Typer app against the simulator, in a config directory of its own."""
+    """The real Typer app with the simulator, in a config directory of its own."""
     from typer.testing import CliRunner
 
     from meshterm.cli import app
@@ -567,7 +618,10 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
 
 
 async def test_cli_channel_scope_reads_sets_and_clears(tmp_path: Path) -> None:
-    """``channels scope`` reads (``-``, exit 0, for none), sets, clears — keyed by the channel."""
+    """``channels scope`` reads, sets, and clears. The channel is the key.
+
+    A read with no scope gives ``-`` and exit 0.
+    """
     from io import StringIO
 
     from rich.console import Console
@@ -613,10 +667,11 @@ async def test_cli_channel_scope_reads_sets_and_clears(tmp_path: Path) -> None:
 
 
 def test_cli_channel_scope_refuses_bad_arguments(run) -> None:  # noqa: ANN001
-    """A bad name, a name with --clear, or a write to an empty slot is a usage error.
+    """A name that is not correct, a name with --clear, or a write to an empty slot is an error.
 
-    Reading an empty slot is exit 5 with its document, the way ``share`` answers one; a
-    write there did nothing, and exit 5 would tell a script it had.
+    The error is a usage error. A read of an empty slot is exit 5 with its document, in the
+    same way as ``share`` answers for an empty slot. A write there did nothing, and exit 5
+    would tell a script that it did something.
     """
     assert run("channels", "scope", "0", "two words").exit_code == 2
     assert run("channels", "scope", "0", "yul", "--clear").exit_code == 2
@@ -628,7 +683,10 @@ def test_cli_channel_scope_refuses_bad_arguments(run) -> None:  # noqa: ANN001
 
 
 def test_cli_send_scope_is_a_channel_option_and_reports_its_scope(run) -> None:  # noqa: ANN001
-    """``--scope *`` goes out unscoped and says so; on a DM or a bad name it's a usage error."""
+    """``--scope *`` goes out unscoped and says so.
+
+    On a DM, or with a name that is not correct, it is a usage error.
+    """
     doc = json.loads(run("--json", "chat", "send", "hi", "--channel", "0", "--scope", "*").stdout)
     assert doc["scope"] == {"state": "unscoped", "region": None, "code": None}
     doc = json.loads(run("--json", "chat", "send", "hi", "--channel", "0", "--scope", "yul").stdout)
@@ -638,10 +696,11 @@ def test_cli_send_scope_is_a_channel_option_and_reports_its_scope(run) -> None: 
 
 
 def test_the_entry_point_never_expands_a_wildcard(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``--scope '*'`` reaches the command as ``*``, not as the directory's file names.
+    """``--scope '*'`` reaches the command as ``*``, not as the file names of the directory.
 
-    Click expands globs in the arguments on Windows, even quoted ones; the console-script
-    entry point turns that off, since ``*`` is the wildcard region and nothing takes a glob.
+    Click expands globs in the arguments on Windows, also the arguments in quotation marks.
+    The entry point of the console script turns this off, because ``*`` is the wildcard
+    region and no argument takes a glob.
     """
     import meshterm.cli as cli
 
@@ -655,7 +714,7 @@ def test_the_entry_point_never_expands_a_wildcard(monkeypatch: pytest.MonkeyPatc
 
 
 def test_a_config_read_learns_the_default_scope(tmp_path: Path) -> None:
-    """A snapshot carrying the default scope teaches the store and seeds the cache."""
+    """A snapshot that has the default scope teaches the store and fills the cache."""
     from meshterm.tools.config import learn_default_scope
 
     noted: list = []
@@ -666,14 +725,14 @@ def test_a_config_read_learns_the_default_scope(tmp_path: Path) -> None:
     learn_default_scope(ctx, {"flood_scope": "#harbour"})
     assert store.get("harbour").sources == ("default",)
     assert noted == ["harbour"]
-    learn_default_scope(ctx, {})  # the read failed: nothing learned, nothing noted
+    learn_default_scope(ctx, {})  # the read failed: nothing is learned, nothing is noted
     assert noted == ["harbour"]
     learn_default_scope(ctx, {"flood_scope": ""})
     assert noted == ["harbour", ""]
 
 
 async def test_a_channel_chat_sends_under_its_scope_end_to_end(tmp_path: Path) -> None:
-    """Typing in a scoped channel's chat, through the real session, sends under the scope."""
+    """If the user types in the chat of a channel with a scope, the real session sends under it."""
     from io import StringIO
 
     from prompt_toolkit.input.defaults import create_pipe_input

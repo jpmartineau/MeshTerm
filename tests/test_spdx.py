@@ -1,41 +1,42 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Enforce SPDX license identifiers on all Python files.
+"""Make sure that all Python files have an SPDX licence identifier.
 
-Every Python source file in the MeshTerm project must declare its license with
-a SPDX-License-Identifier comment on line 1 (or line 2 if it starts with a
-shebang). This test walks the entire codebase and asserts the identifier is
-present. A file lifted out of the repository carries no license marking
-otherwise, so this gate ensures no file lands unmarked.
+Each Python source file in the MeshTerm project must declare its licence with a
+SPDX-License-Identifier comment on line 1 (or on line 2 if the file starts with a shebang).
+This test examines the entire code base and asserts that the identifier is there. If
+someone copies a file out of the repository, the file has no licence marking without this
+identifier. Thus this gate makes sure that no file has no marking.
 """
 
 from pathlib import Path
 
 
 def test_spdx_headers():
-    """Every Python file must have an SPDX-License-Identifier header."""
+    """Each Python file must have an SPDX-License-Identifier header."""
     repo_root = Path(__file__).parent.parent
     python_files = []
 
-    # Collect all Python files from the required directories
+    # Collect all the Python files from the necessary directories
     for directory in ["meshterm", "tests", "packaging", "scripts/picocalc-lyra/xiao-radio"]:
         dir_path = repo_root / directory
         if dir_path.exists():
             if directory == "packaging":
-                # For packaging, include both .py files and .spec files
+                # For packaging, include the .py files and the .spec files
                 python_files.extend(dir_path.glob("*.py"))
                 python_files.extend(dir_path.glob("*.spec"))
             else:
                 python_files.extend(dir_path.rglob("*.py"))
 
-    # Also check the extensionless scripts/uconsole/meshterm-spi-bridge script
+    # Also examine the script scripts/uconsole/meshterm-spi-bridge, which has no extension
     spi_bridge = repo_root / "scripts" / "uconsole" / "meshterm-spi-bridge"
     if spi_bridge.exists():
         python_files.append(spi_bridge)
 
     missing_spdx = []
     for filepath in sorted(python_files):
-        # A file that cannot be read as UTF-8 is a finding, not something to skip: every
-        # source file here is UTF-8, and a silent skip would let an unmarked file through.
+        # A file that MeshTerm cannot read as UTF-8 is a finding. The test must not skip it.
+        # Each source file here is UTF-8, and a skip with no message lets a file with no
+        # marking pass.
         head = filepath.read_text(encoding="utf-8").split("\n", 2)[:2]
         if not any("SPDX-License-Identifier:" in line for line in head):
             missing_spdx.append(str(filepath.relative_to(repo_root)))

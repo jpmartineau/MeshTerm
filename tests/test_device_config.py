@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for the device-configuration registry, backup/restore, and safety gating.
+"""Tests for the device-configuration registry, backup and restore, and the safety checks.
 
-All run against :class:`MockDevice` — no hardware required.
+All the tests run against :class:`MockDevice`, so no hardware is necessary.
 """
 
 from __future__ import annotations
@@ -27,17 +27,17 @@ from meshterm.tools.config import _require_yes
 
 
 async def _connected_mock() -> MockDevice:
-    """Return a connected MockDevice."""
+    """A MockDevice that is connected."""
     device = MockDevice()
     await device.connect()
     return device
 
 
-# -- parsing / formatting ------------------------------------------------------
+# -- parsing and formatting ----------------------------------------------------
 
 
 def test_parse_value_types() -> None:
-    """Each value type coerces from string correctly."""
+    """Each value type converts correctly from a string."""
     assert parse_value(get_spec("name"), "Node-7") == "Node-7"
     assert parse_value(get_spec("radio_sf"), "9") == 9
     assert parse_value(get_spec("radio_freq"), "868.0") == 868.0
@@ -46,7 +46,7 @@ def test_parse_value_types() -> None:
 
 
 def test_parse_value_range_and_enum_errors() -> None:
-    """Out-of-range and invalid enum values raise DeviceConfigError."""
+    """A value out of range, and an enum value that is not valid, raise DeviceConfigError."""
     with pytest.raises(DeviceConfigError, match="<= 12"):
         parse_value(get_spec("radio_sf"), "99")
     with pytest.raises(DeviceConfigError, match=">= 5"):
@@ -58,14 +58,14 @@ def test_parse_value_range_and_enum_errors() -> None:
 
 
 def test_format_value() -> None:
-    """Formatting renders booleans, enums, and unknowns readably."""
+    """The format shows booleans, enums, and unknown values in a form that a person can read."""
     assert format_value(get_spec("manual_add_contacts"), True) == "true"
     assert format_value(get_spec("telemetry_mode_base"), 1) == "1 (by contact)"
     assert format_value(get_spec("name"), None) == "?"
 
 
 def test_path_hash_mode_is_strict_enum() -> None:
-    """path_hash_mode takes the three modes the firmware accepts; it refuses a mode 3."""
+    """path_hash_mode takes the three modes that the firmware accepts. It refuses mode 3."""
     assert parse_value(get_spec("path_hash_mode"), "2") == 2
     assert format_value(get_spec("path_hash_mode"), 0) == "0 (1-byte hashes (default))"
     with pytest.raises(DeviceConfigError, match="one of"):
@@ -73,7 +73,7 @@ def test_path_hash_mode_is_strict_enum() -> None:
 
 
 def test_device_pin_is_zero_or_six_digits() -> None:
-    """The firmware refuses any other PIN, so the value is refused before it is sent."""
+    """The firmware refuses each other PIN, so MeshTerm refuses the value before it sends it."""
     spec = get_spec("device_pin")
     assert parse_value(spec, "0") == 0
     assert parse_value(spec, "123456") == 123456
@@ -82,22 +82,23 @@ def test_device_pin_is_zero_or_six_digits() -> None:
 
 
 def test_telemetry_modes_stop_at_the_firmware_s_three() -> None:
-    """Deny, by contact, allow all — there is no fourth mode to offer."""
+    """The modes are deny, by contact, and allow all. There is no fourth mode to offer."""
     with pytest.raises(DeviceConfigError, match="one of"):
         parse_value(get_spec("telemetry_mode_env"), "3")
 
 
 def test_highlighted_hash_highlights_path_hash_prefix() -> None:
-    """A key lane lights only its path-hash prefix.
+    """A key lane lights only its path hash prefix.
 
-    The full key is shown, with those bytes lit in the node's hash-derived palette
-    hue — the same hue the node's name wears.
+    The lane shows the full key. It lights those bytes in the palette hue that comes from
+    the hash of the node. The name of the node has the same hue.
     """
     from meshterm.ui.theme import node_style
     from meshterm.ui.widgets import highlighted_hash
 
     pub = "aabbccddee" + "00" * 27
-    # mode 2 => 3-byte hashes => first 6 hex chars are the addressable prefix.
+    # Mode 2 means hashes of 3 bytes, so the first 6 hex characters are the prefix that
+    # MeshTerm can address.
     text = highlighted_hash(pub, prefix_bytes=3)
     assert text.plain == pub  # the full key is shown
     highlighted = [s for s in text.spans if s.style == node_style(pub)]
@@ -106,27 +107,27 @@ def test_highlighted_hash_highlights_path_hash_prefix() -> None:
 
 
 def test_highlighted_hash_truncates_on_a_byte_boundary() -> None:
-    """A key too long for its budget is truncated on a byte boundary.
+    """A key that is too long for its width is truncated on a byte boundary.
 
-    It keeps whole leading bytes (an even digit count) plus an ellipsis, padded to the
-    exact width, so a half-byte digit never shows.
+    It keeps whole leading bytes (an even number of digits) and an ellipsis. It has padding
+    to the exact width, so a digit of half a byte never shows.
     """
     from meshterm.ui.widgets import highlighted_hash
 
     pub = "ab" * 32  # 64 hex digits
-    # An even budget: width - 1 is odd, so the last (half-byte) digit is dropped and the
-    # freed cell pads out — 14 digits (7 bytes) shown, not 15.
+    # An even width: width - 1 is odd, so the function removes the last digit (half a byte).
+    # The cell that this frees becomes padding. The lane shows 14 digits (7 bytes), not 15.
     text = highlighted_hash(pub, prefix_bytes=1, width=16)
-    assert len(text.plain) == 16  # the lane still spans the full budget
+    assert len(text.plain) == 16  # the lane still has the full width
     visible = text.plain.rstrip().rstrip("…")
     assert visible == "ab" * 7 and len(visible) % 2 == 0
     assert "…" in text.plain
-    # An odd budget already lands on a boundary: width - 1 = 14 digits, no padding.
+    # An odd width is already on a boundary: width - 1 = 14 digits, with no padding.
     assert highlighted_hash(pub, prefix_bytes=1, width=15).plain == "ab" * 7 + "…"
 
 
 def _contacts_names(counts, sort: str, prefix_bytes: int = 3):
-    """Render a contacts table for ``sort`` and return (table, name-column plain text)."""
+    """Render a contacts table for ``sort``. Return it with the plain text of the name column."""
     from meshterm.core.models import Contact
     from meshterm.ui.widgets import ContactsSort, contacts_table
 
@@ -148,37 +149,39 @@ def _contacts_names(counts, sort: str, prefix_bytes: int = 3):
 
 
 def test_contacts_table_lists_us_first_with_full_keys() -> None:
-    """The contacts table pins our node first, sorts by name, and shows full highlighted keys."""
-    counts = {"3d63c6000000": 14}  # Alice was overheard; Bob wasn't
+    """The contacts table pins our node first, sorts by name, and shows full lit keys."""
+    counts = {"3d63c6000000": 14}  # Alice was heard. Bob was not heard.
     table, names = _contacts_names(counts, sort="name")
 
-    # Column 1 is the name; us first, then contacts alphabetically (Alice before Bob).
+    # Column 1 is the name. Our node is first, then the contacts in alphabetical order
+    # (Alice before Bob).
     assert names[0].startswith("Homestead")
     assert names[1] == "Alice"
     assert names[2] == "Bob"
 
-    # Packet counts (column 3): Alice shows her tally, Bob shows the em dash.
+    # Packet counts (column 3): Alice has her count, and Bob has the em dash.
     pkts = [c.plain if hasattr(c, "plain") else str(c) for c in table.columns[3].cells]
     assert pkts[1] == "14"
     assert pkts[2] == "—"
 
-    # Keys (column 4) are the full key with the path-hash prefix highlighted (no truncation
-    # in the model; Rich ellipsizes only at render time when the terminal is too narrow).
+    # Keys (column 4) are the full key with the path hash prefix lit. The model does not
+    # truncate. Rich truncates with an ellipsis only at render time, when the terminal is
+    # too narrow.
     from meshterm.ui.theme import node_style
 
     keys = list(table.columns[4].cells)
     assert keys[1].plain == "3d63c6" + "00" * 29
-    # The prefix is highlighted in the key's own hash-derived hue.
+    # The prefix is lit in the hue that comes from the hash of the key.
     assert any(s.style == node_style("3d63c6") for s in keys[1].spans)
 
 
 def test_contacts_table_sorts_by_heard_and_packets() -> None:
-    """Non-default sorts reorder contacts while keeping our node pinned first."""
+    """A sort that is not the default changes the order of the contacts. Our node stays first."""
     from datetime import timedelta
 
     from meshterm.core.models import Contact, utcnow
 
-    # Bob was heard more recently than Alice, but Alice has more overheard packets.
+    # MeshTerm heard Bob more recently than Alice, but MeshTerm heard more packets from Alice.
     contacts = [
         Contact(
             name="Bob",
@@ -201,16 +204,17 @@ def test_contacts_table_sorts_by_heard_and_packets() -> None:
         cells = group.renderables[0].columns[1].cells
         return [c.plain if hasattr(c, "plain") else str(c) for c in cells]
 
-    # Freshest first: Bob (5m) before Alice (2d) under the default (ascending-age) heard sort.
+    # Most recent first: Bob (5m) before Alice (2d) in the default heard sort (ascending age).
     assert names(ContactsSort.from_name("heard"))[1:] == ["Bob", "Alice"]
-    # Most packets first: Alice (14) before Bob (3) under the default (descending) packets sort.
+    # Most packets first: Alice (14) before Bob (3) in the default packets sort (descending).
     assert names(ContactsSort.from_name("packets"))[1:] == ["Alice", "Bob"]
-    # Descending flips it: oldest-heard first puts Alice (2d) above Bob (5m).
+    # Descending changes the order: the contact heard longest ago is first, so Alice (2d)
+    # is above Bob (5m).
     assert names(ContactsSort(column="heard", ascending=False))[1:] == ["Alice", "Bob"]
 
 
 def test_contacts_table_breaks_metric_ties_by_name_ascending() -> None:
-    """Two contacts with the same metric keep an A→Z order in both sort directions (no flip)."""
+    """Two contacts with the same metric keep the A→Z order in both sort directions."""
     from datetime import timedelta
 
     from meshterm.core.models import Contact, utcnow
@@ -227,14 +231,18 @@ def test_contacts_table_breaks_metric_ties_by_name_ascending() -> None:
         sort = ContactsSort(column="heard", ascending=ascending)
         return [c.name for c in ordered_contacts(contacts, {}, sort)]
 
-    # Freshest first: the two 5-min contacts lead, ordered Alice→Charlie, then Bob (3h).
+    # Most recent first: the two contacts of 5 minutes are first, in the order Alice→Charlie,
+    # then Bob (3h).
     assert order(ascending=True) == ["Alice", "Charlie", "Bob"]
-    # Oldest first: Bob leads, but the tie still breaks Alice→Charlie — not Charlie→Alice.
+    # Oldest first: Bob is first, but the tie still breaks Alice→Charlie, not Charlie→Alice.
     assert order(ascending=False) == ["Bob", "Alice", "Charlie"]
 
 
 async def test_contacts_tool_opens_sorted_by_heard(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The Contacts list opens most-recently-heard first — who's out there now, not a roll call."""
+    """The Contacts list opens with the most recently heard contact first.
+
+    The user sees who is on the mesh now. The list is not a roll call.
+    """
     from meshterm.core.models import Contact
     from meshterm.tools.contacts import ContactsTool
     from meshterm.ui import widgets
@@ -268,7 +276,7 @@ async def test_contacts_tool_opens_sorted_by_heard(monkeypatch: pytest.MonkeyPat
 
 
 def _contacts_sort(name: str = "name"):
-    """The interactive Contacts screen's sort: the shared contact list's four-column ring."""
+    """The sort of the interactive Contacts screen: the ring of four columns of the shared list."""
     from meshterm.ui.contactlist import SORT_COLUMNS, SORT_OPENS_ASCENDING
     from meshterm.ui.widgets import ContactsSort
 
@@ -276,37 +284,38 @@ def _contacts_sort(name: str = "name"):
 
 
 def test_contacts_screen_ctrl_arrows_steer_the_sort() -> None:
-    """Ctrl+arrows steer the Contacts sort.
+    """The Ctrl+arrow keys control the Contacts sort.
 
-    Ctrl+←/→ walk the shared four-column ring, wrapping, and Ctrl+↑/↓ force the
-    direction — the Time Machine picker's keys, now the Contacts screen's too.
+    Ctrl+←/→ move through the shared ring of four columns, and the ring wraps. Ctrl+↑/↓ set
+    the direction. These are the keys of the Time Machine picker, and the Contacts screen
+    now uses them too.
     """
     from meshterm.ui.contacts_screen import ContactsScreen
 
     screen = ContactsScreen("Us", "aabbcc" + "00" * 29, [], 3, {}, _contacts_sort())
     assert (screen._sort.column, screen._sort.ascending) == ("name", True)
 
-    screen.handle("ctrl_right")  # name -> heard, opening in its natural (ascending) direction
+    screen.handle("ctrl_right")  # name -> heard, which opens in its natural (ascending) direction
     assert (screen._sort.column, screen._sort.ascending) == ("heard", True)
     screen.handle("ctrl_right")  # heard -> packets, which opens descending
     assert (screen._sort.column, screen._sort.ascending) == ("packets", False)
-    screen.handle("ctrl_up")  # force ascending
+    screen.handle("ctrl_up")  # set ascending
     assert screen._sort.ascending is True
-    screen.handle("ctrl_down")  # force descending
+    screen.handle("ctrl_down")  # set descending
     assert screen._sort.ascending is False
-    screen.handle("ctrl_right")  # packets -> hash, the ring's fourth column
+    screen.handle("ctrl_right")  # packets -> hash, the fourth column of the ring
     assert (screen._sort.column, screen._sort.ascending) == ("hash", True)
-    screen.handle("ctrl_right")  # hash -> wraps back to name
+    screen.handle("ctrl_right")  # hash -> wraps to name
     assert screen._sort.column == "name"
     screen.handle("ctrl_left")  # name -> wraps to hash
     assert screen._sort.column == "hash"
 
 
 def test_contacts_screen_lists_contacts_in_the_shared_lanes() -> None:
-    """Contacts are listed in the shared lanes, with our own node pinned first.
+    """The screen lists contacts in the shared lanes, with our node pinned first.
 
-    They render in NAME/HEARD/PKTS/KEY; plain arrows only move the highlight, and
-    Enter resolves the highlighted node.
+    The lanes are NAME, HEARD, PKTS, and KEY. The arrow keys with no modifier only move the
+    highlight, and Enter resolves the highlighted node.
     """
     import re
 
@@ -318,33 +327,34 @@ def test_contacts_screen_lists_contacts_in_the_shared_lanes() -> None:
         Contact(name="Alice", public_key="aa" * 32, last_seen=utcnow()),
         Contact(name="Bob", public_key="bb" * 32),
     ]
-    counts = {"aa" * 6: 7}  # Alice was overheard; Bob never
+    counts = {"aa" * 6: 7}  # MeshTerm heard Alice. It never heard Bob.
     screen = ContactsScreen("Us", "cc" * 32, contacts, 1, counts, _contacts_sort())
     body = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", ln) for ln in screen.render_body(72))
 
-    # The shared column header (recorded sticky, so it pins once scrolled past)...
+    # The shared column header (it is stored as sticky, so it pins when the page scrolls
+    # past it)...
     assert "NAME" in body and "HEARD" in body and "PKTS" in body and "KEY" in body
     assert screen._sticky_headers
-    # ...our own node leading the lanes, then the contacts with their tallies.
+    # ...our node is first in the lanes, then the contacts with their counts.
     choices = screen._choices()
     assert choices[0].value == YOU
     assert "(you)" in choices[0].label.plain
     assert "Alice" in body and "Bob" in body
-    assert f"{7:>5}" in body  # Alice's overheard packets, right-aligned in its lane
+    assert f"{7:>5}" in body  # the packets heard from Alice, right-aligned in the lane
     assert "never" in body  # Bob has no last_seen
-    # Each contact row carries the Contact itself, so Enter hands the whole record on; the
-    # tail closes the list with the archive action (there is no exit row — Esc leaves).
+    # Each contact row has the Contact itself, so Enter gives the whole record to the caller.
+    # The list ends with the archive action (there is no exit row, because Esc leaves).
     assert choices[-1].value == _ARCHIVE
     assert all(isinstance(c.value, Contact) for c in choices[1:-1])
 
-    # Plain arrows move the highlight without touching the sort.
+    # The arrow keys with no modifier move the highlight and do not change the sort.
     before = (screen._sort.column, screen._sort.ascending)
     screen.handle("down")
     assert (screen._sort.column, screen._sort.ascending) == before
     highlighted = screen._current_choice().value
     assert highlighted != YOU and isinstance(highlighted, Contact)
 
-    # Enter resolves the highlighted contact (open_contacts opens its Node detail);
+    # Enter resolves the highlighted contact (open_contacts opens its Node detail).
     # Esc still leaves with CANCEL.
     resolved: list = []
     screen.resolve = lambda value: resolved.append(value)  # type: ignore[method-assign]
@@ -355,12 +365,13 @@ def test_contacts_screen_lists_contacts_in_the_shared_lanes() -> None:
 
 
 def test_archive_age_rungs_split_stale_from_never_heard() -> None:
-    """An age rung takes only contacts once heard and since gone quiet; never-heard has its own.
+    """An age rung takes only contacts that were heard and are now quiet.
 
-    The ladder's second section is the plain predictable operation a ranking cannot express,
-    and its one subtlety is that a contact with no advert time at all must not fall into it:
-    a freshly added contact that hasn't had time to advert yet reads as infinitely old, and
-    an age rung that swept it would be deleting nodes for being new.
+    Never-heard has its own rung. The second section of the ladder is a plain operation with
+    a predictable result, which a ranking cannot express. One point needs care: a contact
+    with no advert time must not be in it. A contact that the user added a short time ago
+    has not yet had time to send an advert, so it looks infinitely old. If an age rung
+    swept it, the sweep deleted nodes because they are new.
     """
     from meshterm.core.contact_score import ContactSignals, ScoredContact
     from meshterm.core.models import Contact
@@ -375,7 +386,7 @@ def test_archive_age_rungs_split_stale_from_never_heard() -> None:
             percentile=int(score),
         )
 
-    # Strongest first, as `rank_contacts` returns them.
+    # Strongest first, in the order that `rank_contacts` returns.
     ranked = [
         scored("Fresh", 0.04, 90.0),
         scored("Quiet", 3.0, 70.0),
@@ -385,27 +396,29 @@ def test_archive_age_rungs_split_stale_from_never_heard() -> None:
     ]
     names = lambda picked: [v.contact.name for v in victims_for(ranked, ranked, picked)]  # noqa: E731
 
-    # A week catches the two aged ones — never the fresh, and never the never-heard.
+    # A week takes the two old contacts. It does not take the fresh contact or the
+    # never-heard contact.
     assert set(names(("age", 7 * _DAY))) == {"Old", "Ancient"}
-    # A year catches only the truly ancient.
+    # A year takes only the very old contact.
     assert names(("age", 365 * _DAY)) == ["Ancient"]
-    # The never-heard bucket is exactly the contact with no advert time.
+    # The never-heard group is only the contact with no advert time.
     assert names(("age", _NEVER)) == ["Unheard"]
-    # Weakest first on the age route too, so a reader skimming the preview's first screen
-    # sees what they are least likely to want back.
+    # Weakest first on the age route also, so a user who looks quickly at the first screen
+    # of the preview sees the contacts that the user is least likely to want back.
     assert names(("age", 7 * _DAY)) == ["Ancient", "Old"]
 
 
 async def test_archive_sweeps_under_a_progress_bar_and_reports_in_a_dialog() -> None:
-    """The whole sweep, end to end: ladder → preview → amber confirm → bar → outcome dialog.
+    """The whole sweep, from start to end: ladder → preview → amber confirm → bar → outcome dialog.
 
-    Two things the busy overlay could not do (JP, 2026-08-10). It only ever said "working",
-    and only in the gaps *between* screens — over the pushed contacts list it drew nothing
-    at all, so a long sweep looked like a screen that had stopped answering while the arrow
-    keys still moved a cursor nothing was being done with. And the count of what it removed
-    went to a note the reader would only meet on their way off the screen. So: the app's
-    progress dialog (which swallows every key for its lifetime) while it runs, and a
-    dismissible dialog naming the count when it is done.
+    The busy overlay could not do two things (JP, 2026-08-10). First, it only said
+    "working", and only in the gaps between screens. Over the contacts list that was
+    pushed, it drew nothing. Thus a long sweep looked like a screen that did not answer,
+    and the arrow keys still moved a highlight where nothing was in progress. Second, the
+    count of the removed contacts went to a note that the user saw only when the user left
+    the screen. Thus the sweep now uses the progress dialog of the app (it swallows each key
+    while it exists) while it runs. When the sweep is done, a dialog that the user can close
+    shows the count.
     """
     import asyncio
     import logging
@@ -431,14 +444,14 @@ async def test_archive_sweeps_under_a_progress_bar_and_reports_in_a_dialog() -> 
 
     class _Device:
         async def remove_contact(self, contact) -> None:  # noqa: ANN001
-            await asyncio.sleep(0)  # a real companion command takes a turn of the loop
+            await asyncio.sleep(0)  # a command of a real companion takes one turn of the loop
             removed_from_device.append(contact.name)
 
     class _Repo:
         @staticmethod
         def contact_signals(nodes):  # noqa: ANN001
-            # Long silent, never messaged, heard a handful of times — the shape of exactly
-            # what the sweep exists to clear out.
+            # Silent for a long time, no messages, heard a few times. This is the shape of
+            # the contacts that the sweep exists to remove.
             return {
                 node: ContactSignals(node=node, heard_age_days=400.0, packets=2, known_days=420.0)
                 for node in nodes
@@ -478,43 +491,45 @@ async def test_archive_sweeps_under_a_progress_bar_and_reports_in_a_dialog() -> 
 
     task = asyncio.ensure_future(archive_contacts(ctx, "cc" * 32))
 
-    # Walk past the five standing rungs into the second section and take "not heard in 1
-    # year", which catches all three — the standing rungs keep a share, so none of them
-    # ever takes a whole table.
+    # Move past the five standing rungs into the second section and select "not heard in 1
+    # year". It takes all three contacts. The standing rungs keep a share, so none of them
+    # takes a whole table.
     ladder = await _step_until_screen(session, lambda s: s.title.startswith("Archive contacts"))
     body = _screen_text(ladder)
-    # A rung is counted in columns, and what it *keeps* — the number that has to fit the
-    # device — leads what it archives.
+    # A rung has columns for its counts. What it keeps is the number that must fit the
+    # device, and it is before what the rung archives.
     assert body.index("KEEPS") < body.index("ARCHIVES")
     for _ in range(9):
         ladder.handle("down")
     ladder.handle("enter")
 
-    # The preview lists exactly who would go, and commits on its Apply row (the default).
+    # The preview lists exactly the contacts that will go, and it commits on its Apply row
+    # (the default).
     preview = await _step_until_screen(session, lambda s: "to archive" in getattr(s, "title", ""))
     body = _screen_text(preview)
-    # The evidence, one lane per kind — never a score, and no longer a percentile either:
-    # the row shows what was measured, and the list's order is the ranking.
+    # The evidence has one lane for each kind. It is never a score, and it is not a
+    # percentile now: the row shows what MeshTerm measured, and the order of the list is the
+    # ranking.
     lanes = ["NAME", "HEARD", "PKTS", "MSGS", "HOPS"]
     assert [body.index(word) for word in lanes] == sorted(body.index(word) for word in lanes)
     assert all(v.name in body for v in victims)
     preview.handle("enter")
 
-    # The confirm is amber and button-only: this is reversible, so it spends neither the
-    # reserved red nor a typed word.
+    # The confirm is amber and has only buttons. The action is reversible, so it does not use
+    # the reserved red or a typed word.
     bar = await _step_until_screen(session, lambda s: isinstance(s, ProgressScreen))
     assert asked and asked[0]["danger"] is True
     assert "destructive" not in asked[0]
     assert [label for label, _v in asked[0]["buttons"]] == ["Cancel", "Archive"]
     assert "restored" in asked[0]["prompt"]
 
-    # The sweep runs under the progress dialog, which is the frontmost screen for its whole
-    # lifetime — so the list underneath cannot be walked while it works.
+    # The sweep runs under the progress dialog, which is the top screen for its whole
+    # lifetime. Thus the user cannot move in the list under it while the sweep works.
     assert bar.title == "Archive contacts"
     assert bar.render_body(60)  # a real bar, with a real total to count down
-    bar.handle("down")  # every key is swallowed; nothing underneath moves
+    bar.handle("down")  # the dialog swallows each key, so nothing under it moves
 
-    # …and the count lands in a dialog, not in a note read on the way out.
+    # …and the count is in a dialog, not in a note that the user reads when leaving.
     done = await _step_until_screen(
         session, lambda s: not isinstance(s, ProgressScreen) and "archived" in _screen_text(s)
     )
@@ -522,16 +537,17 @@ async def test_archive_sweeps_under_a_progress_bar_and_reports_in_a_dialog() -> 
     done.handle("escape")
     assert await task == 3
     assert sorted(removed_from_device) == ["Old0", "Old1", "Old2"]
-    # Off the device, but kept: every victim landed in the store as archived.
+    # The contacts are off the device, but MeshTerm keeps them: each victim is in the store as
+    # archived.
     assert sorted(archived) == ["Old0", "Old1", "Old2"]
 
 
 def test_a_preview_row_leads_with_the_contacts_type_mark() -> None:
-    """Each contact the sweep would take leads with its type mark, as the Contacts list's do.
+    """Each contact that the sweep takes starts with its type mark, as in the Contacts list.
 
-    The mark is a lane of its own ahead of the name, in the type's colour rather than the
-    name's. The header moves over with it — ``NAME`` over the name, every evidence word still
-    over its values — and ``←→`` keeps the mark pinned beside the name it belongs to.
+    The mark is a lane of its own before the name. It has the colour of the type, not the
+    colour of the name. The header moves with it: ``NAME`` is over the name, and each
+    evidence word is still over its values. ``←→`` keeps the mark pinned beside its name.
     """
     from meshterm.core.contact_score import ContactSignals, ScoredContact
     from meshterm.core.models import NODE_TYPE_REPEATER, Contact
@@ -557,7 +573,7 @@ def test_a_preview_row_leads_with_the_contacts_type_mark() -> None:
     widths = _lane_widths(victims)
     hilltop, walker = (_victim_row(v, widths) for v in victims)
     assert hilltop.plain.startswith("▲ Hilltop")
-    assert walker.plain.startswith("● Walker")  # never advertised a type: the plain node
+    assert walker.plain.startswith("● Walker")  # it never sent a type in an advert: the plain node
 
     def styles_at(row, index: int) -> list[str]:  # noqa: ANN001
         return [str(span.style) for span in row.spans if span.start <= index < span.end]
@@ -565,7 +581,7 @@ def test_a_preview_row_leads_with_the_contacts_type_mark() -> None:
     assert styles_at(hilltop, 0) == ["type.repeater"]
     assert styles_at(hilltop, hilltop.plain.index("Hilltop")) == [name_style("Hilltop", "3d" * 32)]
 
-    # The header is drawn from the pointer column's edge and a row from just past it.
+    # The header starts at the edge of the pointer column, and a row starts just after it.
     header = _preview_header(widths, 72)
     assert header.index("NAME") == 2 + hilltop.plain.index("Hilltop")
     assert header.index("PKTS") + len("PKTS") - 1 == 2 + hilltop.plain.index("3")
@@ -576,13 +592,14 @@ def test_a_preview_row_leads_with_the_contacts_type_mark() -> None:
 
 
 async def test_sparing_a_row_shrinks_the_sweep_without_leaving_the_preview() -> None:
-    """Delete on a preview row lifts that contact out of the sweep, in place.
+    """Delete on a preview row removes that contact from the sweep, in place.
 
-    The alternative was to back out and pick a shallower rung — which spares the one contact
-    you recognised by also sparing forty you did not care about. The list refreshes through
-    ``replace_items`` rather than being rebuilt, so the reader keeps their place instead of
-    being dropped at the top of a list they were halfway down, and the row that survives is
-    genuinely dropped from what the sweep goes on to archive.
+    Before, the user had to go back and select a shallower rung. This spared the one contact
+    that the user knew, but it also spared forty contacts that the user did not care about.
+    The list refreshes through ``replace_items`` and is not rebuilt. Thus the user keeps the
+    place in the list, and the list does not go back to the top when the user was halfway
+    down. The contact that the user removes is also removed from the contacts that the sweep
+    archives.
     """
     import asyncio
     from types import SimpleNamespace
@@ -609,23 +626,24 @@ async def test_sparing_a_row_shrinks_the_sweep_without_leaving_the_preview() -> 
 
     screen = await _step_until_screen(session, lambda s: "to archive" in getattr(s, "title", ""))
     assert "3 contacts to archive" in screen.title
-    # Every contact row can be spared; the Apply/Back pair cannot — there is nothing to
-    # remove from a decision. And the percentile lane is pinned out of the ←→ scroll: it is
-    # the reader's place in a list ordered by it.
+    # The user can spare each contact row. The user cannot spare the Apply and Back pair,
+    # because a decision has nothing to remove. The percentile lane is pinned, so the ←→
+    # scroll does not move it. It is the place of the user in a list that the percentile
+    # orders.
     rows = [c for c in screen._choices() if isinstance(c.value, ScoredContact)]
     assert len(rows) == 3 and all(c.deletable and c.hscroll_from > 0 for c in rows)
     assert not any(c.deletable for c in screen._choices() if not isinstance(c.value, ScoredContact))
 
-    # The cursor opens on Apply (the committing row is the default), so walk to the top of
-    # the contacts and down to "Keeper", then spare it. The screen stays up — this is an
-    # edit, not an exit.
+    # The highlight starts on Apply (the row that commits is the default). Move to the top of
+    # the contacts and down to "Keeper", then spare it. The screen stays open, because this
+    # is an edit and not an exit.
     screen.handle("home")
     screen.handle("down")
     screen.handle("down")
     assert screen._current_choice().value.contact.name == "Keeper"
     screen.handle("delete")
-    # Wait for the loop to take the delete — and prove the refresh landed on the *same*
-    # screen object rather than a rebuilt one, which is what keeps the reader's place.
+    # Wait for the loop to take the delete. Then make sure that the refresh went to the same
+    # screen object and not to a rebuilt one, because this keeps the place of the user.
     same = await _step_until_screen(
         session, lambda s: "2 contacts to archive" in getattr(s, "title", "")
     )
@@ -633,10 +651,10 @@ async def test_sparing_a_row_shrinks_the_sweep_without_leaving_the_preview() -> 
     body = _screen_text(screen)
     assert "Keeper" not in body
     assert "Weak" in body and "Middling" in body
-    assert "Archive 2 contacts" in body  # the Apply row re-counts what is left
+    assert "Archive 2 contacts" in body  # the Apply row counts again what is left
 
-    # Committing now archives exactly the two that survived the edit: End lands on Back,
-    # one step up is Apply.
+    # If the user commits now, the sweep archives exactly the two contacts that stayed after
+    # the edit. End goes to Back, and one step up is Apply.
     screen.handle("end")
     screen.handle("up")
     assert screen._current_choice().value == ("apply",)
@@ -646,7 +664,7 @@ async def test_sparing_a_row_shrinks_the_sweep_without_leaving_the_preview() -> 
 
 
 async def test_sparing_every_row_leaves_the_sweep_with_nothing_to_do() -> None:
-    """A preview emptied by the reader backs out rather than confirming an empty archive."""
+    """If the user empties the preview, it goes back. It does not confirm an empty archive."""
     import asyncio
     from types import SimpleNamespace
 
@@ -667,7 +685,7 @@ async def test_sparing_every_row_leaves_the_sweep_with_nothing_to_do() -> None:
     session = TuiSession()
     task = asyncio.ensure_future(_preview(SimpleNamespace(ui=TuiUi(session)), victims))
     screen = await _step_until_screen(session, lambda s: "to archive" in getattr(s, "title", ""))
-    screen.handle("home")  # off the default Apply row and onto the only contact
+    screen.handle("home")  # away from the default Apply row and onto the only contact
     screen.handle("delete")
     assert await task is False
     assert victims == []
@@ -677,13 +695,14 @@ async def test_sparing_every_row_leaves_the_sweep_with_nothing_to_do() -> None:
 def test_the_archive_preview_keeps_its_cursor_in_its_box_walking_both_ways(
     platform_name: str,
 ) -> None:
-    """The preview's highlight stays inside its box however far the reader walks, and back.
+    """The highlight of the preview stays in its box, for each distance that the user moves.
 
-    A long sweep scrolls, and it is a list with a prompt over a pinned column header. Both
-    once let the cursor leave the window on the way back up: the prompt was counted twice in
-    the line the frame keeps in view, so the real row rode above the box's top edge, and at
-    the bottom the header's slide dropped the row the reader had just stepped onto. Walked
-    through the real dialog compositor on each platform, at its own readable width.
+    A long sweep scrolls. It is a list with a prompt over a pinned column header. Two faults
+    once let the highlight leave the window on the way back up. First, MeshTerm counted the
+    prompt two times in the line that the frame keeps visible, so the real row was above
+    the top edge of the box. Second, at the bottom, the slide of the header removed the row
+    that the user had just moved to. The test goes through the real dialog compositor on
+    each platform, at the readable width of that platform.
     """
     from rich.text import Text
 
@@ -707,8 +726,8 @@ def test_the_archive_preview_keeps_its_cursor_in_its_box_walking_both_ways(
 
     screen = _preview_screen([scored(i) for i in range(40)])
     cols, rows = platform.readable_cols, 24
-    # The cursor opens on Apply, at the bottom. Walk to the first contact, down to Back,
-    # and up again: every step is a paint the reader sees.
+    # The highlight starts on Apply, at the bottom. Move to the first contact, down to Back,
+    # and up again. Each step is a paint that the user sees.
     walk = [None] + ["up"] * 45 + ["down"] * 45 + ["up"] * 45
     for step, key in enumerate(walk):
         if key is not None:
@@ -718,12 +737,12 @@ def test_the_archive_preview_keeps_its_cursor_in_its_box_walking_both_ways(
 
 
 async def test_deleting_one_contact_drops_it_from_the_device_and_the_store() -> None:
-    """The single-contact delete: a red confirm, then both halves of the union forgotten.
+    """The delete of one contact: a red confirm, then MeshTerm forgets both parts of the union.
 
-    The list a screen shows is the device's contact table *unioned* with the contacts
-    MeshTerm remembers for that device, so a removal that only reached the radio would be
-    merged straight back on the next read and read as a screen that did nothing. It also
-    drops the cached contacts so the list it returns to actually re-reads.
+    The list on a screen is the union of the contact table of the device and the contacts
+    that MeshTerm remembers for that device. A removal that reached only the radio merges
+    back at the next read, and the screen looks as if it did nothing. The delete also
+    removes the cached contacts, so the list that the user returns to reads them again.
     """
     import logging
     from types import SimpleNamespace
@@ -747,7 +766,7 @@ async def test_deleting_one_contact_drops_it_from_the_device_and_the_store() -> 
 
     async def _dialog(prompt, buttons, **kw):  # noqa: ANN001
         asked.append({"prompt": prompt, "buttons": buttons, **kw})
-        return True  # the committing button
+        return True  # the button that commits
 
     ui.dialog = _dialog  # type: ignore[method-assign]
     ctx = SimpleNamespace(
@@ -763,23 +782,24 @@ async def test_deleting_one_contact_drops_it_from_the_device_and_the_store() -> 
     )
 
     assert await _remove_contact(ctx, hub, "cc" * 32, "Hub") is True
-    # The confirm is the app's single-record delete: red, Cancel on the left, the
-    # committing verb on the right and default. It says plainly that this one is final —
-    # and points at the archive, which is the reversible way to free the same device slot.
+    # The confirm is the delete of one record in the app: red, with Cancel on the left and
+    # the verb that commits on the right, as the default. It says clearly that this delete is
+    # final. It also points to the archive, which is the reversible way to free the same slot
+    # on the device.
     assert asked[0]["destructive"] is True
     assert [label for label, _v in asked[0]["buttons"]] == ["Cancel", "Delete"]
     assert asked[0]["default"] == 1
     prompt = asked[0]["prompt"]
     assert "Hub" in prompt and "for good" in prompt and "restored" in prompt
     assert "archive it instead" in prompt
-    # Both halves of the union, then the cache the list re-reads through.
+    # Both parts of the union, then the cache that the list reads again.
     assert removed == ["Hub"]
     assert forgotten == [("cc" * 32, "3d" * 32)]
     assert invalidated == [True]
 
 
 async def test_cancelling_the_remove_confirm_touches_nothing() -> None:
-    """Esc/Cancel on the confirm leaves the contact on the device and the caller's list."""
+    """Esc or Cancel on the confirm leaves the contact on the device and in the caller's list."""
     import logging
     from types import SimpleNamespace
 
@@ -797,7 +817,7 @@ async def test_cancelling_the_remove_confirm_touches_nothing() -> None:
     ui = TuiUi(TuiSession())
 
     async def _declined(*a, **k):  # noqa: ANN001, ANN002, ANN003
-        return None  # what Esc resolves a button dialog to
+        return None  # the result that Esc gives for a button dialog
 
     ui.dialog = _declined  # type: ignore[method-assign]
     ctx = SimpleNamespace(
@@ -820,11 +840,12 @@ async def test_cancelling_the_remove_confirm_touches_nothing() -> None:
 
 
 async def test_a_refused_removal_is_shown_and_the_contact_stays() -> None:
-    """A device that refuses is reported in a dialog — the row must not vanish on a lie.
+    """A dialog reports a device that refuses. The row must not go away because of a false result.
 
-    Only the *device* can drop a contact from its table; if it refuses, forgetting our own
-    half of the union would hide a contact the radio still holds. So nothing is forgotten,
-    the failure is put in front of the reader, and the page stays open on the node.
+    Only the device can remove a contact from its table. If the device refuses and MeshTerm
+    forgets its own part of the union, the list hides a contact that the radio still has.
+    Thus MeshTerm forgets nothing, the dialog shows the failure to the user, and the page
+    stays open on the node.
     """
     import asyncio
     import logging
@@ -868,17 +889,18 @@ async def test_a_refused_removal_is_shown_and_the_contact_stays() -> None:
     assert "contact table is busy" in _screen_text(failed)
     failed.handle("escape")
     assert await task is False
-    assert forgotten == []  # the device still holds it, so neither do we forget it
+    assert forgotten == []  # the device still has it, so MeshTerm does not forget it
 
 
 async def test_a_contact_the_device_never_held_is_still_removed_here() -> None:
-    """“Not on the device” is not a refusal — the removal finishes on our side, and says so.
+    """“Not on the device” is not a refusal. The removal finishes on our side, and says so.
 
-    The list a screen removes from is the union of the device's table and the contacts
-    MeshTerm remembers for it, so the entry may only ever have existed on our side (or the
-    firmware dropped it since we read). Failing there left a row the reader could not get
-    rid of. Instead the reader is told the device had no part in it, our half is forgotten,
-    and the visit ends on the contact like any other removal.
+    The list that a screen removes from is the union of the table of the device and the
+    contacts that MeshTerm remembers for it. The entry can exist only on our side, or the
+    firmware can remove it after MeshTerm read the table. When the removal failed in this
+    case, the user could not remove the row. Now the user sees that the device had no part
+    in the removal, MeshTerm forgets our part, and the visit ends on the contact like each
+    other removal.
     """
     import asyncio
     import logging
@@ -921,7 +943,7 @@ async def test_a_contact_the_device_never_held_is_still_removed_here() -> None:
     task = asyncio.ensure_future(_remove_contact(ctx, hub, "cc" * 32, "Hub"))
     told = await _step_until_screen(session, lambda s: "wasn't in this device" in _screen_text(s))
     text = _screen_text(told)
-    assert "Hub" in text and "⚠" in text  # a warning, not the ✗ of a failed command
+    assert "Hub" in text and "⚠" in text  # a warning, not the ✗ for a command that failed
     told.handle("escape")
     assert await task is True
     assert forgotten == [("cc" * 32, "3d" * 32)]
@@ -929,7 +951,7 @@ async def test_a_contact_the_device_never_held_is_still_removed_here() -> None:
 
 
 async def _self_info(info):  # noqa: ANN001, ANN201
-    """Await to the given self-info dict (the device read the ranking makes)."""
+    """Wait and return the given self-info dictionary (the device read that the ranking makes)."""
     return info
 
 
@@ -946,7 +968,7 @@ async def _device(device):  # noqa: ANN001
 
 
 def _screen_text(screen) -> str:  # noqa: ANN001
-    """Everything a pushed screen says, as one plain string."""
+    """All the text of a screen that is pushed, as one plain string."""
     import re
 
     body = screen.render_body(60)
@@ -956,7 +978,7 @@ def _screen_text(screen) -> str:  # noqa: ANN001
 
 
 async def _step_until_screen(session, predicate, *, limit: int = 500):  # noqa: ANN001
-    """Yield to the loop until the frontmost screen satisfies ``predicate``, then return it."""
+    """Yield to the loop until the top screen satisfies ``predicate``. Then return that screen."""
     import asyncio
 
     for _ in range(limit):
@@ -970,12 +992,12 @@ async def _step_until_screen(session, predicate, *, limit: int = 500):  # noqa: 
 async def test_the_list_rebuilds_when_the_detail_page_deletes_the_contact(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A contact removed on its own page is gone from the list you come back to.
+    """A contact that the user removes on its own page is not in the list that the user returns to.
 
-    The detail page is where a single contact is deleted, so the list has to be told: it
-    hands the page a contact and takes back whether that contact survived, re-reading the
-    device and rebuilding when it didn't. Without the rebuild the reader returns to a row
-    for a contact the radio no longer holds.
+    The detail page is where the user deletes one contact, so the list must know. It gives
+    a contact to the page and gets back whether that contact stayed. If it did not stay, the
+    list reads the device again and rebuilds. Without the rebuild, the user returns to a row
+    for a contact that the radio no longer has.
     """
     import asyncio
     import logging
@@ -994,7 +1016,7 @@ async def test_the_list_rebuilds_when_the_detail_page_deletes_the_contact(
     detailed: list = []
 
     async def _fake_detail(ctx, contact):  # noqa: ANN001
-        """Stand in for the page: report that it deleted whichever contact it was handed."""
+        """Replace the page: report that it deleted the contact that it received."""
         detailed.append(contact)
         remaining.remove(contact)
         return True
@@ -1017,7 +1039,7 @@ async def test_the_list_rebuilds_when_the_detail_page_deletes_the_contact(
     listed.handle("down")  # off our own node, onto the first contact
     listed.handle("enter")
 
-    # The page deleted it, so the list that comes back is a *new* one, re-read without it.
+    # The page deleted it, so the list that returns is a new list, read again without it.
     rebuilt = await _step_until_screen(
         session, lambda s: isinstance(s, ContactsScreen) and "1 known" in s.title
     )
@@ -1031,7 +1053,7 @@ async def test_the_list_rebuilds_when_the_detail_page_deletes_the_contact(
 
 
 def test_contacts_screen_tail_offers_archive_only_when_populated() -> None:
-    """A populated list closes with the archive action; an empty one has no tail at all."""
+    """A list with contacts ends with the archive action. An empty list has no tail."""
     from meshterm.core.models import Contact
     from meshterm.ui.contacts_screen import _ARCHIVE, ContactsScreen
 
@@ -1042,15 +1064,15 @@ def test_contacts_screen_tail_offers_archive_only_when_populated() -> None:
 
     empty = ContactsScreen("Us", "cc" * 32, [], 1, {}, _contacts_sort())
     values = [c.value for c in empty._choices()]
-    assert _ARCHIVE not in values  # nothing to archive — no action row
+    assert _ARCHIVE not in values  # nothing to archive, so no action row
 
 
 def test_the_archived_row_appears_only_when_something_is_archived() -> None:
-    """The way in to the archived list is drawn, with its tally, exactly when there is one.
+    """The row for the archived list, with its count, shows only when there is an archived list.
 
-    A screen should not offer a route into an empty list, and the tally rides the row so the
-    count is readable without opening it — the sweep's output being visible from the sweep's
-    own screen is what keeps archiving from being something you lose track of.
+    A screen must not offer a way into an empty list. The count is on the row, so the user
+    can read it without opening the list. The user can see the output of the sweep on the
+    screen of the sweep, and thus the user does not lose track of the archive.
     """
     from meshterm.core.models import Contact
     from meshterm.ui.contacts_screen import _ARCHIVE, _ARCHIVED, ContactsScreen
@@ -1062,24 +1084,25 @@ def test_the_archived_row_appears_only_when_something_is_archived() -> None:
 
     some = ContactsScreen("Us", "cc" * 32, contacts, 1, {}, _contacts_sort(), archived=12)
     values = [c.value for c in some._choices()]
-    # Under the archive action, because it is where the sweep's output went.
+    # It is under the archive action, because the output of the sweep goes there.
     assert values[-2:] == [_ARCHIVE, _ARCHIVED]
     row = next(c for c in some._choices() if c.value == _ARCHIVED)
     assert "View archived contacts" in row.label and "12" in row.label
 
-    # It stands on its own for a device whose whole table has been swept: there is nothing
-    # left to archive, but there is very much something to go and look at.
+    # It is alone for a device where the sweep took the whole table. There is nothing left
+    # to archive, but there is much for the user to look at.
     swept = ContactsScreen("Us", "cc" * 32, [], 1, {}, _contacts_sort(), archived=3)
     values = [c.value for c in swept._choices()]
     assert _ARCHIVE not in values and values[-1] == _ARCHIVED
 
 
 def test_contacts_title_counts_the_archived_and_abbreviates_where_narrow() -> None:
-    """The title carries both tallies, and drops the words before it would drop a figure.
+    """The title has both counts. It removes the words before it removes a number.
 
-    Nothing archived keeps the plain ``… known`` title with no short form; with some, the
-    full ``198 known + 123 archived`` draws wherever it fits and ``198 + 123`` where the
-    rule is too narrow — on both frames, the bordered panel and the one-row title bar.
+    If nothing is archived, the title stays the plain ``… known`` and has no short form. If
+    something is archived, the full ``198 known + 123 archived`` shows where it fits, and
+    ``198 + 123`` shows where the rule is too narrow. This is true on both frames: the
+    panel with a border and the title bar of one row.
     """
     from meshterm.core.models import Contact
     from meshterm.ui.contacts_screen import ContactsScreen
@@ -1101,11 +1124,12 @@ def test_contacts_title_counts_the_archived_and_abbreviates_where_narrow() -> No
 
 
 async def test_archiving_one_contact_takes_it_off_the_device_and_keeps_it() -> None:
-    """The single-contact archive: an amber confirm, off the radio, stamped in the store.
+    """The archive of one contact: an amber confirm, off the radio, and a stamp in the store.
 
-    The reversible half of the pair the detail page offers. It wears ``danger`` rather than
-    ``destructive`` and asks for no typed word, because everything it takes is recoverable —
-    which is the whole reason the app has two caution tiers.
+    This is the reversible action of the pair that the detail page offers. It has
+    ``danger`` and not ``destructive``, and it does not ask for a typed word, because the
+    user can recover all that it takes. This is the reason that the app has two caution
+    tiers.
     """
     import logging
     from types import SimpleNamespace
@@ -1153,8 +1177,8 @@ async def test_archiving_one_contact_takes_it_off_the_device_and_keeps_it() -> N
     assert asked[0]["default"] == 1
     prompt = asked[0]["prompt"]
     assert "restore it at any time" in prompt
-    # The contact is named as the Contacts list names it — its type mark to the left of the
-    # name, each in its own colour — while the sentence around them keeps the amber.
+    # The contact has the name that the Contacts list gives it: its type mark is to the left
+    # of the name, and each has its own colour. The sentence around them keeps the amber.
     assert prompt.plain.startswith("Archive ▲ Hub? ")
 
     def styles_at(index: int) -> list[str]:
@@ -1164,14 +1188,18 @@ async def test_archiving_one_contact_takes_it_off_the_device_and_keeps_it() -> N
     assert styles_at(prompt.plain.index("Hub")) == [name_style("Hub", "3d" * 32)]
     assert styles_at(0) == styles_at(prompt.plain.index("restore")) == ["warn"]
     assert not prompt.style, "a base style would merge the amber's bold into the mark"
-    # Off the radio, kept here, and the cached contact list dropped so the list re-reads.
+    # The contact is off the radio and kept here. MeshTerm removes the cached contact list,
+    # so the list reads again.
     assert removed == ["Hub"]
     assert archived == [("cc" * 32, "3d" * 32)]
     assert invalidated == [True]
 
 
 async def test_restoring_writes_the_contact_back_before_clearing_the_mark() -> None:
-    """A refused write leaves the contact archived — never listed as live on a radio without it."""
+    """A refused write leaves the contact archived.
+
+    The list never shows the contact as live on a radio that does not have it.
+    """
     import logging
     from types import SimpleNamespace
 
@@ -1211,32 +1239,33 @@ async def test_restoring_writes_the_contact_back_before_clearing_the_mark() -> N
 
 
 def test_non_strict_enum_accepts_unlisted_value() -> None:
-    """multi_acks/adv_loc_policy list common values but still accept other ints."""
+    """multi_acks and adv_loc_policy list the common values but still accept other integers."""
     spec = get_spec("multi_acks")
     assert spec.value_type == "enum" and not spec.strict_choices
     assert parse_value(spec, "5") == 5  # not in choices, but >= minimum: accepted
     with pytest.raises(DeviceConfigError, match=">= 0"):
-        parse_value(spec, "-1")  # still range-checked
+        parse_value(spec, "-1")  # the range is still checked
 
 
 def test_radio_presets_map_to_radio_settings() -> None:
-    """Every preset exposes the four radio fields by their registry keys."""
+    """Each preset gives the four radio fields with their registry keys."""
     assert RADIO_PRESETS, "expected at least one standard radio preset"
     for preset in RADIO_PRESETS:
         settings = preset.as_settings()
         assert {"radio_freq", "radio_bw", "radio_sf", "radio_cr"} <= set(settings)
-        # Each value parses cleanly through its setting spec.
+        # Each value parses with no error through its setting spec.
         for key, value in settings.items():
             assert parse_value(get_spec(key), value) == value
 
 
 def test_radio_presets_match_meshcore_list() -> None:
-    """Spot-check the presets against MeshCore's own suggested settings.
+    """Check some of the presets against the settings that MeshCore suggests.
 
-    The values are MeshCore's, not ours: a mesh only hears a node whose four radio
-    parameters match, so a drifted table is a radio that talks to nobody. These are the
-    ones a MeshTerm user is most likely to pick, including the two regions MeshCore now
-    marks deprecated (still listed, because nodes that never re-tuned are on them).
+    The values come from MeshCore, not from MeshTerm. A mesh hears a node only when the four
+    radio parameters of the node match. Thus a table that drifted gives a radio that talks to
+    nobody. These are the presets that a MeshTerm user is most likely to select. They include
+    the two regions that MeshCore now marks as deprecated. They stay in the list, because
+    nodes that the user never tuned again use them.
     """
     by_name = {p.name: p for p in RADIO_PRESETS}
     expected = {
@@ -1249,27 +1278,27 @@ def test_radio_presets_match_meshcore_list() -> None:
     for name, values in expected.items():
         preset = by_name[name]
         assert (preset.freq, preset.bw, preset.sf, preset.cr) == values
-    # A region that names a path-hash size stages it as the firmware's mode (size - 1).
+    # A region that names a path hash size stages it as the mode of the firmware (size - 1).
     assert by_name["New Zealand (Narrow)"].as_settings()["path_hash_mode"] == 1
     assert "path_hash_mode" not in by_name["EU/UK (Narrow)"].as_settings()
 
 
 def test_radio_preset_summary_reads_as_meshcore_prints_it() -> None:
-    """The row's parameter lane is MeshCore's own order, at MeshCore's precision."""
+    """The parameter lane of the row has the order and the precision that MeshCore uses."""
     by_name = {p.name: p for p in RADIO_PRESETS}
     assert by_name["USA/Canada (Recommended)"].summary == "910.525 SF7 BW62.5 CR5"
     assert by_name["Australia"].summary == "915.800 SF10 BW250 CR5"
 
 
 async def test_current_preset_identifies_the_mock_radio() -> None:
-    """The mock boots on the firmware defaults, which are EU/UK (Narrow) but for CR."""
+    """The mock starts with the firmware defaults. These are EU/UK (Narrow), but not the CR."""
     snapshot = await build_snapshot(await _connected_mock())
     assert current_preset(snapshot) is None  # CR5, where the EU preset asks CR8
     assert current_preset({**snapshot, "radio_cr": 8}).name == "EU/UK (Narrow)"
 
 
 def test_current_preset_none_for_unmatched_radio() -> None:
-    """A hand-tuned radio matches no preset, and a missing field never crashes it."""
+    """A radio that the user tuned by hand matches no preset. A missing field does not crash it."""
     assert (
         current_preset({"radio_freq": 868.0, "radio_bw": 250.0, "radio_sf": 11, "radio_cr": 5})
         is None
@@ -1278,16 +1307,16 @@ def test_current_preset_none_for_unmatched_radio() -> None:
 
 
 def test_get_spec_unknown_raises() -> None:
-    """An unknown key produces a helpful error listing valid keys."""
+    """An unknown key gives an error that lists the valid keys."""
     with pytest.raises(DeviceConfigError, match="unknown setting"):
         get_spec("not_a_setting")
 
 
-# -- apply against the mock device ---------------------------------------------
+# -- apply to the mock device --------------------------------------------------
 
 
 async def test_apply_simple_setting() -> None:
-    """Setting the node name round-trips through the device."""
+    """The node name that MeshTerm sets comes back from the device with no change."""
     device = await _connected_mock()
     spec = get_spec("name")
     await spec.apply(device, parse_value(spec, "Yagi-Hub"), await build_snapshot(device))
@@ -1295,7 +1324,7 @@ async def test_apply_simple_setting() -> None:
 
 
 async def test_apply_coupled_radio_field_preserves_others() -> None:
-    """Changing one radio field rebuilds set_radio from the current snapshot."""
+    """A change of one radio field builds set_radio again from the current snapshot."""
     device = await _connected_mock()
     spec = get_spec("radio_sf")
     await spec.apply(device, 9, await build_snapshot(device))
@@ -1307,7 +1336,7 @@ async def test_apply_coupled_radio_field_preserves_others() -> None:
 
 
 async def test_apply_telemetry_mode_preserves_siblings() -> None:
-    """Editing one telemetry mode leaves the other two intact."""
+    """An edit of one telemetry mode does not change the other two."""
     device = await _connected_mock()
     spec = get_spec("telemetry_mode_loc")
     await spec.apply(device, 2, await build_snapshot(device))
@@ -1318,17 +1347,17 @@ async def test_apply_telemetry_mode_preserves_siblings() -> None:
 
 
 async def test_custom_var_round_trip() -> None:
-    """Custom variables persist on the device."""
+    """The device keeps custom variables."""
     device = await _connected_mock()
     await device.set_custom_var("exp_flag", "1")
     assert (await device.get_custom_vars())["exp_flag"] == "1"
 
 
-# -- backup / restore ----------------------------------------------------------
+# -- backup and restore --------------------------------------------------------
 
 
 async def test_backup_and_read_round_trip(tmp_path: Path) -> None:
-    """A backup writes all settings, custom vars, and channels and reads back."""
+    """A backup writes all the settings, custom variables, and channels. Then it reads them back."""
     device = await _connected_mock()
     await device.set_name("Foo")
     await device.set_channel(0, "Public", b"\x01" * 16)
@@ -1344,49 +1373,49 @@ async def test_backup_and_read_round_trip(tmp_path: Path) -> None:
 
 
 async def test_plan_restore_emits_only_differences(tmp_path: Path) -> None:
-    """The restore planner returns ops only for values that differ from the device."""
+    """The restore planner returns operations only for values that are different from the device."""
     source = await _connected_mock()
     await source.set_name("Foo")
     path = backup_config(tmp_path / "cfg.toml", await build_snapshot(source), {"exp": "1"}, [])
     backup = read_backup(path)
 
-    target = await _connected_mock()  # fresh device: name still "MockCompanion"
+    target = await _connected_mock()  # a new device: the name is still "MockCompanion"
     ops = plan_restore(backup, await build_snapshot(target), await target.get_custom_vars())
 
     assert ("set", "name", "Foo") in ops
     assert ("set_custom", "exp", "1") in ops
-    # Unchanged values (e.g. radio_sf 8 == 8) are not re-applied.
+    # Values that did not change (for example radio_sf 8 == 8) are not applied again.
     assert "radio_sf" not in [op[1] for op in ops if op[0] == "set"]
 
 
-# -- the device-reported TX power ceiling ---------------------------------------
+# -- the TX power ceiling that the device reports -------------------------------
 
 
 def test_tx_power_capped_by_device_reported_maximum() -> None:
-    """With a snapshot, the board's max_tx_power tightens the static bound."""
+    """With a snapshot, the max_tx_power of the board makes the static bound tighter."""
     spec = get_spec("tx_power")
     snapshot = {"max_tx_power": 22}
     assert parse_value(spec, "22", snapshot) == 22
     with pytest.raises(DeviceConfigError, match="<= 22"):
         parse_value(spec, "23", snapshot)
-    # Without a snapshot only the static ceiling applies.
+    # With no snapshot, only the static ceiling applies.
     assert parse_value(spec, "27") == 27
     assert effective_maximum(spec, snapshot) == 22
     assert effective_maximum(spec, None) == 30
 
 
 def test_effective_maximum_never_loosens_the_static_bound() -> None:
-    """A device reporting a max above the static ceiling doesn't raise it."""
+    """A device that reports a maximum above the static ceiling does not raise the ceiling."""
     spec = get_spec("tx_power")
     assert effective_maximum(spec, {"max_tx_power": 99}) == 30
     assert effective_maximum(spec, {"max_tx_power": "bogus"}) == 30  # unparseable -> static
 
 
-# -- flood scope / auto-add / TX delays ------------------------------------------
+# -- flood scope, auto-add, and TX delays ----------------------------------------
 
 
 def test_flood_scope_length_limited_and_formats_empty() -> None:
-    """The scope name respects its 31-byte protocol slot; empty renders readably."""
+    """The scope name keeps to its protocol slot of 31 bytes. An empty name shows readably."""
     spec = get_spec("flood_scope")
     assert parse_value(spec, "alpha") == "alpha"
     with pytest.raises(DeviceConfigError, match="at most 30"):
@@ -1400,7 +1429,7 @@ def test_flood_scope_length_limited_and_formats_empty() -> None:
 
 
 async def test_flood_scope_round_trips_with_hashtag_normalization() -> None:
-    """A scope name is stored bare, as the firmware and apps store it; empty clears it."""
+    """A scope name is stored bare, as the firmware and apps store it. An empty name clears it."""
     device = await _connected_mock()
     spec = get_spec("flood_scope")
     await spec.apply(device, "#alpha", await build_snapshot(device))
@@ -1410,7 +1439,7 @@ async def test_flood_scope_round_trips_with_hashtag_normalization() -> None:
 
 
 async def test_autoadd_config_round_trips() -> None:
-    """The auto-add bitmask reaches the device and reads back into the snapshot."""
+    """The auto-add bitmask goes to the device and comes back into the snapshot."""
     device = await _connected_mock()
     spec = get_spec("autoadd_config")
     await spec.apply(device, parse_value(spec, "5"), await build_snapshot(device))
@@ -1418,21 +1447,21 @@ async def test_autoadd_config_round_trips() -> None:
 
 
 def test_tuning_fields_are_floats_with_firmware_ranges() -> None:
-    """RX delay and airtime factor take real (unscaled) float values, firmware-bounded.
+    """RX delay and airtime factor take real (not scaled) floats, with the firmware limits.
 
-    The firmware stores both as floats (rx_delay_base 0–20 s, airtime_factor 0–9) and
-    only the *wire* carries them ×1000 — the settings must speak the real units.
+    The firmware stores both as floats (rx_delay_base 0–20 s, airtime_factor 0–9). Only the
+    wire carries them ×1000. The settings must use the real units.
     """
     assert parse_value(get_spec("rx_delay"), "0.5") == 0.5
     assert parse_value(get_spec("airtime_factor"), "2.5") == 2.5
     with pytest.raises(DeviceConfigError, match="<= 20"):
-        parse_value(get_spec("rx_delay"), "500")  # a raw wire value must be rejected
+        parse_value(get_spec("rx_delay"), "500")  # MeshTerm must reject a raw wire value
     with pytest.raises(DeviceConfigError, match="<= 9"):
         parse_value(get_spec("airtime_factor"), "1000")
 
 
 def test_rx_delay_is_rounded_to_one_place() -> None:
-    """RX delay shows and applies at one decimal, matching the repeater admin's delays."""
+    """RX delay shows and applies with one decimal, as the delays of the repeater admin do."""
     spec = get_spec("rx_delay")
     assert parse_value(spec, "0.3333") == 0.3
     assert format_value(spec, 0.123) == "0.1"
@@ -1440,10 +1469,11 @@ def test_rx_delay_is_rounded_to_one_place() -> None:
 
 
 def test_tx_delay_factors_are_not_companion_settings() -> None:
-    """The repeater-only TX delay factors must not appear as (no-op) device settings.
+    """The TX delay factors of repeaters must not appear as device settings. They do nothing.
 
-    Companion firmware's CMD_SET_TUNING_PARAMS reads exactly rx_delay + airtime_factor
-    and ignores trailing bytes, so offering these knobs here would silently do nothing.
+    The CMD_SET_TUNING_PARAMS of the companion firmware reads only rx_delay and
+    airtime_factor, and it ignores the bytes after them. Thus a setting that MeshTerm offers
+    for these factors does nothing and gives no warning.
     """
     with pytest.raises(DeviceConfigError, match="unknown setting"):
         get_spec("tx_delay_factor")
@@ -1452,7 +1482,7 @@ def test_tx_delay_factors_are_not_companion_settings() -> None:
 
 
 async def test_apply_tuning_field_preserves_the_other() -> None:
-    """Editing one tuning field resends the pair without clobbering its sibling."""
+    """An edit of one tuning field sends the pair again and does not overwrite the other field."""
     device = await _connected_mock()
     await device.set_tuning(0.5, 2.0)
     spec = get_spec("airtime_factor")
@@ -1464,12 +1494,12 @@ async def test_apply_tuning_field_preserves_the_other() -> None:
 
 
 async def test_mock_clock_drifts_until_set_time_corrects_it() -> None:
-    """The simulator's clock reads behind the host until set_time re-anchors it."""
+    """The clock of the simulator is behind the host until set_time anchors it again."""
     import time as _time
 
     device = await _connected_mock()
     before = await device.get_time()
-    assert before is not None and before < int(_time.time())  # seeded drift
+    assert before is not None and before < int(_time.time())  # the drift that the mock starts with
     now = int(_time.time())
     await device.set_time(now)
     after = await device.get_time()
@@ -1480,7 +1510,7 @@ async def test_mock_clock_drifts_until_set_time_corrects_it() -> None:
 
 
 async def test_status_panel_reports_role_battery_clock_and_stats() -> None:
-    """The info tool's status panel surfaces the read-only device state in one place."""
+    """The status panel of the info tool shows the read-only state of the device in one place."""
     import io
 
     from rich.console import Console
@@ -1494,17 +1524,17 @@ async def test_status_panel_reports_role_battery_clock_and_stats() -> None:
     console.print(panel)
     out = console.file.getvalue()
 
-    assert "companion" in out  # adv_type 1 rendered as the node role
+    assert "companion" in out  # adv_type 1, rendered as the node role
     assert "MeshCore Simulator" in out
     assert "4.10 V" in out
     assert "1d 2h 3m" in out  # 93784 s of simulated uptime
-    assert "s behind" in out  # the mock's seeded clock drift
+    assert "s behind" in out  # the clock drift that the mock sets at the start
     assert "-110 dBm noise floor" in out
     assert "210 sent" in out and "1234 received" in out
 
 
 def test_uptime_renders_compact_units() -> None:
-    """Uptime shows seconds only under a minute, then d/h/m parts as needed."""
+    """Uptime shows only seconds under a minute. Then it shows the d, h, and m parts as needed."""
     from meshterm.tools.info import _uptime
 
     assert _uptime(45) == "45 s"
@@ -1513,15 +1543,16 @@ def test_uptime_renders_compact_units() -> None:
     assert _uptime(86400) == "1d 0m"
 
 
-# -- safety gating -------------------------------------------------------------
+# -- safety checks -------------------------------------------------------------
 
 
 def test_require_yes_blocks_without_confirmation() -> None:
-    """Destructive CLI commands abort unless --yes is passed.
+    """Destructive CLI commands stop unless the user passes --yes.
 
-    As a *usage* error: a missing confirmation is a bad invocation, so it exits under the
-    parser's own status and prints in the parser's own words on stderr, rather than a red
-    line of its own on stdout (see :mod:`meshterm.core.exitcodes`).
+    The error is a usage error. A missing confirmation is a bad command line. Thus the exit
+    status is the status of the parser, and the message is in the words of the parser on
+    stderr. It is not a red line of its own on stdout (refer to
+    :mod:`meshterm.core.exitcodes`).
     """
     with pytest.raises(typer.BadParameter, match="--yes"):
         _require_yes(False, "factory reset erases all data")
@@ -1529,7 +1560,7 @@ def test_require_yes_blocks_without_confirmation() -> None:
 
 
 async def _channels(device: MockDevice) -> list[dict]:
-    """Collect the mock's configured channels for backup."""
+    """Get the configured channels of the mock for a backup."""
     channels = []
     for idx in range(8):
         ch = await device.get_channel(idx)
@@ -1541,12 +1572,13 @@ async def _channels(device: MockDevice) -> list[dict]:
 async def test_the_preview_opens_node_pages_with_no_management_verbs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Enter on a archive candidate opens its page to *look* at, not to act on.
+    """Enter on an archive candidate opens its page so that the user can look at it, not act on it.
 
-    The rule (JP, 2026-09-01): management verbs belong to the list a contact actually lives
-    in, never to a page opened out of a list that is about to act on it wholesale. A preview
-    whose whole job is choosing what to archive should not also hand out a singular archive —
-    or a delete — from inside its own candidate list, which is two answers to one question.
+    The rule (JP, 2026-09-01): the management verbs belong to the list where a contact
+    lives. They never belong to a page that opens from a list that is about to act on the
+    contact in bulk. The only job of a preview is to choose what to archive. It must not also
+    offer an archive of one contact, or a delete, from inside its own list of candidates.
+    These are two answers to one question.
     """
     import asyncio
     from types import SimpleNamespace
@@ -1578,19 +1610,19 @@ async def test_the_preview_opens_node_pages_with_no_management_verbs(
     session = TuiSession()
     task = asyncio.ensure_future(_preview(SimpleNamespace(ui=TuiUi(session)), victims))
     screen = await _step_until_screen(session, lambda s: "to archive" in getattr(s, "title", ""))
-    screen.handle("home")  # off the default Apply row and onto the contact
+    screen.handle("home")  # away from the default Apply row and onto the contact
     screen.handle("enter")
     await _step_until_screen(session, lambda s: bool(opened))
     assert opened == [{"name": "Solo", "manage": False}]
 
-    # The preview is still up underneath — looking at a candidate is not leaving the sweep.
+    # The preview is still open under it. To look at a candidate is not to leave the sweep.
     assert session.top is screen
     screen.handle("escape")
     assert await task is False
 
 
 def test_a_locked_contact_leads_its_row_with_a_padlock_left_of_its_type_glyph() -> None:
-    """Locked rows open on the padlock; the rest keep the column blank, so glyphs line up."""
+    """A locked row starts with the padlock. Other rows keep the column blank, so glyphs line up."""
     from meshterm.core.models import Contact
     from meshterm.ui.contacts_screen import ContactsScreen
 
@@ -1612,7 +1644,8 @@ def test_a_locked_contact_leads_its_row_with_a_padlock_left_of_its_type_glyph() 
     assert lines["Al"].startswith("\U0001f512 ● Al ")
     assert lines["Bartholomew"].startswith("   ● Bartholomew")
 
-    # Unlocking redraws in place, and a list with no locks spends no cells on the column.
+    # If the user unlocks a contact, the list paints again in place. A list with no locks does
+    # not use cells for the column.
     screen.refresh_locks(frozenset())
     screen.render_body(72)
     al = next(c for c in screen._choices() if getattr(c.value, "name", None) == "Al")
@@ -1620,7 +1653,7 @@ def test_a_locked_contact_leads_its_row_with_a_padlock_left_of_its_type_glyph() 
 
 
 async def test_a_locked_contact_is_never_offered_to_the_sweep() -> None:
-    """The ranking reads the store's locks, so a locked contact is protected, not a victim."""
+    """The ranking reads the locks in the store, so a locked contact is protected, not a victim."""
     import logging
     from types import SimpleNamespace
 

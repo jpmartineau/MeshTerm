@@ -1,23 +1,25 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the BLE connect path's ownership of its meshcore client.
 
-The bug these pin down: ``MeshCore.create_ble`` builds a client, calls ``connect()`` on it,
-and returns it *only on success*. A connect that raises — which is exactly how a
-PIN-protected companion answers an unbonded notify-subscribe — therefore left the client,
-and the bleak link it had already opened, orphaned inside the library. MeshTerm's own
-``disconnect`` was a no-op (``_mc`` was never assigned), Windows held the ACL link for the
-life of the process, and the peripheral, still believing it had a peer, stopped advertising.
-The PIN dialog that opened next then asked for a code it could no longer deliver.
+The bug that these tests guard against: ``MeshCore.create_ble`` builds a client, calls
+``connect()`` on it, and returns it only if the connect succeeds. A connect that raises is
+exactly how a PIN-protected companion answers a notify-subscribe that has no bond. In that
+case, the client and the bleak link that it already opened stayed in the library, with no
+owner. The ``disconnect`` of MeshTerm did nothing (``_mc`` was never assigned). Windows kept
+the ACL link for the life of the process. The peripheral still believed that it had a peer,
+and it stopped advertising. The PIN dialog that opened next then asked for a code that it
+could not deliver any more.
 
-Owning the client is only half of it, and the fakes here model the other half. The library's
-``ConnectionManager.disconnect`` closes its transport only ``if self._is_connected`` — a flag
-set *after* ``connection.connect()`` returns. A connect that raised never set it, so a
-graceful ``mc.disconnect()`` walks away from a live ``BleakClient`` believing there is
-nothing to close. That is why ``_discard_meshcore`` also closes the transport directly, and
-why the assertions below are about the *transport*, not about ``mc.disconnect`` being called.
+To own the client is only half of the fix, and the fakes here model the other half. The
+``ConnectionManager.disconnect`` of the library closes its transport only ``if
+self._is_connected``. The library sets this flag after ``connection.connect()`` returns. A
+connect that raised never set it. Thus a graceful ``mc.disconnect()`` leaves a live
+``BleakClient`` and believes that nothing is open. For this reason ``_discard_meshcore`` also
+closes the transport directly. Also for this reason, the assertions below are about the
+transport, and not about a call to ``mc.disconnect``.
 
-Everything runs against stand-ins for ``meshcore.MeshCore`` and ``meshcore.BLEConnection``;
-no radio, no real address, and no real pairing code is involved.
+All tests run against stand-ins for ``meshcore.MeshCore`` and ``meshcore.BLEConnection``.
+They use no radio, no real address, and no real pairing code.
 """
 
 from __future__ import annotations
@@ -30,16 +32,18 @@ import pytest
 from meshterm.core import connection as conn_mod
 from meshterm.core.connection import MeshCoreDevice
 
-# A stand-in address. Deliberately not a real companion's: a test that names one turns a
-# personal device into repository content, and nothing here needs hardware to run.
+# A stand-in address. It is not the address of a real companion on purpose. A test that
+# names a real address puts a personal device in the repository, and no test here needs
+# hardware.
 _ADDR = "00:11:22:33:44:55"
 
 
 class _FakeTransport:
-    """Stands in for ``meshcore.BLEConnection`` — what actually holds the bleak client.
+    """A stand-in for ``meshcore.BLEConnection``, which holds the bleak client.
 
-    ``link_open`` is the thing that matters: it stands for the OS-level link that, left up,
-    makes the peripheral believe it still has a peer and stop advertising.
+    ``link_open`` is the important attribute. It stands for the link at the operating-system
+    level. If the link stays open, the peripheral believes that it still has a peer, and it
+    stops advertising.
     """
 
     last: _FakeTransport | None = None
@@ -50,7 +54,7 @@ class _FakeTransport:
         self.pin = pin
         self.link_open = False
         self.disconnect_calls = 0
-        #: What the peripheral answers a write with: ``None`` accepts it, an exception refuses.
+        #: The answer of the peripheral to a write: ``None`` accepts it, an exception refuses it.
         self.write_answer: BaseException | None = None
         _FakeTransport.last = self
 
@@ -64,32 +68,35 @@ class _FakeTransport:
 
 
 class _FakeConnectionManager:
-    """Mirrors the library's guard: it will not close a transport it never saw connect."""
+    """Copies the guard of the library: it does not close a transport that it never saw connect."""
 
     def __init__(self, connection: _FakeTransport) -> None:
         self.connection = connection
         self._is_connected = False
 
     async def disconnect(self) -> None:
-        if self._is_connected:  # the trap: False whenever connection.connect() raised
+        if self._is_connected:  # the trap: False if connection.connect() raised
             await self.connection.disconnect()
             self._is_connected = False
 
 
 class _FakeMeshCore:
-    """Stands in for the ``meshcore.MeshCore`` *class*, one instance per connect attempt.
+    """A stand-in for the ``meshcore.MeshCore`` class, with one instance for each connect attempt.
 
-    ``outcomes`` drives each successive ``connect()``: an exception instance is raised (with
-    the link already up, as the real GATT failure leaves it), ``"none"`` returns ``None``
-    (transport up, no identity reply), ``"slow"`` hangs for a caller to cancel, a
-    ``("refused", exc)`` pair has the handshake's write refused with ``exc`` — swallowed, as
-    meshcore's ``send`` does, leaving the handshake empty — and anything else is returned as
-    a successful handshake.
+    ``outcomes`` controls each ``connect()`` in turn:
+
+    * An exception instance is raised. The link is already up, as the real GATT failure
+      leaves it.
+    * ``"none"`` returns ``None`` (the transport is up, with no identity reply).
+    * ``"slow"`` hangs, so that the caller can cancel it.
+    * A ``("refused", exc)`` pair makes the write of the handshake fail with ``exc``. The
+      fake swallows the failure, as ``send`` of meshcore does, and the handshake is empty.
+    * Any other value is returned as a successful handshake.
     """
 
-    #: Every instance built during a test, in order (a retry builds a second one).
+    #: Each instance that a test built, in order (a retry builds a second one).
     built: list[_FakeMeshCore] = []
-    #: Consumed one entry per connect attempt.
+    #: Each connect attempt uses one entry.
     outcomes: list = []
 
     def __init__(self, cx, *, default_timeout=None, auto_reconnect=False, **kwargs) -> None:
@@ -103,20 +110,21 @@ class _FakeMeshCore:
 
     async def connect(self):
         outcome = type(self).outcomes.pop(0)
-        self.cx.link_open = True  # bleak is connected by the time anything below fails
+        self.cx.link_open = True  # bleak is connected when anything below fails
         if isinstance(outcome, BaseException):
-            # The GATT subscribe fails here — after the link is up and *before* the manager
-            # records it. Nothing downstream will close it unless someone reaches the cx.
+            # The GATT subscribe fails here, after the link is up and before the manager
+            # records it. Nothing after this point closes the link, unless a caller
+            # reaches the cx.
             raise outcome
         if isinstance(outcome, tuple) and outcome[0] == "refused":
             self.cx.write_answer = outcome[1]
-            try:  # meshcore's send: log the failure, return False, and carry on
+            try:  # send of meshcore: log the failure, return False, and continue
                 await self.cx._write_locked(b"")
             except Exception:
                 pass
             return None
         if outcome == "slow":
-            await asyncio.sleep(30)  # a handshake the caller's wait_for will cancel
+            await asyncio.sleep(30)  # a handshake that the wait_for of the caller cancels
         self.connection_manager._is_connected = True
         return None if outcome == "none" else {"ok": True}
 
@@ -135,7 +143,7 @@ class _FakeMeshCore:
 
 @pytest.fixture(autouse=True)
 def _fake_meshcore(monkeypatch: pytest.MonkeyPatch):
-    """Make ``from meshcore import BLEConnection`` inside the connect path resolve to a fake."""
+    """Make ``from meshcore import BLEConnection`` in the connect path give a fake."""
     import sys
     import types
 
@@ -152,15 +160,15 @@ def _device(pin: str | None = None) -> MeshCoreDevice:
 
 
 class _AuthError(Exception):
-    """A stand-in for the GATT failure a PIN-protected companion answers with."""
+    """A stand-in for the GATT failure that a PIN-protected companion gives."""
 
 
 def test_a_raising_connect_releases_the_link_it_left_open() -> None:
-    """THE bug: a connect that raises must not strand an open link.
+    """The main bug: a connect that raises must not leave an open link with no owner.
 
-    ``create_ble`` would have swallowed the reference here. Owning the client lets the
-    failure path put the link down before the exception continues on its way — so the
-    peripheral stops holding a phantom peer and goes on advertising for the PIN retry.
+    ``create_ble`` would have lost the reference here. When MeshTerm owns the client, the
+    failure path closes the link before the exception continues. Thus the peripheral does
+    not keep a phantom peer, and it continues to advertise for the PIN retry.
     """
     _FakeMeshCore.reset(_AuthError("Insufficient Authentication"))
     dev = _device()
@@ -175,12 +183,13 @@ def test_a_raising_connect_releases_the_link_it_left_open() -> None:
 
 
 def test_the_graceful_disconnect_alone_would_not_have_been_enough() -> None:
-    """The regression guard for the *first* attempt at this fix, which still leaked.
+    """The regression guard for the first attempt at this fix, which still leaked.
 
-    ``ConnectionManager.disconnect`` is a no-op after a raising connect, because the flag it
-    guards on is set only once ``connection.connect()`` has returned. Calling ``mc.disconnect``
-    and stopping there looks like a teardown and closes nothing — so this asserts the graceful
-    call really is inert on this path, and that the link went down anyway.
+    ``ConnectionManager.disconnect`` does nothing after a connect that raised. It checks a
+    flag, and the library sets the flag only after ``connection.connect()`` returns. A call
+    to ``mc.disconnect`` that stops there looks like a teardown, but it closes nothing. This
+    test makes sure that the graceful call has no effect on this path, and that the link
+    closed in another way.
     """
     _FakeMeshCore.reset(_AuthError("Insufficient Authentication"))
     dev = _device()
@@ -189,14 +198,17 @@ def test_the_graceful_disconnect_alone_would_not_have_been_enough() -> None:
         asyncio.run(dev._connect_owned_ble(_FakeMeshCore))
 
     client = _FakeMeshCore.built[0]
-    assert client.graceful_calls == 1  # it was tried…
+    assert client.graceful_calls == 1  # the code tried it…
     assert client.connection_manager._is_connected is False  # …and the guard refused it
-    assert client.cx.link_open is False  # …so the direct transport close is what saved us
-    assert client.stop_calls == 1  # and the dispatcher was cancelled rather than awaited
+    assert client.cx.link_open is False  # …so the direct close of the transport closed the link
+    assert client.stop_calls == 1  # also, the code cancelled the dispatcher and did not await it
 
 
 def test_an_unanswered_handshake_closes_the_link_too() -> None:
-    """Transport up, no identity reply: reported as "not a companion", link still released."""
+    """The transport is up but no identity reply comes. MeshTerm reports "not a companion".
+
+    The link still closes.
+    """
     _FakeMeshCore.reset("none")
     dev = _device()
 
@@ -205,7 +217,7 @@ def test_an_unanswered_handshake_closes_the_link_too() -> None:
 
 
 def test_a_good_connect_hands_the_client_over_still_open() -> None:
-    """The success path must not close anything — the caller owns the live client."""
+    """The success path must not close anything, because the caller owns the live client."""
     _FakeMeshCore.reset("ok")
     dev = _device()
 
@@ -219,7 +231,7 @@ def test_a_good_connect_hands_the_client_over_still_open() -> None:
 def test_the_connection_is_built_from_this_device_s_own_endpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Address and discovered ``BLEDevice`` reach the connection we construct; the PIN doesn't."""
+    """The address and the discovered ``BLEDevice`` reach the new connection. The PIN does not."""
     monkeypatch.setattr(sys, "platform", "win32")
     _FakeMeshCore.reset("ok")
     sentinel = object()
@@ -236,17 +248,18 @@ def test_the_connection_is_built_from_this_device_s_own_endpoint(
     cx = _FakeTransport.last
     assert (cx.address, cx.device, cx.pin) == (_ADDR, sentinel, None)
     client = _FakeMeshCore.built[0]
-    # auto_reconnect stays off: MeshTerm drives reconnection itself.
+    # auto_reconnect stays off, because MeshTerm controls the reconnection itself.
     assert (client.default_timeout, client.auto_reconnect) == (7.5, False)
 
 
 def test_the_pin_is_withheld_on_macos(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No PIN is handed to macOS: supplying one is what *breaks* the connection there.
+    """MeshTerm gives no PIN to macOS, because a PIN breaks the connection there.
 
-    ``BLEConnection.connect`` responds to a PIN by calling bleak's ``pair()``, and
-    CoreBluetooth has no pairing API — the macOS backend raises outright, whereupon the
-    library disconnects and re-raises. Pairing there is the OS's to run, prompted by the
-    unbonded subscribe, so saying nothing is what lets a protected companion bond at all.
+    When it gets a PIN, ``BLEConnection.connect`` calls ``pair()`` of bleak. CoreBluetooth
+    has no pairing API, so the macOS backend raises an error at once. Then the library
+    disconnects and raises the error again. On macOS, the operating system does the
+    pairing, and the subscribe without a bond starts it. Thus a protected companion can bond
+    only if MeshTerm gives no PIN.
     """
     monkeypatch.setattr(sys, "platform", "darwin")
     _FakeMeshCore.reset("ok")
@@ -255,15 +268,15 @@ def test_the_pin_is_withheld_on_macos(monkeypatch: pytest.MonkeyPatch) -> None:
     asyncio.run(dev._connect_owned_ble(_FakeMeshCore))
 
     assert _FakeTransport.last.pin is None
-    assert dev._pin == "000000"  # still remembered — it is the platform that can't use it
+    assert dev._pin == "000000"  # the device still remembers it, because the platform cannot use it
 
 
 def test_the_pin_is_withheld_from_bleak_on_linux(monkeypatch: pytest.MonkeyPatch) -> None:
-    """On Linux MeshTerm pairs through its own BlueZ agent, so bleak never gets the PIN.
+    """On Linux, MeshTerm pairs through its own BlueZ agent, so bleak never gets the PIN.
 
-    bleak's BlueZ ``pair()`` ignores it and pairs through whatever system agent there is — a
-    desktop dialog, or nothing — so handing it over would only start a second pairing
-    nobody can answer.
+    The BlueZ ``pair()`` of bleak ignores the PIN. It pairs through the system agent that is
+    present, which is a desktop dialog or nothing. Thus a PIN given to it would only start a
+    second pairing that nobody can answer.
     """
     monkeypatch.setattr(sys, "platform", "linux")
     _FakeMeshCore.reset("ok")
@@ -276,10 +289,11 @@ def test_the_pin_is_withheld_from_bleak_on_linux(monkeypatch: pytest.MonkeyPatch
 
 
 def test_the_pin_is_withheld_from_bleak_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Bleak's WinRT ``pair()`` is Just Works only, so a PIN handed to it bonds *without* one.
+    """The WinRT ``pair()`` of bleak is Just Works only, so a PIN given to it bonds without a PIN.
 
-    After our own PIN pairing failed on a mistyped PIN, that fallback left Windows holding an
-    unauthenticated bond, and the next attempt — right PIN — reused it and was refused.
+    The PIN pairing of MeshTerm once failed because of a wrong PIN. Then that fallback left
+    Windows with a bond that had no authentication. The next attempt had the right PIN, but
+    it used the old bond, and the companion refused it.
     """
     monkeypatch.setattr(sys, "platform", "win32")
     _FakeMeshCore.reset("ok")
@@ -292,11 +306,12 @@ def test_the_pin_is_withheld_from_bleak_on_windows(monkeypatch: pytest.MonkeyPat
 
 
 def test_a_refused_handshake_write_is_a_pairing_problem() -> None:
-    """A firmware that guards only the write (MeshOS, wadamesh on a T-Deck) is still paired.
+    """A firmware that guards only the write (MeshOS, wadamesh on a T-Deck) still needs pairing.
 
-    The subscribe succeeds there, and the refusal lands on the handshake's first write, which
-    meshcore's ``send`` swallows. The empty handshake must surface as that refusal — not as
-    "not a companion" — so the pairing, the stale-bond repair and the macOS wait all run.
+    On this firmware the subscribe succeeds, and the refusal comes on the first write of the
+    handshake. ``send`` of meshcore swallows that refusal. The empty handshake must show as
+    that refusal, and not as "not a companion". Then the pairing, the repair of a stale bond,
+    and the macOS wait all run.
     """
     refusal = _AuthError("GATT Protocol Error: Insufficient Encryption")
     _FakeMeshCore.reset(("refused", refusal))
@@ -310,7 +325,7 @@ def test_a_refused_handshake_write_is_a_pairing_problem() -> None:
 
 
 def test_a_write_failing_for_another_reason_still_reads_as_no_answer() -> None:
-    """Only a refusal for want of a bond is promoted; a dropped write stays "no answer"."""
+    """Only a refusal because of a missing bond is promoted. A dropped write stays "no answer"."""
     _FakeMeshCore.reset(("refused", OSError("device unreachable")))
     dev = _device()
 
@@ -320,9 +335,9 @@ def test_a_write_failing_for_another_reason_still_reads_as_no_answer() -> None:
 def test_a_refused_write_heals_through_the_pin_repair(monkeypatch: pytest.MonkeyPatch) -> None:
     """End to end on Windows: refused write → unpair and pair with the PIN → connected.
 
-    The T-Deck case exactly: a Just Works bond is trusted on the fast path, the handshake's
-    write is refused over it, and the repair that stock firmware reaches from the subscribe
-    must be reached from the write too.
+    This is the exact case of the T-Deck. The fast path trusts a Just Works bond, and the
+    companion refuses the write of the handshake over that bond. Stock firmware reaches the
+    repair from the subscribe. The code must also reach the repair from the write.
     """
     monkeypatch.setattr(sys, "platform", "win32")
     forced: list[bool] = []
@@ -342,10 +357,10 @@ def test_a_refused_write_heals_through_the_pin_repair(monkeypatch: pytest.Monkey
 
 
 def test_a_cancelled_handshake_still_closes_the_link() -> None:
-    """A probe's ``wait_for`` expiring mid-handshake must not leak what it cancelled.
+    """A ``wait_for`` of a probe that expires during the handshake must not leak what it cancelled.
 
-    This is the second way in, and the reason the teardown is shielded: a plain ``await``
-    would itself be cancelled the moment it suspended, abandoning the close.
+    This is the second way to this fault, and the reason that the teardown is shielded. A
+    plain ``await`` would be cancelled when it suspended, and the close would not run.
     """
     _FakeMeshCore.reset("slow")
     dev = _device()
@@ -353,7 +368,7 @@ def test_a_cancelled_handshake_still_closes_the_link() -> None:
     async def scenario():
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(dev._connect_owned_ble(_FakeMeshCore), timeout=0.1)
-        # The shielded close runs on after the cancellation propagates; give it a tick.
+        # The shielded close continues after the cancellation propagates. Give it a tick.
         await asyncio.sleep(0.2)
         return _FakeMeshCore.built[0]
 
@@ -362,7 +377,7 @@ def test_a_cancelled_handshake_still_closes_the_link() -> None:
 
 
 def test_a_failing_teardown_never_masks_the_real_error() -> None:
-    """Teardown is best-effort: the connect's own failure is what the caller must see."""
+    """The teardown is best-effort. The caller must see the failure of the connect itself."""
 
     class _Stubborn(_FakeMeshCore):
         async def disconnect(self):
@@ -374,17 +389,17 @@ def test_a_failing_teardown_never_masks_the_real_error() -> None:
 
     with pytest.raises(_AuthError):
         asyncio.run(dev._connect_owned_ble(_Stubborn))
-    # The graceful half blew up, and the forced close still ran and did the job.
+    # The graceful half failed with an error, and the forced close still ran and closed the link.
     assert _Stubborn.built[0].cx.link_open is False
 
 
 def test_a_wedged_teardown_is_not_waited_out_forever() -> None:
-    """A dispatcher stop that deadlocks is abandoned, and the transport closed regardless."""
+    """A stop of the dispatcher that deadlocks is abandoned, and the transport closes anyway."""
 
     class _Wedged(_FakeMeshCore):
         async def disconnect(self):
             self.graceful_calls += 1
-            await asyncio.sleep(30)  # the library's queue.join() deadlock
+            await asyncio.sleep(30)  # the deadlock of queue.join() in the library
 
     _Wedged.reset(_AuthError("Insufficient Authentication"))
     dev = _device()
@@ -401,7 +416,7 @@ def test_a_wedged_teardown_is_not_waited_out_forever() -> None:
 
 
 def test_the_retry_loop_never_reuses_a_torn_down_client() -> None:
-    """A retried link-open builds a fresh client, and the abandoned one was released."""
+    """A retry of the link-open builds a new client, and MeshTerm released the abandoned one."""
     _FakeMeshCore.reset(ConnectionError("Failed to connect to device"), "ok")
     dev = _device()
 
@@ -414,7 +429,7 @@ def test_the_retry_loop_never_reuses_a_torn_down_client() -> None:
 
 
 def test_every_link_open_attempt_failing_raises_the_last_error() -> None:
-    """Exhausting the retries says the link never opened — with nothing left open."""
+    """When all the retries fail, MeshTerm says that the link never opened. Nothing stays open."""
     _FakeMeshCore.reset(
         ConnectionError("Failed to connect to device"),
         ConnectionError("Failed to connect to device"),
@@ -430,14 +445,14 @@ def test_every_link_open_attempt_failing_raises_the_last_error() -> None:
 
 
 class _BleakError(Exception):
-    """Stand-in for ``bleak.exc.BleakError``, which carries what happened only as text."""
+    """A stand-in for ``bleak.exc.BleakError``, which has only text to say what happened."""
 
 
 def test_a_link_that_drops_while_connecting_is_retried() -> None:
-    """BlueZ losing the peer during service discovery is the radio, so it gets the retry.
+    """If BlueZ loses the peer during service discovery, the radio caused it, so MeshTerm retries.
 
-    Seen on a Cardputer Zero: an HCI Connection Timeout 1.7 s in, with no security
-    exchange begun, and the next attempt connected.
+    Seen on a Cardputer Zero: an HCI Connection Timeout 1.7 s after the start, before any
+    security exchange began. The next attempt connected.
     """
     _FakeMeshCore.reset(_BleakError("failed to discover services, device disconnected"), "ok")
     dev = _device()
@@ -450,7 +465,7 @@ def test_a_link_that_drops_while_connecting_is_retried() -> None:
 
 
 def test_an_auth_refusal_that_ends_in_a_disconnect_is_never_retried() -> None:
-    """A refused PIN can drop the link too; it goes to the PIN handling, not round again."""
+    """A refused PIN can also drop the link. That case goes to the PIN handling, not to a retry."""
     _FakeMeshCore.reset(_AuthError("Insufficient Authentication: device disconnected"), "ok")
     dev = _device()
 
@@ -461,7 +476,10 @@ def test_an_auth_refusal_that_ends_in_a_disconnect_is_never_retried() -> None:
 
 
 def test_any_other_failure_is_not_retried() -> None:
-    """Only a link that never opened or that dropped is the radio's; the rest surface at once."""
+    """Only a link that never opened or that dropped is a radio problem.
+
+    MeshTerm raises all other failures at once.
+    """
     _FakeMeshCore.reset(_BleakError("Characteristic 6e400003 was not found"), "ok")
     dev = _device()
 
@@ -472,7 +490,7 @@ def test_any_other_failure_is_not_retried() -> None:
 
 
 class _Connection:
-    """A ``BLEConnection`` stand-in: just the drop handler the guard wraps."""
+    """A stand-in for ``BLEConnection``, with only the drop handler that the guard wraps."""
 
     def __init__(self) -> None:
         self.forwarded: list[object] = []
@@ -482,21 +500,21 @@ class _Connection:
 
 
 def test_a_hang_up_after_the_pin_was_asked_is_flagged_not_held() -> None:
-    """The retries bleak makes are held back; a companion refusing its pairing is not one."""
+    """The code holds back the retries that bleak makes, but not a refusal to pair."""
     asked = False
     connection = _Connection()
     seen = conn_mod._hold_disconnects_while_connecting(connection, lambda: asked)
 
-    connection.handle_disconnect("first try")  # bleak's 0x3e retry: held, nothing flagged
+    connection.handle_disconnect("first try")  # a 0x3e retry of bleak: held, with no flag
     assert not seen.hung_up.is_set()
     asked = True
     connection.handle_disconnect("after the PIN")
     assert seen.hung_up.is_set()
-    assert connection.forwarded == []  # still held while connecting
+    assert connection.forwarded == []  # still held during the connect
 
 
 def test_a_hang_up_ends_the_connect_as_a_pairing_failure() -> None:
-    """The connect stops waiting on a dead link and says why, in the PIN handling's words."""
+    """The connect stops waiting for a dead link and says why, in the words of the PIN handling."""
 
     async def scenario() -> bool:
         hung_up = asyncio.Event()
@@ -520,7 +538,7 @@ def test_a_hang_up_ends_the_connect_as_a_pairing_failure() -> None:
 
 
 def test_a_connect_that_finishes_first_is_returned() -> None:
-    """No hang-up, no change: the connect's own answer comes back."""
+    """With no hang-up, nothing changes: the function returns the answer of the connect itself."""
 
     async def scenario() -> str:
         async def connect() -> str:

@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Region scopes: the key and code maths, the known-region store, and where scopes are kept.
+"""Region scopes: the key and code maths, the store of known regions, and where scopes are kept.
 
-The maths is pinned against the firmware's own definitions (``TransportKeyStore``,
-``TransportKey::calcTransportCode``) spelled out independently here, so a slip in
-:mod:`meshterm.core.regions` cannot pass by agreeing with itself.
+The tests compare the maths with the definitions of the firmware itself (``TransportKeyStore``,
+``TransportKey::calcTransportCode``). The tests write these definitions again, independently.
+Thus a fault in :mod:`meshterm.core.regions` cannot pass because the code agrees with itself.
 """
 
 from __future__ import annotations
@@ -35,13 +35,13 @@ from meshterm.core.regions import (
 )
 from meshterm.persistence.repository import Repository
 
-#: A channel-text payload: channel hash, 2-byte MAC, ciphertext (contents are arbitrary).
+#: A channel-text payload: channel hash, 2-byte MAC, and ciphertext. The content is arbitrary.
 _PAYLOAD = bytes.fromhex("a71c2d00112233445566778899aabbccddeeff")
 _GRP_TXT = 5
 
 
 def _firmware_code(name: str, payload_type: int, payload: bytes) -> int:
-    """The transport code as the firmware computes it, written out longhand."""
+    """The transport code that the firmware computes, written in full steps."""
     key = hashlib.sha256(("#" + name).encode("utf-8")).digest()[:16]
     mac = hmac.new(key, bytes([payload_type]) + payload, hashlib.sha256).digest()
     code = mac[0] | (mac[1] << 8)
@@ -49,7 +49,10 @@ def _firmware_code(name: str, payload_type: int, payload: bytes) -> int:
 
 
 def _scoped_raw(name: str, payload: bytes = _PAYLOAD) -> dict:
-    """An RX-log frame's raw payload for a flood scoped to ``name``, as the library parses it."""
+    """The raw payload of an RX-log frame for a flood with the scope ``name``.
+
+    The payload has the form that the library parses.
+    """
     code = _firmware_code(name, _GRP_TXT, payload)
     return {
         "route_typename": "TC_FLOOD",
@@ -64,20 +67,23 @@ def _scoped_raw(name: str, payload: bytes = _PAYLOAD) -> dict:
 
 
 def test_key_is_the_hashed_hashtag_name_either_way_it_is_written() -> None:
-    """``yul`` and ``#yul`` are one region; the key hashes ``#yul`` as UTF-8."""
+    """``yul`` and ``#yul`` are one region. The key is the hash of ``#yul`` as UTF-8."""
     expected = hashlib.sha256(b"#yul").digest()[:16]
     assert region_key("yul") == region_key("#yul") == region_key("  #yul ") == expected
     assert region_key("montréal") == hashlib.sha256("#montréal".encode()).digest()[:16]
 
 
 def test_code_matches_the_firmware_definition() -> None:
-    """HMAC over type byte + payload, first two bytes little-endian."""
+    """The code is the HMAC of the type byte and the payload.
+
+    It uses the first two bytes, little-endian.
+    """
     code = transport_code(region_key("yul"), scope_body(_GRP_TXT, _PAYLOAD))
     assert code == _firmware_code("yul", _GRP_TXT, _PAYLOAD)
 
 
 def test_reserved_codes_step_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    """0x0000 and 0xFFFF are reserved; the firmware sends 0x0001 and 0xFFFE instead."""
+    """0x0000 and 0xFFFF are reserved. The firmware sends 0x0001 and 0xFFFE instead."""
     for digest, expected in ((b"\x00\x00", 0x0001), (b"\xff\xff", 0xFFFE)):
         fake = SimpleNamespace(digest=lambda d=digest: d + bytes(30))
         monkeypatch.setattr(regions.hmac, "new", lambda *a, f=fake, **k: f)
@@ -85,7 +91,7 @@ def test_reserved_codes_step_off(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_codes_field_splits_little_endian() -> None:
-    """The 4-byte field is two little-endian uint16s; junk parses to nothing."""
+    """The 4-byte field is two little-endian uint16 values. Invalid data parses to nothing."""
     assert parse_codes("341200ff") == (0x1234, 0xFF00)
     assert parse_codes(None) is None
     assert parse_codes("12") is None
@@ -105,19 +111,22 @@ def test_codes_field_splits_little_endian() -> None:
     ],
 )
 def test_names_the_firmware_would_refuse_are_refused(name: str, message: str) -> None:
-    """A name that could be stored but never matched or listed back is refused up front."""
+    """MeshTerm refuses at the start a name that it can store but that never matches.
+
+    This includes a name that never lists back.
+    """
     with pytest.raises(RegionNameError, match=message):
         validate(name)
 
 
 def test_valid_names_come_back_bare() -> None:
-    """Validation is also normalization: the ``#`` is the key's, not the name's."""
+    """Validation also normalizes the name. The ``#`` belongs to the key, not to the name."""
     assert validate("#yul-nord") == "yul-nord"
     assert validate("x" * 30) == "x" * 30
 
 
 def test_resolution_finds_the_region_whose_key_reproduces_the_code() -> None:
-    """A code names no region; trying the known names does."""
+    """A code does not name a region. A test of the known names finds the region."""
     raw = _scoped_raw("harbour")
     code = parse_codes(raw["transport_code"])[0]
     body = scope_body(_GRP_TXT, _PAYLOAD)
@@ -126,7 +135,10 @@ def test_resolution_finds_the_region_whose_key_reproduces_the_code() -> None:
 
 
 def test_frame_scope_reads_the_three_states_and_ignores_direct_frames() -> None:
-    """Plain flood → unscoped; scoped → a region or unknown; direct → no scope at all."""
+    """A plain flood is unscoped. A scoped flood has a region or an unknown scope.
+
+    A direct packet has no scope.
+    """
     assert frame_scope({"route_typename": "FLOOD"}, ["harbour"]) is UNSCOPED
     assert frame_scope({"route_typename": "DIRECT"}, ["harbour"]) is None
     assert frame_scope({"route_typename": "TC_DIRECT"}, ["harbour"]) is None
@@ -139,7 +151,10 @@ def test_frame_scope_reads_the_three_states_and_ignores_direct_frames() -> None:
 
 
 def test_a_repeaters_region_list_parses_bare_with_the_wildcard_kept() -> None:
-    """``*`` first when it relays unscoped floods; names bare, duplicates and blanks dropped."""
+    """``*`` is first when the repeater relays unscoped floods. Names are bare.
+
+    The parse removes duplicates and blanks.
+    """
     assert parse_region_list("*,#lakeside,harbour,,harbour\x00") == ["*", "lakeside", "harbour"]
     assert parse_region_list(None) == []
 
@@ -148,7 +163,7 @@ def test_a_repeaters_region_list_parses_bare_with_the_wildcard_kept() -> None:
 
 
 def test_store_learns_persists_and_orders_chosen_names_first(tmp_path: Path) -> None:
-    """Names the reader chose resolve before names only a repeater mentioned."""
+    """Names that the user chose resolve before names that only a repeater mentioned."""
     path = tmp_path / "regions.json"
     store = RegionStore(path)
     store.learn_carried("aabbccddeeff0011", ["*", "harbour", "lakeside"])
@@ -163,7 +178,10 @@ def test_store_learns_persists_and_orders_chosen_names_first(tmp_path: Path) -> 
 
 
 def test_a_repeaters_new_list_replaces_what_it_said_before(tmp_path: Path) -> None:
-    """A region only that repeater taught is forgotten when it stops naming it."""
+    """The store forgets a region that only one repeater taught.
+
+    This occurs when that repeater stops naming the region.
+    """
     store = RegionStore(tmp_path / "regions.json")
     store.learn_carried("aabbccddeeff", ["harbour", "lakeside"])
     store.learn("lakeside", "typed")
@@ -175,7 +193,7 @@ def test_a_repeaters_new_list_replaces_what_it_said_before(tmp_path: Path) -> No
 
 
 def test_channel_scope_is_kept_by_identity_and_teaches_the_name(tmp_path: Path) -> None:
-    """Setting a channel's scope records the region; clearing it leaves the name known."""
+    """A set of the scope of a channel stores the region. A clear of it leaves the name known."""
     store = RegionStore(tmp_path / "regions.json")
     store.set_channel_scope("chan-1", "#harbour")
     assert store.channel_scope("chan-1") == "harbour"
@@ -188,7 +206,7 @@ def test_channel_scope_is_kept_by_identity_and_teaches_the_name(tmp_path: Path) 
 
 
 def test_forgetting_a_region_clears_the_channels_scoped_to_it(tmp_path: Path) -> None:
-    """A channel is never left scoped to a region the store no longer knows."""
+    """A channel never keeps a scope for a region that the store does not know."""
     store = RegionStore(tmp_path / "regions.json")
     store.set_channel_scope("chan-1", "harbour")
     store.forget("harbour")
@@ -197,7 +215,7 @@ def test_forgetting_a_region_clears_the_channels_scoped_to_it(tmp_path: Path) ->
 
 
 def test_scope_of_resolves_against_names_learned_after_the_frame(tmp_path: Path) -> None:
-    """The memo is dropped when a name arrives, so a frame heard earlier resolves now."""
+    """The cache is cleared when a name arrives, so a frame that was heard earlier now resolves."""
     store = RegionStore(tmp_path / "regions.json")
     raw = _scoped_raw("harbour")
     assert store.scope_of(raw).state == "unknown"
@@ -212,7 +230,10 @@ def test_scope_of_resolves_against_names_learned_after_the_frame(tmp_path: Path)
 
 
 def test_a_scoped_frame_keeps_what_it_needs_to_resolve_from_history(tmp_path: Path) -> None:
-    """The code and its HMAC input survive the database, and nothing is kept for others."""
+    """The code and its HMAC input stay in the database.
+
+    For other frames, MeshTerm stores nothing.
+    """
     repo = Repository(tmp_path / "meshterm.db")
     run = repo.start_run("monitor", {})
     when = utcnow()
@@ -243,7 +264,7 @@ def test_a_scoped_frame_keeps_what_it_needs_to_resolve_from_history(tmp_path: Pa
 
 
 class _Commands:
-    """A meshcore ``commands`` stand-in that records what was sent."""
+    """A stand-in for the meshcore ``commands`` that records what MeshTerm sent."""
 
     def __init__(self) -> None:
         self.calls: list[tuple] = []
@@ -270,7 +291,10 @@ def _device(commands: _Commands):  # noqa: ANN202
 
 
 def test_default_scope_frame_is_bare_and_byte_padded() -> None:
-    """``[63][name, 31 bytes NUL-padded][key16]`` — bare name, UTF-8 bytes, 48 in all."""
+    """The frame is ``[63][name, 31 bytes NUL-padded][key16]``.
+
+    The name is bare and in UTF-8 bytes. The frame has 48 bytes in all.
+    """
     commands = _Commands()
     device = _device(commands)
     asyncio.run(device.set_default_flood_scope("#montréal"))
@@ -285,10 +309,11 @@ def test_default_scope_frame_is_bare_and_byte_padded() -> None:
 
 
 def test_session_scope_sends_the_key_the_override_or_the_reset() -> None:
-    """A name sends its key; ``*`` forces unscoped; ``None`` falls back to the default.
+    """A name sends its key. ``*`` forces unscoped. ``None`` goes back to the default.
 
-    Framed by MeshTerm as the firmware's command 54, never through the library's
-    ``reset_flood_scope``/``force_unscoped``, which an older meshcore 2.3 lacks.
+    MeshTerm makes the frame as command 54 of the firmware. It never uses the
+    ``reset_flood_scope`` and ``force_unscoped`` of the library, because an older meshcore 2.3
+    does not have them.
     """
     commands = _Commands()
     device = _device(commands)
@@ -303,7 +328,7 @@ def test_session_scope_sends_the_key_the_override_or_the_reset() -> None:
 
 
 def test_mock_device_mirrors_scope_and_answers_regions_from_repeaters() -> None:
-    """The mock stores bare names and only a repeater answers the regions request."""
+    """The mock stores bare names. Only a repeater answers the request for regions."""
     from meshterm.core.connection import DeviceCommandError, MockDevice
 
     async def run() -> None:

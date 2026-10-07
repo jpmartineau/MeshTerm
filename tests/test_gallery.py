@@ -1,25 +1,26 @@
 # SPDX-License-Identifier: Apache-2.0
 """The dual-platform gallery.
 
-Every screen the interactive menu can open, checked for width discipline under both
-flavours this app runs as.
+Each screen that the interactive menu can open, checked for the width on both platforms
+that the app runs on.
 
-Each entry below builds one full-screen :class:`~meshterm.ui.tui.screen.Screen` against
-hand-built (simulator-shaped) data — the same "fake session, real screen" approach every
-individual screen's own test file already uses — then renders it, both directly
-(``render_body``) and through the real frame compositor (``compose_base``), at REGULAR's
-72x24, at PICOCALC_LYRA's two live/lux row counts (53x26, the actual on-device floor; 53x40,
-the boot-font/6x8-font-B case), and at the CARDPUTER_ZERO's 53x14. No rendered line may exceed
-its terminal's width.
+Each entry below builds one full-screen :class:`~meshterm.ui.tui.screen.Screen` with data
+that the test builds by hand (in the form of the simulator). This is the "fake session,
+real screen" method that the test file of each individual screen already uses. Then the
+test renders the screen two ways: directly (``render_body``), and through the real frame
+compositor (``compose_base``). It does this at 72x24 for REGULAR. It does this at the two
+live row counts of PICOCALC_LYRA (53x26, which is the real floor on the handheld, and 53x40,
+which is the case of the boot font and the 6x8 font B). It also does this at 53x14 for
+CARDPUTER_ZERO. No rendered line can be wider than its terminal.
 
-This is the platform-parity harness the PicoCalc work was built around: a
-screen added here without surviving both platforms is meant to fail CI by default, so the
-suite polices new work automatically instead of relying on someone remembering to check
-by eye. It intentionally starts already covering every screen the interactive menu can
-open (not growing empty) — a screen that doesn't yet fit 53 columns is marked ``xfail`` in
-:data:`_KNOWN_WIDE` instead of being left out, so that list *is* the width-reduction
-worklist P6 works through screen by screen; a screen graduates off it the moment its case
-starts reporting XPASS.
+This is the harness for platform parity, and the work on the PicoCalc was built around it.
+If a screen is added here and does not work on both platforms, CI fails by default. Thus
+the suite checks new work automatically, and nobody must remember to check by eye. The
+suite already covers each screen that the interactive menu can open from the start. It does
+not start empty. If a screen does not yet fit 53 columns, the suite marks it ``xfail`` in
+:data:`_KNOWN_WIDE`, and does not leave it out. Thus this list is the worklist of P6 for the
+reduction of width, and P6 works through it screen by screen. A screen leaves the list when
+its case reports XPASS.
 """
 
 from __future__ import annotations
@@ -120,10 +121,10 @@ _FAR_KEY = "f2c24f54551e" + "0" * 52
 
 
 class _GallerySession:
-    """A minimal TuiSession stand-in every gallery screen is happy with.
+    """A minimal stand-in for TuiSession that each gallery screen accepts.
 
-    The same shape each screen's own test file rolls independently as ``_FakeSession``
-    or ``_StubSession``.
+    It has the same shape as the class that the test file of each screen makes for itself,
+    as ``_FakeSession`` or ``_StubSession``.
     """
 
     def __init__(self, cols: int = 80, rows: int = 24) -> None:
@@ -152,13 +153,13 @@ class _GallerySession:
 
 @dataclass
 class _Entry:
-    """One gallery specimen: a name, and how to build it at a given terminal size."""
+    """One gallery specimen: a name, and the method to build it at a given terminal size."""
 
     name: str
     factory: Callable[[int, int], Screen]
 
 
-# --- factories: one per screen the interactive menu can open ---------------------------
+# --- factories: one for each screen that the interactive menu can open -----------------
 
 
 def _dashboard(cols: int, rows: int) -> Screen:
@@ -190,13 +191,14 @@ def _dashboard(cols: int, rows: int) -> Screen:
 
 
 def _dashboard_scoped(cols: int, rows: int) -> Screen:
-    """The dashboard narrowed to one region: its title, its F3 chip, its scoped sections.
+    """The dashboard for one region: its title, its F3 chip, and its sections for the scope.
 
-    The region is named long on purpose, so the title needs its short form on the console.
+    The name of the region is long on purpose, so the title needs its short form on the
+    console.
     """
     from meshterm.core.regions import Scope
 
-    def scope_of(raw):  # noqa: ANN001, ANN202 - the RegionStore.scope_of shape
+    def scope_of(raw):  # noqa: ANN001, ANN202 - the shape of RegionStore.scope_of
         return Scope("scoped", "laurentides-nord", "beef") if raw else None
 
     frame = {"payload_typename": "GRP_TXT", "route_typename": "TC_FLOOD"}
@@ -223,9 +225,9 @@ def _contacts(cols: int, rows: int) -> Screen:
         Contact(name="Alice", public_key="aa" * 32),
         Contact(name="A Rather Long Repeater Name For Width", public_key=_HUB_KEY),
     ]
-    # A non-zero archived tally, so the tail draws both maintenance rows — its populated
-    # state, and the widest the tail ever gets — and a locked contact, so its padlock is held
-    # to both platforms' glyph contracts.
+    # The archived count is not zero, so the end of the list draws both maintenance rows.
+    # This is its populated state, and the widest that the end of the list gets. There is also
+    # a locked contact, so that its padlock must follow the glyph contract of both platforms.
     return ContactsScreen(
         "Homestead",
         "cc" * 32,
@@ -239,13 +241,14 @@ def _contacts(cols: int, rows: int) -> Screen:
 
 
 def _archive_ranked():  # noqa: ANN201
-    """A ranked contact table for the sweep's screens — scored by the real function.
+    """A ranked contact table for the screens of the sweep. The real function scores it.
 
-    Deliberately *not* hand-stamped percentiles. The whole point of the gallery is that a
-    specimen comes out of the app's own funnels, and a percentile is the one number on these
-    screens that cannot be written down by hand and still be true: it is a contact's rank
-    against the others in the same list, so faking it renders a screen that is internally
-    inconsistent — three contacts reading 2, 7 and 11 out of a field of three.
+    The percentiles are not written by hand, on purpose. The purpose of the gallery is that
+    a specimen comes from the own funnels of the app. A percentile is the one number on
+    these screens that cannot be written by hand and still be true. It is the rank of a
+    contact against the other contacts in the same list. If the test makes it up, the
+    screen is not consistent in itself: three contacts show 2, 7, and 11 out of a field of
+    three.
     """
     from meshterm.core.contact_score import ContactSignals, rank_contacts
 
@@ -271,8 +274,8 @@ def _archive_ranked():  # noqa: ANN201
         ("Lakeside", "3d" * 32, dict(heard_age_days=30.0, packets=22, known_days=250.0, hops=1.0)),
         ("sensor-2", "7c" * 32, dict(heard_age_days=210.0, packets=2, known_days=260.0)),
     ]
-    # Typed as their names say, so the preview draws a repeater's ``▲`` and a sensor's ``◉``
-    # beside the plain ``●`` of ``hop-9``, which never advertised a type.
+    # The types are as the names say. Thus the preview draws the ``▲`` of a repeater and the
+    # ``◉`` of a sensor, next to the plain ``●`` of ``hop-9``, which never advertised a type.
     types = {
         "Alice": NODE_TYPE_CHAT,
         "A Rather Long Repeater Name For Width": NODE_TYPE_REPEATER,
@@ -288,7 +291,7 @@ def _archive_ranked():  # noqa: ANN201
 
 
 def _archive_victims():  # noqa: ANN201
-    """The sweep's victim list: the weakest half of the ranking, weakest first."""
+    """The contacts that the sweep removes: the weakest half of the ranking, weakest first."""
     from meshterm.core.contact_score import sweep_candidates
 
     ranked = _archive_ranked()
@@ -335,8 +338,9 @@ def _archived(cols: int, rows: int) -> Screen:
 
 
 def _node_detail_mark() -> Text:
-    # Through the app's own marker and name styles, not a hand-spelled hex: the gallery is
-    # a specimen of what the platform draws, so a stub colour would hide a palette bug.
+    # The code uses the own marker and name styles of the app, not a hex colour that is
+    # written by hand. The gallery is a specimen of what the platform draws, so a colour in a
+    # stub can hide a bug in the palette.
     glyph, glyph_style = NODE_GLYPHS[NODE_TYPE_REPEATER]
     mark = Text(f"{glyph} ", style=glyph_style)
     mark.append("Hilltop-Repeater", style=name_style("Hilltop-Repeater", _HUB_KEY))
@@ -377,9 +381,9 @@ def _node_detail(cols: int, rows: int, *, with_minimap: bool = False) -> Screen:
         routes=_RoutesView(note="no route observed yet — trace to discover one"),
         info_actions=[
             _Action("timemachine", "⏳", "", "Time machine — 42 receptions"),
-            # The page's destructive row: here so the specimen shows how a delete reads
-            # on each platform — a red 🗑 on the desktop, the tint on the words where
-            # the PicoCalc drops the icon lane.
+            # The destructive row of the page. It is here so that the specimen shows how a
+            # delete looks on each platform: a red 🗑 on the desktop, and a tint on the
+            # words where the PicoCalc has no icon lane.
             _Action("remove", "🗑", "err", "Remove contact…"),
         ],
         trace_action=_Action("trace", "\U0001f3af", "", "Trace — auto route …"),
@@ -388,7 +392,7 @@ def _node_detail(cols: int, rows: int, *, with_minimap: bool = False) -> Screen:
 
 
 class _StubTileSource:
-    """An always-offline tile source: the gallery renders markers only, no network."""
+    """A tile source that is always offline: the gallery renders only markers, with no network."""
 
     available = False
     max_zoom = 14
@@ -397,33 +401,33 @@ class _StubTileSource:
         return None
 
     def answered_empty(self, z: int, x: int, y: int) -> bool:  # noqa: ANN001
-        return False  # offline is silence, never the source saying "nothing there"
+        return False  # offline means no answer. It is never the source that says "nothing there"
 
     def resident(self, z: int, x: int, y: int):  # noqa: ANN001
-        return None  # nothing is ever held in RAM
+        return None  # RAM never holds anything
 
     def warm(self, z: int, x: int, y: int) -> None:  # noqa: ANN001
         return None
 
 
 def _map_body_rows(rows: int) -> int:
-    """The body height the map would be handed in the frame these specimens compose into.
+    """The body height that the map gets in the frame into which these specimens compose.
 
-    The map is the one screen that sizes its own canvas from
-    :meth:`~meshterm.ui.tui.session.TuiSession.base_body_size`, so the stub session has to
-    answer with the *body* height rather than the terminal's — otherwise the specimen draws
-    a canvas taller than the slice it is shown in, which cuts the bottom row (and on the
-    borderless platform the basemap credit that rides there) and hangs a phantom "↓ more"
-    off a map that never scrolls. Mirrors ``base_body_size`` with no header — these
-    specimens compose against an
-    empty one — so it is the footer row plus either the panel's two borders or the
-    borderless platform's single title bar.
+    The map is the only screen that sets the size of its own canvas from
+    :meth:`~meshterm.ui.tui.session.TuiSession.base_body_size`. Thus the stub session must
+    answer with the height of the body, not the height of the terminal. If it does not, the
+    specimen draws a canvas that is taller than the slice in which it is shown. This cuts
+    the bottom row (and, on the borderless platform, the basemap credit that is in that
+    row). It also makes a "↓ more" that is not real, for a map that never scrolls. This
+    function does the same as ``base_body_size`` with no header, because these specimens
+    compose against an empty header. The result is the footer row, and also the two borders
+    of the panel or the one title bar of the borderless platform.
     """
     return max(1, rows - (3 if get_platform().frame_border else 2))
 
 
 def _map(cols: int, rows: int) -> Screen:
-    """The map as it is arrived at: nothing pressed yet, so the whole basemap credit shows."""
+    """The map when the user arrives: no key is pressed yet, so the whole basemap credit shows."""
     session = _GallerySession(cols, _map_body_rows(rows))
     markers = [
         MapMarker("Homestead", 45.50, -73.60, is_self=True),
@@ -434,15 +438,15 @@ def _map(cols: int, rows: int) -> Screen:
 
 
 def _map_panned(cols: int, rows: int) -> Screen:
-    """The map once used: the credit has collapsed to its remnant (see ui/attribution.py)."""
+    """The map after use: the credit is now its short form (refer to ui/attribution.py)."""
     screen = _map(cols, rows)
-    screen.render_body(cols)  # the arrival paint the reader is answering
+    screen.render_body(cols)  # the paint at arrival, which the user answers
     screen.handle("right")
     return screen
 
 
 def _map_find(cols: int, rows: int) -> Screen:
-    """A used map with a live find: on the PicoCalc the query and the credit share a row."""
+    """A map in use, with a live find. On the PicoCalc the query and the credit share a row."""
     screen = _map_panned(cols, rows)
     for ch in "Hilltop":
         screen.handle("text", ch)
@@ -450,12 +454,12 @@ def _map_find(cols: int, rows: int) -> Screen:
 
 
 def _node_detail_map(cols: int, rows: int) -> Screen:
-    """The node page carrying its location preview, which credits the basemap too."""
+    """The node page with its preview of the location, which also credits the basemap."""
     return _node_detail(cols, rows, with_minimap=True)
 
 
 def _node_detail_regions(cols: int, rows: int) -> Screen:
-    """A repeater's node page with its regions answered — the longest the row gets."""
+    """The node page of a repeater, with its regions answered. The row is longest here."""
     from meshterm.core.region_store import RegionStore
     from meshterm.ui.node_detail_screen import regions_value
 
@@ -475,13 +479,16 @@ def _node_detail_regions(cols: int, rows: int) -> Screen:
 
 
 def _region_editor(cols: int, rows: int) -> Screen:
-    """The region editor at its fullest: a cut dump, the rest recovered, edits unsaved."""
+    """The region editor when it has the most content.
+
+    The dump is cut, the rest is recovered, and the edits are not saved.
+    """
     from meshterm.core.region_admin import parse_region_dump
     from meshterm.core.region_sim import SimulatedRegionMap
     from meshterm.ui.region_editor import RegionMenu, region_items
 
     hub = Contact(name="Hilltop-Repeater", public_key=_HUB_KEY, key_prefix="3d63c6429436")
-    # A table too big for one reply, answered the way a repeater answers it.
+    # A table that is too big for one reply, with the answer that a repeater gives.
     sim = SimulatedRegionMap(
         [
             ("lakeside", "*", True),
@@ -529,11 +536,12 @@ def _chat(cols: int, rows: int) -> Screen:
 
 
 def _room(cols: int, rows: int, *, access=None, retry: bool = False) -> Screen:  # noqa: ANN001
-    """A room's board at its widest: every kind of author, and the title's access atom.
+    """The board of a room when it is widest: each type of author, and the access atom of the title.
 
-    A post by a contact (named, in its hue), one by an author nothing names (the grey hash),
-    a notice the room posted itself, and our own — the last unacknowledged when ``retry``,
-    so ^R joins ^L on the hint, the longest the hint gets.
+    The board has a post by a contact (with a name, in its hue), a post by an author that
+    nothing names (the grey hash), a notice that the room posted itself, and our own post.
+    If ``retry`` is set, our post has no ack, so ^R joins ^L on the hint. This is the longest
+    that the hint gets.
     """
     from meshterm.core.models import LoginResult, RoomAccess, RoomLogin
     from meshterm.ui.room import RoomScreen
@@ -552,7 +560,7 @@ def _room(cols: int, rows: int, *, access=None, retry: bool = False) -> Screen: 
     ]
     names = {"d4e5f6a7": "Alice", "f6f6f6f6": room.name}
 
-    async def never(*_):  # noqa: ANN002, ANN202 - nothing is pressed in the gallery
+    async def never(*_):  # noqa: ANN002, ANN202 - nobody presses a key in the gallery
         return RoomLogin(LoginResult.NO_REPLY)
 
     return RoomScreen(
@@ -570,7 +578,7 @@ def _room(cols: int, rows: int, *, access=None, retry: bool = False) -> Screen: 
 
 
 class _RoomsCtx:
-    """The minimal AppContext surface the Rooms page and a room's page read."""
+    """The minimal AppContext surface that the Rooms page and the page of a room read."""
 
     def __init__(self) -> None:
         from meshterm.core.models import RoomAccess
@@ -593,7 +601,7 @@ class _RoomsCtx:
 
 
 def _gallery_rooms() -> list[Contact]:
-    """A joined room with a long name and a busy board, and two heard but not joined."""
+    """A joined room with a long name and a busy board, and two rooms heard but not joined."""
     from datetime import timedelta
 
     now = utcnow()
@@ -618,7 +626,10 @@ def _gallery_rooms() -> list[Contact]:
 
 
 def _rooms_page(cols: int, rows: int) -> Screen:
-    """The Rooms page at its widest: a long name, a three-digit badge, and a room never heard."""
+    """The Rooms page when it is widest.
+
+    It has a long name, a badge of three digits, and a room that was never heard.
+    """
     from meshterm.ui.rooms import _PAGE_HINT, _page_items
 
     ctx = _RoomsCtx()
@@ -628,7 +639,10 @@ def _rooms_page(cols: int, rows: int) -> Screen:
 
 
 def _room_login_card(cols: int, rows: int) -> Screen:
-    """The join's busy card at its widest: a long room name, a long route, a long wait."""
+    """The busy card of the join when it is widest.
+
+    It has a long room name, a long route, and a long wait.
+    """
     from meshterm.ui.tui.screen import BusyDialog
 
     return BusyDialog(
@@ -637,7 +651,10 @@ def _room_login_card(cols: int, rows: int) -> Screen:
 
 
 def _room_page(cols: int, rows: int) -> Screen:
-    """A joined room's page: its vital signs over its actions, the badge on Open the board."""
+    """The page of a joined room: its summary is over its actions.
+
+    The badge is on Open the board.
+    """
     from meshterm.ui.rooms import _detail_items, _summary
 
     ctx = _RoomsCtx()
@@ -652,25 +669,26 @@ def _room_page(cols: int, rows: int) -> Screen:
 
 
 def _room_read_only(cols: int, rows: int) -> Screen:
-    """A read-only member: the compose line gives way to the line saying why."""
+    """A member with read-only access: the compose line gives way to a line that says why."""
     from meshterm.core.models import RoomAccess
 
     return _room(cols, rows, access=RoomAccess.READ_ONLY)
 
 
 def _room_retry(cols: int, rows: int) -> Screen:
-    """An unacknowledged post of ours: ^R retry joins ^L on the hint."""
+    """A post of ours with no ack: ^R retry joins ^L on the hint."""
     return _room(cols, rows, retry=True)
 
 
 def _chat_channel_scoped(cols: int, rows: int) -> Screen:
-    """A channel with a send scope: the title's ``· scope`` atom, and a resend under it.
+    """A channel with a send scope: the ``· scope`` atom of the title, and a resend under it.
 
-    The widest honest case: a region name at the firmware's 30-byte ceiling in the title,
-    a message that went out under it, and an unscoped one wearing the muted tail — with
-    ^R's hint and the lane's *Resend* chip both live on the scoped newest message.
+    This is the widest real case. The title has a region name at the maximum of the
+    firmware, 30 bytes. One message went out with this scope. One message is unscoped and
+    has the muted tail. The hint ^R and the *Resend* chip of the lane are both live on the
+    newest message, which has a scope.
     """
-    region = "lakeside-north-shore-emergency"  # 30 bytes, the firmware's longest
+    region = "lakeside-north-shore-emergency"  # 30 bytes, the longest that the firmware allows
     conv = Conversation(label="Lakeside emergency", is_channel=True, channel_idx=2)
     messages = [
         ChatMessage(text="Alice: anyone on the north shore?", is_channel=True),
@@ -697,10 +715,11 @@ def _chat_channel_scoped(cols: int, rows: int) -> Screen:
 
 
 def _chat_urls(cols: int, rows: int) -> Screen:
-    """A channel message carrying two links: on the PicoCalc, two codes side by side under it.
+    """A channel message with two links: on the PicoCalc, two codes are side by side under it.
 
-    The longest pair that still sits side by side in the 44 cells after the body's indent,
-    so the width gate sees the widest band a transcript draws; regular draws no codes.
+    This is the longest pair that still fits side by side in the 44 cells after the indent
+    of the body. Thus the width gate sees the widest band that a transcript draws. Regular
+    draws no codes.
     """
     conv = Conversation(label="Lakeside emergency", is_channel=True, channel_idx=2)
     messages = [
@@ -717,11 +736,12 @@ def _chat_urls(cols: int, rows: int) -> Screen:
 
 
 def _chat_long_url(cols: int, rows: int) -> Screen:
-    """A picked message whose link outruns the body lane: it steps out whole, and ^U is named.
+    """A picked message with a link that is wider than the body lane.
 
-    Regular's 72-cell gate sees the link start at the gutter and the hint carrying
-    ``^U QR``; on the PicoCalc the same link folds under the indent (it is wider than the
-    whole panel) with its code hung below, and the lane lights ``QR``.
+    The link goes out of the lane whole, and the hint names ^U. The gate of 72 cells on
+    Regular sees the link start at the gutter and the hint with ``^U QR``. On the PicoCalc,
+    the same link folds under the indent (it is wider than the whole panel) and its code is
+    below it, and the lane lights ``QR``.
     """
     conv = Conversation(label="Lakeside emergency", is_channel=True, channel_idx=2)
     messages = [
@@ -740,7 +760,7 @@ def _chat_long_url(cols: int, rows: int) -> Screen:
 
 
 class _PickerChat:
-    """The unread counter the picker rows read live."""
+    """The unread counter that the rows of the picker read live."""
 
     def __init__(self, unread: dict[str, int]) -> None:
         self._unread = unread
@@ -750,7 +770,7 @@ class _PickerChat:
 
 
 class _PickerDevstate:
-    """The session-cached device reads the picker builds itself from."""
+    """The device reads, cached in the session, from which the picker builds itself."""
 
     def __init__(self, contacts: list[Contact], slots: list) -> None:
         self._contacts = contacts
@@ -764,12 +784,12 @@ class _PickerDevstate:
 
 
 class _PickerRepo:
-    """The stored history behind each row's age, badge and last-message preview."""
+    """The stored history for the age, the badge, and the preview of the last message in a row."""
 
     def __init__(self, lasts: dict) -> None:
         self._lasts = lasts
 
-    def last_chat_messages(self, rooms=()) -> dict:  # noqa: ANN001 - the repository's shape
+    def last_chat_messages(self, rooms=()) -> dict:  # noqa: ANN001 - the shape of the repository
         return dict(self._lasts)
 
     def node_names(self) -> dict:
@@ -777,11 +797,12 @@ class _PickerRepo:
 
 
 def _chat_picker(cols: int, rows: int) -> Screen:
-    """The conversation picker, built through the tool's own row funnel.
+    """The conversation picker, built through the own row funnel of the tool.
 
-    Its widest case: a name at the lane's ceiling, a three-digit-capable unread badge, and
-    a last message far longer than any terminal — which is the row ←→ scroll, so it has to
-    be cut rather than fitted (see :meth:`meshterm.tools.chat.ChatTool._picker_items`).
+    This is its widest case. It has a name at the maximum of the lane, an unread badge that
+    can have three digits, and a last message that is much longer than any terminal. The
+    row scrolls with ←→, so MeshTerm must cut the message and not fit it (refer to
+    :meth:`meshterm.tools.chat.ChatTool._picker_items`).
     """
     from meshterm.tools.chat import ChatTool
 
@@ -789,14 +810,15 @@ def _chat_picker(cols: int, rows: int) -> Screen:
         Contact(name="Alice", public_key="aa" * 32, key_prefix="aa" * 6, node_type=1),
         Contact(name="A Rather Long Contact Name", public_key="d4" * 32, key_prefix="d4" * 6),
         Contact(name="Homestead", public_key="60" * 32, key_prefix="60" * 6, node_type=1),
-        # A room whose latest post is by an author nothing names (the hash stands in), and
-        # one never joined, whose preview lane says so.
+        # A room whose latest post is by an author that nothing names (the hash is used
+        # instead), and a room that was never joined, whose preview lane says so.
         Contact(name="Lakeside BBS", public_key="f6" * 32, key_prefix="f6" * 6, node_type=3),
         Contact(name="Hilltop Swap", public_key="b7" * 32, key_prefix="b7" * 6, node_type=3),
     ]
     now = datetime(2026, 7, 12, 14, 30, tzinfo=timezone.utc)
     lasts = {
-        # The default public channel, as _channels_from_slots names it with no slots read.
+        # The default public channel, with the name that _channels_from_slots gives it when
+        # no slots are read.
         "chan:slot:0": ChatMessage(
             text="Alice: anyone up around the Plateau tonight? testing a new antenna",
             is_channel=True,
@@ -827,14 +849,15 @@ def _chat_picker(cols: int, rows: int) -> Screen:
 
 
 def _channels_manager(cols: int, rows: int) -> Screen:
-    """The channel manager at its widest: every lane populated, every action row drawn.
+    """The channel manager when it is widest: each lane has data, and each action row is drawn.
 
-    Built through the feature's own row funnel, so the header line, the glyph lane, the
-    unread badge, the counts, the ages and the sparkline are laid out by the code the app
-    runs. The cases that matter are here: a name at the lane's ceiling, a send scope at its
-    lane's ceiling (ellipsized) beside a short one and channels with none, a muted channel
-    (its mark folds to a different glyph on the console), a channel with no messages at all,
-    and a three-digit unread badge.
+    The test builds it through the own row funnel of the feature. Thus the code that the app
+    runs lays out the header line, the glyph lane, the unread badge, the counts, the ages,
+    and the sparkline. The cases that matter are here. There is a name at the maximum of the
+    lane. There is a send scope at the maximum of its lane (cut with an ellipsis), next to a
+    short scope and channels with no scope. There is a muted channel (its mark folds to a
+    different glyph on the console), a channel with no messages at all, and an unread badge
+    with three digits.
     """
     from meshterm.core.channel_probe import ChannelSlot
     from meshterm.ui.channels import _MANAGER_HINT, _LiveStats, _menu_items
@@ -855,7 +878,7 @@ def _channels_manager(cols: int, rows: int) -> Screen:
 
 
 def _channel_detail(cols: int, rows: int, *, scope: str | None = None) -> Screen:
-    """One channel's action page, its vital-signs line above the rows."""
+    """The action page of one channel, with its summary line above the rows."""
     from meshterm.core.channel_probe import ChannelSlot
     from meshterm.ui.channels import _detail_items, _detail_summary, _LiveStats
 
@@ -871,12 +894,18 @@ def _channel_detail(cols: int, rows: int, *, scope: str | None = None) -> Screen
 
 
 def _channel_detail_scoped(cols: int, rows: int) -> Screen:
-    """The same page with a send scope at the 30-byte ceiling — the summary's atom and row."""
+    """The same page with a send scope of 30 bytes, the maximum.
+
+    This shows the atom and the row of the summary.
+    """
     return _channel_detail(cols, rows, scope="lakeside-north-shore-emergency")
 
 
 def _scope_picker(cols: int, rows: int) -> Screen:
-    """The send-scope value picker: no scope, known regions with their carriers, typing one."""
+    """The value picker for the send scope.
+
+    The user can choose no scope, a known region with its carriers, or a typed region.
+    """
     from meshterm.ui.channels import _SCOPE_HINT, _scope_items
 
     ctx = _ChannelsCtx(
@@ -893,18 +922,18 @@ def _scope_picker(cols: int, rows: int) -> Screen:
 
 
 class _ChannelsChat:
-    """The chat service surface the channel rows read: unread counts and mute state."""
+    """The surface of the chat service that the channel rows read: unread counts and mute state."""
 
     def __init__(self, muted: set[str]) -> None:
         self._muted = muted
 
     def unread(self, key: str) -> int:
-        """A three-digit badge on one channel, so the lane is drawn at its widest."""
+        """A badge with three digits on one channel, so that the lane is at its widest."""
         return 128 if key.endswith("slot:1") or "Lakeside" in key else 0
 
 
 class _ChannelsCtx:
-    """The minimal AppContext surface the channel rows and detail page read."""
+    """The minimal AppContext surface that the channel rows and the detail page read."""
 
     def __init__(
         self,
@@ -919,8 +948,8 @@ class _ChannelsCtx:
         self._muted = muted
         scopes = scopes or {}
         regions = regions or {}
-        # The region store's reading surface: each channel's scope, and the known regions
-        # with how many repeaters were heard to carry each.
+        # The read surface of the region store: the scope of each channel, and the known
+        # regions with the number of repeaters that were heard to carry each region.
         self.region_store = SimpleNamespace(
             channel_scope=lambda identity: scopes.get(identity),
             names=lambda: list(regions),
@@ -929,20 +958,20 @@ class _ChannelsCtx:
 
     @property
     def mute_store(self):  # noqa: ANN201 - a stand-in for the real store
-        """A store answering only the one question a row asks it."""
+        """A store that answers only the one question that a row asks it."""
         return SimpleNamespace(is_muted=lambda identity: identity in self._muted)
 
 
 class _ChannelsRepo:
-    """Channel statistics with one busy channel, one quiet one, and one never used."""
+    """Channel statistics with one busy channel, one quiet channel, and one that was never used."""
 
     def channel_stats(self, *a, **k):  # noqa: ANN002, ANN003, ANN201
-        """Return nothing: the rows then draw their empty marks, which is the tighter case."""
+        """Return nothing. The rows then draw their empty marks, which is the narrower case."""
         return {}
 
 
 class _PickerCtx:
-    """The minimal AppContext surface :meth:`ChatTool._picker_items` reads."""
+    """The minimal AppContext surface that :meth:`ChatTool._picker_items` reads."""
 
     def __init__(self, contacts: list[Contact], lasts: dict) -> None:
         self.devstate = _PickerDevstate(contacts, [])
@@ -968,13 +997,13 @@ def _livefeed(cols: int, rows: int) -> Screen:
     )
 
 
-#: The region the scope specimens resolve against, and a channel-text payload to scope.
+#: The region against which the scope specimens resolve, and a channel-text payload to scope.
 _REGION = "harbour"
 _SCOPED_PAYLOAD = bytes.fromhex("a71c2d00112233445566778899aabbccddeeff")
 
 
 def _scoped_frame(region: str) -> dict:
-    """An RX-log frame's raw payload for a channel text flooded under ``region``."""
+    """The raw payload of an RX-log packet for a channel text that is flooded under ``region``."""
     code = transport_code(region_key(region), scope_body(5, _SCOPED_PAYLOAD))
     return {
         "route_typename": "TC_FLOOD",
@@ -986,16 +1015,20 @@ def _scoped_frame(region: str) -> dict:
     }
 
 
-def _scope_of(raw: dict | None):  # noqa: ANN202 - the region store's answer, standing in
-    """Resolve a frame's scope against the one region the specimens know by name."""
+def _scope_of(raw: dict | None):  # noqa: ANN202 - the answer of the region store, as a stand-in
+    """Resolve the scope of a packet against the one region that the specimens know by name."""
     return frame_scope(raw, (_REGION,)) if isinstance(raw, dict) else None
 
 
 def _livefeed_scopes(cols: int, rows: int) -> Screen:
-    """The feed carrying a scoped, an unknown-scoped, an unscoped and a direct frame."""
+    """The feed with four packets.
+
+    They are a scoped packet, a packet with an unknown scope, an unscoped packet, and a
+    direct packet.
+    """
     frames = [
         _scoped_frame(_REGION),
-        _scoped_frame("elsewhere"),  # a region nobody here has named
+        _scoped_frame("elsewhere"),  # a region that nobody here has named
         {"route_typename": "FLOOD", "payload_typename": "GRP_TXT", "chan_hash": "a7"},
         {"route_typename": "DIRECT", "payload_typename": "TEXT_MSG", "dest_hash": "a1"},
     ]
@@ -1022,9 +1055,10 @@ def _walk_topo() -> tuple[MeshTopology, dict[str, Contact]]:
 
 
 def _timemachine_scoped(cols: int, rows: int) -> Screen:
-    """The whole-mesh page narrowed to one scope: its title, its F2 chip, its charts.
+    """The whole-mesh page for one scope: its title, its F2 chip, and its charts.
 
-    The region is named long on purpose, so the title needs its short form on the console.
+    The name of the region is long on purpose, so the title needs its short form on the
+    console.
     """
     from datetime import timedelta
 
@@ -1089,7 +1123,7 @@ def _message_paths(cols: int, rows: int) -> Screen:
 
 
 def _message_paths_scoped(cols: int, rows: int) -> Screen:
-    """A message flooded under a known region: its scope rides the title, stated once."""
+    """A message that is flooded under a known region: its scope is in the title, one time."""
     screen = _message_paths(cols, rows)
     return MessagePathsScreen(
         screen._message,
@@ -1105,7 +1139,7 @@ def _message_paths_scoped(cols: int, rows: int) -> Screen:
 
 
 def _message_paths_unknown_scope(cols: int, rows: int) -> Screen:
-    """A message flooded under a region nobody here has named: the code stands in."""
+    """A message flooded under a region that nobody here has named: the code is used instead."""
     screen = _message_paths(cols, rows)
     return MessagePathsScreen(
         screen._message,
@@ -1121,7 +1155,10 @@ def _message_paths_unknown_scope(cols: int, rows: int) -> Screen:
 
 
 def _message_paths_sent_scope(cols: int, rows: int) -> Screen:
-    """Our scoped send that nothing relayed: the line saying no known repeater carries it."""
+    """Our send with a scope that no node relayed.
+
+    The line says that no known repeater carries the scope.
+    """
     from meshterm.ui.chat import _sent_scope_line
 
     message = ChatMessage(
@@ -1187,7 +1224,7 @@ class _CourierStubChat:
 
 
 class _CourierStubContext:
-    """The minimal AppContext surface :class:`CourierOutboxScreen` actually reads."""
+    """The minimal AppContext surface that :class:`CourierOutboxScreen` reads."""
 
     def __init__(self, config_dir: Path) -> None:
         self.courier_store = CourierStore(config_dir / "courier.json")
@@ -1248,7 +1285,7 @@ def _record_dialog(cols: int, rows: int) -> Screen:
 
 
 def _record_area(cols: int, rows: int) -> Screen:
-    """A record with positioned hops, turned to its Area tab: the drawing at the stage's size."""
+    """A record with positioned hops, on its Area tab: the drawing has the size of the stage."""
     record = _record()
     sglyph, scolor = self_marker()
     hglyph, hcolor = node_marker(NODE_TYPE_REPEATER)
@@ -1273,7 +1310,7 @@ def _record_area(cols: int, rows: int) -> Screen:
 
 
 def _record_route(cols: int, rows: int) -> Screen:
-    """A record turned to its Route tab: the graph, its key, the route line, the trace row."""
+    """A record on its Route tab: the graph, its legend, the route line, and the trace row."""
     screen = _record_dialog(cols, rows)
     screen.handle("tab")
     return screen
@@ -1295,7 +1332,7 @@ def _packet_viewer(cols: int, rows: int) -> Screen:
 
 
 def _packet_viewer_scoped(cols: int, rows: int, region: str = _REGION) -> Screen:
-    """A channel text flooded under a region: the route row names it."""
+    """A channel text that is flooded under a region: the route row names the region."""
     entry = PacketEntry(
         when=utcnow(),
         kind="packet",
@@ -1311,7 +1348,7 @@ def _packet_viewer_scoped(cols: int, rows: int, region: str = _REGION) -> Screen
 
 
 def _packet_viewer_unknown_scope(cols: int, rows: int) -> Screen:
-    """A channel text flooded under a region nobody here has named: its code stands in."""
+    """A channel text flooded under a region that nobody here named: its code is used instead."""
     return _packet_viewer_scoped(cols, rows, region="elsewhere")
 
 
@@ -1320,7 +1357,7 @@ def _trace(cols: int, rows: int) -> Screen:
         return current
 
     async def _trace_call(path_spec, on_trace):  # noqa: ANN001
-        pass  # never invoked — the screen is seeded directly via _on_trace below
+        pass  # never called: the test gives data to the screen directly with _on_trace below
 
     screen = TraceScreen(
         "Alice",
@@ -1384,8 +1421,8 @@ def _tx_sweep(cols: int, rows: int) -> Screen:
     return screen
 
 
-#: A device snapshot shaped like a companion's, for the Device info page. Every field the
-#: config table draws, including the pairing PIN it conceals.
+#: A device snapshot in the shape of a companion, for the Device info page. It has each
+#: field that the config table draws, with the pairing PIN that the table conceals.
 _DEVICE_SNAPSHOT = {
     "name": "Homestead-Hub",
     "adv_lat": 45.5017,
@@ -1421,14 +1458,14 @@ def _device_info(cols: int, rows: int) -> Screen:
 
 
 def _device_info_revealed(cols: int, rows: int) -> Screen:
-    # The same page after ^S: the widest state of the row the other case masks.
+    # The same page after ^S: the widest state of the row that the other case masks.
     screen = _device_info(cols, rows)
     screen.handle("reveal")
     return screen
 
 
 def _config_editor(cols: int, rows: int) -> Screen:
-    """The Device config editor: every setting staged from one grouped list."""
+    """The Device config editor: each setting is staged from one grouped list."""
     return _ConfigMenu(
         _GallerySession(cols, rows),
         lambda reveal: _menu_items(_DEVICE_SNAPSHOT, {"tx_power": 14}, 1, reveal),
@@ -1445,7 +1482,7 @@ def _config_editor_revealed(cols: int, rows: int) -> Screen:
 
 
 def _repeater_admin(cols: int, rows: int) -> Screen:
-    """The repeater admin page at its widest: values read, one staged, Apply drawn."""
+    """The repeater admin page when it is widest: values read, one value staged, and Apply drawn."""
     hub = Contact(name="Hilltop-Repeater", public_key=_HUB_KEY, key_prefix="3d63c6429436")
     now = utcnow()
     cache = {
@@ -1458,7 +1495,10 @@ def _repeater_admin(cols: int, rows: int) -> Screen:
 
 
 def _preferences(cols: int, rows: int) -> Screen:
-    """The Preferences page at its widest: one saved override, one staged, reset row drawn."""
+    """The Preferences page when it is widest.
+
+    It has one saved override, one staged value, and the reset row.
+    """
     prefs = Preferences()
     prefs.set("trace_cooldown_s", 2.5)
     title, items = _preference_items(prefs, {"history_days": 90})
@@ -1470,7 +1510,7 @@ def _preferences(cols: int, rows: int) -> Screen:
 
 
 def _preferences_weekly_advert(cols: int, rows: int) -> Screen:
-    """The Preferences page with the weekly advert on and its longest status line drawn."""
+    """The Preferences page with the weekly advert on, and its longest status line drawn."""
     from meshterm.services.advert_scheduler import QUIET, AdvertStatus
 
     prefs = Preferences()
@@ -1485,20 +1525,23 @@ def _preferences_weekly_advert(cols: int, rows: int) -> Screen:
 
 
 def _cooldown_countdown(cols: int, rows: int) -> Screen:
-    """The transmit-cooldown countdown at its widest: a flood advert's wait and its reason.
+    """The countdown of the transmit cooldown when it is widest.
 
-    A dialog rather than a menu screen, and here for the one thing only this harness does:
-    its box is sized from its own content, so a longer reason line would overflow the
-    PicoCalc's 53 columns with nothing else to catch it.
+    It shows the wait of a flood advert and its reason.
+
+    This is a dialog and not a menu screen. It is here for the one check that only this
+    harness does. The box has the size of its own content, so a longer reason line would go
+    over the 53 columns of the PicoCalc, and nothing else would find it.
     """
     return CountdownDialog("Flood advert", 47.0, reason="a flood advert reaches the whole mesh")
 
 
 def _reconnect_reason(cols: int, rows: int) -> Screen:
-    """The reconnect dialog once a refusal has persisted: the reason wraps under the spinner.
+    """The reconnect dialog after a refusal that continues: the reason wraps under the spinner.
 
-    Sized from its own content like the countdown, with the longest reason a reconnect can
-    meet on a serial port — Linux's, which goes on to name ModemManager.
+    The size comes from its own content, as for the countdown. The reason is the longest
+    that a reconnect can get on a serial port. It is the reason of Linux, which also names
+    ModemManager.
     """
     from meshterm.core.connection import DeviceCommandError
     from meshterm.ui.device_picker import connect_failure_text
@@ -1534,11 +1577,11 @@ def _join_discord(cols: int, rows: int) -> Screen:
 
 
 def _diagnostics(cols: int, rows: int) -> Screen:
-    """The Diagnostics page, carrying the widest values a real one can.
+    """The Diagnostics page, with the widest values that a real page can have.
 
-    A deep Windows config directory and a connection error in the radio's own words are the
-    two fields with no natural bound, and both are here on purpose: a markdown list item
-    hangs its wrapped text under itself at any width, and that is what has to survive 53
+    A deep Windows config directory and a connection error in the own words of the radio
+    are the two fields that have no natural limit. Both are here on purpose. A markdown list
+    item hangs its wrapped text under itself at any width, and this must work in 53
     columns.
     """
     from meshterm.ui.diagnostics import DiagnosticsPage
@@ -1551,7 +1594,7 @@ def _diagnostics(cols: int, rows: int) -> Screen:
 
 
 def _diagnostics_source() -> str:
-    """A representative diagnostics document, built the way the tool builds one."""
+    """A typical diagnostics document, built in the way that the tool builds one."""
     from datetime import datetime
 
     from meshterm.tools.diagnostics import markdown_source
@@ -1615,7 +1658,7 @@ def _diagnostics_source() -> str:
 
 
 def _quit_hold(cols: int, rows: int) -> Screen:
-    """The box a held Esc raises, its bar half full: a second from the quit."""
+    """The box that a held Esc key opens, with its bar half full: one second before the quit."""
     from meshterm.services.hold_to_quit import DIALOG_S, QUIT_S
     from meshterm.ui.tui.holdquit import HoldQuitDialog
 
@@ -1623,7 +1666,7 @@ def _quit_hold(cols: int, rows: int) -> Screen:
 
 
 def _share_qr(cols: int, rows: int) -> Screen:
-    """The share screen: a contact card's code and link on a bare frame (the widest QR)."""
+    """The share screen: the code and the link of a contact card on a bare frame (the widest QR)."""
     from meshterm.ui.qr import QrScreen
 
     url = "meshcore://contact/add?name=Lakeside&public_key=" + "ab" * 32 + "&type=2"
@@ -1631,7 +1674,10 @@ def _share_qr(cols: int, rows: int) -> Screen:
 
 
 def _links_qr(cols: int, rows: int) -> Screen:
-    """A chat message's two links on the share screen: one code, ←→ flanking its URL."""
+    """The two links of a chat message on the share screen.
+
+    The screen shows one code, with ←→ on each side of its URL.
+    """
     from meshterm.ui.qr import QrScreen
 
     return QrScreen(
@@ -1707,13 +1753,15 @@ _ENTRIES: list[_Entry] = [
     _Entry("diagnostics", _diagnostics),
 ]
 
-#: (platform, cols, rows) combos every entry above renders under. PicoCalc gets both its
-#: live floor (53x26, the on-device measurement — see the plan's P0 appendix) and the lux
-#: case (53x40, today's boot fbcon font / a future 6x8 font). Regular is unchanged by this
-#: seam's arrival, so it stays the existing 72x24 standard. The Cardputer Zero renders at its
-#: one size, 53x14: the same width gate as the PicoCalc, so every case is a hard gate there
-#: too. Rows are not gated — a body scrolls — so which screens are *cramped* at 14 rows is a
-#: judged worklist, not an xfail list (see the port's logbook).
+#: The combinations of (platform, cols, rows) under which each entry above renders. The
+#: PicoCalc has its live floor (53x26, the measurement on the handheld: refer to the P0
+#: appendix of the plan) and the lux case (53x40, the boot fbcon font of today or a future
+#: 6x8 font). The arrival of this seam did not change Regular, so it stays the existing
+#: standard of 72x24. The Cardputer Zero renders at its one size, 53x14. It has the same
+#: width gate as the PicoCalc, so each case is also a hard gate there. The test does not
+#: gate rows, because a body scrolls. Thus the screens that are cramped at 14 rows are a
+#: worklist that a person judges. They are not a list of xfail cases (refer to the logbook
+#: of the port).
 _COMBOS: list[tuple[Platform, int, int]] = [
     (REGULAR, REGULAR.readable_cols, REGULAR.readable_rows),
     (PICOCALC_LYRA, PICOCALC_LYRA.readable_cols, PICOCALC_LYRA.readable_rows),
@@ -1721,24 +1769,24 @@ _COMBOS: list[tuple[Platform, int, int]] = [
     (CARDPUTER_ZERO, CARDPUTER_ZERO.readable_cols, CARDPUTER_ZERO.readable_rows),
 ]
 
-#: Entries that overflow PICOCALC_LYRA's 53 columns today (a width overflow doesn't depend on
-#: row count, so one entry here covers both picocalc-lyra combos). P6 emptied it — the whole
-#: P1 worklist graduated once the F-key lane replaced the per-screen hint strings and the
-#: path composer's wrapped empty-state note stopped smuggling a newline into one row —
-#: so every picocalc-lyra case is now a hard gate. A new screen that can't fit 53 goes here
-#: only with a ticket, never to stay.
+#: Entries that are wider than the 53 columns of PICOCALC_LYRA today. (A width overflow does
+#: not depend on the row count, so one entry here covers both picocalc-lyra combinations.)
+#: P6 emptied this set. The whole P1 worklist left it when the F-key lane replaced the hint
+#: strings of each screen, and when the wrapped empty-state note of the path composer no
+#: longer put a newline into one row. Thus each picocalc-lyra case is now a hard gate. A
+#: new screen that cannot fit 53 columns goes here only with a ticket, and it must not stay.
 _KNOWN_WIDE: set[str] = set()
 
-#: Entries whose footer_hint already overflowed the *existing* 72-column standard before
-#: this platform seam existed. Not this phase's to fix: CLAUDE.md's 72-col rule predates
-#: the seam, and per standing guidance old chrome that already broke it is left for a
-#: dedicated pass rather than retrofitted as a drive-by here. Empty since the F-lane pass
-#: of 2026-08-08 rebuilt the map's hint around its new view-jump keys and brought it back
-#: inside the budget on the way through.
+#: Entries whose footer_hint was already wider than the 72-column standard that existed
+#: before this platform seam. This phase does not correct them. The rule of 72 columns in
+#: CLAUDE.md is older than the seam. The standing guidance is that old chrome that already
+#: broke the rule waits for a special pass, and is not changed here as a side task. The set
+#: has been empty since the F-lane pass of 2026-08-08. That pass built the hint of the map
+#: again around its new view-jump keys, and the hint came back inside the budget.
 _PREEXISTING_REGULAR_OVERFLOW: set[str] = set()
 
 
-#: The specimens by name, for a test that wants one entry rather than the whole sweep.
+#: The specimens by name, for a test that needs one entry and not the whole sweep.
 _ENTRY_BY_NAME = {entry.name: entry for entry in _ENTRIES}
 
 
@@ -1773,7 +1821,7 @@ def _cases():
 
 
 def _assert_fits(lines: list[str], cols: int, where: str) -> None:
-    """Assert every line of already-rendered output is within ``cols`` display cells."""
+    """Assert that each line of the rendered output is at most ``cols`` cells wide."""
     for i, line in enumerate(lines):
         width = cell_len(_plain(line))
         assert width <= cols, f"{where} line {i} is {width} cells, over {cols} allowed: {line!r}"
@@ -1786,17 +1834,17 @@ def test_gallery_screen_fits_its_platform(
     cols: int,
     rows: int,
 ) -> None:
-    """Every gallery specimen renders within its platform's width, raw and framed alike."""
+    """Each gallery specimen renders within the width of its platform, raw and with the frame."""
     set_platform(platform)
     screen = entry.factory(cols, rows)
-    screen.note_viewport(max(1, rows - 4))  # mirrors compose_base's own viewport math
+    screen.note_viewport(max(1, rows - 4))  # the same viewport math as compose_base
 
     _assert_fits(screen.render_body(cols), cols, "render_body")
-    # Assert the footer that is actually drawn on this platform. Regular draws each
-    # screen's footer_hint string (which may carry Rich markup — map's
-    # "[warn]offline[/warn]" — so parse before measuring). PicoCalc never draws the
-    # hint strings at all: the fixed F-key lane replaces them (Platform.footer_fkeys),
-    # so what must fit there is the screen's lane.
+    # Assert the footer that the platform draws. Regular draws the footer_hint string of each
+    # screen. It can have Rich markup (the "[warn]offline[/warn]" of the map), so the test
+    # parses it before it measures. The PicoCalc never draws the hint strings. The fixed
+    # F-key lane replaces them (Platform.footer_fkeys), so the lane of the screen must fit
+    # there.
     if platform.footer_fkeys:
         deck = fkeys.DECKS[platform.lane_deck]
         lane = deck.lane_text(screen.fkey_lane)
@@ -1814,24 +1862,21 @@ def test_gallery_screen_fits_its_platform(
     composed = frame.compose_base(Text(""), screen, screen.footer_hint, cols, rows)
     _assert_fits(composed.split("\n"), cols, "compose_base")
 
-    # No screen carries an exit row. Esc leaves — it is on both platforms' keyboards and
-    # every footer_hint says so — and a row repeating it cost two lines of every screen,
-    # which on the PicoCalc's 26 is a row in thirteen. The one surviving "Back" is the
-    # staged-changes discard half ("✗ Back — discard …"), which is a choice rather than an
-    # exit and never reads as a bare word.
+    # No screen has an exit row. Esc leaves. It is on the keyboards of both platforms, and
+    # each footer_hint says so. A row that repeated it used two lines of each screen. On the
+    # 26 rows of the PicoCalc, this is one row in thirteen. The one "Back" that stays is the
+    # half for the discard of staged changes ("✗ Back — discard …"). It is a choice, not an
+    # exit, and it is never the bare word.
     for line in _plain(screen.render_body(cols)).splitlines():
         assert line.strip() != "Back", f"{entry.name}: an exit row came back: {line!r}"
 
-    # P3 assertions, on the *rendered ANSI* (the theme/fold contracts, not the config):
-    # picocalc-lyra output may carry no truecolor or 256-colour SGR (the console has 16 slots,
-    # addressed as plain 30-37/90-97/40-47 codes), and no character outside the 512-glyph
-    # console font. Together these are the parity gate that catches a stray emoji or hex
-    # colour the moment a screen grows one, instead of as tofu found on-device.
-    # A handheld may emit nothing outside its own font (Platform.font): the PicoCalc's
-    # 512-glyph console font, or what the Cardputer's emulator draws. And a console
-    # with 16 slots (the PicoCalc's) may carry no truecolor or 256-colour SGR either.
-    # Together these are the parity gate that catches a stray emoji or hex colour the
-    # moment a screen grows one, instead of as tofu found on-device.
+    # P3 assertions, on the rendered ANSI (the contracts of the theme and the fold, not the
+    # config). A handheld must not emit anything that is not in its own font
+    # (Platform.font): the 512-glyph console font of the PicoCalc, or what the emulator of
+    # the Cardputer draws. A console with 16 slots (the PicoCalc) must also not have truecolor
+    # or 256-colour SGR. Together these are the parity gate. It finds a stray emoji or hex
+    # colour when a screen gets one. Without it, the first sign is a tofu box that someone
+    # finds on the handheld.
     if platform.font:
         font = FONTS[platform.font]
         for where, ansi_lines in (
@@ -1853,8 +1898,8 @@ def test_gallery_screen_fits_its_platform(
                 )
 
 
-#: The map specimens and the credit each should be carrying — the whole OpenFreeMap line
-#: on the map nobody has touched, the remnant on the two that have been used.
+#: The map specimens and the credit that each must have. The map that nobody touched has
+#: the whole OpenFreeMap line. The two maps that were used have the short form.
 _CREDITED: list[tuple[str, bool]] = [
     ("map", True),
     ("map_panned", False),
@@ -1871,13 +1916,14 @@ def test_gallery_map_shows_the_basemap_credit_where_its_frame_puts_it(
     cols: int,
     rows: int,
 ) -> None:
-    """Every map specimen credits OpenStreetMap, on the surface its own frame affords.
+    """Each map specimen credits OpenStreetMap, on the surface that its own frame has.
 
-    The width gate above would be perfectly happy with a map that had quietly stopped
-    crediting anyone, so the specimens assert the mark itself as well: on a bordered frame
-    it is set into the bottom border rule, right-justified with one rule cell before the
-    corner, and the drawing is left alone; on the borderless one, which has no rule, it is
-    stamped on the drawing's own last row. See :mod:`meshterm.ui.attribution`.
+    The width gate above does not fail for a map that stopped to credit anyone with no
+    warning. Thus the specimens also assert the mark itself. On a frame with a border, the
+    credit is in the bottom border rule, right-justified, with one rule cell before the
+    corner, and the drawing does not change. On the borderless frame, which has no rule, the
+    code stamps the credit on the last row of the drawing. Refer to
+    :mod:`meshterm.ui.attribution`.
     """
     set_platform(platform)
     screen = _ENTRY_BY_NAME[name].factory(cols, rows)
@@ -1889,8 +1935,9 @@ def test_gallery_map_shows_the_basemap_credit_where_its_frame_puts_it(
 
     if platform.frame_border:
         assert "OpenStreetMap" not in body, "the credit reached the drawing on a bordered frame"
-        # Rounded corners, or square where Rich judges the console legacy Windows (a
-        # captured pytest run there) — either is the frame's own bottom rule.
+        # The corners are rounded, or square where Rich decides that the console is legacy
+        # Windows (a pytest run with captured output there). Both are the own bottom rule of
+        # the frame.
         rule = next(ln for ln in reversed(lines) if "╰" in ln or "└" in ln)
         assert rule[-1] in "╯┘" and rule[:-1].endswith(f" {expected} ─"), rule
     else:

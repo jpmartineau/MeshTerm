@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the seam between a tool's answer and its rendering.
 
-:mod:`meshterm.ui.report` is where a tool states what it found, :mod:`meshterm.ui.fields`
-is where the shapes it states it in are defined once, and :mod:`meshterm.ui.renderers` is
-where that becomes bytes. The claim the whole design rests on is that **one typed row
-projects two ways** — so almost every test here builds one report and asserts both faces
-of it, because a rule that holds in only one of them is exactly the drift this replaced.
+In :mod:`meshterm.ui.report`, a tool states what it found. :mod:`meshterm.ui.fields`
+defines the shapes of that statement, one time for each shape. :mod:`meshterm.ui.renderers`
+changes the statement to bytes. The design depends on this claim: **one typed row has two
+projections**. Thus almost each test here builds one report and checks both faces of it.
+A rule that is true for only one face is the drift that this design replaced.
 """
 
 from __future__ import annotations
@@ -23,15 +23,15 @@ from meshterm.ui.report import BARE, SILENT, Column, Facts, Lane, Listing
 _WHEN = datetime(2026, 9, 7, 22, 22, 41, tzinfo=timezone.utc)
 
 
-def _plain(*blocks) -> str:  # noqa: ANN002 - blocks vary per test
-    """Render a report through the plain face and return what came out."""
+def _plain(*blocks) -> str:  # noqa: ANN002 - the blocks differ in each test
+    """Render a report through the plain face and return the output."""
     buffer = io.StringIO()
     PlainRenderer(script.console(buffer)).render(blocks)
     buffer.flush()
     return buffer.getvalue()
 
 
-def _json(*blocks):  # noqa: ANN002, ANN202 - blocks vary per test
+def _json(*blocks):  # noqa: ANN002, ANN202 - the blocks differ in each test
     """Render a report through the machine face and return the parsed document."""
     buffer = io.StringIO()
     JsonRenderer(script.console(buffer)).render(blocks)
@@ -40,8 +40,8 @@ def _json(*blocks):  # noqa: ANN002, ANN202 - blocks vary per test
     return json.loads(lines[0])
 
 
-def _contacts(rows) -> Listing:  # noqa: ANN001 - rows vary per test
-    """A listing in the shape ``contacts`` uses: a node, an age and a count."""
+def _contacts(rows) -> Listing:  # noqa: ANN001 - the rows differ in each test
+    """A listing in the shape that ``contacts`` uses: a node, an age, and a count."""
     return Listing(
         key="contacts",
         columns=(
@@ -68,12 +68,12 @@ _ALICE = {
 
 
 def test_one_typed_row_reaches_both_faces_without_either_parsing_the_other() -> None:
-    """The claim the seam exists for: a row holds the value, not somebody's rendering.
+    """The seam exists for this claim: a row holds the value and not a rendering of it.
 
-    The plain face writes ``+5.1`` because a column of readings only compares by eye once
-    every one declares its sign; the document writes ``5.1`` because a number carries its
-    own. Neither could be derived from the other without a parser, which is what the two
-    hand-written ``if ctx.json_output:`` branches were.
+    The plain face writes ``+5.1``. A user compares a column of readings by eye only when
+    each reading shows its sign. The document writes ``5.1``, because a number has its own
+    sign. A function cannot find one output from the other without a parser. The two
+    hand-written ``if ctx.json_output:`` branches were such parsers.
     """
     block = Listing(key="hops", columns=(fields.snr("snr_db", "SNR_DB"),), rows=[{"snr_db": 5.14}])
     assert _plain(block).splitlines()[1].strip() == "+5.1"
@@ -81,11 +81,11 @@ def test_one_typed_row_reaches_both_faces_without_either_parsing_the_other() -> 
 
 
 def test_a_node_is_one_object_however_many_columns_it_is_worth() -> None:
-    """One machine key, four plain lanes — the thing :func:`fields.node` earns.
+    """One machine key and four plain lanes: this is the purpose of :func:`fields.node`.
 
-    Every listing that mentions a node asks for the same column, so ``jq '.[].node.key'``
-    reads the same on contacts, courier and monitor and a consumer's node handler is
-    written once. What differs is only how much room the surface has for it.
+    Each listing that mentions a node asks for the same column. Thus ``jq '.[].node.key'``
+    reads the same on contacts, courier, and monitor, and a consumer writes its node handler
+    one time. Only the room that the surface has for the node is different.
     """
     header, record = _plain(_contacts([_ALICE])).splitlines()
     assert header.split() == ["NAME", "TYPE", "HEARD", "PKTS", "HASH", "KEY"]
@@ -101,11 +101,11 @@ def test_a_node_is_one_object_however_many_columns_it_is_worth() -> None:
 
 
 def test_a_listing_may_draw_its_lanes_in_an_order_the_document_does_not_use() -> None:
-    """``contacts`` puts HEARD and PKTS between a node's TYPE and its HASH.
+    """``contacts`` puts HEARD and PKTS between the TYPE and the HASH of a node.
 
-    The lane order is a reading decision — the fields a person scans first go left — and
-    the key order is the document's. Tying them together would have meant choosing which
-    face to make worse.
+    The order of the lanes is a decision for reading: the fields that a user scans first go
+    on the left. The order of the keys belongs to the document. If the two orders were tied
+    together, we would have to make one face worse.
     """
     header = _plain(_contacts([_ALICE])).splitlines()[0].split()
     assert header.index("HEARD") < header.index("HASH")
@@ -113,10 +113,10 @@ def test_a_listing_may_draw_its_lanes_in_an_order_the_document_does_not_use() ->
 
 
 def test_a_listing_refuses_an_order_that_does_not_name_its_own_lanes() -> None:
-    """A typo here draws a listing with a column missing and no complaint.
+    """A typo here draws a listing with a missing column and gives no error.
 
-    That is the one failure a header line cannot show — the records still line up, under
-    the wrong headings — so it is caught where it is written instead.
+    A header line cannot show this failure, because the records still align, under the wrong
+    headings. Thus the listing catches the typo where the code writes it.
     """
     with pytest.raises(ValueError, match="every lane"):
         Listing(
@@ -130,10 +130,10 @@ def test_a_listing_refuses_an_order_that_does_not_name_its_own_lanes() -> None:
 
 
 def test_the_two_faces_spell_absence_in_their_own_alphabets() -> None:
-    """``-`` is learned once by a reader; ``null`` is what a parser already has.
+    """A user learns ``-`` one time. A parser already has ``null``.
 
-    Same fact, and neither face has to know the other's token — which is what stopped the
-    plain ``-`` from ever reaching a document as a string.
+    The fact is the same, and neither face must know the token of the other face. For this
+    reason the plain ``-`` never reaches a document as a string.
     """
     empty = {"node": None, "heard_at": None, "packets": None}
     record = _plain(_contacts([empty])).splitlines()[1]
@@ -142,10 +142,10 @@ def test_the_two_faces_spell_absence_in_their_own_alphabets() -> None:
 
 
 def test_a_word_standing_in_for_an_absence_stays_a_word_only_on_the_plain_face() -> None:
-    """``unknown`` is a word a reader acts on; a consumer already has ``null`` for it.
+    """``unknown`` is a word that a user acts on. A consumer already has ``null`` for it.
 
-    Carrying both would give a program two spellings for one fact and a special case to
-    remember on every field.
+    If the document had both, a program would have two spellings for one fact, and a special
+    case to remember for each field.
     """
     row = {"node": fields.NodeRef(hash="a1")}
     block = Listing(key="n", columns=(fields.node("node", lanes=(("type", "TYPE"),)),), rows=[row])
@@ -154,23 +154,23 @@ def test_a_word_standing_in_for_an_absence_stays_a_word_only_on_the_plain_face()
 
 
 def test_a_never_heard_node_is_a_fact_and_an_undated_row_is_an_absence() -> None:
-    """Two different things, and the age lane says which without a second column.
+    """These are two different things, and the age lane shows which one, with no second column.
 
-    A node that has never been heard *has* a heard-age; a row with no such time at all
-    does not. Flattening both onto ``-`` would have made "we have not heard from it" and
-    "this kind of row has no heard time" the same reading.
+    A node that was never heard has a heard-age. A row that has no such time does not. If
+    both used ``-``, "we have not heard from it" and "this kind of row has no heard time"
+    would be the same reading.
     """
     assert script.age(None, absent="never") == "never"
     assert script.age(None) == script.NONE
 
 
 def test_info_leaves_out_a_reading_the_radio_does_not_answer_for_and_json_keeps_the_key() -> None:
-    """The one deliberate disagreement between the faces, and why it is deliberate.
+    """The only deliberate disagreement between the faces, and the reason for it.
 
-    A missing plain key says "this radio does not report it", where a dash would claim it
-    reported nothing — a distinction a person can act on. A consumer cannot, and a
-    variable key set costs it a membership test on every field, so the document keeps the
-    key and writes ``null``.
+    A missing plain key says "this radio does not report it". A dash would say that the
+    radio reported nothing. A user can act on this difference. A consumer cannot. Also, a
+    set of keys that changes costs the consumer a membership test for each field. Thus the
+    document keeps the key and writes ``null``.
     """
     block = Facts(
         key="info",
@@ -186,11 +186,11 @@ def test_info_leaves_out_a_reading_the_radio_does_not_answer_for_and_json_keeps_
 
 
 def test_a_get_prints_its_value_alone_and_still_documents_the_key() -> None:
-    """The caller named the key, so repeating it back is one more thing to strip off.
+    """The caller named the key, so a repeat of the key is one more thing to remove.
 
-    ``$(meshterm config get name)`` needs no stripping — an argument entirely about shell
-    substitution, which a JSON consumer is not doing, so the document keeps the key, the
-    type and the label the bare form threw away.
+    ``$(meshterm config get name)`` needs no removal. This argument is only about shell
+    substitution. A JSON consumer does not do shell substitution. Thus the document keeps
+    the key, the type, and the label that the bare form removed.
     """
     block = Facts(
         key="setting",
@@ -208,11 +208,11 @@ def test_a_get_prints_its_value_alone_and_still_documents_the_key() -> None:
 
 
 def test_a_bare_answer_with_nothing_in_it_prints_nothing_at_all() -> None:
-    """A node that never answered, a slot with nothing in it — and no lone dash.
+    """A node that never answered, a slot with nothing in it, and no single dash.
 
-    The bare form prints *the value*, so where there is none the exit status is the whole
-    report and stdout stays empty. The document still carries the shape, with ``null``
-    where the answer would have been, because a consumer branching on it needs the key.
+    The bare form prints the value. If there is no value, the exit status is the whole
+    report, and stdout stays empty. The document still has the shape, with ``null`` where
+    the answer would be, because a consumer that branches on the key needs it.
     """
     block = Facts(
         key="remote",
@@ -226,11 +226,11 @@ def test_a_bare_answer_with_nothing_in_it_prints_nothing_at_all() -> None:
 
 
 def test_an_acknowledgement_prints_nothing_and_is_still_a_document() -> None:
-    """Printing nothing is an answer a person can act on and a program cannot.
+    """A user can act on an answer that prints nothing. A program cannot.
 
-    ``config advert`` says everything it has to say in its exit status, and that is the
-    right plain answer. A caller that needs to log *what was sent* has nowhere to read it,
-    which is what the document is for.
+    ``config advert`` says everything in its exit status, and that is the correct plain
+    answer. A caller that must log what was sent has no place to read it. The document is
+    for this case.
     """
     block = Facts(
         key="advert",
@@ -246,20 +246,20 @@ def test_an_acknowledgement_prints_nothing_and_is_still_a_document() -> None:
 
 
 def test_a_single_block_report_is_its_block_and_nothing_around_it() -> None:
-    """``meshterm contacts --json | jq '.[].node.name'`` reads what it looks like.
+    """``meshterm contacts --json | jq '.[].node.name'`` reads as it looks.
 
-    There is no envelope: the report a caller needs is ``$?``, exactly as it is without
-    the flag, so nothing has to be reached through to get at the answer.
+    There is no envelope. The report that a caller needs is ``$?``, the same as without the
+    flag. Thus a caller does not look inside anything to get the answer.
     """
     assert isinstance(_json(_contacts([_ALICE])), list)
 
 
 def test_several_blocks_make_one_object_with_the_facts_at_its_top_level() -> None:
-    """A trace is a set of facts *and* a per-hop table, and the document says so.
+    """A trace is a set of facts and a table for each hop, and the document shows both.
 
-    The facts block is the set of facts about the one thing the command answered, so it is
-    the document rather than a compartment inside it; a listing needs a name and takes its
-    own key.
+    The facts block is the set of facts about the one thing that the command answered. Thus
+    it is the document, and not a part inside the document. A listing needs a name, and it
+    takes its own key.
     """
     facts = Facts(
         key="trace", fields=(fields.flag("success", "success"),), values={"success": True}
@@ -270,11 +270,11 @@ def test_several_blocks_make_one_object_with_the_facts_at_its_top_level() -> Non
 
 
 def test_a_block_drawn_only_for_a_person_never_reaches_the_document() -> None:
-    """``monitor``'s closing per-node summary is derivable from the records above it.
+    """The closing summary of ``monitor`` for each node comes from the records above it.
 
-    Emitting it as a second *shape* of line mid-stream would cost every reader a
-    discriminator it otherwise never needs, so the plain face keeps the aggregate and the
-    stream stays homogeneous.
+    If the stream printed the summary as a second shape of line in the middle of the stream,
+    each consumer would need a discriminator that it does not need otherwise. Thus the plain
+    face keeps the summary, and the stream stays uniform.
     """
     facts = Facts(
         key="window", fields=(fields.integer("packets", "packets"),), values={"packets": 2}
@@ -290,11 +290,11 @@ def test_a_block_drawn_only_for_a_person_never_reaches_the_document() -> None:
 
 
 def test_a_block_that_prints_nothing_leaves_no_blank_line_where_it_stood() -> None:
-    """The separator is counted off what was drawn, not off the block index.
+    """The separator depends on what the renderer drew, not on the index of the block.
 
-    ``config restore --dry-run`` states its outcome silently and its plan as a listing, and
-    counting positions instead opened the command with an empty line — output it did not
-    have, in whatever was reading it.
+    ``config restore --dry-run`` states its outcome silently and its plan as a listing. A
+    count of positions made the command start with an empty line. That line was output that
+    the command did not have, for the program that read it.
     """
     silent = Facts(
         key="restore", fields=(fields.flag("dry_run", "dry_run"),), values={}, shape=SILENT
@@ -313,9 +313,9 @@ def test_a_block_that_prints_nothing_leaves_no_blank_line_where_it_stood() -> No
 def test_a_document_is_one_compact_line_that_never_escapes_a_name() -> None:
     r"""A node name in Cyrillic is a node name, not a run of ``\\uXXXX``.
 
-    One line, so a stream and a one-shot answer are read the same way and ``jq .`` can
-    re-indent for a person at no cost. Nothing can un-stream a document that was
-    pretty-printed across four hundred lines.
+    The document is one line. Thus a program reads a stream and a one-shot answer in the
+    same way, and ``jq .`` can indent the document for a user with no cost. Nothing can
+    change a document that was pretty-printed across four hundred lines back to a stream.
     """
     buffer = io.StringIO()
     row = {"node": fields.NodeRef(name="Наблюдатель", hash="c3")}
@@ -328,11 +328,10 @@ def test_a_document_is_one_compact_line_that_never_escapes_a_name() -> None:
 
 
 def test_every_time_in_a_document_is_utc_to_the_second() -> None:
-    """Twenty characters, always, so string comparison is time comparison.
+    """Twenty characters, always, so a string comparison is a time comparison.
 
-    A local offset is a fact about the machine that ran the command rather than about the
-    event, and two hosts asking the same radio the same question must produce the same
-    document.
+    A local offset is a fact about the machine that ran the command, not about the event.
+    Two hosts that ask the same radio the same question must make the same document.
     """
     stamped = _json(_contacts([_ALICE]))[0]["heard_at"]
     assert stamped == "2026-09-07T22:22:41Z"
@@ -340,18 +339,18 @@ def test_every_time_in_a_document_is_utc_to_the_second() -> None:
 
 
 def test_a_time_whose_offset_we_do_not_know_is_absent_on_both_faces() -> None:
-    """A naive datetime is not a fact, and neither face may invent an offset for it."""
+    """A naive datetime is not a fact, and neither face can make up an offset for it."""
     naive = {"node": None, "heard_at": datetime(2026, 9, 7, 22, 22, 41), "packets": None}
     assert "2026" not in _plain(_contacts([naive]))
     assert _json(_contacts([naive]))[0]["heard_at"] is None
 
 
 def test_a_concept_may_have_a_face_on_only_one_side() -> None:
-    """Both directions, and each has a real call site.
+    """This is true in both directions, and each direction has a real call site.
 
-    A preference's DESCRIPTION is prose for whoever is choosing a value and carries
-    nothing a program would branch on; a setting's declared type is the reverse — a fact
-    the document wants and a reader dumping ``config show`` does not.
+    The DESCRIPTION of a preference is prose for the person who chooses a value. It has
+    nothing that a program can branch on. The declared type of a setting is the opposite.
+    The document needs this fact, but a user who prints ``config show`` does not.
     """
     block = Listing(
         key="prefs",
@@ -370,7 +369,7 @@ def test_a_concept_may_have_a_face_on_only_one_side() -> None:
 
 
 def _stream_listing() -> Listing:
-    """A live listing in the shape ``monitor`` uses: pinned lanes, the name last."""
+    """A live listing in the shape that ``monitor`` uses: pinned lanes, with the name last."""
     return Listing(
         key="observations",
         columns=(
@@ -382,10 +381,10 @@ def _stream_listing() -> Listing:
 
 
 def test_a_stream_pins_its_lanes_because_the_widths_arrive_with_the_data() -> None:
-    """A live capture has no "once every record is in", which is when columns are sized.
+    """A live capture has no moment when "each record is in", and that is when columns get a size.
 
-    Both streams used to be gutter-joined with no alignment at all, which is why a name in
-    one still carried its quotes — nothing else said where the field ended.
+    Both streams were once joined with a gutter and had no alignment. Thus a name in one of
+    them still had its quotes, because nothing else showed where the field ended.
     """
     buffer = io.StringIO()
     listing = _stream_listing()
@@ -398,7 +397,7 @@ def test_a_stream_pins_its_lanes_because_the_widths_arrive_with_the_data() -> No
 
 
 def test_a_streamed_document_is_one_record_per_line_all_the_same_shape() -> None:
-    """A consumer reads line by line and never has to ask which kind of record it holds."""
+    """A consumer reads line by line and never asks which type of record it has."""
     buffer = io.StringIO()
     listing = _stream_listing()
     with JsonRenderer(script.console(buffer)).stream(listing) as row:
@@ -413,14 +412,14 @@ def test_a_streamed_document_is_one_record_per_line_all_the_same_shape() -> None
 
 
 def test_the_format_picks_the_renderer_and_nothing_else_does() -> None:
-    """One choice, made once, at the one place that knows what the caller asked for."""
+    """One choice, made one time, in the one place that knows what the caller asked for."""
     console = script.console(io.StringIO())
     assert isinstance(for_format(OutputFormat.PLAIN, console), PlainRenderer)
     assert isinstance(for_format(OutputFormat.JSON, console), JsonRenderer)
 
 
 def test_a_tool_with_no_scripted_face_renders_nothing_at_all() -> None:
-    """The map and the dashboard state no report, and both renderers must be fine with it."""
+    """The map and the dashboard state no report, and both renderers must accept this."""
     assert _plain() == ""
     buffer = io.StringIO()
     JsonRenderer(script.console(buffer)).render(None)
@@ -428,10 +427,10 @@ def test_a_tool_with_no_scripted_face_renders_nothing_at_all() -> None:
 
 
 def test_a_lane_and_a_column_are_separable_so_a_third_format_needs_neither() -> None:
-    """The point of the split, stated as a test: a format is a function of the typed row.
+    """The purpose of the split, as a test: a format is a function of the typed row.
 
-    A renderer that wanted CSV would read the same columns and the same rows and write its
-    own cells. Nothing about the report knows a gutter, a comma or a brace.
+    A renderer for CSV would read the same columns and rows, and write its own cells. The
+    report knows nothing about a gutter, a comma, or a brace.
     """
     column = Column(key="n", lanes=(Lane(header="N", render=lambda v: f"<{v}>"),))
     assert column.lanes[0].render(3) == "<3>"

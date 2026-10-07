@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Terminal-font detection tests: the recommended list, the ladder, the verdict.
+"""Tests for the detection of the terminal font: the recommended list, the ladder, the verdict.
 
-Every verdict runs against injected environments, temp settings files and injected
-probes, so the suite decides the same answers on any box. Two tests deliberately do
-touch the real machine — the installed-font scan and the console buffer probe — and both
-assert only that asking is safe, never what this particular box replies.
+Each verdict runs against injected environments, temporary settings files, and injected
+probes. Thus the suite gives the same answers on any machine. Two tests use the real
+machine on purpose: the scan of the installed fonts and the probe of the console buffer.
+Both tests assert only that the question is safe. They never assert what this machine
+answers.
 """
 
 from __future__ import annotations
@@ -42,37 +43,37 @@ from meshterm.ui.termfont import (
 
 
 def test_primary_family_takes_the_first_of_a_css_list() -> None:
-    """VS Code stores comma lists with optional quotes; the head family is judged."""
+    """VS Code stores comma lists with optional quotes, and MeshTerm judges the first family."""
     assert primary_family("'Hack Nerd Font Mono', monospace") == "Hack Nerd Font Mono"
     assert primary_family('"Fira Code", Consolas') == "Fira Code"
     assert primary_family("Cascadia Mono") == "Cascadia Mono"
 
 
 def test_normalize_face_folds_case_quotes_and_spacing() -> None:
-    """Matching is done on a lower-cased, single-spaced, unquoted form."""
+    """The match uses a form in lower case, with single spaces and no quotes."""
     assert normalize_face("  'Hack  Nerd Font' ") == "hack nerd font"
     assert normalize_face('"MesloLGS NF"') == "meslolgs nf"
 
 
 def test_match_recommended_knows_the_nerd_font_spellings() -> None:
-    """The long name and the v3 short suffix both land on the same full entry."""
+    """The long name and the short suffix of version 3 match the same full entry."""
     assert match_recommended("Hack Nerd Font Mono").name == "Hack Nerd Font"
     assert match_recommended("Hack NFM").name == "Hack Nerd Font"
-    assert match_recommended("MesloLGS NF").coverage == FULL  # powerlevel10k's install
+    assert match_recommended("MesloLGS NF").coverage == FULL  # the font of powerlevel10k
 
 
 def test_match_recommended_orders_full_patches_before_core_families() -> None:
-    """A full patched family is matched ahead of the core family it is built on.
+    """A full patched family matches before the core family that it comes from.
 
-    ``JetBrainsMono Nerd Font`` must hit its full entry, never the plain ``JetBrains
-    Mono`` core prefix — first match wins, so the full entries lead.
+    ``JetBrainsMono Nerd Font`` must match its full entry, and never the plain
+    ``JetBrains Mono`` core prefix. The first match wins, so the full entries are first.
     """
     assert match_recommended("JetBrainsMono Nerd Font Mono").coverage == FULL
     assert match_recommended("JetBrains Mono").coverage == CORE
 
 
 def test_match_recommended_core_natives_and_strangers() -> None:
-    """Stock coder fonts with native triangles read core; anything else, nothing."""
+    """Stock coder fonts with native triangles give core. All other fonts give no match."""
     assert match_recommended("Fira Code").coverage == CORE
     assert match_recommended("Source Code Variable").coverage == CORE
     assert match_recommended("Consolas") is None
@@ -80,7 +81,7 @@ def test_match_recommended_core_natives_and_strangers() -> None:
 
 
 def test_match_recommended_generic_nerd_rule_catches_unlisted_patches() -> None:
-    """Any family carrying the Nerd Font branding has the full block patched in."""
+    """Each family that has the Nerd Font branding has the full block patched in."""
     assert match_recommended("Comic Shanns Mono Nerd Font") is NERD_FONT_GENERIC
     assert match_recommended("Terminess NF") is NERD_FONT_GENERIC
 
@@ -89,7 +90,7 @@ def test_match_recommended_generic_nerd_rule_catches_unlisted_patches() -> None:
 
 
 def test_read_jsonc_survives_comments_and_trailing_commas(tmp_path: Path) -> None:
-    """Both WT and VS Code write JSON-with-comments; the reader shrugs it off."""
+    """WT and VS Code both write JSON with comments, and the function accepts it."""
     path = tmp_path / "settings.json"
     path.write_text(
         "{\n"
@@ -112,7 +113,7 @@ def test_read_jsonc_survives_comments_and_trailing_commas(tmp_path: Path) -> Non
 
 
 def _wt_env(tmp_path: Path, settings: dict, guid: str = "{abc-123}") -> dict:
-    """A fake Windows Terminal environment around a written settings file."""
+    """A fake Windows Terminal environment with a settings file that the function writes."""
     folder = tmp_path / "Microsoft" / "Windows Terminal"
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
@@ -120,7 +121,7 @@ def _wt_env(tmp_path: Path, settings: dict, guid: str = "{abc-123}") -> dict:
 
 
 def test_windows_terminal_face_resolves_profile_then_defaults(tmp_path: Path) -> None:
-    """The session profile's ``font.face`` wins; ``profiles.defaults`` backs it up."""
+    """The ``font.face`` of the session profile wins, and ``profiles.defaults`` is the fallback."""
     env = _wt_env(
         tmp_path,
         {
@@ -130,7 +131,7 @@ def test_windows_terminal_face_resolves_profile_then_defaults(tmp_path: Path) ->
             },
         },
     )
-    assert _windows_terminal_face(env) == "Hack Nerd Font Mono"  # guid case-folded
+    assert _windows_terminal_face(env) == "Hack Nerd Font Mono"  # the GUID is case-folded
     env2 = _wt_env(
         tmp_path,
         {
@@ -144,7 +145,7 @@ def test_windows_terminal_face_resolves_profile_then_defaults(tmp_path: Path) ->
 
 
 def test_windows_terminal_face_reads_legacy_and_defaults_to_cascadia(tmp_path: Path) -> None:
-    """The old flat ``fontFace`` key still counts; nothing set means the built-in."""
+    """The old flat ``fontFace`` key still counts. If nothing is set, the built-in face is used."""
     env = _wt_env(
         tmp_path,
         {
@@ -160,10 +161,10 @@ def test_windows_terminal_face_reads_legacy_and_defaults_to_cascadia(tmp_path: P
 def test_vscode_face_precedence_terminal_over_editor_workspace_over_user(
     tmp_path: Path,
 ) -> None:
-    """VS Code's font settings are read in precedence order.
+    """MeshTerm reads the font settings of VS Code in the order of precedence.
 
-    ``terminal.integrated.fontFamily`` beats ``editor.fontFamily``, and within a key
-    the workspace file beats the user file. The value's head family is the one judged.
+    ``terminal.integrated.fontFamily`` wins over ``editor.fontFamily``. For each key, the
+    workspace file wins over the user file. MeshTerm judges the first family of the value.
     """
     workspace = tmp_path / "repo"
     (workspace / ".vscode").mkdir(parents=True)
@@ -180,7 +181,7 @@ def test_vscode_face_precedence_terminal_over_editor_workspace_over_user(
     env = {"APPDATA": str(appdata)}
     assert _vscode_face(env, workspace) == "Hack Nerd Font Mono"  # terminal.* wins
     (user / "settings.json").write_text("{}", encoding="utf-8")
-    assert _vscode_face(env, workspace) == "Consolas"  # workspace editor fallback
+    assert _vscode_face(env, workspace) == "Consolas"  # the editor fallback of the workspace
     (workspace / ".vscode" / "settings.json").write_text("{}", encoding="utf-8")
     assert _vscode_face(env, workspace) == _vscode_default_face()
 
@@ -189,10 +190,10 @@ def test_vscode_face_precedence_terminal_over_editor_workspace_over_user(
 
 
 def test_detect_terminal_font_ladder(tmp_path: Path) -> None:
-    """The terminal is identified by working down a ladder of markers.
+    """MeshTerm identifies the terminal with a ladder of markers.
 
-    Windows Terminal first, then VS Code, then a genuine conhost — and ``TERM`` being
-    set disqualifies the conhost probe, since some other emulator is hosting it.
+    The order is Windows Terminal, then VS Code, then a real conhost. A ``TERM`` that is
+    set removes the conhost probe, because another emulator hosts the console.
     """
     wt = detect_terminal_font(_wt_env(tmp_path, {"profiles": {"list": []}}))
     assert wt is not None and wt.source == "windows-terminal"
@@ -204,7 +205,7 @@ def test_detect_terminal_font_ladder(tmp_path: Path) -> None:
 
 
 def test_powerline_support_env_override_always_wins() -> None:
-    """``MESHTERM_POWERLINE`` is the user's word: off, on/full, or core."""
+    """``MESHTERM_POWERLINE`` is the decision of the user: off, on/full, or core."""
     assert _powerline_support({"MESHTERM_POWERLINE": "0"}).level == NONE
     assert _powerline_support({"MESHTERM_POWERLINE": "off"}).level == NONE
     on = _powerline_support({"MESHTERM_POWERLINE": "1", "WT_SESSION": "s"})
@@ -213,7 +214,7 @@ def test_powerline_support_env_override_always_wins() -> None:
 
 
 def test_powerline_support_matched_font_sets_the_level(tmp_path: Path) -> None:
-    """A recommended face read from the terminal's own config decides coverage."""
+    """A recommended face that MeshTerm reads from the config of the terminal sets the coverage."""
     env = _wt_env(
         tmp_path,
         {
@@ -227,23 +228,23 @@ def test_powerline_support_matched_font_sets_the_level(tmp_path: Path) -> None:
 
 
 def test_powerline_support_renderer_fallback_and_honest_none(tmp_path: Path) -> None:
-    """An unmatched face still earns core where the renderer can supply the glyphs.
+    """An unmatched face still gives core where the renderer can supply the glyphs.
 
-    On Windows Terminal that is the bundled-symbol fallback; the same face on a bare
-    conhost is an honest ``none``.
+    On Windows Terminal, the fallback is the bundled symbols. The same face on a bare
+    conhost gives ``none``.
     """
     env = _wt_env(tmp_path, {"profiles": {"list": [{"guid": "{abc-123}"}]}})
-    wt = _powerline_support(env)  # face resolves to Cascadia Mono → no match
+    wt = _powerline_support(env)  # the face is Cascadia Mono, which gives no match
     assert (wt.level, wt.source) == (CORE, "renderer:windows-terminal")
     con = _powerline_support({}, conhost_probe=lambda: "Consolas")
     assert (con.level, con.source, con.face) == (NONE, "font:conhost", "Consolas")
 
 
 def test_powerline_support_kitty_ssh_and_unknown() -> None:
-    """A glyph-drawing terminal earns core by its marker; anything else stays unknown.
+    """A terminal that draws the glyphs gives core by its marker. All others stay unknown.
 
-    ssh sessions and terminals we do not recognise are unknown rather than none: the
-    font lives on glass we cannot see.
+    An ssh session and a terminal that MeshTerm does not recognize give ``unknown``
+    and not ``none``, because the font is on a display that MeshTerm cannot see.
     """
     kitty = _powerline_support({"TERM": "xterm-kitty"})
     assert (kitty.level, kitty.source) == (CORE, "renderer:kitty")
@@ -254,13 +255,14 @@ def test_powerline_support_kitty_ssh_and_unknown() -> None:
 
 
 def test_powerline_support_a_handheld_answers_from_its_own_font() -> None:
-    """A handheld's font draws the screen, so its inventory answers and no terminal does.
+    """The font of a handheld draws the screen, so its inventory answers and no terminal does.
 
-    The Cardputer's Terminus and the PicoCalc's console font both have the core chevrons
-    and no rounded caps. A font without the chevrons gets ``none``, also when a kitty
-    started the app. The override still outranks the font, as it outranks each probe.
+    The Terminus of the Cardputer and the console font of the PicoCalc both have the core
+    chevrons and no rounded caps. A font without the chevrons gives ``none``, also when
+    kitty started the app. The override still wins over the font, as it wins over each
+    probe.
     """
-    kitty = {"TERM": "xterm-kitty"}  # a terminal that would otherwise earn core
+    kitty = {"TERM": "xterm-kitty"}  # a terminal that gives core in all other cases
     cardputer = _powerline_support(kitty, handheld=("cardputer-zero", CARDPUTER_ZERO_CODEPOINTS))
     assert (cardputer.level, cardputer.source) == (CORE, "platform:cardputer-zero")
     picocalc = _powerline_support(kitty, handheld=("picocalc-lyra", FONT_CODEPOINTS))
@@ -276,7 +278,7 @@ def test_powerline_support_a_handheld_answers_from_its_own_font() -> None:
 
 
 def test_powerline_support_follows_a_platform_switch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The memoized verdict is dropped on a switch, so it never answers for the last glass."""
+    """A platform switch clears the cached verdict, so it never answers for the last display."""
     monkeypatch.delenv("MESHTERM_POWERLINE", raising=False)
     monkeypatch.setenv("TERM", "xterm-kitty")
     monkeypatch.delenv("WT_SESSION", raising=False)
@@ -290,10 +292,10 @@ def test_powerline_support_follows_a_platform_switch(monkeypatch: pytest.MonkeyP
 
 
 def test_installed_recommended_never_raises() -> None:
-    """Scanning the machine for installed fonts never raises.
+    """The scan of the machine for installed fonts never raises an exception.
 
-    It is best-effort context for a future nudge screen, so whatever the platform
-    answers, the result is a RecommendedFont or None.
+    It gives information for a future screen of suggestions, and it does its best. For
+    each answer of the platform, the result is a RecommendedFont or None.
     """
     result = installed_recommended()
     assert result is None or isinstance(result, RecommendedFont)
@@ -303,10 +305,10 @@ def test_installed_recommended_never_raises() -> None:
 
 
 def test_emoji_is_only_the_windows_consoles_problem() -> None:
-    """Everywhere but Windows, a terminal draws emoji and the question does not arise.
+    """Only the classic console of Windows has the emoji problem. Other terminals draw emoji.
 
-    The probe is never even run there — a Linux or macOS session pays nothing for a limit
-    only the classic console has.
+    MeshTerm does not run the probe on other platforms. A Linux or macOS session has no
+    cost from a limit that only the classic console has.
     """
 
     def never_called() -> bool | None:
@@ -318,35 +320,38 @@ def test_emoji_is_only_the_windows_consoles_problem() -> None:
 
 
 def test_a_classic_console_turns_the_icons_compact() -> None:
-    """The verdict that matters: conhost draws no emoji, so the icons go compact.
+    """The important verdict: conhost draws no emoji, so the icons become compact.
 
-    This is the double-clicked build on Windows — the case the whole check exists for.
+    This is the build that the user double-clicks on Windows. The whole check exists for
+    this case.
     """
     verdict = _emoji_support({}, console_probe=lambda: True, system="win32")
     assert (verdict.supported, verdict.source) == (False, "console")
 
 
 def test_every_other_windows_terminal_keeps_its_emoji() -> None:
-    """Windows Terminal, VS Code's terminal and ssh all draw them; nothing changes."""
+    """Windows Terminal, the terminal of VS Code, and ssh all draw emoji, and nothing changes."""
     verdict = _emoji_support({}, console_probe=lambda: False, system="win32")
     assert (verdict.supported, verdict.source) == (True, "console")
 
 
 def test_an_unanswerable_probe_never_degrades_the_ui() -> None:
-    """No console to identify (redirected output, a failed call) leaves emoji on.
+    """If there is no console to identify (redirected output, a failed call), emoji stay on.
 
-    An unknown is not evidence of a limit. Degrading on one would strip the icons from
-    every piped or redirected run, which is most of the test suite and all of CI.
+    An unknown result is not evidence of a limit. If MeshTerm degrades on an unknown
+    result, it removes the icons from each piped or redirected run. These runs are most
+    of the test suite and all of CI.
     """
     verdict = _emoji_support({}, console_probe=lambda: None, system="win32")
     assert (verdict.supported, verdict.source) == (True, "no-console")
 
 
 def test_the_override_beats_the_probe_both_ways() -> None:
-    """``MESHTERM_EMOJI`` wins, as the powerline gate's override does.
+    """``MESHTERM_EMOJI`` wins in both directions, as the override of the powerline gate does.
 
-    Someone on a console this cannot recognise knows their own glass better than a probe
-    does — and the negative direction is how anyone asks for the compact icons on purpose.
+    A user on a console that MeshTerm cannot recognize knows their own display better than
+    a probe does. The negative direction is how a user asks for the compact icons on
+    purpose.
     """
     forced_on = _emoji_support({"MESHTERM_EMOJI": "1"}, console_probe=lambda: True, system="win32")
     assert (forced_on.supported, forced_on.source) == (True, "env")
@@ -359,11 +364,11 @@ def test_the_override_beats_the_probe_both_ways() -> None:
 
 
 def test_an_inherited_wt_session_cannot_speak_for_the_host() -> None:
-    """The environment is not consulted, and this is why.
+    """MeshTerm does not use the environment. This test shows the reason.
 
-    ``WT_SESSION`` is inherited by child processes, so a program launched from Windows
-    Terminal into a console of its own still carries it — measured, not supposed. Reading
-    it would have answered for the terminal that did the launching.
+    Child processes inherit ``WT_SESSION``. A program that starts from Windows Terminal
+    into a console of its own still has it. We measured this, and did not suppose it. If
+    MeshTerm reads the variable, the answer is for the terminal that started the program.
     """
     env = {"WT_SESSION": "670f6626-8bdf-4c09-9164-b1eef91abe4f"}
     verdict = _emoji_support(env, console_probe=lambda: True, system="win32")
@@ -371,9 +376,9 @@ def test_an_inherited_wt_session_cannot_speak_for_the_host() -> None:
 
 
 def test_identifying_the_host_never_raises() -> None:
-    """Whatever this machine is, asking is safe and answers one of three things.
+    """On any machine, the question is safe and the answer is one of three values.
 
-    It runs on a startup path, so "it degrades rather than raises" is the property that
-    keeps an unusual host from taking the app down with it.
+    The function runs on the startup path. Thus the property "it degrades and does not
+    raise" prevents an unusual host from stopping the app.
     """
     assert _is_classic_console() in (True, False, None)

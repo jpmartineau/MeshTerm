@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Regression tests for serialized, index-validated channel reads.
+"""Regression tests for channel reads that are serialized and checked against the index.
 
-The meshcore library's ``get_channel`` waits for "the next CHANNEL_INFO event" with no
-correlation to the slot it asked for, and the dispatcher fans that event to every in-flight
-waiter. Two concurrent reads therefore both resolve on the first response and one caller
-silently gets the other's channel — which misfiles that channel's messages. :class:`MeshCoreDevice`
-guards against this by serializing reads and verifying the response is for the slot requested.
+The ``get_channel`` of the meshcore library waits for "the next CHANNEL_INFO event". It does
+not match this event to the slot that it asked for, and the dispatcher sends the event to
+each waiter that is in flight. Thus two concurrent reads both resolve on the first response.
+One caller silently gets the channel of the other caller, and this files the messages of that
+channel in the wrong place. :class:`MeshCoreDevice` prevents this. It serializes the reads and
+checks that the response is for the slot that it requested.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from meshterm.core.connection import DeviceCommandError, MeshCoreDevice
 
 
 class _Event:
-    """Minimal stand-in for a meshcore CHANNEL_INFO event."""
+    """A minimal stand-in for a meshcore CHANNEL_INFO event."""
 
     def __init__(self, payload: dict) -> None:
         self.payload = payload
@@ -28,12 +29,12 @@ class _Event:
 
 
 class _CrosstalkCommands:
-    """Fake ``commands`` that reproduces the uncorrelated-response race if reads overlap.
+    """A fake ``commands`` that causes the race of unmatched responses if reads overlap.
 
-    Each call records itself as in-flight and yields control. If a second read starts while
-    the first is still outstanding, both return the payload of whichever finishes first —
-    exactly the library behavior that misroutes messages. Serialized callers never overlap, so
-    each gets its own channel back.
+    Each call records itself as in flight and gives control to other tasks. If a second read
+    starts while the first read is not complete, both reads return the payload of the read
+    that finishes first. This is the behaviour of the library that sends messages to the wrong
+    place. Serialized callers never overlap, so each caller gets its own channel.
     """
 
     def __init__(self) -> None:
@@ -44,9 +45,9 @@ class _CrosstalkCommands:
         self.in_flight.append(index)
         self.peak_concurrency = max(self.peak_concurrency, len(self.in_flight))
         try:
-            await asyncio.sleep(0)  # a real await point where interleaving would happen
-            # Model "the first response resolves everyone": the crossed answer is the
-            # oldest in-flight request, not necessarily this one.
+            await asyncio.sleep(0)  # a real await point, where an interleave can occur
+            # Model "the first response resolves everyone". The crossed answer is the
+            # oldest request in flight, which is not always this request.
             served = self.in_flight[0]
             return _Event(
                 {
@@ -60,7 +61,7 @@ class _CrosstalkCommands:
 
 
 class _MismatchCommands:
-    """Fake ``commands`` that always answers with the wrong slot index."""
+    """A fake ``commands`` that always answers with the wrong slot index."""
 
     async def get_channel(self, index: int) -> _Event:
         wrong = index + 1
@@ -80,7 +81,7 @@ def _device_with(commands: object) -> MeshCoreDevice:
 
 
 async def test_get_channel_serializes_concurrent_reads() -> None:
-    """Concurrent reads never overlap, so each returns its own slot (no cross-talk)."""
+    """Concurrent reads never overlap, so each read returns its own slot (no cross-talk)."""
     commands = _CrosstalkCommands()
     device = _device_with(commands)
 
@@ -94,7 +95,10 @@ async def test_get_channel_serializes_concurrent_reads() -> None:
 
 
 async def test_get_channel_rejects_response_for_a_different_slot() -> None:
-    """A response whose index doesn't match the request is refused, never returned as-is."""
+    """The device refuses a response with an index that does not match the request.
+
+    It never returns the response.
+    """
     device = _device_with(_MismatchCommands())
 
     with pytest.raises(DeviceCommandError, match="returned slot"):
@@ -102,7 +106,7 @@ async def test_get_channel_rejects_response_for_a_different_slot() -> None:
 
 
 class _Refusal:
-    """A meshcore ERROR event: a refusal with a companion error code, or a timeout's."""
+    """A meshcore ERROR event: a refusal with an error code of the companion, or a timeout."""
 
     def __init__(self, payload: dict) -> None:
         self.payload = payload
@@ -112,10 +116,10 @@ class _Refusal:
 
 
 class _ScriptedCommands:
-    """Fake ``commands`` answering each slot from a queue of scripted replies.
+    """A fake ``commands`` that answers each slot from a queue of scripted replies.
 
-    ``replies[i]`` is a list of what successive reads of slot ``i`` get: a channel name, or
-    an error payload. A slot with no script is past the end — the firmware's NOT_FOUND.
+    ``replies[i]`` is a list of what the next reads of slot ``i`` get: a channel name, or an
+    error payload. A slot with no script is past the end. The firmware answers NOT_FOUND for it.
     """
 
     def __init__(self, replies: dict[int, list]) -> None:
@@ -131,16 +135,16 @@ class _ScriptedCommands:
         return _Event({"channel_idx": index, "channel_name": reply, "channel_secret": bytes(16)})
 
 
-#: What the clock sync's refusal looks like when a concurrent channel read is handed it.
+#: The refusal of the clock sync, as a concurrent channel read receives it.
 _MALFORMED = {"error_code": 6}
 
 
 async def test_a_borrowed_refusal_does_not_end_the_slot_probe() -> None:
-    """Another command's error, delivered to a slot read, is asked past — not a list's end.
+    """The error of another command, delivered to a slot read, does not end the list of slots.
 
-    The library hands every waiter the first ERROR to arrive, so at connect the channel
-    prewarm could take the clock sync's "malformed" as slot 2 being past the end, and cache
-    a list missing every channel after it.
+    The library gives the first ERROR that arrives to each waiter. Thus, at connect, the
+    channel prewarm can take the "malformed" error of the clock sync as the end of the list
+    at slot 2. Then it caches a list that does not have the channels after slot 2.
     """
     from meshterm.core.channel_probe import probe_channel_slots
 
@@ -152,7 +156,10 @@ async def test_a_borrowed_refusal_does_not_end_the_slot_probe() -> None:
 
 
 async def test_a_refusal_that_repeats_is_a_failed_read_not_a_layout() -> None:
-    """Two refusals in a row that aren't NOT_FOUND leave the probe unfinished (not cached)."""
+    """Two refusals in a row that are not NOT_FOUND leave the probe unfinished.
+
+    MeshTerm does not cache the result.
+    """
     from meshterm.core.channel_probe import probe_channel_slots
 
     commands = _ScriptedCommands({0: ["Public"], 1: [_MALFORMED, _MALFORMED], 2: ["ops"]})
@@ -162,7 +169,7 @@ async def test_a_refusal_that_repeats_is_a_failed_read_not_a_layout() -> None:
 
 
 async def test_no_answer_is_a_failed_read_and_not_found_is_the_end() -> None:
-    """A timeout never reads as the end of the slots; the firmware's NOT_FOUND does."""
+    """A timeout is never the end of the slots. The NOT_FOUND of the firmware is the end."""
     from meshterm.core.channel_probe import probe_channel_slots
 
     timeout = {"reason": "no_event_received"}

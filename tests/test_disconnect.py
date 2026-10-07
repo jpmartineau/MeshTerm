@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for graceful handling of a lost device connection.
+"""Tests for the graceful handling of a lost device connection.
 
-Covers the exception classifier that distinguishes a dropped serial link from an ordinary
-command failure, and :meth:`AppContext.reconnect`, which rebuilds the connection and restores
-the services (event hub, passive monitor, chat) that were running before the drop. All run
-against the :class:`MockDevice` simulator; no hardware required.
+The tests cover two things. The first is the exception classifier, which finds the
+difference between a dropped serial link and an ordinary command failure. The second is
+:meth:`AppContext.reconnect`. It builds the connection again and restores the services
+(event hub, passive monitor, chat) that ran before the drop. All the tests run against the
+:class:`MockDevice` simulator, so no hardware is necessary.
 """
 
 from __future__ import annotations
@@ -33,15 +34,18 @@ from meshterm.ui import menu
 
 
 class _SerialException(Exception):
-    """A stand-in for ``serial.SerialException`` (matched by type name, not import)."""
+    """A stand-in for ``serial.SerialException``.
+
+    The classifier matches the type name, not the import.
+    """
 
 
 class _FakeSerialDevice:
-    """A minimal stand-in for a connected serial :class:`Device` in liveness tests.
+    """A minimal stand-in for a connected serial :class:`Device` in the liveness tests.
 
-    Its :meth:`link_present` mirrors the real serial device: it reports whether the port is
-    still enumerated by the OS, reading through the (monkeypatched) module function so tests
-    can flip presence on and off.
+    Its :meth:`link_present` is the same as in the real serial device. It reports if the
+    operating system still lists the port. It reads through the module function that the
+    tests patch, so the tests can switch the presence on and off.
     """
 
     transport = "serial"
@@ -54,12 +58,12 @@ class _FakeSerialDevice:
 
 
 def test_is_connection_lost_matches_serial_exception() -> None:
-    """A pyserial-style read/write failure is classified as a dropped link."""
+    """The classifier finds a pyserial read or write failure to be a dropped link."""
     assert is_connection_lost(_SerialException("ClearCommError failed (Access is denied.)"))
 
 
 def test_is_connection_lost_walks_the_exception_chain() -> None:
-    """A link error wrapped in a higher-level error is still detected via its cause."""
+    """A link error in a higher-level error is still found through its cause."""
     try:
         try:
             raise _SerialException("WriteFile failed")
@@ -70,21 +74,24 @@ def test_is_connection_lost_walks_the_exception_chain() -> None:
 
 
 def test_is_connection_lost_matches_os_level_drops() -> None:
-    """OS-layer connection teardown and telltale I/O messages count as a lost link."""
+    """A teardown by the operating system, or an I/O message that shows a drop, is a lost link."""
     assert is_connection_lost(ConnectionResetError("reset"))
     assert is_connection_lost(OSError("input/output error"))
 
 
 def test_is_connection_lost_ignores_ordinary_failures() -> None:
-    """A transient command timeout or a generic error is not a dropped link."""
+    """A short command timeout or a generic error is not a dropped link."""
     assert not is_connection_lost(DeviceCommandError("the companion didn't respond in time"))
     assert not is_connection_lost(ValueError("bad value"))
 
 
-# These stand-ins are named to match bleak's real classes, since the classifier matches by
-# type name (not import) — see ``_CONNECTION_LOST_TYPES``.
-class BleakError(Exception):  # noqa: N818 - mirrors bleak's own (non-Error-suffixed) name
-    """A stand-in for ``bleak.exc.BleakError`` (matched by type name, not import)."""
+# These stand-ins have the names of the real bleak classes, because the classifier matches
+# the type name (not the import). Refer to ``_CONNECTION_LOST_TYPES``.
+class BleakError(Exception):  # noqa: N818 - the same name as bleak's own, with no Error suffix
+    """A stand-in for ``bleak.exc.BleakError``.
+
+    The classifier matches the type name, not the import.
+    """
 
 
 class BleakDeviceNotFoundError(Exception):
@@ -92,26 +99,32 @@ class BleakDeviceNotFoundError(Exception):
 
 
 def test_is_connection_lost_matches_ble_errors() -> None:
-    """A dropped Bluetooth link is classified as a lost connection, like a serial unplug."""
-    assert is_connection_lost(BleakError("gatt operation failed"))  # matched by type name
+    """A dropped Bluetooth link is a lost connection, the same as a serial unplug."""
+    assert is_connection_lost(BleakError("gatt operation failed"))  # Matched by type name.
     assert is_connection_lost(BleakDeviceNotFoundError("AA:BB:CC not found"))
-    # The meshcore BLE transport reports link loss via a callback reason string.
+    # The meshcore BLE transport reports a lost link with a reason string in a callback.
     assert is_connection_lost(RuntimeError("ble_transport_lost"))
 
 
 class BleakGATTProtocolError(Exception):
-    """Stand-in for bleak's GATT auth rejection (classifier matches its message, not import)."""
+    """A stand-in for the GATT authentication rejection of bleak.
+
+    The classifier matches its message, not the import.
+    """
 
 
 def test_ble_auth_error_is_recognized_and_is_not_a_lost_link() -> None:
-    """A PIN/pairing rejection is its own actionable case — never mistaken for a dropped link."""
+    """A PIN or pairing rejection is a separate case. It is not a dropped link.
+
+    The user can act on this case, so the classifier must not confuse it with a drop.
+    """
     exc = BleakGATTProtocolError("(5, 'GATT Protocol Error: Insufficient Authentication')")
     assert connection._is_ble_auth_error(exc)
-    assert not is_connection_lost(exc)  # so the session offers a PIN, not a reconnect
+    assert not is_connection_lost(exc)  # Thus the session offers a PIN, not a reconnect.
 
 
 def test_ble_auth_error_walks_the_exception_chain() -> None:
-    """An auth rejection wrapped by the meshcore transport is still recognized via its cause."""
+    """An authentication rejection in a meshcore transport error is found through its cause."""
     try:
         try:
             raise BleakGATTProtocolError("Insufficient Encryption")
@@ -121,28 +134,29 @@ def test_ble_auth_error_walks_the_exception_chain() -> None:
         assert connection._is_ble_auth_error(exc)
 
 
-#: Stand-in Bluetooth addresses. Never a real companion's: a test that names one turns a
-#: personal device into repository content, and any hardware coupling here would be a lie —
-#: nothing in this file touches a radio.
+#: Stand-in Bluetooth addresses. They are never the address of a real companion. A test
+#: that names a real address puts a personal device into the repository. Also, a link to
+#: hardware here is false, because no test in this file touches a radio.
 _BONDED_ADDR = "00:11:22:33:44:55"
 _OPEN_ADDR = "AA:BB:CC:DD:EE:FF"
-#: A stand-in pairing code, for the same reason. What matters is only that one was supplied.
+#: A stand-in pairing code, for the same reason. The tests check only that a code was supplied.
 _A_PIN = "123456"
 
 
 @pytest.fixture(autouse=True)
 def _no_bluez_agent(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep the connect-time BlueZ agent off the system bus when these run on Linux."""
+    """Keep the BlueZ agent of the connect step off the system bus when these tests run on Linux."""
     from contextlib import nullcontext
 
     monkeypatch.setattr(connection.MeshCoreDevice, "_ble_pairing_agent", lambda self: nullcontext())
 
 
 def test_an_unlikely_error_on_the_subscribe_is_a_pairing_refusal() -> None:
-    """ATT 0x0E is how a companion given a PIN refuses a subscribe over an unauthenticated bond.
+    """ATT 0x0E is how a companion that has a PIN refuses a subscribe over an unauthenticated bond.
 
-    Seen on a uConsole whose bond with a T1000-E predated its PIN (BlueZ Authenticated=0):
-    encryption succeeded, the subscribe did not, and the raw GATT error was all anyone saw.
+    This happened on a uConsole. Its bond with a T1000-E was older than the PIN of the
+    T1000-E (BlueZ Authenticated=0). The encryption succeeded, but the subscribe did not.
+    The user saw only the raw GATT error.
     """
     exc = BleakGATTProtocolError(
         "(<BleakGATTProtocolErrorCode.UNLIKELY_ERROR: 14>, 'GATT Protocol Error: Unlikely Error')"
@@ -151,7 +165,7 @@ def test_an_unlikely_error_on_the_subscribe_is_a_pairing_refusal() -> None:
 
 
 class _RetryingBleakClient:
-    """A bleak client whose connect drops its first link attempts and then succeeds."""
+    """A bleak client whose connect step drops its first link attempts and then succeeds."""
 
     def __init__(self, drops: int, callback) -> None:
         self.drops, self.callback = drops, callback
@@ -160,7 +174,7 @@ class _RetryingBleakClient:
 
     async def connect(self) -> None:
         for _ in range(self.drops):
-            self.callback(self)  # bleak fires the disconnect callback for each lost attempt
+            self.callback(self)  # bleak calls the disconnect callback for each lost attempt.
         self.is_connected = True
 
     async def disconnect(self) -> None:
@@ -169,7 +183,10 @@ class _RetryingBleakClient:
 
 
 class _MeshcoreLikeConnection:
-    """Mirrors meshcore's BLEConnection: a disconnect resets ``client`` to what was passed."""
+    """The same as the BLEConnection of meshcore.
+
+    A disconnect sets ``client`` to the value that was passed.
+    """
 
     def __init__(self, drops: int) -> None:
         self.client = None
@@ -178,39 +195,40 @@ class _MeshcoreLikeConnection:
 
     def handle_disconnect(self, client) -> None:
         self.forwarded += 1
-        self.client = None  # the reset that stranded the live link
+        self.client = None  # This reset left the live link with no owner.
 
     async def connect(self):
         self.client = _RetryingBleakClient(self.drops, self.handle_disconnect)
         await self.client.connect()
-        if self.client is None:  # meshcore's start_notify on None, as "not established"
+        # meshcore calls start_notify on None, and reports "not established".
+        if self.client is None:
             return None
         return "address"
 
 
 async def test_a_retried_link_attempt_no_longer_strands_the_client() -> None:
-    """The retries inside bleak must not make meshcore drop the client that then connects.
+    """The retries in bleak must not make meshcore drop the client that connects after them.
 
-    The uConsole failure, three runs out of three: each lost link attempt fired meshcore's
-    disconnect handler, which set ``client`` to ``None``; bleak's next retry connected a
-    client nobody held, meshcore gave up, and the live link kept the companion from
-    advertising to the retry.
+    This failure happened on the uConsole, in three runs out of three. Each lost link
+    attempt called the disconnect handler of meshcore, and the handler set ``client`` to
+    ``None``. The next retry of bleak connected a client that nobody held. Then meshcore
+    gave up. The live link stopped the companion from advertising to the retry.
     """
     unguarded = _MeshcoreLikeConnection(drops=3)
-    assert await unguarded.connect() is None  # the bug, reproduced
+    assert await unguarded.connect() is None  # This is the bug, reproduced.
 
     guarded = _MeshcoreLikeConnection(drops=3)
     seen = connection._hold_disconnects_while_connecting(guarded)
     assert await guarded.connect() == "address"
     seen.connecting = False
-    assert guarded.forwarded == 0  # held while connecting...
+    assert guarded.forwarded == 0  # The disconnects are held while the connect step runs.
     assert connection._held_client(guarded, seen) is guarded.client
-    guarded.client.callback(guarded.client)  # ...and a real drop afterwards still arrives
+    guarded.client.callback(guarded.client)  # A real drop after that still arrives.
     assert guarded.forwarded == 1
 
 
 def test_the_held_client_falls_back_to_the_one_meshcore_lost() -> None:
-    """If meshcore let go anyway, teardown still gets the live client to close."""
+    """If meshcore lets go of the client, the teardown still gets the live client to close."""
     lost = _RetryingBleakClient(0, None)
     lost.is_connected = True
     seen = connection._ConnectingClients([lost])
@@ -218,11 +236,12 @@ def test_the_held_client_falls_back_to_the_one_meshcore_lost() -> None:
 
 
 async def _disable_windows_pairing(dev: connection.MeshCoreDevice) -> None:
-    """Stub out the WinRT ProvidePin step so ``_create_ble`` stays hermetic in tests.
+    """Replace the WinRT ProvidePin step with a stub, so ``_create_ble`` stays isolated in tests.
 
-    On a real Windows or Linux host ``_pair_ble`` would reach the OS Bluetooth stack (and the
-    physical device); pinning it to a no-op reproduces the non-Windows / no-winrt path so the
-    auth-translation logic can be exercised without hardware.
+    On a real Windows or Linux host, ``_pair_ble`` reaches the Bluetooth stack of the
+    operating system and the physical device. A no-op in its place gives the same path as a
+    host that is not Windows, or that has no winrt. Thus the tests can examine the logic
+    that translates an authentication error without hardware.
     """
 
     async def _never_pairs(*, force: bool) -> bool:
@@ -236,22 +255,23 @@ async def _disable_windows_pairing(dev: connection.MeshCoreDevice) -> None:
 
 
 def _fake_ble_stack(monkeypatch: pytest.MonkeyPatch, *outcomes):
-    """A stand-in ``MeshCore`` class, scripted one entry per connect attempt.
+    """A stand-in ``MeshCore`` class, with one scripted entry for each connect attempt.
 
-    MeshTerm builds the meshcore client itself (:meth:`~MeshCoreDevice._connect_owned_ble`)
-    rather than letting ``create_ble`` construct and then orphan it, so the fake here is a
-    *class* that gets instantiated per attempt — and each instance records whether it was
-    closed, which is the property that matters: a connect that fails must never leave its
-    link open, or the peripheral goes on believing it has a peer and stops advertising.
+    MeshTerm builds the meshcore client itself (:meth:`~MeshCoreDevice._connect_owned_ble`).
+    It does not let ``create_ble`` build the client and then leave it with no owner. Thus
+    the fake here is a class, and the test makes one instance for each attempt. Each
+    instance records if it was closed. This is the important property: a connect that
+    fails must never leave its link open. If it does, the peripheral believes that it has a
+    peer, and it stops advertising.
 
     Args:
-        monkeypatch: Used to stub the lazily-imported ``meshcore`` module, so no real
-            ``BLEConnection`` (and therefore no ``bleak``) is needed.
-        outcomes: What each successive ``connect()`` does — an exception instance to raise,
-            or a value to return (``None`` standing for an unanswered handshake).
+        monkeypatch: Used to replace the ``meshcore`` module, which MeshTerm imports late,
+            with a stub. Thus no real ``BLEConnection`` (and no ``bleak``) is necessary.
+        outcomes: What each next ``connect()`` does. An exception instance is raised. Any
+            other value is returned (``None`` is a handshake that got no answer).
 
     Returns:
-        The fake class; its ``built`` list holds the instances it made, in order.
+        The fake class. Its ``built`` list holds the instances that it made, in order.
     """
     import sys
     import types
@@ -287,23 +307,30 @@ def _fake_ble_stack(monkeypatch: pytest.MonkeyPatch, *outcomes):
 
 
 async def test_create_ble_translates_auth_error_to_pin_guidance(monkeypatch) -> None:
-    """A raw GATT auth rejection becomes a DeviceAuthenticationError that names the PIN fix."""
-    # Pinned off macOS: there the same rejection starts an OS-run pairing and is retried
-    # rather than reported, and the advice is the system dialog rather than --ble-pin.
-    # Without this the test would assert Windows/Linux wording on the macOS CI runner.
+    """A raw GATT authentication rejection becomes an error that names the PIN solution.
+
+    The error is a DeviceAuthenticationError.
+    """
+    # The test sets the platform to not macOS. On macOS, the same rejection starts a pairing
+    # that the operating system runs, and MeshTerm retries it and does not report it. There,
+    # the advice is the system dialog and not --ble-pin. Without this line, the test checks
+    # the Windows and Linux words on the macOS CI runner, and it fails.
     monkeypatch.setattr(sys, "platform", "win32")
-    # No PIN supplied -> tell the user to pass one. The subclass lets the interactive picker
-    # catch "needs a PIN" specifically, while the CLI still catches it as DeviceCommandError.
+    # No PIN was supplied, so the message tells the user to pass one. The subclass lets the
+    # interactive picker catch "needs a PIN" alone, and the CLI still catches it as a
+    # DeviceCommandError.
     fake = _fake_ble_stack(monkeypatch, BleakGATTProtocolError("Insufficient Authentication"))
     dev = connection.MeshCoreDevice(transport="ble", address=_BONDED_ADDR)
     await _disable_windows_pairing(dev)
     with pytest.raises(connection.DeviceAuthenticationError) as excinfo:
         await dev._create_ble(fake)
-    assert isinstance(excinfo.value, DeviceCommandError)  # so the scripted CLI catches it too
+    assert isinstance(excinfo.value, DeviceCommandError)  # Thus the scripted CLI catches it too.
     assert "--ble-pin" in str(excinfo.value)
-    assert fake.built[0].disconnect_calls == 1  # the doomed link was released, not stranded
+    # MeshTerm released the failed link and did not leave it open.
+    assert fake.built[0].disconnect_calls == 1
 
-    # PIN supplied but rejected -> say it was wrong, not that none was given.
+    # A PIN was supplied but the device rejected it. The message says the PIN was wrong. It
+    # does not say that no PIN was given.
     fake_pin = _fake_ble_stack(monkeypatch, BleakGATTProtocolError("Insufficient Authentication"))
     dev_pin = connection.MeshCoreDevice(transport="ble", address=_BONDED_ADDR, pin=_A_PIN)
     await _disable_windows_pairing(dev_pin)
@@ -313,11 +340,12 @@ async def test_create_ble_translates_auth_error_to_pin_guidance(monkeypatch) -> 
 
 
 async def test_create_ble_names_a_stale_windows_bond(monkeypatch) -> None:
-    """No PIN, but Windows holds a bond the device refuses: say the bond is stale.
+    """There is no PIN, but Windows holds a bond that the device refuses.
 
-    The case reported from the field — a companion Windows showed as paired, refusing the
-    subscribe after the device's side of the bond was lost. "Requires a PIN" was the wrong
-    story for someone looking at "Paired" in Settings.
+    The message says that the bond is stale. A user reported this case. Windows showed the
+    companion as paired, but the companion refused the subscribe, because the device side
+    of the bond was lost. The message "Requires a PIN" was wrong for a user who saw
+    "Paired" in Settings.
     """
     monkeypatch.setattr(sys, "platform", "win32")
     fake = _fake_ble_stack(monkeypatch, BleakGATTProtocolError("Insufficient Authentication"))
@@ -331,8 +359,8 @@ async def test_create_ble_names_a_stale_windows_bond(monkeypatch) -> None:
     with pytest.raises(connection.DeviceAuthenticationError) as excinfo:
         await dev._create_ble(fake)
     assert "Windows has" in str(excinfo.value)
-    assert "--ble-pin" in str(excinfo.value)  # the PIN is still how MeshTerm re-pairs it
-    assert "saved pairing" in excinfo.value.hint  # and the PIN dialog says why it is asking
+    assert "--ble-pin" in str(excinfo.value)  # The PIN is still how MeshTerm pairs it again.
+    assert "saved pairing" in excinfo.value.hint  # Also, the PIN dialog says why it asks.
 
 
 @pytest.mark.parametrize(
@@ -349,7 +377,7 @@ async def test_create_ble_names_a_stale_windows_bond(monkeypatch) -> None:
 async def test_create_ble_names_what_the_pairing_found(
     monkeypatch, pairing, expected: str, hint: str
 ) -> None:
-    """With a PIN, the refusal names the pairing's own outcome, each with its own fix."""
+    """With a PIN, the refusal names the outcome of the pairing. Each outcome has a solution."""
     monkeypatch.setattr(sys, "platform", "win32")
     fake = _fake_ble_stack(
         monkeypatch,
@@ -370,7 +398,7 @@ async def test_create_ble_names_what_the_pairing_found(
 
 
 def test_a_refused_pairing_step_is_an_auth_error() -> None:
-    """A failing pair() in bleak is a pairing problem, not a device that "didn't answer"."""
+    """A pair() call that fails in bleak is a pairing problem, not a device that did not answer."""
     assert connection._is_ble_auth_error(Exception("Could not pair with device: 19: FAILED"))
     assert connection._is_ble_auth_error(Exception("org.bluez.Error.AuthenticationFailed"))
 
@@ -379,7 +407,7 @@ def test_a_refused_pairing_step_is_an_auth_error() -> None:
     ("stage", "expected"), [("connect", "took longer"), ("identity", "identity")]
 )
 async def test_ble_probe_timeout_names_its_stage(monkeypatch, stage: str, expected: str) -> None:
-    """A BLE probe that runs out of time says which stage stalled, instead of returning None."""
+    """A BLE probe that runs out of time says which stage stopped. It does not return None."""
     dev = connection.MeshCoreDevice(transport="ble", address=_OPEN_ADDR)
 
     async def _connect() -> None:
@@ -397,11 +425,11 @@ async def test_ble_probe_timeout_names_its_stage(monkeypatch, stage: str, expect
 
 
 async def test_create_ble_repairs_stale_bond_and_retries_once(monkeypatch) -> None:
-    """A first auth failure triggers one unpair-and-re-pair, then the retried connect succeeds.
+    """A first authentication failure causes one unpair and pair again, then a connect that works.
 
-    Models the Windows upgrade case: a leftover unauthenticated "Just Works" bond makes the
-    first connect fail even with the right PIN, so ``_pair_ble(force=True)`` clears it
-    and the second connect goes through.
+    The test models the Windows upgrade case. An old unauthenticated "Just Works" bond
+    makes the first connect fail, also with the correct PIN. Thus ``_pair_ble(force=True)``
+    clears the bond, and the second connect succeeds.
     """
     fake = _fake_ble_stack(
         monkeypatch, BleakGATTProtocolError("Insufficient Authentication"), "handshake-ok"
@@ -411,19 +439,21 @@ async def test_create_ble_repairs_stale_bond_and_retries_once(monkeypatch) -> No
 
     async def _pair(*, force: bool) -> bool:
         repairs.append(force)
-        return force  # the pre-connect pass (force=False) no-ops; the repair (force=True) works
+        # The pass before the connect (force=False) does nothing. The repair (force=True) works.
+        return force
 
     dev._pair_ble = _pair  # type: ignore[method-assign]
     result = await dev._create_ble(fake)
-    assert result is fake.built[1]  # the retry's client is what the caller gets
-    assert len(fake.built) == 2  # failed once, retried once
-    assert repairs == [False, True]  # pre-connect attempt, then the healing re-pair
-    assert fake.built[0].disconnect_calls == 1  # ...and the failed one was closed first
-    assert fake.built[1].disconnect_calls == 0  # the live one is handed over open
+    assert result is fake.built[1]  # The caller gets the client of the retry.
+    assert len(fake.built) == 2  # It failed one time and MeshTerm retried one time.
+    # The attempt before the connect, then the pairing again that repairs the bond.
+    assert repairs == [False, True]
+    assert fake.built[0].disconnect_calls == 1  # Also, MeshTerm closed the failed client first.
+    assert fake.built[1].disconnect_calls == 0  # MeshTerm returns the live client open.
 
 
 async def test_create_ble_gives_up_after_one_repair(monkeypatch) -> None:
-    """A wrong PIN that never bonds fails cleanly rather than looping on the repair retry."""
+    """A wrong PIN that never bonds fails cleanly. It does not loop on the repair retry."""
     fake = _fake_ble_stack(
         monkeypatch,
         BleakGATTProtocolError("Insufficient Authentication"),
@@ -434,26 +464,27 @@ async def test_create_ble_gives_up_after_one_repair(monkeypatch) -> None:
 
     async def _pair(*, force: bool) -> bool:
         calls.append(force)
-        return force  # even the repair "succeeds" so we prove the retry runs exactly once
+        return force  # Also the repair "succeeds", so the test proves that the retry runs one time.
 
     dev._pair_ble = _pair  # type: ignore[method-assign]
     with pytest.raises(connection.DeviceAuthenticationError):
         await dev._create_ble(fake)
-    # force=False (pre-connect), then force=True (repair). The repair's retry passes
-    # allow_repair=False, so there is no third pairing attempt even though it keeps failing.
+    # First force=False (before the connect), then force=True (the repair). The retry of the
+    # repair passes allow_repair=False. Thus there is no third pairing attempt, also if the
+    # connect keeps failing.
     assert calls == [False, True]
     assert all(client.disconnect_calls == 1 for client in fake.built)
 
 
 async def test_create_ble_retries_a_transient_link_failure(monkeypatch) -> None:
-    """A transport-level ConnectionError is retried once, and the scanned BLEDevice rides along.
+    """A ConnectionError at the transport level is retried one time, with the scanned BLEDevice.
 
-    Models the common Windows flake: the first link open misses the (slow-advertising)
-    peripheral and the meshcore client raises a bare ``ConnectionError``; users learned to
-    work around it by re-selecting the device — a manual retry — so the connect retries
-    itself before surfacing the failure.
+    The test models a common failure on Windows. The first attempt to open the link misses
+    the peripheral, which advertises slowly, and the meshcore client raises a bare
+    ``ConnectionError``. Users learned to select the device again, which is a manual
+    retry. Thus the connect step retries by itself before it reports the failure.
     """
-    scanned_device = object()  # the BLEDevice the discovery scan produced
+    scanned_device = object()  # The BLEDevice that the discovery scan produced.
     fake = _fake_ble_stack(
         monkeypatch, ConnectionError("Failed to connect to device"), "handshake-ok"
     )
@@ -461,13 +492,13 @@ async def test_create_ble_retries_a_transient_link_failure(monkeypatch) -> None:
     dev = connection.MeshCoreDevice(transport="ble", address=_OPEN_ADDR, ble_device=scanned_device)
     await _disable_windows_pairing(dev)
     assert await dev._create_ble(fake) is fake.built[1]
-    assert len(fake.built) == 2  # failed once, retried once
-    # Every attempt connects through the already-discovered BLEDevice, never a bare address.
+    assert len(fake.built) == 2  # It failed one time and MeshTerm retried one time.
+    # Each attempt connects through the BLEDevice that the scan found. It never uses a bare address.
     assert all(client.cx.device is scanned_device for client in fake.built)
 
 
 async def test_create_ble_gives_up_after_the_retry(monkeypatch) -> None:
-    """A link that never opens says so after the bounded retries — not "not a companion"."""
+    """A link that never opens says so after the limited retries, not "not a companion"."""
     fake = _fake_ble_stack(
         monkeypatch,
         ConnectionError("Failed to connect to device"),
@@ -480,14 +511,15 @@ async def test_create_ble_gives_up_after_the_retry(monkeypatch) -> None:
         await dev._create_ble(fake)
     assert not isinstance(excinfo.value, connection.DeviceAuthenticationError)
     assert "couldn't open a Bluetooth link" in str(excinfo.value)
-    assert isinstance(excinfo.value.__cause__, ConnectionError)  # the original rides along
+    assert isinstance(excinfo.value.__cause__, ConnectionError)  # The original error is the cause.
     assert len(fake.built) == connection._BLE_CONNECT_ATTEMPTS
     assert all(client.disconnect_calls == 1 for client in fake.built)
 
 
 async def test_create_ble_never_retries_an_auth_rejection(monkeypatch) -> None:
-    """A PIN/bond rejection is translated on the first attempt — never looped by the retry."""
-    # Off macOS, where a rejection is the *start* of an OS-run pairing and is waited on.
+    """A PIN or bond rejection is translated on the first attempt. The retry never loops on it."""
+    # The platform is not macOS. On macOS, a rejection is the start of a pairing that the
+    # operating system runs, and MeshTerm waits for it.
     monkeypatch.setattr(sys, "platform", "win32")
     fake = _fake_ble_stack(monkeypatch, BleakGATTProtocolError("Insufficient Authentication"))
     dev = connection.MeshCoreDevice(transport="ble", address=_BONDED_ADDR)
@@ -498,16 +530,17 @@ async def test_create_ble_never_retries_an_auth_rejection(monkeypatch) -> None:
 
 
 async def test_create_ble_waits_for_macos_to_finish_pairing(monkeypatch) -> None:
-    """On macOS the first auth rejection is the pairing *starting*, so the connect waits.
+    """On macOS the first authentication rejection starts the pairing, so the connect waits.
 
-    Touching the companion's authenticated characteristic is the only way to make
-    CoreBluetooth pair at all, so the rejection and the Passkey dialog are the same event.
-    Giving up there reported an error for a pairing that was succeeding, and the device
-    connected only when the user selected it a second time.
+    The only way to make CoreBluetooth pair is to touch the authenticated characteristic of
+    the companion. Thus the rejection and the Passkey dialog are one event. MeshTerm once
+    gave up at this point. It reported an error for a pairing that was successful, and the
+    device connected only when the user selected it a second time.
     """
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setattr(connection, "_BLE_MACOS_PAIRING_DELAY_S", 0)
-    # Refused twice while the dialog is up, then the bond lands and the subscribe works.
+    # The companion refuses two times while the dialog is open. Then the bond is made and the
+    # subscribe works.
     fake = _fake_ble_stack(
         monkeypatch,
         BleakGATTProtocolError("Insufficient Authentication"),
@@ -518,15 +551,16 @@ async def test_create_ble_waits_for_macos_to_finish_pairing(monkeypatch) -> None
     await _disable_windows_pairing(dev)
 
     result = await dev._create_ble(fake)
-    assert result is fake.built[2]  # the attempt made after the bond is what the caller gets
+    assert result is fake.built[2]  # The caller gets the attempt that MeshTerm made after the bond.
     assert len(fake.built) == 3
-    assert fake.built[0].disconnect_calls == 1  # each refused link was released, not stranded
+    # MeshTerm released each refused link and did not leave it open.
+    assert fake.built[0].disconnect_calls == 1
     assert fake.built[1].disconnect_calls == 1
-    assert fake.built[2].disconnect_calls == 0  # the live one is handed over open
+    assert fake.built[2].disconnect_calls == 0  # MeshTerm returns the live client open.
 
 
 async def test_create_ble_gives_up_when_macos_pairing_is_dismissed(monkeypatch) -> None:
-    """A dialog nobody answers still fails in the end, and says where the code is asked for."""
+    """A dialog that nobody answers fails in the end. The error says where the code is asked for."""
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setattr(connection, "_BLE_MACOS_PAIRING_DELAY_S", 0)
     refusals = [BleakGATTProtocolError("Insufficient Authentication")] * (
@@ -538,14 +572,18 @@ async def test_create_ble_gives_up_when_macos_pairing_is_dismissed(monkeypatch) 
 
     with pytest.raises(connection.DeviceAuthenticationError) as excinfo:
         await dev._create_ble(fake)
-    assert len(fake.built) == connection._BLE_MACOS_PAIRING_ATTEMPTS + 1  # bounded, not endless
-    # --ble-pin cannot help on macOS: the OS collects the code, so don't send the reader there.
+    assert len(fake.built) == connection._BLE_MACOS_PAIRING_ATTEMPTS + 1  # The number is limited.
+    # --ble-pin cannot help on macOS, because the operating system collects the code. Thus
+    # the message must not send the user to --ble-pin.
     assert "--ble-pin" not in str(excinfo.value)
     assert "System Settings" in str(excinfo.value)
 
 
 async def test_connect_reports_an_unanswered_handshake_and_closes_it(monkeypatch) -> None:
-    """Transport up but no identity reply: a clean "not a companion", link still released."""
+    """The transport is up but no identity reply comes. The error is a clean "not a companion".
+
+    MeshTerm also releases the link.
+    """
     fake = _fake_ble_stack(monkeypatch, None)
     dev = connection.MeshCoreDevice(transport="ble", address=_OPEN_ADDR)
     await _disable_windows_pairing(dev)
@@ -555,7 +593,7 @@ async def test_connect_reports_an_unanswered_handshake_and_closes_it(monkeypatch
 
 
 async def test_pair_ble_windows_noops_without_pin() -> None:
-    """Pairing is skipped (no WinRT touched) when no PIN is set — the fast, hermetic path."""
+    """MeshTerm skips the pairing when no PIN is set, and it does not touch WinRT on this path."""
     dev = connection.MeshCoreDevice(transport="ble", address=_BONDED_ADDR)
     assert await dev._pair_ble_windows(force=False) is False
 
@@ -565,7 +603,7 @@ async def test_pair_ble_windows_noops_without_pin() -> None:
     [("win32", "_pair_ble_windows"), ("linux", "_pair_ble_bluez"), ("darwin", None)],
 )
 async def test_pair_ble_runs_this_platform_s_ceremony(monkeypatch, platform, ceremony) -> None:
-    """Windows pairs through WinRT, Linux through a BlueZ agent, macOS not at all."""
+    """Windows pairs through WinRT and Linux pairs through a BlueZ agent. macOS does not pair."""
     monkeypatch.setattr(sys, "platform", platform)
     dev = connection.MeshCoreDevice(transport="ble", address=_BONDED_ADDR, pin=_A_PIN)
     ran: list[str] = []
@@ -581,7 +619,7 @@ async def test_pair_ble_runs_this_platform_s_ceremony(monkeypatch, platform, cer
 
 
 async def test_linux_pairing_records_what_bluez_found(monkeypatch) -> None:
-    """The BlueZ outcome lands in ``_ble_pairing``, where the refusal message reads it."""
+    """The BlueZ outcome goes into ``_ble_pairing``, and the refusal message reads it there."""
     from meshterm.core import bluez
 
     async def _pair(address, pin, *, force):
@@ -604,7 +642,7 @@ async def test_linux_pairing_records_what_bluez_found(monkeypatch) -> None:
     ],
 )
 def test_linux_refusals_speak_of_linux_and_bluetoothctl(monkeypatch, pairing, expected) -> None:
-    """On Linux the remedies name Linux and ``bluetoothctl``, never Windows' Settings."""
+    """On Linux the solutions name Linux and ``bluetoothctl``, never the Settings of Windows."""
     monkeypatch.setattr(sys, "platform", "linux")
     dev = connection.MeshCoreDevice(transport="ble", address=_BONDED_ADDR, pin=_A_PIN)
     dev._ble_pairing = pairing
@@ -614,19 +652,22 @@ def test_linux_refusals_speak_of_linux_and_bluetoothctl(monkeypatch, pairing, ex
 
 
 def test_a_stale_linux_bond_is_named_as_such(monkeypatch) -> None:
-    """No PIN, BlueZ holds a bond, the device refuses it: stale, with the Linux way out."""
+    """If there is no PIN, BlueZ holds a bond, and the device refuses it, the bond is stale.
+
+    The message gives the solution for Linux.
+    """
     monkeypatch.setattr(sys, "platform", "linux")
     dev = connection.MeshCoreDevice(transport="ble", address=_BONDED_ADDR)
     message, hint = dev._ble_auth_diagnosis(_BONDED_ADDR, True)
     assert message.startswith("Linux has") and "bluetoothctl remove" in message
     assert "Linux's saved pairing" in hint
-    # And with no bond, the PIN request carries no Windows-only advice.
+    # If there is no bond, the PIN request has no advice that is only for Windows.
     message, _ = dev._ble_auth_diagnosis(_BONDED_ADDR, False)
     assert "--ble-pin" in message and "Windows" not in message
 
 
 class SerialException(OSError):
-    """Stand-in for pyserial's exception (an ``OSError`` whose ``errno`` is usually unset)."""
+    """A stand-in for the exception of pyserial (an ``OSError`` that usually has no ``errno``)."""
 
 
 @pytest.mark.parametrize(
@@ -668,21 +709,21 @@ class SerialException(OSError):
     ],
 )
 def test_serial_open_failures_are_named(monkeypatch, platform, exc, expected) -> None:
-    """A port that won't open says why, instead of "didn't answer as a MeshCore device"."""
+    """A port that does not open says why. It does not say "didn't answer as a MeshCore device"."""
     monkeypatch.setattr(sys, "platform", platform)
     message = connection._serial_open_message("PORT", exc)
     assert message is not None and expected in message
     if platform == "win32":
-        assert "dialout" not in message  # Windows' "Access is denied" is a held port
+        assert "dialout" not in message  # On Windows, "Access is denied" is a port that is in use.
 
 
 def test_an_unrecognised_serial_failure_passes_through() -> None:
-    """Anything that isn't an open failure keeps its own error."""
+    """A failure that is not an open failure keeps its own error."""
     assert connection._serial_open_message("PORT", ValueError("bad baud rate")) is None
 
 
 async def test_serial_connect_raises_the_named_failure(monkeypatch) -> None:
-    """``connect`` turns a refused open into a DeviceCommandError the picker shows verbatim."""
+    """``connect`` turns a refused open into a DeviceCommandError that the picker shows as it is."""
     import types
 
     class _MeshCore:
@@ -702,7 +743,7 @@ async def test_serial_connect_raises_the_named_failure(monkeypatch) -> None:
 
 
 def _fake_meshcore(monkeypatch, **factories) -> None:  # noqa: ANN003
-    """Stand a ``meshcore`` module in whose ``create_*`` factories are the ones given."""
+    """Put a ``meshcore`` module in place. Its ``create_*`` factories are the factories given."""
     import types
 
     module = types.ModuleType("meshcore")
@@ -723,18 +764,21 @@ def _fake_meshcore(monkeypatch, **factories) -> None:  # noqa: ANN003
     ],
 )
 def test_tcp_open_failures_are_named(exc: BaseException, expected: str) -> None:
-    """Each way a socket refuses has its own sentence, not "no response from a companion"."""
+    """Each way in which a socket refuses has its own sentence.
+
+    The sentence is not "no response from a companion".
+    """
     message = connection._tcp_open_message("meshbox", 5000, exc)
     assert message is not None and expected in message
 
 
 def test_an_unrecognised_tcp_failure_is_left_to_the_caller() -> None:
-    """A failure that isn't one of the socket's own is not given a name it hasn't earned."""
+    """A failure that is not a socket failure gets no name, and the caller handles it."""
     assert connection._tcp_open_message("meshbox", 5000, ValueError("odd")) is None
 
 
 async def test_tcp_connect_raises_the_named_failure(monkeypatch) -> None:
-    """``connect`` says a refused port is a refused port, keeping the socket error as cause."""
+    """``connect`` says that a refused port is a refused port, with the socket error as cause."""
 
     async def create_tcp(*_args, **_kwargs):
         raise ConnectionRefusedError(111, "Connection refused")
@@ -750,10 +794,13 @@ async def test_tcp_connect_raises_the_named_failure(monkeypatch) -> None:
 async def test_a_tcp_companion_that_never_answers_is_told_from_one_never_reached(
     monkeypatch,
 ) -> None:
-    """A socket that opened onto silence names the listener, not the address or the network."""
+    """A socket that opened and then got silence names the listener.
+
+    The error does not name the address or the network.
+    """
 
     async def create_tcp(*_args, **_kwargs):
-        return None  # meshcore's answer when the handshake goes unanswered
+        return None  # This is the answer of meshcore when the handshake gets no answer.
 
     _fake_meshcore(monkeypatch, create_tcp=create_tcp)
     dev = connection.MeshCoreDevice(transport="tcp", host="10.0.0.9", tcp_port=5000)
@@ -765,7 +812,7 @@ async def test_a_tcp_companion_that_never_answers_is_told_from_one_never_reached
 async def test_an_unrecognised_connect_failure_is_said_in_its_own_words(
     monkeypatch, caplog
 ) -> None:
-    """A failure with no name is still a sentence, and its traceback is logged — once."""
+    """A failure with no name still has a sentence, and MeshTerm logs its traceback one time."""
     monkeypatch.setattr(connection, "_TRACED", set())
 
     async def create_serial(*_args, **_kwargs):
@@ -774,7 +821,7 @@ async def test_an_unrecognised_connect_failure_is_said_in_its_own_words(
     _fake_meshcore(monkeypatch, create_serial=create_serial)
     dev = connection.MeshCoreDevice(port="/dev/ttyACM0")
     caplog.set_level("WARNING", logger="meshterm.core.connection")
-    for _ in range(2):  # a reconnect retrying against the same fault
+    for _ in range(2):  # A reconnect that retries against the same fault.
         with pytest.raises(connection.UnrecognisedConnectError) as excinfo:
             await dev.connect()
     assert str(excinfo.value) == (
@@ -783,12 +830,12 @@ async def test_an_unrecognised_connect_failure_is_said_in_its_own_words(
     assert isinstance(excinfo.value.__cause__, ValueError)
     records = [r for r in caplog.records if "unsupported baud rate" in r.getMessage()]
     assert len(records) == 2
-    assert records[0].exc_info is not None  # the traceback, the first time
-    assert records[1].exc_info is None  # and only the line after that
+    assert records[0].exc_info is not None  # The first time, the log has the traceback.
+    assert records[1].exc_info is None  # After that, the log has only the line.
 
 
 async def test_a_ble_connect_timeout_is_named_as_a_stall(monkeypatch) -> None:
-    """A Bluetooth stack's own timeout says what stalls, rather than a bare ``TimeoutError``."""
+    """A timeout of the Bluetooth stack says what stopped. It is not a bare ``TimeoutError``."""
     dev = connection.MeshCoreDevice(transport="ble", address=_OPEN_ADDR)
 
     async def _create_ble(_mesh_core):
@@ -802,7 +849,10 @@ async def test_a_ble_connect_timeout_is_named_as_a_stall(monkeypatch) -> None:
 
 
 async def test_a_tcp_probe_that_runs_out_of_time_says_so() -> None:
-    """The probe's own window runs out before the OS gives up on a silent host: named too."""
+    """The time limit of the probe ends before the operating system gives up on a silent host.
+
+    The error names this case too.
+    """
     dev = connection.MeshCoreDevice(transport="tcp", host="10.0.0.9", tcp_port=5000)
 
     async def _connect() -> None:
@@ -815,7 +865,7 @@ async def test_a_tcp_probe_that_runs_out_of_time_says_so() -> None:
 
 
 async def test_the_probe_names_a_failure_it_does_not_recognise(monkeypatch) -> None:
-    """An odd failure is said in its own words, not called "not a MeshCore device"."""
+    """An unusual failure gets its own words. It is not called "not a MeshCore device"."""
     monkeypatch.setattr(connection, "_TRACED", set())
     dev = connection.MeshCoreDevice(port="COM5")
 
@@ -835,7 +885,10 @@ async def test_the_probe_names_a_failure_it_does_not_recognise(monkeypatch) -> N
 
 
 def test_ble_address_int_parses_macs_and_rejects_others() -> None:
-    """A colon/dash MAC becomes a 48-bit int; a non-MAC (e.g. a macOS UUID) yields None."""
+    """A MAC with colons or dashes becomes a 48-bit int.
+
+    A non-MAC (for example a macOS UUID) gives None.
+    """
     parse = connection.MeshCoreDevice._ble_address_int
     assert parse(_BONDED_ADDR) == 0x001122334455
     assert parse("da-c5-21-6b-7c-7c") == 0xDAC5216B7C7C
@@ -844,31 +897,32 @@ def test_ble_address_int_parses_macs_and_rejects_others() -> None:
 
 
 async def test_ble_pairing_helpers_noop_for_non_mac_address() -> None:
-    """The bond query and unpair short-circuit (never touching WinRT) for a non-MAC address."""
-    # A non-MAC address fails the parse before any winrt import, so these stay hermetic on any
-    # platform — no real Bluetooth stack is consulted.
+    """The bond query and the unpair stop early for a non-MAC address. They do not touch WinRT."""
+    # A non-MAC address fails the parse before any winrt import. Thus these tests stay isolated
+    # on each platform, and no real Bluetooth stack is consulted.
     assert await connection.MeshCoreDevice.is_ble_paired("not-a-mac") is False
     assert await connection.MeshCoreDevice.unpair_ble("not-a-mac") is False
     assert await connection.MeshCoreDevice.is_ble_paired("") is False
 
 
 async def test_can_unpair_only_for_bonded_ble(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The quit dialog offers unpair only on a BLE link that Windows actually holds a bond for."""
+    """The quit dialog offers unpair only on a BLE link for which Windows holds a bond."""
 
     async def _is_paired(address: str) -> bool:
         return address == _BONDED_ADDR
 
     monkeypatch.setattr(connection.MeshCoreDevice, "is_ble_paired", staticmethod(_is_paired))
-    # Serial: never offered, whatever the address.
+    # Serial: the dialog never offers it, for any address.
     serial_ctx = SimpleNamespace(active_transport="serial", active_address=None)
     assert await menu._can_unpair(serial_ctx) is False
-    # BLE but no address to act on: not offered.
+    # BLE with no address to act on: the dialog does not offer it.
     ble_no_addr = SimpleNamespace(active_transport="ble", active_address=None)
     assert await menu._can_unpair(ble_no_addr) is False
-    # BLE with a live bond: offered.
+    # BLE with a live bond: the dialog offers it.
     bonded = SimpleNamespace(active_transport="ble", active_address=_BONDED_ADDR)
     assert await menu._can_unpair(bonded) is True
-    # BLE but open (no bond, e.g. the PIN-less companion): not offered.
+    # BLE that is open (no bond, for example a companion that has no PIN): the dialog does
+    # not offer it.
     open_ble = SimpleNamespace(active_transport="ble", active_address=_OPEN_ADDR)
     assert await menu._can_unpair(open_ble) is False
 
@@ -876,7 +930,10 @@ async def test_can_unpair_only_for_bonded_ble(monkeypatch: pytest.MonkeyPatch) -
 async def test_unpair_on_exit_disconnects_before_unpairing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Teardown drops the live link first, then forgets the OS bond (order matters)."""
+    """The teardown drops the live link first, then removes the bond of the operating system.
+
+    The order is important.
+    """
     order: list[str] = []
 
     class _Dev:
@@ -890,14 +947,15 @@ async def test_unpair_on_exit_disconnects_before_unpairing(
     monkeypatch.setattr(connection.MeshCoreDevice, "unpair_ble", staticmethod(_unpair))
     ctx = SimpleNamespace(active_address=_BONDED_ADDR, _device=_Dev())
     await menu._unpair_on_exit(ctx)
-    # Disconnect precedes unpair (a bond can't be dropped while in use), and the device handle
-    # is released. The device_store is never touched — the remembered record survives.
+    # The disconnect comes before the unpair, because a bond that is in use cannot be dropped.
+    # Also, MeshTerm releases the device handle. It never touches the device_store, so the
+    # stored record stays.
     assert order == ["disconnect", f"unpair:{_BONDED_ADDR}"]
     assert ctx._device is None
 
 
 def _make_ctx(tmp_path: Path) -> AppContext:
-    """Build a real, mock-backed application context for reconnect tests."""
+    """Build a real application context, with the simulator as the device, for reconnect tests."""
     settings = Settings(config_dir=tmp_path, db_path=tmp_path / "disc.db")
     return AppContext(
         console=Console(file=io.StringIO()),
@@ -910,19 +968,19 @@ def _make_ctx(tmp_path: Path) -> AppContext:
 
 
 async def test_reconnect_rebuilds_device_and_restores_services(tmp_path: Path) -> None:
-    """Reconnect opens a fresh connection and resumes the hub, monitor, and chat."""
+    """Reconnect opens a new connection and resumes the hub, the monitor, and the chat."""
     ctx = _make_ctx(tmp_path)
     try:
         await ctx.events.start()
-        await ctx.monitor.start()  # start recording on the already-running hub
+        await ctx.monitor.start()  # Start to record on the hub that already runs.
         await ctx.chat.start()
         original = await ctx.device()
         assert ctx.events.active and ctx.monitor.active and ctx.chat.active
 
         await ctx.reconnect()
 
-        # A brand-new connection replaced the dead one, and everything that was running
-        # before the drop is running again.
+        # A new connection replaced the dead connection. Each service that ran before the
+        # drop runs again.
         rebuilt = await ctx.device()
         assert rebuilt is not original
         assert ctx.events.active
@@ -933,7 +991,7 @@ async def test_reconnect_rebuilds_device_and_restores_services(tmp_path: Path) -
 
 
 async def test_ble_profile_opens_bluetooth_transport(tmp_path: Path, monkeypatch) -> None:
-    """A BLE profile makes ``device()`` build a Bluetooth connection by address."""
+    """A BLE profile makes ``device()`` build a Bluetooth connection with the address."""
     from meshterm.core import connection as conn
     from meshterm.core.config import DeviceProfile
 
@@ -968,7 +1026,8 @@ async def test_ble_profile_opens_bluetooth_transport(tmp_path: Path, monkeypatch
         return _FakeBle(**kw)
 
     monkeypatch.setattr(conn, "make_device", fake_make_device)
-    # context imported make_device by name, so patch the reference it actually calls.
+    # The context module imported make_device by name. Thus the test patches the reference
+    # that the context module calls.
     import meshterm.context as context_mod
 
     monkeypatch.setattr(context_mod, "make_device", fake_make_device)
@@ -977,13 +1036,13 @@ async def test_ble_profile_opens_bluetooth_transport(tmp_path: Path, monkeypatch
         assert device.transport == "ble"
         assert built["address"] == "AA:BB:CC:DD:EE:FF"
         assert ctx.active_transport == "ble"
-        assert ctx.active_port is None  # BLE has no serial port to watch
+        assert ctx.active_port is None  # BLE has no serial port to watch.
     finally:
         ctx.repo.close()
 
 
 async def test_tcp_profile_opens_network_transport(tmp_path: Path, monkeypatch) -> None:
-    """A TCP profile makes ``device()`` build a network connection by host:port."""
+    """A TCP profile makes ``device()`` build a network connection with the host and port."""
     from meshterm.core import connection as conn
     from meshterm.core.config import DeviceProfile
 
@@ -1034,10 +1093,11 @@ async def test_tcp_profile_opens_network_transport(tmp_path: Path, monkeypatch) 
 
 
 async def test_reconnect_leaves_idle_services_idle(tmp_path: Path) -> None:
-    """Reconnect only restores what was live: idle services stay idle afterward."""
+    """Reconnect restores only what was live. Services that were idle stay idle."""
     ctx = _make_ctx(tmp_path)
     try:
-        original = await ctx.device()  # a tool opened the radio lazily; nothing subscribed
+        # A tool opened the device when it needed it. No service subscribed.
+        original = await ctx.device()
 
         await ctx.reconnect()
 
@@ -1053,12 +1113,13 @@ async def test_reconnect_leaves_idle_services_idle(tmp_path: Path) -> None:
 async def test_reconnect_restores_services_after_failed_attempts(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """Resume intent survives retries: services restore even if early reconnects fail.
+    """The intent to resume survives retries. Services restore also if early reconnects fail.
 
-    Reproduces the real-hardware bug where the first (failed) reconnect attempt tore the
-    services down, so later attempts read the now-idle flags and restored nothing. The
-    mock never fails ``device()``, so we force the first two ``device()`` calls to raise —
-    as an absent port does — before letting the third (and the restore calls) succeed.
+    The test reproduces a bug that happened on real hardware. The first reconnect attempt
+    failed and stopped the services. Then later attempts read the flags, which were now
+    idle, and restored nothing. The simulator never makes ``device()`` fail. Thus the test
+    makes the first two ``device()`` calls raise, as an absent port does. Then the third
+    call, and the calls that restore the services, succeed.
     """
     ctx = _make_ctx(tmp_path)
     try:
@@ -1073,19 +1134,20 @@ async def test_reconnect_restores_services_after_failed_attempts(
 
         async def flaky_device(self: AppContext):
             attempts["n"] += 1
-            if attempts["n"] <= 2:  # the device isn't back yet on the first two tries
+            if attempts["n"] <= 2:  # On the first two tries, the device is not back yet.
                 raise _SerialException("could not open port 'COM_TEST'")
             return await real_device(self)
 
         monkeypatch.setattr(AppContext, "device", flaky_device)
 
-        # Two failed reconnects (device still absent), then a success — like a slow replug.
+        # Two reconnects fail (the device is still absent), then one succeeds. This is the
+        # same as a slow replug.
         for _ in range(2):
             try:
                 await ctx.reconnect()
             except _SerialException:
                 pass
-        await ctx.reconnect()  # the third device() call succeeds; services restore
+        await ctx.reconnect()  # The third device() call succeeds, and the services restore.
 
         assert ctx.events.active
         assert ctx.monitor.active
@@ -1096,7 +1158,10 @@ async def test_reconnect_restores_services_after_failed_attempts(
 
 
 def test_serial_port_present_reflects_os_enumeration(monkeypatch) -> None:
-    """A port is 'present' iff it appears in the OS enumeration; the primary unplug signal."""
+    """A port is 'present' if and only if it is in the list of the operating system.
+
+    This list is the main signal for an unplug.
+    """
     pytest.importorskip("serial")
     from serial.tools import list_ports
 
@@ -1106,7 +1171,7 @@ def test_serial_port_present_reflects_os_enumeration(monkeypatch) -> None:
 
 
 def test_serial_port_present_assumes_up_on_enumeration_error(monkeypatch) -> None:
-    """A failed port query must never fake a disconnect — it reports 'present'."""
+    """A port query that fails must never cause a false disconnect. It reports 'present'."""
     pytest.importorskip("serial")
     from serial.tools import list_ports
 
@@ -1118,12 +1183,11 @@ def test_serial_port_present_assumes_up_on_enumeration_error(monkeypatch) -> Non
 
 
 def test_serial_port_present_platform_uart_by_path(monkeypatch) -> None:
-    """A platform UART counts as present by its ``/dev`` node, not by a scan.
+    """A platform UART is present if its ``/dev`` node exists. A scan does not decide this.
 
-    A soldered UART (``/dev/ttyS1`` on the Luckfox Lyra) is invisible to pyserial's
-    ``comports()``, but its char-device node persists — so an existing character
-    device reads as present, while a vanished node (a real USB unplug of
-    ``/dev/ttyUSB*``) still reads as absent.
+    ``comports()`` of pyserial does not list a soldered UART (``/dev/ttyS1`` on the Luckfox
+    Lyra), but its character-device node stays. Thus a character device that exists is
+    present. A node that is gone (a real USB unplug of ``/dev/ttyUSB*``) is absent.
     """
     pytest.importorskip("serial")
     import os as _os
@@ -1131,20 +1195,22 @@ def test_serial_port_present_platform_uart_by_path(monkeypatch) -> None:
 
     from serial.tools import list_ports
 
-    monkeypatch.setattr(list_ports, "comports", list)  # platform UARTs aren't enumerated -> []
+    # The scan does not list platform UARTs, so it gives [].
+    monkeypatch.setattr(list_ports, "comports", list)
     monkeypatch.setattr(_os.path, "exists", lambda p: p == "/dev/ttyS1")
     monkeypatch.setattr(_os, "stat", lambda p: SimpleNamespace(st_mode=_stat.S_IFCHR))
 
-    assert connection.serial_port_present("/dev/ttyS1")  # existing char device -> present
-    assert not connection.serial_port_present("/dev/ttyUSB9")  # node gone -> absent (unplug)
+    # A character device that exists is present. A node that is gone is absent (an unplug).
+    assert connection.serial_port_present("/dev/ttyS1")
+    assert not connection.serial_port_present("/dev/ttyUSB9")
 
 
 async def test_serial_link_check_walks_the_ports_off_the_event_loop(monkeypatch) -> None:
-    """The liveness poll never runs the port walk on the loop the screen paints from.
+    """The liveness poll never runs the port walk on the loop from which the screen paints.
 
-    The walk is hundreds of small sysfs reads, each one waiting its turn for the GIL; with
-    a map frame being drawn on a worker thread, running it on the loop froze the PicoCalc's
-    screen for up to 1.2 s every two seconds.
+    The walk is hundreds of small sysfs reads, and each read waits for its turn at the GIL.
+    A worker thread draws a map frame at the same time. When the walk ran on the loop, the
+    screen of the PicoCalc froze for up to 1.2 s in each two seconds.
     """
     import threading
 
@@ -1162,11 +1228,12 @@ async def test_serial_link_check_walks_the_ports_off_the_event_loop(monkeypatch)
 
 
 async def test_wait_for_disconnect_fires_when_port_vanishes(tmp_path: Path, monkeypatch) -> None:
-    """The liveness watcher resolves once the connected device's port leaves enumeration."""
+    """The liveness watcher resolves when the port of the connected device leaves the list."""
     ctx = _make_ctx(tmp_path)
-    # Pose as a live real-hardware session on COM_TEST (the mock can't be unplugged).
+    # The test acts as a live session with real hardware on COM_TEST. Nobody can unplug the
+    # simulator.
     ctx.mock = False
-    ctx._device = _FakeSerialDevice("COM_TEST")  # connected device; is_connected -> True
+    ctx._device = _FakeSerialDevice("COM_TEST")  # The device is connected, so is_connected is True.
     ctx._active_transport = "serial"
     ctx._active_port = "COM_TEST"
 
@@ -1174,7 +1241,7 @@ async def test_wait_for_disconnect_fires_when_port_vanishes(tmp_path: Path, monk
 
     def fake_present(port: str) -> bool:
         checks["n"] += 1
-        return checks["n"] < 2  # present on the first poll, gone thereafter
+        return checks["n"] < 2  # The port is present on the first poll, and gone after that.
 
     monkeypatch.setattr(connection, "serial_port_present", fake_present)
     monkeypatch.setattr(menu, "_LIVENESS_POLL_S", 0.0)
@@ -1186,7 +1253,7 @@ async def test_wait_for_disconnect_fires_when_port_vanishes(tmp_path: Path, monk
 
 
 async def test_wait_for_disconnect_ignores_the_simulator(tmp_path: Path) -> None:
-    """The watcher never fires for --mock: the simulator has no port to lose."""
+    """The watcher never fires for --mock, because the simulator has no port to lose."""
     ctx = _make_ctx(tmp_path)  # mock=True
     try:
         with pytest.raises(asyncio.TimeoutError):
@@ -1198,37 +1265,39 @@ async def test_wait_for_disconnect_ignores_the_simulator(tmp_path: Path) -> None
 async def test_wait_for_disconnect_fires_on_an_announced_reboot(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """A reboot we sent fires the watcher at once, though the port never goes away.
+    """A reboot that MeshTerm sent fires the watcher at once, but the port does not go away.
 
-    A board behind a USB-UART bridge keeps its port through a reboot, so the poll alone
-    would never see the drop; the announcement is the evidence.
+    A board behind a USB-UART bridge keeps its port during a reboot. Thus the poll alone
+    does not see the drop. The announcement is the evidence.
     """
     ctx = _make_ctx(tmp_path)
     ctx.mock = False
     ctx._device = _FakeSerialDevice("COM_TEST")
     ctx._active_transport = "serial"
     ctx._active_port = "COM_TEST"
-    monkeypatch.setattr(connection, "serial_port_present", lambda port: True)  # never leaves
+    # The port never leaves.
+    monkeypatch.setattr(connection, "serial_port_present", lambda port: True)
     try:
         watcher = asyncio.ensure_future(menu._wait_for_disconnect(ctx))
         await asyncio.sleep(0)
         assert not watcher.done()
         ctx.announce_reboot()
-        await asyncio.wait_for(watcher, timeout=0.5)  # well inside one liveness poll
+        await asyncio.wait_for(watcher, timeout=0.5)  # This is less than one liveness poll.
         assert ctx.take_reboot() is True
-        assert ctx.take_reboot() is False  # consumed: the next drop reads as an unplug
-        with pytest.raises(asyncio.TimeoutError):  # and the next watcher waits for one
+        # The first call consumed the reboot, so the next drop is an unplug.
+        assert ctx.take_reboot() is False
+        with pytest.raises(asyncio.TimeoutError):  # Also, the next watcher waits for one.
             await asyncio.wait_for(menu._wait_for_disconnect(ctx), timeout=0.2)
     finally:
         ctx.repo.close()
 
 
 async def test_reboot_does_not_wait_for_an_acknowledgement_that_never_comes() -> None:
-    """A reboot write the board never acknowledges returns at once, not at link loss.
+    """A reboot write that the board never acknowledges returns at once, not at the link loss.
 
-    Over Bluetooth the write is a write-with-response, and a board that restarts on the
-    command can drop the link before acknowledging it; waiting that out held the reboot
-    dialog back by the supervision timeout.
+    Over Bluetooth, the write is a write with a response. A board that restarts on the
+    command can drop the link before it acknowledges the write. MeshTerm once waited for
+    this, and the reboot dialog stayed open until the supervision timeout.
     """
     ended = asyncio.Event()
 
@@ -1241,16 +1310,16 @@ async def test_reboot_does_not_wait_for_an_acknowledgement_that_never_comes() ->
     device = connection.MeshCoreDevice(port="mock")
     device._mc = SimpleNamespace(commands=SimpleNamespace(reboot=never_acknowledged))
     await asyncio.wait_for(device.reboot(), timeout=1.0)
-    assert len(connection._REBOOT_WRITES) == 1  # still pending, and still referenced
+    assert len(connection._REBOOT_WRITES) == 1  # The write is still pending, and a set holds it.
     for write in list(connection._REBOOT_WRITES):
-        write.cancel()  # the teardown that follows a reboot
+        write.cancel()  # This is the teardown that follows a reboot.
     await asyncio.wait_for(ended.wait(), timeout=1.0)
     await asyncio.sleep(0)
     assert not connection._REBOOT_WRITES
 
 
 async def test_reboot_still_raises_a_write_that_fails_outright() -> None:
-    """Returning early is for a write left hanging; one that fails at once still raises."""
+    """The early return is for a write that hangs. A write that fails at once still raises."""
 
     async def refused() -> None:
         raise RuntimeError("not connected")
@@ -1262,10 +1331,10 @@ async def test_reboot_still_raises_a_write_that_fails_outright() -> None:
 
 
 class _FakeBleDevice:
-    """A minimal stand-in for a connected BLE :class:`Device` in liveness tests.
+    """A minimal stand-in for a connected BLE :class:`Device` in the liveness tests.
 
-    Its :meth:`link_present` reads an ``is_connected`` flag, mirroring how the real BLE
-    device reads the meshcore client's connection state.
+    Its :meth:`link_present` reads an ``is_connected`` flag. The real BLE device reads the
+    connection state of the meshcore client in the same way.
     """
 
     transport = "ble"
@@ -1278,7 +1347,7 @@ class _FakeBleDevice:
 
 
 async def test_wait_for_disconnect_fires_when_ble_link_drops(tmp_path: Path, monkeypatch) -> None:
-    """The same watcher fires for BLE once the peripheral's connection flag flips false."""
+    """The same watcher fires for BLE when the connection flag of the peripheral becomes false."""
     ctx = _make_ctx(tmp_path)
     ctx.mock = False
     device = _FakeBleDevice()
@@ -1287,7 +1356,7 @@ async def test_wait_for_disconnect_fires_when_ble_link_drops(tmp_path: Path, mon
     ctx._active_address = "AA:BB:CC:DD:EE:FF"
 
     async def drop_soon() -> None:
-        device.is_connected = False  # the peripheral goes out of range
+        device.is_connected = False  # The peripheral goes out of range.
 
     monkeypatch.setattr(menu, "_LIVENESS_POLL_S", 0.0)
     monkeypatch.setattr(menu, "_LIVENESS_CONFIRM_S", 0.0)
@@ -1299,11 +1368,11 @@ async def test_wait_for_disconnect_fires_when_ble_link_drops(tmp_path: Path, mon
 
 
 class _FakeSession:
-    """A minimal stand-in for :class:`TuiSession` recording pushes/pops for dialog tests."""
+    """A minimal stand-in for :class:`TuiSession` that records pushes and pops for dialog tests."""
 
     def __init__(self) -> None:
         self.stack: list = []
-        self.root = None  # no menu ever declared itself: the dialog gets a blank base
+        self.root = None  # No menu declared itself as the root, so the dialog gets a blank base.
 
     def push(self, screen) -> None:
         self.stack.append(screen)
@@ -1319,20 +1388,20 @@ class _FakeSession:
 async def test_handle_disconnect_auto_reconnects_when_port_returns(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """The popup dismisses itself (no keypress) once the device's port re-appears."""
+    """The dialog closes itself, with no key press, when the port of the device appears again."""
     ctx = _make_ctx(tmp_path)
     ctx.mock = False
-    ctx._device = object()  # a connected stand-in
+    ctx._device = object()  # A stand-in for a connected device.
     ctx._active_port = "COM_TEST"
 
     polls = {"n": 0}
 
     def fake_present(port: str) -> bool:
         polls["n"] += 1
-        return polls["n"] >= 2  # absent on the first poll, back thereafter
+        return polls["n"] >= 2  # The port is absent on the first poll, and back after that.
 
     async def fake_reconnect(self: AppContext, *, ble_device: object | None = None) -> None:
-        self._device = object()  # a fresh connection
+        self._device = object()  # A new connection.
 
     monkeypatch.setattr(connection, "serial_port_present", fake_present)
     monkeypatch.setattr(AppContext, "reconnect", fake_reconnect)
@@ -1342,20 +1411,20 @@ async def test_handle_disconnect_auto_reconnects_when_port_returns(
     session = _FakeSession()
     try:
         quit_chosen = await asyncio.wait_for(menu._handle_disconnect(ctx, session), timeout=2.0)
-        assert quit_chosen is False  # reconnected, not quit
-        assert session.stack == []  # the popup was cleaned up
+        assert quit_chosen is False  # The app reconnected. The user did not quit.
+        assert session.stack == []  # The dialog was removed.
     finally:
         ctx.repo.close()
 
 
 async def test_handle_disconnect_quits_when_user_presses_quit(tmp_path: Path, monkeypatch) -> None:
-    """Pressing Enter (the Abort button) leaves, even while the device is still gone."""
+    """Enter (the Abort button) quits, also while the device is still gone."""
     ctx = _make_ctx(tmp_path)
     ctx.mock = False
     ctx._device = object()
     ctx._active_port = "COM_TEST"
 
-    # The port never comes back, so the only way out is the Quit button.
+    # The port never comes back, so the Quit button is the only way out.
     monkeypatch.setattr(connection, "serial_port_present", lambda port: False)
     monkeypatch.setattr(menu, "_LIVENESS_POLL_S", 0.0)
     monkeypatch.setattr(menu, "spinner_interval", lambda: 0.0)
@@ -1363,7 +1432,7 @@ async def test_handle_disconnect_quits_when_user_presses_quit(tmp_path: Path, mo
     session = _FakeSession()
 
     async def press_quit() -> None:
-        # Once the dialog is on the stack, deliver Enter to its Abort button.
+        # When the dialog is on the stack, send Enter to its Abort button.
         while not session.stack:
             await asyncio.sleep(0)
         session.stack[-1].handle("enter")
@@ -1380,30 +1449,30 @@ async def test_handle_disconnect_quits_when_user_presses_quit(tmp_path: Path, mo
 
 
 async def test_reconnect_dialog_aborts_on_enter_and_ignores_escape() -> None:
-    """Enter aborts (resolves ``"quit"``); Esc is inert so a stray keypress can't drop us."""
+    """Enter aborts (it resolves ``"quit"``). Esc does nothing, so a wrong key press cannot quit."""
     from meshterm.ui.tui import ReconnectDialog
 
     dialog = ReconnectDialog("Waiting…")
     dialog.future = asyncio.get_running_loop().create_future()
 
     dialog.handle("escape")
-    assert not dialog.future.done()  # Esc does nothing
+    assert not dialog.future.done()  # Esc does nothing.
 
     dialog.handle("enter")
     assert dialog.future.result() == "quit"
 
 
 async def _never() -> None:
-    """An awaitable that blocks forever (a stand-in for an idle worker/watcher)."""
+    """An awaitable that blocks for ever (a stand-in for an idle worker or watcher)."""
     await asyncio.Event().wait()
 
 
 async def test_session_loop_quits_without_touching_the_disconnect_path(monkeypatch) -> None:
-    """When the menu loop returns (user quit), the watcher is stopped and no dialog shows."""
+    """When the menu loop returns (the user quit), the watcher stops and no dialog shows."""
     handled = {"n": 0}
 
     async def fake_menu(ctx, session):
-        return None  # user quit at the menu
+        return None  # The user quit at the menu.
 
     async def fake_handle(ctx, session):
         handled["n"] += 1
@@ -1415,23 +1484,23 @@ async def test_session_loop_quits_without_touching_the_disconnect_path(monkeypat
 
     session = SimpleNamespace(reset=lambda: None)
     await asyncio.wait_for(menu._session_loop(object(), session), timeout=2)
-    assert handled["n"] == 0  # the disconnect path was never entered
+    assert handled["n"] == 0  # The code never entered the disconnect path.
 
 
 async def test_session_loop_cancels_worker_and_prompts_on_disconnect(monkeypatch) -> None:
-    """A disconnect while the menu is busy cancels the worker, clears the stack, and prompts."""
+    """A disconnect while the menu is busy cancels the worker, clears the stack, and asks."""
     resets = {"n": 0}
     cancelled = {"seen": False}
 
     async def busy_menu(ctx, session):
         try:
-            await asyncio.Event().wait()  # a tool is mid-flight; it must be cancelled
+            await asyncio.Event().wait()  # A tool is in progress. The loop must cancel it.
         except asyncio.CancelledError:
             cancelled["seen"] = True
             raise
 
     async def fires_now(ctx):
-        return None  # the port vanished
+        return None  # The port vanished.
 
     async def quit_at_dialog(ctx, session):
         return True
@@ -1442,29 +1511,29 @@ async def test_session_loop_cancels_worker_and_prompts_on_disconnect(monkeypatch
 
     session = SimpleNamespace(reset=lambda: resets.__setitem__("n", resets["n"] + 1))
     await asyncio.wait_for(menu._session_loop(object(), session), timeout=2)
-    assert cancelled["seen"]  # the in-flight worker was cancelled
-    assert resets["n"] == 1  # the stack was unwound before the dialog
+    assert cancelled["seen"]  # The loop cancelled the worker that was in progress.
+    assert resets["n"] == 1  # The loop unwound the stack before the dialog.
 
 
 async def test_session_loop_resumes_a_fresh_menu_after_reconnect(monkeypatch) -> None:
-    """After a reconnect the loop starts a new menu (and re-arms the watcher)."""
+    """After a reconnect the loop starts a new menu and arms the watcher again."""
     state = {"menu": 0, "watch": 0, "handle": 0}
 
     async def flaky_menu(ctx, session):
         state["menu"] += 1
         if state["menu"] == 1:
-            await asyncio.Event().wait()  # first pass: interrupted by the disconnect
-        return None  # second pass: user quits
+            await asyncio.Event().wait()  # First pass: the disconnect interrupts it.
+        return None  # Second pass: the user quits.
 
     async def watch(ctx):
         state["watch"] += 1
         if state["watch"] == 1:
-            return None  # fire once
-        await asyncio.Event().wait()  # never fire again
+            return None  # Fire one time.
+        await asyncio.Event().wait()  # Never fire again.
 
     async def reconnected(ctx, session):
         state["handle"] += 1
-        return False  # the device came back
+        return False  # The device came back.
 
     monkeypatch.setattr(menu, "_menu_loop", flaky_menu)
     monkeypatch.setattr(menu, "_wait_for_disconnect", watch)
@@ -1472,16 +1541,17 @@ async def test_session_loop_resumes_a_fresh_menu_after_reconnect(monkeypatch) ->
 
     session = SimpleNamespace(reset=lambda: None)
     await asyncio.wait_for(menu._session_loop(object(), session), timeout=2)
-    assert state["handle"] == 1  # one disconnect handled
-    assert state["menu"] == 2  # a fresh menu ran after reconnect
+    assert state["handle"] == 1  # The loop handled one disconnect.
+    assert state["menu"] == 2  # A new menu ran after the reconnect.
 
 
 class _WedgedMeshCore:
     """A fake meshcore client whose graceful ``disconnect()`` never returns.
 
-    Reproduces the library's dispatcher-stop deadlock (``queue.join()`` with events still
-    queued after the processor task exited), which used to hang MeshTerm's exit until the
-    watchdog force-killed the process. Records whether the forced path ran.
+    It reproduces a deadlock of the library when the dispatcher stops. In this deadlock,
+    ``queue.join()`` waits for events that are still in the queue after the processor task
+    exited. The deadlock once held the exit of MeshTerm until the watchdog killed the
+    process. The class records if the forced path ran.
     """
 
     def __init__(self) -> None:
@@ -1490,11 +1560,12 @@ class _WedgedMeshCore:
         self.raw_closed = False
 
     async def disconnect(self) -> None:
-        # Called both as the graceful teardown (via the manager-less attribute lookup on
-        # the client) and as the raw transport close. The graceful call wedges; the raw
-        # close is distinguished by the force-stop having run first.
+        # The code calls this method as the graceful teardown (through the attribute lookup on
+        # the client, with no manager) and as the raw transport close. The graceful call
+        # hangs. The raw close is the call that comes after the forced stop.
         if not self.force_stopped:
-            await asyncio.Event().wait()  # the dispatcher deadlock: never returns
+            # This is the deadlock of the dispatcher. It never returns.
+            await asyncio.Event().wait()
         self.raw_closed = True
 
     def stop(self) -> None:
@@ -1502,7 +1573,7 @@ class _WedgedMeshCore:
 
 
 async def test_disconnect_bounds_a_wedged_client_teardown(monkeypatch) -> None:
-    """A deadlocked graceful teardown is abandoned and the transport force-closed instead."""
+    """MeshTerm abandons a graceful teardown that deadlocks, and closes the transport by force."""
     monkeypatch.setattr(connection, "_DISCONNECT_TIMEOUT_S", 0.05)
     monkeypatch.setattr(connection, "_FORCE_DISCONNECT_TIMEOUT_S", 0.5)
 
@@ -1510,15 +1581,15 @@ async def test_disconnect_bounds_a_wedged_client_teardown(monkeypatch) -> None:
     wedged = _WedgedMeshCore()
     dev._mc = wedged
 
-    await asyncio.wait_for(dev.disconnect(), timeout=2.0)  # must not hang
+    await asyncio.wait_for(dev.disconnect(), timeout=2.0)  # It must not hang.
 
-    assert wedged.force_stopped  # the dispatcher task was cancelled synchronously
-    assert wedged.raw_closed  # the port/link was still released
-    assert dev._mc is None  # idempotent: a second disconnect is a no-op
+    assert wedged.force_stopped  # MeshTerm cancelled the dispatcher task at once.
+    assert wedged.raw_closed  # MeshTerm still released the port or link.
+    assert dev._mc is None  # A second disconnect does nothing.
 
 
 async def test_disconnect_graceful_path_needs_no_force(monkeypatch) -> None:
-    """A healthy teardown completes gracefully; the forced path is never entered."""
+    """A healthy teardown completes gracefully, and the code never enters the forced path."""
 
     class _HealthyMeshCore:
         def __init__(self) -> None:
@@ -1544,7 +1615,7 @@ async def test_disconnect_graceful_path_needs_no_force(monkeypatch) -> None:
 
 
 class _FakeBleDevice:
-    """A stand-in for a connected BLE :class:`Device` whose link has already dropped."""
+    """A stand-in for a connected BLE :class:`Device` whose link already dropped."""
 
     transport = "ble"
 
@@ -1568,7 +1639,7 @@ class _FakeBleDevice:
 
 
 def _ble_ctx(tmp_path: Path) -> AppContext:
-    """A context standing in for a live BLE session whose companion has just dropped."""
+    """A context that stands in for a live BLE session whose companion just dropped."""
     ctx = _make_ctx(tmp_path)
     ctx.mock = False
     ctx._device = _FakeBleDevice()
@@ -1580,14 +1651,15 @@ def _ble_ctx(tmp_path: Path) -> AppContext:
 async def test_ble_reconnect_waits_for_the_advertisement_and_hands_over_the_fresh_handle(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """BLE reconnects on hearing the companion, opening it with the handle just scanned."""
+    """BLE reconnects when it hears the companion, with the handle that the scan found."""
     ctx = _ble_ctx(tmp_path)
-    fresh = object()  # the live BLEDevice the scan produced
+    fresh = object()  # The live BLEDevice that the scan produced.
     scans: list[str] = []
 
     async def fake_find(address: str, timeout: float = 0.0) -> object | None:
         scans.append(address)
-        return fresh if len(scans) >= 2 else None  # silent on the first round, then heard
+        # The companion is silent on the first round, then the scan hears it.
+        return fresh if len(scans) >= 2 else None
 
     opened: list[object | None] = []
 
@@ -1603,11 +1675,12 @@ async def test_ble_reconnect_waits_for_the_advertisement_and_hands_over_the_fres
     session = _FakeSession()
     try:
         quit_chosen = await asyncio.wait_for(menu._handle_disconnect(ctx, session), timeout=2.0)
-        assert quit_chosen is False  # reconnected, not quit
-        # It waited for the device to be heard rather than blind-retrying the connect...
+        assert quit_chosen is False  # The app reconnected. The user did not quit.
+        # MeshTerm waited until it heard the device. It did not retry the connect blindly.
         assert scans == [ctx._active_address, ctx._active_address]
         assert len(opened) == 1
-        # ...and reopened it with the handle that scan produced, not a stale one.
+        # Then MeshTerm opened the device again with the handle that the scan produced. It
+        # did not use an old handle.
         assert opened == [fresh]
     finally:
         ctx.repo.close()
@@ -1616,7 +1689,7 @@ async def test_ble_reconnect_waits_for_the_advertisement_and_hands_over_the_fres
 async def test_ble_reconnect_releases_the_dead_link_before_scanning(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """The old link is put down first, so the peripheral is free to advertise again."""
+    """MeshTerm closes the old link first, so the peripheral can advertise again."""
     ctx = _ble_ctx(tmp_path)
     dead = ctx._device
     held_at_scan: list[bool] = []
@@ -1635,8 +1708,8 @@ async def test_ble_reconnect_releases_the_dead_link_before_scanning(
     session = _FakeSession()
     try:
         await asyncio.wait_for(menu._handle_disconnect(ctx, session), timeout=2.0)
-        assert dead.disconnected  # the dead companion was let go...
-        assert held_at_scan == [False]  # ...before we ever listened for it
+        assert dead.disconnected  # MeshTerm released the dead companion...
+        assert held_at_scan == [False]  # ...before it listened for the companion.
     finally:
         ctx.repo.close()
 
@@ -1644,29 +1717,32 @@ async def test_ble_reconnect_releases_the_dead_link_before_scanning(
 async def test_reconnect_prefers_the_freshly_scanned_ble_handle(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """A handle passed to reconnect opens the link; the startup scan's stale one is not reused."""
+    """A handle that the caller passes to reconnect opens the link.
+
+    MeshTerm does not use the old handle of the startup scan.
+    """
     address = "AA:BB:00:00:00:01"
     ctx = _make_ctx(tmp_path)
     ctx.mock = False
     ctx.ble_override = address
-    stale = object()  # what the picker's scan produced when the session opened
-    fresh = object()  # what the reconnect flow just heard advertising
+    stale = object()  # The handle that the scan of the picker produced when the session opened.
+    fresh = object()  # The handle of the peripheral that the reconnect flow just heard advertising.
     ctx.selected_device = DiscoveredDevice(
         transport="ble", address=address, name="MeshCore-Homestead", ble_device=stale
     )
     handles: list[object | None] = []
 
-    def fake_make_device(**kwargs: object):  # noqa: ANN202 - a stub stands in for the radio
+    def fake_make_device(**kwargs: object):  # noqa: ANN202 - a stub that stands in for the radio
         handles.append(kwargs.get("ble_device"))
         return _FakeBleDevice()
 
     monkeypatch.setattr(context_module, "make_device", fake_make_device)
     try:
         await ctx.reconnect(ble_device=fresh)
-        assert handles == [fresh]  # the freshly-scanned peripheral, never the stale handle
-        assert ctx._ble_handle is None  # consumed by the connection it opened
+        assert handles == [fresh]  # The handle of the new scan, never the old handle.
+        assert ctx._ble_handle is None  # The connection that it opened consumed the handle.
 
-        # With nothing scanned, the picker's handle is still the best available guess.
+        # If the reconnect has no new scan, the handle of the picker is still the best handle.
         await ctx.reconnect()
         assert handles == [fresh, stale]
     finally:
@@ -1674,27 +1750,28 @@ async def test_reconnect_prefers_the_freshly_scanned_ble_handle(
 
 
 async def test_release_link_is_idempotent_and_holds_the_resume_intent(tmp_path: Path) -> None:
-    """Releasing twice is harmless, and what was running is still restored on reconnect."""
+    """Two releases are harmless, and reconnect still restores what was running."""
     ctx = _make_ctx(tmp_path)
     try:
         await ctx.events.start()
         await ctx.monitor.start()
         await ctx.release_link()
-        assert not ctx.monitor.active  # the services rode the link down with it
-        await ctx.release_link()  # a second release finds nothing to do and says nothing
+        assert not ctx.monitor.active  # The services stopped when the link went down.
+        await ctx.release_link()  # A second release has nothing to do, and it says nothing.
 
         await ctx.reconnect()
 
-        assert ctx.events.active and ctx.monitor.active  # the held intent survived both
+        # The intent to resume survived both releases.
+        assert ctx.events.active and ctx.monitor.active
     finally:
         await ctx.aclose()
 
 
 class _AbandonedBleakClient:
-    """A ``bleak`` client whose peripheral vanished: already down, and never handed back.
+    """A ``bleak`` client whose peripheral vanished. It is already down, and nobody returns it.
 
-    Mirrors what the meshcore transport leaves behind on a dropped link — ``is_connected`` is
-    already ``False``, so every guarded teardown in the library declines to touch it.
+    The meshcore transport leaves this client when a link drops. ``is_connected`` is
+    already ``False``. Thus each guarded teardown in the library does not touch the client.
     """
 
     def __init__(self) -> None:
@@ -1706,53 +1783,58 @@ class _AbandonedBleakClient:
 
 
 class _DroppedBleConnection:
-    """meshcore's ``BLEConnection`` after its dropped-link callback ran: client reference gone."""
+    """The ``BLEConnection`` of meshcore after its callback for a dropped link ran.
+
+    The reference to the client is gone.
+    """
 
     def __init__(self) -> None:
-        self.client = None  # handle_disconnect restored this to the constructor's value
+        self.client = None  # handle_disconnect set this to the value that the constructor had.
         self.disconnect_calls = 0
 
     async def disconnect(self) -> None:
-        self.disconnect_calls += 1  # guards on self.client — reaches nothing
+        self.disconnect_calls += 1  # This guards on self.client, so it reaches nothing.
 
 
 class _DroppedMeshCore:
-    """A meshcore client whose connection manager also believes it is already disconnected."""
+    """A meshcore client whose connection manager also believes that it is already disconnected."""
 
     def __init__(self, connection: _DroppedBleConnection) -> None:
         self.connection_manager = SimpleNamespace(connection=connection)
         self.disconnected = False
 
     async def disconnect(self) -> None:
-        self.disconnected = True  # guards on _is_connected — reaches nothing
+        self.disconnected = True  # This guards on _is_connected, so it reaches nothing.
 
     def stop(self) -> None:
         pass
 
 
 async def test_a_vanished_peripheral_still_gets_its_bleak_client_closed() -> None:
-    """The client is released even though every library guard says there is nothing to close."""
+    """MeshTerm releases the client, also if each guard of the library says nothing is open."""
     dev = connection.MeshCoreDevice(transport="ble", address="AA:BB:00:00:00:01")
     dropped = _DroppedBleConnection()
     dev._mc = _DroppedMeshCore(dropped)
     abandoned = _AbandonedBleakClient()
-    dev._ble_client = abandoned  # what we kept hold of at connect
+    dev._ble_client = abandoned  # The client that MeshTerm kept at the connect step.
 
     await dev.disconnect()
 
-    # The library's own teardown reached nothing — the connection had already let the client go.
+    # The teardown of the library reached nothing, because the connection already let the
+    # client go.
     assert dropped.client is None
-    # Ours closed it anyway, which is what frees the WinRT handles the next connect needs.
+    # The teardown of MeshTerm closed the client in spite of this. This releases the WinRT
+    # handles that the next connect needs.
     assert abandoned.disconnect_calls == 1
-    assert dev._ble_client is None  # and it is not closed twice
+    assert dev._ble_client is None  # MeshTerm does not close the client two times.
     assert dev._mc is None
 
 
 async def test_releasing_the_bleak_client_is_idempotent_and_never_raises() -> None:
-    """A second disconnect finds nothing to do, and a failing close is swallowed."""
+    """A second disconnect has nothing to do, and MeshTerm ignores a close that fails."""
     dev = connection.MeshCoreDevice(transport="ble", address="AA:BB:00:00:00:01")
 
-    await dev.disconnect()  # nothing connected at all
+    await dev.disconnect()  # Nothing is connected.
     assert dev._ble_client is None
 
     class _RefusesToClose:
@@ -1762,12 +1844,12 @@ async def test_releasing_the_bleak_client_is_idempotent_and_never_raises() -> No
             raise OSError("the handle is invalid")
 
     dev._ble_client = _RefusesToClose()
-    await dev.disconnect()  # must not raise: teardown is best-effort
+    await dev.disconnect()  # It must not raise, because the teardown is a best effort.
     assert dev._ble_client is None
 
 
 async def test_a_healthy_bluetooth_teardown_still_releases_the_client() -> None:
-    """The graceful path runs as before, and the client is released after it."""
+    """The graceful path runs as before, and MeshTerm releases the client after it."""
     dev = connection.MeshCoreDevice(transport="ble", address="AA:BB:00:00:00:01")
 
     class _HealthyMeshCore:
@@ -1791,15 +1873,15 @@ async def test_a_healthy_bluetooth_teardown_still_releases_the_client() -> None:
     await dev.disconnect()
 
     assert healthy.disconnected
-    assert not healthy.force_stopped  # the graceful path was enough, as it always was
-    assert live.disconnect_calls == 1  # and the client is released regardless
+    assert not healthy.force_stopped  # The graceful path was enough, as it always was.
+    assert live.disconnect_calls == 1  # Also, MeshTerm released the client in each case.
 
 
-# --- What the reader is told when a connection won't open --------------------------------------
+# --- What the user sees when a connection does not open ----------------------------------------
 
 
 def _refusal() -> Exception:
-    """A connect failure as the context raises it: its own wrapper round the named sentence."""
+    """A connect failure as the context raises it: its own wrapper around the named sentence."""
     from meshterm.core.selection import DeviceSelectionError
 
     try:
@@ -1815,10 +1897,11 @@ def _refusal() -> Exception:
 
 
 async def test_a_device_that_failed_to_open_is_not_kept(tmp_path: Path, monkeypatch) -> None:
-    """After a failed open, nothing claims to be connected, and the next caller tries again.
+    """After an open that failed, nothing claims to be connected, and the next caller tries again.
 
-    The device used to stay behind unopened: ``is_connected`` said yes, and every tool after
-    a failed start was handed it and failed with "not connected" instead of the reason.
+    The device once stayed in the context without an open connection. ``is_connected`` said
+    yes. Each tool that ran after the failed start got this device, and it failed with "not
+    connected" and not with the reason.
     """
     from meshterm.core.selection import DeviceSelectionError
 
@@ -1847,20 +1930,20 @@ async def test_a_device_that_failed_to_open_is_not_kept(tmp_path: Path, monkeypa
             with pytest.raises(DeviceSelectionError, match="port 5000"):
                 await ctx.device()
             assert not ctx.is_connected
-            assert len(built) == attempt  # a fresh attempt each time, not the dead one back
-        assert built[0].disconnects == 1  # whatever half of it opened was put down
+            assert len(built) == attempt  # Each time is a new attempt. It is not the dead device.
+        assert built[0].disconnects == 1  # MeshTerm closed the part of it that opened.
     finally:
         ctx.repo.close()
 
 
 def test_a_failure_reads_as_the_connection_s_own_sentence() -> None:
-    """The dialog shows the named sentence, not the context's wrapper repeating the endpoint."""
+    """The dialog shows the named sentence, not the wrapper that repeats the endpoint."""
     from meshterm.ui.device_picker import connect_failure_text
 
     text = connect_failure_text(_refusal())
     assert text.plain.startswith("COM_TEST is in use by another program")
     assert "could not open serial port" not in text.plain
-    assert "The full error" not in text.plain  # a named failure: the log has nothing more
+    assert "The full error" not in text.plain  # The failure has a name, so the log has no more.
 
 
 @pytest.mark.parametrize(
@@ -1874,10 +1957,10 @@ def test_a_failure_reads_as_the_connection_s_own_sentence() -> None:
     ],
 )
 def test_a_dialog_capitalises_a_plain_word_and_never_a_name(sentence: str, shown: str) -> None:
-    """A dialog capitalises the command line's lowercase sentence, but never a name.
+    """A dialog capitalizes the lowercase sentence of the command line, but never a name.
 
-    A sentence that starts with a port, a host, or an address keeps that spelling, since it
-    is the reader's to match against their own.
+    A sentence that starts with a port, a host, or an address keeps that spelling, because
+    the user must match it with their own spelling.
     """
     from meshterm.ui.device_picker import connect_failure_text
 
@@ -1885,7 +1968,7 @@ def test_a_dialog_capitalises_a_plain_word_and_never_a_name(sentence: str, shown
 
 
 def test_an_unrecognised_failure_says_where_the_log_is(monkeypatch, tmp_path: Path) -> None:
-    """Only a failure MeshTerm couldn't name points at the log, and only if the log took it."""
+    """Only a failure that MeshTerm cannot name points to the log, and only if the log has it."""
     from meshterm.ui import device_picker
 
     log = tmp_path / "meshterm.log"
@@ -1894,15 +1977,16 @@ def test_an_unrecognised_failure_says_where_the_log_is(monkeypatch, tmp_path: Pa
     text = device_picker.connect_failure_text(odd)
     assert text.plain == f"Couldn't connect to COM5: [WinError 31] odd\nThe full error is in {log}"
 
-    monkeypatch.setattr(device_picker, "log_file_for", lambda level: None)  # log level ERROR
+    # The log level is ERROR.
+    monkeypatch.setattr(device_picker, "log_file_for", lambda level: None)
     assert "The full error" not in device_picker.connect_failure_text(odd).plain
 
 
 async def test_reconnect_says_why_once_the_failure_persists(tmp_path: Path, monkeypatch) -> None:
     """A device that is back but refuses gets its reason under the spinner, not a silent wait.
 
-    The first failure is let go (a board can refuse once while it boots), so the reason
-    appears from the second.
+    MeshTerm ignores the first failure, because a board can refuse one time while it boots.
+    Thus the reason appears from the second failure.
     """
     from rich.text import Text
 
@@ -1934,8 +2018,8 @@ async def test_reconnect_says_why_once_the_failure_persists(tmp_path: Path, monk
     try:
         await asyncio.wait_for(menu._auto_reconnect(ctx, dialog), timeout=2.0)
         assert dialog.future.result() == "reconnected"
-        assert "in use by another program" not in seen[1]  # one failure: just retried
-        assert "in use by another program" in seen[2]  # two: said
+        assert "in use by another program" not in seen[1]  # After one failure, it only retried.
+        assert "in use by another program" in seen[2]  # After two failures, the dialog says why.
         assert "Still trying to reconnect" in seen[2]
     finally:
         ctx.repo.close()
@@ -1944,7 +2028,7 @@ async def test_reconnect_says_why_once_the_failure_persists(tmp_path: Path, monk
 async def test_reconnect_forgets_the_reason_when_the_device_goes_again(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """Unplugged after it refused, the device is waited for again, not still called refusing."""
+    """If the user unplugs the device after it refused, MeshTerm waits for it again."""
     from rich.text import Text
 
     from meshterm.ui.tui import ReconnectDialog
@@ -1955,7 +2039,8 @@ async def test_reconnect_forgets_the_reason_when_the_device_goes_again(
     ctx._active_port = "COM_TEST"
     dialog = ReconnectDialog("Waiting for your device — reconnect it to resume.")
     dialog.future = asyncio.get_running_loop().create_future()
-    present = iter([True, True, False, True])  # refuses twice, is pulled, comes back
+    # The device refuses two times, the user pulls it, and it comes back.
+    present = iter([True, True, False, True])
     bodies: list[str] = []
 
     def port_present(_port: str) -> bool:
@@ -1978,8 +2063,9 @@ async def test_reconnect_forgets_the_reason_when_the_device_goes_again(
     monkeypatch.setattr(menu, "_LIVENESS_POLL_S", 0.0)
     try:
         await asyncio.wait_for(menu._auto_reconnect(ctx, dialog), timeout=2.0)
-        assert "in use by another program" in bodies[2]  # said, while it was refusing
-        assert "in use by another program" not in bodies[3]  # gone again: waited for
+        assert "in use by another program" in bodies[2]  # The dialog says why, while it refuses.
+        # The device is gone again, so MeshTerm waits.
+        assert "in use by another program" not in bodies[3]
         assert "Waiting for your device" in bodies[3]
     finally:
         ctx.repo.close()
@@ -1988,7 +2074,7 @@ async def test_reconnect_forgets_the_reason_when_the_device_goes_again(
 async def test_a_radio_that_will_not_start_is_reported_before_the_menu(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """With the device named on the command line there is no picker, so startup says why."""
+    """If the command line names the device, there is no picker, so the startup says why."""
     ctx = _make_ctx(tmp_path)
     notes: list = []
 
@@ -2004,7 +2090,7 @@ async def test_a_radio_that_will_not_start_is_reported_before_the_menu(
     try:
         failure = await menu._resume_monitor(ctx)
         assert failure is not None
-        assert not ctx.chat.active  # not a second try at the same refusal
+        assert not ctx.chat.active  # There is no second try at the same refusal.
         await menu._report_startup_failure(ctx, failure)
         [(title, plain)] = notes
         assert title == "Can't connect yet"
@@ -2015,7 +2101,7 @@ async def test_a_radio_that_will_not_start_is_reported_before_the_menu(
 
 
 class _ToolUi:
-    """Collects what a tool run leaves for its result dialog."""
+    """Collects what a run of a tool leaves for its result dialog."""
 
     def __init__(self) -> None:
         self.buffer: list = []
@@ -2037,7 +2123,7 @@ class _ToolUi:
 
 
 async def _run_failing_tool(tmp_path: Path, monkeypatch, exc: Exception) -> _ToolUi:
-    """Run a menu tool that raises ``exc``, and return what it left to show."""
+    """Run a menu tool that raises ``exc``, and return what the tool left to show."""
     from meshterm import tools
 
     class _Tool:
@@ -2058,9 +2144,9 @@ async def _run_failing_tool(tmp_path: Path, monkeypatch, exc: Exception) -> _Too
 
 
 async def test_a_tool_whose_radio_never_opened_says_why(tmp_path: Path, monkeypatch) -> None:
-    """A connect that failed reads as the connection's sentence, even if it looks like a lost link.
+    """A connect that failed shows the sentence of the connection, also for a lost link.
 
-    The watcher has nothing connected to notice, so nothing else would say it.
+    The watcher has no connected device to notice, so no other code says the reason.
     """
     from meshterm.core.selection import DeviceSelectionError
 
@@ -2077,7 +2163,7 @@ async def test_a_tool_whose_radio_never_opened_says_why(tmp_path: Path, monkeypa
 
 
 async def test_a_tool_failure_shows_the_error_s_brackets(tmp_path: Path, monkeypatch) -> None:
-    """A library's bracketed words are shown, not swallowed as a markup tag."""
+    """The bracketed words of a library are shown. The markup does not take them as a tag."""
     exc = RuntimeError("[org.bluez.Error.Failed] le-connection-abort-by-local")
     ui = await _run_failing_tool(tmp_path, monkeypatch, exc)
     [text] = ui.buffer

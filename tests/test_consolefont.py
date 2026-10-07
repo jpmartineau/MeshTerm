@@ -1,15 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for the bundled console font and the machinery that installs and selects it.
+"""Tests for the bundled console font and the code that installs and selects it.
 
-The Win32 half cannot be exercised off Windows, and should not be exercised *on* it by a
-test suite — installing a font is a change to the machine, and one that cannot be undone
-inside a session (Windows locks the file once it is loaded). So what is pinned here is
-everything that can be checked without touching the system: that the font we ship is the
-font we say we ship, that it can actually draw what MeshTerm draws, and that every entry
-point degrades rather than raises where there is no console to talk to.
+A test cannot run the Win32 part of the code off Windows. A test suite must not run it on
+Windows either. The installation of a font changes the machine, and a session cannot undo
+the change, because Windows locks the file when it loads the font. Thus these tests check
+only what they can check without a change to the system:
 
-The font's own coverage is asserted from its ``cmap``, which makes this the desktop
-counterpart to :mod:`meshterm.ui.fontset` — the PicoCalc's device-verified inventory.
+- The font that MeshTerm ships is the font that MeshTerm says it ships.
+- The font can draw what MeshTerm draws.
+- Each entry point does its work in a reduced way, and does not raise an exception, when
+  there is no console to talk to.
+
+The tests make assertions about the coverage of the font from its ``cmap``. Thus these
+tests are the equivalent, on the desktop, of :mod:`meshterm.ui.fontset`. That module is
+the inventory of the PicoCalc, which tests on the handheld verified.
 """
 
 from __future__ import annotations
@@ -27,10 +31,10 @@ BRAILLE = range(0x2800, 0x2900)
 
 
 def _cmap(path: Path) -> set[int]:
-    """Every codepoint a TrueType font maps, read from its ``cmap`` table.
+    """Each codepoint that a TrueType font maps, read from its ``cmap`` table.
 
-    A short format-4 reader rather than a dependency: the question asked here is narrow
-    and the alternative is trusting a font file we ship without ever looking inside it.
+    This is a short reader for format 4, and not a dependency. The question here is narrow.
+    The other choice is to trust a font file that MeshTerm ships, with no look inside it.
     """
     data = path.read_bytes()
     count = struct.unpack(">H", data[4:6])[0]
@@ -73,7 +77,10 @@ def _cmap(path: Path) -> set[int]:
 
 
 def test_the_font_we_ship_is_present_with_its_licence() -> None:
-    """It is redistributed under the SIL OFL, which travels with the file or not at all."""
+    """The font that MeshTerm ships is there with its licence.
+
+    MeshTerm redistributes the font under the SIL OFL. The licence must go with the file.
+    """
     assert consolefont.BUNDLED_FONT.is_file()
     licence = consolefont.FONT_DIR / "CascadiaMono-OFL.txt"
     assert licence.is_file()
@@ -83,12 +90,14 @@ def test_the_font_we_ship_is_present_with_its_licence() -> None:
 
 
 def test_the_bundled_font_can_draw_the_charts() -> None:
-    """The reason this font and not another: it has the braille block, and few do.
+    """The bundled font can draw the charts.
 
-    Measured across every font on a development machine, no mainstream coder font carried
-    it — Hack Nerd Font, JetBrains Mono, Fira Code, Source Code Pro and even DejaVu Sans
-    *Mono* all hold none of the 256. Shipping one that cannot draw a chart would leave the
-    offer technically successful and visibly pointless.
+    This is the reason for this font and not another: it has the braille block, and few
+    fonts have it. A measurement of all the fonts on a development machine showed that no
+    common coder font has the block. Hack Nerd Font, JetBrains Mono, Fira Code, Source Code
+    Pro, and also DejaVu Sans Mono have none of the 256 characters. If MeshTerm shipped a
+    font that cannot draw a chart, the offer would succeed in a technical sense, and it
+    would have no visible effect.
     """
     covered = _cmap(consolefont.BUNDLED_FONT)
     missing = [cp for cp in BRAILLE if cp not in covered]
@@ -96,10 +105,11 @@ def test_the_bundled_font_can_draw_the_charts() -> None:
 
 
 def test_the_bundled_font_covers_the_marks_and_the_path_chips() -> None:
-    """The rest of what a classic console has to draw from its font alone.
+    """The bundled font covers the marks and the path chips.
 
-    The powerline separators are why the ``PL`` build is the one bundled rather than the
-    plain one: 25KB more, and the path lines keep their chips.
+    These are the other characters that a classic console must draw from its font only.
+    The powerline separators are the reason that MeshTerm bundles the ``PL`` build and not
+    the plain build. The ``PL`` build is 25 KB larger, and the path lines keep their chips.
     """
     covered = _cmap(consolefont.BUNDLED_FONT)
     for mark in "✓❯◉●○▲■─│╭╮╰╯▌▐░▒▓█←↑→↓↔↕…":
@@ -109,10 +119,11 @@ def test_the_bundled_font_covers_the_marks_and_the_path_chips() -> None:
 
 
 def test_the_bundled_face_is_what_the_font_calls_itself() -> None:
-    """``SetCurrentConsoleFontEx`` matches on the family name exactly, so a typo is silent.
+    """The bundled face is the name that the font gives itself.
 
-    It would install the font, fail to select it, and report a console that "kept its own
-    font" — with nothing anywhere naming the real cause.
+    ``SetCurrentConsoleFontEx`` matches the family name exactly, so a typo gives no
+    message. The code would install the font and fail to select it. Then it would report a
+    console that "kept its own font", and no message would name the real cause.
     """
     data = consolefont.BUNDLED_FONT.read_bytes()
     count = struct.unpack(">H", data[4:6])[0]
@@ -135,32 +146,36 @@ def test_the_bundled_face_is_what_the_font_calls_itself() -> None:
 
 
 def test_the_bundled_face_is_one_we_would_accept() -> None:
-    """The font we install has to satisfy the check that decides whether to offer it.
+    """The bundled face is a face that MeshTerm accepts.
 
-    Otherwise MeshTerm installs it, selects it, and offers again on the next launch.
+    The font that MeshTerm installs must pass the check that decides whether to make the
+    offer. If it does not, MeshTerm installs it, selects it, and makes the offer again at
+    the next start.
     """
     assert face_draws_charts(consolefont.BUNDLED_FACE)
 
 
 def test_chart_fonts_are_matched_by_family_however_spelled() -> None:
-    """Cascadia ships plain, PL and NF builds, and the Nerd Font patches rename it.
+    """The code matches chart fonts by family, in any spelling.
 
-    Matched on the *family* name, which is what a terminal's config, the ``HKCU``
-    registration and ``SetCurrentConsoleFontEx`` all speak — never the filename. Those
-    differ here: ``CascadiaMonoPL.ttf`` calls itself ``Cascadia Mono PL``, spaced.
+    Cascadia has plain, PL, and NF builds, and the Nerd Font patches rename it. The code
+    matches the family name. The config of a terminal, the ``HKCU`` registration, and
+    ``SetCurrentConsoleFontEx`` all use the family name. They never use the file name. The
+    two differ here: ``CascadiaMonoPL.ttf`` calls itself ``Cascadia Mono PL``, with spaces.
     """
     assert face_draws_charts("Cascadia Mono")
     assert face_draws_charts("Cascadia Mono PL")
     assert face_draws_charts("Cascadia Mono NF")
-    assert face_draws_charts("  cascadia   code  ")  # spacing and case are normalised
+    assert face_draws_charts("  cascadia   code  ")  # the code normalizes the spacing and the case
     assert face_draws_charts("CaskaydiaCove Nerd Font Mono")
 
 
 def test_the_fonts_that_cannot_draw_charts_are_not_claimed() -> None:
-    """Every one of these was measured at zero braille cells; a wrong yes here is a lie.
+    """The code does not claim the fonts that cannot draw charts.
 
-    It would leave a reader on a classic console with boxes for charts and no offer to
-    fix them, which is the exact failure the whole check exists to prevent.
+    A measurement gave zero braille cells for each of these fonts. A wrong yes here is not
+    true. Then a user on a classic console would see boxes for charts, with no offer to
+    correct them. The whole check exists to prevent exactly this failure.
     """
     for face in (
         "Consolas",
@@ -178,24 +193,39 @@ def test_the_fonts_that_cannot_draw_charts_are_not_claimed() -> None:
 
 
 def test_every_chart_font_entry_is_normalised() -> None:
-    """The list is compared against normalised faces, so an entry with capitals never hits."""
+    """Each chart font entry is normalized.
+
+    The code compares the list with normalized faces. Thus an entry with capitals never
+    matches.
+    """
     for entry in CHART_FONTS:
         assert entry == entry.lower().strip()
         assert "  " not in entry
 
 
 def test_asking_the_machine_what_it_has_never_raises() -> None:
-    """Best-effort, on every platform: a font scan that throws would take startup with it."""
+    """A query of the machine for its fonts never raises an exception.
+
+    The code does its best on each platform. A font scan that raises an exception would
+    stop the start of the app.
+    """
     assert installed_chart_font() is None or isinstance(installed_chart_font(), str)
 
 
 def test_reading_the_console_font_never_raises() -> None:
-    """Under pytest there is no console worth asking, and the answer must simply be None."""
+    """A read of the console font never raises an exception.
+
+    Under pytest there is no console to ask, and the answer must be None.
+    """
     assert consolefont.current_face() is None or isinstance(consolefont.current_face(), str)
 
 
 def test_the_user_font_directory_is_under_the_users_own_profile() -> None:
-    """The whole point of the per-user location: no administrator rights are involved."""
+    """The font directory of the user is in the own profile of the user.
+
+    This is the purpose of the location for each user: no administrator rights are
+    necessary.
+    """
     directory = consolefont.user_font_dir()
     assert directory.parts[-3:] == ("Microsoft", "Windows", "Fonts")
     assert "AppData" in str(directory) or "Local" in str(directory)
@@ -203,12 +233,20 @@ def test_the_user_font_directory_is_under_the_users_own_profile() -> None:
 
 @pytest.mark.skipif(sys.platform == "win32", reason="would touch the real machine")
 def test_installing_is_a_no_op_where_there_are_no_windows_fonts() -> None:
-    """Off Windows the offer is never made, and the install refuses rather than pretends."""
+    """The install does nothing where there are no Windows fonts.
+
+    Off Windows, MeshTerm never makes the offer. The install refuses, and it does not
+    pretend to succeed.
+    """
     assert consolefont.install_bundled_font() is False
     assert consolefont.select("Cascadia Mono PL") is False
     assert consolefont.use("Cascadia Mono PL") is False
 
 
 def test_a_font_resource_is_only_added_from_a_file_that_exists(tmp_path: Path) -> None:
-    """The retry path takes a path that may well not be there, and must not raise on it."""
+    """The code adds a font resource only from a file that exists.
+
+    The retry path can get a path for a file that is not there. It must not raise an
+    exception for it.
+    """
     assert consolefont._add_font_resource(tmp_path / "nothing.ttf") is False

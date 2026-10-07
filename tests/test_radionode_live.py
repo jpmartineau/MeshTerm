@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The SPI radio's node, run for real: the radio library with a fake radio underneath.
+"""The node of the SPI radio, run for real: the radio library with a fake radio under it.
 
-MeshTerm's own companion client talks to it over the loopback port exactly as it would on a
-uConsole. This is the only way to prove what the node exists for — that a channel written
-through MeshTerm is still there after the node restarts, which is the bug the node's state
-directory ended. Skipped where ``openhop_core`` isn't installed (it is in the dev extra).
+The companion client of MeshTerm talks to the node through the loopback port, as it does on
+a uConsole. This is the only way to prove the purpose of the node: a channel that MeshTerm
+writes is still there after the node restarts. The state directory of the node ended this
+bug. The tests are skipped where ``openhop_core`` is not installed (it is in the dev extra).
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ openhop_core = pytest.importorskip("openhop_core")
 
 
 class _FakeRadio:
-    """Just enough of an SX1262 for the node to come up and sit listening."""
+    """An SX1262 with only the parts that the node needs to start and listen."""
 
     instances: list[_FakeRadio] = []
 
@@ -71,7 +71,7 @@ def _fake_init(  # noqa: ANN202
     reset_pin=25,  # noqa: ANN001
     frequency=0,  # noqa: ANN001
     tx_power=0,  # noqa: ANN001
-    preamble_length=12,  # noqa: ANN001 - the library's own default, which must never survive
+    preamble_length=12,  # noqa: ANN001 - the default of the library, which must never stay
     **kwargs,  # noqa: ANN003
 ):
     _FakeRadio.__init__(
@@ -86,7 +86,7 @@ def _fake_init(  # noqa: ANN202
 
 
 class _Node:
-    """One run of the node in this process, stopped on request instead of by stdin."""
+    """One run of the node in this process. A request stops it, not stdin."""
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch, state: Path) -> None:
         import openhop_core.hardware.sx1262_wrapper as sx1262
@@ -116,7 +116,7 @@ class _Node:
         waiter = asyncio.create_task(ready.wait())
         await asyncio.wait({self.task, waiter}, timeout=20, return_when=asyncio.FIRST_COMPLETED)
         if self.task.done():
-            self.task.result()  # surface the node's own failure
+            self.task.result()  # show the failure of the node
         assert self.status.get("event") == "ready", self.status
         return int(self.status["port"])
 
@@ -138,7 +138,7 @@ async def _client(port: int):  # noqa: ANN202
 async def test_channels_name_and_radio_survive_a_restart(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The bug this node was built to end: a channel added through MeshTerm is forgotten."""
+    """The bug that this node ends: the node forgets a channel that MeshTerm added."""
     secret = bytes(range(16))
     async with _Node(monkeypatch, tmp_path) as port:
         device = await _client(port)
@@ -160,8 +160,8 @@ async def test_channels_name_and_radio_survive_a_restart(
     assert channel is not None and channel.get("channel_name") == "Lakeside ops"
     assert bytes(channel.get("channel_secret") or b"")[:16] == secret
     assert info.get("name") == "Lakeside"
-    # The chip is brought up on the saved radio, not the seed — and at SF11 with the
-    # preamble MeshCore sends there.
+    # The chip starts with the saved radio, not the seed. It uses SF11 and the preamble that
+    # MeshCore sends at that SF.
     assert _FakeRadio.instances[-1].kwargs["frequency"] == 869_525_000
     assert _FakeRadio.instances[-1].preamble_length == 16
 
@@ -170,7 +170,7 @@ async def test_channels_name_and_radio_survive_a_restart(
 async def test_a_cleared_channel_stays_cleared(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Clearing a slot through MeshTerm removes it from what the node restores."""
+    """If MeshTerm clears a slot, the node does not restore it."""
     async with _Node(monkeypatch, tmp_path) as port:
         device = await _client(port)
         try:
@@ -186,7 +186,7 @@ async def test_a_cleared_channel_stays_cleared(
 async def test_the_identity_is_the_same_node_after_a_restart(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The node comes back with the key it had, so it is still the same contact to everyone."""
+    """The node returns with the key that it had, so it is the same contact for everyone."""
     keys = []
     for _ in range(2):
         async with _Node(monkeypatch, tmp_path) as port:

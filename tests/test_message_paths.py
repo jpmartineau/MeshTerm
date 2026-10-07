@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Message-paths tests: matching a chat message back to its logged arrivals.
+"""Message-paths tests: the match of a chat message to its logged arrivals.
 
-Channel arrivals are matched by decrypting overheard GRP_TXT frames with the channel's
-own key (firmware-shaped frames are built here exactly as the packet-viewer tests build
-theirs); direct arrivals are matched by time alone. Everything runs against a real
-temporary repository, so the window query is exercised too.
+The tests match channel arrivals by a decrypt of the overheard GRP_TXT packets with the key
+of the channel. The tests build packets in the firmware form, in the same way as the
+packet-viewer tests. The tests match direct arrivals by time only. Everything runs against
+a real temporary repository, so the tests also use the window query.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ SECRET = derive_secret("#general")
 
 
 def _grp_txt_raw(secret: bytes, text: str, *, attempt: int = 0) -> dict:
-    """A firmware-shaped GRP_TXT packet payload for ``text``, encrypted under ``secret``."""
+    """A GRP_TXT packet payload in the firmware form for ``text``, encrypted with ``secret``."""
     plain = (0).to_bytes(4, "little") + bytes([attempt]) + text.encode("utf-8")
     plain += b"\x00" * (-len(plain) % 16)
     crypted = AES.new(secret, AES.MODE_ECB).encrypt(plain)
@@ -57,7 +57,7 @@ def _record_frame(repo: Repository, run_id: int, *, when, path: str, raw: dict, 
 
 
 def test_channel_arrivals_match_by_decrypted_content(tmp_path: Path) -> None:
-    """Every overheard copy of a channel message surfaces, each with its own path."""
+    """Each overheard copy of a channel message is found, and each has its own path."""
     repo, run = _repo(tmp_path)
     now = utcnow()
     wire = "Alice: hi mesh"
@@ -87,7 +87,10 @@ def test_channel_arrivals_match_by_decrypted_content(tmp_path: Path) -> None:
 
 
 def test_channel_arrivals_tolerate_the_sender_prefix_on_the_wire(tmp_path: Path) -> None:
-    """Our own outbound message (stored as typed) matches its prefixed on-air copies."""
+    """Our own outbound message (stored as typed) matches its copies on the air.
+
+    The copies on the air have a prefix.
+    """
     repo, run = _repo(tmp_path)
     now = utcnow()
     _record_frame(
@@ -104,7 +107,10 @@ def test_channel_arrivals_tolerate_the_sender_prefix_on_the_wire(tmp_path: Path)
 
 
 def test_channel_arrivals_carry_the_resend_counter(tmp_path: Path) -> None:
-    """A decrypted frame's resend counter rides along, telling copies from retries."""
+    """The resend counter of a decrypted packet goes with it.
+
+    The counter shows copies and retries.
+    """
     repo, run = _repo(tmp_path)
     now = utcnow()
     _record_frame(repo, run, when=now, path="", raw=_grp_txt_raw(SECRET, "Alice: hi", attempt=0))
@@ -123,7 +129,7 @@ def test_channel_arrivals_carry_the_resend_counter(tmp_path: Path) -> None:
 
 
 def test_channel_arrivals_ignore_frames_outside_the_window(tmp_path: Path) -> None:
-    """A matching frame far outside the message's window is someone else's message."""
+    """A matching packet far outside the window of the message belongs to another message."""
     repo, run = _repo(tmp_path)
     now = utcnow()
     _record_frame(
@@ -139,7 +145,7 @@ def test_channel_arrivals_ignore_frames_outside_the_window(tmp_path: Path) -> No
 
 
 def _direct_raw(dest: str = "", src: str = "", mac: str = "", route: str = "") -> dict:
-    """A direct-message frame's raw payload, spelled as the meshcore library reports it."""
+    """The raw payload of a direct-message packet, in the form that the meshcore library reports."""
     raw: dict = {"payload_typename": "TEXT_MSG"}
     if dest:
         raw["dest_hash"] = dest
@@ -153,11 +159,11 @@ def _direct_raw(dest: str = "", src: str = "", mac: str = "", route: str = "") -
 
 
 def test_direct_frames_without_a_mac_fall_back_to_address_and_time(tmp_path: Path) -> None:
-    """History recorded before the MAC was kept still correlates — and says that it did.
+    """History from before the app kept the MAC still correlates, and it says so.
 
-    The fallback is honest evidence, not a claim: a frame between the right pair in the
-    right window is only *probably* this message, and ``exact`` comes back ``False`` so the
-    view can bill it that way.
+    The fallback is evidence and not a claim. A packet between the right pair in the right
+    window is only probably this message. Thus ``exact`` is ``False``, and the screen can
+    show the match as not certain.
     """
     repo, run = _repo(tmp_path)
     now = utcnow()
@@ -168,14 +174,14 @@ def test_direct_frames_without_a_mac_fall_back_to_address_and_time(tmp_path: Pat
         path="3d63",
         raw=_direct_raw(dest="d4", src="a1"),
     )
-    _record_frame(  # a channel frame in the window is not direct-message evidence
+    _record_frame(  # a channel packet in the window is not evidence of a direct message
         repo,
         run,
         when=now + timedelta(seconds=4),
         path="",
         raw=_grp_txt_raw(SECRET, "Alice: hi"),
     )
-    _record_frame(  # a direct frame far outside the window doesn't correlate
+    _record_frame(  # a direct packet far outside the window does not correlate
         repo,
         run,
         when=now + timedelta(minutes=10),
@@ -190,13 +196,13 @@ def test_direct_frames_without_a_mac_fall_back_to_address_and_time(tmp_path: Pat
 
 
 def test_direct_frames_keep_only_the_direction_the_message_travelled(tmp_path: Path) -> None:
-    """A send shows our outgoing frames; a received message shows the incoming ones.
+    """A sent message shows our outgoing packets. A received message shows the incoming ones.
 
-    Both ends' hashes sit on every frame of a conversation whichever way it went, so
-    matching on the pair alone put our own sends into a received message's view. That is
-    where the implausible one-hop rows came from (JP, 2026-09-02): our transmissions heard
-    coming back off the repeaters in earshot, correctly one hop, shown as if they were an
-    inbound route to us.
+    The hashes of both ends are on each packet of a conversation, in each direction. Thus a
+    match on the pair only put our own sends into the view of a received message. This is
+    the cause of the one-hop rows that could not be true (JP, 2026-09-02). Our own
+    transmissions came back from the repeaters in range, and each was correctly one hop.
+    But the view showed them as an inbound route to us.
     """
     repo, run = _repo(tmp_path)
     now = utcnow()
@@ -204,7 +210,7 @@ def test_direct_frames_keep_only_the_direction_the_message_travelled(tmp_path: P
     theirs = dict(dest="a1", src="d4", mac="f00d")  # peer -> us
     _record_frame(repo, run, when=now + timedelta(seconds=1), path="3d63", raw=_direct_raw(**ours))
     _record_frame(repo, run, when=now + timedelta(seconds=2), path="c0", raw=_direct_raw(**theirs))
-    # Someone else's traffic, overheard in the same window.
+    # Traffic of other nodes, overheard in the same window.
     _record_frame(
         repo,
         run,
@@ -230,15 +236,15 @@ def test_direct_frames_keep_only_the_direction_the_message_travelled(tmp_path: P
 
 
 def test_a_shared_mac_separates_one_message_from_the_next(tmp_path: Path) -> None:
-    """Two sends seconds apart keep their own frames — the MAC is the fingerprint.
+    """Two sends, a few seconds apart, keep their own packets. The MAC is the fingerprint.
 
-    This is the direct-message counterpart of the channel view's content match: the frames
-    cannot be read, but copies of one message carry the same MAC over its ciphertext and the
-    next message's carry a different one.
+    This is the equivalent, for direct messages, of the content match of the channel view.
+    The app cannot read the packets. But the copies of one message have the same MAC over
+    their ciphertext, and the copies of the next message have a different MAC.
     """
     repo, run = _repo(tmp_path)
     now = utcnow()
-    # First send, retried twice and heard off two repeaters.
+    # The first send, with two retries, heard from two repeaters.
     for offset, path in ((1, "3d63"), (1, "27d4"), (6, "3d63"), (6, "27d4")):
         _record_frame(
             repo,
@@ -247,7 +253,7 @@ def test_a_shared_mac_separates_one_message_from_the_next(tmp_path: Path) -> Non
             path=path,
             raw=_direct_raw(dest="d4", src="a1", mac="beef"),
         )
-    # Second send, twelve seconds later, same pair and same paths.
+    # The second send, twelve seconds later, with the same pair and the same paths.
     for offset, path in ((13, "3d63"), (13, "27d4")):
         _record_frame(
             repo,
@@ -273,13 +279,14 @@ def test_a_shared_mac_separates_one_message_from_the_next(tmp_path: Path) -> Non
 
 
 def test_the_window_clamps_to_the_messages_going_the_same_way(tmp_path: Path) -> None:
-    """Each direction is bounded by its own neighbours, and bounded differently.
+    """The window has a limit from the messages that go the same way, and each way differs.
 
-    Without a clamp a fast exchange put every message's frames in every other's view — nine
-    messages of one real conversation fell inside a single flat window. With the wrong
-    clamp, a *received* message got an empty one: its stamp is the sender's clock, so
-    ordering it against our own sends compares two clocks and can bound it by an edge that,
-    in its own clock, hasn't happened yet (JP, 2026-09-02).
+    Without a clamp, a fast exchange put the packets of each message in the view of each
+    other message. Nine messages of one real conversation were in one flat window. With the
+    wrong clamp, a received message got an empty window. The time stamp of a received
+    message is the clock of the sender. Thus the order against our own sends compares two
+    clocks. The result can be a limit that, on the clock of the received message, has not
+    yet occurred (JP, 2026-09-02).
     """
     from meshterm.services.message_paths import _DIRECT_WINDOW, direct_window
 
@@ -296,15 +303,15 @@ def test_the_window_clamps_to_the_messages_going_the_same_way(tmp_path: Path) ->
             ChatMessage(text="theirs", outbound=False, peer="d4e5f6a7", created_at=at)
         )
 
-    # Our own send: our clock, so nothing of it predates it — the window opens at the
-    # message and runs forward to the next send, where retries actually live.
+    # Our own send uses our clock, so nothing of it is earlier than the message. The window
+    # opens at the message and runs forward to the next send. The retries are there.
     ours = ChatMessage(text="ours", outbound=True, peer="d4e5f6a7", created_at=now)
     start, end = direct_window(repo, ours)
     assert (now - start) < timedelta(seconds=5), "no room behind a send"
     assert end == sent[1], "forward to the next send, not to the next received message"
 
-    # A received message keeps a centred window, reaching halfway to the received messages
-    # either side of it — and is untouched by our own sends in between.
+    # A received message keeps a window in the centre. The window goes halfway to the
+    # received messages on each side. Our own sends in between do not change it.
     theirs = ChatMessage(
         text="theirs", outbound=False, peer="d4e5f6a7", created_at=now + timedelta(seconds=50)
     )
@@ -315,7 +322,10 @@ def test_the_window_clamps_to_the_messages_going_the_same_way(tmp_path: Path) ->
 
 
 def test_collapse_folds_a_repeated_path_into_one_counted_row(tmp_path: Path) -> None:
-    """One row per path, carrying its copy count, first sighting and best SNR."""
+    """The collapse makes one row for each path.
+
+    The row has the number of copies, the time it was first heard, and the best SNR.
+    """
     from meshterm.services.message_paths import Arrival
 
     base = utcnow()
@@ -334,24 +344,25 @@ def test_collapse_folds_a_repeated_path_into_one_counted_row(tmp_path: Path) -> 
 def test_a_routed_frames_path_is_where_it_was_going_not_where_it_has_been(
     tmp_path: Path,
 ) -> None:
-    """The route type decides what ``path`` means, and an empty routed one means nothing.
+    """The route type decides what ``path`` means. An empty path of a routed packet means nothing.
 
-    A flooded packet accumulates its path — every relay appends itself — so the hops are the
-    route it travelled to us. A direct-routed packet carries a route its sender wrote and
-    its relays consume, so an empty path means the route was used up, not that the packet
-    crossed no relays. Read the second as the first and a message from five hops away is
-    drawn as having arrived out of thin air: the "impossible direct path" (JP, 2026-09-02).
+    A flooded packet collects its path, because each relay adds itself. Thus the hops are
+    the route that the packet took to us. A direct-routed packet has a route that its
+    sender wrote, and its relays use up the route. Thus an empty path means that the packet
+    used all of the route. It does not mean that the packet crossed no relays. If the code
+    reads the second case as the first, a message from five hops away shows as a message
+    that came from nowhere: the "impossible direct path" (JP, 2026-09-02).
     """
     repo, run = _repo(tmp_path)
     now = utcnow()
-    _record_frame(  # flooded, one relay: it really did come to us that way
+    _record_frame(  # flooded, one relay: it did come to us that way
         repo,
         run,
         when=now + timedelta(seconds=1),
         path="3d63",
         raw=_direct_raw(dest="a1", src="d4", mac="beef", route="FLOOD"),
     )
-    _record_frame(  # direct-routed, route consumed: says nothing about how it got here
+    _record_frame(  # direct-routed, route used up: it does not show how the packet got here
         repo,
         run,
         when=now + timedelta(seconds=2),
@@ -369,7 +380,7 @@ def test_a_routed_frames_path_is_where_it_was_going_not_where_it_has_been(
 
 
 def test_history_without_a_route_type_is_unknown_rather_than_assumed(tmp_path: Path) -> None:
-    """Frames recorded before the route type was kept read as before, not as guesses."""
+    """Packets from before the app kept the route type read as before. They are not guesses."""
     repo, run = _repo(tmp_path)
     now = utcnow()
     _record_frame(
@@ -387,7 +398,7 @@ def test_history_without_a_route_type_is_unknown_rather_than_assumed(tmp_path: P
 
 
 def test_collapse_keeps_a_routed_path_apart_from_the_same_hops_flooded(tmp_path: Path) -> None:
-    """Identical hashes mean two different things under the two route types."""
+    """The same hashes have two different meanings under the two route types."""
     from meshterm.services.message_paths import Arrival
 
     base = utcnow()

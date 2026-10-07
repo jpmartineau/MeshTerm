@@ -1,17 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 """A retired name is never reused.
 
-A value can outlive its key: a file nobody has saved since the key left still holds it. If
-the name came back with a new meaning — seconds become minutes, a range moves — an old
-value that happens to pass the new spec would load cleanly and mean something else, and
-no validation can catch that. So every name that leaves is recorded as retired, and these
-tests fail the moment one comes back:
+A value can stay in a file after its key is removed. This occurs when nobody saved the file
+after the key left. Suppose that the name returns with a new meaning (seconds become minutes,
+or a range moves). Then an old value that passes the new spec loads without an error and
+means something else, and no validation can find this problem. Thus MeshTerm records each
+name that leaves as retired, and these tests fail when a retired name returns:
 
-* the preference registry against :data:`meshterm.core.preferences.RETIRED`, and the
-  device-setting registry against :data:`meshterm.core.device_config.RETIRED`;
-* every persisted record type — a dataclass in :mod:`meshterm.core` declaring its own
-  ``RETIRED`` set — against its own fields. The record is the path: a name retired from
-  one record says nothing about another, where it may be exactly the right name.
+* The preference registry against :data:`meshterm.core.preferences.RETIRED`, and the
+  device-setting registry against :data:`meshterm.core.device_config.RETIRED`.
+* Each persisted record type against its own fields. A record type is a dataclass in
+  :mod:`meshterm.core` that has its own ``RETIRED`` set. The record is the path: a name that
+  is retired from one record does not affect another record, where the name can be correct.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ from meshterm.core.settings_store import SettingsStore
 
 
 def _record_types() -> list[type]:
-    """Every dataclass in meshterm.core that declares a ``RETIRED`` set of field names."""
+    """Each dataclass in meshterm.core that declares a ``RETIRED`` set of field names."""
     found = []
     for info in pkgutil.iter_modules(meshterm.core.__path__):
         module = importlib.import_module(f"meshterm.core.{info.name}")
@@ -58,17 +58,20 @@ def _record_types() -> list[type]:
 
 
 def test_no_live_preference_takes_a_retired_key() -> None:
-    """A preference that returns changed returns under a new name."""
+    """A preference that comes back with a change comes back under a new name."""
     assert not {spec.key for spec in PREFERENCES} & RETIRED
 
 
 def test_no_live_device_setting_takes_a_retired_key() -> None:
-    """The settings store restores values onto the radio; a reused key would misplace one."""
+    """The settings store restores values onto the radio.
+
+    If a key is reused, a value goes to the wrong setting.
+    """
     assert not {spec.key for spec in device_config.DEVICE_SETTINGS} & device_config.RETIRED
 
 
-#: Every persisted record type, by the module that writes it. A store that grows a record
-#: adds it here, and the sweep below checks it without being told how.
+#: Each persisted record type, with the module that writes it. When a store gets a new
+#: record, add the record here. The sweep below then checks it with no more instructions.
 _EXPECTED_RECORDS = {
     "admin_store": {"AdminCredential"},
     "advert_store": {"_Device", "_Document"},
@@ -83,7 +86,7 @@ _EXPECTED_RECORDS = {
 
 
 def test_the_record_walk_finds_every_store() -> None:
-    """The sweep below is not vacuous: it sees each store's records."""
+    """The sweep below is not empty: it finds the records of each store."""
     found = {(cls.__module__.rsplit(".", 1)[1], cls.__qualname__) for cls in _record_types()}
     expected = {(module, name) for module, names in _EXPECTED_RECORDS.items() for name in names}
     assert expected <= found
@@ -91,13 +94,13 @@ def test_the_record_walk_finds_every_store() -> None:
 
 @pytest.mark.parametrize("record", _record_types(), ids=lambda cls: cls.__qualname__)
 def test_no_record_takes_back_a_retired_field(record: type) -> None:
-    """Each persisted record's fields are disjoint from the names it has retired."""
+    """The fields of each persisted record have no name in common with its retired names."""
     fields = {f.name for f in dataclasses.fields(record)}
     assert not fields & record.RETIRED
 
 
 def test_loading_refuses_a_retired_key(tmp_path: Path) -> None:
-    """A retired key in the file is not applied, and is named as retired."""
+    """The load does not apply a retired key from the file, and it names the key as retired."""
     path = tmp_path / "preferences.toml"
     retired = sorted(RETIRED)[0]
     path.write_text(f"{retired} = 3\ntrace_cooldown_s = 2.0\n", encoding="utf-8")
@@ -107,7 +110,7 @@ def test_loading_refuses_a_retired_key(tmp_path: Path) -> None:
 
 
 def test_the_next_save_leaves_out_everything_refused(tmp_path: Path) -> None:
-    """Retired, unknown and invalid entries are all gone once the file is saved."""
+    """After the file is saved, the retired, unknown, and invalid entries are all removed."""
     path = tmp_path / "preferences.toml"
     retired = sorted(RETIRED)[0]
     path.write_text(
@@ -124,13 +127,16 @@ def test_the_next_save_leaves_out_everything_refused(tmp_path: Path) -> None:
 
 
 def test_a_retired_key_is_named_as_such_when_set(tmp_path: Path) -> None:
-    """`preferences set` on a retired key says it is no longer a preference."""
+    """`preferences set` on a retired key says that the key is no longer a preference."""
     with pytest.raises(PreferenceError, match="no longer a preference"):
         Preferences().set(sorted(RETIRED)[0], 1)
 
 
 def test_drops_are_logged_by_kind(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
-    """A retired key is expected (INFO); a typo or a bad value is a WARNING naming it."""
+    """A retired key is expected, so its log level is INFO.
+
+    A typo or a bad value is a WARNING that names it.
+    """
     path = tmp_path / "preferences.toml"
     retired = sorted(RETIRED)[0]
     path.write_text(f"{retired} = 3\ntrace_cooldwn_s = 2.0\nhistory_days = -4\n", encoding="utf-8")
@@ -149,7 +155,7 @@ _NODE = Contact(name="Hilltop-Repeater", public_key="cd" * 32, key_prefix="cd" *
 
 
 def test_the_admin_store_writes_only_known_fields(tmp_path: Path) -> None:
-    """A stray field on a credential, or a stray record, is gone after the next write."""
+    """After the next write, an unknown field on a credential, or an unknown record, is removed."""
     path = tmp_path / "admin.json"
     path.write_text(
         json.dumps(
@@ -168,7 +174,7 @@ def test_the_admin_store_writes_only_known_fields(tmp_path: Path) -> None:
 
 
 def test_the_room_store_writes_only_known_fields(tmp_path: Path) -> None:
-    """A stray field on a membership, or a record with no access, is gone after a write."""
+    """After a write, an unknown field on a membership, or a record with no access, is removed."""
     from meshterm.core.models import LoginResult, RoomAccess, RoomLogin
 
     path = tmp_path / "rooms.json"
@@ -196,7 +202,7 @@ def test_the_room_store_writes_only_known_fields(tmp_path: Path) -> None:
 
 
 def test_the_remote_store_writes_only_known_fields(tmp_path: Path) -> None:
-    """Unknown fields on a node or a cached value do not survive, and the spelling holds."""
+    """Unknown fields on a node or a cached value do not stay, and the known names stay the same."""
     path = tmp_path / "remote.json"
     stamp = "2026-09-01T12:00:00+00:00"
     path.write_text(
@@ -223,7 +229,7 @@ def test_the_remote_store_writes_only_known_fields(tmp_path: Path) -> None:
 
 
 def test_the_settings_store_keeps_only_registered_settings(tmp_path: Path) -> None:
-    """A key that is not a device setting is never offered for restore, and leaves the file."""
+    """A key that is not a device setting is never offered for a restore, and the file loses it."""
     path = tmp_path / "settings.json"
     path.write_text(json.dumps({"devices": {"ab" * 32: {"name": "Node", "no_such_key": 3}}}))
     store = SettingsStore(path)

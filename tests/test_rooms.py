@@ -1,15 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Room servers: joining one, reading its board under each post's author, and posting.
+"""Room servers: joining one, reading its board under the author of each post, and posting.
 
-A room server is a bulletin board on a radio. It keeps its members' latest posts and sends
-each member the ones they missed — as direct messages from *itself*, each signed with the
-first four bytes of its author's key. So the facts these tests pin are the ones a room adds
-to a direct exchange: who wrote a post (``author``), what a login let us do
-(:class:`~meshterm.core.models.RoomAccess`), when a room needs logging in to again, and
-that a room's posts stay a board — deduplicated, kept apart from its command replies, and
-raising the unread badge — rather than leaking into anything else.
+A room server is a bulletin board on a radio. It keeps the latest posts of its members.
+It sends each member the posts that the member missed. It sends them as direct messages
+from itself, and each message has the first four bytes of the key of its author as a
+signature. Thus these tests check the facts that a room adds to a direct exchange: who
+wrote a post (``author``), what a login let us do
+(:class:`~meshterm.core.models.RoomAccess`), and when a room needs a new login. They also
+check that the posts of a room stay a board. The code removes duplicates, keeps the posts
+apart from the command replies of the room, and raises the unread badge. The posts must
+not go into anything else.
 
-Everything runs against the simulator and scratch stores; no hardware.
+All the tests run against the simulator and temporary stores. They do not use hardware.
 """
 
 from __future__ import annotations
@@ -53,7 +55,7 @@ from meshterm.ui.tui import fkeys
 from tests.conftest import plain
 from tests.test_admin_login import _device, _Event, _FakeMeshCore, quick_budget  # noqa: F401
 
-#: The simulator's room server, exactly as MockDevice lists it.
+#: The room server of the simulator, in the same form as MockDevice lists it.
 ROOM = Contact(
     name="Lakeside BBS",
     public_key="f6a7b8c9" + "0" * 56,
@@ -62,13 +64,13 @@ ROOM = Contact(
     route_hops=("a1b2c3d4",),
 )
 ALICE_KEY = "d4e5f6a7"
-#: A node no contact names (the simulator's neighbour that never advertised to us).
+#: A node that no contact names (the neighbour of the simulator that never advertised to us).
 STRANGER_KEY = "e5f6a7b8"
 NOW = datetime(2026, 10, 4, 12, 0, tzinfo=timezone.utc)
 
 
 def _post(text: str, author: str = ALICE_KEY, *, minutes: int = 0) -> Message:
-    """One room post as the wire hands it over: from the room, signed by its author."""
+    """One room post in the form that arrives on the wire: from the room, signed by its author."""
     return Message(
         text=text,
         sender=ROOM.key_prefix,
@@ -79,7 +81,7 @@ def _post(text: str, author: str = ALICE_KEY, *, minutes: int = 0) -> Message:
 
 @pytest.fixture()
 def repo(tmp_path: Path) -> Repository:
-    """A Repository on a scratch database."""
+    """A Repository on a temporary database."""
     r = Repository(tmp_path / "rooms.db")
     yield r
     r.close()
@@ -89,7 +91,7 @@ def repo(tmp_path: Path) -> Repository:
 
 
 def test_only_a_room_server_is_a_room() -> None:
-    """A room is its own section — and still not a direct-message recipient."""
+    """A room is its own section, and it is not a recipient of direct messages."""
     assert is_room(NODE_TYPE_ROOM)
     assert not is_room(NODE_TYPE_CHAT) and not is_room(None) and not is_room(NODE_TYPE_REPEATER)
     assert not is_direct_messageable(NODE_TYPE_ROOM)
@@ -103,10 +105,10 @@ def test_only_a_room_server_is_a_room() -> None:
     [
         ({"acl_permissions": 3, "permissions": 1}, RoomAccess.ADMIN),
         ({"acl_permissions": 2, "permissions": 0}, RoomAccess.MEMBER),
-        # Role 1 is the firmware's "read-only", set by hand; the room still keeps its posts.
+        # Role 1 is the "read-only" of the firmware, set by hand. The room still keeps its posts.
         ({"acl_permissions": 1, "permissions": 0}, RoomAccess.MEMBER),
         ({"acl_permissions": 0, "permissions": 2}, RoomAccess.READ_ONLY),
-        # Only the high bits differ — the role is the low two.
+        # Only the high bits are different. The role is the low two bits.
         ({"acl_permissions": 0x80 | 2}, RoomAccess.MEMBER),
         # A reply from before the permissions byte: only the legacy flag.
         ({"permissions": 1}, RoomAccess.ADMIN),
@@ -116,31 +118,31 @@ def test_only_a_room_server_is_a_room() -> None:
     ],
 )
 def test_the_access_a_login_reply_grants(payload: dict, access: RoomAccess) -> None:
-    """Read from the access-list byte where there is one, the legacy flag where not."""
+    """The code reads the access from the access-list byte if it exists, or else the legacy flag."""
     assert RoomAccess.from_login(payload) is access
 
 
 def test_only_a_read_only_member_cannot_post() -> None:
-    """The one access a room drops posts from."""
+    """The room drops the posts of only one access."""
     assert RoomAccess.ADMIN.can_post and RoomAccess.MEMBER.can_post
     assert not RoomAccess.READ_ONLY.can_post
 
 
 def test_a_room_login_is_truthy_only_when_accepted() -> None:
-    """The ``if not login`` idiom keeps LoginResult's meaning."""
+    """The ``if not login`` idiom keeps the meaning of LoginResult."""
     assert RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER)
     assert not RoomLogin(LoginResult.NO_REPLY)
     assert not RoomLogin(LoginResult.REFUSED)
 
 
 def test_a_post_keeps_its_author_and_the_time_it_was_posted() -> None:
-    """The room is the sender; the author rides beside it; the time is the post's own."""
+    """The room is the sender, the author is a separate field, and the time is that of the post."""
     chat = ChatMessage.from_message(_post("swap meet?"))
     assert chat.peer == ROOM.key_prefix
     assert chat.author == ALICE_KEY
     assert chat.is_post
     assert chat.created_at == NOW
-    assert chat.key == f"dm:{ROOM.key_prefix}"  # the room's board, keyed like the room
+    assert chat.key == f"dm:{ROOM.key_prefix}"  # the board of the room, with the key of the room
 
 
 # --- the wire -------------------------------------------------------------------------
@@ -159,7 +161,7 @@ def _received(txt_type: int, **extra) -> SimpleNamespace:
 
 
 def test_a_signed_message_names_its_author() -> None:
-    """The library's ``signature`` is the author's key prefix, not a signature."""
+    """The ``signature`` of the library is the key prefix of the author. It is not a signature."""
     message = message_from_event(_received(2, signature="E5F6A7B8"))
     assert message.author == STRANGER_KEY
     assert message.is_post
@@ -168,13 +170,13 @@ def test_a_signed_message_names_its_author() -> None:
 
 @pytest.mark.parametrize("txt_type", [0, 1])
 def test_plain_text_and_command_replies_have_no_author(txt_type: int) -> None:
-    """A room's command reply shares its key with its posts; only a post has an author."""
+    """A command reply of a room has the same key as its posts. Only a post has an author."""
     message = message_from_event(_received(txt_type, signature="e5f6a7b8"))
     assert message.author is None and not message.is_post
 
 
 def test_a_channel_message_never_has_an_author() -> None:
-    """Authors belong to room posts; a channel names its sender in the text."""
+    """Only room posts have authors. A channel names its sender in the text."""
     event = SimpleNamespace(
         payload={"type": "CHAN", "channel_idx": 0, "txt_type": 2, "signature": "ab", "text": "x"}
     )
@@ -182,7 +184,7 @@ def test_a_channel_message_never_has_an_author() -> None:
 
 
 def test_a_room_login_reads_the_access_from_the_reply(quick_budget) -> None:  # noqa: ANN001, F811
-    """One login exchange, read for the role the room filed us under."""
+    """One login exchange, read for the role that the room gave us."""
     from meshcore import EventType
 
     answer = _Event(
@@ -197,16 +199,17 @@ def test_a_room_login_reads_the_access_from_the_reply(quick_budget) -> None:  # 
 
 
 def test_a_room_that_stays_silent_is_no_reply_with_no_access(quick_budget) -> None:  # noqa: ANN001, F811
-    """A room says nothing to a wrong password — silence, never a refusal."""
+    """A room says nothing to a wrong password. It is silent, and it never refuses."""
     login = asyncio.run(_device(_FakeMeshCore()).room_login(ROOM, "wrong"))
     assert login == RoomLogin(LoginResult.NO_REPLY)
 
 
 class _CommandMeshCore:
-    """A meshcore client stand-in for an admin command: arms, sends, then hears replies.
+    """A replacement for a meshcore client for an admin command: it arms, sends, then hears replies.
 
-    ``replies`` are delivered after the command goes out, each through the subscription's
-    attribute filter exactly as the library's dispatcher applies it.
+    The class delivers ``replies`` after the command goes out. Each reply goes through the
+    attribute filter of the subscription, in the same way as the dispatcher of the library
+    applies it.
     """
 
     def __init__(self, replies: list[dict]) -> None:
@@ -230,10 +233,12 @@ class _CommandMeshCore:
 
 
 def test_an_admin_command_reply_is_not_a_post_or_someone_elses_message() -> None:
-    """THE trap a room sets: its members' posts arrive down the command reply's channel.
+    """An admin command reply is not a post, and it is not a message from another node.
 
-    A post pushed by the room, and a companion's message landing mid-command, both used to
-    be taken for the node's answer.
+    This is the main trap of a room: the posts of its members arrive on the same channel as
+    the command reply. In the past, a post that the room pushed was taken for the answer of
+    the node. A message of a companion that arrived during the command was also taken for
+    the answer.
     """
     room_prefix = ROOM.public_key[:12]
     mc = _CommandMeshCore(
@@ -253,32 +258,35 @@ def test_an_admin_command_reply_is_not_a_post_or_someone_elses_message() -> None
 
 @pytest.fixture()
 def rooms(tmp_path: Path) -> RoomStore:
-    """A room store on a scratch file."""
+    """A room store on a temporary file."""
     return RoomStore(tmp_path / "rooms.json")
 
 
 def test_an_accepted_member_login_remembers_the_room_password(rooms: RoomStore) -> None:
-    """The password that got us in is the one opening the room again uses."""
+    """The password that gave us access is the password that opens the room again."""
     rooms.record(ROOM, "hello", RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER))
     assert rooms.password(ROOM) == "hello"
     assert rooms.access(ROOM) is RoomAccess.MEMBER
 
 
 def test_an_open_room_remembers_its_empty_password(rooms: RoomStore) -> None:
-    """``""`` is a password that worked, not an absence."""
+    """``""`` is a password that worked. It is not an absence."""
     rooms.record(ROOM, "", RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER))
     assert rooms.password(ROOM) == ""
 
 
 def test_an_admin_login_remembers_the_access_but_not_the_password(rooms: RoomStore) -> None:
-    """The admin password lives in one place, where Repeater admin can change it."""
+    """The admin password is in one place, where Repeater admin can change it."""
     rooms.record(ROOM, "s3cret", RoomLogin(LoginResult.ACCEPTED, RoomAccess.ADMIN))
     assert rooms.password(ROOM) is None
     assert rooms.access(ROOM) is RoomAccess.ADMIN
 
 
 def test_silence_neither_remembers_nor_forgets(rooms: RoomStore) -> None:
-    """A room is silent for a wrong password, so silence proves nothing either way."""
+    """Silence does not store a room, and it does not forget a room.
+
+    A room is silent for a wrong password, so silence does not prove anything.
+    """
     rooms.record(ROOM, "typo", RoomLogin(LoginResult.NO_REPLY))
     assert rooms.membership(ROOM) is None
     rooms.record(ROOM, "hello", RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER))
@@ -287,7 +295,7 @@ def test_silence_neither_remembers_nor_forgets(rooms: RoomStore) -> None:
 
 
 def test_a_refusal_forgets_the_room(rooms: RoomStore) -> None:
-    """The node said no: the password it refused is gone."""
+    """The node said no, so the code removes the password that the node refused."""
     rooms.record(ROOM, "hello", RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER))
     rooms.record(ROOM, "hello", RoomLogin(LoginResult.REFUSED))
     assert rooms.membership(ROOM) is None
@@ -297,7 +305,7 @@ def test_a_refusal_forgets_the_room(rooms: RoomStore) -> None:
 
 
 class _Ctx:
-    """The slice of AppContext the room service and the chat recorder read."""
+    """The part of AppContext that the room service and the chat recorder read."""
 
     def __init__(self, tmp_path: Path, device: MockDevice, repo: Repository | None = None):
         self._device = device
@@ -317,7 +325,10 @@ class _Ctx:
 
 
 def test_the_admin_password_is_tried_before_the_room_password(tmp_path: Path) -> None:
-    """A login replaces a known member's role, so the room password would demote an owner."""
+    """The code tries the admin password first. A login replaces the role of a known member.
+
+    Thus the room password demotes an owner.
+    """
     ctx = _Ctx(tmp_path, MockDevice())
     assert ctx.rooms.password(ROOM) is None and not ctx.rooms.joined(ROOM)
     ctx.room_store.record(ROOM, "hello", RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER))
@@ -327,7 +338,7 @@ def test_the_admin_password_is_tried_before_the_room_password(tmp_path: Path) ->
 
 
 def test_an_admin_password_alone_is_not_a_join(tmp_path: Path) -> None:
-    """Repeater admin's password lets a join go through unasked; joining is still a login."""
+    """The Repeater admin password lets a join go through with no question. A join is a login."""
     ctx = _Ctx(tmp_path, MockDevice())
     ctx.admin_store.remember(ROOM, "admin")
     assert ctx.rooms.password(ROOM) == "admin"
@@ -335,7 +346,7 @@ def test_an_admin_password_alone_is_not_a_join(tmp_path: Path) -> None:
 
 
 async def test_forgetting_a_room_leaves_it(tmp_path: Path) -> None:
-    """The membership and its password go; nothing is transmitted."""
+    """The membership and its password are removed. The code transmits nothing."""
     ctx = _Ctx(tmp_path, MockDevice())
     await ctx.rooms.login(ROOM, "hello")
     ctx.rooms.forget(ROOM)
@@ -344,7 +355,11 @@ async def test_forgetting_a_room_leaves_it(tmp_path: Path) -> None:
 
 
 def test_read_only_never_replaces_the_room_password(rooms: RoomStore) -> None:
-    """A room that lets readers in lets any password in: that proves nothing about one."""
+    """A read-only login never replaces the room password.
+
+    A room that lets read-only members in accepts any password. This does not prove that a
+    password is correct.
+    """
     rooms.record(ROOM, "hello", RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER))
     rooms.record(ROOM, "helo", RoomLogin(LoginResult.ACCEPTED, RoomAccess.READ_ONLY))
     assert rooms.password(ROOM) == "hello"
@@ -355,7 +370,7 @@ def test_read_only_never_replaces_the_room_password(rooms: RoomStore) -> None:
 
 
 def test_a_blank_login_never_replaces_a_password(rooms: RoomStore) -> None:
-    """Blank proves the room knows us — until it restarts and forgets a member."""
+    """A blank login shows that the room knows us, until the room starts and forgets a member."""
     rooms.record(ROOM, "hello", RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER))
     rooms.record(ROOM, "", RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER))
     assert rooms.password(ROOM) == "hello"
@@ -364,21 +379,21 @@ def test_a_blank_login_never_replaces_a_password(rooms: RoomStore) -> None:
 
 
 def test_an_admin_login_keeps_the_room_password_beside_it(rooms: RoomStore) -> None:
-    """The admin password lives in the admin store; the member's stays here as the fallback."""
+    """The admin password is in the admin store. The member password stays here as a fallback."""
     rooms.record(ROOM, "hello", RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER))
     rooms.record(ROOM, "admin", RoomLogin(LoginResult.ACCEPTED, RoomAccess.ADMIN))
     assert rooms.password(ROOM) == "hello" and rooms.access(ROOM) is RoomAccess.ADMIN
 
 
 def test_a_refusal_forgets_only_the_password_it_refused(rooms: RoomStore) -> None:
-    """A node turning one password down says nothing about another."""
+    """If a node refuses one password, this does not show anything about another password."""
     rooms.record(ROOM, "hello", RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER))
     rooms.record(ROOM, "other", RoomLogin(LoginResult.REFUSED))
     assert rooms.password(ROOM) == "hello"
 
 
 async def test_a_blank_admin_login_leaves_the_admin_password_alone(tmp_path: Path) -> None:
-    """Repeater admin shares that password; a blank probe must not erase it."""
+    """Repeater admin uses the same password, so a blank probe must not delete it."""
     ctx = _Ctx(tmp_path, MockDevice())
     await ctx.rooms.login(ROOM, "admin")
     login = await ctx.rooms.login(ROOM, "")
@@ -387,7 +402,7 @@ async def test_a_blank_admin_login_leaves_the_admin_password_alone(tmp_path: Pat
 
 
 async def test_one_login_to_a_room_at_a_time(tmp_path: Path) -> None:
-    """A view closed and reopened mid-login shares the login rather than sending another."""
+    """If the user closes and opens a view during a login, the view uses that login."""
     device = MockDevice()
     ctx = _Ctx(tmp_path, device)
     ctx.room_store.record(ROOM, "hello", RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER))
@@ -406,23 +421,23 @@ async def test_one_login_to_a_room_at_a_time(tmp_path: Path) -> None:
     second = await ctx.rooms.login(ROOM, "hello")
     assert (await first) == second
     assert sent == ["hello"]
-    third = await ctx.rooms.login(ROOM, "hello")  # once it is answered, a new one may go
+    third = await ctx.rooms.login(ROOM, "hello")  # after the answer, the code can send a new login
     assert third and sent == ["hello", "hello"]
 
 
 async def test_joining_with_the_room_password_makes_us_a_member(tmp_path: Path) -> None:
-    """The stock room password, the simulator's room, a member."""
+    """The stock room password, in the room of the simulator, makes us a member."""
     ctx = _Ctx(tmp_path, MockDevice())
     login = await ctx.rooms.login(ROOM, "hello")
     assert login.access is RoomAccess.MEMBER
     assert ctx.rooms.joined(ROOM) and ctx.rooms.access(ROOM) is RoomAccess.MEMBER
-    assert ctx.admin_store.get(ROOM) is None  # a member password is never an admin one
+    assert ctx.admin_store.get(ROOM) is None  # a member password is never an admin password
 
 
 async def test_joining_with_the_admin_password_remembers_it_for_repeater_admin(
     tmp_path: Path,
 ) -> None:
-    """Typed into a room's join prompt, it works for administering the room too."""
+    """If the user types the admin password in a join prompt, it also administers the room."""
     ctx = _Ctx(tmp_path, MockDevice())
     login = await ctx.rooms.login(ROOM, "admin")
     assert login.access is RoomAccess.ADMIN
@@ -432,7 +447,7 @@ async def test_joining_with_the_admin_password_remembers_it_for_repeater_admin(
 
 
 async def test_a_wrong_password_is_silence_and_is_never_remembered(tmp_path: Path) -> None:
-    """A password that never worked is never written down."""
+    """The code never stores a password that did not work."""
     ctx = _Ctx(tmp_path, MockDevice())
     login = await ctx.rooms.login(ROOM, "nope")
     assert login.result is LoginResult.NO_REPLY
@@ -440,17 +455,17 @@ async def test_a_wrong_password_is_silence_and_is_never_remembered(tmp_path: Pat
 
 
 async def test_a_room_heard_lately_needs_no_login(tmp_path: Path) -> None:
-    """A login is a transmission; a room still sending to us needs none."""
+    """A login is a transmission. A room that still sends to us needs no login."""
     ctx = _Ctx(tmp_path, MockDevice())
     assert not ctx.rooms.login_due(ROOM), "nothing to log in with yet"
     ctx.room_store.record(ROOM, "hello", RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER))
     assert ctx.rooms.login_due(ROOM), "joined, but not heard this session"
-    ctx.rooms.heard("F6A7B8C90000")  # a post, its prefix at the wire's width
+    ctx.rooms.heard("F6A7B8C90000")  # a post, with its prefix at the width of the wire
     assert not ctx.rooms.login_due(ROOM)
 
 
 async def test_a_login_counts_as_hearing_the_room(tmp_path: Path) -> None:
-    """A room that just let us in is sending: opening it again sends nothing."""
+    """A room that just gave us access is sending. The code sends nothing when it opens it again."""
     ctx = _Ctx(tmp_path, MockDevice())
     await ctx.rooms.login(ROOM, "hello")
     assert not ctx.rooms.login_due(ROOM)
@@ -460,14 +475,14 @@ async def test_a_login_counts_as_hearing_the_room(tmp_path: Path) -> None:
 
 
 async def test_the_simulators_room_sends_its_board_after_a_login(tmp_path: Path) -> None:
-    """Oldest first, from the room, each under its author — and never our own posts."""
+    """The room sends the oldest post first, under its author. It never sends our posts."""
     device = MockDevice()
     heard: list[Message] = []
     unsubscribe = await device.subscribe_events(
         lambda event: heard.append(event.message) if event.message is not None else None
     )
     try:
-        heard.clear()  # the stream's opening burst carries a synthetic DM of its own
+        heard.clear()  # the first burst of the stream has a synthetic DM of its own
         assert not (await device.send_direct_message(ROOM, "before joining")).acked
         login = await device.room_login(ROOM, "hello")
         assert login.access is RoomAccess.MEMBER
@@ -480,7 +495,7 @@ async def test_the_simulators_room_sends_its_board_after_a_login(tmp_path: Path)
 
         assert (await device.send_direct_message(ROOM, "mine")).acked  # kept, acked
         heard.clear()
-        await device.room_login(ROOM, "")  # the room knows us; nothing new but our own
+        await device.room_login(ROOM, "")  # the room knows us. Nothing is new, except our post
         await asyncio.sleep(0.2)
         assert not [m for m in heard if m.is_post]
     finally:
@@ -489,7 +504,7 @@ async def test_the_simulators_room_sends_its_board_after_a_login(tmp_path: Path)
 
 
 async def test_a_read_only_member_is_heard_but_not_kept(tmp_path: Path) -> None:
-    """``allow.read.only`` lets any password in — and drops what it posts."""
+    """``allow.read.only`` accepts any password, and it drops what the member posts."""
     device = MockDevice()
     device._remote_config(ROOM)["allow.read.only"] = "on"
     login = await device.room_login(ROOM, "anything")
@@ -499,7 +514,7 @@ async def test_a_read_only_member_is_heard_but_not_kept(tmp_path: Path) -> None:
 
 
 async def test_an_admin_posts_in_the_rooms_own_name(tmp_path: Path) -> None:
-    """``room.post`` adds a notice authored by the room itself."""
+    """``room.post`` adds a notice that the room itself is the author of."""
     device = MockDevice()
     assert await device.admin_login(ROOM, "admin") is LoginResult.ACCEPTED
     assert await device.send_remote_command(ROOM, "room.post Meeting at 7") == "OK"
@@ -512,10 +527,10 @@ async def test_an_admin_posts_in_the_rooms_own_name(tmp_path: Path) -> None:
 
 
 def test_a_rooms_board_leaves_out_its_command_replies(repo: Repository) -> None:
-    """Posts and our own posts are the board; a reply under the room's key is not."""
+    """The board has the posts and our posts. A reply under the key of the room is not on it."""
     peer = ROOM.key_prefix
     repo.record_chat_message(ChatMessage.from_message(_post("first", minutes=1)))
-    repo.record_chat_message(ChatMessage(text="OK", peer=peer))  # an admin command's reply
+    repo.record_chat_message(ChatMessage(text="OK", peer=peer))  # the reply to an admin command
     repo.record_chat_message(ChatMessage(text="mine", outbound=True, peer=peer, acked=True))
 
     board = repo.recent_chat_messages(is_channel=False, peer=peer, posts_only=True)
@@ -530,7 +545,7 @@ def test_a_rooms_board_leaves_out_its_command_replies(repo: Repository) -> None:
 
 
 def test_a_post_already_stored_is_recognised(repo: Repository) -> None:
-    """The same room, author, time and text name one post."""
+    """The same room, author, time, and text identify one post."""
     post = ChatMessage.from_message(_post("swap meet?"))
     assert not repo.has_room_post(post)
     repo.record_chat_message(post)
@@ -540,7 +555,7 @@ def test_a_post_already_stored_is_recognised(repo: Repository) -> None:
 
 
 class _GatedCtx(_Ctx):
-    """With the device-state cache, so the badge rule can place a sender."""
+    """A context with the device-state cache, so that the badge rule can place a sender."""
 
     def __init__(self, tmp_path: Path, device: MockDevice, repo: Repository) -> None:
         super().__init__(tmp_path, device, repo)
@@ -555,14 +570,14 @@ async def _record(chat: ChatService, ctx, message: Message) -> None:  # noqa: AN
 
 
 def _join(ctx) -> None:  # noqa: ANN001
-    """Record a membership, as an accepted login does."""
+    """Store a membership, as an accepted login does."""
     ctx.room_store.record(ROOM, "hello", RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER))
 
 
 async def test_a_room_not_joined_records_its_posts_but_raises_no_badge(
     tmp_path: Path, repo: Repository
 ) -> None:
-    """Chat has no row for a room not joined, so the badge would point at nothing."""
+    """Chat has no row for a room that is not joined, so the badge points at nothing."""
     ctx = _GatedCtx(tmp_path, MockDevice(), repo)
     chat = ChatService(ctx)
     await chat.start()
@@ -578,7 +593,7 @@ async def test_a_room_not_joined_records_its_posts_but_raises_no_badge(
 async def test_a_post_is_recorded_once_and_raises_the_badge_once(
     tmp_path: Path, repo: Repository
 ) -> None:
-    """A re-sent post lands twice on the wire and once in history."""
+    """A post that the room sends again arrives two times on the wire and one time in history."""
     ctx = _GatedCtx(tmp_path, MockDevice(), repo)
     _join(ctx)
     chat = ChatService(ctx)
@@ -598,7 +613,7 @@ async def test_a_post_is_recorded_once_and_raises_the_badge_once(
 async def test_a_rooms_command_reply_is_recorded_but_silent(
     tmp_path: Path, repo: Repository
 ) -> None:
-    """The board is listed; what else a room sends has no row to point the badge at."""
+    """The board is listed. Other data from a room has no row for the badge to point at."""
     ctx = _GatedCtx(tmp_path, MockDevice(), repo)
     chat = ChatService(ctx)
     await chat.start()
@@ -611,7 +626,7 @@ async def test_a_rooms_command_reply_is_recorded_but_silent(
 
 
 async def test_posting_records_the_post_under_the_room(tmp_path: Path, repo: Repository) -> None:
-    """Acknowledged means the room kept it; a read-only member's post is not."""
+    """An acknowledgement means that the room kept the post. It does not keep a read-only post."""
     device = MockDevice()
     ctx = _Ctx(tmp_path, device, repo)
     chat = ChatService(ctx)
@@ -627,7 +642,7 @@ async def test_posting_records_the_post_under_the_room(tmp_path: Path, repo: Rep
 
 
 async def test_a_post_is_never_soft_retried(tmp_path: Path, repo: Repository) -> None:
-    """A retry is a new post, which every member would receive twice."""
+    """A retry is a new post, and each member receives it two times."""
     device = MockDevice()
     ctx = _Ctx(tmp_path, device, repo)
     ctx.preferences.direct_message_soft_retries = 2
@@ -639,15 +654,15 @@ async def test_a_post_is_never_soft_retried(tmp_path: Path, repo: Repository) ->
         return await original(contact, text)
 
     device.send_direct_message = counting
-    await ChatService(ctx).send_post(ROOM, "unacked")  # not a member: no ack
+    await ChatService(ctx).send_post(ROOM, "unacked")  # we are not a member, so there is no ack
     assert sends == ["unacked"]
 
 
-# --- the repeater-admin page in a room server's words --------------------------------
+# --- the repeater-admin page in the words of a room server ---------------------------
 
 
 def test_a_room_servers_guest_password_is_its_room_password() -> None:
-    """Same key on both firmwares; a room's page calls it what it is there."""
+    """The key is the same on both firmwares. The page of a room uses the name that fits there."""
     spec = get_setting("guest.password")
     assert spec.for_node(NODE_TYPE_ROOM).label == "Room password"
     assert spec.for_node(NODE_TYPE_REPEATER).label == "Guest password"
@@ -671,7 +686,7 @@ class _Session:
 
 
 def _resolve(hash_: str | None) -> str | None:
-    """Alice's key names her and the room's names the room; nothing names the stranger."""
+    """The key of Alice names her, and the key of the room names it. Nothing names the stranger."""
     return {ALICE_KEY: "Alice", "f6a7b8c9": ROOM.name}.get(hash_ or "", hash_)
 
 
@@ -682,13 +697,13 @@ def _view(
     joined: bool = True,
     login: RoomLogin | None = None,
 ) -> tuple[RoomScreen, dict]:
-    """A board over stubbed hooks; ``calls`` records what they were asked."""
+    """A board with stub hooks. ``calls`` records the requests to the hooks."""
     calls: dict = {"auto": 0, "joins": [], "sent": []}
     outcome = login if login is not None else RoomLogin(LoginResult.ACCEPTED, RoomAccess.MEMBER)
 
     async def auto_login() -> RoomLogin | None:
         calls["auto"] += 1
-        await asyncio.sleep(0)  # an exchange on the air: the board goes on drawing meanwhile
+        await asyncio.sleep(0)  # an exchange on the air: the board continues to draw
         return outcome
 
     async def join(ask: bool) -> RoomLogin | None:
@@ -734,13 +749,13 @@ def _compose(screen: RoomScreen) -> str:
 
 
 def test_an_author_is_named_by_key_or_stands_as_a_grey_hash() -> None:
-    """A key something names is that name, in its hue; one nothing names stays a hash."""
+    """A key that something names shows as that name, in its hue. Other keys stay a hash."""
     assert author_label(ALICE_KEY, _resolve) == ("Alice", ALICE_KEY)
     assert author_label(STRANGER_KEY, _resolve) == (STRANGER_KEY, None)
 
 
 def test_the_board_draws_each_post_under_its_author() -> None:
-    """A contact, a stranger, the room's own notice, and us — each under its own chip."""
+    """A contact, a stranger, the own notice of the room, and us: each has its own chip."""
     screen, _ = _view(_board())
     text = plain("\n".join(screen.render_body(72)))
     for expected in ("Alice", STRANGER_KEY, ROOM.name, "Anyone driving Saturday?", "I'll check it"):
@@ -749,7 +764,10 @@ def test_the_board_draws_each_post_under_its_author() -> None:
 
 
 def test_a_post_that_arrives_twice_is_shown_once_and_a_reply_not_at_all() -> None:
-    """The live view applies the same two rules the recorder does."""
+    """A post that arrives two times shows one time. A reply does not show at all.
+
+    The live view applies the same two rules as the recorder.
+    """
     screen, _ = _view(_board())
     screen.append(ChatMessage.from_message(_post("Board keeps 32 posts.", "f6a7b8c9", minutes=-10)))
     screen.append(ChatMessage(text="> hello", peer=ROOM.key_prefix))  # a command reply
@@ -759,7 +777,7 @@ def test_a_post_that_arrives_twice_is_shown_once_and_a_reply_not_at_all() -> Non
 
 
 async def test_a_member_posts_from_the_compose_line() -> None:
-    """Enter posts, through the same path a direct message takes."""
+    """Enter posts, through the same path as a direct message."""
     screen, calls = _view()
     for ch in "hi":
         screen.handle("text", ch)
@@ -770,7 +788,7 @@ async def test_a_member_posts_from_the_compose_line() -> None:
 
 
 async def test_the_compose_line_waits_for_the_quiet_login() -> None:
-    """Opening a quiet room logs in in the background; posting opens once it lets us in."""
+    """A room that is quiet logs in in the background. Posting opens after the room accepts us."""
     screen, calls = _view(access=RoomAccess.MEMBER)
     screen.begin_auto_login()
     assert screen.title == f"{ROOM.name} · {LOGGING_IN}"
@@ -783,7 +801,7 @@ async def test_the_compose_line_waits_for_the_quiet_login() -> None:
 
 
 async def test_after_silence_nothing_can_be_posted_and_the_line_says_why() -> None:
-    """THE reported bug: a login met silence, and the compose line went on taking posts."""
+    """The reported bug: a login got silence, and the compose line continued to take posts."""
     screen, calls = _view(login=RoomLogin(LoginResult.NO_REPLY, flood=True))
     screen.begin_auto_login()
     await _settled(screen)
@@ -798,18 +816,18 @@ async def test_after_silence_nothing_can_be_posted_and_the_line_says_why() -> No
 
 
 async def test_control_l_runs_the_explained_login() -> None:
-    """^L hands the login to the Rooms flow, its dialogs over the board, and shows the end."""
+    """^L gives the login to the Rooms flow, with its dialogs over the board, and shows the end."""
     screen, calls = _view(access=None, login=RoomLogin(LoginResult.ACCEPTED, RoomAccess.ADMIN))
     screen.handle("login")
     assert screen._login_open
-    assert "^L log in" not in screen.footer_hint  # a second press would do nothing
+    assert "^L log in" not in screen.footer_hint  # a second press does nothing
     await _settled(screen)
     assert calls["joins"] == [False]
     assert screen.title == f"{ROOM.name} · admin" and screen._composing
 
 
 async def test_a_read_only_member_is_asked_for_another_password_and_offered_no_retry() -> None:
-    """^L asks (the room password is what lets a reader post); ^R would only be dropped."""
+    """^L asks, because the room password lets a read-only member post. ^R is only dropped."""
     unacked = ChatMessage(text="lost", outbound=True, peer=ROOM.key_prefix, acked=False)
     screen, calls = _view([unacked], access=RoomAccess.READ_ONLY)
     assert "read-only" in _compose(screen)
@@ -820,23 +838,26 @@ async def test_a_read_only_member_is_asked_for_another_password_and_offered_no_r
 
 
 def test_a_board_not_joined_takes_no_posts() -> None:
-    """Its stored posts read from the Rooms page; posting starts with joining."""
+    """The user reads the stored posts on the Rooms page. To post, the user must join first."""
     screen, _ = _view(_board(), access=None, joined=False)
     assert screen.title.endswith(NOT_JOINED)
     assert "not joined" in _compose(screen) and not screen._composing
 
 
 async def test_enter_on_a_picked_post_replies_to_its_author() -> None:
-    """A board has many voices, so Enter on a post primes an @mention, as a channel does."""
+    """A board has many authors, so Enter on a post prepares an @mention, as a channel does."""
     screen, _ = _view(_board())
-    for _ in range(3):  # ours, the room's notice, then the stranger's post
+    for _ in range(3):  # our post, the notice of the room, then the post of the stranger
         screen.handle("up")
     screen.handle("enter")
     assert screen._editor.text == f"@[{STRANGER_KEY}] "
 
 
 async def test_a_read_only_member_picks_a_post_to_see_its_paths_not_to_reply() -> None:
-    """With no compose line, Enter on a post has nothing to prime, and a paste nowhere to go."""
+    """A read-only member has no compose line, so Enter on a post has nothing to prepare.
+
+    A paste has no place to go.
+    """
     screen, _ = _view(_board(), access=RoomAccess.READ_ONLY)
     opened: list[ChatMessage] = []
 
@@ -855,7 +876,7 @@ async def test_a_read_only_member_picks_a_post_to_see_its_paths_not_to_reply() -
 
 
 def test_the_hint_names_log_in_and_fits() -> None:
-    """^L is named where it acts, inside 72 cells, picked or not."""
+    """The hint names ^L where it acts, in 72 cells, with or without a selected post."""
     screen, _ = _view(_board())
     assert "^L log in" in screen.footer_hint
     assert cell_len(screen.footer_hint) <= 72
@@ -864,7 +885,7 @@ def test_the_hint_names_log_in_and_fits() -> None:
 
 
 def test_the_handheld_lane_puts_log_in_behind_f1() -> None:
-    """Every chord earns a chip where the keyboard has no Ctrl to reach it by."""
+    """Each chord has a chip where the keyboard has no Ctrl key to reach it."""
     screen, _ = _view(_board())
     lane = screen.picocalc_lyra_lane
     assert lane[0].opp_label == "Log in"
@@ -875,10 +896,10 @@ def test_the_handheld_lane_puts_log_in_behind_f1() -> None:
 
 
 class _ScriptedUi:
-    """A UI surface answering the join flow's prompt and dialogs from a script.
+    """A UI surface that answers the prompt and the dialogs of the join flow from a script.
 
-    ``choices`` are button *labels*, pressed in order; every dialog shown is kept as
-    ``(text, labels, default label)`` for the test to read.
+    ``choices`` are button labels, and the script presses them in order. The class keeps each
+    dialog that it shows as ``(text, labels, default label)``, so that the test can read it.
     """
 
     def __init__(self, *, passwords=(), choices=()) -> None:  # noqa: ANN001
@@ -912,7 +933,7 @@ class _ScriptedUi:
 
 
 class _JoinCtx(_Ctx):
-    """A context with a scripted UI and a device-state stub the flow invalidates."""
+    """A context with a scripted UI and a device-state stub that the flow invalidates."""
 
     def __init__(self, tmp_path: Path, device: MockDevice, ui: _ScriptedUi) -> None:
         super().__init__(tmp_path, device)
@@ -921,7 +942,7 @@ class _JoinCtx(_Ctx):
 
 
 async def test_joining_with_the_right_password_says_nothing_more(tmp_path: Path) -> None:
-    """A login that lets us post ends the flow quietly; the page shows the access."""
+    """A login that lets us post ends the flow with no message. The page shows the access."""
     from meshterm.ui.rooms import join_room
 
     ui = _ScriptedUi(passwords=["hello"])
@@ -932,7 +953,7 @@ async def test_joining_with_the_right_password_says_nothing_more(tmp_path: Path)
 
 
 async def test_a_stale_route_is_explained_and_a_flood_gets_through(tmp_path: Path) -> None:
-    """THE case on hardware: a learned route silently dead, the same login by flood fine."""
+    """The case on hardware: a learned route that is dead with no error, and a flood that works."""
     from meshterm.ui.rooms import join_room
 
     device = MockDevice()
@@ -951,11 +972,11 @@ async def test_a_stale_route_is_explained_and_a_flood_gets_through(tmp_path: Pat
 async def test_silence_by_flood_names_both_causes_and_offers_another_password(
     tmp_path: Path,
 ) -> None:
-    """A password that never worked here could be the problem; the dialog says so."""
+    """A password that never worked here can be the problem, and the dialog says so."""
     from meshterm.ui.rooms import join_room
 
     device = MockDevice()
-    await device.reset_route(ROOM)  # no route: every login floods
+    await device.reset_route(ROOM)  # no route: each login floods
     ui = _ScriptedUi(passwords=["nope", "hello"], choices=["Try again…"])
     ctx = _JoinCtx(tmp_path, device, ui)
     login = await join_room(ctx, ROOM)
@@ -967,7 +988,7 @@ async def test_silence_by_flood_names_both_causes_and_offers_another_password(
 
 
 async def test_silence_with_a_password_that_worked_points_at_reach(tmp_path: Path) -> None:
-    """A remembered password is still right; the room most likely didn't hear us."""
+    """A stored password is still correct. The room most likely did not hear us."""
     from meshterm.ui.rooms import join_room
 
     device = MockDevice()
@@ -975,7 +996,7 @@ async def test_silence_with_a_password_that_worked_points_at_reach(tmp_path: Pat
     ui = _ScriptedUi(choices=["Cancel"])
     ctx = _JoinCtx(tmp_path, device, ui)
     await ctx.rooms.login(ROOM, "hello")
-    await device.reset_route(ROOM)  # the answer taught it a route; flood the next one too
+    await device.reset_route(ROOM)  # the answer gave it a route, so the next login floods as well
     device._unreachable.add(ROOM.name)
     login = await join_room(ctx, ROOM)
     assert login.result is LoginResult.NO_REPLY and ui.asked == []
@@ -985,7 +1006,7 @@ async def test_silence_with_a_password_that_worked_points_at_reach(tmp_path: Pat
 
 
 async def test_read_only_is_explained_and_another_password_offered(tmp_path: Path) -> None:
-    """In, but not as a member: the dialog says what that means and why it may be."""
+    """The user has access, but not as a member. The dialog says what this means and why."""
     from meshterm.ui.rooms import join_room
 
     device = MockDevice()
@@ -999,7 +1020,10 @@ async def test_read_only_is_explained_and_another_password_offered(tmp_path: Pat
 
 
 async def test_a_room_the_radio_forgot_is_put_back_and_tried_again(tmp_path: Path) -> None:
-    """Not sent at all is its own case: the radio said why, and the fix is one write."""
+    """A login that the radio did not send is a separate case. The radio says why.
+
+    The correction is one write.
+    """
     from meshterm.ui.rooms import join_room
 
     device = MockDevice()
@@ -1014,7 +1038,7 @@ async def test_a_room_the_radio_forgot_is_put_back_and_tried_again(tmp_path: Pat
 
 
 async def test_backing_out_of_the_prompt_sends_nothing(tmp_path: Path) -> None:
-    """Esc on the password prompt is the end of it; no login goes out."""
+    """Esc on the password prompt ends the flow, and the code sends no login."""
     from meshterm.ui.rooms import join_room
 
     device = MockDevice()
@@ -1025,7 +1049,7 @@ async def test_backing_out_of_the_prompt_sends_nothing(tmp_path: Path) -> None:
 
 
 def test_a_password_the_radio_would_cut_is_refused() -> None:
-    """MeshCore sends 15 bytes of a password; a longer one could never work."""
+    """MeshCore sends 15 bytes of a password. A longer password cannot work."""
     from meshterm.ui.rooms import valid_password
 
     assert valid_password("x" * 15) is True
@@ -1034,7 +1058,7 @@ def test_a_password_the_radio_would_cut_is_refused() -> None:
 
 
 def test_how_long_since_the_room_was_heard_is_part_of_the_explanation(tmp_path: Path) -> None:
-    """Never heard, heard just now: the evidence a reader judges reach by."""
+    """Never heard, heard just now: this is the evidence that the user uses to judge the reach."""
     from dataclasses import replace
 
     from meshterm.ui.rooms import silence_explanation
@@ -1052,7 +1076,7 @@ def test_how_long_since_the_room_was_heard_is_part_of_the_explanation(tmp_path: 
 
 
 class _ConfirmingMeshCore:
-    """A meshcore stand-in whose login sends confirmations and answers as scripted."""
+    """A replacement for meshcore. Its login sends confirmations and answers as the script says."""
 
     def __init__(self, frames: list[tuple[str, dict]]) -> None:
         self.frames = frames
@@ -1083,7 +1107,10 @@ def _confirmed_login(frames: list[tuple[str, dict]]) -> RoomLogin:
 
 
 def test_the_radios_confirmation_says_how_the_login_went_out(quick_budget) -> None:  # noqa: ANN001, F811
-    """Matched by the login's expected ack — the room's first four key bytes."""
+    """The code matches the confirmation by the expected ack of the login.
+
+    The expected ack is the first four key bytes of the room.
+    """
     ours = bytes.fromhex(ROOM.public_key[:8])
     flood = _confirmed_login(
         [("MSG_SENT", {"type": 1, "expected_ack": ours}), ("LOGIN_SUCCESS", {"acl_permissions": 2})]
@@ -1094,20 +1121,23 @@ def test_the_radios_confirmation_says_how_the_login_went_out(quick_budget) -> No
 
 
 def test_another_commands_confirmation_is_not_ours(quick_budget) -> None:  # noqa: ANN001, F811
-    """A MSG_SENT for anything else in flight says nothing about this login."""
+    """A MSG_SENT for another command in progress does not show anything about this login."""
     other = _confirmed_login([("MSG_SENT", {"type": 1, "expected_ack": b"\x00\x01\x02\x03"})])
     assert other.flood is None and other.radio_error is None
 
 
 def test_a_login_the_radio_would_not_send_carries_its_reason(quick_budget) -> None:  # noqa: ANN001, F811
-    """No confirmation, and the radio's own error: the room isn't in its contacts."""
+    """There is no confirmation, and the radio gives an error: the room is not in its contacts."""
     refused = _confirmed_login([("ERROR", {"error_code": 2})])
     assert refused.flood is None
     assert refused.radio_error == "this node isn't in the radio's contacts"
 
 
 async def test_the_simulator_floods_once_its_route_is_forgotten(tmp_path: Path) -> None:
-    """A stale route meets silence; forgetting it floods, and the answer brings a new one."""
+    """A stale route gets silence. If the code forgets the route, the login floods.
+
+    The answer then gives a new route.
+    """
     device = MockDevice()
     device._stale_routes.add(ROOM.name)
     stale = await device.room_login(ROOM, "hello")
@@ -1123,7 +1153,10 @@ async def test_the_simulator_floods_once_its_route_is_forgotten(tmp_path: Path) 
 
 
 def test_the_page_lists_joined_rooms_first(tmp_path: Path, repo: Repository) -> None:
-    """Joined, then the rest heard most recently first, each with its lanes."""
+    """The joined rooms are first. The other rooms follow, with the most recently heard first.
+
+    Each row has its lanes.
+    """
     from dataclasses import replace
 
     from meshterm.ui.rooms import _page_items
@@ -1147,7 +1180,7 @@ def test_the_page_lists_joined_rooms_first(tmp_path: Path, repo: Repository) -> 
 
 
 async def test_joining_from_the_rooms_page_end_to_end(tmp_path: Path) -> None:
-    """Rooms, the room's page, Join…, the password, Open the board: read, post, leave."""
+    """Rooms, the page of the room, Join…, the password, Open the board: read, post, leave."""
     from prompt_toolkit.input.defaults import create_pipe_input
     from prompt_toolkit.output import DummyOutput
     from rich.console import Console
@@ -1202,9 +1235,9 @@ async def test_joining_from_the_rooms_page_end_to_end(tmp_path: Path) -> None:
                 await until(lambda: len([m for m in board() if m.is_post]) >= 5, "the catch-up")
                 inp.send_text("count me in\r")
                 await until(lambda: [m for m in board() if m.outbound], "the post")
-                inp.send_text("\x1b")  # board, back to the room's page
+                inp.send_text("\x1b")  # from the board, back to the page of the room
                 await until(lambda: top() == f"Room — {ROOM.name}", "the room's page again")
-                inp.send_text("\x1b")  # the room's page, back to Rooms
+                inp.send_text("\x1b")  # from the page of the room, back to Rooms
                 await until(lambda: top().startswith("Rooms"), "the Rooms page again")
                 inp.send_text("\x1b")
 
@@ -1229,7 +1262,7 @@ async def test_joining_from_the_rooms_page_end_to_end(tmp_path: Path) -> None:
 
 @pytest.fixture()
 def cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201 - a closure
-    """The real CLI against the simulator, in a home of its own (see test_cli_contract)."""
+    """The real CLI against the simulator, in its own home (refer to test_cli_contract)."""
     from typer.testing import CliRunner
 
     from meshterm.cli import app
@@ -1246,7 +1279,7 @@ def cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201 - a cl
 
 
 def test_chat_list_names_a_room_as_one(cli) -> None:  # noqa: ANN001
-    """A room is its own kind of conversation, on both faces."""
+    """A room is its own type of conversation, on both faces."""
     import json
 
     assert "Lakeside BBS    room" in cli("chat", "list").stdout
@@ -1256,7 +1289,7 @@ def test_chat_list_names_a_room_as_one(cli) -> None:  # noqa: ANN001
 
 
 def test_rooms_join_answers_with_the_access_won(cli) -> None:  # noqa: ANN001
-    """The access word alone on the plain face; the room, the access and the route in JSON."""
+    """The plain face shows only the access word. JSON has the room, the access, and the route."""
     import json
 
     from meshterm.core import exitcodes
@@ -1273,7 +1306,7 @@ def test_rooms_join_answers_with_the_access_won(cli) -> None:  # noqa: ANN001
 
     joined = cli("rooms", "join", "Lakeside BBS", "--password", "hello")
     assert joined.exit_code == exitcodes.OK and joined.stdout == "member\n"
-    again = json.loads(cli("--json", "rooms", "join", "Lakeside BBS").stdout)  # remembered
+    again = json.loads(cli("--json", "rooms", "join", "Lakeside BBS").stdout)  # a stored password
     assert again["access"] == "member" and again["route"] == "direct"
     assert again["room"]["name"] == "Lakeside BBS" and again["room"]["type"] == "room server"
     flooded = json.loads(cli("--json", "rooms", "join", "Lakeside BBS", "--flood").stdout)
@@ -1281,7 +1314,7 @@ def test_rooms_join_answers_with_the_access_won(cli) -> None:  # noqa: ANN001
 
 
 def test_rooms_list_and_forget(cli) -> None:  # noqa: ANN001
-    """Every room the radio knows, joined or not; forgetting one is local and silent."""
+    """The list has each room that the radio knows, joined or not. A forget is local and silent."""
     import json
 
     from meshterm.core import exitcodes
@@ -1299,7 +1332,7 @@ def test_rooms_list_and_forget(cli) -> None:  # noqa: ANN001
 
 
 def test_chat_history_reads_a_room_by_author(cli) -> None:  # noqa: ANN001
-    """AUTHOR stands where PEER would; a command reply is not on the board; one shape."""
+    """AUTHOR is in the place of PEER. A command reply is not on the board. The form is the same."""
     import json
 
     repo = Repository(cli.db)
@@ -1328,7 +1361,7 @@ def test_chat_history_reads_a_room_by_author(cli) -> None:  # noqa: ANN001
 
 
 def test_chat_send_to_a_room_is_a_post(cli) -> None:  # noqa: ANN001
-    """The receipt says it was a room it went to."""
+    """The receipt says that the message went to a room."""
     import json
 
     receipt = json.loads(cli("--json", "chat", "send", "--to", "Lakeside BBS", "hi").stdout)

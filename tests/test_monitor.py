@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for the passive mesh monitor: listening, aggregation, and persistence.
+"""Tests for the passive mesh monitor: listening, aggregation, and storage.
 
-All run against the :class:`MockDevice` simulator and an on-disk SQLite database, no
-hardware required.
+All the tests run against the :class:`MockDevice` simulator and an SQLite database on disk.
+They do not need hardware.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from meshterm.services.monitor_service import MonitorService
 
 
 class _StubContext:
-    """Minimal stand-in for :class:`~meshterm.context.AppContext` for service tests."""
+    """A minimal substitute for :class:`~meshterm.context.AppContext` in the service tests."""
 
     def __init__(self, repo: Repository, device: MockDevice) -> None:
         self.repo = repo
@@ -42,7 +42,7 @@ class _StubContext:
 
     @property
     def events(self):
-        """Lazily build a real event hub bound to this stub context (as AppContext does)."""
+        """Build a real event hub for this stub context at the first use, as AppContext does."""
         from meshterm.services.event_hub import EventHub
 
         if self._events is None:
@@ -51,7 +51,7 @@ class _StubContext:
 
 
 async def _collect_observations(device: MockDevice, duration_s: float) -> list[Observation]:
-    """Subscribe, gather observations for a window, then unsubscribe (test helper)."""
+    """Subscribe, collect observations for a period, then unsubscribe. This is a test helper."""
     seen: list[Observation] = []
 
     def on_event(event) -> None:
@@ -67,7 +67,7 @@ async def _collect_observations(device: MockDevice, duration_s: float) -> list[O
 
 
 async def test_subscribe_events_streams_observations_then_stops() -> None:
-    """The event stream emits an immediate burst, keeps streaming, and halts on unsub."""
+    """The event stream sends a burst at once, continues to send, and stops at unsubscribe."""
     device = MockDevice()
     await device.connect()
 
@@ -79,34 +79,34 @@ async def test_subscribe_events_streams_observations_then_stops() -> None:
 
     unsubscribe = await device.subscribe_events(on_event)
     try:
-        # The first burst is emitted synchronously, before any await.
+        # The stream sends the first burst synchronously, before any await.
         first_burst = len(seen)
         assert first_burst >= 1
-        assert any(o.lat is not None for o in seen)  # a located repeater is in the burst
+        assert any(o.lat is not None for o in seen)  # the burst has a repeater with a location
 
         await asyncio.sleep(_MOCK_INTERVAL * 3)
-        assert len(seen) > first_burst  # more packets arrived while we did nothing
+        assert len(seen) > first_burst  # more packets arrived while the test did nothing
     finally:
         unsubscribe()
 
     frozen = len(seen)
     await asyncio.sleep(_MOCK_INTERVAL * 3)
-    assert len(seen) == frozen  # nothing more after unsubscribing
+    assert len(seen) == frozen  # no more packets after the unsubscribe
 
 
 async def test_disconnect_stops_background_emitter() -> None:
-    """Disconnecting cancels any live subscription task rather than leaking it."""
+    """A disconnect cancels each live subscription task. The task does not stay running."""
     device = MockDevice()
     await device.connect()
     await device.subscribe_events(lambda _event: None)
-    assert device._bg_tasks  # a background emitter is running
+    assert device._bg_tasks  # a background sender is running
     await device.disconnect()
-    await asyncio.sleep(0)  # let the cancellation settle
+    await asyncio.sleep(0)  # let the cancellation finish
     assert not device._bg_tasks
 
 
 def test_heard_node_aggregation() -> None:
-    """from_observations summarizes count, robust SNR, latest RSSI, and location."""
+    """``from_observations`` gives the count, a robust SNR, the latest RSSI, and the location."""
     now = utcnow()
     obs = [
         Observation(node="a1", name="Yagi", snr=4.0, rssi=-100.0, observed_at=now),
@@ -127,25 +127,28 @@ def test_heard_node_aggregation() -> None:
     assert node.count == 3
     assert node.median_snr == 6.0  # median of [4, 8, 6]
     assert node.best_snr == 8.0
-    assert node.last_seen == now + timedelta(seconds=5)  # freshest observation
-    assert node.last_rssi == -90.0  # RSSI from that freshest observation
-    assert node.has_location  # location carried by one observation is retained
+    assert node.last_seen == now + timedelta(seconds=5)  # the newest observation
+    assert node.last_rssi == -90.0  # the RSSI of that newest observation
+    assert node.has_location  # the location of one observation stays
 
 
 def test_heard_node_latest_wins_for_rssi_and_location() -> None:
-    """The freshest observation supplies RSSI; the freshest *located* one supplies coords."""
+    """The newest observation gives the RSSI.
+
+    The newest observation with a location gives the coordinates.
+    """
     now = utcnow()
     obs = [
         Observation(node="b2", snr=1.0, rssi=-80.0, lat=10.0, lon=20.0, observed_at=now),
         Observation(node="b2", snr=2.0, rssi=-70.0, observed_at=now + timedelta(seconds=10)),
     ]
     node = HeardNode.from_observations("b2", obs)
-    assert node.last_rssi == -70.0  # latest reading
-    assert (node.lat, node.lon) == (10.0, 20.0)  # latest one that actually had a fix
+    assert node.last_rssi == -70.0  # the latest reading
+    assert (node.lat, node.lon) == (10.0, 20.0)  # the latest observation that had a fix
 
 
 def test_observation_from_event_parses_advert() -> None:
-    """The event parser pulls node id, name, SNR/RSSI, and location from a payload."""
+    """The event parser gets the node id, name, SNR, RSSI, and location from a payload."""
 
     class _Event:
         payload = {
@@ -167,7 +170,7 @@ def test_observation_from_event_parses_advert() -> None:
 
 
 def test_observation_from_event_keeps_full_public_key() -> None:
-    """An advert carrying the whole key keeps it (public_key) while node stays the 12-hex id."""
+    """An advert with the whole key keeps it in ``public_key``, and ``node`` stays the 12-hex id."""
     full = "aabbccddee11223344556677" + "00" * 20  # 64 hex
 
     class _Event:
@@ -175,12 +178,12 @@ def test_observation_from_event_keeps_full_public_key() -> None:
 
     obs = observation_from_event(_Event(), "advert")
     assert obs is not None
-    assert obs.node == full[:12]  # the stored 12-hex canonical id everything joins on
-    assert obs.public_key == full  # the whole key, kept for a fuller hash display
+    assert obs.node == full[:12]  # the stored 12-hex canonical id that all joins use
+    assert obs.public_key == full  # the whole key, kept for a longer hash display
 
 
 def test_observation_from_event_short_hash_leaves_no_full_key() -> None:
-    """A short-hash-only advert stores just the id, no (fabricated) full key."""
+    """An advert with only a short hash stores only the id. The code does not make a full key."""
 
     class _Event:
         payload = {"hash": "aabbcc0011", "adv_name": "Rep"}
@@ -190,7 +193,7 @@ def test_observation_from_event_short_hash_leaves_no_full_key() -> None:
 
 
 def test_observation_from_event_without_node_is_skipped() -> None:
-    """A payload carrying no node identifier yields no observation."""
+    """A payload with no node identifier gives no observation."""
 
     class _Event:
         payload = {"snr": 3.0}
@@ -199,7 +202,7 @@ def test_observation_from_event_without_node_is_skipped() -> None:
 
 
 def test_message_from_event_parses_direct_message() -> None:
-    """A CONTACT_MSG_RECV payload maps to a direct message with sender and timestamp."""
+    """A CONTACT_MSG_RECV payload becomes a direct message with a sender and a timestamp."""
     from datetime import datetime, timezone
 
     class _Event:
@@ -221,7 +224,7 @@ def test_message_from_event_parses_direct_message() -> None:
 
 
 def test_message_from_event_parses_channel_message() -> None:
-    """A CHANNEL_MSG_RECV payload maps to a channel message with no per-contact sender."""
+    """A CHANNEL_MSG_RECV payload becomes a channel message with no sender contact."""
 
     class _Event:
         payload = {"type": "CHAN", "channel_idx": 2, "text": "net tonight", "SNR": 5.0}
@@ -235,7 +238,7 @@ def test_message_from_event_parses_channel_message() -> None:
 
 
 def test_message_from_event_without_text_is_skipped() -> None:
-    """A payload carrying no text body yields no message."""
+    """A payload with no text body gives no message."""
 
     class _Event:
         payload = {"pubkey_prefix": "aabb"}
@@ -244,7 +247,7 @@ def test_message_from_event_without_text_is_skipped() -> None:
 
 
 def test_ack_from_event_extracts_code() -> None:
-    """An ACK payload maps to an Ack carrying the correlation code."""
+    """An ACK payload becomes an Ack with the correlation code."""
 
     class _Event:
         payload = {"code": "deadbeef"}
@@ -253,7 +256,7 @@ def test_ack_from_event_extracts_code() -> None:
 
 
 async def test_observations_round_trip_and_aggregate(tmp_path: Path) -> None:
-    """Observations persist and heard_nodes reaggregates them across runs."""
+    """The store keeps observations, and ``heard_nodes`` combines them again across runs."""
     repo = Repository(tmp_path / "obs.db")
     run_id = repo.start_run("monitor", {"duration": 1})
 
@@ -266,20 +269,23 @@ async def test_observations_round_trip_and_aggregate(tmp_path: Path) -> None:
 
     nodes = repo.heard_nodes()
     assert nodes
-    # Every aggregated reception should be counted — except packet-log rows, whose SNR
-    # belongs to the last relay rather than the node, so they feed topology instead.
+    # The aggregate must count each reception, except the packet-log rows. The SNR of such
+    # a row belongs to the last relay and not to the node, so these rows go to the topology.
     receptions = [o for o in observations if o.kind != "packet"]
     assert sum(n.count for n in nodes) == len(receptions)
-    # The simulator also overhears relayed packets, which persist with their path.
+    # The simulator also overhears relayed packets. The store keeps them with their path.
     packets = repo.packet_paths()
     assert packets and all(p.hops for p in packets)
-    # Nodes are ordered most-recently-heard first.
+    # The nodes are in order, with the most recently heard node first.
     assert nodes == sorted(nodes, key=lambda n: n.last_seen, reverse=True)
     repo.close()
 
 
 def test_observation_count_totals_every_run(tmp_path: Path) -> None:
-    """observation_count sums observations across all runs, empty database included."""
+    """``observation_count`` adds the observations of all runs.
+
+    It also works for an empty database.
+    """
     repo = Repository(tmp_path / "count.db")
     assert repo.observation_count() == 0
     run_id = repo.start_run("monitor", {})
@@ -290,26 +296,28 @@ def test_observation_count_totals_every_run(tmp_path: Path) -> None:
 
 
 def test_observation_full_key_round_trips_into_heard_nodes(tmp_path: Path) -> None:
-    """A captured full public key persists and surfaces on the aggregated HeardNode."""
-    full = "3d63c6429436" + "ab" * 26  # 64 hex; node is its first 12
+    """The store keeps a captured full public key, and it shows on the combined HeardNode."""
+    full = "3d63c6429436" + "ab" * 26  # 64 hex digits. The node is the first 12.
     repo = Repository(tmp_path / "keys.db")
     run_id = repo.start_run("monitor", {})
-    # One advert with the whole key, a later one for the same node carrying only the prefix.
+    # One advert has the whole key. A later advert for the same node has only the prefix.
     repo.record_observation(run_id, Observation(node=full[:12], public_key=full, snr=5.0))
     repo.record_observation(run_id, Observation(node=full[:12], snr=6.0))
     (node,) = repo.heard_nodes()
     assert node.node == full[:12]  # the id stays the 12-hex prefix
-    assert node.public_key == full  # the full key is surfaced from the row that had it
+    assert node.public_key == full  # the full key comes from the row that had it
     assert node.count == 2
     repo.close()
 
 
 def test_last_heard_by_node_is_the_latest_non_packet_reception(tmp_path: Path) -> None:
-    """The heard-time evidence: one stamp per node, packet rows excluded.
+    """The last heard time of a node is its latest reception that is not a packet.
 
-    Backs the contacts merge, which weighs it against the device's sender-stamped advert
-    time. ``packet`` rows are excluded exactly as ``heard_nodes`` excludes them — hearing a
-    relayed frame means hearing its last relay, not its originator.
+    This is the evidence of the heard time, with one stamp for each node. It does not use
+    ``packet`` rows. The contacts merge uses it, and compares it with the advert time that
+    the sender stamped on the device. The query excludes ``packet`` rows in the same way as
+    ``heard_nodes``, because when a node hears a relayed packet, it hears the last relay and
+    not the originator.
     """
     repo = Repository(tmp_path / "heard.db")
     run_id = repo.start_run("monitor", {})
@@ -321,12 +329,15 @@ def test_last_heard_by_node_is_the_latest_non_packet_reception(tmp_path: Path) -
         run_id, Observation(node="bb" * 6, kind="packet", path="c1", observed_at=late)
     )
     heard = repo.last_heard_by_node()
-    assert heard == {"aa" * 6: late}  # latest wins; the relayed packet credits nobody
+    assert heard == {"aa" * 6: late}  # the latest wins, and the relayed packet credits no node
     repo.close()
 
 
 def test_last_message_by_peer_credits_only_inbound_direct_messages(tmp_path: Path) -> None:
-    """Receiving a DM is hearing its sender; sending one, and channel traffic, are not."""
+    """When MeshTerm receives a DM, it hears the sender.
+
+    A sent DM and channel traffic do not count.
+    """
     repo = Repository(tmp_path / "msgs.db")
     early = utcnow() - timedelta(days=4)
     late = utcnow() - timedelta(minutes=5)
@@ -338,43 +349,47 @@ def test_last_message_by_peer_credits_only_inbound_direct_messages(tmp_path: Pat
     repo.record_chat_message(
         ChatMessage(text="all", is_channel=True, channel_id="pub", created_at=late)
     )
-    assert repo.last_message_by_peer() == {"ababab": late}  # peers store lowercased
+    assert repo.last_message_by_peer() == {"ababab": late}  # the store keeps peers in lower case
     repo.close()
 
 
 async def test_monitor_service_records_while_hub_pumps(tmp_path: Path) -> None:
-    """start() subscribes before the hub opens, then logs observations once it pumps."""
+    """``start()`` subscribes before the hub opens. It logs observations when the hub pumps."""
     repo = Repository(tmp_path / "svc.db")
     ctx = _StubContext(repo, MockDevice())
     service = MonitorService(ctx)
 
     assert not service.active
-    await service.start()  # device-free: no connection has been opened yet
+    await service.start()  # no device is necessary: no connection is open yet
     assert service.active
-    await ctx.events.start()  # the hub opens; recording catches the initial burst
+    await ctx.events.start()  # the hub opens, and the recording catches the first burst
 
-    await asyncio.sleep(_MOCK_INTERVAL * 3)  # let packets stream in while we "do other work"
+    await asyncio.sleep(_MOCK_INTERVAL * 3)  # let packets stream in during "other work"
     assert service.session_count > 0
-    # Started from an empty database, so total equals what this session captured.
+    # The database was empty at the start, so the total is what this session captured.
     assert service.total_count() == service.session_count
 
     await service.stop()
     assert not service.active
-    assert repo.observation_count() == service.session_count  # everything was logged
+    assert repo.observation_count() == service.session_count  # all the observations were logged
 
     frozen = service.session_count
     await asyncio.sleep(_MOCK_INTERVAL * 3)
-    assert service.session_count == frozen  # recording really stopped
+    assert service.session_count == frozen  # the recording did stop
 
-    # The always-on hub keeps listening after recording stops; shut it down cleanly so the
-    # simulator's background emitter task doesn't outlive the test.
+    # The hub is always on, and it continues to listen after the recording stops. Shut it
+    # down cleanly, so that the background sender task of the simulator does not continue
+    # after the test.
     await ctx.events.stop()
     await ctx._device.disconnect()
     repo.close()
 
 
 async def test_monitor_service_counts_every_packet_kind(tmp_path: Path) -> None:
-    """The activity histogram counts observations, messages, and acks alike, newest first."""
+    """The activity histogram counts observations, messages, and acks in the same way.
+
+    The newest bucket is first.
+    """
     from meshterm.core.events import MeshEvent
     from meshterm.core.models import Ack, Message
     from meshterm.services.monitor_service import ACTIVITY_BUCKETS
@@ -392,17 +407,17 @@ async def test_monitor_service_counts_every_packet_kind(tmp_path: Path) -> None:
 
     histogram = service.activity_histogram()
     assert len(histogram) == ACTIVITY_BUCKETS
-    # All three land in the freshest bucket or, over a slot rollover, the freshest two.
+    # All three are in the newest bucket. If a slot rolls over, they are in the newest two.
     assert sum(histogram[:2]) == 3 and sum(histogram) == 3
 
     await service.stop()
     hub.publish(MeshEvent.ack_event(Ack(code=2)))
-    assert sum(service.activity_histogram()) == 3  # the counter stopped with the service
+    assert sum(service.activity_histogram()) == 3  # the counter stopped when the service stopped
     repo.close()
 
 
 async def test_monitor_service_start_without_device_is_safe(tmp_path: Path) -> None:
-    """Recording can start before any device exists, and a silent session leaves no run."""
+    """The recording can start before a device exists. A silent session leaves no run."""
 
     class _NoDevice(_StubContext):
         async def device(self) -> MockDevice:
@@ -411,12 +426,12 @@ async def test_monitor_service_start_without_device_is_safe(tmp_path: Path) -> N
     repo = Repository(tmp_path / "nodev.db")
     service = MonitorService(_NoDevice(repo, MockDevice()))
 
-    await service.start()  # never touches the device, so this cannot fail
+    await service.start()  # the call does not use the device, so it cannot fail
     assert service.active
     assert service.session_count == 0
 
     await service.stop()
     assert not service.active
     assert repo.observation_count() == 0
-    assert repo.list_runs() == []  # the run row is opened lazily, so none was created
+    assert repo.list_runs() == []  # the service opens the run row only if needed, so none
     repo.close()

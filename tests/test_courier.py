@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Courier tests: the outbox store, delivery eligibility, and the attempt flow.
+"""Courier tests: the outbox store, the eligibility for delivery, and the flow of an attempt.
 
-The service is driven synchronously (eligibility) and through stubbed chat sends
-(attempts), so no timers or hardware are involved.
+The tests run the service synchronously (eligibility) and through chat sends that are
+stubs (attempts). Thus the tests use no timers and no hardware.
 """
 
 from __future__ import annotations
@@ -35,12 +35,12 @@ CONTACT = Contact(name="Hub", public_key="3d" * 32)
 
 
 class _StubChat:
-    """Scripted chat service: pops the next ack outcome per send."""
+    """A scripted chat service. It takes the next ack outcome for each send."""
 
     def __init__(self, outcomes: list[bool]) -> None:
         self.outcomes = list(outcomes)
         self.sent: list[tuple[str, str]] = []
-        self.late: list = []  # the late-ack listener each unacked send handed over
+        self.late: list = []  # the late-ack listener that each send without an ack gave
 
     async def send_direct(self, contact: Contact, text: str, *, on_late_ack=None) -> ChatMessage:  # noqa: ANN001
         self.sent.append((contact.name, text))
@@ -57,7 +57,7 @@ class _StubDevice:
 
 
 class _StubContext:
-    """Minimal stand-in for :class:`~meshterm.context.AppContext`."""
+    """A minimal stand-in for :class:`~meshterm.context.AppContext`."""
 
     def __init__(self, tmp_path: Path, outcomes: list[bool]) -> None:
         self.courier_store = CourierStore(tmp_path / "courier.json")
@@ -79,7 +79,7 @@ def _service(tmp_path: Path, outcomes: list[bool]) -> CourierService:
 
 
 def test_store_queue_round_trips_and_persists(tmp_path: Path) -> None:
-    """Queued entries survive a fresh store instance with their schedule intact."""
+    """Queued entries stay in a new store instance, and their schedule does not change."""
     path = tmp_path / "courier.json"
     store = CourierStore(path)
     when = utcnow() + timedelta(hours=8)
@@ -94,7 +94,7 @@ def test_store_queue_round_trips_and_persists(tmp_path: Path) -> None:
 
 
 def test_store_lifecycle_attempts_finish_cancel_clear(tmp_path: Path) -> None:
-    """Attempt marks, delivery, cancellation, and clearing all behave."""
+    """The attempt marks, the delivery, the cancellation, and the clear work correctly."""
     store = CourierStore(tmp_path / "courier.json")
     a = store.queue(NODE, "Hub", "one")
     b = store.queue(NODE, "Hub", "two")
@@ -104,13 +104,13 @@ def test_store_lifecycle_attempts_finish_cancel_clear(tmp_path: Path) -> None:
     assert store.pending() == [store.get(b.ident)]
     assert store.cancel(b.ident) is True
     assert store.pending_count() == 0
-    assert store.get(a.ident) is not None  # delivered history remains
+    assert store.get(a.ident) is not None  # the history of delivered entries stays
     store.clear_done()
     assert store.entries() == []
 
 
 def test_store_caps_the_finished_history(tmp_path: Path) -> None:
-    """Old finished entries fall off; the waiting queue is never trimmed."""
+    """The store removes old finished entries. It never makes the waiting queue shorter."""
     store = CourierStore(tmp_path / "courier.json")
     keeper = store.queue(NODE, "Hub", "still waiting")
     for i in range(DONE_CAP + 5):
@@ -125,13 +125,13 @@ def test_store_caps_the_finished_history(tmp_path: Path) -> None:
 
 
 def test_eligibility_waits_for_freshness_and_schedule(tmp_path: Path) -> None:
-    """Plain entries need the contact heard; scheduled ones hold until their time."""
+    """A plain entry needs a contact that was heard. A scheduled entry waits until its time."""
     service = _service(tmp_path, [])
     store = service._ctx.courier_store
     now = utcnow()
 
     plain = store.queue(NODE, "Hub", "hi")
-    assert not service.eligible(plain, now)  # never heard this session
+    assert not service.eligible(plain, now)  # not heard in this session
     service._heard[NODE] = now - timedelta(seconds=FRESH_S + 1)
     assert not service.eligible(plain, now)  # heard, but too long ago
     service._heard[NODE] = now
@@ -139,13 +139,17 @@ def test_eligibility_waits_for_freshness_and_schedule(tmp_path: Path) -> None:
 
     scheduled = store.queue(NODE, "Hub", "later", not_before=now + timedelta(hours=1))
     assert not service.eligible(scheduled, now)  # the schedule holds it
-    # Past its time, a scheduled entry's *first* shot fires even unheard-of.
+    # After its time, the *first* attempt of a scheduled entry runs also if the contact was
+    # not heard.
     service._heard.clear()
     assert service.eligible(scheduled, now + timedelta(hours=2))
 
 
 def test_eligibility_backs_off_after_failures(tmp_path: Path) -> None:
-    """A failed attempt waits out its (doubling) backoff even when the contact is fresh."""
+    """A failed attempt waits for its backoff (it doubles).
+
+    This is also true when the contact was heard lately.
+    """
     service = _service(tmp_path, [])
     store = service._ctx.courier_store
     now = utcnow()
@@ -154,7 +158,7 @@ def test_eligibility_backs_off_after_failures(tmp_path: Path) -> None:
     store.note_attempt(entry.ident, when=now)
     entry = store.get(entry.ident)
     assert not service.eligible(entry, now + timedelta(minutes=2))
-    assert service.eligible(entry, now + timedelta(minutes=6))  # 5-min base elapsed
+    assert service.eligible(entry, now + timedelta(minutes=6))  # the base of 5 minutes passed
     assert service.next_retry_s(entry, now + timedelta(minutes=2)) is not None
 
 
@@ -162,7 +166,7 @@ def test_eligibility_backs_off_after_failures(tmp_path: Path) -> None:
 
 
 async def test_attempt_delivers_and_raises_the_good_news(tmp_path: Path) -> None:
-    """An acknowledged send settles the entry and lights the Watchtower badge."""
+    """A send with an ack settles the entry and lights the Watchtower badge."""
     service = _service(tmp_path, [True])
     ctx = service._ctx
     entry = ctx.courier_store.queue(NODE, "Hub", "hello")
@@ -178,7 +182,7 @@ async def test_attempt_delivers_and_raises_the_good_news(tmp_path: Path) -> None
 
 
 async def test_attempt_gives_up_after_the_budget(tmp_path: Path) -> None:
-    """Unacknowledged attempts exhaust the budget and say so, exactly once."""
+    """Attempts without an ack use all the budget, and the service says this exactly one time."""
     service = _service(tmp_path, [False] * MAX_ATTEMPTS)
     ctx = service._ctx
     entry = ctx.courier_store.queue(NODE, "Hub", "hello")
@@ -192,10 +196,11 @@ async def test_attempt_gives_up_after_the_budget(tmp_path: Path) -> None:
 
 
 async def test_a_late_ack_is_a_delivery_not_a_reason_to_send_again(tmp_path: Path) -> None:
-    """The ack outran the attempt's wait; when it lands, the entry is delivered.
+    """The ack came after the wait of the attempt. When it arrives, the entry is delivered.
 
-    It used to stay queued, and the next attempt sent the recipient the same message again —
-    on a mesh where most acks from beyond a neighbour arrive late, a duplicate per message.
+    The entry once stayed queued, and the next attempt sent the same message to the
+    recipient again. On a mesh, most acks from nodes that are not neighbours arrive late.
+    Thus each message had a duplicate.
     """
     service = _service(tmp_path, [False])
     ctx = service._ctx
@@ -207,12 +212,12 @@ async def test_a_late_ack_is_a_delivery_not_a_reason_to_send_again(tmp_path: Pat
     settled = ctx.courier_store.get(entry.ident)
     assert settled.status == "delivered" and settled.attempts == 1
     assert any("ack came late" in a.message for a in ctx.watch_store.alerts())
-    on_late_ack(chat)  # the radio can push the same ack twice
+    on_late_ack(chat)  # the radio can send the same ack two times
     assert len([a for a in ctx.watch_store.alerts() if "delivered" in a.message]) == 1
 
 
 async def test_pass_attempts_at_most_one_entry(tmp_path: Path) -> None:
-    """A backlog drains one message per pass — the courier never bursts."""
+    """A backlog goes down by one message in each pass. The courier never sends a burst."""
     service = _service(tmp_path, [True, True])
     ctx = service._ctx
     ctx.courier_store.queue(NODE, "Hub", "first")
@@ -222,11 +227,11 @@ async def test_pass_attempts_at_most_one_entry(tmp_path: Path) -> None:
     assert len(ctx.chat.sent) == 1
     await service._pass()
     assert len(ctx.chat.sent) == 2
-    assert [t for _n, t in ctx.chat.sent] == ["first", "second"]  # oldest first
+    assert [t for _n, t in ctx.chat.sent] == ["first", "second"]  # the oldest first
 
 
 async def test_unknown_contact_spends_no_budget(tmp_path: Path) -> None:
-    """A recipient the device doesn't know yet stays queued, untouched."""
+    """A recipient that the device does not know yet stays queued, and the entry does not change."""
     service = _service(tmp_path, [True])
     ctx = service._ctx
     entry = ctx.courier_store.queue("ff" * 6, "Stranger", "hello")
@@ -238,19 +243,19 @@ async def test_unknown_contact_spends_no_budget(tmp_path: Path) -> None:
 
 
 async def test_attempt_now_forces_a_send(tmp_path: Path) -> None:
-    """The screen's Send now works regardless of freshness or schedule."""
+    """The Send now of the screen works with no regard for freshness or schedule."""
     service = _service(tmp_path, [True])
     ctx = service._ctx
     entry = ctx.courier_store.queue(NODE, "Hub", "hello", not_before=utcnow() + timedelta(hours=8))
     assert await service.attempt_now(entry.ident) == "delivered"
-    assert await service.attempt_now(entry.ident) == "gone"  # already settled
+    assert await service.attempt_now(entry.ident) == "gone"  # the entry is already settled
 
 
 # --- the scripted CLI actions -------------------------------------------------------------
 
 
 class _NoteUi:
-    """A UI surface that just collects notes and shown renderables."""
+    """A UI surface that only collects the notes and the renderables that it shows."""
 
     def __init__(self) -> None:
         self.notes: list[str] = []
@@ -260,7 +265,7 @@ class _NoteUi:
         self.notes.append(markup)
 
     def ack(self, markup: str) -> None:
-        # The menu's answer: an acknowledgement is a note. (The scripted CLI drops it.)
+        # The answer of the menu: an acknowledgement is a note. (The scripted CLI removes it.)
         self.note(markup)
 
     def show(self, *renderables: object) -> None:
@@ -268,7 +273,7 @@ class _NoteUi:
 
 
 class _StubCourier:
-    """A courier service whose ``attempt_now`` returns a canned outcome."""
+    """A courier service whose ``attempt_now`` returns a fixed outcome."""
 
     def __init__(self, store: CourierStore, outcome: str) -> None:
         self._store = store
@@ -284,7 +289,10 @@ class _StubCourier:
 
 
 class _ToolCtx:
-    """Minimal context for the courier tool's scripted CLI actions (no device needed)."""
+    """A minimal context for the scripted CLI actions of the courier tool.
+
+    No device is necessary.
+    """
 
     def __init__(self, tmp_path: Path, *, outcome: str = "delivered") -> None:
         self.courier_store = CourierStore(tmp_path / "courier.json")
@@ -293,7 +301,7 @@ class _ToolCtx:
 
 
 async def test_cli_list_renders_waiting_and_finished(tmp_path: Path) -> None:
-    """`courier list` shows the outbox without needing a device."""
+    """`courier list` shows the outbox, and it does not need a device."""
     from meshterm.tools.courier import CourierTool
 
     ctx = _ToolCtx(tmp_path)
@@ -303,28 +311,28 @@ async def test_cli_list_renders_waiting_and_finished(tmp_path: Path) -> None:
 
     result = await CourierTool().run(ctx, {"cli_action": "list"})
     assert result.summary == {"entries": 2}
-    # The outbox is *stated*, not printed: the tool hands back the rows and the CLI
-    # boundary picks a renderer for them (see meshterm.ui.report).
+    # The tool *states* the outbox. It does not print it. The tool returns the rows, and the
+    # CLI boundary selects a renderer for them (refer to meshterm.ui.report).
     listing = result.report[0]
     assert sorted(row["state"] for row in listing.rows) == ["delivered", "waiting"]
     assert sorted(row["text"] for row in listing.rows) == ["landed", "still waiting"]
 
 
 async def test_cli_list_empty_notes_and_counts_zero(tmp_path: Path) -> None:
-    """An empty outbox reports zero entries and shows no table."""
+    """An empty outbox gives zero entries and shows no table."""
     from meshterm.tools.courier import CourierTool
 
     ctx = _ToolCtx(tmp_path)
     result = await CourierTool().run(ctx, {"cli_action": "list"})
     assert result.summary == {"entries": 0}
     assert result.exit_code == exitcodes.NO_RESULT
-    # An empty listing, not an absent one: the plain face draws nothing from it and the
-    # machine face gets `[]`, which is a document a consumer can read.
+    # An empty listing, not an absent listing. The plain face draws nothing from it, and the
+    # machine face gets `[]`, which is a document that a consumer can read.
     assert result.report[0].rows == []
 
 
 async def test_cli_cancel_removes_a_waiting_entry(tmp_path: Path) -> None:
-    """`courier cancel` drops a waiting entry; a second cancel is a no-op."""
+    """`courier cancel` removes a waiting entry. A second cancel changes nothing."""
     from meshterm.tools.courier import CourierTool
 
     ctx = _ToolCtx(tmp_path)
@@ -340,7 +348,7 @@ async def test_cli_cancel_removes_a_waiting_entry(tmp_path: Path) -> None:
 
 
 async def test_cli_send_forces_one_attempt(tmp_path: Path) -> None:
-    """`courier send` forces one delivery attempt and reports the outcome."""
+    """`courier send` forces one delivery attempt and gives the outcome."""
     from meshterm.tools.courier import CourierTool
 
     ctx = _ToolCtx(tmp_path, outcome="delivered")
@@ -350,12 +358,12 @@ async def test_cli_send_forces_one_attempt(tmp_path: Path) -> None:
 
 
 async def test_cli_send_unknown_entry_is_a_bad_argument(tmp_path: Path) -> None:
-    """An id nobody has is a *usage* error, and it used to claim the device had failed.
+    """An id that does not exist is a *usage* error. It once said that the device failed.
 
-    The outbox is a local file: nothing was transmitted, and no retry will make an id
-    exist. Exit 4 tells a caller "the radio was reached and the operation failed, try
-    again" — which sent a scheduled sender into a retry loop over a typo. Exit 2 says fix
-    the command, which is the truth.
+    The outbox is a local file. MeshTerm transmitted nothing, and a new attempt cannot make
+    an id exist. Exit 4 tells a caller "the radio was reached and the operation failed, try
+    again". This sent a scheduled sender into a loop of attempts because of a typing error.
+    Exit 2 says "correct the command", and this is the truth.
     """
     import typer
 
@@ -367,7 +375,7 @@ async def test_cli_send_unknown_entry_is_a_bad_argument(tmp_path: Path) -> None:
 
 
 async def test_cli_clear_drops_finished_only(tmp_path: Path) -> None:
-    """`courier clear` removes finished entries and leaves the waiting queue."""
+    """`courier clear` removes the finished entries and does not change the waiting queue."""
     from meshterm.tools.courier import CourierTool
 
     ctx = _ToolCtx(tmp_path)
@@ -384,7 +392,10 @@ async def test_cli_clear_drops_finished_only(tmp_path: Path) -> None:
 
 
 def test_parse_clock_finds_the_next_occurrence() -> None:
-    """HH:MM resolves to the next future occurrence, local, returned as UTC."""
+    """HH:MM becomes the next future occurrence, in local time.
+
+    The function returns it as UTC.
+    """
     now = utcnow()
     when = parse_clock("07:00", now)
     assert when is not None and when > now
@@ -399,7 +410,10 @@ def test_parse_clock_finds_the_next_occurrence() -> None:
 
 
 class _StubScheduleSession:
-    """Scripts the when-to-send picker: ``choose`` maps the offered rows to a selection."""
+    """A script for the when-to-send picker.
+
+    ``choose`` maps the rows that it gets to a selection.
+    """
 
     def __init__(self, choose) -> None:
         self._choose = choose
@@ -417,26 +431,32 @@ class _ScheduleCtx:
 
 
 async def test_pick_schedule_when_next_heard_returns_no_schedule() -> None:
-    """Picking *When it's next heard* returns ``None`` (queue with no hold), not a cancel.
+    """If the user selects ``When it's next heard``, the function returns ``None``.
 
-    Regression: the row once carried the value ``None``, which ``session.select`` also
-    returns on Esc, so choosing it read as a cancel and the message was never queued.
+    ``None`` means "queue with no hold". It is not a cancel.
+
+    This test guards against a regression. The row once had the value ``None``, and
+    ``session.select`` also returns ``None`` on Esc. Thus the selection of the row looked
+    like a cancel, and MeshTerm did not queue the message.
     """
     ctx = _ScheduleCtx(_StubScheduleSession(lambda items: items[0].value))
     result = await _pick_schedule(ctx, "Hub")
     assert result is None
     assert result is not CANCEL_SCHEDULE
-    assert WHEN_HEARD is not None  # the row's own sentinel, distinct from Esc's None
+    assert WHEN_HEARD is not None  # the sentinel of the row, different from the None of Esc
 
 
 async def test_pick_schedule_esc_cancels_the_queueing() -> None:
-    """Esc on the picker (``select`` returns ``None``) backs out without queueing anything."""
+    """Esc on the picker (``select`` returns ``None``) goes back, and MeshTerm queues nothing."""
     ctx = _ScheduleCtx(_StubScheduleSession(lambda items: None))
     assert await _pick_schedule(ctx, "Hub") is CANCEL_SCHEDULE
 
 
 async def test_pick_schedule_a_fixed_delay_holds_until_its_time() -> None:
-    """A concrete offset row (e.g. In 1 h) comes back as its aware future datetime."""
+    """A row with a fixed offset (for example In 1 h) returns as an aware datetime.
+
+    The datetime is in the future.
+    """
     ctx = _ScheduleCtx(_StubScheduleSession(lambda items: items[1].value))  # In 1 h
     result = await _pick_schedule(ctx, "Hub")
     assert result is not None and result is not CANCEL_SCHEDULE
@@ -459,7 +479,10 @@ def _outbox_plain(screen, width: int = 100) -> str:
 
 
 def test_outbox_refresh_moves_a_delivered_entry_without_a_keypress(tmp_path: Path) -> None:
-    """A delivery lands its row in Finished on refresh(), no action required."""
+    """A delivery puts its row in Finished at ``refresh()``.
+
+    The user does not need to do anything.
+    """
     from meshterm.ui.courier_screen import CourierOutboxScreen
 
     ctx = _outbox_ctx(tmp_path)
@@ -475,7 +498,7 @@ def test_outbox_refresh_moves_a_delivered_entry_without_a_keypress(tmp_path: Pat
 
 
 def test_outbox_refresh_keeps_the_highlight_on_its_entry(tmp_path: Path) -> None:
-    """A row finishing above the cursor doesn't drag the highlight off its entry."""
+    """A row that finishes above the highlight does not move the highlight off its entry."""
     from meshterm.ui.courier_screen import CourierOutboxScreen
 
     ctx = _outbox_ctx(tmp_path)
@@ -490,7 +513,10 @@ def test_outbox_refresh_keeps_the_highlight_on_its_entry(tmp_path: Path) -> None
 
 
 def test_outbox_refresh_without_change_recomposes_nothing(tmp_path: Path) -> None:
-    """An unchanged store shape leaves the row objects alone (no churn per tick)."""
+    """If the shape of the store does not change, the row objects do not change.
+
+    Thus there is no work at each tick.
+    """
     from meshterm.ui.courier_screen import CourierOutboxScreen
 
     ctx = _outbox_ctx(tmp_path)
@@ -502,7 +528,7 @@ def test_outbox_refresh_without_change_recomposes_nothing(tmp_path: Path) -> Non
 
 
 def test_outbox_rows_recompute_live_state_per_repaint(tmp_path: Path) -> None:
-    """The waiting row's text is a callable: a state change shows on the next paint."""
+    """The text of the waiting row is a callable. A change of state shows at the next paint."""
     from meshterm.ui.courier_screen import CourierOutboxScreen
 
     ctx = _outbox_ctx(tmp_path)
@@ -510,20 +536,27 @@ def test_outbox_rows_recompute_live_state_per_repaint(tmp_path: Path) -> None:
     screen = CourierOutboxScreen(ctx)
     assert "waiting to hear the contact" in _outbox_plain(screen)
 
-    # An attempt just happened: the same row now shows the retry countdown —
-    # no refresh() needed, the callable title re-reads the entry on repaint.
+    # An attempt just happened. The same row now shows the countdown to the next attempt.
+    # ``refresh()`` is not necessary, because the callable title reads the entry again at
+    # each paint.
     ctx.courier_store.note_attempt(entry.ident)
     assert "try 1" in _outbox_plain(screen)
 
 
 def _title_plain(choice) -> str:
-    """A row's label as plain text, resolving a live (callable) title the way a paint does."""
+    """The label of a row as plain text.
+
+    It resolves a live (callable) title in the same way as a paint.
+    """
     title = choice.title() if callable(choice.title) else choice.title
     return title.plain if isinstance(title, Text) else title
 
 
 def _outbox_titles(tmp_path: Path) -> list[str]:
-    """Every row of an outbox holding one waiting, one delivered and one given-up entry."""
+    """Each row of an outbox with three entries.
+
+    The entries are one waiting entry, one delivered entry, and one entry that was given up.
+    """
     from meshterm.ui.courier_screen import CourierOutboxScreen
 
     ctx = _outbox_ctx(tmp_path)
@@ -536,7 +569,7 @@ def _outbox_titles(tmp_path: Path) -> list[str]:
 
 
 async def _entry_action_titles(tmp_path: Path) -> list[str]:
-    """The labels a waiting entry's action menu offers (the menu is dismissed unanswered)."""
+    """The labels in the action menu of a waiting entry (the menu closes with no answer)."""
     offered: list = []
 
     class _Session:
@@ -552,7 +585,10 @@ async def _entry_action_titles(tmp_path: Path) -> list[str]:
 
 
 def _word_starts(rows: list[str], leads: dict[str, str]) -> set[int]:
-    """The display cell each row's first word starts in, checking the mark it leads with."""
+    """The display cell where the first word of each row starts.
+
+    The function checks the mark that starts the row.
+    """
     starts = set()
     for word, mark in leads.items():
         row = next(row for row in rows if word in row)
@@ -562,13 +598,14 @@ def _word_starts(rows: list[str], leads: dict[str, str]) -> set[int]:
 
 
 async def test_courier_rows_start_every_label_in_the_same_cell(tmp_path: Path) -> None:
-    """Both of the courier's lists share one icon column, whatever each mark's width.
+    """The two lists of the courier have one icon column, with no regard for the width of each mark.
 
-    The outbox mixes two-cell marks (⏳ a waiting entry, 📨 the queue row) with one-cell ones
-    (✓ ✗ a finished entry, 🗑 the clear row), and wrote each as ``mark + " "`` — so a finished
-    recipient sat a column left of a waiting one and *Clear finished* a column left of
-    *Queue a message…*. An entry's actions did the same with 📤 over ✗. Cells, not
-    characters, are the measure: that is what the terminal lines up.
+    The outbox has marks of two cells (⏳ a waiting entry, 📨 the queue row) and marks of one
+    cell (✓ ✗ a finished entry, 🗑 the clear row). It wrote each as ``mark + " "``. Thus a
+    finished recipient was one column to the left of a waiting recipient, and *Clear
+    finished* was one column to the left of *Queue a message…*. The actions of an entry
+    had the same fault with 📤 over ✗. The measure is cells, not characters, because the
+    terminal aligns cells.
     """
     outbox = {"Waiting": "⏳", "Queue": "📨", "Landed": "✓", "Lost": "✗", "Clear": "🗑"}
     actions = {"Send": "📤", "Cancel": "✗"}
@@ -582,11 +619,11 @@ async def test_courier_rows_start_every_label_in_the_same_cell(tmp_path: Path) -
 async def test_courier_command_rows_go_bare_where_the_platform_draws_no_icons(
     tmp_path: Path,
 ) -> None:
-    """No icon lane: the command icons go with no padding left, and the entry marks stay.
+    """If there is no icon lane, the command icons go with no padding. The entry marks stay.
 
-    An entry's ✓/✗/⏳ is its outcome, not decoration, so the PicoCalc keeps it — and keeps
-    those rows aligned with one another — while the queue, clear, send and cancel rows lose
-    their icons exactly as every other command row does there.
+    The ✓, ✗, or ⏳ of an entry is its outcome, not decoration. Thus the PicoCalc keeps it,
+    and it keeps those rows in line with each other. The queue, clear, send, and cancel rows
+    lose their icons in the same way as each other command row there.
     """
     from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 
@@ -608,7 +645,10 @@ async def test_courier_command_rows_go_bare_where_the_platform_draws_no_icons(
 
 
 def test_recipient_picker_rides_the_shared_node_list(tmp_path: Path) -> None:
-    """The picker draws the full lanes, opens freshest-heard first, and Enter commits."""
+    """The picker draws all the lanes and opens with the node that was heard last at the top.
+
+    Enter commits.
+    """
     from meshterm.ui.contactlist import SORT_COLUMNS, SORT_OPENS_ASCENDING
     from meshterm.ui.courier_screen import _PICK_HINT, CourierRecipientScreen
     from meshterm.ui.widgets import ContactsSort
@@ -626,11 +666,11 @@ def test_recipient_picker_rides_the_shared_node_list(tmp_path: Path) -> None:
 
     body = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", ln) for ln in screen.render_body(80))
     assert "NAME" in body and "HEARD" in body and "PKTS" in body and "KEY" in body
-    assert body.index("Fresh") < body.index("Stale")  # heard opens freshest-first
-    assert "    7" in body  # Fresh's overheard tally fills the PKTS lane
+    assert body.index("Fresh") < body.index("Stale")  # heard opens with the newest first
+    assert "    7" in body  # the count of packets heard from Fresh is in the PKTS lane
     assert screen.footer_hint == _PICK_HINT
 
-    # Enter resolves the highlighted row's value — the Contact itself.
+    # Enter resolves the value of the highlighted row: the Contact itself.
     resolved: list = []
     screen.resolve = resolved.append  # type: ignore[method-assign]
     screen.handle("enter")
@@ -638,7 +678,7 @@ def test_recipient_picker_rides_the_shared_node_list(tmp_path: Path) -> None:
 
 
 def test_recipient_picker_sort_keys_walk_the_ring(tmp_path: Path) -> None:
-    """The same ^←→ keys the Nodes list uses re-sort the picker's columns."""
+    """The ^←→ keys that the Nodes list uses sort the columns of the picker again."""
     from meshterm.ui.contactlist import SORT_COLUMNS, SORT_OPENS_ASCENDING
     from meshterm.ui.courier_screen import CourierRecipientScreen
     from meshterm.ui.widgets import ContactsSort

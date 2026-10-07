@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """The main menu's Quit row shares the tool rows' icon column (JP, 2026-09-11).
 
-The menu closes on a ``🚪 Quit`` row below its tool rows, and for as long as it has existed
-that row sat *outside* the measured icon column the tools are drawn through: a literal
-string whose word happened to start in the right cell because ``🚪`` happened to be as wide
-as the widest tool icon. These tests pin the alignment itself rather than today's icons, so
-a narrower quit mark or a wider tool mark cannot quietly reopen it, and they pin the
-PicoCalc case — no icon lane, so the bare word and not a stray indent.
+The menu ends with a ``🚪 Quit`` row below its tool rows. The Quit row was always outside
+the measured icon column that the code uses to draw the tools. It was a literal string. Its
+word started in the correct cell only because ``🚪`` has the same width as the widest tool
+icon. These tests check the alignment itself and not the icons of today. Thus a narrower
+quit mark or a wider tool mark cannot cause the fault again. The tests also check the
+PicoCalc case. There is no icon lane, so the row has the bare word and no extra indent.
 """
 
 from __future__ import annotations
@@ -22,24 +22,24 @@ from meshterm.tools import all_tools, load_all_tools
 from meshterm.ui import menu
 from meshterm.ui.tui import Choice
 
-#: A mark the terminal draws in one cell — the width a quit or tool icon must not be
-#: allowed to mis-align by.
+#: A mark that the terminal draws in one cell. A quit icon or a tool icon of this width
+#: must not cause a misalignment.
 _NARROW = "⚙"
 
-#: A mark the terminal draws in two.
+#: A mark that the terminal draws in two cells.
 _WIDE = "📡"
 
 
 @pytest.fixture
 def tools() -> list:
-    """The real menu-visible tools, in drawing order — the registry the menu is built from."""
+    """The real tools that the menu shows, in drawing order (the registry of the menu)."""
     load_all_tools()
     return [tool for tool in all_tools() if tool.menu_visible]
 
 
 @pytest.fixture
 def picocalc_lyra() -> Iterator[None]:
-    """Run a test on the PicoCalc platform, restoring the regular one afterwards."""
+    """Run a test on the PicoCalc platform, and restore the regular platform afterwards."""
     set_platform(PICOCALC_LYRA)
     try:
         yield
@@ -48,17 +48,17 @@ def picocalc_lyra() -> Iterator[None]:
 
 
 def _fake_tool(name: str, icon: str) -> SimpleNamespace:
-    """A stand-in tool carrying only what the menu reads, with an icon of our choosing."""
+    """A stand-in tool with only the attributes that the menu reads, and an icon that we choose."""
     return SimpleNamespace(
         name=name, title=name.capitalize(), icon=icon, category="Test", help="does a thing"
     )
 
 
 def _word_starts(items: list, tools: list) -> dict[str, int]:
-    """The cell each row's words start in, keyed by row value — the tools' titles and Quit.
+    """The cell where the words of each row start, by row value: the tool titles and Quit.
 
-    Measured from the rendered title rather than from the lane, so it checks what the
-    reader sees: everything before the title (the mark and its padding) in display cells.
+    The function measures the rendered title and not the lane. Thus it checks what the user
+    sees: all the text before the title (the mark and its padding), in display cells.
     """
     words = {tool.name: tool.title or tool.name for tool in tools}
     words[menu._QUIT_VALUE] = "Quit"
@@ -72,23 +72,23 @@ def _word_starts(items: list, tools: list) -> dict[str, int]:
 
 
 def test_the_quit_row_starts_its_word_in_the_tool_titles_cell(tools: list) -> None:
-    """On the real menu, *Quit* lines up under every tool title above it."""
+    """On the real menu, Quit aligns under each tool title above it."""
     items = menu._menu_items(tools)
     starts = _word_starts(items, tools)
 
     assert menu._QUIT_VALUE in starts, "the menu lost its Quit row"
     assert set(starts) == {tool.name for tool in tools} | {menu._QUIT_VALUE}
     assert len(set(starts.values())) == 1, f"a row starts a column off: {starts}"
-    # The row closes the list, behind its blank separator, with its wording intact.
+    # The row ends the list, after its blank separator, with its words unchanged.
     assert items[-1].value == menu._QUIT_VALUE
     assert items[-1].title.plain == f"{menu._QUIT_ICON} Quit"
 
 
 def test_a_narrower_quit_mark_still_lines_up(tools: list, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A one-cell quit icon pads out to the tools' two-cell column instead of starting early.
+    """A one-cell quit icon gets padding to the two-cell column of the tools, not an early start.
 
-    This is the case the old literal ``🚪 Quit`` would have got wrong: its word followed
-    the mark by exactly one space, whatever the mark's width.
+    The old literal ``🚪 Quit`` was wrong in this case. Its word followed the mark after
+    exactly one space, whatever the width of the mark.
     """
     assert cell_len(_NARROW) == 1, "the substitute must actually be narrower"
     monkeypatch.setattr(menu, "_QUIT_ICON", _NARROW)
@@ -99,12 +99,13 @@ def test_a_narrower_quit_mark_still_lines_up(tools: list, monkeypatch: pytest.Mo
 
 
 def test_the_quit_mark_is_measured_into_the_column(monkeypatch: pytest.MonkeyPatch) -> None:
-    """When Quit's mark is the widest in the list, the tool titles move over to meet it.
+    """When the mark of Quit is the widest in the list, the tool titles move to meet it.
 
-    Every tool here leads with a one-cell mark and Quit with a two-cell one. A column
-    measured over the tools alone would be one cell wide: the titles would start in cell 2
-    and Quit's mark, with no room left for its separator, would run into its word
-    (``📡Quit``). The menu's column counts Quit's icon too, so every word starts in cell 3.
+    Each tool here starts with a one-cell mark, and Quit starts with a two-cell mark. If
+    the code measured the column over the tools only, the column would be one cell wide.
+    The titles would start in cell 2. The mark of Quit would have no room for its
+    separator, and it would touch its word (``📡Quit``). The column of the menu also counts
+    the icon of Quit, so each word starts in cell 3.
     """
     fakes = [_fake_tool("alpha", _NARROW), _fake_tool("beta", _NARROW)]
     monkeypatch.setattr(menu, "_QUIT_ICON", _WIDE)
@@ -116,7 +117,7 @@ def test_the_quit_mark_is_measured_into_the_column(monkeypatch: pytest.MonkeyPat
 
 @pytest.mark.usefixtures("picocalc_lyra")
 def test_no_icon_lane_leaves_the_bare_word_flush_with_the_titles(tools: list) -> None:
-    """No icon lane on the PicoCalc: the row is just *Quit*, with no padding left behind."""
+    """There is no icon lane on the PicoCalc: the row is only Quit, with no padding."""
     items = menu._menu_items(tools)
     starts = _word_starts(items, tools)
 
@@ -126,7 +127,7 @@ def test_no_icon_lane_leaves_the_bare_word_flush_with_the_titles(tools: list) ->
 
 
 def test_the_quit_confirm_keeps_the_chip_that_asked(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The confirm's F3 reads ``Quit!`` and sends ``quit`` — the menu's own F3, again."""
+    """The F3 of the confirm reads ``Quit!`` and sends ``quit``. It is the F3 of the menu again."""
     import asyncio
 
     from meshterm.ui.tui import fkeys

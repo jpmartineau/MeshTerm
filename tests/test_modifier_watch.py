@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The F-key lane's Shift-state watcher: the raw flag and the shift-bank latch."""
+"""The watcher of the Shift state of the F-key lane: the raw flag and the shift-bank latch."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ def _reset() -> None:
 
 
 def test_shift_down_reflects_the_raw_flag() -> None:
-    """``shift_down()`` reports the flag the watcher last set, with nothing in between."""
+    """``shift_down()`` reports the flag that the watcher set last, with no change between."""
     _reset()
     try:
         assert modifier_watch.shift_down() is False
@@ -23,11 +23,11 @@ def test_shift_down_reflects_the_raw_flag() -> None:
 
 
 def test_shift_bank_key_latches_over_the_release_flicker(monkeypatch) -> None:
-    """A shift-bank key latches over the release flicker.
+    """A shift-bank key latches over the flicker at the release.
 
-    An F6-F10 press keeps the lane's shifted read for a grace window, even if the raw
-    watcher reports Shift already back up — which, per the MCU quirk, it may do
-    wrongly.
+    A press of F6-F10 keeps the shifted state of the lane for a grace window. This is true
+    also if the raw watcher reports that Shift is already up. Because of a quirk of the MCU,
+    the watcher can report this wrongly.
     """
     _reset()
     try:
@@ -36,12 +36,12 @@ def test_shift_bank_key_latches_over_the_release_flicker(monkeypatch) -> None:
 
         assert modifier_watch.shift_down() is False
         modifier_watch.note_shift_bank_key()
-        assert modifier_watch.shift_down() is True  # latched, raw flag never went true
+        assert modifier_watch.shift_down() is True  # latched, and the raw flag never became true
 
         clock[0] += modifier_watch._SHIFT_BANK_GRACE_S - 0.05
-        assert modifier_watch.shift_down() is True  # still inside the grace window
+        assert modifier_watch.shift_down() is True  # still in the grace window
 
         clock[0] += 0.1
-        assert modifier_watch.shift_down() is False  # grace lapsed, Shift really let go
+        assert modifier_watch.shift_down() is False  # the grace window ended, and Shift is up
     finally:
         _reset()

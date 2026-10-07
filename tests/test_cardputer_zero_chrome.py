@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The Cardputer's frame: no header row, its atoms on the title bar, dialogs over the bar."""
+"""The frame of the Cardputer: no header row, its atoms on the title bar, dialogs over the bar."""
 
 from __future__ import annotations
 
@@ -20,7 +20,10 @@ ROWS, COLS = CARDPUTER_ZERO.readable_rows, CARDPUTER_ZERO.readable_cols
 
 
 def _status() -> Text:
-    """Three unread and a pack at 87%, as the header callback hands them to the frame."""
+    """Three unread messages and a battery at 87%.
+
+    This is what the header callback gives to the frame.
+    """
     status = Text()
     status.append("●", style="err")
     status.append(" 3", style="warn")
@@ -35,12 +38,12 @@ def _screen(title: str = "Chrome probe", hint: str = "↑↓ move · Esc back") 
 
 
 def _rows(header: Text, cols: int = COLS, rows: int = ROWS, **lane) -> list[str]:
-    """The composed base frame, one ANSI string per row."""
+    """The composed base frame, with one ANSI string for each row."""
     return frame.compose_base(header, _screen(), "", cols, rows, **lane).split("\n")
 
 
 def test_the_cardputer_has_no_header_row() -> None:
-    """The title bar is the top row, and every screen gets the header's row for its body."""
+    """The title bar is the top row, and each screen uses the row of the header for its body."""
     set_platform(CARDPUTER_ZERO)
     assert not CARDPUTER_ZERO.header_row
     assert frame.header_lines(_status(), COLS) == []
@@ -48,12 +51,15 @@ def test_the_cardputer_has_no_header_row() -> None:
     assert len(composed) == ROWS
     assert composed[0].startswith("↑↓ ") and "Chrome probe" in composed[0]
     assert composed[1].startswith("row 0")
-    # Bar, then twelve body rows, then the footer: the header's row went to the body.
+    # The bar, then twelve body rows, then the footer. The row of the header goes to the body.
     assert composed[12].startswith("row 11")
 
 
 def test_a_platform_with_a_header_row_keeps_it() -> None:
-    """The PicoCalc is unchanged: header on top, the bar under it, no status on the bar."""
+    """The PicoCalc does not change.
+
+    The header is on top, the bar is under it, and the bar has no status.
+    """
     set_platform(PICOCALC_LYRA)
     composed = [_plain(line) for line in _rows(Text("hdr"), 53, 26)]
     assert composed[0].startswith("hdr")
@@ -61,7 +67,7 @@ def test_a_platform_with_a_header_row_keeps_it() -> None:
 
 
 def test_the_status_sits_in_the_corner_after_the_way_out() -> None:
-    """``↑↓ ── Title ──── Esc back ● 3 ⣷ 87%``: the badges and battery keep their corner."""
+    """``↑↓ ── Title ──── Esc back ● 3 ⣷ 87%``: the badges and battery stay in their corner."""
     set_platform(CARDPUTER_ZERO)
     bar = frame._title_bar(_screen(), COLS, False, True, _status()).plain
     assert cell_len(bar) == COLS
@@ -70,14 +76,14 @@ def test_the_status_sits_in_the_corner_after_the_way_out() -> None:
 
 
 def test_an_empty_status_draws_the_bar_as_it_always_was() -> None:
-    """Nothing unread and no pack: the bar is exactly the one a header row would sit over."""
+    """With nothing unread and no battery, the bar is the bar of a screen with a header row."""
     set_platform(CARDPUTER_ZERO)
     plain_bar = frame._title_bar(_screen(), COLS, False, True).plain
     assert frame._title_bar(_screen(), COLS, False, True, Text()).plain == plain_bar
 
 
 def test_a_long_title_gives_way_before_the_status_does() -> None:
-    """The way out sheds first, then the title is cut short; the status is never pushed off."""
+    """The way out goes first, then the title is cut short. The status is never pushed off."""
     set_platform(CARDPUTER_ZERO)
     status = _status()
     long_title = "Trace — Hilltop-Repeater over a much longer spec than fits"
@@ -89,7 +95,10 @@ def test_a_long_title_gives_way_before_the_status_does() -> None:
 
 
 def test_the_header_is_its_atoms_alone_without_a_row() -> None:
-    """No version, no pulse, no padding: the badges and the battery, a space apart."""
+    """The header has only its atoms and no row: no version, no pulse, no padding.
+
+    The badges and the battery have one space between them.
+    """
     set_platform(CARDPUTER_ZERO)
     ctx = SimpleNamespace(
         mock=False,
@@ -107,7 +116,10 @@ def test_the_header_is_its_atoms_alone_without_a_row() -> None:
 
 
 def test_the_main_menu_wears_the_wordmark_where_no_header_row_does() -> None:
-    """The root screen's title is ``MeshTerm vX`` in the header's colours, or else the question."""
+    """If there is no header row, the title of the root screen is ``MeshTerm vX``.
+
+    The title has the colours of the header. If there is a header row, the title is the question.
+    """
     set_platform(CARDPUTER_ZERO)
     assert menu._menu_title() == f"MeshTerm v{__version__}"
     screen = menu._MainMenu(menu._menu_title(), [], footer_hint="↑↓ move · ^Q quit?")
@@ -121,24 +133,24 @@ def test_the_main_menu_wears_the_wordmark_where_no_header_row_does() -> None:
 
 
 def test_a_tall_dialog_covers_the_bar_and_blanks_its_ends() -> None:
-    """Over the bar, never over the lane — and no fragment of the bar shows beside the box.
+    """The dialog covers the bar, but never the lane. No part of the bar shows beside the box.
 
-    A dialog's lane is the dialog's own, naming keys nowhere else, so the box stops a row
-    short of it. On the bar, the cells either side of the box are blanked: there, a stray
-    ``7%`` would read as the battery.
+    The lane of a dialog belongs to the dialog and names keys nowhere else, so the box stops
+    one row before the lane. On the bar, the cells on each side of the box are blank. If they
+    are not blank, a stray ``7%`` looks like the battery.
     """
     set_platform(CARDPUTER_ZERO)
-    assert ROWS - 2 - CARDPUTER_ZERO.dialog_row_margin == 11  # the dialog's budget
+    assert ROWS - 2 - CARDPUTER_ZERO.dialog_row_margin == 11  # the rows that the dialog can use
     base = _rows(_status(), footer_lane=lambda: Text("LANE"))
     box = "\n".join("|" + "x" * 45 + "|" for _ in range(ROWS - 1))
     rows = [_plain(row) for row in frame.composite_float(base, box, COLS, ROWS)]
-    assert rows[0].strip() == "|" + "x" * 45 + "|"  # the bar's ends are gone
-    assert rows[1].startswith("ro")  # the backdrop still shows in the gutter below the bar
+    assert rows[0].strip() == "|" + "x" * 45 + "|"  # the ends of the bar are blank
+    assert rows[1].startswith("ro")  # the backdrop is still visible in the gutter below the bar
     assert rows[ROWS - 1].startswith("LANE")
 
 
 def test_a_short_dialog_leaves_the_bar_whole() -> None:
-    """A box that doesn't reach the top row leaves the bar, and its status, in view."""
+    """A box that does not reach the top row leaves the bar, and its status, visible."""
     set_platform(CARDPUTER_ZERO)
     base = _rows(_status())
     rows = frame.composite_float(base, "\n".join(["[box]"] * 5), COLS, ROWS)

@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for machine-setup loading (where things live, and which device to talk to).
+"""Tests for the load of the machine setup: where files are, and which device to use.
 
-MeshTerm's *behaviour* settings are preferences and live in ``tests/test_preferences.py``;
-this file is only what ``config.toml`` still answers for.
+The values of MeshTerm's own behaviour are preferences. Their tests are in
+``tests/test_preferences.py``. This file has only the tests for what ``config.toml`` still
+holds.
 """
 
 from __future__ import annotations
@@ -15,19 +16,19 @@ from meshterm.core.config import CONFIG_DIR_ENV, Settings, default_config_dir
 
 
 def test_connect_on_start_defaults_true() -> None:
-    """Eager connect-at-launch is the default when nothing is configured."""
+    """MeshTerm connects when it starts, if the config does not say otherwise."""
     assert Settings().connect_on_start is True
 
 
 def test_connect_on_start_loads_from_toml(tmp_path: Path) -> None:
-    """Whether the session opens the radio link at launch round-trips from the config file."""
+    """The value that tells the session to open the radio link at start loads from the config."""
     config = tmp_path / "config.toml"
     config.write_text("connect_on_start = false\n", encoding="utf-8")
     assert Settings.load(config).connect_on_start is False
 
 
 def test_tcp_profile_inferred_and_loaded(tmp_path: Path) -> None:
-    """A profile with a ``host`` loads as a TCP profile and exposes its host:port endpoint."""
+    """A profile with a ``host`` loads as a TCP profile and gives its host:port endpoint."""
     config = tmp_path / "config.toml"
     config.write_text(
         '[profiles.wifi]\nhost = "192.168.1.50"\ntcp_port = 6000\n',
@@ -40,7 +41,7 @@ def test_tcp_profile_inferred_and_loaded(tmp_path: Path) -> None:
 
 
 def test_tcp_profile_defaults_port(tmp_path: Path) -> None:
-    """A TCP profile naming only a host takes the default port in its endpoint."""
+    """A TCP profile that has only a host gets the default port in its endpoint."""
     config = tmp_path / "config.toml"
     config.write_text('[profiles.wifi]\nhost = "meshcore.local"\n', encoding="utf-8")
     profile = Settings.load(config).profiles["wifi"]
@@ -48,7 +49,7 @@ def test_tcp_profile_defaults_port(tmp_path: Path) -> None:
 
 
 def test_config_dir_defaults_to_the_home_directory(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With no override set, config and data live in ``.meshterm`` under the user's home."""
+    """If no override is set, the config and the data are in ``.meshterm`` in the home directory."""
     monkeypatch.delenv(CONFIG_DIR_ENV, raising=False)
     assert default_config_dir() == Path.home() / ".meshterm"
 
@@ -56,19 +57,19 @@ def test_config_dir_defaults_to_the_home_directory(monkeypatch: pytest.MonkeyPat
 def test_config_dir_follows_the_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """``$MESHTERM_HOME`` moves the whole directory, so a build can run beside a real one.
 
-    This is what keeps a downloaded binary from opening the same database as the checkout
-    it was built from — the history is the valuable half of an install, and there was no
-    way to point a second copy somewhere else.
+    Thus a downloaded binary does not open the same database as the checkout that it was
+    built from. The history is the most valuable part of an install. Before this override,
+    a second copy could not use another directory.
     """
     monkeypatch.setenv(CONFIG_DIR_ENV, str(tmp_path / "elsewhere"))
     assert default_config_dir() == tmp_path / "elsewhere"
 
 
 def test_config_dir_ignores_an_empty_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An unset-but-present or whitespace value falls back rather than resolving to nowhere.
+    """An empty or whitespace value uses the default directory. It does not resolve to nowhere.
 
-    A shell that exports the variable empty is common enough that treating "" as "put the
-    data in the current directory" would be a nasty way to scatter someone's history.
+    A shell often exports the variable with an empty value. If MeshTerm used "" to mean "put
+    the data in the current directory", the history of a user would be in many directories.
     """
     monkeypatch.setenv(CONFIG_DIR_ENV, "   ")
     assert default_config_dir() == Path.home() / ".meshterm"

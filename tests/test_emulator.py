@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The Cardputer's emulator: its terminal, keys, font, pixels, and a whole run."""
+"""Tests for the emulator of the Cardputer: its terminal, keys, font, pixels, and a whole run."""
 
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ def _parsed(data: str) -> list[Keys | str]:
 
 
 def test_text_lands_where_the_cursor_is_and_wraps_at_the_edge() -> None:
-    """Printing starts at the cursor and wraps onto the next row at the right edge."""
+    """The text starts at the cursor and wraps to the next row at the right edge."""
     term = Terminal(6, 3)
     term.feed("\x1b[2;3Habcdef")
     assert term.line(1) == "  abcd"
@@ -69,33 +69,36 @@ def test_text_lands_where_the_cursor_is_and_wraps_at_the_edge() -> None:
 
 
 def test_erase_and_cursor_moves() -> None:
-    """Erase-to-end and erase-to-start clear what they name and nothing else."""
+    """Erase-to-end and erase-to-start clear the cells that they name, and no other cells."""
     term = Terminal(8, 2)
     term.feed("abcdefgh\r\nijklmnop\x1b[1;4H\x1b[K\x1b[2;2H\x1b[1K")
     assert term.text() == "abc     \n  klmnop"
 
 
 def test_sgr_in_every_colour_depth() -> None:
-    """16-colour, 256-colour and truecolor SGR, with either separator, and the flags."""
+    """The terminal parses SGR with 16 colours, 256 colours, and truecolor.
+
+    It handles each separator and the flags.
+    """
     term = Terminal(8, 1, palette=[(i, i, i) for i in range(16)])
     term.feed("\x1b[31ma\x1b[38;5;196mb\x1b[38;2;1;2;3mc\x1b[38:2::4:5:6md\x1b[1;4;7me\x1b[0mf")
     styles = [style for _, style in term.screen[0][:6]]
     assert styles[0].fg == (1, 1, 1)  # palette slot 1
-    assert styles[1].fg == (255, 0, 0)  # the 256-colour cube's pure red
+    assert styles[1].fg == (255, 0, 0)  # the pure red of the 256-colour cube
     assert styles[2].fg == (1, 2, 3) and styles[3].fg == (4, 5, 6)
     assert styles[4].flags == BOLD | UNDERLINE | REVERSE
     assert styles[5].fg is None and styles[5].flags == 0
 
 
 def test_unknown_sequences_are_skipped_whole() -> None:
-    """A sequence the parser doesn't model leaves nothing of itself on screen."""
+    """A sequence that the parser does not model leaves no text on the screen."""
     term = Terminal(10, 1)
     term.feed("\x1b]0;a title\x07\x1b[?2004h\x1b[>4;2m\x1bPq#0;\x1b\\x\x1b(By")
     assert term.line(0) == "xy        "
 
 
 def test_the_alternate_screen_keeps_the_main_one() -> None:
-    """Leaving the alternate screen brings the main one back as it was."""
+    """When the terminal leaves the alternate screen, the main screen comes back as it was."""
     term = Terminal(4, 1)
     term.feed("main\x1b[?1049h\x1b[2J\x1b[Halt")
     assert term.line(0) == "alt "
@@ -104,7 +107,7 @@ def test_the_alternate_screen_keeps_the_main_one() -> None:
 
 
 def test_only_changed_rows_are_dirty() -> None:
-    """A one-cell change marks one row for redrawing."""
+    """A change of one cell marks one row to draw again."""
     term = Terminal(4, 3)
     term.take_dirty()
     term.feed("\x1b[3;1Hx")
@@ -112,11 +115,11 @@ def test_only_changed_rows_are_dirty() -> None:
 
 
 def test_prompt_toolkit_draws_into_it() -> None:
-    """The output the host hands prompt_toolkit really does land in the grid."""
+    """The output that the host gives to prompt_toolkit puts its text in the grid."""
     term = Terminal(20, 2)
     frames: list[int] = []
     output = panel_output(term, threading.Lock(), lambda: frames.append(1))
-    output.cursor_goto(2, 4)  # 1-based, as a terminal counts
+    output.cursor_goto(2, 4)  # 1-based, in the same way as a terminal counts
     output.write("hello")
     output.flush()
     assert term.line(1).startswith("   hello") and frames
@@ -127,7 +130,10 @@ def test_prompt_toolkit_draws_into_it() -> None:
 
 
 def test_the_lane_keys_reach_prompt_toolkit_as_the_deck_expects() -> None:
-    """Fn+4..8 parse as F4-F8 and Shift with them as F16-F20, the Cardputer deck's banks."""
+    """Fn+4..8 parse as F4-F8, and Shift with them parses as F16-F20.
+
+    These are the banks of the Cardputer deck.
+    """
     plain = [_parsed(encode(Key(name=f"f{n}")))[0] for n in range(4, 9)]
     shifted = [_parsed(encode(Key(name=f"f{n}", shift=True)))[0] for n in range(4, 9)]
     assert [k.value for k in plain] == [f"f{n}" for n in CARDPUTER_ZERO_DECK.keys]
@@ -135,7 +141,10 @@ def test_the_lane_keys_reach_prompt_toolkit_as_the_deck_expects() -> None:
 
 
 def test_modified_navigation_and_control_letters() -> None:
-    """Ctrl+PgUp (the section jump), arrows, Shift+Tab, and the C0 control letters."""
+    """The encoder handles Ctrl+PgUp (the section jump), the arrows, and Shift+Tab.
+
+    It also handles the C0 control letters.
+    """
     assert _parsed(encode(Key(name="pageup", ctrl=True))) == [Keys.ControlPageUp]
     assert _parsed(encode(Key(name="up"))) == [Keys.Up]
     assert _parsed(encode(Key(name="tab", shift=True))) == [Keys.BackTab]
@@ -146,7 +155,7 @@ def test_modified_navigation_and_control_letters() -> None:
 
 
 def test_tk_events_become_keys() -> None:
-    """The window reads Shift, Ctrl and text off Tk's events."""
+    """The window gets Shift, Ctrl, and text from the events of Tk."""
     assert key_from_tk("F4", "", 0x0001) == Key(name="f4", shift=True)
     assert key_from_tk("q", "\x11", 0x0004) == Key(text="q", ctrl=True)
     assert key_from_tk("a", "a", 0) == Key(text="a")
@@ -154,16 +163,19 @@ def test_tk_events_become_keys() -> None:
 
 
 def test_the_device_keyboard_types_what_its_keycaps_say() -> None:
-    """Letters and digits as printed, Sym's placeholder codes as M5's keymap names them."""
+    """The keyboard of the device types the letters and digits that are printed on its keys.
+
+    The placeholder codes of Sym have the names that the keymap of M5 gives.
+    """
     keys = KeyState()
     assert keys.event(30, 1) == Key(text="a")  # KEY_A
-    keys.event(42, 1)  # Shift down — the driver holds it for a sticky Shift too
+    keys.event(42, 1)  # Shift down. The driver also holds it for a sticky Shift
     assert keys.event(30, 1) == Key(text="A")
     assert keys.event(62, 1) == Key(name="f4", shift=True)  # Shift+Fn+4
     keys.event(42, 0)
     assert keys.event(26, 1) == Key(text="!")  # Sym+1 arrives as KEY_LEFTBRACE
     assert keys.event(93, 1) == Key(text="?")  # Sym+M
-    assert keys.event(389, 1) is None  # the Fn key itself (KEY_DVD) types nothing
+    assert keys.event(389, 1) is None  # the Fn key (KEY_DVD) types nothing
     assert keys.event(30, 0) is None  # a release types nothing
 
 
@@ -171,7 +183,7 @@ def test_the_device_keyboard_types_what_its_keycaps_say() -> None:
 
 
 def test_a_bdf_glyph_lands_in_the_cell(tmp_path) -> None:
-    """A BDF glyph is set into the 6x12 cell where its bounding box says."""
+    """The loader puts a BDF glyph in the 6x12 cell where its bounding box says."""
     path = tmp_path / "t.bdf"
     path.write_text(_BDF)
     glyph = load_bdf(path)[65]
@@ -180,43 +192,50 @@ def test_a_bdf_glyph_lands_in_the_cell(tmp_path) -> None:
 
 
 def test_meshterm_marks_draw_over_the_base_and_gaps_show() -> None:
-    """MeshTerm's marks win over the base font, and a missing glyph draws as a box."""
+    """The marks of MeshTerm have priority over the base font.
+
+    A missing glyph draws as a box.
+    """
     font = build_font({0x2605: bytes(12)})
-    assert font.glyph("★") == MARKS[0x2605]  # the mark wins over the base's glyph
-    assert font.glyph("⋯") == MARKS[0x2026]  # aliased, as on the PicoCalc
+    assert font.glyph("★") == MARKS[0x2605]  # the mark has priority over the glyph of the base
+    assert font.glyph("⋯") == MARKS[0x2026]  # an alias, as on the PicoCalc
     assert font.glyph("一") == MISSING
 
 
 def test_braille_draws_as_solid_tiles_with_no_gap() -> None:
-    """Braille is pixels here, as on the PicoCalc: each dot a 3x3 tile, the cell tiled whole.
+    """Braille is pixels here, as on the PicoCalc.
 
-    The base's dotted braille loses to the tiles, and so does the bold smear, which would
-    only close the seam between a cell's two columns.
+    Each dot is a 3x3 tile, and the tiles fill the cell. The tiles have priority over the
+    dotted braille of the base. They also have priority over the bold smear, which would only
+    close the seam between the two columns of a cell.
     """
     dotted = bytes([0x6C, 0x6C, 0, 0x6C, 0x6C, 0, 0x6C, 0x6C, 0, 0x6C, 0x6C, 0])
     font = build_font({0x28FF: dotted})
-    assert font.glyph("⣿") == bytes([0xFC] * 12)  # every dot: the cell, solid
+    assert font.glyph("⣿") == bytes([0xFC] * 12)  # each dot: the cell is solid
     assert font.glyph("⣿", bold=True) == bytes([0xFC] * 12)
     assert font.glyph("⡇") == bytes([0xE0] * 12)  # the left column: three pixels wide
-    assert font.glyph("⠉") == bytes([0xFC] * 3 + [0] * 9)  # the top row: three tall
-    assert font.glyph("⢀", bold=True) == bytes([0] * 9 + [0x1C] * 3)  # dot 8, unsmeared
+    assert font.glyph("⠉") == bytes([0xFC] * 3 + [0] * 9)  # the top row: three pixels tall
+    assert font.glyph("⢀", bold=True) == bytes([0] * 9 + [0x1C] * 3)  # dot 8, with no smear
 
 
 def test_the_raster_draws_a_cell_in_its_colours() -> None:
-    """A cell's ink and paper land in the right pixels, and only dirty rows redraw."""
+    """The ink and the paper of a cell go to the correct pixels.
+
+    Only the dirty rows are drawn again.
+    """
     term = Terminal(53, 14)
     font = build_font({0x41: bytes([0, 0, 0x70, 0x88, 0x88, 0x88, 0xF8, 0x88, 0x88, 0x88, 0, 0])})
     raster = Raster(term, font, pack=rgb565, default_bg=(0, 0, 0))
     term.feed("\x1b[38;2;255;255;255m\x1b[48;2;0;0;255mA")
     bands = raster.update()
-    assert bands == [(raster.top, raster.top + 12 * 14)]  # the first paint is every row
+    assert bands == [(raster.top, raster.top + 12 * 14)]  # the first paint has each row
     assert len(raster.pixels) == PANEL_W * PANEL_H * 2
 
     def pixel(x: int, y: int) -> bytes:
         at = (raster.top + y) * raster.stride + (raster.left + x) * 2
         return bytes(raster.pixels[at : at + 2])
 
-    assert pixel(1, 2) == rgb565((255, 255, 255))  # ink: the A's top bar
+    assert pixel(1, 2) == rgb565((255, 255, 255))  # ink: the top bar of the A
     assert pixel(0, 2) == rgb565((0, 0, 255))  # paper beside it
     term.feed("\x1b[14;1Hz")
     assert raster.update() == [(raster.top + 13 * 12, raster.top + 14 * 12)]
@@ -224,15 +243,16 @@ def test_the_raster_draws_a_cell_in_its_colours() -> None:
 
 @pytest.mark.skipif(not hasattr(mmap, "MAP_SHARED"), reason="the panel is Linux's")
 def test_the_panel_is_written_through_its_mapping(tmp_path) -> None:
-    """Rows land at their stride through the map: the panel redraws only what the map dirties.
+    """The rows go to their stride through the map.
 
-    A ``pwrite`` to the Cardputer's ``/dev/fb0`` reaches the buffer and never the glass, so
-    MeshTerm ran behind the launcher's loading screen. A plain file stands in for the
-    device; what is pinned is that the bytes go through the mapping, in the right place.
+    The panel draws again only what the map makes dirty. A ``pwrite`` to the ``/dev/fb0`` of
+    the Cardputer reaches the buffer, but it never reaches the glass. Thus MeshTerm ran
+    behind the loading screen of the launcher. A plain file is a stand-in for the device.
+    The test makes sure that the bytes go through the mapping, to the correct place.
     """
     path = tmp_path / "fb0"
     path.write_bytes(bytes(8 * 4))
-    fb = Framebuffer(str(path), width=4, height=4)  # no sysfs here: stride is width * 2
+    fb = Framebuffer(str(path), width=4, height=4)  # no sysfs here: the stride is width * 2
     write = os.pwrite
     try:
         os.pwrite = lambda *a: pytest.fail("the panel must not be written with pwrite")  # type: ignore[assignment]
@@ -248,15 +268,17 @@ def test_the_panel_is_written_through_its_mapping(tmp_path) -> None:
 
 
 def test_meshterm_runs_inside_the_host(monkeypatch) -> None:
-    """The ordinary CLI, hosted: the menu draws at 53x14 with the Cardputer's lane, ^Q^Q leaves.
+    """The normal CLI runs in the host. ^Q^Q leaves.
 
-    No header row: the title bar is the top row, and the menu's title is the wordmark.
+    The menu draws at 53x14 with the lane of the Cardputer. There is no header row. The title
+    bar is the top row, and the title of the menu is the wordmark.
     """
     from meshterm import __version__
     from meshterm.ui import menu
 
-    # Quitting arms a watchdog that hard-exits the process if teardown wedges — right for
-    # the host, which ends with the TUI, but fatal to the test run it is hosted in here.
+    # When the user quits, the app arms a watchdog. It ends the process at once if the
+    # teardown does not finish. This is correct for the host, which ends with the TUI. But
+    # it would stop the test run that hosts it here.
     monkeypatch.setattr(menu, "_arm_exit_watchdog", lambda *args, **kwargs: None)
     seen: dict[str, str] = {}
     wordmark = f"MeshTerm v{__version__}"
@@ -289,11 +311,11 @@ def test_meshterm_runs_inside_the_host(monkeypatch) -> None:
     assert run(["--mock"], Headless) == 0
     menu = seen["menu"].splitlines()
     assert len(menu) == 14 and all(len(line) == 53 for line in menu)
-    assert "Quit?" in menu[-1]  # the main menu's lane, drawn by the Cardputer deck
+    assert "Quit?" in menu[-1]  # the lane of the main menu, drawn by the Cardputer deck
 
 
 def test_the_cardputer_inventory_is_what_the_host_draws() -> None:
-    """``fontset.CARDPUTER_ZERO_CODEPOINTS`` holds every mark, and the installed font exactly."""
+    """``fontset.CARDPUTER_ZERO_CODEPOINTS`` has each mark, and it is exactly the installed font."""
     from meshterm.emulator.font import ALIASES, BRAILLE, font_dir, load_bdf
     from meshterm.ui.fontset import CARDPUTER_ZERO_CODEPOINTS
 
@@ -301,16 +323,16 @@ def test_the_cardputer_inventory_is_what_the_host_draws() -> None:
     assert ours <= CARDPUTER_ZERO_CODEPOINTS
     installed = font_dir() / "ter-u12n.bdf"
     if not installed.is_file():
-        return  # no Terminus on this machine (CI): the marks are the part that is ours
+        return  # no Terminus on this machine (CI): the marks are the part that we own
     drawn = {cp for cp in load_bdf(installed) if cp >= 0x20} | ours
     assert drawn == CARDPUTER_ZERO_CODEPOINTS
 
 
-# --- the devices the emulator stands in for ------------------------------------------------
+# --- the devices that the emulator stands in for -------------------------------------------
 
 
 def test_every_device_is_named_for_its_platform() -> None:
-    """``meshterm emulate picocalc-lyra`` and ``--platform picocalc-lyra`` say one device."""
+    """``meshterm emulate picocalc-lyra`` and ``--platform picocalc-lyra`` name one device."""
     import pytest
 
     from meshterm.emulator.devices import DEVICES, device
@@ -324,22 +346,26 @@ def test_every_device_is_named_for_its_platform() -> None:
 
 
 def test_the_picocalc_s_shift_bank_arrives_as_f6_to_f10() -> None:
-    """Its keyboard sends F6–F10 for Shift+F1–F5; the Cardputer's sends a shifted F4–F8."""
+    """The keyboard of the PicoCalc sends F6–F10 for Shift+F1–F5.
+
+    The keyboard of the Cardputer sends a shifted F4–F8.
+    """
     from meshterm.emulator.devices import CARDPUTER_ZERO_DEVICE, PICOCALC_LYRA_DEVICE
 
     picocalc = PICOCALC_LYRA_DEVICE.translate
     assert encode(picocalc(Key(name="f1", shift=True))) == encode(Key(name="f6"))
     assert encode(picocalc(Key(name="f5", shift=True))) == encode(Key(name="f10"))
-    assert picocalc(Key(name="f1")) == Key(name="f1")  # unshifted, untouched
+    assert picocalc(Key(name="f1")) == Key(name="f1")  # no Shift, no change
     shifted_f4 = Key(name="f4", shift=True)
     assert CARDPUTER_ZERO_DEVICE.translate(shifted_f4) == shifted_f4
 
 
 def test_a_console_draws_bold_as_bright_from_the_top_left_corner() -> None:
-    """The PicoCalc's Linux console: grid at (0, 0), bold a dim colour's bright twin.
+    """The Linux console of the PicoCalc has its grid at (0, 0).
 
-    And never a heavier glyph — a console font has no bold face — where the Cardputer's
-    panel keeps its centred grid and bold weight.
+    Bold is the bright twin of a dim colour. The console never uses a heavier glyph, because
+    a console font has no bold face. The panel of the Cardputer keeps its centred grid and
+    its bold weight.
     """
     from meshterm.emulator.run import _palette
 
@@ -354,11 +380,11 @@ def test_a_console_draws_bold_as_bright_from_the_top_left_corner() -> None:
     console.redraw()
     assert (console.left, console.top) == (0, 0)
     lit = {bytes(console.pixels[i : i + 3]) for i in range(0, len(console.pixels), 3)}
-    assert bytes(palette[9]) in lit  # the bright twin (slot 9) …
-    assert bytes(palette[1]) not in lit  # … never the dim red it was asked for
-    # The regular glyph's row 2 (0x70) is drawn, not the bold one's (0xF8).
+    assert bytes(palette[9]) in lit  # the bright twin (slot 9)
+    assert bytes(palette[1]) not in lit  # not the dim red that the text asked for
+    # The console draws row 2 of the regular glyph (0x70), not row 2 of the bold glyph (0xF8).
     row2 = console.pixels[2 * 12 * 3 : 2 * 12 * 3 + 6 * 3]
-    assert bytes(row2[:3]) != bytes(palette[9])  # the leftmost pixel of 0x70 is off
+    assert bytes(row2[:3]) != bytes(palette[9])  # the pixel at the far left of 0x70 is off
 
     term.feed("\x1b[2J\x1b[H\x1b[1;31mA")
     panel = Raster(term, font, width=16, height=14)
@@ -370,11 +396,11 @@ def test_a_console_draws_bold_as_bright_from_the_top_left_corner() -> None:
 
 
 def test_meshterm_runs_as_a_picocalc_inside_the_emulator(monkeypatch) -> None:
-    """53x26 with the PicoCalc's header, its F1–F5 lane, drawn by MeshTerm itself.
+    """The screen is 53x26, with the header and the F1–F5 lane of the PicoCalc.
 
-    The platform is the PicoCalc's in every respect but one: inside the emulator nothing but
-    MeshTerm draws it, so it resolves with ``own_display`` set and never offers to move to
-    another terminal.
+    MeshTerm draws it. The platform is the PicoCalc in each way but one. In the emulator,
+    only MeshTerm draws it. Thus it resolves with ``own_display`` set, and it never offers
+    to move to another terminal.
     """
     from meshterm import __version__
     from meshterm.emulator.devices import PICOCALC_LYRA_DEVICE
@@ -412,15 +438,15 @@ def test_meshterm_runs_as_a_picocalc_inside_the_emulator(monkeypatch) -> None:
     assert run(["--mock"], Headless, PICOCALC_LYRA_DEVICE) == 0
     screen = seen["menu"].splitlines()
     assert len(screen) == 26 and all(len(line) == 53 for line in screen)
-    assert screen[-1].startswith("F1") and "F3 Quit?" in screen[-1]  # the PicoCalc's own lane
+    assert screen[-1].startswith("F1") and "F3 Quit?" in screen[-1]  # the lane of the PicoCalc
     assert seen["platform"].name == "picocalc-lyra" and seen["platform"].own_display
 
 
 def test_emulate_hands_the_global_options_to_the_meshterm_it_runs(monkeypatch, tmp_path) -> None:
-    """``meshterm emulate picocalc-lyra --mock``: the window's MeshTerm gets ``--mock``.
+    """``meshterm emulate picocalc-lyra --mock``: the MeshTerm in the window gets ``--mock``.
 
-    A global is parsed by the outer invocation wherever it was typed, so the emulated one
-    would otherwise start without it — and go looking for real hardware.
+    The outer run parses a global option where the user typed it. If the outer run did not
+    pass it on, the emulated MeshTerm would start without it and look for real hardware.
     """
     from typer.testing import CliRunner
 
@@ -436,14 +462,17 @@ def test_emulate_hands_the_global_options_to_the_meshterm_it_runs(monkeypatch, t
     assert result.exit_code == 0, result.output
     ((name, argv, kw),) = calls
     assert name == "picocalc-lyra" and "--mock" in argv and kw["scale"] == 2
-    assert "--platform" not in argv  # the emulator names the platform itself
+    assert "--platform" not in argv  # the emulator gives the name of the platform itself
 
 
 # --- the lane under the mouse --------------------------------------------------------------
 
 
 def test_a_clicked_lane_key_types_its_slot_or_with_shift_its_companion() -> None:
-    """A click types what the desktop's F-key would: the deck's plain bank, Shift its own."""
+    """A click types what the F-key of the desktop types.
+
+    This is the plain bank of the deck, or with Shift its own bank.
+    """
     from meshterm.emulator.devices import DEVICES
     from meshterm.emulator.window import lane_press
 
@@ -455,9 +484,10 @@ def test_a_clicked_lane_key_types_its_slot_or_with_shift_its_companion() -> None
 
 
 def test_a_click_finds_the_chip_under_it_only_on_a_drawn_lane() -> None:
-    """Any cell of a chip is that slot, in either bank.
+    """Each cell of a chip is that slot, in each bank.
 
-    A gap between chips, another row, or a frame with no lane on its last row is nothing.
+    A gap between chips, another row, or a frame with no lane on its last row is not a
+    slot.
     """
     from meshterm.emulator.window import chip_at
     from meshterm.ui.tui.fkeys import DEFAULT_LANE, PICOCALC_LYRA_DECK
@@ -467,15 +497,19 @@ def test_a_click_finds_the_chip_under_it_only_on_a_drawn_lane() -> None:
     term.feed("\x1b[3;1H" + deck.lane_text(DEFAULT_LANE).plain)
     assert [chip_at(term, deck, col, 2) for col in (0, 8, 11, 44, 52)] == [0, 0, 1, 4, 4]
     assert chip_at(term, deck, 9, 2) is None  # the gap between two chips
-    assert chip_at(term, deck, 0, 1) is None  # not the lane's row
+    assert chip_at(term, deck, 0, 1) is None  # not the row of the lane
     term.feed("\x1b[3;1H" + deck.lane_text(DEFAULT_LANE, shifted=True).plain)
     assert chip_at(term, deck, 46, 2) == 4  # F10, captioned "10"
     term.feed("\x1b[3;1H\x1b[2Kscan me")
-    assert chip_at(term, deck, 0, 2) is None  # a bare frame's last row
+    assert chip_at(term, deck, 0, 2) is None  # the last row of a bare frame
 
 
 def test_the_drawn_keys_wear_the_lane_s_fills() -> None:
-    """The Cardputer's own fn orange and Shift blue; a console's chips are palette slots."""
+    """The drawn keys have the fills of the lane.
+
+    The Cardputer has the fn orange and its Shift blue. The chips of a console are palette
+    slots.
+    """
     from meshterm.emulator.devices import CARDPUTER_ZERO_DEVICE, PICOCALC_LYRA_DEVICE
     from meshterm.emulator.run import _palette
     from meshterm.emulator.window import lane_fills
@@ -488,7 +522,10 @@ def test_the_drawn_keys_wear_the_lane_s_fills() -> None:
 
 @pytest.mark.parametrize("name", ["cardputer-zero", "picocalc-lyra"])
 def test_a_shift_click_on_the_menu_s_quit_chip_leaves_at_once(monkeypatch, name) -> None:
-    """A click reaches the lane as the key would: Shift on ``Quit?`` is ``Quit!``, no question."""
+    """A click reaches the lane in the same way as the key.
+
+    Shift on ``Quit?`` is ``Quit!``, with no question.
+    """
     from meshterm.emulator.devices import device
     from meshterm.emulator.window import chip_at, lane_press
     from meshterm.ui import menu
@@ -512,7 +549,7 @@ def test_a_shift_click_on_the_menu_s_quit_chip_leaves_at_once(monkeypatch, name)
                     time.sleep(0.1)
                 type_text(lane_press(emulated, 2, shift=True))
                 if not closed.wait(5):
-                    seen["stuck"] = True  # still running: leave the way the window does
+                    seen["stuck"] = True  # still running: leave in the same way as the window
                     type_text("\x11")
                     time.sleep(0.3)
                     type_text("\x11")
@@ -526,5 +563,5 @@ def test_a_shift_click_on_the_menu_s_quit_chip_leaves_at_once(monkeypatch, name)
             closed.set()
 
     assert run(["--mock"], Headless, emulated) == 0
-    assert seen["slot"] == 2  # the click on Quit? lands on its chip …
-    assert "stuck" not in seen  # … and Shift with it leaves without asking
+    assert seen["slot"] == 2  # the click on Quit? is on its chip
+    assert "stuck" not in seen  # and Shift with it leaves with no question

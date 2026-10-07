@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The macOS Terminal profile: what it says, and what it refuses to touch.
+"""The macOS Terminal profile: what it contains, and what it refuses to change.
 
-The archive shapes here were not invented. They were read back off a profile installed on
-a real Mac and confirmed rendering — so the encoder is pinned to bytes that are known to
-work, rather than to a reading of Apple's format.
+The archive shapes in these tests are not invented. They were read from a profile that was
+installed on a real Mac, and the profile was confirmed to render. Thus the tests fix the
+encoder to bytes that are known to work. They do not fix it to an interpretation of the
+format of Apple.
 """
 
 from __future__ import annotations
@@ -20,7 +21,10 @@ from meshterm.ui.theme import _VT_SLOTS
 
 
 def test_color_archive_is_the_shape_appkit_writes() -> None:
-    """A colour decodes to a calibrated-RGB ``NSColor``, six places and NUL-terminated."""
+    """The colour archive has the shape that AppKit writes.
+
+    A colour decodes to a calibrated-RGB ``NSColor``, with six places and a NUL at the end.
+    """
     decoded = plistlib.loads(macterminal.ns_color("#aa0000"))
 
     assert decoded["$archiver"] == "NSKeyedArchiver"
@@ -32,7 +36,10 @@ def test_color_archive_is_the_shape_appkit_writes() -> None:
 
 
 def test_font_archive_names_the_bundled_face() -> None:
-    """The font archive carries the PostScript name, not the family name."""
+    """The font archive names the bundled face.
+
+    It has the PostScript name and not the family name.
+    """
     decoded = plistlib.loads(macterminal.ns_font())
 
     assert macterminal.FONT_FACE in decoded["$objects"]
@@ -41,11 +48,13 @@ def test_font_archive_names_the_bundled_face() -> None:
 
 
 def test_every_palette_slot_comes_from_the_theme() -> None:
-    """The window cannot disagree with the screen it is holding.
+    """Each palette slot comes from the theme.
 
-    Sixteen keys, in the dim-then-bright order Terminal expects, each one the theme's own
-    hex. A slot changed in :data:`~meshterm.ui.theme._VT_SLOTS` lands here on the next
-    write, which is the reason the profile is generated rather than shipped.
+    The window cannot differ from the screen that it holds. The profile has sixteen keys,
+    in the order that Terminal needs (dim, then bright). Each key has the own hex value of
+    the theme. A change to a slot in :data:`~meshterm.ui.theme._VT_SLOTS` appears here at
+    the next write. This is the reason that the code generates the profile, and does not
+    ship it.
     """
     profile = macterminal.build_profile()
 
@@ -55,23 +64,28 @@ def test_every_palette_slot_comes_from_the_theme() -> None:
 
 
 def test_the_window_is_opaque_and_bold_is_not_brightness() -> None:
-    """The two settings the profile exists to guarantee, beside the font."""
+    """The window is opaque, and bold is not brightness.
+
+    These are the two settings, with the font, that the profile exists to guarantee.
+    """
     profile = macterminal.build_profile()
 
     assert profile["BackgroundColor"] == macterminal.ns_color("#000000")
     assert "BackgroundBlur" not in profile
     assert profile["UseBrightBold"] is False
-    # Tidy itself away on a clean exit, stay put on a crash the reader needs to read.
+    # The window closes after a clean exit. It stays after a crash, so that the user can
+    # read the error.
     assert profile["shellExitAction"] == 1
 
 
 def test_the_profile_is_the_same_bytes_whatever_the_command_line() -> None:
-    """The finding that shaped the module, pinned.
+    """The profile is the same bytes for each command line.
 
-    Terminal names an imported settings set after the *file*, reuses it when the bytes
-    match, and adds "MeshTerm 1" when they do not. So the profile must not carry anything
-    that varies between launches — the launcher path is fixed, and the varying command
-    lives in the file it points at.
+    This test fixes the finding that shaped the module. Terminal names an imported
+    settings set from the file. It uses the set again when the bytes are the same, and it
+    adds "MeshTerm 1" when they are not. Thus the profile must not have anything that
+    changes between starts. The launcher path is fixed, and the command that changes is in
+    the file that the path points at.
     """
     import plistlib
 
@@ -79,7 +93,7 @@ def test_the_profile_is_the_same_bytes_whatever_the_command_line() -> None:
     again = plistlib.dumps(macterminal.build_profile("/Users/x/.meshterm/launch.sh"))
 
     assert plain == again
-    # And what actually goes in is a path, never an argv or an environment.
+    # The value that goes in is a path. It is never an argv or an environment.
     profile = macterminal.build_profile("/Users/x/.meshterm/launch.sh")
     assert profile["CommandString"] == "/Users/x/.meshterm/launch.sh"
     assert "--mock" not in str(profile["CommandString"])
@@ -89,7 +103,11 @@ def test_the_profile_is_the_same_bytes_whatever_the_command_line() -> None:
 def test_the_launcher_carries_the_command_and_is_executable(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """What varies lives here instead, regenerated on every launch."""
+    """The launcher has the command and is executable.
+
+    The part that changes is in the launcher instead, and the code generates it again at
+    each start.
+    """
     monkeypatch.setenv("MESHTERM_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(sys, "argv", ["meshterm", "--mock"])
 
@@ -105,7 +123,10 @@ def test_the_launcher_carries_the_command_and_is_executable(
 
 
 def test_a_bare_profile_runs_nothing() -> None:
-    """Without a command it is an entry in the list, not a launcher."""
+    """A profile with no command runs nothing.
+
+    Without a command, the profile is an entry in the list and not a launcher.
+    """
     profile = macterminal.build_profile()
 
     assert "CommandString" not in profile
@@ -113,7 +134,11 @@ def test_a_bare_profile_runs_nothing() -> None:
 
 
 def test_the_profile_round_trips_as_a_terminal_file() -> None:
-    """What is written is what Terminal reads: a plist, with the nested archives intact."""
+    """The profile makes a round trip as a Terminal file.
+
+    What MeshTerm writes is what Terminal reads: a plist, with the nested archives
+    unchanged.
+    """
     written = plistlib.dumps(macterminal.build_profile("true"), fmt=plistlib.FMT_XML)
     reloaded = plistlib.loads(written)
 
@@ -126,7 +151,10 @@ def test_the_profile_round_trips_as_a_terminal_file() -> None:
 def test_launch_command_carries_meshterm_variables_and_the_marker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Terminal starts the command from a fresh shell, so what it needs travels with it."""
+    """The launch command has the MeshTerm variables and the marker.
+
+    Terminal starts the command from a new shell, so what the command needs goes with it.
+    """
     monkeypatch.setenv("MESHTERM_HOME", "/Users/someone/meshterm test")
     monkeypatch.delenv(REOPENED_ENV, raising=False)
     monkeypatch.setattr(sys, "argv", ["meshterm", "--mock"])
@@ -134,24 +162,33 @@ def test_launch_command_carries_meshterm_variables_and_the_marker(
     command = macterminal.launch_command()
 
     assert f"{REOPENED_ENV}=1" in command
-    # Quoted, because the reader's path may contain a space and the shell would split it.
+    # The value is in quotes, because the path of the user can have a space, and the shell
+    # would split it.
     assert "MESHTERM_HOME='/Users/someone/meshterm test'" in command
     assert command.endswith("--mock")
-    # A real executable, not a `VAR=value` shell prefix: measured on macOS 26, Terminal
-    # reads the string as a bare program name under one setting and as a shell line under
-    # the other, and a prefix puts "Command not found: MESHTERM_REOPENED=1" on the screen.
+    # The command starts with a real executable and not a `VAR=value` shell prefix. A
+    # measurement on macOS 26 showed this. Terminal reads the string as a bare program name
+    # under one setting, and as a shell line under the other setting. A prefix puts
+    # "Command not found: MESHTERM_REOPENED=1" on the screen.
     assert command.startswith("/usr/bin/env ")
 
 
 def test_an_unrelated_variable_is_not_carried(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The hop is not a chance to launder the whole environment into a new shell."""
+    """The launch command does not carry a variable that is not related to MeshTerm.
+
+    The step to a new window must not copy the whole environment into a new shell.
+    """
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "nope")
 
     assert "AWS_SECRET_ACCESS_KEY" not in macterminal.launch_command()
 
 
 def test_a_reopened_session_never_reopens_again(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The guard that keeps a relaunch from chaining, since the profile's command sets it."""
+    """A session that was reopened never reopens again.
+
+    This is the guard that stops a relaunch from chaining. The command of the profile sets
+    the marker.
+    """
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setenv("TERM_PROGRAM", "Apple_Terminal")
     monkeypatch.setenv(REOPENED_ENV, "1")
@@ -162,7 +199,10 @@ def test_a_reopened_session_never_reopens_again(monkeypatch: pytest.MonkeyPatch)
 
 @pytest.mark.parametrize("program", ["iTerm.app", "ghostty", "vscode", "WezTerm"])
 def test_another_terminal_is_left_alone(program: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Nothing is offered to a terminal that already has truecolor and a chosen font."""
+    """The code leaves another terminal alone.
+
+    MeshTerm makes no offer to a terminal that already has truecolor and a chosen font.
+    """
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.delenv(REOPENED_ENV, raising=False)
     monkeypatch.setenv("TERM_PROGRAM", program)
@@ -172,7 +212,10 @@ def test_another_terminal_is_left_alone(program: str, monkeypatch: pytest.Monkey
 
 
 def test_nothing_happens_off_macos(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every entry point is inert on the platforms this module is not about."""
+    """Nothing happens off macOS.
+
+    Each entry point does nothing on the platforms that this module is not for.
+    """
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setenv("TERM_PROGRAM", "Apple_Terminal")
 
@@ -185,7 +228,10 @@ def test_nothing_happens_off_macos(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_the_profile_is_written_under_meshterm_home(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """It lives in MeshTerm's own directory, and follows ``MESHTERM_HOME`` when set."""
+    """The profile is in the own directory of MeshTerm.
+
+    It follows ``MESHTERM_HOME`` when that is set.
+    """
     monkeypatch.setenv("MESHTERM_HOME", str(tmp_path / "home"))
 
     path = macterminal.write_profile()
@@ -195,10 +241,12 @@ def test_the_profile_is_written_under_meshterm_home(
 
 
 def test_the_readers_preferences_are_never_named(tmp_path, monkeypatch) -> None:
-    """Terminal discards external edits to its prefs on quit, so nothing here writes them.
+    """The code never names the preferences of the user.
 
-    A guard against the obvious future shortcut rather than against today's code: the
-    whole design rests on handing Terminal a file and letting it do the importing.
+    Terminal discards external edits to its preferences when it quits, so no code here
+    writes them. This test guards against an easy shortcut in the future. It does not guard
+    against the code of today. The whole design depends on this: MeshTerm gives Terminal a
+    file, and Terminal does the import.
     """
     source = (macterminal.__file__).replace(".pyc", ".py")
     with open(source, encoding="utf-8") as handle:
@@ -210,5 +258,8 @@ def test_the_readers_preferences_are_never_named(tmp_path, monkeypatch) -> None:
 
 
 def test_the_font_goes_to_the_users_own_library() -> None:
-    """No administrator rights, and undoable from Font Book."""
+    """The font goes to the own library of the user.
+
+    No administrator rights are necessary, and the user can undo it from Font Book.
+    """
     assert macterminal.USER_FONT_DIR == Path.home() / "Library" / "Fonts"

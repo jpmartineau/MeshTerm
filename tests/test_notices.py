@@ -1,18 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for ``packaging/notices.py``, the third-party notices generator.
+"""Tests for ``packaging/notices.py``, the generator of the third-party notices.
 
-Loaded by file path rather than as ``packaging.notices``: ``packaging`` is also the name
-of a PyPI library that module itself imports (``packaging.markers``,
-``packaging.requirements``), and the repository's ``packaging/`` directory is not a real
-package — it has no ``__init__.py``, deliberately, so it can never shadow that library
-(a regular package anywhere on ``sys.path`` always wins over a same-named directory with
-no ``__init__.py``, which is what keeps ``import packaging.markers`` finding the real one
-even with the repo root on the path). Reaching the module by file avoids relying on that
-distinction holding forever.
+The tests load the module by file path and not as ``packaging.notices``. ``packaging`` is
+also the name of a PyPI library that this module imports (``packaging.markers`` and
+``packaging.requirements``). The ``packaging/`` directory of the repository is not a real
+package. It has no ``__init__.py`` on purpose, so that it can never hide that library. A
+regular package anywhere on ``sys.path`` always wins over a directory with the same name
+and no ``__init__.py``. This is the reason that ``import packaging.markers`` finds the real
+library, also with the root of the repository on the path. The load by file does not
+depend on this rule for all time.
 
-Skips cleanly when ``mesh-term`` isn't installed in the interpreter running the tests —
-the generator walks the *installed* dependency closure, so without an installed
-distribution to walk there is nothing here to test.
+The tests skip when ``mesh-term`` is not installed in the interpreter that runs the tests.
+The generator walks the installed dependency closure. Without an installed distribution to
+walk, there is nothing to test here.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from packaging.requirements import Requirement
 
 if sys.version_info >= (3, 11):
     import tomllib
-else:  # pragma: no cover - exercised only on 3.10
+else:  # pragma: no cover - the code runs only on 3.10
     import tomli as tomllib
 
 try:
@@ -41,37 +41,38 @@ _spec = importlib.util.spec_from_file_location(
 )
 assert _spec is not None and _spec.loader is not None
 notices = importlib.util.module_from_spec(_spec)
-# Registered before exec: `Notice` is a dataclass under `from __future__ import
-# annotations`, and dataclasses resolves deferred annotations via `sys.modules[cls.
-# __module__]` — a module never registered there fails with a confusing `NoneType has
-# no attribute '__dict__'` the moment the class body runs, unrelated to anything this
-# test is actually checking.
+# The code registers the module before exec. `Notice` is a dataclass under `from
+# __future__ import annotations`, and dataclasses resolves deferred annotations through
+# `sys.modules[cls.__module__]`. A module that is not registered there fails with a
+# confusing `NoneType has no attribute '__dict__'` when the class body runs. This error
+# has no relation to what this test checks.
 sys.modules[_spec.name] = notices
 _spec.loader.exec_module(notices)
 
-#: The copyleft licenses no *runtime* dependency of MeshTerm may carry. Checking for
-#: "GPL" alone also catches LGPL and AGPL (both contain it as a substring); MPL needs
-#: its own check. PyInstaller itself is GPL-with-bootloader-exception, and must never
-#: appear here precisely because it is a build tool, not part of the runtime closure
-#: this module walks — its absence from the generated notices is the thing this test
-#: guards, not an oversight to work around.
+#: The copyleft licences that no runtime dependency of MeshTerm can have. A check for
+#: "GPL" alone also finds LGPL and AGPL, because both have it as a substring. MPL needs its
+#: own check. PyInstaller is GPL with a bootloader exception. It must never appear here,
+#: because it is a build tool and not part of the runtime closure that this module walks.
+#: This test guards the absence of PyInstaller from the generated notices. The absence is
+#: not an error to work around.
 _COPYLEFT_MARKERS = ("GPL", "MPL")
 
 
 @pytest.fixture(scope="module")
 def all_notices() -> list:
-    """Every notice this interpreter's install of ``mesh-term`` would generate."""
+    """Each notice that the install of ``mesh-term`` in this interpreter generates."""
     return notices.collect_notices()
 
 
 def _direct_runtime_dependencies() -> list[Requirement]:
-    """The ``[project.dependencies]`` MeshTerm itself declares, applicable here.
+    """The ``[project.dependencies]`` that MeshTerm declares and that apply here.
 
-    Mirrors :func:`notices.dependency_closure`'s own marker evaluation (``extra`` forced
-    to ``""``, meaning "no extras requested") so a dependency gated to a platform or
-    Python version this interpreter isn't — the pre-3.11 ``tomli`` backport, one day a
-    Windows- or macOS-only package — is excluded here exactly as it would be from the
-    generated notices, rather than flagged as "missing".
+    The function does the same marker evaluation as :func:`notices.dependency_closure`. It
+    sets ``extra`` to ``""``, which means that no extras are requested. A dependency can be
+    for a platform or a Python version that this interpreter is not. Examples are the
+    ``tomli`` backport before Python 3.11, and one day a package for Windows only or macOS
+    only. The function excludes such a dependency in the same way as the generated notices
+    do, and does not flag it as "missing".
     """
     from packaging.markers import default_environment
 
@@ -83,7 +84,7 @@ def _direct_runtime_dependencies() -> list[Requirement]:
 
 
 def test_every_direct_dependency_has_a_notice(all_notices: list) -> None:
-    """Every applicable ``pyproject.toml`` dependency turns up as a generated notice."""
+    """Each applicable ``pyproject.toml`` dependency is in the generated notices."""
     from packaging.utils import canonicalize_name
 
     covered = {canonicalize_name(n.name) for n in all_notices}
@@ -96,13 +97,13 @@ def test_every_direct_dependency_has_a_notice(all_notices: list) -> None:
 
 
 def test_every_notice_has_license_text(all_notices: list) -> None:
-    """Nothing in the generated set carries empty or whitespace-only license text."""
+    """No notice in the generated set has an empty licence text or a text of whitespace only."""
     empty = [f"{n.name} {n.version}" for n in all_notices if not n.text.strip()]
     assert not empty, f"empty license text for: {empty}"
 
 
 def test_python_entry_present_and_mentions_psf(all_notices: list) -> None:
-    """Python's own PSF license is the first entry, and it is actually the PSF text."""
+    """The PSF licence of Python is the first entry, and it is the PSF text."""
     assert all_notices, "no notices generated at all"
     python_entry = all_notices[0]
     assert python_entry.name == "Python"
@@ -110,12 +111,13 @@ def test_python_entry_present_and_mentions_psf(all_notices: list) -> None:
 
 
 def test_no_copyleft_dependency(all_notices: list) -> None:
-    """No runtime dependency's declared license is GPL/LGPL/AGPL/MPL.
+    """The declared licence of a runtime dependency is never GPL, LGPL, AGPL, or MPL.
 
-    MeshTerm's dependency closure is entirely MIT/BSD/ISC/PSF/Apache-2.0. PyInstaller
-    itself is GPL-with-bootloader-exception but is a *build* tool, never a runtime
-    dependency of the frozen app, so it must never appear in ``all_notices`` at all —
-    this both confirms that and guards against a future dependency quietly adding one.
+    The dependency closure of MeshTerm is only MIT, BSD, ISC, PSF, and Apache-2.0.
+    PyInstaller is GPL with a bootloader exception, but it is a build tool. It is never a
+    runtime dependency of the frozen app. Thus it must never appear in ``all_notices``.
+    This test confirms that. It also guards against a future dependency that adds a
+    copyleft licence with no message.
     """
     offenders = [
         f"{n.name} {n.version} ({n.summary})"
@@ -126,22 +128,22 @@ def test_no_copyleft_dependency(all_notices: list) -> None:
 
 
 def test_output_is_deterministic() -> None:
-    """Rendering the same closure twice produces byte-identical output."""
+    """Two renders of the same closure give output that is the same, byte for byte."""
     first = notices.render(notices.collect_notices())
     second = notices.render(notices.collect_notices())
     assert first == second
 
 
 def test_rendered_output_is_newline_terminated_utf8() -> None:
-    """The rendered document ends with a single trailing newline and encodes as UTF-8."""
+    """The rendered document ends with one newline, and it encodes as UTF-8."""
     rendered = notices.render(notices.collect_notices())
     assert rendered.endswith("\n")
     assert not rendered.endswith("\n\n")
-    rendered.encode("utf-8")  # raises on anything that wouldn't round-trip
+    rendered.encode("utf-8")  # this raises an exception for anything that does not round-trip
 
 
 def test_write_third_party_notices_writes_utf8_lf(tmp_path: Path) -> None:
-    """The file on disk matches ``render()`` exactly, with no newline translation."""
+    """The file on disk is exactly the same as ``render()``, with no newline translation."""
     out = notices.write_third_party_notices(tmp_path / "THIRD-PARTY-NOTICES.txt")
     raw = out.read_bytes()
     assert b"\r\n" not in raw
@@ -149,12 +151,13 @@ def test_write_third_party_notices_writes_utf8_lf(tmp_path: Path) -> None:
 
 
 def test_every_vendored_license_gap_has_its_file() -> None:
-    """A gap-table entry whose file is missing would fail only on the platform that hits it.
+    """Each vendored licence gap has its file.
 
-    The pyobjc entries are exercised by a macOS build alone and the winrt ones by a
-    Windows build alone, so a typo in a path would surface on a release runner rather
-    than here. Check every entry on every platform: the file exists, is non-empty, and
-    the key is in the canonical (lowercase, hyphenated) form ``collect_notices`` looks up.
+    A gap-table entry with a missing file fails only on the platform that uses it. Only a
+    macOS build uses the pyobjc entries, and only a Windows build uses the winrt entries.
+    Thus a typo in a path would show on a release runner and not here. This test checks
+    each entry on each platform. The file must exist and must not be empty. The key must
+    be in the canonical form (lower case, with hyphens) that ``collect_notices`` looks up.
     """
     for name, paths in notices._VENDORED_LICENSE_GAPS.items():
         assert name == name.lower().replace("_", "-"), name

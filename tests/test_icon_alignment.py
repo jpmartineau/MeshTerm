@@ -1,46 +1,51 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The icon-column guard: in any one list, every icon-led row starts its words in one cell.
+"""The icon-column guard: in one list, each icon row starts its words in one cell.
 
-The terminal draws some of the app's icons in one cell (``🗑 ✎ ⚙ ▶ ★ ↻ ↕ ⇄ ⌨ # ✓ ✗ ⚠``)
-and most emoji in two, so a row written ``icon + " " + label`` starts its words a column
-left of its two-cell siblings. The fault is invisible in review — the source reads the same
-either way — and it kept coming back screen by screen (the node page's ``🗑 Remove
-contact…`` under ``⏳ Time machine``, the main menu, the repeater admin) until the column
-was measured once in :mod:`meshterm.ui.menus`: :func:`~meshterm.ui.menus.align_icons` (which
+An icon row is a row that starts with an icon. The terminal draws some of the icons of the
+app in one cell (``🗑 ✎ ⚙ ▶ ★ ↻ ↕ ⇄ ⌨ # ✓ ✗ ⚠``) and most emoji in two cells. Thus a row
+that is written ``icon + " " + label`` starts its words one column to the left of its
+two-cell neighbours. A review cannot show this fault,
+because the source looks the same in both cases. The fault returned again and again, screen
+by screen (the node page's ``🗑 Remove contact…`` under ``⏳ Time machine``, the main menu,
+the repeater admin). Then we measured the column one time in :mod:`meshterm.ui.menus`. The
+tools are :func:`~meshterm.ui.menus.align_icons` (which
 :func:`~meshterm.ui.menus.menu_rows` applies for you), or
-:func:`~meshterm.ui.menus.icon_lane` with :func:`~meshterm.ui.menus.icon_mark` /
-:func:`~meshterm.ui.menus.marked_label`. This file is what keeps a new list from skipping
+:func:`~meshterm.ui.menus.icon_lane` with :func:`~meshterm.ui.menus.icon_mark` and
+:func:`~meshterm.ui.menus.marked_label`. This file makes sure that a new list does not skip
 them.
 
-**Coverage comes from the gallery, not from a list kept here.** :mod:`tests.test_gallery`
-already builds every screen the menu can open, through its real builders, on both
-platforms; this sweep imports that inventory (``_ENTRIES`` × ``_COMBOS``) so a screen added
-there is guarded here with no edit. Two readings, because the gallery's screens hold their
-rows two ways:
+**The coverage comes from the gallery, not from a list in this file.**
+:mod:`tests.test_gallery` already builds each screen that the menu can open, through its
+real builders, on both platforms. This sweep imports that inventory (``_ENTRIES`` ×
+``_COMBOS``). Thus a screen that is added there is guarded here with no edit. The sweep has
+two readings, because the screens in the gallery hold their rows in two ways:
 
 * A :class:`~meshterm.ui.tui.select.SelectScreen` holds :class:`~meshterm.ui.tui.select.Choice`
-  items, so its rows are read as *data*: every choice's natural title, filter or viewport
-  notwithstanding, including the rows scrolled below the fold.
+  items, so the sweep reads its rows as *data*. It reads the natural title of each choice,
+  with no effect from the filter or the viewport. This includes the rows below the fold.
 * A screen that draws its own action rows (the node page, Trace, the TX sweep, a trophy
-  card) has no items to read, so its body is rendered — under a viewport tall enough that
-  nothing is clipped — and the list is found by its ``❯`` cursor: the contiguous run of
-  pointer-column lines (``❯ `` or two spaces, then content) around it, blank lines included.
+  card) has no items to read. Thus the sweep renders its body in a viewport that is tall
+  enough to clip nothing. It finds the list by its ``❯`` pointer: the continuous run of
+  pointer-column lines (``❯ `` or two spaces, then content) around it, with the blank
+  lines.
 
-"Leads with an icon" is :func:`meshterm.ui.menus._icon_head` — the one definition the
-aligner and the icon-dropping :func:`~meshterm.ui.menus.command_label` share — and a row's
-words start where :func:`meshterm.ui.menus._words_start` says, measured in display cells
-with :func:`rich.cells.cell_len`, never characters.
+"Starts with an icon" is :func:`meshterm.ui.menus._icon_head`. The aligner and the
+:func:`~meshterm.ui.menus.command_label` function (which removes the icon) use this same
+definition. The words of a row start where :func:`meshterm.ui.menus._words_start` says.
+The sweep measures this in display cells with :func:`rich.cells.cell_len`, never in
+characters.
 
-Glyphs that are *data* rather than decoration — a node's ``● ▲ ■ ◉ ○ ★``, a channel's
-``＃ 🌐 🔒`` — get no exemption. They sit in the same column as the command icons around
-them (the chat picker pads ``●`` out to ``🌐`` so every conversation name lines up), and a
-data lane that went ragged is the same fault the reader sees. The one allowance is structural
-and small: in a Choice list, a **blank** :class:`~meshterm.ui.tui.select.Separator` starts a
-new group. That blank line is how :func:`~meshterm.ui.menus.exit_rows` sets its ``✓ Apply``
-/ ``✗ Back — discard`` pair apart, and how a table sets its command tail apart (the Contacts
-list's rows under its maintenance rows, the Courier queue row under its outbox) — the space
-says "a different list", and each side is still held to its own column. A section heading
-(``── Label ──``) does not break a group: sections of one list read as one column.
+A glyph that is *data* and not decoration gets no exemption. Examples are the ``● ▲ ■ ◉ ○ ★``
+of a node and the ``＃ 🌐 🔒`` of a channel. These glyphs are in the same column as the
+command icons around them (the chat picker pads ``●`` to the width of ``🌐``, so each
+conversation name is in line). A data lane that is not aligned is the same fault that the
+user sees. There is one small allowance, and it is structural. In a Choice list, a
+**blank** :class:`~meshterm.ui.tui.select.Separator` starts a new group. This blank line is
+how :func:`~meshterm.ui.menus.exit_rows` sets its ``✓ Apply`` and ``✗ Back — discard`` pair
+apart. It is also how a table sets its command tail apart (the rows of the Contacts list
+under its maintenance rows, the Courier queue row under its outbox). The space means "a
+different list", and each side keeps its own column. A section heading (``── Label ──``)
+does not break a group: the sections of one list have one column.
 """
 
 from __future__ import annotations
@@ -58,24 +63,27 @@ from meshterm.ui.tui import Choice, Screen, SelectScreen, Separator
 from tests.conftest import plain as _plain
 from tests.test_gallery import _COMBOS, _ENTRIES, _Entry
 
-#: The pointer column every list draws before its rows: the cursor row's ``❯ ``, or two
-#: spaces for the rest (see :class:`~meshterm.ui.tui.select.SelectScreen`). One cell of
-#: glyph and one of space, so two cells wherever it appears.
+#: The pointer column that each list draws before its rows: the ``❯ `` of the highlight,
+#: or two spaces for the other rows (refer to :class:`~meshterm.ui.tui.select.SelectScreen`).
+#: It has one cell of glyph and one cell of space, thus two cells in each place.
 _CURSOR = "❯ "
 _GUTTER = "  "
 
-#: A viewport taller than any gallery screen's content, so a hand-drawn list pushed below
-#: the fold is still in the rendered body the sweep reads.
+#: A viewport that is taller than the content of each gallery screen. Thus a hand-drawn
+#: list below the fold is still in the rendered body that the sweep reads.
 _TALL_VIEWPORT = 400
 
 
 @dataclass(frozen=True)
 class _IconRow:
-    """One icon-led row of a list: its label as the reader sees it, and where its words start.
+    """One row of a list that starts with an icon.
+
+    The row has its label as the user sees it, and the cell where its words start.
 
     Attributes:
-        label: The row's plain text, pointer column removed.
-        start: The display cell (0-based, from the label's first cell) its words begin in.
+        label: The plain text of the row, with no pointer column.
+        start: The display cell (0-based, from the first cell of the label) where its words
+            start.
     """
 
     label: str
@@ -83,7 +91,7 @@ class _IconRow:
 
 
 def _icon_row(label: str) -> _IconRow | None:
-    """``label`` measured as an icon row, or ``None`` when it does not lead with an icon."""
+    """``label`` measured as an icon row, or ``None`` if it does not start with an icon."""
     head = _icon_head(label)
     if not head:
         return None
@@ -91,10 +99,11 @@ def _icon_row(label: str) -> _IconRow | None:
 
 
 def _choice_groups(items: Iterable) -> list[list[_IconRow]]:
-    """A Choice list's icon rows, grouped — a blank separator line starts a new group.
+    """The icon rows of a Choice list, in groups. A blank separator line starts a new group.
 
-    See the module docstring for why the blank line (and only the blank line) separates
-    two lists: it is the seam :func:`~meshterm.ui.menus.exit_rows` draws above its pair.
+    Refer to the module docstring for the reason that the blank line (and only the blank
+    line) separates two lists: it is the seam that :func:`~meshterm.ui.menus.exit_rows`
+    draws above its pair.
     """
     groups: list[list[_IconRow]] = [[]]
     for item in items:
@@ -114,19 +123,19 @@ def _choice_groups(items: Iterable) -> list[list[_IconRow]]:
 
 
 def _in_pointer_column(line: str) -> bool:
-    """Whether a rendered line belongs to a hand-drawn list: blank, or a pointer + content."""
+    """Whether a rendered line is part of a hand-drawn list: blank, or a pointer and content."""
     if not line.strip():
         return True
     return line.startswith((_CURSOR, _GUTTER)) and line[2:3] not in ("", " ")
 
 
 def _rendered_groups(lines: list[str]) -> list[list[_IconRow]]:
-    """The icon rows of every hand-drawn list in a rendered body, one group per list.
+    """The icon rows of each hand-drawn list in a rendered body, with one group for each list.
 
-    A list is anchored by its ``❯`` row and runs, both ways, over every contiguous line in
-    the pointer column. Blank lines stay inside it: a screen that spaces its actions into
-    clusters (Trace's compose/explore, width/samples, run) still measures one icon column
-    for all of them, and the reader reads them as one.
+    The ``❯`` row is the anchor of a list. The list goes up and down over each continuous
+    line in the pointer column. Blank lines stay in the list. A screen can put its actions
+    in clusters (Trace's compose and explore, width and samples, run). It still has one icon
+    column for all of them, and the user reads them as one list.
     """
     groups: list[list[_IconRow]] = []
     for anchor, line in enumerate(lines):
@@ -144,7 +153,10 @@ def _rendered_groups(lines: list[str]) -> list[list[_IconRow]]:
 
 
 def _screen_groups(screen: Screen, cols: int) -> list[list[_IconRow]]:
-    """Every list on ``screen``, read as items where it has them and as rendering where not."""
+    """Each list on ``screen``.
+
+    The sweep reads items if the screen has them, and the rendering if not.
+    """
     if isinstance(screen, SelectScreen):
         return _choice_groups(screen._items)
     screen.note_viewport(_TALL_VIEWPORT)
@@ -152,7 +164,7 @@ def _screen_groups(screen: Screen, cols: int) -> list[list[_IconRow]]:
 
 
 def _misalignments(where: str, groups: list[list[_IconRow]]) -> list[str]:
-    """One failure sentence per group whose icon rows start their words in different cells."""
+    """One failure sentence for each group whose icon rows start in different cells."""
     problems = []
     for number, group in enumerate(groups, start=1):
         if len({row.start for row in group}) < 2:
@@ -179,11 +191,11 @@ def _cases():
 def test_icon_rows_share_one_column(
     entry: _Entry, platform: Platform, cols: int, rows: int
 ) -> None:
-    """Within one list, every icon-led row starts its words in the same display cell.
+    """In one list, each row that starts with an icon starts its words in the same display cell.
 
-    Swept over the whole gallery on both platforms. The PicoCalc drops a command row's icon
-    lane outright, but its data glyphs (a node's type, a channel's openness) stay and fold to
-    one-cell stand-ins, so the rule still has something to hold there.
+    The test sweeps the whole gallery on both platforms. The PicoCalc removes the icon lane
+    of a command row completely. But its data glyphs (the type of a node, the openness of a
+    channel) stay and fold to one-cell substitutes. Thus the rule still applies there.
     """
     set_platform(platform)
     screen = entry.factory(cols, rows)
@@ -194,13 +206,14 @@ def test_icon_rows_share_one_column(
 
 @pytest.mark.parametrize("platform", sorted({p for p, _, _ in _COMBOS}, key=lambda p: p.name))
 def test_the_sweep_measures_something_on_every_platform(platform: Platform) -> None:
-    """The guard is not vacuous: each platform compares real lists, on each reading it can.
+    """The guard is not empty: each platform compares real lists, in each reading that it can.
 
-    A gallery refactor that hid a screen's items, or a render change that moved the ``❯``
-    pointer, would otherwise leave every case above passing because it found nothing to
-    measure. On the desktop both readings must reach a list of two or more icon rows; on the
-    PicoCalc the hand-drawn action lists carry no icons at all (the lane is dropped), so only
-    the Choice reading — node-type and channel glyphs, the exit pair — is required there.
+    Suppose a gallery refactor hides the items of a screen, or a render change moves the
+    ``❯`` pointer. Then each case above passes, because it finds nothing to measure. This
+    test finds that fault. On the desktop, both readings must reach a list of two or more
+    icon rows. On the PicoCalc, the hand-drawn action lists have no icons (the lane is
+    removed). Thus there the test needs only the Choice reading: the node-type glyphs, the
+    channel glyphs, and the exit pair.
     """
     set_platform(platform)
     cols, rows = next((c, r) for p, c, r in _COMBOS if p is platform)
@@ -215,10 +228,11 @@ def test_the_sweep_measures_something_on_every_platform(platform: Platform) -> N
 
 
 def test_guard_catches_a_hand_written_icon_prefix() -> None:
-    """A list written ``icon + " " + label`` fails, naming both rows and both start cells.
+    """A list that is written ``icon + " " + label`` fails.
 
-    ``🗑`` is one cell and ``💾`` two: the exact pair that put the node page's delete row out
-    of line under its archive row. If this stops failing, the guard has stopped guarding.
+    The failure names both rows and both start cells. ``🗑`` is one cell and ``💾`` is two
+    cells. This exact pair put the delete row of the node page out of line under its archive
+    row. If this test stops to fail, the guard does not guard.
     """
     screen = SelectScreen("Node", [Choice("💾 Archive contact", 1), Choice("🗑 Delete contact…", 2)])
     problems = _misalignments("node page", _screen_groups(screen, 72))
@@ -237,10 +251,10 @@ def test_guard_catches_a_hand_written_icon_prefix() -> None:
 
 
 def test_guard_catches_a_hand_drawn_list_through_its_rendering() -> None:
-    """A screen with no items is read off its rendered body, the pointer column removed.
+    """The sweep reads a screen with no items from its rendered body, with no pointer column.
 
-    The cursor row and its gutter siblings are one list across a blank line, and the text
-    above (a card, not in the pointer column) is not part of it.
+    The highlighted row and the rows with a gutter are one list across a blank line. The
+    text above them (a card, not in the pointer column) is not part of the list.
     """
     lines = [
         "route  ★ → 3d63 → ★",
@@ -259,11 +273,11 @@ def test_guard_catches_a_hand_drawn_list_through_its_rendering() -> None:
 
 
 def test_exit_pair_is_its_own_group() -> None:
-    """The staged-changes pair after its blank line is measured apart from the rows above it.
+    """The test measures the staged-changes pair after its blank line apart from the rows above it.
 
-    ``✓``/``✗`` are one-cell status marks on a commit row, never padded to a list's emoji
-    column (see :func:`~meshterm.ui.menus.exit_rows`); the blank separator is the seam. The
-    pair is still held to its own column, and so are the rows above it.
+    ``✓`` and ``✗`` are one-cell status marks on a commit row. MeshTerm does not pad them to
+    the emoji column of a list (refer to :func:`~meshterm.ui.menus.exit_rows`). The blank
+    separator is the seam. The pair keeps its own column, and the rows above it keep theirs.
     """
     items = menu_rows([("📡 Send advert", "Flood it", 1), ("⌨ Command line", "Raw CLI", 2)])
     items += exit_rows(2, apply_value="apply", back_value="back")

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for the always-on event hub: fan-out, filtering, streaming, and lifecycle.
+"""Tests for the event hub that is always on: fan-out, filtering, streaming, and lifecycle.
 
-All run against the :class:`MockDevice` simulator; no hardware required.
+All tests run against the :class:`MockDevice` simulator. They do not need hardware.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from meshterm.services.event_hub import EventHub
 
 
 class _StubContext:
-    """Minimal stand-in for :class:`~meshterm.context.AppContext` for hub tests."""
+    """A minimal stand-in for :class:`~meshterm.context.AppContext` in the hub tests."""
 
     def __init__(self, device: MockDevice) -> None:
         self._device = device
@@ -31,12 +31,12 @@ class _StubContext:
 
 
 def _obs_event(node: str) -> MeshEvent:
-    """Build an observation event for a node id (test helper)."""
+    """Build an observation event for a node id. This is a helper for the tests."""
     return MeshEvent.observation_event(Observation(node=node))
 
 
 def test_publish_fans_out_to_all_subscribers() -> None:
-    """Every subscriber receives each published event."""
+    """Each subscriber receives each event that the hub publishes."""
     hub = EventHub(_StubContext(MockDevice()))
     a: list[MeshEvent] = []
     b: list[MeshEvent] = []
@@ -51,24 +51,27 @@ def test_publish_fans_out_to_all_subscribers() -> None:
 
 
 def test_kind_filter_only_delivers_requested_kinds() -> None:
-    """A subscriber filtered to a kind only sees that kind; an unfiltered one sees all."""
+    """A subscriber with a filter for a kind receives only that kind.
+
+    A subscriber with no filter receives all kinds.
+    """
     hub = EventHub(_StubContext(MockDevice()))
     observations: list[MeshEvent] = []
     everything: list[MeshEvent] = []
     hub.subscribe(observations.append, EventKind.OBSERVATION)
-    hub.subscribe(everything.append)  # no kinds = all
+    hub.subscribe(everything.append)  # no kinds means all kinds
 
     obs_event = _obs_event("a1")
-    other = MeshEvent(kind=EventKind.OBSERVATION, payload=None)  # still an OBSERVATION kind
+    other = MeshEvent(kind=EventKind.OBSERVATION, payload=None)  # it is also an OBSERVATION kind
     hub.publish(obs_event)
     hub.publish(other)
 
-    assert observations == [obs_event, other]  # both are OBSERVATION kind
+    assert observations == [obs_event, other]  # both are the OBSERVATION kind
     assert everything == [obs_event, other]
 
 
 def test_unsubscribe_stops_delivery() -> None:
-    """A removed subscriber receives nothing further, and unsubscribe is idempotent."""
+    """A subscriber that the hub removes receives nothing more, and unsubscribe is idempotent."""
     hub = EventHub(_StubContext(MockDevice()))
     seen: list[MeshEvent] = []
     unsubscribe = hub.subscribe(seen.append)
@@ -76,13 +79,16 @@ def test_unsubscribe_stops_delivery() -> None:
     hub.publish(_obs_event("a1"))
     unsubscribe()
     hub.publish(_obs_event("b2"))
-    unsubscribe()  # second call is a harmless no-op
+    unsubscribe()  # the second call does nothing, and this is not a problem
 
     assert len(seen) == 1
 
 
 def test_failing_subscriber_does_not_break_others() -> None:
-    """A subscriber that raises is skipped; the others still receive the event."""
+    """The hub skips a subscriber that raises an error.
+
+    The other subscribers still receive the event.
+    """
     hub = EventHub(_StubContext(MockDevice()))
     good: list[MeshEvent] = []
 
@@ -93,13 +99,13 @@ def test_failing_subscriber_does_not_break_others() -> None:
     hub.subscribe(good.append)
 
     event = _obs_event("a1")
-    hub.publish(event)  # must not raise
+    hub.publish(event)  # this call must not raise an error
 
     assert good == [event]
 
 
 async def test_async_handler_is_scheduled() -> None:
-    """A handler returning a coroutine is run as a task rather than awaited inline."""
+    """If a handler returns a coroutine, the hub runs it as a task. It does not await it inline."""
     hub = EventHub(_StubContext(MockDevice()))
     ran = asyncio.Event()
 
@@ -109,12 +115,15 @@ async def test_async_handler_is_scheduled() -> None:
     hub.subscribe(handler)
     hub.publish(_obs_event("a1"))
 
-    assert not ran.is_set()  # not awaited inline
-    await asyncio.wait_for(ran.wait(), timeout=1.0)  # but scheduled and runs on the loop
+    assert not ran.is_set()  # the hub did not await it inline
+    await asyncio.wait_for(ran.wait(), timeout=1.0)  # the hub scheduled it, and it runs on the loop
 
 
 async def test_stream_yields_matching_events_then_unsubscribes() -> None:
-    """stream() yields published events and drops its subscription when closed."""
+    """stream() yields the events that the hub publishes.
+
+    It removes its subscription when it closes.
+    """
     hub = EventHub(_StubContext(MockDevice()))
     stream = hub.stream(EventKind.OBSERVATION)
 
@@ -123,18 +132,18 @@ async def test_stream_yields_matching_events_then_unsubscribes() -> None:
     received = await asyncio.wait_for(stream.__anext__(), timeout=1.0)
     assert received is event
 
-    await stream.aclose()  # closing removes the underlying subscription
+    await stream.aclose()  # the close removes the subscription under the stream
     assert hub._subs == []
 
 
 async def test_message_events_delivered_from_device() -> None:
-    """The device's inbound messages reach a MESSAGE subscriber as message events."""
+    """The inbound messages of the device reach a MESSAGE subscriber as message events."""
     device = MockDevice()
     hub = EventHub(_StubContext(device))
     messages: list[MeshEvent] = []
     hub.subscribe(messages.append, EventKind.MESSAGE)
 
-    await hub.start()  # the simulator's first burst carries one message synchronously
+    await hub.start()  # the first burst of the simulator has one message, synchronously
     assert messages
     assert all(e.kind is EventKind.MESSAGE and e.message is not None for e in messages)
     assert messages[0].message.text
@@ -171,7 +180,7 @@ async def test_wait_for_honors_predicate_and_times_out() -> None:
 
 
 async def test_start_pumps_device_observations_then_stops() -> None:
-    """Starting subscribes to the device; observations arrive as events until stopped."""
+    """The start subscribes to the device. Observations arrive as events until the hub stops."""
     device = MockDevice()
     hub = EventHub(_StubContext(device))
     events: list[MeshEvent] = []
@@ -182,7 +191,7 @@ async def test_start_pumps_device_observations_then_stops() -> None:
     assert hub.active
 
     await asyncio.sleep(_MOCK_INTERVAL * 3)
-    assert events  # the simulator's adverts flowed through as observation events
+    assert events  # the adverts of the simulator went through as observation events
     assert all(e.kind is EventKind.OBSERVATION for e in events)
     assert all(e.observation is not None for e in events)
 
@@ -190,6 +199,6 @@ async def test_start_pumps_device_observations_then_stops() -> None:
     assert not hub.active
     frozen = len(events)
     await asyncio.sleep(_MOCK_INTERVAL * 3)
-    assert len(events) == frozen  # nothing more after stopping
+    assert len(events) == frozen  # no more events after the stop
 
     await device.disconnect()

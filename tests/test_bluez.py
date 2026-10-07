@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for MeshTerm's own BlueZ pairing (Linux PIN pairing through a D-Bus agent).
+"""Tests for the own BlueZ pairing of MeshTerm (PIN pairing on Linux through a D-Bus agent).
 
-bleak's BlueZ ``pair()`` never delivers a PIN — BlueZ asks a pairing *agent* for it and bleak
-registers none — so a PIN-protected companion could not bond on Linux at all.
-:mod:`meshterm.core.bluez` registers an agent for the length of one pairing. These tests run
-against a scripted stand-in for the system bus: no BlueZ, no radio, and no real address or PIN.
-``dbus_fast`` is bleak's Linux dependency; its ``Message`` type is all that is needed here.
+The ``pair()`` of bleak for BlueZ never gives a PIN. BlueZ asks a pairing agent for the
+PIN, and bleak registers no agent. Thus a companion that has a PIN could not bond on Linux
+at all. :mod:`meshterm.core.bluez` registers an agent for the length of one pairing. These
+tests run against a scripted substitute for the system bus. They use no BlueZ, no radio,
+and no real address or PIN. ``dbus_fast`` is a Linux dependency of bleak. The tests need
+only its ``Message`` type.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ _PIN = "123456"
 
 
 def _agent_call(member: str, *body, path: str = "/agent") -> Message:
-    """A method call BlueZ would send the agent."""
+    """A method call that BlueZ sends to the agent."""
     signature = {
         "RequestPasskey": "o",
         "RequestPinCode": "o",
@@ -46,26 +47,26 @@ def _agent_call(member: str, *body, path: str = "/agent") -> Message:
 
 
 def test_status_names_read_as_words() -> None:
-    """A BlueZ error name becomes the words the connection's status sets use."""
+    """A BlueZ error name becomes the words that the status sets of the connection use."""
     assert bluez.status_name("org.bluez.Error.AuthenticationFailed") == "authentication failed"
     assert bluez.status_name("org.bluez.Error.ConnectionAttemptFailed") == (
         "connection attempt failed"
     )
-    # The bare Failed says nothing, so BlueZ's own detail rides along.
+    # The bare Failed gives no information, so the own detail of BlueZ is added.
     assert bluez.status_name("org.bluez.Error.Failed", ["le-connection-abort-by-local"]) == (
         "failed: le-connection-abort-by-local"
     )
 
 
 def test_is_mac() -> None:
-    """Only a 48-bit address can be paired through BlueZ (a macOS UUID cannot)."""
+    """BlueZ can pair only a 48-bit address. It cannot pair a macOS UUID."""
     assert bluez.is_mac(_ADDR) and bluez.is_mac("aa-bb-cc-dd-ee-ff")
     assert not bluez.is_mac("550e8400-e29b-41d4-a716-446655440000")
     assert not bluez.is_mac("")
 
 
 def test_agent_answers_the_passkey_with_the_pin() -> None:
-    """RequestPasskey is answered with the PIN as a number, and the agent notes it was asked."""
+    """The agent answers RequestPasskey with the PIN as a number, and it notes that it was asked."""
     agent = bluez.PinAgent("/agent", _PIN, _DEV)
     reply = agent.handle(_agent_call("RequestPasskey", _DEV))
     assert reply.message_type == MessageType.METHOD_RETURN
@@ -74,18 +75,21 @@ def test_agent_answers_the_passkey_with_the_pin() -> None:
 
 
 def test_agent_refuses_another_device_and_other_paths() -> None:
-    """A pairing MeshTerm didn't start is never approved, and foreign calls are left alone."""
+    """The agent never approves a pairing that MeshTerm did not start.
+
+    It ignores calls for other paths.
+    """
     agent = bluez.PinAgent("/agent", _PIN, _DEV)
     reply = agent.handle(_agent_call("RequestPasskey", "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF"))
     assert reply.message_type == MessageType.ERROR
     assert reply.error_name == "org.bluez.Error.Rejected"
     assert not agent.asked
-    # Not addressed to the agent's path: none of its business.
+    # The call is not for the path of the agent, so the agent ignores it.
     assert agent.handle(_agent_call("RequestPasskey", _DEV, path="/elsewhere")) is None
 
 
 def test_agent_confirms_only_the_number_its_pin_names() -> None:
-    """Numeric Comparison is approved only for our own PIN's number."""
+    """The agent approves Numeric Comparison only for the number of our own PIN."""
     agent = bluez.PinAgent("/agent", _PIN, _DEV)
     ok = agent.handle(_agent_call("RequestConfirmation", _DEV, 123456))
     assert ok.message_type == MessageType.METHOD_RETURN
@@ -108,11 +112,11 @@ class _Variant:
 
 
 class _FakeBus:
-    """A scripted system bus: BlueZ's object tree plus the answer to ``Pair``.
+    """A scripted system bus: the object tree of BlueZ and the answer to ``Pair``.
 
-    ``pair_reply`` is what ``Device1.Pair`` returns — a list is answered one entry per
-    call, to script a retry; ``asks`` makes BlueZ call the agent's ``RequestPasskey``
-    first, as a real Passkey Entry pairing does.
+    ``pair_reply`` is what ``Device1.Pair`` returns. For a list, the bus gives one entry
+    for each call. This scripts a retry. ``asks`` makes BlueZ call ``RequestPasskey`` of the
+    agent first, as a real Passkey Entry pairing does.
     """
 
     def __init__(self, *, known=True, paired=False, pair_reply=None, asks=True) -> None:
@@ -144,7 +148,7 @@ class _FakeBus:
             self.known = self.paired = False
             return _Reply()
         if msg.member == "StartDiscovery":
-            self.known = True  # the device is heard again
+            self.known = True  # the adapter hears the device again
             return _Reply()
         if msg.member == "Pair":
             if self.asks:
@@ -170,7 +174,7 @@ _AGENT = f"/net/meshterm/agent{os.getpid()}"
 
 @pytest.fixture
 def bus(monkeypatch):
-    """Point :mod:`bluez` at a fresh fake bus."""
+    """Point :mod:`bluez` at a new fake bus."""
     holder: dict = {}
 
     async def _system_bus():
@@ -186,17 +190,21 @@ def bus(monkeypatch):
 
 
 def test_pair_registers_an_agent_answers_the_pin_and_trusts(bus) -> None:
-    """The happy path: agent in, Pair, PIN answered, Trusted set, agent out, bus closed."""
+    """The normal path of a pairing.
+
+    The code registers the agent, calls Pair, answers the PIN, sets Trusted, unregisters
+    the agent, and closes the bus.
+    """
     fake = bus()
     assert asyncio.run(bluez.pair(_ADDR, _PIN, force=False, discover_s=0)) == ("paired", "")
-    # Disconnect: Pair leaves its link up, and a connected companion stops advertising.
+    # Disconnect: Pair leaves its link up, and a companion that is connected stops advertising.
     assert fake.calls[1:] == ["RegisterAgent", "Pair", "Set", "Disconnect", "UnregisterAgent"]
-    assert fake.agent_answer.body == [123456]  # the PIN reached BlueZ as the passkey
+    assert fake.agent_answer.body == [123456]  # the PIN got to BlueZ as the passkey
     assert fake.handlers == [] and fake.disconnected
 
 
 def test_pair_trusts_an_existing_bond_unless_forced(bus) -> None:
-    """An existing bond is reused; ``force`` removes it and pairs afresh."""
+    """The code uses an existing bond again. ``force`` removes the bond and pairs again."""
     fake = bus(paired=True)
     assert asyncio.run(bluez.pair(_ADDR, _PIN, force=False, discover_s=0)) == ("reused", "")
     assert "Pair" not in fake.calls
@@ -207,7 +215,11 @@ def test_pair_trusts_an_existing_bond_unless_forced(bus) -> None:
 
 
 def test_pair_reports_a_wrong_pin_and_a_refusal_apart(bus) -> None:
-    """AuthenticationFailed after the PIN was asked is a wrong PIN; before it, a refusal."""
+    """The code tells a wrong PIN and a refusal apart.
+
+    AuthenticationFailed after the agent was asked for the PIN is a wrong PIN. Before the
+    agent was asked, it is a refusal.
+    """
     bus(pair_reply=_Reply(error="org.bluez.Error.AuthenticationFailed"))
     assert asyncio.run(bluez.pair(_ADDR, _PIN, force=False, discover_s=0)) == (
         "failed",
@@ -221,14 +233,20 @@ def test_pair_reports_a_wrong_pin_and_a_refusal_apart(bus) -> None:
 
 
 def test_pair_listens_for_a_forgotten_device_then_gives_up(bus) -> None:
-    """A device BlueZ has forgotten is listened for; one never heard is ``absent``."""
+    """The code listens for a device that BlueZ forgot.
+
+    A device that it never hears is ``absent``.
+    """
     fake = bus(known=False)
     assert asyncio.run(bluez.pair(_ADDR, _PIN, force=False, discover_s=1))[0] == "paired"
     assert fake.calls.count("StartDiscovery") == fake.calls.count("StopDiscovery") == 1
 
 
 def test_pair_without_a_bus_is_an_error_not_a_raise(monkeypatch) -> None:
-    """No system bus (a container, no BlueZ) reports ``error`` rather than raising."""
+    """If there is no system bus (a container, no BlueZ), the code reports ``error``.
+
+    It does not raise an exception.
+    """
 
     async def _no_bus():
         raise OSError("no system bus")
@@ -239,17 +257,23 @@ def test_pair_without_a_bus_is_an_error_not_a_raise(monkeypatch) -> None:
 
 
 def test_a_pin_that_is_not_digits_never_reaches_bluez(bus) -> None:
-    """A passkey is a number; anything else is a wrong PIN without asking the radio."""
+    """A PIN that is not digits never reaches BlueZ.
+
+    A passkey is a number. Any other value is a wrong PIN, and the code does not ask the
+    radio.
+    """
     fake = bus()
     assert asyncio.run(bluez.pair(_ADDR, "12ab56", force=False))[0] == "failed"
     assert fake.calls == []
 
 
 def test_pair_retries_a_link_that_failed_to_come_up(bus, monkeypatch) -> None:
-    """ConnectionAttemptFailed is the radio, not the pairing: Pair again, a bounded few times.
+    """The code retries a link that failed to come up.
 
-    bleak retries these inside its own connect; BlueZ's Pair does not, and on a uConsole the
-    first Pair failed this way, sending the connect on unpaired into a 32 s stall.
+    ConnectionAttemptFailed is a fault of the radio and not of the pairing. The code calls
+    Pair again, a limited number of times. bleak retries these faults inside its own
+    connect. The Pair of BlueZ does not. On a uConsole, the first Pair failed in this way.
+    Then the connect went on with no pairing, and it stopped for 32 s.
     """
     monkeypatch.setattr(bluez, "PAIR_RETRY_DELAY_S", 0)
     flake = _Reply(error="org.bluez.Error.ConnectionAttemptFailed")
@@ -260,11 +284,14 @@ def test_pair_retries_a_link_that_failed_to_come_up(bus, monkeypatch) -> None:
     fake = bus(pair_reply=[flake] * bluez.PAIR_ATTEMPTS)
     outcome, status = asyncio.run(bluez.pair(_ADDR, _PIN, force=False, discover_s=0))
     assert (outcome, status) == ("failed", "connection attempt failed")
-    assert fake.calls.count("Pair") == bluez.PAIR_ATTEMPTS  # bounded, never endless
+    assert fake.calls.count("Pair") == bluez.PAIR_ATTEMPTS  # the number of retries has a limit
 
 
 def test_pair_never_retries_a_wrong_pin(bus, monkeypatch) -> None:
-    """Only a link failure is retried; a refused passkey is an answer."""
+    """The code never retries a wrong PIN.
+
+    It retries only a link failure. A passkey that BlueZ refuses is an answer.
+    """
     monkeypatch.setattr(bluez, "PAIR_RETRY_DELAY_S", 0)
     fake = bus(pair_reply=[_Reply(error="org.bluez.Error.AuthenticationFailed"), _Reply()])
     assert asyncio.run(bluez.pair(_ADDR, _PIN, force=False, discover_s=0))[0] == "failed"
@@ -272,7 +299,11 @@ def test_pair_never_retries_a_wrong_pin(bus, monkeypatch) -> None:
 
 
 def test_agent_without_a_pin_refuses_at_once() -> None:
-    """No PIN: every passkey question is refused immediately rather than left unanswered."""
+    """An agent with no PIN refuses at once.
+
+    If there is no PIN, the agent refuses each passkey question immediately. It does not
+    leave the question without an answer.
+    """
     agent = bluez.PinAgent("/agent", None, bluez.device_tail(_ADDR))
     for member, body in (("RequestPasskey", [_DEV]), ("RequestConfirmation", [_DEV, 0])):
         reply = agent.handle(_agent_call(member, *body))
@@ -281,14 +312,21 @@ def test_agent_without_a_pin_refuses_at_once() -> None:
 
 
 def test_agent_never_approves_a_pairing_without_the_passkey() -> None:
-    """A "Just Works" yes/no is refused even with a PIN: that is how a bond ends up weak."""
+    """The agent never approves a pairing without the passkey.
+
+    The agent refuses a "Just Works" yes or no, also when it has a PIN. This is how a bond
+    becomes weak.
+    """
     agent = bluez.PinAgent("/agent", _PIN, _DEV)
     reply = agent.handle(_agent_call("RequestAuthorization", _DEV))
     assert reply.message_type == MessageType.ERROR
 
 
 def test_agent_matches_a_device_by_its_path_tail() -> None:
-    """Before a connect the adapter is unknown, so the agent matches the ``/dev_…`` tail."""
+    """The agent matches a device by the tail of its path.
+
+    Before a connect, the adapter is not known. Thus the agent matches the ``/dev_…`` tail.
+    """
     agent = bluez.PinAgent("/agent", _PIN, bluez.device_tail("00-11-22-33-44-55"))
     assert agent.handle(_agent_call("RequestPasskey", _DEV)).body == [123456]
     reply = agent.handle(_agent_call("RequestPasskey", "/org/bluez/hci1/dev_AA_BB_CC_DD_EE_FF"))
@@ -296,7 +334,11 @@ def test_agent_matches_a_device_by_its_path_tail() -> None:
 
 
 def test_answering_is_the_default_agent_for_the_connect_and_then_steps_down(bus) -> None:
-    """Registered, made default, then unregistered with the bus closed — in that order."""
+    """The agent is the default agent for the connect, and then it steps down.
+
+    The order is: the code registers the agent, makes it the default, then unregisters it
+    and closes the bus.
+    """
     fake = bus()
 
     async def scenario() -> list[str]:
@@ -311,7 +353,10 @@ def test_answering_is_the_default_agent_for_the_connect_and_then_steps_down(bus)
 
 
 def test_answering_without_a_bus_still_runs_the_connect(monkeypatch) -> None:
-    """No system bus: the connect goes ahead with no agent, and nothing raises."""
+    """If there is no system bus, the connect still runs.
+
+    It has no agent, and nothing raises an exception.
+    """
 
     async def _no_bus():
         raise OSError("no system bus")

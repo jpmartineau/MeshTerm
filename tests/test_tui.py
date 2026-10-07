@@ -1,10 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit tests for the reusable text-UI library (``meshterm.ui.tui``).
 
-These exercise the pure logic — ANSI rendering/slicing, selection filtering and navigation,
-scroll math, the frame composition's terminal-fit guarantee, prompt editing/validation, and
-the progress handle's Rich-``Progress`` parity — without standing up a real prompt_toolkit
-application, so they run fast and headless.
+These tests examine the pure logic. They do not start a real prompt_toolkit application,
+so they run fast and without a display. The logic includes:
+
+- The rendering and slicing of ANSI text.
+- The filtering of a selection, and the navigation in it.
+- The scroll calculation.
+- The guarantee that a composed frame fits the terminal.
+- The editing and validation of a prompt.
+- The parity of the progress handle with the Rich ``Progress``.
 """
 
 from __future__ import annotations
@@ -41,7 +46,7 @@ _UNSET = object()
 
 
 class _Fut:
-    """A minimal stand-in for an asyncio.Future used to capture a screen's result."""
+    """A minimal stand-in for an asyncio.Future that captures the result of a screen."""
 
     def __init__(self) -> None:
         self.result = _UNSET
@@ -56,7 +61,7 @@ class _Fut:
 
 
 def _run(screen, action: str, data: str = ""):
-    """Attach a fake future, dispatch one action, and return the captured result."""
+    """Attach a fake future, send one action, and return the result that it captured."""
     screen.future = _Fut()
     screen.handle(action, data)
     return screen.future.result
@@ -66,7 +71,7 @@ def _run(screen, action: str, data: str = ""):
 
 
 def test_render_lines_counts_visible_rows() -> None:
-    """A three-row table renders to a matching count of ANSI lines (no phantom blank)."""
+    """A table of three rows renders to three ANSI lines, with no extra blank line."""
     table = Table(show_header=False, box=None)
     table.add_column("a")
     for value in ("one", "two", "three"):
@@ -77,8 +82,8 @@ def test_render_lines_counts_visible_rows() -> None:
 
 
 def test_render_to_ansi_wraps_to_width() -> None:
-    """Rendering honors the requested width, wrapping long text onto multiple lines."""
-    long = Text("word " * 40)  # 200 chars, must wrap under width 20
+    """The render uses the width that the caller asks for, and wraps long text onto more lines."""
+    long = Text("word " * 40)  # The text has 200 characters, so it must wrap at width 20.
     lines = render_to_ansi(long, 20).split("\n")
     assert len(lines) > 1
 
@@ -97,24 +102,24 @@ def _menu() -> SelectScreen:
 
 
 def test_select_default_and_arrows_walk_the_choices() -> None:
-    """The default choice is preselected and the arrows step over the selectable choices."""
+    """The default choice is selected at the start, and the arrows step over the choices."""
     screen = _menu()
-    assert _run(screen, "enter") == 2  # default is beta
+    assert _run(screen, "enter") == 2  # The default is beta.
     screen = _menu()
-    screen.handle("down")  # beta -> gamma
-    screen.handle("up")  # gamma -> beta
-    screen.handle("up")  # beta -> alpha
+    screen.handle("down")  # From beta to gamma.
+    screen.handle("up")  # From gamma to beta.
+    screen.handle("up")  # From beta to alpha.
     assert _run(screen, "enter") == 1
 
 
 def test_select_filter_narrows_but_keeps_separators() -> None:
-    """Typing filters to matching choices while the section headings stay in place."""
+    """Typing filters the list to the choices that match, and the section headings stay."""
     screen = _menu()
-    screen.handle("text", "a")  # matches alpha, beta, gamma — all contain 'a'
+    screen.handle("text", "a")  # This matches alpha, beta, and gamma. Each one has an 'a'.
     rows = screen._rows()
     assert [r.title for r in rows if isinstance(r, Separator)] == ["── group ──"]
     assert {r.title for r in rows if isinstance(r, Choice)} == {"alpha", "beta", "gamma"}
-    screen.handle("text", "l")  # now 'al' -> only alpha (the heading still shows)
+    screen.handle("text", "l")  # The filter is now 'al', so only alpha matches. The heading stays.
     rows = screen._rows()
     assert [r.title for r in rows if isinstance(r, Choice)] == ["alpha"]
     assert [r.title for r in rows if isinstance(r, Separator)] == ["── group ──"]
@@ -122,28 +127,28 @@ def test_select_filter_narrows_but_keeps_separators() -> None:
 
 
 def test_select_filter_ignores_leading_and_trailing_spaces() -> None:
-    """A leading space never begins the filter; a trailing one is dropped when matching."""
+    """A leading space never starts the filter. The match ignores a trailing space."""
     screen = _menu()
-    screen.handle("text", " ")  # ignored — the filter never starts with whitespace
+    screen.handle("text", " ")  # The screen ignores it. The filter never starts with a space.
     assert screen._filter == ""
-    for ch in "alpha ":  # "alpha", then a trailing space
+    for ch in "alpha ":  # The word "alpha", then a trailing space.
         screen.handle("text", ch)
-    assert screen._filter == "alpha "  # the space stays in the buffer…
-    # …but matching strips it, so the trailing space doesn't stop "alpha" from matching.
+    assert screen._filter == "alpha "  # The space stays in the buffer...
+    # ...but the match removes it. Thus the trailing space does not stop "alpha" from matching.
     assert [r.title for r in screen._rows() if isinstance(r, Choice)] == ["alpha"]
 
 
 def test_select_non_filterable_ignores_typing() -> None:
-    """With filtering off, typed keys neither narrow the list nor add a filter line."""
+    """If filtering is off, typed keys do not narrow the list and do not add a filter line."""
     screen = SelectScreen("pick", [Choice("alpha", 1), Choice("beta", 2)], filterable=False)
     screen.handle("text", "a")
     screen.handle("backspace")
     assert screen._filter == ""
-    assert len(screen._rows()) == 2  # nothing was filtered out
+    assert len(screen._rows()) == 2  # The filter removed no row.
 
 
 def test_select_delete_hint_follows_the_highlight() -> None:
-    """The 'Del remove' atom shows only while the cursor sits on a deletable row."""
+    """The 'Del remove' atom shows only while the highlight is on a row that the user can delete."""
     screen = SelectScreen(
         "pick",
         [Choice("keep", 1), Choice("drop", 2, deletable=True)],
@@ -151,19 +156,19 @@ def test_select_delete_hint_follows_the_highlight() -> None:
         delete_hint="Del remove",
         filterable=False,
     )
-    # On the non-deletable row, the footer is the plain base hint.
+    # On the row that the user cannot delete, the footer is the plain base hint.
     assert "Del remove" not in screen.footer_hint
-    screen.handle("down")  # move onto the deletable row
-    # The atom appears, spliced before the trailing Esc clause (Esc stays last).
+    screen.handle("down")  # Move to the row that the user can delete.
+    # The atom appears. It goes in before the Esc atom at the end, so Esc stays last.
     assert screen.footer_hint == "↑↓ move · Enter select · Del remove · Esc quit"
-    screen.handle("up")  # back to the plain row
+    screen.handle("up")  # Move back to the plain row.
     assert "Del remove" not in screen.footer_hint
-    # The box is always sized for the fullest footer, so it never widens on the move.
+    # The box has the size of the fullest footer, so it does not become wider on the move.
     assert "Del remove" in screen.sizing_footer_hint
 
 
 def test_select_no_delete_hint_leaves_footer_fixed() -> None:
-    """Without a delete_hint, a deletable row doesn't touch the footer."""
+    """If there is no delete_hint, a row that the user can delete does not change the footer."""
     screen = SelectScreen(
         "pick", [Choice("drop", 1, deletable=True)], footer_hint="↑↓ move · Esc quit"
     )
@@ -172,24 +177,25 @@ def test_select_no_delete_hint_leaves_footer_fixed() -> None:
 
 
 def test_select_escape_cancels() -> None:
-    """Esc resolves the sentinel rather than a value."""
+    """Esc resolves the sentinel and not a value."""
     assert _run(_menu(), "escape") is CANCEL
 
 
 def test_select_cursor_line_tracks_selection() -> None:
-    """The reported cursor line accounts for separators (and the filter line)."""
-    screen = _menu()  # default beta -> row index 2 (sep, alpha, beta)
+    """The line that the screen reports for the highlight counts the separators and filter line."""
+    screen = _menu()  # The default is beta, which is row index 2 (separator, alpha, beta).
     screen.render_body(40)
     assert screen.cursor_line() == 2
 
 
 def test_select_cursor_line_counts_a_prompt_once() -> None:
-    """Under a prompt, the reported cursor line is the highlighted row's own line.
+    """Under a prompt, the line that the screen reports for the highlight is the line of the row.
 
-    The rows are laid out after the prompt's lines, so the index they are recorded at
-    already counts them. Adding the prompt's height on top reported a line further down,
-    and the frame kept *that* line in view: walking ↑ then carried the real highlight above
-    the window's top edge (the archive preview, whose prompt sits over a long list).
+    The screen lays out the rows after the lines of the prompt. Thus the index at which it
+    records them already counts the prompt. The screen once added the height of the prompt
+    again, and it reported a line that was too low. The frame kept that line visible. Then
+    ↑ moved the real highlight above the top edge of the list window. This happened in the
+    archive preview, where the prompt is over a long list.
     """
     items = [Choice(f"c{i}", i) for i in range(12)]
     screen = SelectScreen("pick", items, prompt="Read the list, then pick one.", default=3)
@@ -198,19 +204,19 @@ def test_select_cursor_line_counts_a_prompt_once() -> None:
 
 
 def test_select_callable_title_re_renders_live() -> None:
-    """A callable title is resolved on every repaint, so a live badge tracks state."""
+    """MeshTerm resolves a callable title on each paint, so a live badge follows the state."""
     unread = {"n": 0}
     screen = SelectScreen("pick", [Choice(lambda: f"chan ● {unread['n']}", 1)])
     assert "chan ● 0" in "\n".join(screen.render_body(40))
-    unread["n"] = 3  # a message arrived while the list is open
+    unread["n"] = 3  # A message arrived while the list was open.
     assert "chan ● 3" in "\n".join(screen.render_body(40))
 
 
 def test_select_width_aware_title_fits_itself_to_the_row() -> None:
-    """A width-aware title fits itself to the row it is drawn on.
+    """A title that knows the width fits itself to the row on which MeshTerm draws it.
 
-    A route middle-elides, while the natural form still feeds filtering and the
-    dialog's own width measure.
+    A route elides its middle. The natural form of the title is still the text that the
+    filter uses, and the text that the dialog measures to find its own width.
     """
     seen: list[int] = []
 
@@ -220,19 +226,20 @@ def test_select_width_aware_title_fits_itself_to_the_row() -> None:
 
     screen = SelectScreen("pick", [Choice(fitted, 1)])
     assert "you ⋯ far" in "\n".join(screen.render_body(12))
-    assert seen[-1] == 10  # the row's content area: the width less the 2-cell pointer
+    assert seen[-1] == 10  # The content area of the row: the width minus the pointer of 2 cells.
     assert "you → hub → far" in "\n".join(screen.render_body(40))
-    assert screen.dialog_width > cell_len("you → hub → far")  # measured at its fullest
-    screen.handle("text", "hub")  # the filter reads the natural (unbounded) form
+    # The screen measures the fullest form.
+    assert screen.dialog_width > cell_len("you → hub → far")
+    screen.handle("text", "hub")  # The filter reads the natural form, which has no width limit.
     assert screen._rows() == screen._items
 
 
 def test_select_row_cracks_a_chip_path_and_ellipsizes_everything_else() -> None:
-    """A row too wide for the list is cut, not truncated.
+    """A row that is too wide for the list is cut at the crack, or ends with an ellipsis.
 
-    A row carrying a path line (a trophy walk, a probe candidate) breaks its chip off
-    on the crack, while an ordinary prose row keeps the ellipsis. The row itself
-    decides which — the list has no idea it is ever holding a route.
+    A row that has a path line (a trophy walk, a probe candidate) breaks its chip off at
+    the crack. An ordinary row of prose keeps the ellipsis. The row decides which one,
+    because the list does not know that it holds a route.
     """
     route = PathLine(
         [PathHop(f"NODE{i:02d}", key=f"{i:02x}aa") for i in range(8)], mode="powerline"
@@ -242,14 +249,13 @@ def test_select_row_cracks_a_chip_path_and_ellipsizes_everything_else() -> None:
     route_row = next(ln for ln in rows if "NODE" in ln)
     prose_row = next(ln for ln in rows if "plainly" in ln)
     assert route_row.rstrip().endswith(CRACK_TAIL) and "…" not in route_row
-    assert prose_row.rstrip().endswith("…")  # prose was shortened; that is what happened
+    assert prose_row.rstrip().endswith("…")  # The prose was shortened, and the ellipsis shows it.
 
 
 def test_select_hscroll_highlight_keeps_the_natural_row() -> None:
-    """In an hscroll list the highlighted row keeps its natural, unfitted text.
+    """In an hscroll list, the highlighted row keeps its natural text, which is not fitted.
 
-    ←→ slide the full line there, while every other row still elides itself to the
-    width.
+    ←→ slide the full line in that row. Each other row still elides itself to the width.
     """
 
     def fitted(width: int) -> str:
@@ -258,17 +264,18 @@ def test_select_hscroll_highlight_keeps_the_natural_row() -> None:
     items = [Choice(fitted, 1), Choice(fitted, 2)]
     screen = SelectScreen("pick", items, hscroll=True)
     body = "\n".join(screen.render_body(14))
-    assert "start middl" in body  # the highlighted row: natural form, cropped by the screen
-    assert "start ⋯ end" in body  # the unhighlighted row fitted itself
+    # The highlighted row has its natural form, and the screen crops it.
+    assert "start middl" in body
+    assert "start ⋯ end" in body  # The row that is not highlighted fitted itself.
 
 
 def test_select_hscroll_highlight_draws_a_fitted_row_fitted() -> None:
     """A row whose fitted form is complete (``Choice.fitted``) stays fitted under the highlight.
 
-    The Channels list's rows shorten their trailing chart to the width; drawn natural under
-    the highlight, the chart came back cut off on exactly the row being read. Nothing past
-    such a row's edge is worth sliding to, so it doesn't claim to overflow either: no ←→
-    atom, and → leaves it where it is.
+    The rows of the Channels list shorten their last chart to the width. When the screen
+    drew the natural form under the highlight, the chart came back cut off in the row that
+    the user was reading. There is nothing past the edge of such a row to slide to. Thus
+    the row does not claim to overflow: it has no ←→ atom, and → leaves the row where it is.
     """
 
     def chart_row(width: int) -> str:
@@ -276,14 +283,14 @@ def test_select_hscroll_highlight_draws_a_fitted_row_fitted() -> None:
 
     screen = SelectScreen("pick", [Choice(chart_row, 1, fitted=True)], hscroll=True)
     lines = [Text.from_ansi(line).plain for line in screen.render_body(14)]
-    assert lines[0] == "❯ lanes " + "⣀" * 6  # fitted to the 12-cell content area
+    assert lines[0] == "❯ lanes " + "⣀" * 6  # The row is fitted to the content area of 12 cells.
     assert not screen._selected_overflows()
     screen.handle("right")
     assert [Text.from_ansi(line).plain for line in screen.render_body(14)] == lines
 
 
 def test_select_filter_matches_callable_title() -> None:
-    """Type-to-filter matches against a callable title's current text."""
+    """The filter that the user types matches the current text of a callable title."""
     screen = SelectScreen("pick", [Choice(lambda: "alpha", 1), Choice("beta", 2)])
     screen.handle("text", "alp")
     assert [r.label for r in screen._rows()] == ["alpha"]
@@ -294,7 +301,7 @@ def test_select_filter_matches_callable_title() -> None:
 
 
 def _edge_list() -> SelectScreen:
-    """Six lines of lead-in over four choices and a closing note: taller than a 4-row view."""
+    """Six lines of lead-in over four choices and a closing note, taller than 4 rows."""
     items: list = [Separator(f"lead {i}") for i in range(6)]
     items += [Choice(name, name) for name in ("alpha", "beta", "gamma", "delta")]
     items.append(Separator("closing note"))
@@ -302,35 +309,37 @@ def _edge_list() -> SelectScreen:
 
 
 def _press(screen, action: str, data: str = "") -> None:
-    """Dispatch one key as the session does: edge scroll first, then the screen itself."""
+    """Send one key as the session does: the edge scroll first, then the screen."""
     if not screen.edge_scroll(action):
         screen.handle(action, data)
 
 
 def _view(screen, viewport: int = 4) -> list[str]:
-    """Paint once through the frame's own slicer and return the visible rows' text."""
+    """Paint one time through the slicer of the frame, and return the text of the visible rows."""
     visible, _above, _below = frame._visible_slice(screen, screen.render_body(40), viewport)
     return [_plain([line]).strip() for line in visible]
 
 
 def test_edge_scroll_brings_back_what_sits_above_the_first_row() -> None:
-    """↑ on the first row scrolls the page a line instead, up to its very top.
+    """↑ on the first row scrolls the page one line, up to its very top.
 
-    Following the highlight down had scrolled the lead-in off, and nothing up there can
-    take the highlight, so before edge scroll there was no way back to it. The highlight
-    may scroll off screen meanwhile; the snap-back brings it home without moving it.
+    When the highlight followed the user down, it scrolled the lead-in off. Nothing in
+    the lead-in can take the highlight. Thus, before the edge scroll, the user had no way
+    back to it. The highlight can scroll off the screen in the meantime. The snap-back
+    brings it back, and it does not move it.
     """
     screen = _edge_list()
     assert _view(screen) == ["lead 3", "lead 4", "lead 5", "❯ alpha"]
-    _press(screen, "up")  # alpha is the first row: the page scrolls a line instead
+    _press(screen, "up")  # Alpha is the first row, so the page scrolls one line.
     assert _view(screen)[0] == "lead 2"
     for _ in range(5):
         _press(screen, "up")
     view = _view(screen)
-    assert view == ["lead 0", "lead 1", "lead 2", "lead 3"]  # the top; alpha is off screen
+    # This is the top. Alpha is off the screen.
+    assert view == ["lead 0", "lead 1", "lead 2", "lead 3"]
     _press(screen, "up")
-    assert _view(screen) == view  # nothing further up: it stays
-    # The snap-back: ↓ only brings alpha back, still highlighted; the next ↓ moves.
+    assert _view(screen) == view  # Nothing is further up, so the view stays.
+    # The snap-back: ↓ only brings alpha back, and it stays highlighted. The next ↓ moves it.
     _press(screen, "down")
     assert "❯ alpha" in _view(screen)
     _press(screen, "down")
@@ -338,20 +347,20 @@ def test_edge_scroll_brings_back_what_sits_above_the_first_row() -> None:
 
 
 def test_edge_scroll_brings_back_what_sits_below_the_last_row() -> None:
-    """↓ on the last row scrolls the closing note into view; ↑ moves on as ever."""
+    """↓ on the last row scrolls the closing note into view. ↑ moves the highlight as before."""
     screen = _edge_list()
     _view(screen)
     for _ in range(3):
         _press(screen, "down")
-    assert _view(screen) == ["alpha", "beta", "gamma", "❯ delta"]  # the note is below
-    _press(screen, "down")  # delta is the last row
+    assert _view(screen) == ["alpha", "beta", "gamma", "❯ delta"]  # The note is below.
+    _press(screen, "down")  # Delta is the last row.
     assert _view(screen) == ["beta", "gamma", "❯ delta", "closing note"]
-    _press(screen, "up")  # the highlight is in view, so this simply moves it
+    _press(screen, "up")  # The highlight is visible, so ↑ moves it.
     assert "❯ gamma" in _view(screen)
 
 
 def test_enter_on_a_highlight_scrolled_off_brings_it_back_instead() -> None:
-    """Nothing runs that can't be seen: the first Enter only snaps the highlight back."""
+    """Nothing runs that the user cannot see. The first Enter only snaps the highlight back."""
     screen = _edge_list()
     screen.future = _Fut()
     _view(screen)
@@ -359,26 +368,26 @@ def test_enter_on_a_highlight_scrolled_off_brings_it_back_instead() -> None:
         _press(screen, "up")
     assert "❯ alpha" not in _view(screen)
     _press(screen, "enter")
-    assert screen.future.result is _UNSET  # nothing was chosen…
-    assert "❯ alpha" in _view(screen)  # …the highlight came back
+    assert screen.future.result is _UNSET  # The user selected nothing...
+    assert "❯ alpha" in _view(screen)  # ...and the highlight came back.
     _press(screen, "enter")
     assert screen.future.result == "alpha"
 
 
 def test_home_and_end_take_the_page_to_its_very_ends() -> None:
-    """End shows the closing note under the last row; Home the lead-in over the first."""
+    """End shows the closing note under the last row. Home shows the lead-in over the first row."""
     screen = _edge_list()
     _view(screen)
     _press(screen, "end")
     assert _view(screen) == ["beta", "gamma", "❯ delta", "closing note"]
     _press(screen, "home")
     assert _view(screen) == ["lead 0", "lead 1", "lead 2", "lead 3"]
-    _press(screen, "down")  # the snap-back: alpha, the highlight Home left, comes into view
+    _press(screen, "down")  # The snap-back: alpha, where Home left the highlight, comes into view.
     assert "❯ alpha" in _view(screen)
 
 
 def test_any_other_key_ends_the_edge_scroll() -> None:
-    """A typed filter moves the highlight, so the frame follows it again at once."""
+    """A filter that the user types moves the highlight, so the frame follows it again at once."""
     screen = _edge_list()
     _view(screen)
     for _ in range(3):
@@ -391,18 +400,19 @@ def test_any_other_key_ends_the_edge_scroll() -> None:
 
 
 def test_a_screen_without_a_highlight_keeps_its_own_arrows() -> None:
-    """Edge scroll stays out of a plain scroll screen: its ↑↓ are its own."""
+    """The edge scroll does not act on a plain scroll screen, because the screen keeps its ↑↓."""
     screen = ScrollScreen(Text("\n".join(f"row {i}" for i in range(20))), title="t")
     for action in ("up", "down", "home", "end", "enter"):
         assert not screen.edge_scroll(action)
 
 
 class _Rows(Screen):
-    """A screen with no edge-scroll code at all: a lead-in, a highlight over rows, a note.
+    """A screen that has no edge-scroll code: a lead-in, a highlight over rows, and a note.
 
-    Its ↑↓ clamp as every cursor's do, its Home and End move nothing, and it names its
-    highlight's line in ``cursor_line`` — which is all a screen supplies. ``window`` draws
-    the rows that many at a time, scrolling with the highlight as a ListWindow does.
+    Its ↑↓ clamp, as the arrows of each highlight do. Its Home and End move nothing. It
+    names the line of its highlight in ``cursor_line``, and a screen supplies only this.
+    ``window`` is the number of rows that the screen draws at one time. The rows scroll
+    with the highlight, as a ListWindow does.
     """
 
     def __init__(self, count: int = 3, *, window: int | None = None) -> None:
@@ -434,27 +444,30 @@ class _Rows(Screen):
 
 
 def test_every_screen_with_a_highlight_edge_scrolls() -> None:
-    """Edge scroll is inherited: a screen that only names its highlight's line has it.
+    """A screen inherits the edge scroll: a screen that only names the line of its highlight has it.
 
-    _Rows says nothing about where its edges are — the paint reads them off the page.
+    _Rows does not say where its edges are. The paint reads them from the page.
     """
     screen = _Rows()
     assert _view(screen) == ["lead 1", "lead 2", "lead 3", "❯ row 0"]
-    _press(screen, "up")  # row 0 is the first row: the page takes the line
+    _press(screen, "up")  # Row 0 is the first row, so the page takes the line.
     assert _view(screen) == ["lead 0", "lead 1", "lead 2", "lead 3"]
-    _press(screen, "down")  # the snap-back
+    _press(screen, "down")  # The snap-back.
     assert "❯ row 0" in _view(screen)
     for _ in range(2):
         _press(screen, "down")
         _view(screen)
-    _press(screen, "down")  # row 2 is the last: the note comes into view
+    _press(screen, "down")  # Row 2 is the last row, so the note comes into view.
     assert _view(screen) == ["row 0", "row 1", "❯ row 2", "note"]
 
 
 def test_several_arrows_before_a_paint_scroll_as_many_lines() -> None:
-    """Arrows faster than the paint are judged together: three at the edge, three lines."""
+    """Arrows that come faster than the paint are judged together.
+
+    Three arrows at the edge scroll three lines.
+    """
     screen = _Rows()
-    _press(screen, "up")  # before any paint: nothing on the page to judge yet
+    _press(screen, "up")  # This is before any paint, so there is nothing on the page to judge.
     _view(screen)
     for _ in range(2):
         _press(screen, "down")
@@ -462,32 +475,36 @@ def test_several_arrows_before_a_paint_scroll_as_many_lines() -> None:
     for _ in range(3):
         _press(screen, "down")
     view = _view(screen)
-    assert view == ["row 0", "row 1", "❯ row 2", "note"]  # clamped at the page's end
+    assert view == ["row 0", "row 1", "❯ row 2", "note"]  # The view clamps at the end of the page.
 
 
 def test_a_list_scrolling_in_its_own_window_is_not_at_its_edge() -> None:
-    """A highlight holding its line while rows pass under it has moved: no edge scroll.
+    """A highlight that keeps its line while rows pass under it has moved: no edge scroll.
 
-    Walking ↓ down a windowed list keeps the highlight on the window's last line, so the
-    line's index alone can't tell it from one that stayed put; the line as drawn can.
+    When the user walks ↓ in a list that has a window, the highlight stays on the last line
+    of the window. Thus the index of the line alone does not show if the highlight moved.
+    The line as drawn does show it.
     """
     screen = _Rows(6, window=2)
     _view(screen)
     _press(screen, "down")
     _view(screen)
     before = screen.scroll
-    _press(screen, "down")  # row 2: the same body line as row 1, drawn differently
+    _press(screen, "down")  # Row 2 is on the same body line as row 1, but the text is different.
     assert "❯ row 2" in _view(screen)
     assert not screen.edge_scrolled and screen.scroll == before
     for _ in range(3):
         _press(screen, "down")
         _view(screen)
-    _press(screen, "down")  # row 5 is the last
+    _press(screen, "down")  # Row 5 is the last row.
     assert _view(screen)[-1] == "note" and screen.edge_scrolled
 
 
 def test_a_screen_can_keep_its_arrows_from_edge_scroll() -> None:
-    """``edge_scrolls`` off — the remote CLI, whose ↑↓ recall history — never scrolls."""
+    """If ``edge_scrolls`` is off, the screen never edge scrolls.
+
+    The remote CLI uses ↑↓ to recall history.
+    """
     screen = _Rows()
     screen.edge_scrolls = False
     view = _view(screen)
@@ -496,11 +513,11 @@ def test_a_screen_can_keep_its_arrows_from_edge_scroll() -> None:
 
 
 def test_home_that_moves_no_highlight_leaves_the_arrows_to_it() -> None:
-    """Home takes the page to its top; only the page says where the highlight went.
+    """Home takes the page to its top. Only the page says where the highlight went.
 
-    _Rows's Home moves nothing, so ↑ afterwards is still a step up the rows — the arrow
-    pointing away from an off-screen highlight goes to the screen, and the highlight
-    comes back into view with it.
+    The Home of _Rows moves nothing, so ↑ after Home is still a step up the rows. The
+    arrow that points away from a highlight that is off the screen goes to the screen.
+    Then the highlight comes back into the viewport.
     """
     screen = _Rows()
     _view(screen)
@@ -514,7 +531,7 @@ def test_home_that_moves_no_highlight_leaves_the_arrows_to_it() -> None:
 
 
 def test_a_list_with_no_rows_still_edge_scrolls() -> None:
-    """With nothing to highlight, the empty state holds the highlight's place."""
+    """If there is nothing to highlight, the empty state takes the place of the highlight."""
     screen = _edge_list()
     _view(screen)
     _press(screen, "text", "z")
@@ -526,7 +543,7 @@ def test_a_list_with_no_rows_still_edge_scrolls() -> None:
 
 
 def test_reorder_home_and_end_reach_the_ends() -> None:
-    """Home and End jump the reorder list's highlight too, as on every list."""
+    """Home and End also move the highlight of the reorder list to its ends, as on each list."""
     screen = ReorderScreen("order", ["a", "b", "c"])
     screen.handle("end")
     assert any(line.startswith("❯ c") for line in _view(screen))
@@ -535,7 +552,7 @@ def test_reorder_home_and_end_reach_the_ends() -> None:
 
 
 def test_autocomplete_keeps_its_highlighted_suggestion_in_view() -> None:
-    """A box too short for every suggestion follows the highlight, and edge-scrolls."""
+    """A box that is too short for each suggestion follows the highlight, and edge scrolls."""
     screen = AutocompleteScreen("t", [f"opt{i}" for i in range(8)], prompt="pick one")
     _view(screen, 5)
     for _ in range(7):
@@ -546,36 +563,39 @@ def test_autocomplete_keeps_its_highlighted_suggestion_in_view() -> None:
         _press(screen, "up")
         _view(screen, 5)
     assert _view(screen, 5)[0] == "❯ opt0"
-    _press(screen, "up")  # the first suggestion: the field comes back above it
+    _press(screen, "up")  # This is the first suggestion, so the field comes back above it.
     assert _view(screen, 5)[1] == "❯ opt0"
 
 
 def test_select_clamps_at_the_ends() -> None:
-    """Up on the first row and Down on the last stay put — no cursor in the app rolls over."""
+    """Up on the first row and Down on the last row stay where they are.
+
+    No highlight in the app rolls over.
+    """
     items = [Choice("alpha", 1), Choice("beta", 2), Choice("gamma", 3)]
     screen = SelectScreen("pick", items)
-    screen.handle("up")  # already on the first choice — must not jump to the last
+    screen.handle("up")  # The highlight is on the first choice. It must not jump to the last.
     assert _run(screen, "enter") == 1
-    screen = SelectScreen("pick", items, default=3)  # last choice
-    screen.handle("down")  # already on the last — must not wrap to the first
+    screen = SelectScreen("pick", items, default=3)  # The last choice.
+    screen.handle("down")  # The highlight is on the last choice. It must not wrap to the first.
     assert _run(screen, "enter") == 3
 
 
 def test_select_pageup_pagedown_jump_by_a_screenful() -> None:
-    """PageDown/PageUp move the highlight a screenful at a time, clamped to the choice range."""
+    """PageDown and PageUp move the highlight one screenful at a time. They clamp to the choices."""
     items = [Choice(f"c{i}", i) for i in range(30)]
-    screen = SelectScreen("pick", items)  # starts on the first choice
-    screen.note_metrics(total=30, viewport=11)  # a screenful is viewport - 1 = 10 rows
+    screen = SelectScreen("pick", items)  # The highlight starts on the first choice.
+    screen.note_metrics(total=30, viewport=11)  # A screenful is viewport - 1 = 10 rows.
     screen.handle("pagedown")
-    assert _run(screen, "enter") == 10  # advanced one page (viewport - 1) down
+    assert _run(screen, "enter") == 10  # The highlight moved one page (viewport - 1) down.
     screen = SelectScreen("pick", items, default=25)
     screen.note_metrics(total=30, viewport=11)
     screen.handle("pageup")
-    assert _run(screen, "enter") == 25 - 10  # and one page back up
+    assert _run(screen, "enter") == 25 - 10  # Then it moved one page back up.
 
 
 def _grouped_menu(default: object = None) -> SelectScreen:
-    """A two-section menu long enough that each section scrolls past a small viewport."""
+    """A menu of two sections. Each section is long enough to scroll past a small viewport."""
     items: list = [section_heading("Channels")]
     items += [Choice(f"chan{i}", ("c", i)) for i in range(6)]
     items += [section_heading("Direct")]
@@ -584,32 +604,33 @@ def _grouped_menu(default: object = None) -> SelectScreen:
 
 
 def _top_plain(screen: SelectScreen, viewport: int) -> str:
-    """Slice the screen at its selection-driven scroll and return the top row's plain text."""
+    """Slice the screen at the scroll that its selection sets. Return the top row as plain text."""
     lines = screen.render_body(40)
     visible, _above, _below = frame._visible_slice(screen, lines, viewport)
     return Text.from_ansi(visible[0]).plain.strip()
 
 
 def test_select_pins_section_heading_when_it_scrolls_off() -> None:
-    """Selecting deep in a section keeps that section's heading pinned to the top row."""
-    # Highlighting a channel far enough down pushes the "Channels" heading off the top, so it
-    # is re-pinned rather than vanishing.
+    """If the user selects a row deep in a section, the heading of the section stays on top."""
+    # A highlight on a channel that is far enough down pushes the "Channels" heading off the
+    # top. The screen pins the heading again, and it does not vanish.
     assert _top_plain(_grouped_menu(default=("c", 5)), viewport=6) == "── Channels ──"
-    # Deep into the Direct group, the pinned heading switches to that section's.
+    # Deep in the Direct group, the pinned heading changes to the heading of that section.
     assert _top_plain(_grouped_menu(default=("d", 6)), viewport=6) == "── Direct ──"
 
 
 def test_select_does_not_pin_a_heading_that_is_still_visible() -> None:
-    """With the list scrolled to the top, the real heading shows — nothing is pinned over it."""
-    screen = _grouped_menu()  # default selection is the first choice, so scroll stays at 0
+    """If the list is at the top, the real heading shows, and nothing is pinned over it."""
+    screen = _grouped_menu()  # The default is the first choice, so the scroll stays at 0.
     lines = screen.render_body(40)
     visible, above, _below = frame._visible_slice(screen, lines, 6)
     assert Text.from_ansi(visible[0]).plain.strip() == "── Channels ──"
-    assert above is False  # top of the list; no pinned duplicate and no "more above"
+    # This is the top of the list. There is no pinned copy and no "more above".
+    assert above is False
 
 
 def _trophy_shaped() -> SelectScreen:
-    """The Trophy case's shape: a heading, its description, then that board's rows."""
+    """The shape of the Trophy case: a heading, its description, then the rows of that board."""
     items: list = [section_heading("Longest haul")]
     items += [Separator(f"   description line {i}", style="muted") for i in range(2)]
     items += [Choice(f"rec{i}", ("l", i)) for i in range(6)]
@@ -619,7 +640,7 @@ def _trophy_shaped() -> SelectScreen:
 
 
 def _blocks(screen: SelectScreen) -> list[list[str]]:
-    """Each recorded sticky block's rows, as plain text."""
+    """The rows of each sticky block that the screen recorded, as plain text."""
     return [
         [Text.from_ansi(line).plain.strip() for line in rows]
         for _idx, rows in screen._sticky_headers
@@ -627,12 +648,12 @@ def _blocks(screen: SelectScreen) -> list[list[str]]:
 
 
 def test_select_blocks_a_heading_with_the_prose_written_under_it() -> None:
-    """A heading's landmark runs on through the separators that immediately follow it.
+    """The landmark of a heading continues through the separators that follow it at once.
 
-    The Trophy case's shape: each discipline's ``── heading ──`` is followed by its wrapped
-    description, which explains the rows below and so belongs overhead with the heading —
-    while prose that follows a *row* (a stray note, the exit group's blank) labels nothing
-    and is no landmark at all.
+    This is the shape of the Trophy case. The ``── heading ──`` of each discipline has a
+    wrapped description after it. The description explains the rows below it, so it belongs
+    overhead with the heading. Prose that follows a row (a stray note, or the blank line
+    of the exit group) labels nothing, and it is not a landmark.
     """
     screen = _trophy_shaped()
     screen.render_body(40)
@@ -643,28 +664,28 @@ def test_select_blocks_a_heading_with_the_prose_written_under_it() -> None:
 
 
 def test_select_pins_a_block_row_only_once_it_has_scrolled_off() -> None:
-    """A block hands its rows over one at a time, so the pins continue into the body.
+    """A block gives its rows one at a time, so the pins continue into the body.
 
-    While the description is still the top content row the heading alone pins over it; once
-    both are gone the two pin together. Never the prose alone — the row that says *which*
-    section this is leads whatever is overhead.
+    While the description is the top content row, only the heading pins over it. When
+    both have scrolled off, the two pin together. The prose never pins alone, because the
+    row that says which section this is always leads the rows overhead.
     """
     screen = _trophy_shaped()
     screen.render_body(40)
     screen.note_metrics(total=20, viewport=12)
-    plain = lambda scroll: [  # noqa: E731 - a one-liner reader for the assertions below
+    plain = lambda scroll: [  # noqa: E731 - a one-line reader for the assertions below
         Text.from_ansi(line).plain.strip() for line in screen.sticky_rows(scroll)
     ]
-    assert plain(0) == []  # the heading is the top row itself; nothing to duplicate
-    assert plain(1) == ["── Longest haul ──"]  # its description is still on screen
+    assert plain(0) == []  # The heading is the top row, so there is nothing to copy.
+    assert plain(1) == ["── Longest haul ──"]  # Its description is still on the screen.
     assert plain(2) == ["── Longest haul ──", "description line 0"]
     assert plain(4) == [
         "── Longest haul ──",
         "description line 0",
         "description line 1",
     ]
-    # A block never eats more than half the viewport — the rows go from the end, so the
-    # heading is the last thing a short terminal gives up.
+    # A block never takes more than half the viewport. The rows go from the end, so a short
+    # terminal gives up the heading last.
     screen.note_metrics(total=20, viewport=4)
     assert plain(4) == ["── Longest haul ──", "description line 0"]
     screen.note_metrics(total=20, viewport=2)
@@ -672,33 +693,33 @@ def test_select_pins_a_block_row_only_once_it_has_scrolled_off() -> None:
 
 
 def test_select_pins_the_heading_not_the_prose_beneath_it() -> None:
-    """The pinned rows always *lead* with the heading, never the last muted line under it."""
+    """The pinned rows always start with the heading, never with the last muted line under it."""
     screen = _trophy_shaped()
     assert _top_plain(screen, viewport=6) == "── Longest haul ──"
-    # And the empty-state note can't stand in for its heading either.
+    # Also, the note for an empty state cannot take the place of its heading.
     assert _top_plain(_reselect(screen, ("a", 4)), viewport=6) == "── Widest arc ──"
 
 
 def _reselect(screen: SelectScreen, value: object) -> SelectScreen:
-    """Move a select screen's highlight to ``value`` (by walking Down to it)."""
+    """Move the highlight of a select screen to ``value``. The helper walks Down to it."""
     while screen._choices()[screen._index].value != value:
         screen.handle("down")
     return screen
 
 
 def test_select_pinned_heading_keeps_the_last_row_reachable() -> None:
-    """Even with a heading pinned, the bottom choice stays fully visible (not clipped)."""
+    """Also with a pinned heading, the last choice stays fully visible and is not clipped."""
     screen = _grouped_menu()
-    screen.handle("end")  # highlight the final choice
+    screen.handle("end")  # Highlight the last choice.
     lines = screen.render_body(40)
     visible, _above, below = frame._visible_slice(screen, lines, 6)
-    assert Text.from_ansi(visible[0]).plain.strip() == "── Direct ──"  # heading pinned
-    assert any("peer7" in Text.from_ansi(row).plain for row in visible)  # last row shown
-    assert below is False  # and we know we're at the bottom
+    assert Text.from_ansi(visible[0]).plain.strip() == "── Direct ──"  # The heading is pinned.
+    assert any("peer7" in Text.from_ansi(row).plain for row in visible)  # The last row shows.
+    assert below is False  # Also, the user can see that this is the bottom.
 
 
 def _columned_menu(default: object = None) -> SelectScreen:
-    """A grouped menu led by a pinned column header, like the config editor's."""
+    """A grouped menu that starts with a pinned column header, as the config editor does."""
     items: list = [Separator("  SETTING          VALUE", pinned=True)]
     items += [section_heading("Channels")]
     items += [Choice(f"chan{i}", ("c", i)) for i in range(6)]
@@ -708,36 +729,36 @@ def _columned_menu(default: object = None) -> SelectScreen:
 
 
 def test_select_pins_a_column_header_above_the_section_heading() -> None:
-    """A pinned column header rides the whole list, the governing heading under it."""
-    screen = _columned_menu(default=("d", 6))  # deep in the second section
+    """A pinned column header stays for the whole list, and the heading that governs is under it."""
+    screen = _columned_menu(default=("d", 6))  # This is deep in the second section.
     lines = screen.render_body(40)
     visible, above, _below = frame._visible_slice(screen, lines, 7)
     assert [Text.from_ansi(row).plain.strip() for row in visible[:2]] == [
-        "SETTING          VALUE",  # the lanes, pinned for every section
-        "── Direct ──",  # over the section the highlight is in
+        "SETTING          VALUE",  # The lanes, which are pinned for each section.
+        "── Direct ──",  # This is over the section that has the highlight.
     ]
     assert above is True
-    assert any("peer6" in Text.from_ansi(row).plain for row in visible)  # highlight in view
-    # The pinned header is no section landmark — only the two headings are.
+    assert any("peer6" in Text.from_ansi(row).plain for row in visible)  # The highlight shows.
+    # The pinned header is not a section landmark. Only the two headings are landmarks.
     assert _blocks(screen) == [["── Channels ──"], ["── Direct ──"]]
 
 
 def test_select_column_header_shows_itself_at_the_top_and_pins_alone() -> None:
-    """Unscrolled it just draws; past it, it pins even before any heading scrolls off."""
-    screen = _columned_menu()  # highlight on the first choice — the list sits at the top
+    """At the top, the header only draws. Past the top, it pins before any heading scrolls off."""
+    screen = _columned_menu()  # The highlight is on the first choice, so the list is at the top.
     lines = screen.render_body(40)
     visible, above, _below = frame._visible_slice(screen, lines, 8)
     assert Text.from_ansi(visible[0]).plain.strip() == "SETTING          VALUE"
-    assert above is False  # nothing pinned over the real row, nothing above it
-    # Scrolled one row on, the header pins while its own section heading is still the top
-    # content row — so it is the only pin.
+    assert above is False  # Nothing is pinned over the real row, and nothing is above it.
+    # After a scroll of one row, the header pins while the heading of its own section is
+    # still the top content row. Thus the header is the only pin.
     assert screen.sticky_rows(1) == [screen._pinned_header[1]]
 
 
 def test_select_pinned_column_header_keeps_the_last_row_reachable() -> None:
-    """Two pinned rows still leave the bottom choice fully visible (not clipped)."""
+    """Two pinned rows still leave the last choice fully visible, with no clip."""
     screen = _columned_menu()
-    screen.handle("end")  # highlight the final choice
+    screen.handle("end")  # Highlight the last choice.
     lines = screen.render_body(40)
     visible, _above, below = frame._visible_slice(screen, lines, 7)
     assert Text.from_ansi(visible[0]).plain.strip() == "SETTING          VALUE"
@@ -748,11 +769,11 @@ def test_select_pinned_column_header_keeps_the_last_row_reachable() -> None:
 def test_select_walking_up_from_the_bottom_keeps_the_highlight_in_view() -> None:
     """↑ from the last row to the first never leaves the highlight outside the window.
 
-    At the bottom the window slides down under its pinned rows, so they cost stale lines at
-    the top rather than the last ones. Walking back up, the highlight reaches the top line
-    of the scroll window before the scroll has to move. A slide past that line hid the row
-    the reader had just stepped onto, for one step with a column header pinned and for two
-    with a section heading under it.
+    At the bottom, the window slides down under its pinned rows. Thus the pinned rows use
+    old lines at the top, and not the last lines. When the user walks back up, the
+    highlight reaches the top line of the scroll window before the scroll must move. A
+    slide past that line hid the row that the user had just moved to. It hid the row for
+    one step with a pinned column header, and for two steps with a section heading under it.
     """
     for viewport in (5, 6, 7, 8):
         screen = _columned_menu()
@@ -766,14 +787,15 @@ def test_select_walking_up_from_the_bottom_keeps_the_highlight_in_view() -> None
 
 
 def test_select_resolves_a_width_aware_separator_at_the_render_width() -> None:
-    """A callable separator title is handed the render width, so a header can fit itself."""
+    """A callable separator title gets the render width, so a header can fit itself."""
     screen = SelectScreen(
         "pick", [Separator(lambda w: f"HEADER@{w}", pinned=True), Choice("row", 1)]
     )
     assert Text.from_ansi(screen.render_body(30)[0]).plain.strip() == "HEADER@30"
     assert Text.from_ansi(screen.render_body(48)[0]).plain.strip() == "HEADER@48"
-    # Natural-width measurement asks for the fullest form, not a terminal-sized one, so the
-    # box is sized to the whole header and only the terminal can force it to abbreviate.
+    # The measure of the natural width asks for the fullest form, not a form that has the
+    # size of the terminal. Thus the box has the size of the whole header, and only the
+    # terminal can force the header to abbreviate.
     natural = SelectScreen(
         "pick",
         [Separator(lambda w: "H" * min(w, 120), pinned=True), Choice("row", 1)],
@@ -783,107 +805,108 @@ def test_select_resolves_a_width_aware_separator_at_the_render_width() -> None:
 
 
 def test_select_pinned_header_crops_where_a_plain_separator_wraps() -> None:
-    """A pinned row must stay exactly one row: too wide, it ellipsizes rather than wraps."""
+    """A pinned row must stay one row. If it is too wide, it ends with an ellipsis, not a wrap."""
     wide = "SETTING" + " " * 40 + "DESCRIPTION"
     screen = SelectScreen("pick", [Separator(wide, pinned=True), Choice("row", 1)])
     lines = screen.render_body(24)
     assert screen._pinned_header == (0, lines[0])
     assert Text.from_ansi(lines[0]).plain.rstrip().endswith("…")
-    assert len(lines) == 2  # the header and the one choice — nothing wrapped onto a row
-    # An ordinary separator still wraps, each row of it counted as its own body line.
+    assert len(lines) == 2  # The header and the one choice. Nothing wrapped onto a new row.
+    # An ordinary separator still wraps. Each row of it is a body line.
     plain = SelectScreen("pick", [Separator(wide), Choice("row", 1)])
     assert len(plain.render_body(24)) == 3
 
 
 def test_screen_sticky_rows_stack_the_pinned_header_over_the_section_heading() -> None:
-    """The shared rule composing both pins: whole-list header first, then the section's."""
+    """The shared rule that composes both pins: the header of the whole list, then the section."""
     screen = Screen()
     screen.note_metrics(total=40, viewport=12)
     screen._pinned_header = (0, "COLUMNS")
     screen._sticky_headers = [(1, ["A"]), (5, ["B"])]
-    assert screen.sticky_rows(0) == []  # nothing has scrolled off yet
-    assert screen.sticky_rows(1) == ["COLUMNS"]  # heading A is itself the top row
-    assert screen.sticky_rows(3) == ["COLUMNS", "A"]  # inside section A
-    assert screen.sticky_rows(9) == ["COLUMNS", "B"]  # below every heading → the last one
-    assert Screen().sticky_rows(9) == []  # nothing recorded → nothing pinned
+    assert screen.sticky_rows(0) == []  # Nothing has scrolled off.
+    assert screen.sticky_rows(1) == ["COLUMNS"]  # Heading A is the top row.
+    assert screen.sticky_rows(3) == ["COLUMNS", "A"]  # This is inside section A.
+    assert screen.sticky_rows(9) == ["COLUMNS", "B"]  # Below each heading, the last one pins.
+    assert Screen().sticky_rows(9) == []  # The screen recorded nothing, so nothing is pinned.
 
 
 def test_screen_sticky_block_picks_the_governing_recorded_block() -> None:
-    """The base Screen.sticky_block logic is generic over any recorded landmark list.
+    """The logic of the base Screen.sticky_block works for any list of recorded landmarks.
 
-    Both the select list and the chat transcript reuse it by populating ``_sticky_headers``;
-    this exercises the shared rule directly: take the last block starting at or above the
-    offset, and pin exactly the rows of it the offset has passed.
+    The select list and the chat transcript both use it. They fill ``_sticky_headers``.
+    This test examines the shared rule directly. The rule takes the last block that starts
+    at or above the offset. It pins exactly the rows of that block that the offset passed.
     """
     screen = Screen()
     screen.note_metrics(total=40, viewport=12)
     screen._sticky_headers = [(0, ["A"]), (5, ["B", "b"]), (12, ["C"])]
-    assert screen.sticky_block(0) == []  # block A is itself the top row
-    assert screen.sticky_block(3) == ["A"]  # scrolled past A, before B → A governs
-    assert screen.sticky_block(5) == []  # block B's heading is now the top row
-    assert screen.sticky_block(6) == ["B"]  # its second row is still on screen
-    assert screen.sticky_block(7) == ["B", "b"]  # both gone → both pin
-    assert screen.sticky_block(20) == ["C"]  # below every block → the last one pins
-    assert Screen().sticky_block(9) == []  # no recorded landmarks → nothing to pin
+    assert screen.sticky_block(0) == []  # Block A is the top row.
+    assert screen.sticky_block(3) == ["A"]  # The scroll is past A and before B, so A governs.
+    assert screen.sticky_block(5) == []  # The heading of block B is now the top row.
+    assert screen.sticky_block(6) == ["B"]  # Its second row is still on the screen.
+    assert screen.sticky_block(7) == ["B", "b"]  # Both rows are gone, so both pin.
+    assert screen.sticky_block(20) == ["C"]  # Below each block, the last block pins.
+    assert Screen().sticky_block(9) == []  # There are no recorded landmarks, so nothing pins.
 
 
 def test_select_ctrl_page_jumps_between_sections() -> None:
-    """Ctrl+PageDown lands on the next section's first choice; Ctrl+PageUp walks back up."""
-    screen = _grouped_menu()  # Channels (6) then Direct (8), highlight on the first choice
+    """Ctrl+PageDown goes to the first choice of the next section. Ctrl+PageUp goes back up."""
+    screen = _grouped_menu()  # Channels (6) then Direct (8). The highlight is on the first choice.
     screen.handle("ctrl_pagedown")
-    assert _run(screen, "enter") == ("d", 0)  # jumped to the first Direct choice
+    assert _run(screen, "enter") == ("d", 0)  # The highlight jumped to the first Direct choice.
     screen.handle("ctrl_pageup")
-    assert _run(screen, "enter") == ("c", 0)  # already atop Direct → back to Channels' first
+    # The highlight was at the top of Direct, so it went back to the first choice of Channels.
+    assert _run(screen, "enter") == ("c", 0)
     screen.handle("ctrl_pagedown")
-    assert _run(screen, "enter") == ("d", 0)  # and forward to Direct again
+    assert _run(screen, "enter") == ("d", 0)  # Then it went forward to Direct again.
 
 
 # --- scroll ------------------------------------------------------------------
 
 
 def test_screen_scroll_helpers_page_and_clamp_to_metrics() -> None:
-    """The shared scroll helpers page by a screenful and clamp to the recorded body/viewport."""
+    """The shared scroll helpers move one screenful for a page, and clamp to the body."""
     screen = Screen()
     screen.note_metrics(total=100, viewport=10)
     screen.scroll_pages(1)
-    assert screen.scroll == 9  # a page is viewport - 1
+    assert screen.scroll == 9  # A page is viewport - 1.
     screen.scroll_to_bottom()
-    assert screen.scroll == 90  # total - viewport
+    assert screen.scroll == 90  # This is total - viewport.
     screen.scroll_lines(50)
-    assert screen.scroll == 90  # clamped, never past the bottom
+    assert screen.scroll == 90  # The scroll clamps and never goes past the bottom.
     screen.scroll_to_top()
     assert screen.scroll == 0
 
 
 def test_screen_section_scroll_walks_recorded_headers() -> None:
-    """Ctrl+PageUp/PageDown move the scroll offset between recorded section boundaries."""
+    """Ctrl+PageUp and Ctrl+PageDown move the scroll offset between the recorded section limits."""
     screen = Screen()
     screen.note_metrics(total=100, viewport=10)
     screen._sticky_headers = [(0, ["A"]), (20, ["B"]), (60, ["C"])]
     screen.scroll_to_next_section()
-    assert screen.scroll == 20  # from the top → start of section B
+    assert screen.scroll == 20  # From the top to the start of section B.
     screen.scroll_to_next_section()
-    assert screen.scroll == 60  # → start of C
+    assert screen.scroll == 60  # To the start of C.
     screen.scroll_to_next_section()
-    assert screen.scroll == 90  # no section past C → clamp to the bottom
-    screen.scroll = 40  # mid-section B
+    assert screen.scroll == 90  # There is no section after C, so the scroll clamps to the bottom.
+    screen.scroll = 40  # This is in the middle of section B.
     screen.scroll_to_section_start()
-    assert screen.scroll == 20  # up to B's start
+    assert screen.scroll == 20  # Up to the start of B.
     screen.scroll_to_section_start()
-    assert screen.scroll == 0  # already atop B → previous section (A at the top)
+    assert screen.scroll == 0  # It was at the top of B, so it goes to the section before (A).
 
 
 def test_scroll_screen_ctrl_edges_and_sectionless_fallback() -> None:
-    """Ctrl+Home/End reach the edges; with no sections Ctrl+PageUp/PageDown do too."""
+    """Ctrl+Home and Ctrl+End reach the edges. With no sections, Ctrl+PageUp/PageDown do too."""
     body = Text("\n".join(f"line {i}" for i in range(100)))
     screen = ScrollScreen(body, title="log")
-    screen.render_body(40)  # sets total = 100
+    screen.render_body(40)  # This sets total = 100.
     screen.note_viewport(10)
     screen.handle("ctrl_end")
     assert screen.scroll == 90
     screen.handle("ctrl_home")
     assert screen.scroll == 0
-    screen.handle("ctrl_pagedown")  # no sections recorded → falls through to the bottom
+    screen.handle("ctrl_pagedown")  # The screen has no sections, so it goes to the bottom.
     assert screen.scroll == 90
     screen.handle("ctrl_pageup")
     assert screen.scroll == 0
@@ -893,23 +916,23 @@ def test_scroll_screen_ctrl_edges_and_sectionless_fallback() -> None:
 
 
 def test_scroll_screen_paging_and_clamp() -> None:
-    """PageDown advances by a page, End jumps to the bottom, both clamped to content."""
+    """PageDown moves one page and End jumps to the bottom. Both clamp to the content."""
     body = Text("\n".join(f"line {i}" for i in range(100)))
     screen = ScrollScreen(body, title="log")
-    screen.render_body(40)  # sets total = 100
+    screen.render_body(40)  # This sets total = 100.
     screen.note_viewport(10)
     screen.handle("pagedown")
-    assert screen.scroll == 9  # page = viewport - 1
+    assert screen.scroll == 9  # A page is viewport - 1.
     screen.handle("end")
-    assert screen.scroll == 90  # total - viewport
+    assert screen.scroll == 90  # This is total - viewport.
     screen.handle("home")
     assert screen.scroll == 0
     screen.handle("up")
-    assert screen.scroll == 0  # clamped, never negative
+    assert screen.scroll == 0  # The scroll clamps and is never negative.
 
 
 def test_scroll_screen_escape_resolves_none() -> None:
-    """A result window dismisses to ``None`` on Esc or Enter."""
+    """A result dialog closes with ``None`` when the user presses Esc or Enter."""
     assert _run(ScrollScreen(Text("x")), "escape") is None
     assert _run(ScrollScreen(Text("x")), "enter") is None
 
@@ -918,35 +941,35 @@ def test_scroll_screen_escape_resolves_none() -> None:
 
 
 def test_reorder_apply_row_commits_new_order() -> None:
-    """Enter grabs and drops a list row; Enter on Apply commits the rearrangement."""
+    """Enter grabs and drops a list row. Enter on Apply commits the new order."""
     screen = ReorderScreen("order", ["a", "b", "c"])
-    screen.handle("enter")  # grab "a"
+    screen.handle("enter")  # Grab "a".
     assert screen._grabbed and "Enter drop" in screen.footer_hint
-    screen.handle("down")  # carry it past "b"
-    screen.handle("enter")  # drop
+    screen.handle("down")  # Carry it past "b".
+    screen.handle("enter")  # Drop it.
     assert not screen._grabbed and "Enter grab" in screen.footer_hint
-    screen.handle("down")  # cursor from position 1 past "c"…
-    screen.handle("down")  # …onto the Apply row
+    screen.handle("down")  # The highlight moves from position 1 past "c"...
+    screen.handle("down")  # ...onto the Apply row.
     assert _run(screen, "enter") == [1, 0, 2]
 
 
 def test_reorder_actions_follow_the_dirty_state() -> None:
-    """Untouched order offers no action row at all; a change brings Apply plus discard-Back.
+    """An order that the user did not change has no action row. A change adds Apply and Back.
 
-    Esc leaves either way, so an untouched list spends nothing on saying so — the pair
-    appears only once there is something to apply, and Apply has no key of its own.
+    Esc leaves in each case. Thus a list that the user did not change shows no row for it.
+    The pair appears only when there is something to apply, and Apply has no key of its own.
     """
     screen = ReorderScreen("order", ["a", "b", "c"])
     assert screen._actions() == []
     screen.handle("enter")
-    screen.handle("down")  # dirty now
+    screen.handle("down")  # The order is now changed.
     assert [key for key, _ in screen._actions()] == ["apply", "back"]
-    screen.handle("up")  # moved back home — clean again
+    screen.handle("up")  # The row is back at its place, so the order is clean again.
     assert screen._actions() == []
 
 
 def test_reorder_back_row_and_escape_cancel_discarding_moves() -> None:
-    """Enter on Back — like Esc — resolves the sentinel, so the caller keeps the old order."""
+    """Enter on Back resolves the sentinel, as Esc does, so the caller keeps the old order."""
     screen = ReorderScreen("order", ["a", "b", "c"])
     screen.handle("enter")
     screen.handle("down")
@@ -955,59 +978,62 @@ def test_reorder_back_row_and_escape_cancel_discarding_moves() -> None:
     screen = ReorderScreen("order", ["a", "b", "c"])
     screen.handle("enter")
     screen.handle("down")
-    screen.handle("enter")  # drop at position 1; the order is dirty
-    for _ in range(3):  # cursor 1 → 2 → Apply → Back
+    screen.handle("enter")  # Drop it at position 1. The order is now changed.
+    for _ in range(3):  # The highlight goes from 1 to 2, then to Apply, then to Back.
         screen.handle("down")
     assert _run(screen, "enter") is CANCEL
 
 
 def test_reorder_cursor_runs_into_the_action_rows_and_clamps() -> None:
-    """↑ on the first row stays put; ↓ walks the list and on into the action rows, then stops.
+    """↑ on the first row stays. ↓ walks the list and then the action rows, and then stops.
 
-    Clean, the list is the whole cursor space; once dirty the two action rows join it and
-    the cursor runs on through them to the bottom — never round to the top.
+    If the order is clean, the list is the whole space of the highlight. If the order is
+    changed, the two action rows join the space. The highlight goes through them to the
+    bottom, and it never goes round to the top.
     """
     screen = ReorderScreen("order", ["a", "b"])
-    screen.handle("up")  # already atop: no last row to fall onto
+    screen.handle("up")  # The highlight is at the top, and there is no last row to go to.
     assert screen._index == 0
-    screen.handle("down")  # onto the last list row, there being no action rows
+    screen.handle("down")  # It goes to the last list row, because there are no action rows.
     assert screen._index == 1
-    screen.handle("down")  # and stop there
+    screen.handle("down")  # It stops there.
     assert screen._index == 1
 
-    screen.handle("enter")  # grab row 1…
-    screen.handle("up")  # …and carry it up: dirty, so Apply and Back join the space
-    screen.handle("enter")  # drop it — the cursor rode it to the first list row
-    screen.handle("down")  # onto the second list row
-    screen.handle("down")  # off the list, onto Apply
-    screen.handle("down")  # …then the discard-Back row below it
+    screen.handle("enter")  # Grab row 1...
+    # ...and carry it up. The order is changed, so Apply and Back join the space.
+    screen.handle("up")
+    screen.handle("enter")  # Drop it. The highlight moved with it to the first list row.
+    screen.handle("down")  # To the second list row.
+    screen.handle("down")  # Off the list, onto Apply.
+    screen.handle("down")  # ...then to the Back row that discards the changes, below it.
     assert screen._index == 3
-    screen.handle("down")  # the bottom of the space: it stays
+    screen.handle("down")  # This is the bottom of the space, so the highlight stays.
     assert screen._index == 3
 
 
 def test_reorder_ignores_typed_characters_including_space() -> None:
-    """Typed characters — the spacebar included — neither grab a row nor resolve the screen."""
+    """Typed characters, also the space bar, do not grab a row and do not resolve the screen."""
     screen = ReorderScreen("order", ["a", "b"])
     screen.future = _Fut()
     screen.handle("text", "x")
-    screen.handle("text", " ")  # Space no longer grabs; Enter is the grab key
+    screen.handle("text", " ")  # Space does not grab now. Enter is the key that grabs.
     screen.handle("space")
     assert not screen._grabbed
     assert not screen.future.done()
 
 
 def test_reorder_dialog_width_is_stable_across_states() -> None:
-    """The reorder dialog is one width in every state it can be in.
+    """The reorder dialog has one width in each state that it can have.
 
-    The natural width fits the widest of rows, hints, and dirty actions, and never
-    changes as the user grabs a row or dirties the order, so the popup doesn't resize.
+    The natural width fits the widest of the rows, the hints, and the actions for a changed
+    order. It does not change when the user grabs a row or changes the order. Thus the
+    dialog does not change its size.
     """
     screen = ReorderScreen("order", ["🔒 alpha", "＃ b"])
     w = screen.dialog_width
-    screen.handle("enter")  # grab
+    screen.handle("enter")  # Grab.
     assert screen.dialog_width == w
-    screen.handle("down")  # dirty: Apply/discard rows appear
+    screen.handle("down")  # The order is changed, so the Apply and discard rows appear.
     assert screen.dialog_width == w
 
 
@@ -1015,7 +1041,7 @@ def test_reorder_dialog_width_is_stable_across_states() -> None:
 
 
 def test_compose_base_fills_exactly_terminal_height() -> None:
-    """The composed base view is exactly ``rows`` lines regardless of content size."""
+    """The composed base frame has exactly ``rows`` lines, for any size of the content."""
     tall = Text("\n".join(f"row {i}" for i in range(200)))
     screen = ScrollScreen(tall, title="big")
     for rows in (10, 24, 50):
@@ -1024,7 +1050,7 @@ def test_compose_base_fills_exactly_terminal_height() -> None:
 
 
 def test_a_flush_screen_draws_up_to_the_side_borders() -> None:
-    """A ``flush`` base gets the two padding columns back; an ordinary one keeps its air."""
+    """A ``flush`` base gets the two padding columns back. An ordinary base keeps its padding."""
 
     class Fill(Screen):
         floating = False
@@ -1040,26 +1066,26 @@ def test_a_flush_screen_draws_up_to_the_side_borders() -> None:
 
 
 def test_compose_dialog_is_bounded() -> None:
-    """A dialog for a huge renderable never exceeds the terminal height."""
+    """A dialog for a very large renderable never goes over the terminal height."""
     tall = Text("\n".join(f"row {i}" for i in range(200)))
     out = frame.compose_dialog(ScrollScreen(tall, title="d"), 80, 20)
     assert out.count("\n") + 1 <= 20
 
 
 def _box_height(screen: Screen) -> int:
-    """The row height of the dialog box ``compose_dialog`` draws for ``screen``."""
+    """The height in rows of the dialog box that ``compose_dialog`` draws for ``screen``."""
     return frame.compose_dialog(screen, 80, 40).count("\n") + 1
 
 
 def test_ordinary_dialog_box_resizes_to_each_body() -> None:
-    """A plain (non grow-only) dialog sizes to whatever body it is currently showing."""
+    """An ordinary dialog (not grow-only) has the size of the body that it shows now."""
     short = _box_height(ScrollScreen(Text("one line"), title="d"))
     tall = _box_height(ScrollScreen(Text("\n".join(f"row {i}" for i in range(15))), title="d"))
     assert tall > short
 
 
 class _GrowScreen(Screen):
-    """A grow-only dialog whose body height is set per paint, for the ratchet test."""
+    """A grow-only dialog whose body height is set for each paint, for the ratchet test."""
 
     grow_only = True
 
@@ -1074,34 +1100,34 @@ class _GrowScreen(Screen):
 
 
 def test_grow_only_dialog_box_holds_its_tallest_size() -> None:
-    """A grow-only dialog grows its box for a taller body and never shrinks for a shorter one."""
+    """A grow-only dialog makes its box larger for a taller body, and never makes it smaller."""
     screen = _GrowScreen()
     screen.n = 2
     small = _box_height(screen)
     screen.n = 16
     grown = _box_height(screen)
-    assert grown > small  # a taller body enlarges the box
+    assert grown > small  # A taller body makes the box larger.
     screen.n = 2
-    assert _box_height(screen) == grown  # a shorter body after keeps the larger box
+    assert _box_height(screen) == grown  # A shorter body after that keeps the larger box.
 
 
 def _box_width(screen: Screen) -> int:
-    """The column width of the dialog box ``compose_dialog`` draws for ``screen``."""
+    """The width in cells of the dialog box that ``compose_dialog`` draws for ``screen``."""
     out = Text.from_ansi(frame.compose_dialog(screen, 80, 40)).plain
     return max(cell_len(line.rstrip()) for line in out.split("\n"))
 
 
 def test_grow_only_dialog_box_holds_its_widest_size() -> None:
-    """A grow-only dialog's natural width ratchets too: it widens but never narrows."""
+    """The natural width of a grow-only dialog also ratchets. It becomes wider, never narrower."""
     screen = _GrowScreen()
     screen.dialog_width = 30
     narrow = _box_width(screen)
     screen.dialog_width = 60
     wide = _box_width(screen)
-    assert wide > narrow  # a wider body enlarges the box
+    assert wide > narrow  # A wider body makes the box larger.
     screen.dialog_width = 30
-    assert _box_width(screen) == wide  # a narrower one after keeps the wider box
-    # An ordinary dialog keeps sizing to each width as it comes.
+    assert _box_width(screen) == wide  # A narrower body after that keeps the wider box.
+    # An ordinary dialog keeps the size of each width that it gets.
     plain = ScrollScreen(Text("x"), title="d")
     plain.dialog_width = 60
     wide = _box_width(plain)
@@ -1110,38 +1136,39 @@ def test_grow_only_dialog_box_holds_its_widest_size() -> None:
 
 
 def test_compose_startup_is_chromeless_and_shows_banner() -> None:
-    """The startup splash fills the height, draws the banner, and omits header/footer bars."""
+    """The startup splash fills the height, draws the banner, and has no header or footer bar."""
     screen = SelectScreen("pick", [Choice("alpha", 1), Choice("beta", 2)])
     screen.chrome = False
     screen.banner = ["LOGO-ROW-A", "LOGO-ROW-B"]
     out = frame.compose_startup(screen, 80, 24)
-    assert out.count("\n") + 1 == 24  # fills the terminal height exactly
+    assert out.count("\n") + 1 == 24  # The splash fills the terminal height exactly.
     plain = Text.from_ansi(out).plain
-    assert "LOGO-ROW-A" in plain and "LOGO-ROW-B" in plain  # banner is drawn
-    assert "pick" in plain  # the box keeps its title
-    # The box is content-sized, not full width: no rendered line spans the whole terminal.
+    assert "LOGO-ROW-A" in plain and "LOGO-ROW-B" in plain  # The banner is drawn.
+    assert "pick" in plain  # The box keeps its title.
+    # The box has the size of its content and not the full width. No line that MeshTerm
+    # renders spans the whole terminal.
     assert all(len(line.rstrip()) < 80 for line in plain.split("\n"))
 
 
 def test_compose_bare_is_the_body_alone_on_blank_rows() -> None:
-    """A bare frame: no header, no footer, no title, no box — the body, sat a little high."""
+    """A bare frame has no header, footer, title, or box. It has the body, a little above centre."""
     body = Group(Text("CODE", justify="center"), Text("https://x", justify="center"))
     screen = ScrollScreen(body, title="Share x", floating=False)
     screen.bare = True
     out = frame.compose_bare(screen, 53, 26)
     rows = out.split("\n")
-    assert len(rows) == 26  # fills the terminal height exactly
+    assert len(rows) == 26  # The frame fills the terminal height exactly.
     plain = [Text.from_ansi(row).plain for row in rows]
-    assert not any("Share x" in row or "Esc" in row for row in plain)  # no title, no hint
-    assert not any("─" in row or "│" in row or "╭" in row for row in plain)  # no box
+    assert not any("Share x" in row or "Esc" in row for row in plain)  # No title and no hint.
+    assert not any("─" in row or "│" in row or "╭" in row for row in plain)  # No box.
     filled = [i for i, row in enumerate(plain) if row.strip()]
-    assert filled == [9, 10]  # two body rows, anchored at 2/5 of the blank space
-    assert plain[9].rstrip() == " " * 24 + "CODE"  # centred across the whole width
-    assert screen._scroll_viewport == 26  # the height, stated before the body was asked for
+    assert filled == [9, 10]  # Two body rows, at 2/5 of the blank space.
+    assert plain[9].rstrip() == " " * 24 + "CODE"  # The text is centred across the whole width.
+    assert screen._scroll_viewport == 26  # The frame states the height before it asks for the body.
 
 
 def test_compose_bare_windows_a_body_taller_than_the_frame_from_the_top() -> None:
-    """Too tall to sit, the body scrolls: the top of it — the code — is whole first."""
+    """A body that is too tall for the frame scrolls. The top (the code) is whole first."""
     body = Group(*(Text(f"row {i}") for i in range(40)))
     screen = ScrollScreen(body, floating=False)
     screen.bare = True
@@ -1154,13 +1181,13 @@ def test_compose_bare_windows_a_body_taller_than_the_frame_from_the_top() -> Non
 
 
 def test_startup_splash_gives_rows_back_in_order_when_short() -> None:
-    """A short terminal sheds the blank line first, then the top of the mark — never the box.
+    """A short terminal gives up the blank line first, then the top of the mark, and never the box.
 
-    The lettering says what the app is and the box is what the user came to use; the globe
-    over the lettering is decoration, so it is what pays. Cropping from the *top* means the
-    lettering holds its place while the mark thins above it.
+    The lettering says what the app is. The box is what the user came to use. The globe
+    over the lettering is decoration, so it is what the splash gives up. The crop is from
+    the top. Thus the lettering keeps its place while the mark becomes thinner above it.
     """
-    marks = [f"MARK{i:02d}" for i in range(16)]  # a stand-in with the real mark's height
+    marks = [f"MARK{i:02d}" for i in range(16)]  # A stand-in that has the height of the real mark.
 
     def splash(rows: int) -> list[str]:
         screen = SelectScreen("pick", [Choice("alpha", 1), Choice("beta", 2)])
@@ -1169,13 +1196,14 @@ def test_startup_splash_gives_rows_back_in_order_when_short() -> None:
         return Text.from_ansi(frame.compose_startup(screen, 80, rows)).plain.split("\n")
 
     tall = splash(40)
-    # Roomy: every row of the mark, and a blank line between it and the box.
+    # There is room: each row of the mark shows, with a blank line between it and the box.
     assert all(m in "\n".join(tall) for m in marks)
     mark_end = max(i for i, line in enumerate(tall) if marks[-1] in line)
     assert tall[mark_end + 1].strip() == ""
 
-    # Walk the terminal down a row at a time and note when each concession is made. The
-    # exact heights depend on how tall the box below happens to be, so pin the order.
+    # Make the terminal shorter by one row at a time, and note when the splash gives up
+    # each part. The exact heights depend on the height of the box below, so the test
+    # checks only the order.
     gap_lost = cropped = None
     for rows in range(40, 8, -1):
         lines = splash(rows)
@@ -1185,26 +1213,26 @@ def test_startup_splash_gives_rows_back_in_order_when_short() -> None:
             gap_lost = rows
         if cropped is None and marks[0] not in "\n".join(lines):
             cropped = rows
-        if end is not None:  # while any of the mark is drawn, its last row is drawn
+        if end is not None:  # While the splash draws any part of the mark, it draws the last row.
             assert marks[-1] in "\n".join(lines), f"{rows} rows: lost the mark's last row"
     assert gap_lost is not None, "the blank line was never given back"
     assert cropped is not None, "the mark was never cropped"
     assert gap_lost > cropped, "the blank line must go before the mark is cropped"
 
-    # The crop is bounded: the first row past _BANNER_CROP_ROWS is never sheared, however
-    # short the terminal gets. (Below a certain height the block simply outgrows the screen
-    # and the trailing clip takes the bottom — a different mechanism, not the crop.)
+    # The crop has a limit. The first row after _BANNER_CROP_ROWS is never sheared, for any
+    # height of the terminal. (Below a certain height, the block is taller than the screen,
+    # and the clip at the end takes the bottom. This is a different mechanism, not the crop.)
     keeper = marks[frame._BANNER_CROP_ROWS]
     for rows in range(20, 5, -1):
         assert keeper in "\n".join(splash(rows)), f"{rows} rows: cropped past the bound"
 
 
 def test_startup_splash_fits_every_platform_width() -> None:
-    """The real wordmark, drawn at each platform's own width, never overruns it.
+    """The real wordmark, drawn at the width of each platform, never goes over that width.
 
-    The full-size mark is 71 cells; a PicoCalc console is 53. The splash is the one screen
-    the gallery doesn't cover, and it shipped torn there until the narrow mark landed —
-    so this is the gate.
+    The full-size mark is 71 cells, and a PicoCalc console is 53 cells. The splash is the
+    one screen that the gallery does not cover. It shipped torn on the PicoCalc until the
+    narrow mark was added. Thus this test is the gate.
     """
     from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
     from meshterm.ui.logo import load_logo
@@ -1215,7 +1243,7 @@ def test_startup_splash_fits_every_platform_width() -> None:
             cols = platform.readable_cols
             screen = SelectScreen("Choose a device", [Choice("alpha", 1)])
             screen.chrome = False
-            screen.banner = load_logo()  # what a real caller sets: the full-size mark
+            screen.banner = load_logo()  # A real caller sets this: the full-size mark.
             screen.footnote = copyright_notice()
             out = frame.compose_startup(screen, cols, platform.readable_rows)
             for i, line in enumerate(Text.from_ansi(out).plain.split("\n")):
@@ -1227,50 +1255,52 @@ def test_startup_splash_fits_every_platform_width() -> None:
 
 
 def test_logo_takes_the_widest_mark_that_fits_the_columns() -> None:
-    """The screen picks the size, not the platform — a narrow desktop gets the small mark."""
+    """The screen picks the size, not the platform. A narrow desktop gets the small mark."""
     from meshterm.ui.logo import load_logo, logo_width
 
     wide = logo_width(load_logo())
     narrow = logo_width(load_logo(53))
     assert 0 < narrow <= 53 < wide
-    assert logo_width(load_logo(wide)) == wide  # room for the big one → the big one
-    assert logo_width(load_logo(wide - 1)) == narrow  # a column short → step down
+    # If there is room for the big mark, the screen picks it.
+    assert logo_width(load_logo(wide)) == wide
+    # If the room is one column short, the screen picks the small mark.
+    assert logo_width(load_logo(wide - 1)) == narrow
     assert load_logo(narrow - 1) == []  # nothing fits: no banner beats a torn one
 
 
 def test_compose_startup_shows_footnote_under_logo() -> None:
-    """The startup footnote sits directly under the logo.
+    """The startup footnote is directly under the logo.
 
-    A footnote (a copyright, say) is drawn muted and right-aligned to the logo's own
-    right edge, so the two read as one signed block.
+    MeshTerm draws a footnote (for example a copyright) muted, and aligned to the right
+    edge of the logo. Thus the logo and the footnote read as one signed block.
     """
     screen = SelectScreen("pick", [Choice("a", 1)])
     screen.chrome = False
-    screen.banner = ["A" * 40, "B" * 40]  # a wide wordmark to hang the note off
+    screen.banner = ["A" * 40, "B" * 40]  # A wide wordmark, to align the note with.
     screen.footnote = "note-xyz"
     lines = Text.from_ansi(frame.compose_startup(screen, 80, 20)).plain.split("\n")
     logo_rows = [i for i, ln in enumerate(lines) if set(ln.strip()) in ({"A"}, {"B"})]
     note_row = next(i for i, ln in enumerate(lines) if "note-xyz" in ln)
-    assert lines[note_row].strip() == "note-xyz"  # its own line, nothing else on it
-    assert note_row == logo_rows[-1] + 1  # immediately under the logo, no gap
-    # Right edges align: the note ends at the same column the logo ends.
+    assert lines[note_row].strip() == "note-xyz"  # The note has its own line.
+    assert note_row == logo_rows[-1] + 1  # The note is directly under the logo, with no gap.
+    # The right edges align: the note ends at the same column as the logo.
     assert len(lines[note_row].rstrip()) == len(lines[logo_rows[-1]].rstrip())
 
 
 def test_compose_startup_box_is_horizontally_centered() -> None:
-    """The content-sized box is centered, so its rows carry a leading left margin."""
+    """The box has the size of its content and is centred, so its rows have a left margin."""
     screen = SelectScreen("pick", [Choice("a", 1)])
     screen.chrome = False
     lines = Text.from_ansi(frame.compose_startup(screen, 80, 20)).plain.split("\n")
     box_lines = [ln for ln in lines if ln.strip()]
-    assert box_lines and all(ln.startswith("  ") for ln in box_lines)  # centered inset
+    assert box_lines and all(ln.startswith("  ") for ln in box_lines)  # The box is centred.
 
 
 # --- frames ------------------------------------------------------------------
 
 
 def _cell_color(line: str, idx: int) -> tuple[int, int, int]:
-    """Resolve the foreground RGB of the character at ``idx`` in an ANSI line."""
+    """Find the foreground RGB of the character at ``idx`` in an ANSI line."""
     from meshterm.ui.tui.render import _console
 
     style = Text.from_ansi(line).get_style_at_offset(_console(80), idx)
@@ -1279,14 +1309,14 @@ def _cell_color(line: str, idx: int) -> tuple[int, int, int]:
     return (triplet.red, triplet.green, triplet.blue)
 
 
-_ACCENT = (129, 140, 248)  # the theme's accent border, #818cf8
+_ACCENT = (129, 140, 248)  # The accent border of the theme, #818cf8.
 
 
 def _find(plain: str, glyphs: frozenset[str]) -> int:
     """The index of the first box glyph from ``glyphs``.
 
-    The render console may substitute square corners for rounded ones on legacy
-    Windows, so a test matches the whole family rather than one character.
+    On legacy Windows, the render console can use square corners in place of rounded
+    corners. Thus a test matches the whole family and not one character.
     """
     return next(i for i, ch in enumerate(plain) if ch in glyphs)
 
@@ -1296,7 +1326,7 @@ _EDGES = frozenset("─│")
 
 
 def _border_colours(lines: list[str]) -> set[tuple[int, int, int]]:
-    """Every distinct colour the box-drawing glyphs in ``lines`` are painted in."""
+    """Each different colour in which MeshTerm paints the box-drawing glyphs in ``lines``."""
     return {
         _cell_color(line, i)
         for line in lines
@@ -1306,11 +1336,11 @@ def _border_colours(lines: list[str]) -> set[tuple[int, int, int]]:
 
 
 def test_a_dialog_leaves_its_hint_to_the_footer_line() -> None:
-    """On the desktop the box says nothing about keys — the footer row below already does.
+    """On the desktop, the box says nothing about keys, because the footer row does.
 
-    The frame draws the *top* screen's hint on its footer line, so a dialog that also
-    carried the hint in its own border put the same sentence on one frame twice (JP,
-    2026-08-31). The border falls silent and the footer is the single place hints live.
+    The frame draws the hint of the top screen on its footer line. A dialog that also had
+    the hint in its own border put the same sentence on one frame two times (JP,
+    2026-08-31). Now the border has no hint, and the footer is the only place for hints.
     """
     hint = "←→ choose · Enter select · Esc cancel"
     screen = ScrollScreen(Text("Delete this contact?"), title="Delete contact")
@@ -1324,19 +1354,20 @@ def test_a_dialog_leaves_its_hint_to_the_footer_line() -> None:
 
 
 def test_a_silent_dialog_border_still_says_there_is_more() -> None:
-    """With no hint to carry, the clip arrows keep the base frame's own ``more`` wording."""
+    """If the border has no hint, the clip arrows keep the ``more`` words of the base frame."""
     tall = ScrollScreen(Text("\n".join(f"line {i}" for i in range(40))), title="Packet")
     tall._footer_hint = "↑↓ newer/older · Esc close"
     assert "↓ more" in _plain(frame.compose_dialog(tall, 72, 16))
 
 
 def test_a_frame_draws_in_one_colour() -> None:
-    """A border is its own colour the whole way round — no corner lit, no edge fading.
+    """A border has one colour all the way round, with no lit corner and no fading edge.
 
-    The frames were lit from the top-left for a while: the corner blended toward white and
-    the highlight decayed along the top and left edges. It read as a gradient laid over the
-    chrome rather than as the box being a box, so the pass is gone and the border draws flat.
-    Nested panels are checked with the outer frame, because the pass lit those too.
+    For a time, the frames had light from the top left. The corner blended toward white,
+    and the light decayed along the top edge and the left edge. It looked like a gradient
+    over the chrome, and not like a box. Thus we removed the pass, and the border draws
+    flat. The test checks the nested panels with the outer frame, because the pass also
+    lit those.
     """
     inner = Panel(Text("body"), border_style="accent", width=20)
     screen = ScrollScreen(Group(Text("above"), inner), title="outer")
@@ -1351,12 +1382,12 @@ def test_a_frame_draws_in_one_colour() -> None:
 
 
 def test_text_screen_edits_and_validates() -> None:
-    """Typing edits the buffer; a failing validator blocks submit and shows the error."""
+    """Typing edits the buffer. A validator that fails blocks the submit and shows the error."""
     screen = TextScreen("name?", validate=lambda v: True if v == "ok" else "nope")
     for ch in "xy":
         screen.handle("text", ch)
     screen.future = _Fut()
-    screen.handle("enter")  # 'xy' fails validation
+    screen.handle("enter")  # The text 'xy' fails the validation.
     assert not screen.future.done()
     assert screen._error == "nope"
     screen.handle("backspace")
@@ -1367,46 +1398,50 @@ def test_text_screen_edits_and_validates() -> None:
 
 
 def test_text_screen_byte_limit_gauges_and_blocks_an_oversize_entry() -> None:
-    """A byte-limited field shows the shared used/limit gauge and blocks Enter over the cap."""
+    """A field with a byte limit shows the used/limit gauge, and blocks Enter over the cap."""
     import re
 
     screen = TextScreen("msg?", byte_limit=10)
     for ch in "hello":
         screen.handle("text", ch)
     body = re.sub(r"\x1b\[[0-9;]*m", "", "\n".join(screen.render_body(40)))
-    assert "5/10" in body  # the gauge reads used/limit
-    for ch in " world":  # 11 bytes total, over the 10-byte cap
+    assert "5/10" in body  # The gauge shows used/limit.
+    for ch in " world":  # The total is 11 bytes, which is over the cap of 10 bytes.
         screen.handle("text", ch)
     screen.future = _Fut()
     screen.handle("enter")
-    assert not screen.future.done()  # the over-limit entry is blocked
+    assert not screen.future.done()  # The screen blocks the entry that is over the limit.
     assert "Too long by 1 byte" in screen._error
-    # Trimming back within budget lets it submit.
+    # If the user trims the text to the limit, the screen lets it submit.
     for _ in range(2):
         screen.handle("backspace")
     assert _run(screen, "enter") == "hello wor"
 
 
 def test_line_editor_word_motion() -> None:
-    """Ctrl+Left/Right hop by word — to the current word's start, else the previous/next."""
+    """Ctrl+Left and Ctrl+Right move by word.
+
+    They go to the start of the current word. If the cursor is already there, they go to
+    the previous word or the next word.
+    """
     from meshterm.ui.tui.prompt import LineEditor
 
-    editor = LineEditor("the quick  brown fox")  # cursor at the end (len 20)
+    editor = LineEditor("the quick  brown fox")  # The cursor is at the end (len 20).
     editor.edit("ctrl_left")
-    assert editor.cursor == 17  # start of "fox"
+    assert editor.cursor == 17  # The start of "fox".
     editor.edit("ctrl_left")
-    assert editor.cursor == 11  # skips the double space → start of "brown"
+    assert editor.cursor == 11  # It skips the double space, to the start of "brown".
     editor.edit("ctrl_left")
-    assert editor.cursor == 4  # start of "quick"
+    assert editor.cursor == 4  # The start of "quick".
     editor.edit("ctrl_right")
-    assert editor.cursor == 11  # forward over "quick" and the spaces → start of "brown"
-    editor.cursor = 13  # mid-"brown"
+    assert editor.cursor == 11  # Forward over "quick" and the spaces, to the start of "brown".
+    editor.cursor = 13  # The middle of "brown".
     editor.edit("ctrl_left")
-    assert editor.cursor == 11  # to the current word's start, not the previous word
+    assert editor.cursor == 11  # To the start of the current word, not the previous word.
 
 
 def test_text_screen_password_masks() -> None:
-    """A password field renders bullets, not the typed characters."""
+    """A password field renders bullets and not the characters that the user typed."""
     screen = TextScreen("pw?", password=True)
     for ch in "secret":
         screen.handle("text", ch)
@@ -1416,54 +1451,58 @@ def test_text_screen_password_masks() -> None:
 
 
 def test_line_editor_caps_length_and_truncates_paste() -> None:
-    """A max_length editor swallows keys past the cap and truncates an over-long paste."""
+    """An editor with a max_length ignores keys past the cap, and cuts a paste that is too long."""
     from meshterm.ui.tui.prompt import LineEditor
 
     editor = LineEditor("", max_length=6)
     for ch in "123456":
         assert editor.edit("text", ch) is True
-    assert editor.edit("text", "9") is False  # at capacity — key swallowed, buffer unchanged
+    # The editor is full. It ignores the key and keeps the buffer.
+    assert editor.edit("text", "9") is False
     assert editor.text == "123456"
 
     pasted = LineEditor("", max_length=6)
-    pasted.edit("text", "12345678")  # one over-long insert
-    assert pasted.text == "123456"  # filled only the six available slots
+    pasted.edit("text", "12345678")  # One insert that is too long.
+    assert pasted.text == "123456"  # The editor filled only the six slots that were free.
 
 
 def test_line_editor_paste_folds_controls_and_respects_max_length() -> None:
-    """A ``paste`` action folds newlines/controls to spaces and inserts the run at the cursor."""
+    """A ``paste`` action changes newlines and controls to spaces, and inserts the text."""
     from meshterm.ui.tui.prompt import LineEditor
 
     editor = LineEditor("ab")
     editor.cursor = 1
     assert editor.edit("paste", "X\nY") is True
-    assert editor.text == "aX Yb"  # the newline became a space, inserted mid-buffer
+    # The newline became a space, and it went in the middle of the buffer.
+    assert editor.text == "aX Yb"
 
     capped = LineEditor("", max_length=3)
     capped.edit("paste", "hello")
-    assert capped.text == "hel"  # a paste is trimmed to the remaining room, like a big insert
+    # The editor cuts a paste to the room that is left, as for a big insert.
+    assert capped.text == "hel"
 
-    assert LineEditor("z").edit("paste", "") is False  # nothing to paste leaves the buffer
+    # A paste of nothing does not change the buffer.
+    assert LineEditor("z").edit("paste", "") is False
 
 
 def test_pin_dialog_shows_six_slots_with_dots_for_blanks() -> None:
-    """The PIN field is six fixed slots: bullets for typed digits, centre dots for blanks."""
+    """The PIN field has six fixed slots: bullets for typed digits and centre dots for blanks."""
     from meshterm.ui.tui.prompt import PinDialog
 
     dialog = PinDialog("MeshCore-Testbench")
-    # Empty: six blank centre dots, no bullets yet.
+    # Empty: six blank centre dots and no bullets.
     field = dialog._editor.render(slots=PinDialog.PIN_LENGTH).plain
     assert field.count("·") == 6
     assert "•" not in field
 
-    # After three digits: three bullets, three remaining centre dots.
+    # After three digits: three bullets and three centre dots.
     for ch in "123":
         dialog.handle("text", ch)
     field = dialog._editor.render(slots=PinDialog.PIN_LENGTH).plain
     assert field.count("•") == 3
     assert field.count("·") == 3
 
-    # A full six-digit PIN fills every slot; typing more is capped at six.
+    # A PIN of six digits fills each slot. The editor caps more typing at six.
     for ch in "456999":
         dialog.handle("text", ch)
     assert dialog._editor.text == "123456"
@@ -1473,11 +1512,11 @@ def test_pin_dialog_shows_six_slots_with_dots_for_blanks() -> None:
 
 
 def test_confirm_toggle_and_default() -> None:
-    """The confirm toggles with arrows/letters and returns the chosen bool."""
+    """The confirm toggles with the arrows or letters, and returns the bool that the user chose."""
     screen = ConfirmScreen("sure?", default=True)
     assert _run(screen, "enter") is True
     screen = ConfirmScreen("sure?", default=True)
-    screen.handle("left")  # toggle to No
+    screen.handle("left")  # Toggle to No.
     assert _run(screen, "enter") is False
     screen = ConfirmScreen("sure?", default=True)
     screen.handle("text", "n")
@@ -1485,7 +1524,7 @@ def test_confirm_toggle_and_default() -> None:
 
 
 def test_button_dialog_enter_commits_highlighted() -> None:
-    """Enter returns the highlighted button's value; the default sets the highlight."""
+    """Enter returns the value of the highlighted button. The default sets the highlight."""
     screen = ButtonDialog("quit?", [("Yes", True), ("No", False)], default=0)
     assert _run(screen, "enter") is True
     screen = ButtonDialog("quit?", [("Yes", True), ("No", False)], default=1)
@@ -1493,31 +1532,31 @@ def test_button_dialog_enter_commits_highlighted() -> None:
 
 
 def test_button_dialog_arrows_move_highlight() -> None:
-    """←/→ move the highlight between the buttons and clamp at the ends; Tab still cycles.
+    """←/→ move the highlight between the buttons and clamp at the ends. Tab still cycles.
 
-    Tab is the exception: it has no reverse of its own, so on the last chip it comes round
-    rather than dead-ending.
+    Tab is the exception. It has no reverse key of its own, so on the last chip it goes
+    round to the first chip and does not stop.
     """
     screen = ButtonDialog("quit?", [("Yes", True), ("No", False)], default=0)
-    screen.handle("right")  # → No
+    screen.handle("right")  # To No.
     assert _run(screen, "enter") is False
     screen = ButtonDialog("quit?", [("Yes", True), ("No", False)], default=0)
-    screen.handle("left")  # already leftmost — stays on Yes
+    screen.handle("left")  # The highlight is already at the left end, so it stays on Yes.
     assert _run(screen, "enter") is True
     screen = ButtonDialog("quit?", [("Yes", True), ("No", False)], default=1)
-    screen.handle("right")  # already rightmost — stays on No
+    screen.handle("right")  # The highlight is already at the right end, so it stays on No.
     assert _run(screen, "enter") is False
     screen = ButtonDialog("quit?", [("Yes", True), ("No", False)], default=1)
-    screen.handle("tab")  # No -> round to Yes
+    screen.handle("tab")  # From No, round to Yes.
     assert _run(screen, "enter") is True
 
 
 def test_button_dialog_shortcut_keys_commit_instantly() -> None:
-    """A mapped shortcut key commits its value straight away, bypassing the highlight."""
+    """A shortcut key that is in the map commits its value at once. It ignores the highlight."""
     screen = ButtonDialog(
         "quit?", [("Yes", True), ("No", False)], default=1, keys={"y": True, "n": False}
     )
-    assert _run(screen, "text", "Y") is True  # case-insensitive, ignores the No default
+    assert _run(screen, "text", "Y") is True  # The match ignores case, and ignores the default No.
     screen = ButtonDialog(
         "quit?", [("Yes", True), ("No", False)], default=0, keys={"y": True, "n": False}
     )
@@ -1525,7 +1564,7 @@ def test_button_dialog_shortcut_keys_commit_instantly() -> None:
 
 
 def test_button_dialog_escape_cancels() -> None:
-    """Esc resolves with CANCEL so the caller can treat it as 'stay'."""
+    """Esc resolves with CANCEL, so the caller can treat it as 'stay'."""
     from meshterm.ui.tui.screen import CANCEL
 
     screen = ButtonDialog("quit?", [("Yes", True), ("No", False)])
@@ -1533,7 +1572,7 @@ def test_button_dialog_escape_cancels() -> None:
 
 
 def test_button_dialog_renders_a_styled_text_prompt_line_per_line() -> None:
-    """A pre-styled multi-line Text prompt renders each line, keeping its content."""
+    """A multi-line Text prompt that has styles renders each line, and keeps its content."""
     message = Text.from_markup("[ok]✓[/ok] clock set\n[ok]●[/ok] wrote backup.toml")
     screen = ButtonDialog(message, [("OK", "ok")])
     body = "\n".join(screen.render_body(60))
@@ -1548,23 +1587,23 @@ def test_button_dialog_sizes_to_the_widest_prompt_line() -> None:
     wide = "a really quite long outcome line for sizing"
     message = Text(f"short\n{wide}")
     screen = ButtonDialog(message, [("OK", "ok")])
-    assert screen.dialog_width == len(wide) + 12  # matches the margin the dialog adds
+    assert screen.dialog_width == len(wide) + 12  # This is the margin that the dialog adds.
 
 
 def test_autocomplete_suggests_and_tab_completes() -> None:
-    """Suggestions match case-insensitively; Tab fills the highlighted one; Enter commits."""
+    """Suggestions ignore case. Tab fills the highlighted suggestion, and Enter commits."""
     screen = AutocompleteScreen("target?", ["Alice", "Bob", "alfred"])
     for ch in "al":
         screen.handle("text", ch)
     assert screen._suggestions() == ["Alice", "alfred"]
-    screen.handle("down")  # highlight 'alfred'
-    screen.handle("tab")  # fill it
+    screen.handle("down")  # Highlight 'alfred'.
+    screen.handle("tab")  # Fill it.
     assert screen._editor.text == "alfred"
     assert _run(screen, "enter") == "alfred"
 
 
 def test_autocomplete_accepts_free_text() -> None:
-    """Text with no matching suggestion still commits verbatim (e.g. a hex prefix)."""
+    """Text that has no matching suggestion still commits as typed (for example a hex prefix)."""
     screen = AutocompleteScreen("target?", ["Alice"])
     for ch in "3d":
         screen.handle("text", ch)
@@ -1575,7 +1614,7 @@ def test_autocomplete_accepts_free_text() -> None:
 
 
 def test_device_picker_builds_aligned_columns(tmp_path) -> None:
-    """The picker lays devices out in columns that line up across rows of differing widths."""
+    """The picker puts devices in columns that line up across rows of different widths."""
     from meshterm.core.device_store import DeviceStore
     from meshterm.core.discovery import DiscoveredDevice
     from meshterm.ui.device_picker import prompt_device
@@ -1593,26 +1632,27 @@ def test_device_picker_builds_aligned_columns(tmp_path) -> None:
             captured["items"] = items
             captured["banner"] = banner
             captured["footnote"] = footnote
-            return None  # skip: never reaches the smoke test
+            return None  # The user skips, so the flow never reaches the smoke test.
 
-    async def _never(_device):  # verify is unused when the user skips
+    async def _never(_device):  # The check is not used when the user skips.
         raise AssertionError("verify should not run when selection is skipped")
 
     store = DeviceStore(tmp_path / "devices.json")
     asyncio.run(prompt_device(_Ui(), devices, store, _never))
-    # The banner (wordmark) is passed through so the splash can draw it.
+    # The picker passes the banner (the wordmark) through, so the splash can draw it.
     assert captured["banner"] and any("█" in row for row in captured["banner"])
-    # No footnote: the wordmark carries its own copyright, so the splash adds none.
+    # There is no footnote. The wordmark has its own copyright, so the splash adds none.
     assert captured["footnote"] is None
-    # Each device row's port sits at the same column, proving the name column is padded.
+    # The port of each device row is at the same column. This proves that the name column
+    # has padding.
     rows = [
         it.label.plain if hasattr(it.label, "plain") else it.label
         for it in captured["items"]
         if isinstance(it, Choice)
     ]
-    # Two devices plus the trailing action rows (add a network device, then Quit).
+    # Two devices, then the action rows at the end (add a network device, then Quit).
     assert len(rows) == 4
-    assert rows[-2].strip().endswith("Add a network device…")  # no caveat tag trailing it
+    assert rows[-2].strip().endswith("Add a network device…")  # No caveat tag follows it.
     assert rows[-1].strip().endswith("Quit")
     device_rows = rows[:2]
     assert all(port in row for port, row in zip(("COM5", "/dev/ttyUSB0"), device_rows, strict=True))
@@ -1620,13 +1660,13 @@ def test_device_picker_builds_aligned_columns(tmp_path) -> None:
 
 
 def test_device_picker_shortens_nothing_and_puts_the_address_last() -> None:
-    """Every field is drawn whole, and the connection target is the row's last column.
+    """MeshTerm draws each field whole, and the connection target is the last column of the row.
 
-    The lanes used to be squeezed against a budget so the row fitted the box, and beside a
-    36-cell CoreBluetooth UUID that cut a name down to ``Johnp…`` and the UUID to its tail.
-    Now a row wider than the box runs off its edge and ←→ pan to the rest, so the address,
-    the lane the reader needs least, goes last where running off the edge costs least. The
-    transport badge leads the row, with no heading over it.
+    The lanes once had a budget, so that the row fitted the box. Beside a CoreBluetooth
+    UUID of 36 cells, this cut a name to ``Johnp…`` and cut the UUID to its tail. Now a row
+    that is wider than the box goes past its edge, and ←→ pan to the rest. The address is
+    the lane that the user needs least, so it is last. There, the loss at the edge is
+    smallest. The transport badge starts the row, and it has no heading over it.
     """
     from meshterm.core.discovery import DiscoveredDevice
     from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
@@ -1652,29 +1692,29 @@ def test_device_picker_shortens_nothing_and_puts_the_address_last() -> None:
             for device in devices:
                 row = rows[device.stable_id].rstrip()
                 assert "…" not in row, platform.name
-                # The target is whole, and nothing follows it.
+                # The target is whole, and nothing comes after it.
                 assert row.endswith(device.target), platform.name
             assert name in rows[devices[0].stable_id] and adapter in rows[devices[2].stable_id]
-            # The header is unabridged at any width the row needs, ADDRESS last, and the
-            # badge column it starts over has no label.
+            # The header is complete at each width that the row needs. ADDRESS is last, and
+            # the badge column over which the header starts has no label.
             header = items[0].text(1000)
             assert header.split() == ["DEVICE", "HARDWARE", "PORT", "/", "ADDRESS"]
             for device in devices:
                 row = rows[device.stable_id]
                 name_at = row.index(_display_name(device, {}))
-                assert header.index("DEVICE") == cell_len(row[:name_at]) + 2  # + the pointer
+                assert header.index("DEVICE") == cell_len(row[:name_at]) + 2  # Plus the pointer.
                 assert row[:name_at].strip(), "the badge comes before the name"
     finally:
         set_platform(REGULAR)
 
 
 def test_device_picker_names_and_sorts_known_devices(tmp_path) -> None:
-    """A confirmed device shows its node name (in white), sorts to the top, and marks type."""
+    """A confirmed device shows its node name (in white), goes to the top, and marks its type."""
     from meshterm.core.device_store import DeviceStore
     from meshterm.core.discovery import DiscoveredDevice
     from meshterm.ui.device_picker import _BLE_ICON, _SERIAL_ICON, prompt_device
 
-    # A previously-confirmed serial node, an unknown serial port, and a BLE companion.
+    # A serial node that the user confirmed before, an unknown serial port, and a BLE companion.
     known = DiscoveredDevice(
         port="COM11", serial_number="SN1", description="USB Serial Device (COM11)"
     )
@@ -1682,7 +1722,7 @@ def test_device_picker_names_and_sorts_known_devices(tmp_path) -> None:
     ble = DiscoveredDevice(
         transport="ble", address="AA:BB:CC:DD:EE:FF", name="MeshCore-Roam", product="MeshCore-Roam"
     )
-    devices = [unknown, known, ble]  # discovery order: known is *not* first
+    devices = [unknown, known, ble]  # The order of discovery: the known device is not first.
 
     store = DeviceStore(tmp_path / "devices.json")
     store.remember(known, node_name="BaseStation")
@@ -1694,34 +1734,35 @@ def test_device_picker_names_and_sorts_known_devices(tmp_path) -> None:
             self, title, items, *, default=None, banner=None, footnote=None, **_kw
         ):
             captured["items"] = items
-            return None  # skip past the smoke test
+            return None  # The user skips, so the flow never reaches the smoke test.
 
     async def _never(_device):
         raise AssertionError("verify should not run when selection is skipped")
 
     asyncio.run(prompt_device(_Ui(), devices, store, _never))
     rows = [it.title for it in captured["items"] if isinstance(it, Choice)]
-    device_rows = rows[:-1]  # drop the trailing Quit row
+    device_rows = rows[:-1]  # Remove the Quit row at the end.
 
-    # The confirmed device sorts to the very top and is shown by its mesh node name, not the
-    # OS's generic "USB Serial Device" description.
+    # The confirmed device is at the very top. The row shows its mesh node name, not the
+    # generic description of the operating system, "USB Serial Device".
     top = device_rows[0]
     assert "BaseStation" in top.plain
     assert "USB Serial Device" not in top.plain
-    # …and that name is painted white ("device.known") so it stands out.
+    # The name is also white ("device.known"), so that it is easy to see.
     assert any(span.style == "device.known" for span in top.spans)
 
-    # The TYPE column marks the transport: a serial glyph for the wired node, the Bluetooth
-    # rune for the companion advertised over BLE.
+    # The TYPE column marks the transport: a serial glyph for the wired node, and the
+    # Bluetooth rune for the companion that advertises over BLE.
     assert _SERIAL_ICON in top.plain
     assert any(_BLE_ICON in row.plain for row in device_rows)
 
 
 def test_device_picker_ranks_likely_companions_above_a_bare_port() -> None:
-    """A board's own UART (no USB identity) sinks below companions on any transport.
+    """The UART of a board (with no USB identity) goes below companions on any transport.
 
-    On a Cardputer Zero, ``/dev/ttyS0`` is the Cap's GPS: listed first because serial is
-    scanned first, it opened the splash with the highlight on a port that can't be a node.
+    On a Cardputer Zero, ``/dev/ttyS0`` is the GPS of the Cap. MeshTerm scans serial first,
+    so it listed this port first. Then the splash opened with the highlight on a port that
+    cannot be a node.
     """
     from meshterm.core.config import SpiWiring
     from meshterm.core.discovery import DiscoveredDevice, spi_device
@@ -1734,7 +1775,7 @@ def test_device_picker_ranks_likely_companions_above_a_bare_port() -> None:
 
 
 def test_device_picker_reinjects_remembered_tcp_device(tmp_path) -> None:
-    """A remembered TCP companion reappears in the picker even though it can't be scanned for."""
+    """A remembered TCP companion appears in the picker again, also if no scan can find it."""
     from meshterm.core.device_store import DeviceStore
     from meshterm.core.discovery import tcp_device
     from meshterm.ui.device_picker import _TCP_ICON, prompt_device
@@ -1749,23 +1790,24 @@ def test_device_picker_reinjects_remembered_tcp_device(tmp_path) -> None:
             self, title, items, *, default=None, banner=None, footnote=None, **_kw
         ):
             captured["items"] = items
-            return None  # skip past the smoke test
+            return None  # The user skips, so the flow never reaches the smoke test.
 
     async def _never(_device):
         raise AssertionError("verify should not run when selection is skipped")
 
-    # Nothing discovered this session, yet the remembered network device is rebuilt into the list.
+    # The scan found nothing in this session, but MeshTerm builds the remembered network
+    # device into the list again.
     asyncio.run(prompt_device(_Ui(), [], store, _never))
     rows = [it.title for it in captured["items"] if isinstance(it, Choice)]
     device_rows = [r for r in rows if hasattr(r, "plain") and "WifiNode" in r.plain]
     assert device_rows, "the remembered TCP device should be listed"
     top = device_rows[0]
-    assert "192.168.1.50:5000" in top.plain  # its host:port sits in the address column
-    assert _TCP_ICON in top.plain  # marked with the network TYPE glyph
+    assert "192.168.1.50:5000" in top.plain  # Its host and port are in the address column.
+    assert _TCP_ICON in top.plain  # It has the network glyph in the TYPE column.
 
 
 def test_device_picker_lists_configured_tcp_profile(tmp_path) -> None:
-    """A ``[profiles.*]`` TCP entry shows up in the picker under its alias, ready to select."""
+    """A ``[profiles.*]`` TCP entry is in the picker under its alias, and the user can select it."""
     from meshterm.core.config import DeviceProfile
     from meshterm.core.device_store import DeviceStore
     from meshterm.ui.device_picker import _TCP_ICON, prompt_device
@@ -1782,25 +1824,26 @@ def test_device_picker_lists_configured_tcp_profile(tmp_path) -> None:
             self, title, items, *, default=None, banner=None, footnote=None, **_kw
         ):
             captured["items"] = items
-            return None  # skip past the smoke test
+            return None  # The user skips, so the flow never reaches the smoke test.
 
     async def _never(_device):
         raise AssertionError("verify should not run when selection is skipped")
 
-    # Nothing scanned or remembered — the profile alone puts the endpoint in the list.
+    # The scan found nothing and nothing is remembered. The profile alone puts the endpoint
+    # in the list.
     asyncio.run(prompt_device(_Ui(), [], store, _never, profiles))
     rows = [it.title for it in captured["items"] if isinstance(it, Choice)]
     device_rows = [r for r in rows if hasattr(r, "plain") and "bridge" in r.plain]
     assert device_rows, "the configured TCP profile should be listed"
     top = device_rows[0]
-    assert "127.0.0.1:5000" in top.plain  # its host:port sits in the address column
-    assert _TCP_ICON in top.plain  # marked with the network TYPE glyph
+    assert "127.0.0.1:5000" in top.plain  # Its host and port are in the address column.
+    assert _TCP_ICON in top.plain  # It has the network glyph in the TYPE column.
 
 
 def test_device_picker_lists_configured_serial_profile(tmp_path) -> None:
-    """A configured serial profile is listed in the picker under its alias.
+    """A serial profile in the config is in the picker under its alias.
 
-    A soldered ``/dev/ttyS1`` is ready to select even though pyserial's scan never
+    The user can select a soldered ``/dev/ttyS1``, although the scan of pyserial never
     produces that platform port.
     """
     from meshterm.core.config import DeviceProfile
@@ -1817,24 +1860,25 @@ def test_device_picker_lists_configured_serial_profile(tmp_path) -> None:
             self, title, items, *, default=None, banner=None, footnote=None, **_kw
         ):
             captured["items"] = items
-            return None  # skip past the smoke test
+            return None  # The user skips, so the flow never reaches the smoke test.
 
     async def _never(_device):
         raise AssertionError("verify should not run when selection is skipped")
 
-    # Nothing scanned or remembered — the serial profile alone puts the port in the list.
+    # The scan found nothing and nothing is remembered. The serial profile alone puts the
+    # port in the list.
     asyncio.run(prompt_device(_Ui(), [], store, _never, profiles))
     rows = [it.title for it in captured["items"] if isinstance(it, Choice)]
     device_rows = [r for r in rows if hasattr(r, "plain") and "picocalc" in r.plain]
     assert device_rows, "the configured serial profile should be listed"
-    assert "/dev/ttyS1" in device_rows[0].plain  # its port sits in the address column
+    assert "/dev/ttyS1" in device_rows[0].plain  # Its port is in the address column.
 
 
 def test_device_picker_serial_profile_yields_to_scanned_port(tmp_path) -> None:
-    """A serial profile yields to the scanned port when both name the same thing.
+    """A serial profile yields to the scanned port when both name the same port.
 
-    The row pyserial found wins, because it carries real USB metadata the bare profile
-    does not.
+    The row that pyserial found wins, because it has real USB metadata and the bare
+    profile does not.
     """
     from meshterm.core.config import DeviceProfile
     from meshterm.core.device_store import DeviceStore
@@ -1864,14 +1908,18 @@ def test_device_picker_serial_profile_yields_to_scanned_port(tmp_path) -> None:
 
 
 def test_device_picker_profile_yields_to_remembered_endpoint(tmp_path) -> None:
-    """A profile at an already-remembered endpoint doesn't double-list — the richer row wins."""
+    """A profile at an endpoint that is already remembered is not listed twice.
+
+    The row that has more information wins.
+    """
     from meshterm.core.config import DeviceProfile
     from meshterm.core.device_store import DeviceStore
     from meshterm.core.discovery import tcp_device
     from meshterm.ui.device_picker import prompt_device
 
     store = DeviceStore(tmp_path / "devices.json")
-    # Confirmed before, so it carries the real node name learned at connect time.
+    # The user confirmed it before, so it has the real node name that MeshTerm learned at
+    # connect time.
     store.remember(tcp_device("127.0.0.1", 5000), node_name="uConsole")
     profiles = {
         "bridge": DeviceProfile(name="bridge", transport="tcp", host="127.0.0.1", tcp_port=5000)
@@ -1893,13 +1941,13 @@ def test_device_picker_profile_yields_to_remembered_endpoint(tmp_path) -> None:
     rows = [it.title for it in captured["items"] if isinstance(it, Choice)]
     endpoint_rows = [r for r in rows if hasattr(r, "plain") and "127.0.0.1:5000" in r.plain]
     assert len(endpoint_rows) == 1, "the endpoint should appear exactly once"
-    # The remembered node name wins over the bare profile alias.
+    # The remembered node name wins over the plain alias of the profile.
     assert "uConsole" in endpoint_rows[0].plain
     assert "bridge" not in endpoint_rows[0].plain
 
 
 def test_device_picker_adds_network_device(tmp_path) -> None:
-    """The 'add a network device' row prompts for host:port and confirms the TCP companion."""
+    """The 'add a network device' row asks for the host and port, and confirms the TCP companion."""
     from meshterm.core.device_store import DeviceStore
     from meshterm.ui.device_picker import _ADD_TCP, prompt_device
 
@@ -1910,7 +1958,7 @@ def test_device_picker_adds_network_device(tmp_path) -> None:
         async def select_startup(  # noqa: ANN001, ANN201, ANN003
             self, title, items, *, default=None, banner=None, footnote=None, **_kw
         ):
-            # Choose the "add a network device" action row.
+            # Select the action row "add a network device".
             return next(it.value for it in items if isinstance(it, Choice) and it.value is _ADD_TCP)
 
         async def prompt_text_startup(
@@ -1924,7 +1972,8 @@ def test_device_picker_adds_network_device(tmp_path) -> None:
             banner=None,
             footnote=None,
         ):
-            assert validate("192.168.1.50:5000") is True  # the validator accepts a good endpoint
+            # The validator accepts a correct endpoint.
+            assert validate("192.168.1.50:5000") is True
             return "192.168.1.50:5000"
 
         async def busy_startup(self, message, coro, *, title="", banner=None, footnote=None):
@@ -1932,18 +1981,19 @@ def test_device_picker_adds_network_device(tmp_path) -> None:
 
     async def verify(device, pin=None):
         probed["target"] = device.target
-        return {"adv_name": "WifiNode"}  # a genuine companion answers
+        return {"adv_name": "WifiNode"}  # A real companion answers.
 
     chosen = asyncio.run(prompt_device(_Ui(), [], store, verify))
     assert chosen is not None and chosen.is_tcp and chosen.target == "192.168.1.50:5000"
     assert probed["target"] == "192.168.1.50:5000"
-    # The confirmed network device is remembered forever, with the node name it reported.
+    # MeshTerm remembers the confirmed network device for ever, with the node name that it
+    # reported.
     remembered = store.load()
     assert remembered is not None and remembered.is_tcp and remembered.node_name == "WifiNode"
 
 
 def test_device_picker_removes_network_device_on_delete(tmp_path) -> None:
-    """Delete on a network row confirms, forgets it, and it's gone from the re-drawn list."""
+    """Delete on a network row asks to confirm, then forgets the device and removes the row."""
     from meshterm.core.device_store import DeviceStore
     from meshterm.core.discovery import tcp_device
     from meshterm.ui.device_picker import _QUIT, prompt_device
@@ -1970,7 +2020,8 @@ def test_device_picker_removes_network_device_on_delete(tmp_path) -> None:
             seen_rows.append(names)
             self._passes += 1
             if self._passes == 1:
-                # First pass: the network row is present and marked deletable — press Delete.
+                # First pass: the network row is present, and the user can delete it. Press
+                # Delete.
                 row = next(
                     it
                     for it in items
@@ -1978,7 +2029,7 @@ def test_device_picker_removes_network_device_on_delete(tmp_path) -> None:
                 )
                 assert row.deletable
                 return DeleteRequest(row.value)
-            # Second pass (after the removal): leave the picker.
+            # Second pass (after the removal): quit the picker.
             return _QUIT
 
         async def confirm_startup(
@@ -1993,28 +2044,28 @@ def test_device_picker_removes_network_device_on_delete(tmp_path) -> None:
             backdrop_default=None,
         ):
             confirmed_prompts.append(prompt)
-            # The confirm floats over the picker: it's handed the rows to redraw behind it,
-            # with the row being removed pre-highlighted.
+            # The confirm floats over the picker. It gets the rows to draw behind it, with
+            # the row to remove already highlighted.
             assert backdrop_items is not None
             assert getattr(backdrop_default, "is_tcp", False)
-            return True  # the user confirms the removal
+            return True  # The user confirms the removal.
 
     async def _never(_device, _pin=None):
         raise AssertionError("verify should not run when a row is deleted, not chosen")
 
     result = asyncio.run(prompt_device(_Ui(), [], store, _never))
-    assert result is None  # quit on the second pass
+    assert result is None  # The user quit on the second pass.
     # The confirm named the device and its endpoint.
     assert confirmed_prompts and "WifiNode" in confirmed_prompts[0]
     assert "192.168.1.50:5000" in confirmed_prompts[0]
-    # It was there on the first draw and gone on the second, and the store forgot it.
+    # The row was in the first paint and gone in the second, and the store forgot the device.
     assert any("WifiNode" in name for name in seen_rows[0])
     assert not any("WifiNode" in name for name in seen_rows[1])
     assert store.load() is None
 
 
 def test_device_picker_keeps_network_device_when_removal_cancelled(tmp_path) -> None:
-    """Cancelling the Delete confirm leaves the remembered network device untouched."""
+    """If the user cancels the Delete confirm, the remembered network device stays."""
     from meshterm.core.device_store import DeviceStore
     from meshterm.core.discovery import tcp_device
     from meshterm.ui.device_picker import _QUIT, prompt_device
@@ -2051,19 +2102,22 @@ def test_device_picker_keeps_network_device_when_removal_cancelled(tmp_path) -> 
             backdrop_items=None,
             backdrop_default=None,
         ):
-            return False  # the user backs out (Cancel / Esc)
+            return False  # The user backs out (Cancel or Esc).
 
     async def _never(_device, _pin=None):
         raise AssertionError("verify should not run")
 
     asyncio.run(prompt_device(_Ui(), [], store, _never))
-    # Nothing was forgotten — the device is still remembered.
+    # MeshTerm forgot nothing, so it still remembers the device.
     remembered = store.load()
     assert remembered is not None and remembered.node_name == "WifiNode"
 
 
 def test_confirm_startup_floats_red_over_the_picker_backdrop() -> None:
-    """The removal confirm floats as a red popup over a redrawn picker, not a full splash."""
+    """The removal confirm floats as a red dialog over a picker that MeshTerm draws again.
+
+    It is not a full splash.
+    """
     from meshterm.core.discovery import tcp_device
 
     session = TuiSession()
@@ -2086,24 +2140,24 @@ def test_confirm_startup_floats_red_over_the_picker_backdrop() -> None:
 
         base = session._base_screen()
         floats = session._float_layers()
-        # The picker is redrawn as the chromeless base; the confirm floats over it (not a
-        # full-screen splash that replaces the list).
+        # MeshTerm draws the picker again as the base screen that has no chrome. The confirm
+        # floats over it. It is not a full-screen splash that replaces the list.
         assert isinstance(base, SelectScreen) and base.chrome is False
         assert len(floats) == 1
         dialog = floats[0]
         assert isinstance(dialog, ButtonDialog)
-        assert dialog.border_style == "err"  # the reserved data-loss red
+        assert dialog.border_style == "err"  # The red that is reserved for data loss.
 
-        dialog.resolve(True)  # commit the removal
+        dialog.resolve(True)  # Commit the removal.
         result = await task
         assert result is True
-        assert session._stack == []  # the backdrop is torn down with the dialog
+        assert session._stack == []  # MeshTerm removes the backdrop with the dialog.
 
     asyncio.run(main())
 
 
 class _PickerUi:
-    """A fake splash UI that always selects the first device, then dismisses messages."""
+    """A fake splash UI that always selects the first device, and then closes messages."""
 
     def __init__(self) -> None:
         self.notes: list = []
@@ -2121,7 +2175,7 @@ class _PickerUi:
 
 
 def test_device_picker_smoke_tests_and_reprompts(tmp_path) -> None:
-    """A failed smoke test re-prompts; a passing one is remembered as confirmed."""
+    """A smoke test that fails asks again. MeshTerm remembers a test that passes as confirmed."""
     from meshterm.core.device_store import DeviceStore
     from meshterm.core.discovery import DiscoveredDevice
     from meshterm.ui.device_picker import prompt_device
@@ -2130,7 +2184,7 @@ def test_device_picker_smoke_tests_and_reprompts(tmp_path) -> None:
     store = DeviceStore(tmp_path / "devices.json")
     ui = _PickerUi()
 
-    # First probe fails (not MeshCore), second answers with self-info.
+    # The first probe fails (not MeshCore). The second probe answers with its own info.
     results = [None, {"adv_name": "BaseStation"}]
 
     async def verify(_device, _pin=None):
@@ -2138,14 +2192,14 @@ def test_device_picker_smoke_tests_and_reprompts(tmp_path) -> None:
 
     chosen = asyncio.run(prompt_device(ui, devices, store, verify))
     assert chosen is devices[0]
-    assert len(ui.notes) == 1  # the "not a MeshCore device" message was shown once
+    assert len(ui.notes) == 1  # The picker showed the "not a MeshCore device" message one time.
     remembered = store.load()
     assert remembered is not None and remembered.node_name == "BaseStation"
     assert store.is_known(devices[0])
 
 
 def test_device_picker_leaves_the_copyright_to_the_wordmark(tmp_path) -> None:
-    """No splash states the copyright itself — the wordmark's own art already carries it."""
+    """No splash states the copyright, because the art of the wordmark already has it."""
     from meshterm.core.device_store import DeviceStore
     from meshterm.core.discovery import DiscoveredDevice
     from meshterm.ui.device_picker import prompt_device
@@ -2168,22 +2222,23 @@ def test_device_picker_leaves_the_copyright_to_the_wordmark(tmp_path) -> None:
             footnotes.append(("busy", footnote))
             return await coro
 
-    # First probe fails (re-pick), second passes — exercising every post-selection screen.
+    # The first probe fails (the user selects again). The second probe passes. Thus the test
+    # runs each screen that comes after a selection.
     results = [None, {"adv_name": "BaseStation"}]
 
     async def verify(_device, _pin=None):
         return results.pop(0)
 
     asyncio.run(prompt_device(_Ui(), devices, store, verify))
-    # Every splash draws the logo, and the logo is where the copyright lives now — so none
-    # of them adds a line of its own: not the opening picker, the smoke-test spinner, the
-    # failure notice, nor the re-opened picker.
+    # Each splash draws the logo, and the copyright is now in the logo. Thus no splash adds
+    # a line of its own: not the first picker, not the spinner of the smoke test, not the
+    # failure notice, and not the picker that opens again.
     assert len(footnotes) > 1
     assert all(footnote is None for _kind, footnote in footnotes)
 
 
 def test_device_picker_prompts_and_retries_ble_pin(tmp_path) -> None:
-    """A PIN-protected device opens the popup, re-asks on a wrong code, then connects."""
+    """A device that has a PIN opens the dialog, asks again for a wrong code, then connects."""
     from meshterm.core.connection import DeviceAuthenticationError
     from meshterm.core.device_store import DeviceStore
     from meshterm.core.discovery import DiscoveredDevice
@@ -2194,7 +2249,7 @@ def test_device_picker_prompts_and_retries_ble_pin(tmp_path) -> None:
     ]
     store = DeviceStore(tmp_path / "devices.json")
 
-    entered = iter(["000000", "654321"])  # a wrong code, then the right one
+    entered = iter(["000000", "654321"])  # A wrong code, then the correct code.
     errors: list = []
 
     class _Ui:
@@ -2216,25 +2271,27 @@ def test_device_picker_prompts_and_retries_ble_pin(tmp_path) -> None:
             return next(entered)
 
     async def verify(_device, pin=None):
-        if pin != "654321":  # the first probe (no PIN) and the wrong code both get rejected
-            # The connection names the refusal; the picker carries its hint into the dialog.
+        if pin != "654321":  # The device rejects the first probe (no PIN) and the wrong code.
+            # The connection names the refusal. The picker puts its hint into the dialog.
             hint = "That PIN was rejected — check the code and try again." if pin else ""
             raise DeviceAuthenticationError("needs a Bluetooth pairing PIN", hint=hint)
         return {"adv_name": "Pinned", "model": "Seeed Tracker T1000-E"}
 
     chosen = asyncio.run(prompt_device(_Ui(), devices, store, verify))
     assert chosen is devices[0]
-    # Asked twice: first with no error, then with the refusal's own hint after the wrong code.
+    # The picker asked two times: first with no error, then with the hint of the refusal
+    # after the wrong code.
     assert errors[0] == ""
     assert "rejected" in errors[1].lower()
     remembered = store.load()
     assert remembered is not None
     assert remembered.node_name == "Pinned"
-    assert remembered.hardware_model == "Seeed Tracker T1000-E"  # learned once connected
+    # MeshTerm learned the model when it connected.
+    assert remembered.hardware_model == "Seeed Tracker T1000-E"
 
 
 def test_device_picker_pin_cancel_returns_to_list(tmp_path) -> None:
-    """Esc on the PIN popup returns to the device list instead of connecting."""
+    """Esc on the PIN dialog goes back to the device list. It does not connect."""
     from meshterm.core.connection import DeviceAuthenticationError
     from meshterm.core.device_store import DeviceStore
     from meshterm.core.discovery import DiscoveredDevice
@@ -2244,7 +2301,7 @@ def test_device_picker_pin_cancel_returns_to_list(tmp_path) -> None:
         DiscoveredDevice(transport="ble", address="00:11:22:33:44:55", name="MeshCore-Testbench")
     ]
     store = DeviceStore(tmp_path / "devices.json")
-    picks = iter([0, "quit"])  # pick the device once, then quit the re-opened list
+    picks = iter([0, "quit"])  # Select the device one time, then quit the list that opens again.
 
     class _Ui:
         async def select_startup(  # noqa: ANN001, ANN201, ANN003
@@ -2262,18 +2319,18 @@ def test_device_picker_pin_cancel_returns_to_list(tmp_path) -> None:
         async def prompt_pin_startup(
             self, device_name, *, error="", help_text="", banner=None, footnote=None
         ):
-            return None  # the user cancels the PIN entry
+            return None  # The user cancels the PIN entry.
 
     async def verify(_device, pin=None):
         raise DeviceAuthenticationError("needs a Bluetooth pairing PIN")
 
     result = asyncio.run(prompt_device(_Ui(), devices, store, verify))
-    assert result is None  # cancelling the PIN then quitting leaves the picker empty-handed
-    assert store.load() is None  # nothing was remembered
+    assert result is None  # The user cancels the PIN and quits, so the picker has no device.
+    assert store.load() is None  # MeshTerm remembered nothing.
 
 
 def test_device_picker_quit_row_returns_none(tmp_path) -> None:
-    """Choosing the trailing Quit row leaves the picker (None) without a smoke test."""
+    """If the user selects the Quit row at the end, the picker returns None. No smoke test runs."""
     from meshterm.core.device_store import DeviceStore
     from meshterm.core.discovery import DiscoveredDevice
     from meshterm.ui.device_picker import _QUIT, prompt_device
@@ -2284,7 +2341,7 @@ def test_device_picker_quit_row_returns_none(tmp_path) -> None:
         async def select_startup(  # noqa: ANN001, ANN201, ANN003
             self, title, items, *, default=None, banner=None, footnote=None, **_kw
         ):
-            # The last choice is the Quit row; picking it signals "exit".
+            # The last choice is the Quit row. When the user selects it, the app exits.
             quit_choice = [it for it in items if isinstance(it, Choice) and it.value is _QUIT]
             assert quit_choice, "the picker offers a Quit row"
             return quit_choice[0].value
@@ -2300,11 +2357,11 @@ def test_device_picker_quit_row_returns_none(tmp_path) -> None:
 
 
 def test_a_busy_caption_hangs_its_lines_under_its_text() -> None:
-    """A line feed starts a line under the caption; so does a line too long for the box.
+    """A line feed starts a line under the caption. A line that is too long for the box does too.
 
-    The reported card: a long room name pushed the count's last letter alone onto a line at
-    column zero. Broken on purpose instead, the second line starts under the first one's
-    text, and the card is only as wide as its widest line.
+    A user reported this card. A long room name pushed the last letter of the count alone
+    onto a line at column zero. Now the break is on purpose. The second line starts under
+    the text of the first line, and the card has the width of its widest line.
     """
     from rich.text import Text as RichText
 
@@ -2320,7 +2377,7 @@ def test_a_busy_caption_hangs_its_lines_under_its_text() -> None:
 
 
 def test_busy_screen_spins_over_its_message() -> None:
-    """The busy splash shows an ASCII spinner beside its message and advances on tick."""
+    """The busy splash shows an ASCII spinner beside its message, and it advances on a tick."""
     from rich.text import Text as RichText
 
     from meshterm.ui.tui.screen import BusyScreen
@@ -2329,14 +2386,14 @@ def test_busy_screen_spins_over_its_message() -> None:
     screen = BusyScreen("Talking to Wio on COM5…")
 
     def glyph() -> str:
-        """The first (spinner) character of the rendered body, ANSI codes stripped."""
+        """The first character (the spinner) of the rendered body, with no ANSI codes."""
         return RichText.from_ansi("\n".join(screen.render_body(60))).plain.lstrip()[0]
 
     plain = RichText.from_ansi("\n".join(screen.render_body(60))).plain
     assert "Talking to Wio on COM5" in plain
-    assert glyph() in Spinner.BRAILLE  # a spinner glyph leads the line
+    assert glyph() in Spinner.BRAILLE  # A glyph of the spinner starts the line.
 
-    # Ticking cycles through every frame and returns to the first.
+    # The ticks cycle through each animation step and return to the first.
     seen = {glyph()}
     for _ in range(len(Spinner.BRAILLE) - 1):
         screen.tick()
@@ -2345,7 +2402,7 @@ def test_busy_screen_spins_over_its_message() -> None:
 
 
 def test_spinner_cycles_and_resets() -> None:
-    """The reusable Spinner advances through its frames, wraps, and resets."""
+    """The reusable Spinner advances through its animation steps, wraps, and resets."""
     from meshterm.ui.tui.spinner import Spinner
 
     spinner = Spinner("ab", style="warn")
@@ -2353,7 +2410,7 @@ def test_spinner_cycles_and_resets() -> None:
     assert spinner.text().plain == "a" and spinner.text().style == "warn"
     spinner.tick()
     assert spinner.frame == "b"
-    spinner.tick()  # wraps back to the first frame
+    spinner.tick()  # It wraps back to the first animation step.
     assert spinner.frame == "a"
     spinner.tick()
     spinner.reset()
@@ -2364,7 +2421,7 @@ def test_spinner_cycles_and_resets() -> None:
 
 
 def test_progress_handle_matches_rich_api() -> None:
-    """add_task/advance/update mirror the Rich Progress subset the tools rely on."""
+    """add_task, advance, and update are the same as the part of Rich Progress that tools use."""
     screen = ProgressScreen("work")
     task = screen.add_task("tracing", total=5)
     screen.advance(task)
@@ -2373,26 +2430,27 @@ def test_progress_handle_matches_rich_api() -> None:
     screen.update(task, description="tracing more", completed=5, total=5)
     assert screen._tasks[task].description == "tracing more"
     assert screen._tasks[task].completed == 5
-    # Renders without error at a realistic width.
+    # The screen renders without an error at a realistic width.
     assert screen.render_body(60)
 
 
 def test_progress_chip_animates_between_advances() -> None:
-    """The working chip spins on tick alone, so a task that rarely advances still reads alive.
+    """The working chip spins on a tick alone, so a task that seldom advances looks alive.
 
-    A trace advances just once, at the very end; the meter would sit motionless until then.
-    Ticking the dialog must change what it renders even with the task's count untouched.
+    A trace advances only one time, at the very end. Until then, the meter does not move.
+    A tick of the dialog must change what the dialog renders, also if the count of the
+    task does not change.
     """
     screen = ProgressScreen("trace")
-    screen.add_task("tracing", total=1)  # will sit at 0/1 for the whole wait
+    screen.add_task("tracing", total=1)  # It stays at 0/1 for the whole wait.
     before = "\n".join(screen.render_body(60))
     screen.tick()
     after = "\n".join(screen.render_body(60))
-    assert before != after  # the chip moved even though nothing advanced
+    assert before != after  # The chip moved, but nothing advanced.
 
 
 def test_progress_completed_task_shows_check_and_indeterminate_has_no_track() -> None:
-    """A finished task flips its chip to ✓; an unknown-total task draws no dead track."""
+    """A finished task changes its chip to ✓. A task with an unknown total draws no dead track."""
     from rich.text import Text as RichText
 
     screen = ProgressScreen("work")
@@ -2401,7 +2459,8 @@ def test_progress_completed_task_shows_check_and_indeterminate_has_no_track() ->
     screen.add_task("optimizing", total=None)
     plain = RichText.from_ansi("\n".join(screen.render_body(60))).plain
     assert "✓ tracing" in plain
-    # The indeterminate row carries only the spinning chip + its count, never a track glyph.
+    # The row with no known total has only the spinning chip and its count. It never has a
+    # glyph of a track.
     indet_line = next(line for line in plain.splitlines() if "optimizing" in line)
     assert "⠶" not in indet_line and "⣿" not in indet_line
 
@@ -2410,7 +2469,7 @@ def test_progress_completed_task_shows_check_and_indeterminate_has_no_track() ->
 
 
 async def test_session_runs_and_exits_when_main_returns() -> None:
-    """The app starts, drives the main coroutine, and exits cleanly when it returns."""
+    """The app starts, runs the main coroutine, and exits cleanly when the coroutine returns."""
     with create_pipe_input() as inp:
         session = TuiSession(input=inp, output=DummyOutput())
         ran = {}
@@ -2423,7 +2482,7 @@ async def test_session_runs_and_exits_when_main_returns() -> None:
 
 
 async def test_session_select_dispatches_piped_keys() -> None:
-    """A select resolves the value chosen via piped Down+Enter keystrokes, end to end."""
+    """A select resolves the value that the piped Down and Enter key presses choose, end to end."""
     with create_pipe_input() as inp:
         session = TuiSession(input=inp, output=DummyOutput())
         captured = {}
@@ -2433,13 +2492,13 @@ async def test_session_select_dispatches_piped_keys() -> None:
                 "pick", [Choice("a", 1), Choice("b", 2), Choice("c", 3)]
             )
 
-        inp.send_text("\x1b[B\x1b[B\r")  # Down, Down, Enter -> third choice
+        inp.send_text("\x1b[B\x1b[B\r")  # Down, Down, Enter: the third choice.
         await asyncio.wait_for(session.run(main()), timeout=5)
     assert captured["value"] == 3
 
 
 async def test_session_busy_startup_animates_and_returns() -> None:
-    """busy_startup awaits the task behind a chromeless spinner splash, then pops it."""
+    """busy_startup awaits the task behind a spinner splash that has no chrome, then pops it."""
     from meshterm.ui.tui.screen import BusyScreen
 
     with create_pipe_input() as inp:
@@ -2447,10 +2506,10 @@ async def test_session_busy_startup_animates_and_returns() -> None:
         captured = {}
 
         async def work() -> str:
-            # While the task runs the busy splash is the chromeless base screen.
+            # While the task runs, the busy splash is the base screen that has no chrome.
             assert isinstance(session.top, BusyScreen)
             assert session.top.chrome is False
-            await asyncio.sleep(0.3)  # long enough for the spinner to tick at least once
+            await asyncio.sleep(0.3)  # This is long enough for the spinner to tick one time.
             return "ok"
 
         async def main() -> None:
@@ -2458,16 +2517,17 @@ async def test_session_busy_startup_animates_and_returns() -> None:
 
         await asyncio.wait_for(session.run(main()), timeout=5)
     assert captured["value"] == "ok"
-    assert session.top is None  # the splash was popped when the task finished
+    assert session.top is None  # MeshTerm popped the splash when the task finished.
 
 
 async def test_busy_screens_spin_at_the_platform_cadence() -> None:
-    """Neither busy screen carries a spin rate of its own.
+    """Neither busy screen has a spin rate of its own.
 
-    A repaint on the PicoCalc console costs more than these loops used to wait between
-    them, so a hardcoded cadence spent the event loop redrawing the spinner and starved
-    the device read it was covering for — the wait got *slower* for being animated. Both
-    default to the one platform decision, like every other animated wait in the app.
+    A paint on the PicoCalc console costs more than the time that these loops once waited
+    between paints. Thus a fixed cadence used the event loop to paint the spinner, and it
+    starved the device read that the spinner covered. The wait became slower because it
+    was animated. Both screens now use the one decision of the platform, as each other
+    animated wait in the app does.
     """
     import inspect
 
@@ -2479,11 +2539,11 @@ async def test_busy_screens_spin_at_the_platform_cadence() -> None:
 
 
 async def test_busy_startup_keeps_ticking_through_a_slow_await() -> None:
-    """The spinner animates while the awaited work runs, not just before and after.
+    """The spinner animates while the awaited work runs, not only before and after it.
 
-    The animation shares the event loop with the request it reports on, so anything that
-    blocks the loop stops it dead — which is the whole reason the slow parts of a device
-    read (enumerating serial ports, reading history) are handed to a thread.
+    The animation uses the same event loop as the request that it reports on. Thus a call
+    that blocks the loop stops the animation. For this reason, MeshTerm runs the slow parts
+    of a device read (the list of serial ports, the read of the history) in a thread.
     """
     from meshterm.ui.tui.screen import BusyScreen
 
@@ -2494,7 +2554,7 @@ async def test_busy_startup_keeps_ticking_through_a_slow_await() -> None:
         async def work() -> str:
             screen = session.top
             assert isinstance(screen, BusyScreen)
-            for _ in range(6):  # span several spins without blocking the loop
+            for _ in range(6):  # Span more than one spin, and do not block the loop.
                 await asyncio.sleep(spinner_interval())
                 frames.append(screen._spinner.frame)
             return "ok"
@@ -2507,7 +2567,7 @@ async def test_busy_startup_keeps_ticking_through_a_slow_await() -> None:
 
 
 async def test_session_text_dispatches_typed_keys() -> None:
-    """A text prompt captures typed characters and commits on Enter, end to end."""
+    """A text prompt takes the typed characters and commits on Enter, end to end."""
     with create_pipe_input() as inp:
         session = TuiSession(input=inp, output=DummyOutput())
         captured = {}
@@ -2521,51 +2581,51 @@ async def test_session_text_dispatches_typed_keys() -> None:
 
 
 def test_session_stack_and_float_selection() -> None:
-    """The stack tracks top/base and only floats a deeper screen over its parent."""
+    """The stack tracks the top and the base, and floats only a deeper screen over its parent."""
     session = TuiSession()
     assert session.top is None
     base = ScrollScreen(Text("base"), title="base")
     session.push(base)
     assert session.top is base
     assert session._base_screen() is base
-    assert not session._has_float()  # single screen: no float
+    assert not session._has_float()  # There is one screen, so there is no float.
 
     dialog = SelectScreen("pick", [Choice("a", 1)])
     session.push(dialog)
-    assert session._has_float()  # deeper screen floats
-    assert session._base_screen() is base  # base is the parent beneath the dialog
+    assert session._has_float()  # A deeper screen floats.
+    assert session._base_screen() is base  # The base is the parent under the dialog.
     session.pop(dialog)
     assert session.top is base
     assert not session._has_float()
 
 
 def test_session_stacks_every_dialog_over_one_full_frame_background() -> None:
-    """A dialog over a dialog: both float over the single background, neither full-frame.
+    """A dialog over a dialog: both float over the one background, and neither is full-frame.
 
-    The old compositor drew only the top float and rendered the second-from-top as the
-    full-frame base — so opening a confirm over a popup stretched that popup to fill the
-    frame. Now the background is the deepest full-frame screen and every floating layer
-    above it stays its own centered box.
+    The old compositor drew only the top float. It rendered the second screen from the top
+    as the full-frame base. Thus, when a confirm opened over a dialog, that dialog became
+    as large as the frame. Now the background is the deepest full-frame screen, and each
+    floating layer above it stays its own box at the centre.
     """
     session = TuiSession()
-    channels = SelectScreen("Channels", [Choice("Ops", 1)])  # a tool's own floating list
-    detail = SelectScreen("Ops (private)", [Choice("Clear", "clr")])  # its item popup
+    channels = SelectScreen("Channels", [Choice("Ops", 1)])  # The floating list of a tool.
+    detail = SelectScreen("Ops (private)", [Choice("Clear", "clr")])  # Its item dialog.
     confirm = ButtonDialog("Clear Ops?", [("Cancel", 0), ("Clear", 1)], border_style="err")
     for screen in (channels, detail, confirm):
         session.push(screen)
 
-    # The bottom (all-floating) screen is the one full-frame background; the detail popup
-    # and the confirm both float over it — the detail is no longer promoted to the base.
+    # The bottom screen (all the screens float) is the one full-frame background. The detail
+    # dialog and the confirm both float over it. The code does not make the detail the base.
     assert session._base_screen() is channels
     assert session._float_layers() == [detail, confirm]
 
     session.pop(confirm)
-    assert session._float_layers() == [detail]  # detail stays a float, not full-frame
+    assert session._float_layers() == [detail]  # The detail stays a float. It is not full-frame.
     assert session._base_screen() is channels
 
 
 def test_session_background_is_the_topmost_full_frame_screen() -> None:
-    """A non-floating screen (a map, a scroll window) is the background under any dialogs."""
+    """A screen that does not float (a map, a scroll screen) is the background under dialogs."""
     session = TuiSession()
     full = ScrollScreen(Text("map"), title="map")  # floating=False
     dialog = ButtonDialog("go?", [("No", 0), ("Yes", 1)])
@@ -2576,12 +2636,12 @@ def test_session_background_is_the_topmost_full_frame_screen() -> None:
 
 
 def test_dispatch_promotes_nav_actions_while_right_ctrl_is_held(monkeypatch) -> None:
-    """A bare navigation key becomes its Ctrl chord while right Ctrl is held.
+    """A bare navigation key becomes its Ctrl chord while the user holds right Ctrl.
 
-    This is the rescue for layouts (Canadian Multilingual Standard) that claim right
-    Ctrl as a character modifier and strip the ctrl flag from the console's arrow
-    event. Actions with no Ctrl sibling pass through untouched, as does everything
-    once the key is released.
+    This is the rescue for keyboard layouts (Canadian Multilingual Standard) that use right
+    Ctrl as a modifier for characters. These layouts remove the ctrl flag from the arrow
+    event of the console. Actions that have no Ctrl version pass through with no change.
+    Each action also passes through with no change after the user releases the key.
     """
     from meshterm.ui.tui import session as session_mod
 
@@ -2597,21 +2657,21 @@ def test_dispatch_promotes_nav_actions_while_right_ctrl_is_held(monkeypatch) -> 
     monkeypatch.setattr(session_mod, "_right_ctrl_down", lambda: True)
     session._dispatch("left")
     session._dispatch("home")
-    # Enter has a sibling too — it is the one key a terminal can't spell chorded itself.
+    # Enter also has a Ctrl version. A terminal cannot spell this key as a chord by itself.
     session._dispatch("enter")
-    session._dispatch("escape")  # no ctrl sibling: untouched even while held
+    session._dispatch("escape")  # It has no Ctrl version, so it does not change while held.
     monkeypatch.setattr(session_mod, "_right_ctrl_down", lambda: False)
     session._dispatch("left")
     assert seen == ["ctrl_left", "ctrl_home", "ctrl_enter", "escape", "left"]
 
 
 def test_dispatch_promotes_letter_chords_while_right_ctrl_is_held(monkeypatch) -> None:
-    """A bare letter becomes its Ctrl-letter chord while right Ctrl is held.
+    """A bare letter becomes its Ctrl-letter chord while the user holds right Ctrl.
 
-    The same rescue as the nav keys, for the ^R/^P shortcuts a layout-claimed right
-    Ctrl would otherwise strip to plain text. Only the mapped letters promote
-    (case-folded, with the now-stale data dropped); other text — and everything once
-    the key is released — stays text.
+    This is the same rescue as for the navigation keys. It is for the ^R and ^P shortcuts.
+    If a keyboard layout uses right Ctrl, the layout changes these shortcuts to plain text.
+    Only the letters in the map change. The code makes them lower case and removes the old
+    data. Other text stays text, and each letter stays text after the user releases the key.
     """
     from meshterm.ui.tui import session as session_mod
 
@@ -2625,21 +2685,21 @@ def test_dispatch_promotes_letter_chords_while_right_ctrl_is_held(monkeypatch) -
     session.push(Probe(Text("x")))
 
     monkeypatch.setattr(session_mod, "_right_ctrl_down", lambda: True)
-    session._dispatch("text", "r")  # ^R retry
-    session._dispatch("text", "P")  # ^P paths, case-folded
-    session._dispatch("text", "x")  # unmapped letter: stays text even while held
+    session._dispatch("text", "r")  # ^R retry.
+    session._dispatch("text", "P")  # ^P paths. The code makes the letter lower case.
+    session._dispatch("text", "x")  # This letter is not in the map, so it stays text while held.
     monkeypatch.setattr(session_mod, "_right_ctrl_down", lambda: False)
-    session._dispatch("text", "r")  # released: plain text again
+    session._dispatch("text", "r")  # The user released the key, so this is plain text again.
     assert seen == [("retry", ""), ("paths", ""), ("text", "x"), ("text", "r")]
 
 
 def test_right_ctrl_rescue_covers_the_sessions_own_chords(monkeypatch) -> None:
-    """The right-Ctrl rescue reaches the session's own chords, not just screen actions.
+    """The right-Ctrl rescue reaches the chords of the session itself, not only screen actions.
 
-    ^V and ^C are answered by the session itself, and a layout-claimed right Ctrl must
-    reach them too — right Ctrl-V pastes the clipboard into a compose line rather than
-    typing a ``v``, right Ctrl-C quits. Neither pseudo-action is ever forwarded to a
-    screen.
+    The session itself answers ^V and ^C. The rescue must reach them too, for a keyboard
+    layout that uses right Ctrl. Right Ctrl-V pastes the clipboard into a compose line and
+    does not type a ``v``. Right Ctrl-C quits. The session never sends either
+    pseudo-action to a screen.
     """
     from meshterm.ui.tui import session as session_mod
 
@@ -2666,23 +2726,23 @@ def test_right_ctrl_rescue_covers_the_sessions_own_chords(monkeypatch) -> None:
     monkeypatch.setattr(session_mod, "_read_clipboard", lambda: "pasted")
 
     monkeypatch.setattr(session_mod, "_right_ctrl_down", lambda: True)
-    session._dispatch("text", "v")  # ^V: clipboard reaches the screen as a paste
+    session._dispatch("text", "v")  # ^V: the clipboard reaches the screen as a paste.
     assert seen == [("paste", "pasted")]
-    session._dispatch("text", "c")  # ^C: quits, and nothing lands on the screen
+    session._dispatch("text", "c")  # ^C: the app quits, and nothing reaches the screen.
     assert seen == [("paste", "pasted")]
     assert session._app.exited is True
 
     monkeypatch.setattr(session_mod, "_right_ctrl_down", lambda: False)
-    session._dispatch("text", "v")  # released: a plain typed character again
+    session._dispatch("text", "v")  # The user released the key: this is a typed character again.
     assert seen[-1] == ("text", "v")
 
 
 def test_every_ctrl_letter_chord_is_bound_on_both_ctrl_keys() -> None:
-    """Every Ctrl-letter chord is bound on both Ctrl keys.
+    """Each Ctrl-letter chord is bound on both Ctrl keys.
 
-    The chord table drives the prompt_toolkit bindings, so a chord can never be bound
-    for the left Ctrl without its right-Ctrl rescue — the drift the two used to be
-    able to develop when the letter map was maintained by hand.
+    The chord table sets the prompt_toolkit bindings. Thus a chord is never bound for the
+    left Ctrl without its right-Ctrl rescue. The two tables could once differ, when a
+    person maintained the letter map by hand.
     """
     from prompt_toolkit.keys import Keys
 
@@ -2691,32 +2751,34 @@ def test_every_ctrl_letter_chord_is_bound_on_both_ctrl_keys() -> None:
     for letter, action in _CTRL_LETTER_CHORDS.items():
         key = getattr(Keys, f"Control{letter.upper()}")
         assert _KEY_ACTIONS[key] == action
-    # Enter/Tab/Backspace are spelled c-m/c-i/c-h: claiming those letters would rebind them.
+    # The terminal spells Enter, Tab, and Backspace as c-m, c-i, and c-h. If the table used
+    # those letters, it would bind these keys again.
     assert not {"m", "i", "h"} & set(_CTRL_LETTER_CHORDS)
     assert _KEY_ACTIONS[Keys.Enter] == "enter"
 
 
 def test_wide_glyph_detection_flags_emoji_not_marks() -> None:
-    """The wide-glyph check flags emoji, and leaves the app's own marks alone.
+    """The wide-glyph check flags emoji, and does not flag the marks of the app.
 
-    The desync only ever comes from a width-2 glyph the terminal may draw narrower.
-    Node-type marks, status marks and chart braille are width-1 everywhere, so they
-    must not trip the check — that they seemed to was the earlier misdiagnosis.
+    The desync comes only from a glyph of width 2 that the terminal can draw narrower.
+    The node-type marks, the status marks, and the chart braille have width 1 on each
+    terminal. Thus they must not cause the check to flag them. We once thought that they
+    did, and this was a wrong diagnosis.
     """
     from meshterm.ui.tui.session import _has_wide_glyph
 
     assert _has_wide_glyph("👋")
     assert _has_wide_glyph("Bob 👋 waved")
     assert _has_wide_glyph("clock 🕒 sync")
-    assert _has_wide_glyph("⚡ explore")  # a width-2 icon still counts
+    assert _has_wide_glyph("⚡ explore")  # An icon of width 2 also counts.
     assert not _has_wide_glyph("plain ascii row")
-    assert not _has_wide_glyph("★ ▲ ● ■ ◉ ○")  # node-type marks: width 1
-    assert not _has_wide_glyph("⠿⣿⡇ chart")  # braille: width 1
-    assert not _has_wide_glyph("✓ ✗ ⚠ … done")  # status marks: width 1
+    assert not _has_wide_glyph("★ ▲ ● ■ ◉ ○")  # Node-type marks: width 1.
+    assert not _has_wide_glyph("⠿⣿⡇ chart")  # Braille: width 1.
+    assert not _has_wide_glyph("✓ ✗ ⚠ … done")  # Status marks: width 1.
 
 
 def _repaint_harness():
-    """A session wired to a fake pt app, plus its remembered 3-row frame of ``A`` cells."""
+    """A session that uses a fake pt app, and its remembered frame of 3 rows of ``A`` cells."""
     import types
 
     from prompt_toolkit.data_structures import Size
@@ -2737,73 +2799,75 @@ def _repaint_harness():
 
 
 def _row_text(screen, row: int) -> str:
-    """The remembered frame's row as plain characters (the scrub's sentinel shows through)."""
+    """A row of the remembered frame as plain characters. The sentinel of the scrub shows."""
     return "".join(screen.data_buffer[row][x].char for x in range(10))
 
 
 def test_a_wide_glyph_frame_upgrades_to_a_full_repaint() -> None:
-    """A frame carrying a wide glyph upgrades the next paint to a full repaint.
+    """A frame that has a wide glyph changes the next paint to a full paint.
 
-    prompt_toolkit paints differentially with a *relative* cursor — sound only while
-    every glyph is one cell. A width-2 glyph the terminal draws in one cell (an emoji
-    in a chat line) leaves the row's cursor model off; a later paint that skips the
-    unchanged emoji then strands stale cells to its right. With no remembered frame to
-    compare against, such a frame drops pt's cached frame and takes the erase_down +
-    redraw instead. A frame of only width-1 glyphs keeps the fast differential paint —
-    this holds wherever the glyph is, floating dialog or not.
+    prompt_toolkit paints only the differences, with a relative cursor. This is correct
+    only while each glyph is one cell wide. The terminal can draw a glyph of width 2 (an
+    emoji in a chat line) in one cell. Then the cursor model of the row is wrong. A later
+    paint skips the emoji, because it did not change, and it leaves old cells to the right
+    of it. For such a frame, MeshTerm drops the cached frame of pt. There is then no
+    remembered frame to compare against, so pt does an erase_down and a new draw. A frame
+    that has only glyphs of width 1 keeps the fast paint of the differences. This is
+    true for a glyph in any place, in a floating dialog or not.
     """
     session, _remembered = _repaint_harness()
     session._emit("Bob 👋 says hi")
     assert session._app.renderer._last_screen is None
 
-    # A frame of only width-1 glyphs — plain text, node marks, chart braille — keeps the
-    # efficient differential paint.
+    # A frame that has only glyphs of width 1 (plain text, node marks, chart braille) keeps
+    # the efficient paint of the differences.
     session, remembered = _repaint_harness()
     session._emit("★ you  ▲ repeater  ● node  ⠿ chart")
     assert session._app.renderer._last_screen is remembered
-    session._emit("★ you  ▲ repeater  ● node  ⠿ chart · moved")  # changed, still all width-1
+    session._emit("★ you  ▲ repeater  ● node  ⠿ chart · moved")  # It changed, but all width 1.
     assert session._app.renderer._last_screen is remembered
-    assert _row_text(remembered, 0) == "A" * 10  # nothing scrubbed either
+    assert _row_text(remembered, 0) == "A" * 10  # MeshTerm also scrubbed nothing.
 
 
 def test_only_the_rows_that_changed_are_repainted() -> None:
-    """A ticking header repaints the header, not the screen under it.
+    """A header that ticks paints the header again, and does not paint the screen under it.
 
-    The requirement a wide glyph imposes is that its *row* be rewritten whole, from column 0;
-    pt steps down a row with a carriage return, so the misalignment can never reach the rows
-    below. The background composes one line per terminal row, so the rows that changed are
-    exactly what needs rewriting — and an idle frame changes none of them, which is what the
-    1 Hz refresh was flickering over.
+    A wide glyph makes this necessary: MeshTerm must write its row whole again, from
+    column 0. pt goes down one row with a carriage return, so the wrong alignment cannot
+    reach the rows below. The background has one line for each terminal row. Thus the rows
+    that changed are exactly the rows that MeshTerm must write again. An idle frame changes
+    none of them. The 1 Hz refresh once caused flicker because it did not do this.
     """
     session, remembered = _repaint_harness()
     frame_1 = "🎯 Farthest node\nrow one\nrow two"
     session._emit(frame_1)
-    assert session._app.renderer._last_screen is None  # nothing to compare against yet
+    assert session._app.renderer._last_screen is None  # There is nothing to compare against yet.
 
     session._app.renderer._last_screen = remembered
-    session._emit(frame_1)  # the timer tick: same frame, nothing touched at all
+    session._emit(frame_1)  # The timer tick: it is the same frame, so nothing is touched.
     assert session._app.renderer._last_screen is remembered
     assert [_row_text(remembered, y) for y in range(3)] == ["A" * 10] * 3
 
     session._emit("🎯 Farthest node\nrow one changed\nrow two")
-    assert session._app.renderer._last_screen is remembered  # no erase, no full redraw
-    assert _row_text(remembered, 1) == "￿" * 10  # the one changed row, marked whole
-    assert _row_text(remembered, 0) == "A" * 10  # …and the rows around it left alone
+    assert session._app.renderer._last_screen is remembered  # No erase and no full draw.
+    assert _row_text(remembered, 1) == "￿" * 10  # The one row that changed, marked whole.
+    assert _row_text(remembered, 0) == "A" * 10  # The rows around it stay as they were.
     assert _row_text(remembered, 2) == "A" * 10
 
-    # A frame whose height moved has no row mapping to trust — repaint everything.
+    # A frame that has a different height has no row mapping to trust, so MeshTerm paints
+    # everything again.
     session._emit("🎯 Farthest node\nrow one changed")
     assert session._app.renderer._last_screen is None
 
 
 def test_a_changed_layer_repaints_over_a_still_wide_glyph_frame() -> None:
-    """Any layer changing upgrades the paint while a wide glyph is drawn *anywhere*.
+    """A change in any layer upgrades the paint, while a wide glyph is drawn in any place.
 
-    A plain dialog moving over a base row that carries an emoji is rewritten from a model of
-    that row the terminal disagrees with, so it is the frame as a whole — not the layer that
-    happened to change — that decides. A layer *leaving* counts as a change too: a closing
-    dialog just stops rendering, and the cells it gives back to the base would otherwise be
-    rewritten piecemeal.
+    A plain dialog that moves over a base row with an emoji is written again from a model
+    of that row, and the terminal does not agree with the model. Thus the whole frame
+    decides, and not the layer that changed. A layer that leaves is also a change. A
+    dialog that closes only stops rendering. If the paint did not change, MeshTerm would
+    write the cells that the dialog gives back to the base again, in parts.
     """
     import types
 
@@ -2817,25 +2881,25 @@ def test_a_changed_layer_repaints_over_a_still_wide_glyph_frame() -> None:
         output=types.SimpleNamespace(get_size=lambda: Size(rows=10, columns=60)),
         invalidate=lambda: None,
     )
-    session._emit("🎯 the board behind", "base")  # a wide glyph on the background
+    session._emit("🎯 the board behind", "base")  # A wide glyph on the background.
     session._app.renderer._last_screen = remembered
-    session._emit("plain dialog, frame 1", "float0")  # no emoji of its own…
-    assert session._app.renderer._last_screen is None  # …but the frame carries one
+    session._emit("plain dialog, frame 1", "float0")  # It has no emoji of its own...
+    assert session._app.renderer._last_screen is None  # ...but the frame has one.
 
     session._app.renderer._last_screen = remembered
-    session._emit("plain dialog, frame 1", "float0")  # unchanged again → left alone
+    session._emit("plain dialog, frame 1", "float0")  # It did not change, so MeshTerm leaves it.
     assert session._app.renderer._last_screen is remembered
 
-    # The dialog closes: one screen on the stack means no float layer this paint, so
-    # reconciling drops it — and, with the emoji-bearing base still drawn, the cells it hands
-    # back are repainted whole rather than piecemeal.
+    # The dialog closes. One screen on the stack means no float layer in this paint, so the
+    # reconcile drops the layer. The base with the emoji is still drawn, so MeshTerm paints
+    # the cells that the layer gives back whole, and not in parts.
     session.push(Screen())
     session._app.renderer._last_screen = remembered
     session._reconcile_layers()
     assert "float0" not in session._layers
     assert session._app.renderer._last_screen is None
 
-    # With nothing wide left drawn, a layer leaving costs no repaint at all.
+    # If no wide glyph is drawn, a layer that leaves causes no new paint.
     session._layers.clear()
     session._emit("plain base", "base")
     session._emit("plain dialog", "float0")
@@ -2845,11 +2909,12 @@ def test_a_changed_layer_repaints_over_a_still_wide_glyph_frame() -> None:
 
 
 def test_floating_text_prompt_is_a_popup_over_a_blank_base() -> None:
-    """``text(floating=True)`` floats as a centered popup even on an empty stack.
+    """``text(floating=True)`` floats as a dialog at the centre, also on an empty stack.
 
-    A mid-flow modal — a remote-admin password, between the node picker and the admin menu —
-    must float like the button dialogs, so a blank base is slipped beneath it rather than
-    letting the prompt fill the frame the way a tool's primary entry screen does.
+    A modal in the middle of a flow must float like the button dialogs. One example is a
+    remote-admin password, between the node picker and the admin menu. Thus MeshTerm puts a
+    blank base under it. The prompt must not fill the frame, as the first entry screen of
+    a tool does.
     """
     session = TuiSession()
 
@@ -2861,20 +2926,21 @@ def test_floating_text_prompt_is_a_popup_over_a_blank_base() -> None:
                 break
         floats = session._float_layers()
         assert len(floats) == 1 and isinstance(floats[0], TextScreen)
-        assert session._base_screen() is not floats[0]  # a blank base sits beneath it
+        assert session._base_screen() is not floats[0]  # A blank base is under it.
 
         floats[0].resolve("hunter2")
         assert await task == "hunter2"
-        assert session._stack == []  # the blank base is torn down with the prompt
+        assert session._stack == []  # MeshTerm removes the blank base with the prompt.
 
     asyncio.run(main())
 
 
 def test_default_text_prompt_is_the_full_frame_base() -> None:
-    """A default ``text`` prompt on an empty stack *is* the frame — a tool's primary entry.
+    """A default ``text`` prompt on an empty stack is the frame. It is the first entry of a tool.
 
-    The Trace target's typed fallback stands in for the select picker, so it fills the frame
-    rather than floating over a blank base (the floating popup is opt-in, see above).
+    The typed fallback of the Trace target takes the place of the select picker. Thus it
+    fills the frame. It does not float over a blank base. The floating dialog is optional
+    (refer to the test above).
     """
     session = TuiSession()
 
@@ -2885,7 +2951,7 @@ def test_default_text_prompt_is_the_full_frame_base() -> None:
             if session.top is not None:
                 break
         assert isinstance(session.top, TextScreen)
-        assert not session._has_float()  # no float — the prompt is the background
+        assert not session._has_float()  # There is no float. The prompt is the background.
         assert session._base_screen() is session.top
 
         session.top.resolve("Hub")
@@ -2898,29 +2964,29 @@ def test_default_text_prompt_is_the_full_frame_base() -> None:
 
 
 def test_busy_overlay_renders_only_its_title_chip_and_caption() -> None:
-    """A titled, captioned card shows its heading and the working chip + caption — no more.
+    """A card with a title and a caption shows its heading, the working chip, and the caption.
 
-    The card used to carry a Knight-Rider scanning bar under the caption (JP, 2026-08-29);
-    the chip is the whole animation now, so the card is two lines and nothing travels
-    across it.
+    The card once had a Knight-Rider scanning bar under the caption (JP, 2026-08-29). Now
+    the chip is the whole animation. Thus the card has two lines, and nothing moves across
+    it.
     """
     import re
 
     from meshterm.ui.tui.overlay import BusyOverlay
 
-    overlay = BusyOverlay("reading from Waymarker…", title="Nodes", fade=0.0)  # full bright at once
+    overlay = BusyOverlay("reading from Waymarker…", title="Nodes", fade=0.0)  # Bright at once.
     ansi = overlay.render()
-    assert "Nodes" in ansi  # the heading naming the screen being fetched
-    assert "reading from Waymarker" in ansi  # the caption beside the chip
-    assert overlay.spinner.frame in ansi  # the one-cell working chip
+    assert "Nodes" in ansi  # The heading that names the screen that MeshTerm gets data for.
+    assert "reading from Waymarker" in ansi  # The caption beside the chip.
+    assert overlay.spinner.frame in ansi  # The working chip, which is one cell wide.
     plain = re.sub(r"\[[0-9;]*m", "", ansi)
     rows = [line for line in plain.splitlines() if line.strip()]
-    assert len(rows) == 2  # the title and the chip line; no bar, no spacer row
-    assert "⠶" not in plain  # the LED lamps are gone, not merely unlit
+    assert len(rows) == 2  # The title and the chip line. There is no bar and no spacer row.
+    assert "⠶" not in plain  # The LED lamps are removed, not only unlit.
 
 
 def test_busy_overlay_chip_ticks_with_the_animation() -> None:
-    """The card's working chip is the reusable one-cell Spinner and advances on tick."""
+    """The working chip of the card is the reusable Spinner, and it advances on a tick."""
     from meshterm.ui.tui.overlay import BusyOverlay
     from meshterm.ui.tui.spinner import Spinner
 
@@ -2932,57 +2998,62 @@ def test_busy_overlay_chip_ticks_with_the_animation() -> None:
 
 
 def test_busy_overlay_holds_black_then_fades_in() -> None:
-    """Brightness is 0 through the hold, then climbs to full colour over the fade window."""
+    """The brightness is 0 during the hold. Then it climbs to full colour in the fade time."""
     from meshterm.ui.tui.overlay import BusyOverlay
 
     overlay = BusyOverlay(hold=0.1, fade=0.2)
-    assert overlay.brightness == 0.0  # nothing paints during the hold
-    overlay.started_at -= 0.1  # to the very end of the hold
-    assert overlay.brightness < 0.2  # only now beginning to glow up from black
-    overlay.started_at -= 0.2  # past the full fade window
-    assert overlay.brightness == 1.0  # fully lit
+    assert overlay.brightness == 0.0  # Nothing paints during the hold.
+    overlay.started_at -= 0.1  # Move to the very end of the hold.
+    assert overlay.brightness < 0.2  # The glow from black only starts now.
+    overlay.started_at -= 0.2  # Move past the whole fade time.
+    assert overlay.brightness == 1.0  # The card is fully lit.
 
 
 def test_dim_color_scales_hex_toward_black() -> None:
-    """The fade dimmer scales the hex channels and preserves attribute words like ``bold``."""
+    """The fade dimmer scales the hex channels and keeps attribute words such as ``bold``."""
     from meshterm.ui.tui.overlay import dim_color
 
-    assert dim_color("#38bdf8", 1.0) == "#38bdf8"  # untouched at full brightness
-    assert dim_color("#ffffff", 0.0) == "#000000"  # black at zero
-    assert dim_color("bold #ffffff", 0.5) == "bold #808080"  # keeps 'bold', halves the colour
+    assert dim_color("#38bdf8", 1.0) == "#38bdf8"  # No change at full brightness.
+    assert dim_color("#ffffff", 0.0) == "#000000"  # Black at zero.
+    # It keeps 'bold', and halves the colour.
+    assert dim_color("bold #ffffff", 0.5) == "bold #808080"
 
 
 def test_overlay_fade_restarts_when_re_exposed_after_a_prompt() -> None:
-    """Popping back to an empty stack replays the black-hold + fade, not a full-bright snap."""
+    """A pop back to an empty stack plays the black hold and the fade again.
+
+    It does not snap to full brightness.
+    """
     from meshterm.ui.tui.overlay import BusyOverlay
 
     session = TuiSession()
     overlay = BusyOverlay()
     session._overlay = overlay
-    overlay.started_at -= 10  # pretend the intro already finished
+    overlay.started_at -= 10  # Act as if the intro already finished.
     assert overlay.brightness == 1.0
 
     screen = ScrollScreen(Text("prompt"))
-    session.push(screen)  # a prompt covers the card
-    session.pop(screen)  # dismissed → card re-exposed on the now-empty stack
-    assert overlay.brightness == 0.0  # the fade restarted from black
+    session.push(screen)  # A prompt covers the card.
+    session.pop(screen)  # The prompt closes, and the card shows again on the empty stack.
+    assert overlay.brightness == 0.0  # The fade restarted from black.
 
 
 async def test_session_busy_overlay_shows_between_screens_and_clears() -> None:
-    """The overlay floats while a block runs on an empty stack, and is dropped afterwards."""
+    """The overlay floats while a block runs on an empty stack, and MeshTerm drops it after."""
     with create_pipe_input() as inp:
         session = TuiSession(input=inp, output=DummyOutput())
         seen = {}
 
         async def main() -> None:
             async with session.busy_overlay("working…"):
-                await asyncio.sleep(0.05)  # still within the initial hold
+                await asyncio.sleep(0.05)  # This is still in the first hold.
                 seen["hidden_during_hold"] = not session._overlay_visible()
-                await asyncio.sleep(0.3)  # past the 200ms hold: the ring has faded in
+                await asyncio.sleep(0.3)  # This is past the hold of 200 ms. The ring faded in.
                 seen["active"] = session._overlay is not None
                 seen["visible_empty_stack"] = session._overlay_visible()
                 seen["rendered"] = bool(session._render_overlay().value.strip())
-                # With a screen on the stack the ring stays hidden so it can't bury a prompt.
+                # If a screen is on the stack, the ring stays hidden. Thus it cannot cover a
+                # prompt.
                 session.push(ScrollScreen(Text("prompt"), title="p"))
                 seen["hidden_over_screen"] = not session._overlay_visible()
                 session.pop()
@@ -2994,7 +3065,7 @@ async def test_session_busy_overlay_shows_between_screens_and_clears() -> None:
     assert seen["visible_empty_stack"] is True
     assert seen["rendered"] is True
     assert seen["hidden_over_screen"] is True
-    assert session._overlay is None  # cleared on exit
+    assert session._overlay is None  # MeshTerm cleared it on exit.
 
 
 # --- horizontal scroll (opt-in) -------------------------------------------------------
@@ -3022,16 +3093,16 @@ def _row_plains(screen, width: int) -> list[str]:
 
 
 def test_select_hscroll_shifts_only_the_highlighted_row() -> None:
-    """→ slides the highlighted row under its pinned pointer; other rows and headers hold."""
-    screen = _hscroll_screen()  # the long "row-one" is highlighted by default
+    """→ slides the highlighted row under its pinned pointer. Other rows and headers stay."""
+    screen = _hscroll_screen()  # The long "row-one" is highlighted by default.
     before = _row_plains(screen, 40)
     assert any("row-one-" in ln for ln in before)
     screen.handle("right")
     shifted = _row_plains(screen, 40)
-    # The highlighted row's head scrolled off, under the still-pinned pointer…
+    # The head of the highlighted row scrolled off, under the pointer that is still pinned...
     assert any(ln.startswith("❯ ") for ln in shifted)
     assert not any("row-one-" in ln for ln in shifted)
-    # …but the section header did not move, and the short row is untouched.
+    # ...but the section header did not move, and the short row did not change.
     assert any(ln.strip().startswith("HEAD-") for ln in shifted)
     assert any("short" in ln for ln in shifted)
     screen.handle("left")
@@ -3039,47 +3110,48 @@ def test_select_hscroll_shifts_only_the_highlighted_row() -> None:
 
 
 def test_select_hscroll_clamps_at_the_highlighted_rows_tail() -> None:
-    """→ stops once the *highlighted* row's own end is in view, not the widest row's."""
+    """→ stops when the end of the highlighted row is visible, not the end of the widest row."""
     screen = _hscroll_screen()
     for _ in range(50):
         screen.handle("right")
-    plains = _row_plains(screen, 40)  # the render clamps the shift
-    assert any("-tail" in ln for ln in plains)  # the highlighted row's end is visible
+    plains = _row_plains(screen, 40)  # The render clamps the shift.
+    assert any("-tail" in ln for ln in plains)  # The end of the highlighted row is visible.
     row_len = len("row-one-" + "x" * 60 + "-tail")
-    # Clamped to the first whole step that brings the tail inside the lane (the width less
-    # the pointer, less the cell a scrolled row spends on its left cut mark) — stopping on
-    # the exact flush-right cell would leave a right mark promising a remainder.
+    # The shift clamps to the first whole step that brings the tail into the lane. The lane
+    # is the width minus the pointer, minus the cell that a scrolled row uses for its left
+    # cut mark. If the shift stopped on the exact cell at the right edge, a right mark
+    # would promise more text.
     step = screen._HSCROLL_STEP
     assert screen._hshift == -(-(row_len - (40 - 2 - 1)) // step) * step
 
 
 def test_select_hscroll_resets_when_the_highlight_moves() -> None:
-    """The shift is per-row: moving the highlight (or editing the filter) drops it to the start."""
+    """The shift belongs to one row. If the highlight moves or the filter changes, it goes to 0."""
     screen = _hscroll_screen()
     screen.handle("right")
     assert screen._hshift > 0
-    screen.handle("down")  # moving to another row abandons that row's scroll
+    screen.handle("down")  # A move to another row drops the scroll of that row.
     assert screen._hshift == 0
     screen.handle("right")
-    screen.handle("text", "r")  # a filter edit resets it too
+    screen.handle("text", "r")  # A change of the filter also resets it.
     assert screen._hshift == 0
 
 
 def test_select_hscroll_only_acts_on_an_overflowing_row() -> None:
-    """←→ and its footer atom appear only while the highlighted row overflows the width."""
+    """←→ and their footer atom act only while the highlighted row is wider than the width."""
     screen = _hscroll_screen()
-    screen.render_body(40)  # the long row-one is highlighted and overflows 40 cells
+    screen.render_body(40)  # The long row-one is highlighted, and it is wider than 40 cells.
     assert "←→ scroll" in screen.footer_hint
-    screen.handle("down")  # the short row fits — nothing to scroll
+    screen.handle("down")  # The short row fits, so there is nothing to scroll.
     screen.render_body(40)
     assert "←→ scroll" not in screen.footer_hint
     screen.handle("right")
     screen.render_body(40)
-    assert screen._hshift == 0  # a row that fits can't shift
+    assert screen._hshift == 0  # A row that fits cannot shift.
 
 
 def test_select_hscroll_from_pins_the_rows_head_and_slides_only_its_run() -> None:
-    """A row that declares a head block keeps it drawn while ←→ scroll everything past it."""
+    """A row that declares a head block keeps it drawn while ←→ scroll all the text after it."""
     from meshterm.ui.tui.select import Choice, SelectScreen
 
     lanes = "#1 Aug 09  "
@@ -3090,31 +3162,31 @@ def test_select_hscroll_from_pins_the_rows_head_and_slides_only_its_run() -> Non
     )
     screen.handle("right")
     row = _row_plains(screen, 40)[0]
-    assert row.startswith("❯ " + lanes)  # the lanes never move…
-    assert "run-" not in row  # …while the run behind them has slid off to the left
+    assert row.startswith("❯ " + lanes)  # The lanes never move...
+    assert "run-" not in row  # ...while the run behind them slid off to the left.
     for _ in range(50):
         screen.handle("right")
     end = _row_plains(screen, 40)[0]
-    assert end.startswith("❯ " + lanes) and "-end" in end  # the tail is reachable
+    assert end.startswith("❯ " + lanes) and "-end" in end  # The user can reach the tail.
 
 
 def test_select_scrolls_for_a_row_that_pins_a_head_without_being_told() -> None:
-    """A row declaring ``hscroll_from`` turns its list's scrolling on by itself.
+    """A row that declares ``hscroll_from`` turns on the scrolling of its list by itself.
 
-    The builders that lay out label+description rows (:func:`~meshterm.ui.menus.menu_rows`,
-    the main menu) never see the screen their list is opened in — ``ctx.ui.select`` builds
-    it — so the row is where the intent has to live.
+    The builders that lay out rows with a label and a description (for example
+    :func:`~meshterm.ui.menus.menu_rows` and the main menu) never see the screen in which
+    their list opens, because ``ctx.ui.select`` builds it. Thus the intent must be in the row.
     """
     from meshterm.ui.tui.select import Choice, SelectScreen
 
     lanes = "Send advert  "
     row = Choice(lanes + "Announce this node " + "and then some " * 6, 1, hscroll_from=len(lanes))
-    screen = SelectScreen("menu", [row])  # no hscroll= anywhere
+    screen = SelectScreen("menu", [row])  # There is no hscroll= in any place.
     screen.handle("right")
     drawn = _row_plains(screen, 40)[0]
-    assert drawn.startswith("❯ " + lanes)  # the name stays pinned…
-    assert "Announce this node" not in drawn  # …and the description has slid under it
-    # A list of plain rows still ignores ←→ entirely.
+    assert drawn.startswith("❯ " + lanes)  # The name stays pinned...
+    assert "Announce this node" not in drawn  # ...and the description slid under it.
+    # A list of plain rows still ignores ←→ completely.
     plain = SelectScreen("menu", [Choice("x" * 80, 1)])
     before = _row_plains(plain, 40)[0]
     plain.handle("right")
@@ -3122,10 +3194,10 @@ def test_select_scrolls_for_a_row_that_pins_a_head_without_being_told() -> None:
 
 
 def test_a_list_that_says_no_hscroll_is_not_overruled_by_its_rows() -> None:
-    """``hscroll=False`` holds against rows that pin a head, through a row swap too.
+    """``hscroll=False`` holds against rows that pin a head, also through a swap of rows.
 
-    The editor pages end their lanes at the edge; their Actions rows pin heads, and the
-    rows' say-so used to turn the whole page's ←→ scrolling on regardless.
+    The editor pages end their lanes at the edge. Their Actions rows pin heads. The rows
+    once turned on the ←→ scrolling of the whole page, in spite of the list.
     """
     from meshterm.ui.tui.select import Choice, SelectScreen
 
@@ -3136,13 +3208,13 @@ def test_a_list_that_says_no_hscroll_is_not_overruled_by_its_rows() -> None:
     screen.handle("right")
     assert _row_plains(screen, 40)[0] == before
     assert "←→" not in screen.footer_hint
-    screen.replace_items([row])  # a refresh must not turn it back on
+    screen.replace_items([row])  # A refresh must not turn it on again.
     screen.handle("right")
     assert _row_plains(screen, 40)[0] == before
 
 
 def test_menu_rows_pin_their_label_lane_so_only_the_description_slides() -> None:
-    """The shared label+description builder hands each row its own head block."""
+    """The shared builder for a label and a description gives each row its own head block."""
     from meshterm.ui.menus import menu_rows
 
     rows = menu_rows(
@@ -3150,17 +3222,17 @@ def test_menu_rows_pin_their_label_lane_so_only_the_description_slides() -> None
     )
     lane = rows[0].hscroll_from
     assert lane and all(row.hscroll_from == lane for row in rows)
-    # The head block ends exactly where the descriptions start, on every row.
+    # The head block ends exactly where the descriptions start, on each row.
     for row in rows:
         assert row.label.plain[lane:].startswith(("Set the", "Restart the"))
 
 
 def test_select_hscroll_hint_is_gated_on_the_run_not_the_whole_row() -> None:
-    """A row whose *run* fits earns no ←→ atom, however wide its pinned head makes it.
+    """A row whose run fits has no ←→ atom, for any width of its pinned head.
 
-    The hint may only advertise a key that would do something (the footer's own rule), and
-    on a row that pins a head block the key moves the run alone — so a long lane block in
-    front of a short tail is not overflow, it is just a wide row.
+    The hint can advertise only a key that does something (the rule of the footer). On a
+    row that pins a head block, the key moves only the run. Thus a long lane block in front
+    of a short tail is not an overflow. It is only a wide row.
     """
     from meshterm.ui.tui.select import Choice, SelectScreen
 
@@ -3181,19 +3253,19 @@ def test_select_hscroll_hint_is_gated_on_the_run_not_the_whole_row() -> None:
 
 
 def test_select_hscroll_marks_both_edges_the_run_continues_past() -> None:
-    """A scrolled row cracks/ellipsizes at whichever side its run runs on."""
+    """A scrolled row has a crack or an ellipsis at each side on which its run continues."""
     from meshterm.ui.pathline import _ELLIPSIS
     from meshterm.ui.tui.select import Choice, SelectScreen
 
     screen = SelectScreen("long", [Choice("z" * 200, 1)], hscroll=True)
     screen.handle("right")
     row = _row_plains(screen, 40)[0]
-    # Plain prose has no chip fill to shear, so both marks fall back to the ellipsis.
+    # Plain prose has no chip fill to shear, so both marks are the ellipsis.
     assert row.startswith("❯ " + _ELLIPSIS) and row.endswith(_ELLIPSIS)
 
 
 def test_select_without_hscroll_ignores_left_right() -> None:
-    """The flag defaults off: ←/→ stay inert and rows render exactly as before."""
+    """The flag is off by default. ←/→ do nothing, and rows render as before."""
     from meshterm.ui.tui.select import Choice, SelectScreen
 
     screen = SelectScreen("plain", [Choice("row", 1)])
@@ -3207,7 +3279,7 @@ def test_select_without_hscroll_ignores_left_right() -> None:
 
 
 def test_select_choice_detail_hangs_under_its_row() -> None:
-    """A Choice.detail draws as a second, indented line right under its title."""
+    """A Choice.detail draws as a second line with an indent, directly under its title."""
     from meshterm.ui.tui.select import Choice, SelectScreen
 
     screen = SelectScreen(
@@ -3220,7 +3292,7 @@ def test_select_choice_detail_hangs_under_its_row() -> None:
 
 
 def test_select_choice_without_detail_draws_one_line() -> None:
-    """A Choice with no detail (the default, or one resolving empty) stays a single line."""
+    """A Choice with no detail (the default, or a detail that resolves empty) stays one line."""
     from meshterm.ui.tui.select import Choice, SelectScreen
 
     screen = SelectScreen("pick", [Choice("first row", 1), Choice("second", 2, detail="")])
@@ -3229,7 +3301,7 @@ def test_select_choice_without_detail_draws_one_line() -> None:
 
 
 def test_select_cursor_tracks_the_highlight_past_a_detail_line() -> None:
-    """The cursor lands on the title line even when an earlier row grew a detail line."""
+    """The highlight is on the title line, also when an earlier row has a detail line."""
     from meshterm.ui.tui.select import Choice, SelectScreen
 
     screen = SelectScreen(
@@ -3242,7 +3314,7 @@ def test_select_cursor_tracks_the_highlight_past_a_detail_line() -> None:
 
 
 def test_select_hscroll_leaves_the_detail_line_unshifted() -> None:
-    """←→ slides the highlighted row's title only — its detail line never scrolls."""
+    """←→ slide only the title of the highlighted row. Its detail line never scrolls."""
     from meshterm.ui.tui.select import Choice, SelectScreen
 
     long_title = "row-one-" + "x" * 60 + "-tail"
@@ -3256,7 +3328,7 @@ def test_select_hscroll_leaves_the_detail_line_unshifted() -> None:
 
 
 def _framed_session():
-    """A session with just enough of an app behind it to compose a frame at 53x26."""
+    """A session with enough of an app behind it to compose a frame at 53x26."""
     import types
 
     from prompt_toolkit.data_structures import Size
@@ -3271,12 +3343,13 @@ def _framed_session():
 
 
 def test_a_dialog_frame_is_composed_here_not_handed_to_prompt_toolkit() -> None:
-    """A float used to send the whole frame down prompt_toolkit's renderer.
+    """A float once sent the whole frame to the renderer of prompt_toolkit.
 
-    That cost its full grid rebuild and diff on every keystroke — in every confirm, picker
-    and viewer in the app. The float's placement is reproducible (an unanchored, unsized
-    float is centred), so the frame source returns the finished picture with the box merged
-    in, and the row diff applies to dialogs like everything else.
+    This caused a full rebuild of the grid, and a diff, on each key press. It happened in
+    each confirm, picker, and viewer in the app. The placement of the float is
+    reproducible (a float with no anchor and no size is centred). Thus the frame source
+    returns the finished picture with the box merged in. The diff of the rows applies to
+    dialogs, as it does to the other screens.
     """
     session = _framed_session()
     session.push(ScrollScreen(Text("the list beneath"), title="Nodes", floating=False))
@@ -3292,7 +3365,7 @@ def test_a_dialog_frame_is_composed_here_not_handed_to_prompt_toolkit() -> None:
 
 
 def test_a_bare_base_paints_no_chrome_at_all() -> None:
-    """The session draws a bare base through compose_bare: no bars, no lane, no box."""
+    """The session draws a bare base through compose_bare, with no bars, no lane, and no box."""
     screen = ScrollScreen(Text("CODE", justify="center"), title="Share x", floating=False)
     screen.bare = True
     session = _framed_session()
@@ -3308,20 +3381,26 @@ def test_a_bare_base_paints_no_chrome_at_all() -> None:
 
 
 def test_the_busy_overlay_is_still_prompt_toolkits_to_place() -> None:
-    """The one float we don't place: a content-sized window the float container measures."""
+    """This is the one float that MeshTerm does not place.
+
+    It is a window that has the size of its content, and the float container measures it.
+    """
     from meshterm.ui.tui.overlay import BusyOverlay
 
     session = _framed_session()
-    assert session._plain_frame() is None  # an empty stack has no background either
+    assert session._plain_frame() is None  # An empty stack has no background either.
     overlay = BusyOverlay(title="Starting up")
-    overlay.started_at -= overlay.hold + overlay.fade  # past the hold: it is on screen
+    overlay.started_at -= overlay.hold + overlay.fade  # This is past the hold, so it shows.
     session._overlay = overlay
     assert session._overlay_visible()
     assert session._plain_frame() is None
 
 
 def test_the_rows_a_dialog_does_not_reach_come_back_unchanged() -> None:
-    """What makes compositing worth doing: the diff still skips the untouched rows."""
+    """The rows that a dialog does not cover do not change, so the diff skips them.
+
+    This is the reason to composite the frame.
+    """
     session = _framed_session()
     session.push(
         ScrollScreen(Text("\n".join(f"line {i}" for i in range(40))), title="Nodes", floating=False)
@@ -3338,11 +3417,11 @@ def test_the_rows_a_dialog_does_not_reach_come_back_unchanged() -> None:
 
 
 def test_a_long_list_only_rasterizes_the_rows_the_viewport_shows() -> None:
-    """141 contacts laid out 150 rows tall still only shows twenty of them.
+    """A list of 141 contacts that is 150 rows tall shows only twenty of them.
 
-    Rendering the rest was pure waste on every keystroke *and* on the once-a-second tick.
-    The line count has to stay exact, though — the scroll clamp, the ``↑↓ more`` markers and
-    the sticky-header offsets are all measured against it.
+    The render of the other rows was a waste, on each key press and on the tick that comes
+    one time each second. The line count must stay exact. The scroll clamp, the ``↑↓ more``
+    markers, and the offsets of the sticky headers use it.
     """
     from meshterm.ui.tui.screen import LazyLines
 
@@ -3359,7 +3438,7 @@ def test_a_long_list_only_rasterizes_the_rows_the_viewport_shows() -> None:
     lines = screen.render_body(53)
 
     assert isinstance(lines, LazyLines)
-    assert len(lines) == 150  # the count is exact and cost nothing
+    assert len(lines) == 150  # The count is exact, and it costs nothing.
     assert drawn == [], "no row is rasterized until something reads it"
 
     window = lines[0:20]
@@ -3367,16 +3446,16 @@ def test_a_long_list_only_rasterizes_the_rows_the_viewport_shows() -> None:
     assert sorted(drawn) == list(range(20))
     assert "contact 000" in _plain(window[0])
 
-    lines[5]  # a re-read is memoized, never a second render
+    lines[5]  # A second read uses the memo and never renders again.
     assert sorted(drawn) == list(range(20))
 
 
 def test_a_lazy_body_slices_frames_and_scrolls_exactly_as_a_list_did() -> None:
-    """The substitution has to be invisible to the frame: same height, same clip flags.
+    """The frame must not see the substitution: it has the same height and the same clip flags.
 
-    Deferring a row's *drawing* must never defer how many rows there are — the scroll
-    clamp, the ``↑↓ more`` subtitle and the pinned heading are all measured against that
-    count, and every one of them would go wrong if the tail were merely unbuilt.
+    If MeshTerm defers the drawing of a row, it must never defer the count of the rows.
+    The scroll clamp, the ``↑↓ more`` subtitle, and the pinned heading use that count.
+    If the render did not build the tail, each of them would be wrong.
     """
     items = [section_heading("Group")]
     items += [Choice(f"row {i}", i) for i in range(60)]
@@ -3387,9 +3466,9 @@ def test_a_lazy_body_slices_frames_and_scrolls_exactly_as_a_list_did() -> None:
     assert len(out.split("\n")) == 26
     plain = _plain(out)
     assert "row 0" in plain and "↓ more" in plain
-    assert screen._scroll_total == 61  # the whole body is still measured
+    assert screen._scroll_total == 61  # The screen still measures the whole body.
 
-    for _ in range(45):  # walk the highlight past the fold
+    for _ in range(45):  # Walk the highlight past the fold.
         screen.handle("down")
     plain = _plain(frame.compose_base(Text("hdr"), screen, "Esc back", 53, 26))
     assert "row 45" in plain, "the highlight must still be kept in view"
@@ -3398,7 +3477,7 @@ def test_a_lazy_body_slices_frames_and_scrolls_exactly_as_a_list_did() -> None:
 
 
 def test_an_off_screen_rows_live_title_is_left_alone() -> None:
-    """A row's callable title is resolved only while the row is actually on screen."""
+    """MeshTerm resolves a callable title of a row only while the row is on the screen."""
     calls: list[str] = []
     items = [
         Choice(lambda: (calls.append("top"), "top row")[1], 0),
@@ -3413,11 +3492,11 @@ def test_an_off_screen_rows_live_title_is_left_alone() -> None:
 
 
 def _button_dialog_hints() -> list[tuple[str, int, int | None, str]]:
-    """Every literal ``footer_hint=`` on a button dialog: (file, line, buttons, hint).
+    """Each literal ``footer_hint=`` on a button dialog, as (file, line, buttons, hint).
 
-    ``buttons`` is the count when the call passes a list literal, else ``None`` — a
-    computed row (the quit confirm grows a third button on a bonded device) can hold any
-    number, so it is held to the many-button rule.
+    ``buttons`` is the count when the call passes a list literal. Otherwise it is ``None``.
+    A computed row can have any number of buttons. For example, the quit confirm has a
+    third button on a bonded device. Thus the test applies the rule for many buttons to it.
     """
     import ast
     from pathlib import Path
@@ -3442,7 +3521,7 @@ def _button_dialog_hints() -> list[tuple[str, int, int | None, str]]:
                 None,
             )
             if hint is None:
-                continue  # the default hint, which is the generic one
+                continue  # This is the default hint, which is the generic hint.
             row = node.args[1] if len(node.args) > 1 else None
             count = len(row.elts) if isinstance(row, ast.List) else None
             found.append((path.name, node.lineno, count, hint))
@@ -3450,17 +3529,18 @@ def _button_dialog_hints() -> list[tuple[str, int, int | None, str]]:
 
 
 def test_a_button_dialogs_hint_never_names_the_verb_of_one_button() -> None:
-    """Enter commits *the highlighted* button, so a row of them may only say ``select``.
+    """Enter commits the highlighted button, so a row of buttons can say only ``select``.
 
-    The quit confirm used to promise ``Enter quit · Esc cancel``, which was true only
-    while Quit happened to be highlighted — ←→ moves it, and on a bonded device a third
-    button sits between the two (JP, 2026-08-31). The same hint also left out the one key
-    that changes what Enter will do. A row-picking list may name its committing verb
-    (``Enter adopt path``) because every row commits the same way; a button row cannot.
+    The quit confirm once had the hint ``Enter quit · Esc cancel``. This was true only
+    while the Quit button was highlighted. ←→ move the highlight, and on a bonded device a
+    third button is between the two (JP, 2026-08-31). The same hint also did not name the
+    key that changes what Enter does. A list from which the user selects a row can name
+    its committing verb (``Enter adopt path``), because each row commits in the same way.
+    A row of buttons cannot do this.
 
-    A dialog with a single button is the exception the rule is shaped around: a lone
-    acknowledgement has nothing to choose between, so it names its verb (``Enter OK``)
-    and does not advertise an ←→ that would move nothing.
+    A dialog that has one button is the exception for which the rule is made. A lone
+    acknowledgement has nothing to choose between. Thus it names its verb (``Enter OK``),
+    and it does not advertise ←→, which would move nothing.
     """
     for where, line, buttons, hint in _button_dialog_hints():
         if buttons == 1:
@@ -3479,32 +3559,33 @@ def test_a_button_dialogs_hint_never_names_the_verb_of_one_button() -> None:
 
 
 def _hide_store(tmp_path):  # noqa: ANN001, ANN202
-    """A device registry on a scratch file."""
+    """A device registry in a scratch file."""
     from meshterm.core.device_store import DeviceStore
 
     return DeviceStore(tmp_path / "devices.json")
 
 
 def test_hidden_devices_survive_the_session_that_hid_them(tmp_path) -> None:  # noqa: ANN001
-    """Hiding is written to the registry file, so a fresh store still knows about it."""
+    """MeshTerm writes the hidden state to the registry file, so a new store still has it."""
     store = _hide_store(tmp_path)
     assert store.hidden_ids() == set()
 
     store.hide("usb-0001")
     store.hide("usb-0002")
-    store.hide("usb-0001")  # idempotent
+    store.hide("usb-0001")  # A second call has the same result.
     assert _hide_store(tmp_path).hidden_ids() == {"usb-0001", "usb-0002"}
 
     assert _hide_store(tmp_path).show_all() == 2
     assert _hide_store(tmp_path).hidden_ids() == set()
-    assert _hide_store(tmp_path).show_all() == 0  # nothing left to bring back
+    assert _hide_store(tmp_path).show_all() == 0  # Nothing is left to show again.
 
 
 def test_hiding_leaves_the_registry_and_its_default_alone(tmp_path) -> None:  # noqa: ANN001
-    """A hidden device is still remembered, still the default, still reachable by name.
+    """A hidden device is still remembered, still the default, and the user can reach it by name.
 
-    Hiding is a *listing* choice on one screen. Everything that resolves a device without
-    the splash — ``--port``, a profile, the reconnect — must not be able to tell.
+    To hide a device is a choice about the list on one screen. Each code path that finds a
+    device without the splash (``--port``, a profile, the reconnect) must not see the
+    difference.
     """
     from meshterm.core.discovery import serial_device
 
@@ -3521,7 +3602,7 @@ def test_hiding_leaves_the_registry_and_its_default_alone(tmp_path) -> None:  # 
 
 
 def test_connecting_to_a_hidden_device_shows_it_again(tmp_path) -> None:  # noqa: ANN001
-    """Confirming a device is the plainest statement that it belongs on the list."""
+    """If the user confirms a device, this shows that the device belongs on the list."""
     from meshterm.core.discovery import serial_device
 
     store = _hide_store(tmp_path)
@@ -3532,7 +3613,7 @@ def test_connecting_to_a_hidden_device_shows_it_again(tmp_path) -> None:  # noqa
 
 
 async def test_the_splash_hides_the_highlighted_device_and_redraws(tmp_path) -> None:  # noqa: ANN001
-    """Pressing h drops the row and remembers it; the redrawn list is the feedback."""
+    """The h key removes the row and remembers the device. The new list is the feedback."""
     from meshterm.core.discovery import serial_device
     from meshterm.ui.device_picker import prompt_device
     from meshterm.ui.tui import Choice, KeyRequest
@@ -3543,7 +3624,7 @@ async def test_the_splash_hides_the_highlighted_device_and_redraws(tmp_path) -> 
     drawn: list[list] = []
 
     class _Ui:
-        """Presses h on the probe, then picks whatever is left."""
+        """Presses h on the probe, then selects the device that is left."""
 
         def __init__(self) -> None:
             self.round = 0
@@ -3564,13 +3645,16 @@ async def test_the_splash_hides_the_highlighted_device_and_redraws(tmp_path) -> 
     chosen = await prompt_device(_Ui(), [probe, radio], store, verify)
     assert chosen is radio
     assert store.hidden_ids() == {probe.stable_id}
-    # The first pass offered both devices; the second offered only the one left.
+    # The first pass offered both devices. The second pass offered only the device that is left.
     assert probe in [row.value for row in drawn[0]]
     assert probe not in [row.value for row in drawn[1]]
 
 
 def test_the_splash_says_so_when_it_is_empty_only_because_of_hiding() -> None:
-    """Nothing-detected would be a lie, and with no rows there is no footer atom either."""
+    """The splash says why it is empty, if the only reason is the hidden devices.
+
+    "Nothing detected" would be false, and with no rows there is no footer atom either.
+    """
     from meshterm.core.discovery import serial_device
     from meshterm.ui.device_picker import _build_items
 
@@ -3580,19 +3664,19 @@ def test_the_splash_says_so_when_it_is_empty_only_because_of_hiding() -> None:
     detected = [str(it.title) for it in _build_items([], None, {}, hidden=0)]
     assert any("no companion devices detected" in line for line in detected)
 
-    # With something still listed the footer names ⇧H on every row, so the line would be a
-    # row of the box spent saying it twice.
+    # If the list still has a device, the footer names ⇧H on each row. Then the line would
+    # use a row of the box to say it two times.
     radio = serial_device("COM7", name="A Radio")
     rows = [str(it.title) for it in _build_items([radio], None, {}, hidden=2)]
     assert not any("hidden" in line for line in rows)
 
 
 def test_the_splash_action_rows_share_one_icon_column() -> None:
-    """Add-a-network-device and Quit start their words in one cell, measured, on both platforms.
+    """The words of "Add a network device" and "Quit" start in the same cell, on both platforms.
 
-    They used to be literal ``"  🌐 Add…"`` / ``"  🚪 Quit"`` strings that lined up only because
-    the two emoji happen to be the same width, and that kept their icons on the PicoCalc, where
-    every other command row drops its icon lane.
+    The test measures the cell. The rows were once the literal strings ``"  🌐 Add…"`` and
+    ``"  🚪 Quit"``. They lined up only because the two emoji have the same width. They also
+    kept their icons on the PicoCalc, where each other command row removes its icon lane.
     """
     from rich.cells import cell_len
 
@@ -3616,7 +3700,10 @@ def test_the_splash_action_rows_share_one_icon_column() -> None:
 
 
 def test_hiding_a_device_leaves_the_highlight_where_the_row_was() -> None:
-    """The next device down, or the one above at the end — so a run of adapters clears in a run."""
+    """The highlight goes to the next device down, or to the device above at the end.
+
+    Thus a run of adapters clears in one run.
+    """
     from meshterm.core.discovery import serial_device
     from meshterm.ui.device_picker import _after_hiding
 
@@ -3625,46 +3712,53 @@ def test_hiding_a_device_leaves_the_highlight_where_the_row_was() -> None:
 
     assert _after_hiding(listed, first) is middle
     assert _after_hiding(listed, middle) is last
-    # Off the end there is nowhere further down, so the highlight steps up rather than
-    # rolling round to the top — nothing in the app rolls over.
+    # At the end there is no place further down, so the highlight steps up. It does not roll
+    # round to the top, because nothing in the app rolls over.
     assert _after_hiding(listed, last) is middle
-    assert _after_hiding([first], first) is None  # an emptied list has nothing to land on
+    assert _after_hiding([first], first) is None  # A list that is now empty has no row to select.
 
 
 def test_the_splash_names_a_shortcut_only_where_it_would_act() -> None:
-    """Named on a device row only, and ⇧H only while hidden — the Del remove rule."""
+    """The hint names a shortcut only where it acts. This is the rule of Del remove.
+
+    The h key is named on a device row only. ⇧H is named only while a device is hidden.
+    """
     from meshterm.core.discovery import serial_device
     from meshterm.ui.device_picker import _ADD_TCP, _QUIT, _shortcut_hint
 
     radio = serial_device("COM7", name="A Radio")
 
     nothing_hidden = _shortcut_hint(0)
-    assert nothing_hidden(radio) == "h hide"  # no way back is offered; there is nothing back
-    assert nothing_hidden(_ADD_TCP) == ""  # nothing to hide on the action rows
+    # The hint does not offer a way back, because no device is hidden.
+    assert nothing_hidden(radio) == "h hide"
+    assert nothing_hidden(_ADD_TCP) == ""  # There is nothing to hide on the action rows.
     assert nothing_hidden(_QUIT) == ""
-    assert nothing_hidden(None) == ""  # an empty list highlights nothing at all
+    assert nothing_hidden(None) == ""  # An empty list has no highlight.
 
     with_hidden = _shortcut_hint(2)
     assert with_hidden(radio) == "h hide · ⇧H show all"
-    # ⇧H is screen-wide, so it rides whatever row the reader happens to be standing on.
+    # ⇧H acts on the whole screen, so the hint shows it on each row that has the highlight.
     assert with_hidden(_QUIT) == "⇧H show all"
 
 
 def test_a_hint_too_long_for_its_box_drops_atoms_rather_than_its_tail() -> None:
-    """Cutting the line at the edge would take Esc, which is the one atom that must survive."""
+    """A hint that is too long for its box drops atoms. It does not drop its tail.
+
+    A cut at the edge would remove Esc, and Esc is the one atom that must stay.
+    """
     from meshterm.ui.tui.frame import fit_hint
 
     full = "↑↓ move · ←→ scroll · Enter select · h hide · ⇧H show all · Esc quit"
-    assert fit_hint(full, 100) == full  # room for everything: untouched
+    assert fit_hint(full, 100) == full  # There is room for everything, so nothing changes.
 
-    # Dropped from the right, in front of Esc — never Esc itself.
+    # The function drops atoms from the right, in front of Esc. It never drops Esc.
     assert fit_hint(full, 56) == "↑↓ move · ←→ scroll · Enter select · h hide · Esc quit"
     assert fit_hint(full, 45) == "↑↓ move · ←→ scroll · Enter select · Esc quit"
     assert fit_hint(full, 20).endswith("Esc quit")
 
-    # ...unless the caller names atoms it can spare first, in the order it can spare them:
-    # the scroll keys are already named by the move atom, and between the two hide keys the
-    # one to keep is the way back.
+    # The exception: the caller names the atoms that it can spare first, in the order in
+    # which it can spare them. The move atom already names the scroll keys. Of the two hide
+    # keys, the key to keep is the way back.
     spared = fit_hint(full, 56, shed_first=("←→ scroll", "h hide"))
     assert spared == "↑↓ move · Enter select · h hide · ⇧H show all · Esc quit"
     assert (
@@ -3674,16 +3768,17 @@ def test_a_hint_too_long_for_its_box_drops_atoms_rather_than_its_tail() -> None:
 
 
 def test_a_panning_list_slides_its_header_and_rows_as_one() -> None:
-    """←→ pan a table: its header and every row by one shift, kept as the highlight moves.
+    """←→ pan a table. The header and each row move by one shift, and the shift stays.
 
-    The per-row scroll slides the highlighted row alone and drops its shift on ↑↓, which is
-    right for a list of independent long lines and wrong for a table, whose lanes mean
-    nothing once they have slid out from under their labels. A row that is not part of the
+    The shift stays when the highlight moves. The scroll for one row slides the
+    highlighted row alone, and it drops its shift on ↑↓. This is correct for a list of
+    long lines that are independent. It is wrong for a table. The lanes of a table have
+    no meaning when they slide out from under their labels. A row that is not part of the
     table (an action row under it) stays where it is.
     """
     from meshterm.ui.tui import Choice, SelectScreen, Separator
 
-    # A header is laid out like a row: its first two cells are the pointer column.
+    # A header has the same layout as a row: its first two cells are the pointer column.
     header = Separator("  " + "NAME".ljust(10) + "-" * 30 + " WHERE", pans=True)
     rows = [
         Choice("alpha".ljust(10) + "x" * 30 + " far-a", "a", pans=True),
@@ -3697,13 +3792,13 @@ def test_a_panning_list_slides_its_header_and_rows_as_one() -> None:
         return _plain(screen.render_body(width)).split("\n")
 
     first = lines()
-    assert "←→ scroll" in screen.footer_hint  # the table overflows, so ←→ say so
+    assert "←→ scroll" in screen.footer_hint  # The table overflows, so the hint names ←→.
     screen.handle("right")
     screen.handle("right")
     panned = lines()
     assert panned[0] != first[0] and panned[1] != first[1] and panned[2] != first[2]
-    # Every line of the table moved by the same amount: the dash run under the header
-    # starts in the same column as the x and y runs under it.
+    # Each line of the table moved by the same amount. The run of dashes in the header
+    # starts in the same column as the runs of x and y under it.
     starts = [line.index(ch) for line, ch in zip(panned[:3], "-xy", strict=True)]
     assert len(set(starts)) == 1, panned
     assert panned[-1] == first[-1], "the Quit row is not part of the table"
@@ -3714,14 +3809,14 @@ def test_a_panning_list_slides_its_header_and_rows_as_one() -> None:
     for _ in range(20):
         screen.handle("right")
     end = lines()
-    # Clamped at the widest line's tail, with each label over its lane.
+    # The pan clamps at the tail of the widest line, with each label over its lane.
     assert end[0].rstrip().endswith("WHERE") and end[1].rstrip().endswith("far-a")
     assert end[0].index("WHERE") == end[1].index("far-a") == end[2].index("far-b")
     assert all(cell_len(line) <= width for line in end)
 
 
 def test_the_splash_pans_its_table_on_every_platform() -> None:
-    """The splash's header and device rows pan together, and its action rows stay put."""
+    """The header and the device rows of the splash pan together, and its action rows stay."""
     from meshterm.core.device_store import RememberedDevice
     from meshterm.core.discovery import serial_device
     from meshterm.platforms import CARDPUTER_ZERO, PICOCALC_LYRA, REGULAR, set_platform
@@ -3757,18 +3852,18 @@ def test_the_splash_pans_its_table_on_every_platform() -> None:
                 screen.handle("right")
             after = _plain(screen.render_body(width)).split("\n")
             assert "Wardriver" in before[1] and "Wardriver" not in after[1], platform.name
-            # Panned to the end, the address sits under its label.
+            # After a pan to the end, the address is under its label.
             assert after[0].index("PORT") == after[1].index("COM7"), platform.name
     finally:
         set_platform(REGULAR)
 
 
 def test_the_splash_hint_stays_inside_the_box_it_is_drawn_in() -> None:
-    """The chromeless splash keeps its hint in its own border, on both platforms.
+    """The splash that has no chrome keeps its hint in its own border, on both platforms.
 
-    The border is the terminal less the gutter the box floats over — not the full readable
-    width — and on the PicoCalc that is 47 cells, which is what makes every atom here
-    conditional rather than merely tidy.
+    The width of the border is the width of the terminal minus the gutter over which the
+    box floats. It is not the full readable width. On the PicoCalc it is 47 cells. Thus
+    each atom here must be conditional, and this is more than tidiness.
     """
     from rich.cells import cell_len
 
@@ -3777,7 +3872,7 @@ def test_the_splash_hint_stays_inside_the_box_it_is_drawn_in() -> None:
     from meshterm.ui.device_picker import _shortcut_hint
     from meshterm.ui.tui.select import splice_hint
 
-    base = "↑↓ move · Enter select · Esc bye"  # the splash's own send-off
+    base = "↑↓ move · Enter select · Esc bye"  # This is the own farewell of the splash.
     radio = serial_device("COM7", name="A Radio")
     common = splice_hint(base, _shortcut_hint(0)(radio))
     for platform in (REGULAR, PICOCALC_LYRA):
@@ -3786,9 +3881,9 @@ def test_the_splash_hint_stays_inside_the_box_it_is_drawn_in() -> None:
 
 
 def test_a_shortcut_is_only_honoured_where_a_letter_is_free() -> None:
-    """A filtering list spends its letters on the query, so it declares no shortcuts.
+    """A list that filters uses its letters for the query, so it declares no shortcuts.
 
-    Otherwise a device named "Homestead" could not be typed on a list that had claimed h.
+    If it did, the user could not type a device named "Homestead" on a list that claimed h.
     """
     from meshterm.ui.tui import Choice, KeyRequest
     from meshterm.ui.tui.select import SelectScreen
@@ -3804,20 +3899,20 @@ def test_a_shortcut_is_only_honoured_where_a_letter_is_free() -> None:
     filtering = SelectScreen("filtering", [Choice("Homestead", 1)], keys={"h": token})
     filtering.resolve = lambda value: resolved.append(value)  # type: ignore[method-assign]
     filtering.handle("text", "h")
-    assert len(resolved) == 1  # nothing new resolved
-    assert filtering._filter == "h"  # the letter went to the query, where it belongs
+    assert len(resolved) == 1  # The list resolved nothing new.
+    assert filtering._filter == "h"  # The letter went to the query, where it must go.
 
 
 # -- the splash keeps looking ---------------------------------------------------------
 
 
 def _drive_picker(tmp_path, monkeypatch, *, serial_rounds, ble_rounds=None, hide=None):
-    """Run the picker's rescan against a scripted sequence of scans.
+    """Run the rescan of the picker against a scripted sequence of scans.
 
-    The fake UI stands in for the splash being open: it is handed the ``live`` callable
-    and runs it until the script is exhausted, recording every redraw. Discovery is
-    replaced rather than mocked at the port level, because what is under test is the
-    rescan's behaviour -- when it redraws, when it keeps quiet -- and not pyserial.
+    The fake UI takes the place of the open splash. It gets the ``live`` callable and runs
+    it until the script ends, and it records each paint. The test replaces discovery. It
+    does not use a mock at the port level, because the test examines the behaviour of the
+    rescan (when it paints, and when it stays quiet) and not pyserial.
     """
     import asyncio
 
@@ -3848,9 +3943,9 @@ def _drive_picker(tmp_path, monkeypatch, *, serial_rounds, ble_rounds=None, hide
         store.hide(stable)
 
     redraws: list = []
-    # Scans to let run: every scripted round, then enough more that the last round's redraw
-    # has happened (a round redraws before the next scan starts) and the Bluetooth duty
-    # cycle — one listen per few polls — has had room to show.
+    # The number of scans to run: each scripted round, and enough more scans that the
+    # paint of the last round has happened (a round paints before the next scan starts).
+    # Also, the Bluetooth duty cycle (one listen for each few polls) must have room to show.
     scans = len(serial) + 5
 
     class _Ui:
@@ -3858,9 +3953,10 @@ def _drive_picker(tmp_path, monkeypatch, *, serial_rounds, ble_rounds=None, hide
             self, title, items, *, default=None, banner=None, footnote=None, live=None, **_kw
         ):
             task = asyncio.ensure_future(live(redraws.append))
-            # Wait for the scans themselves, never for a span of time: a fixed 50 ms held a
-            # handful of rounds on a quiet machine and sometimes only one under a full run,
-            # since Windows rounds each 1 ms sleep up to its ~15 ms timer tick.
+            # Wait for the scans, and not for a span of time. A fixed time of 50 ms gave a few
+            # rounds on a quiet machine. Under a full run it sometimes gave only one round,
+            # because Windows rounds each sleep of 1 ms up to its timer tick of approximately
+            # 15 ms.
             loop = asyncio.get_running_loop()
             deadline = loop.time() + 10.0
             while calls["serial"] < scans and loop.time() < deadline:
@@ -3889,7 +3985,7 @@ def _labels(items) -> list[str]:
 
 
 def test_splash_redraws_when_a_device_is_plugged_in(tmp_path, monkeypatch) -> None:
-    """A radio attached after the splash opened appears without restarting MeshTerm."""
+    """A radio that the user attaches after the splash opened appears. MeshTerm need not restart."""
     from meshterm.core.discovery import DiscoveredDevice
 
     first = DiscoveredDevice(port="COM5", product="Wio SX1262", vid=0x2886)
@@ -3902,11 +3998,11 @@ def test_splash_redraws_when_a_device_is_plugged_in(tmp_path, monkeypatch) -> No
 
 
 def test_splash_stays_quiet_when_nothing_changed(tmp_path, monkeypatch) -> None:
-    """A poll that finds the same ports redraws nothing.
+    """A poll that finds the same ports paints nothing.
 
-    This is the half that matters for somebody mid-way through arrowing down the list:
-    a redraw they did not ask for, on a list that has not changed, is the screen moving
-    under their hands for no reason.
+    This half is important for a user who is in the middle of a move down the list with
+    the arrows. A paint that the user did not ask for, on a list that did not change, makes
+    the screen move under the hands of the user for no reason.
     """
     from meshterm.core.discovery import DiscoveredDevice
 
@@ -3918,7 +4014,7 @@ def test_splash_stays_quiet_when_nothing_changed(tmp_path, monkeypatch) -> None:
 
 
 def test_splash_notices_a_device_going_away(tmp_path, monkeypatch) -> None:
-    """Unplugging removes the row, which is the same question asked backwards."""
+    """An unplug removes the row. This is the same question in the other direction."""
     from meshterm.core.discovery import DiscoveredDevice
 
     one = DiscoveredDevice(port="COM5", product="Wio SX1262", vid=0x2886)
@@ -3929,7 +4025,7 @@ def test_splash_notices_a_device_going_away(tmp_path, monkeypatch) -> None:
 
 
 def test_a_rescan_does_not_unhide_what_the_reader_hid(tmp_path, monkeypatch) -> None:
-    """A refresh is not ⇧H. Whatever `h` hid stays hidden when the list is rebuilt."""
+    """A refresh is not ⇧H. A device that `h` hid stays hidden when MeshTerm rebuilds the list."""
     from meshterm.core.discovery import DiscoveredDevice
 
     kept = DiscoveredDevice(port="COM5", product="Wio SX1262", vid=0x2886)
@@ -3950,11 +4046,11 @@ def test_a_rescan_does_not_unhide_what_the_reader_hid(tmp_path, monkeypatch) -> 
 
 
 def test_bluetooth_is_not_scanned_on_every_poll(tmp_path, monkeypatch) -> None:
-    """Serial is cheap and polled; Bluetooth is a listen and gets a duty cycle.
+    """Serial is cheap and MeshTerm polls it. Bluetooth is a listen, and it gets a duty cycle.
 
-    Each BLE scan keeps the radio listening, and this is the screen somebody leaves open
-    on a battery-powered handheld while they go and find a cable -- so it must not be in
-    the poll loop.
+    Each BLE scan keeps the radio in the listen state. A user can leave this screen open
+    on a handheld that uses a battery, while the user goes to find a cable. Thus the BLE
+    scan must not be in the poll loop.
     """
     from meshterm.core.discovery import DiscoveredDevice
 
@@ -3967,14 +4063,14 @@ def test_bluetooth_is_not_scanned_on_every_poll(tmp_path, monkeypatch) -> None:
 
 
 def test_the_picker_only_passes_arguments_the_splash_surface_accepts(tmp_path) -> None:
-    """Every keyword `prompt_device` sends must exist on `Ui.select_startup`.
+    """Each keyword that `prompt_device` sends must exist on `Ui.select_startup`.
 
-    This is the shape of bug a test double hides. `prompt_device` calls the *surface*,
-    which delegates to the session; adding an argument to the session alone crashes the
-    startup path and nothing else, because every fake Ui in this file absorbs unknown
-    keywords with `**kwargs` and is perfectly happy. So the fake here binds what it is
-    given against the real signature, and a keyword the surface has never heard of raises
-    exactly where a running MeshTerm would.
+    A test double hides this type of bug. `prompt_device` calls the surface, and the
+    surface delegates to the session. If a developer adds an argument to the session only,
+    the startup path crashes and nothing else does. This is because each fake Ui in this
+    file takes unknown keywords with `**kwargs`, and it does not fail. Thus the fake here
+    binds the arguments that it gets against the real signature. A keyword that the surface
+    does not have raises an error in the same place as in a running MeshTerm.
     """
     import inspect
 
@@ -3986,7 +4082,8 @@ def test_the_picker_only_passes_arguments_the_splash_surface_accepts(tmp_path) -
 
     class _Ui:
         async def select_startup(self, title, items, **kw):  # noqa: ANN001, ANN003, ANN201
-            signature.bind(self, title, items, **kw)  # TypeError on an unknown keyword
+            # This raises a TypeError for an unknown keyword.
+            signature.bind(self, title, items, **kw)
             return None
 
     async def _never(_device):

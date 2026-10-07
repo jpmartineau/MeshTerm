@@ -1,20 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
-"""A repeater that says nothing has not said the password is wrong.
+"""A repeater that says nothing has not said that the password is wrong.
 
-THE bug, reported after administering a repeater that happened to be down: MeshTerm forgot
-that repeater's admin password. The login came back ``False``, every caller read ``False``
-as *wrong password*, and the credential went in the bin — for a node that had never
-answered at all.
+The bug: a user administered a repeater that was down, and MeshTerm forgot the admin
+password of that repeater. The login returned ``False``. Each caller read ``False`` as
+"wrong password", and MeshTerm deleted the credential for a node that never answered.
 
-Two things were wrong under that. The ``meshcore`` library's ``send_login_sync`` waits for
-``LOGIN_SUCCESS`` and only ``LOGIN_SUCCESS``, so a refusal (which the firmware *does* send,
-as a ``LOGIN_FAILED`` frame) times out exactly like silence and comes back as the same
-``None``. And the credential policy lived, five times over, at the call sites.
+Two faults caused this. First, the ``meshcore`` library function ``send_login_sync`` waits
+for ``LOGIN_SUCCESS`` and for nothing else. The firmware does send a refusal (a
+``LOGIN_FAILED`` frame), but the function times out on it in the same way as on silence,
+and returns the same ``None``. Second, the credential policy was in five places, at the
+call sites.
 
-Now the device listens for the refusal frame itself and answers with a three-way
-:class:`~meshterm.core.models.LoginResult`, and one method —
-:meth:`~meshterm.core.admin_store.AdminStore.record` — owns what that means for the stored
-password: remember on accepted, forget on refused, and *leave it alone* on silence.
+Now the device listens for the refusal frame itself and returns a three-way
+:class:`~meshterm.core.models.LoginResult`. One method,
+:meth:`~meshterm.core.admin_store.AdminStore.record`, decides what the result means for the
+stored password. It remembers the password on accepted, forgets it on refused, and does
+not change it on silence.
 """
 
 from __future__ import annotations
@@ -41,11 +42,11 @@ _NODE = Contact(name="Yagi-Repeater", public_key="a1b2c3d4" * 8, key_prefix="a1b
 
 
 def test_only_an_accepted_login_is_truthy() -> None:
-    """``if not await device.admin_login(...)`` has to keep meaning "we are not in".
+    """``if not await device.admin_login(...)`` keeps the meaning "we are not logged in".
 
-    The three-way answer replaced a bool, and the whole point is that a call site which
-    only asks "am I logged in?" reads the same as it always did — while one that *acts* on
-    the failure is forced to name which failure it is acting on.
+    The three-way result replaced a bool. A call site that only asks "am I logged in?" reads
+    the result in the same way as before. A call site that acts on the failure must name
+    the failure that it acts on.
     """
     assert LoginResult.ACCEPTED
     assert not LoginResult.REFUSED
@@ -53,11 +54,11 @@ def test_only_an_accepted_login_is_truthy() -> None:
 
 
 def test_the_two_failures_are_distinguishable() -> None:
-    """They were the same ``False``; being able to tell them apart *is* the fix."""
+    """The two failures were the same ``False``. The fix is that a caller can tell them apart."""
     assert LoginResult.REFUSED is not LoginResult.NO_REPLY
 
 
-# --- the credential policy, in the one place that owns it -----------------------------
+# --- the credential policy, in the only place that owns it ----------------------------
 
 
 @pytest.fixture()
@@ -69,21 +70,21 @@ def store(tmp_path: Path) -> AdminStore:
 
 
 def test_silence_leaves_the_remembered_password_exactly_where_it_was(store) -> None:  # noqa: ANN001
-    """THE regression. The node was down; it never rendered a verdict on the password."""
+    """The main regression. The node was down, so it never gave a verdict on the password."""
     store.record(_NODE, "hunter2", LoginResult.NO_REPLY)
 
     assert store.get(_NODE) == "hunter2"
 
 
 def test_a_refusal_clears_the_password_because_the_node_said_so(store) -> None:  # noqa: ANN001
-    """A node that answered "no" is the one authority on the password being wrong."""
+    """Only a node that answered "no" can say that the password is wrong."""
     store.record(_NODE, "hunter2", LoginResult.REFUSED)
 
     assert store.get(_NODE) is None
 
 
 def test_a_successful_login_remembers_the_password_that_worked(store) -> None:  # noqa: ANN001
-    """Including a freshly typed one — that is how the credential gets stored at all."""
+    """This includes a password that the user just typed. That is how MeshTerm stores one."""
     store.forget(_NODE)
 
     store.record(_NODE, "correct-horse", LoginResult.ACCEPTED)
@@ -92,7 +93,7 @@ def test_a_successful_login_remembers_the_password_that_worked(store) -> None:  
 
 
 def test_silence_does_not_invent_a_password_either(tmp_path: Path) -> None:
-    """A no-reply on a node we have nothing stored for must stay nothing stored."""
+    """A no-reply from a node with no stored password leaves no stored password."""
     store = AdminStore(tmp_path / "admin.json")
 
     store.record(_NODE, "typed-once", LoginResult.NO_REPLY)
@@ -101,7 +102,7 @@ def test_silence_does_not_invent_a_password_either(tmp_path: Path) -> None:
 
 
 def test_a_node_that_goes_quiet_after_working_keeps_its_password(store) -> None:  # noqa: ANN001
-    """The lived sequence: it worked yesterday, it is down today, it works tomorrow."""
+    """A real sequence: the login worked yesterday, the node is down today, it works tomorrow."""
     store.record(_NODE, "hunter2", LoginResult.ACCEPTED)
     store.record(_NODE, "hunter2", LoginResult.NO_REPLY)
     store.record(_NODE, "hunter2", LoginResult.NO_REPLY)
@@ -109,11 +110,11 @@ def test_a_node_that_goes_quiet_after_working_keeps_its_password(store) -> None:
     assert store.get(_NODE) == "hunter2"
 
 
-# --- reading the wire: who is listening, and for how long -----------------------------
+# --- reading the wire: which listeners are active, and for how long -------------------
 
 
 class _Subscription:
-    """Stands in for meshcore's Subscription handle, unsubscribe method and all."""
+    """A replacement for the Subscription handle of meshcore, with its unsubscribe method."""
 
     def __init__(self, mc, event_type, callback) -> None:  # noqa: ANN001
         self.mc = mc
@@ -132,12 +133,12 @@ class _Event:
 
 
 class _FakeCommands:
-    """``send_login_sync`` as the library really behaves.
+    """``send_login_sync`` with the behaviour of the real library.
 
-    It waits for LOGIN_SUCCESS and only LOGIN_SUCCESS, so it returns a success it saw and
-    ``None`` for everything else — a refusal included. And ``late`` models the case that
-    broke a healthy node: the answer lands *after* it has already given up, which only a
-    listener outliving it can catch.
+    It waits for LOGIN_SUCCESS and for nothing else. It returns a success that it heard,
+    and ``None`` for all other results, a refusal included. The ``late`` argument models
+    the case that broke a healthy node: the answer arrives after the function gave up.
+    Only a listener that lives longer than the function can catch it.
     """
 
     def __init__(  # noqa: ANN003
@@ -147,8 +148,9 @@ class _FakeCommands:
         self._answer = answer
         self._late = late
         self._late_delay = late_delay
-        # How long the send takes to return — the library's mesh-request lock, then a
-        # MSG_SENT it correlates by event type alone. None of it is the node's time.
+        # How long the send takes to return. The time is the mesh-request lock of the
+        # library, then a MSG_SENT that it matches by event type only. None of it is the
+        # time of the node.
         self._send_delay = send_delay
 
     async def send_login_sync(self, pubkey, password):  # noqa: ANN001
@@ -161,7 +163,7 @@ class _FakeCommands:
             self._mc.dispatch(self._answer)
             if self._answer.type is EventType.LOGIN_SUCCESS:
                 return self._answer
-            return None  # a refusal is nothing it was ever waiting for
+            return None  # the function never waits for a refusal
         if self._late is not None:
             asyncio.get_running_loop().call_later(self._late_delay, self._mc.dispatch, self._late)
         return None
@@ -171,7 +173,7 @@ class _FakeMeshCore:
     def __init__(self, **commands) -> None:  # noqa: ANN003
         self.subscriptions: list[_Subscription] = []
         self.sent: list[tuple] = []
-        self.armed: list = []  # the event types subscribed by the time the send went out
+        self.armed: list = []  # the event types that were subscribed when the send went out
         self.commands = _FakeCommands(self, **commands)
 
     def subscribe(self, event_type, callback, attribute_filters=None):  # noqa: ANN001
@@ -187,9 +189,10 @@ class _FakeMeshCore:
 
 @pytest.fixture()
 def quick_budget(monkeypatch):  # noqa: ANN001
-    """Shrink the route-sized reply budget so a no-reply test is not a ten-second wait."""
-    # Patched where the device *reads* it: the budget arithmetic lives in ``core.tracing``
-    # and ``core.connection`` binds the name at import, so that binding is the one in play.
+    """Make the reply budget short, so that a no-reply test does not wait ten seconds."""
+    # The patch is where the device reads the budget. The budget calculation is in
+    # ``core.tracing``, and ``core.connection`` binds the name at import. Thus that
+    # binding is the one that the device uses.
     import meshterm.core.connection as connection
 
     monkeypatch.setattr(connection, "trace_timeout", lambda hops: 0.05)
@@ -214,7 +217,7 @@ def _login_failed(prefix: str | None = "a1b2c3d4a1b2"):
 
 
 def test_a_login_the_node_accepts_reads_as_accepted(quick_budget) -> None:  # noqa: ANN001
-    """The happy path: the session is open."""
+    """The normal case: the session is open."""
     mc = _FakeMeshCore(answer=_login_success())
 
     assert asyncio.run(_device(mc).admin_login(_NODE, "hunter2")) is LoginResult.ACCEPTED
@@ -222,13 +225,13 @@ def test_a_login_the_node_accepts_reads_as_accepted(quick_budget) -> None:  # no
 
 
 def test_an_answer_that_lands_after_the_library_gave_up_is_still_the_answer() -> None:
-    """THE reported regression: a healthy node, the right password, a no-reply popup.
+    """The reported regression: a healthy node, the right password, a no-reply dialog.
 
-    ``send_login_sync`` does not start listening until its own send returns, and that send
-    blocks on a MSG_SENT the library correlates by event type alone — so a scheduled advert
-    or the courier can consume ours and leave it stalled. Everything that lands during the
-    stall is dispatched to no listener and dropped. Owning the wait, armed before the send,
-    is what makes a login the repeater accepted read as accepted.
+    ``send_login_sync`` does not start to listen until its own send returns. That send
+    waits for a MSG_SENT that the library matches by event type only. Thus a scheduled
+    advert or the courier can use our MSG_SENT, and the send stalls. Each answer that
+    arrives during the stall goes to no listener and is lost. The device owns the wait and
+    arms it before the send. Thus a login that the repeater accepted reads as accepted.
     """
     mc = _FakeMeshCore(late=_login_success(), late_delay=0.05)
 
@@ -236,17 +239,18 @@ def test_an_answer_that_lands_after_the_library_gave_up_is_still_the_answer() ->
 
 
 def test_a_late_refusal_is_still_a_refusal() -> None:
-    """The same window, the other verdict — and this one must still clear the password."""
+    """The same window, the other verdict. This verdict must also clear the password."""
     mc = _FakeMeshCore(late=_login_failed(), late_delay=0.05)
 
     assert asyncio.run(_device(mc).admin_login(_NODE, "wrong")) is LoginResult.REFUSED
 
 
 def test_a_refusal_frame_reads_as_refused(quick_budget) -> None:  # noqa: ANN001
-    """The library's wait times out on it, so the app has to hear the frame itself.
+    """The wait of the library times out on a refusal, so the app must hear the frame itself.
 
-    Without this, a genuinely wrong password would report no-reply and be kept forever —
-    the mirror image of the reported bug, and the reason a refusal is not simply assumed.
+    Without this, a wrong password would report no-reply and MeshTerm would keep it for
+    ever. This is the opposite of the reported bug. It is also the reason that the code does
+    not assume a refusal.
     """
     mc = _FakeMeshCore(answer=_login_failed())
 
@@ -254,17 +258,17 @@ def test_a_refusal_frame_reads_as_refused(quick_budget) -> None:  # noqa: ANN001
 
 
 def test_silence_reads_as_no_reply(quick_budget) -> None:  # noqa: ANN001
-    """THE case that started this: nothing came back, so nothing is known."""
+    """The case that started this work: nothing came back, so nothing is known."""
     mc = _FakeMeshCore()
 
     assert asyncio.run(_device(mc).admin_login(_NODE, "hunter2")) is LoginResult.NO_REPLY
 
 
 def test_a_terse_answer_with_no_key_prefix_still_counts(quick_budget) -> None:  # noqa: ANN001
-    """Firmware only stamps the answering node's prefix when the frame carries one.
+    """The firmware adds the key prefix of the answering node only when the frame has one.
 
-    Demanding one would turn every answer from terse firmware into a no-reply — which is
-    the failure this path exists to stop, not one to reintroduce at the filter.
+    If the filter demanded a key prefix, each answer from terse firmware would become a
+    no-reply. This path exists to stop that failure, so the filter must not cause it again.
     """
     mc = _FakeMeshCore(answer=_login_failed(prefix=None))
 
@@ -272,14 +276,14 @@ def test_a_terse_answer_with_no_key_prefix_still_counts(quick_budget) -> None:  
 
 
 def test_an_answer_meant_for_a_different_node_is_not_ours(quick_budget) -> None:  # noqa: ANN001
-    """Two admin flows can overlap; a stranger's rejection must not clear our password."""
+    """Two admin flows can overlap. The rejection from another node must not clear our password."""
     mc = _FakeMeshCore(answer=_login_failed("ffeeddccbbaa"))
 
     assert asyncio.run(_device(mc).admin_login(_NODE, "hunter2")) is LoginResult.NO_REPLY
 
 
 def test_the_listener_is_armed_before_the_request_goes_out(quick_budget) -> None:  # noqa: ANN001
-    """Both answers subscribed before the send — one landing mid-send has somewhere to go."""
+    """Both answers are subscribed before the send, so an answer during the send has a listener."""
     from meshcore import EventType
 
     mc = _FakeMeshCore(answer=_login_success())
@@ -291,12 +295,13 @@ def test_the_listener_is_armed_before_the_request_goes_out(quick_budget) -> None
 
 
 def test_a_companion_error_is_watched_for_because_the_library_erases_it() -> None:
-    """``send_login_sync`` turns its own ERROR into a bare ``None``, so the reason is lost.
+    """``send_login_sync`` changes its own ERROR to a bare ``None``, so the reason is lost.
 
-    A companion that refuses to send and a node that never answers are the same
-    :attr:`LoginResult.NO_REPLY` — correctly, since neither says anything about the
-    password — but they are opposite faults to go and fix, and only the frame tells them
-    apart. It is uncorrelated, so it is logged and never read as a verdict.
+    A companion that refuses to send and a node that never answers both give
+    :attr:`LoginResult.NO_REPLY`. This is correct, because neither says anything about the
+    password. But the two faults are different, and a user repairs them in different ways.
+    Only the frame shows which fault it is. The frame has no correlation to the login, so
+    the device logs it and never reads it as a verdict.
     """
     from meshcore import EventType
 
@@ -308,13 +313,13 @@ def test_a_companion_error_is_watched_for_because_the_library_erases_it() -> Non
 
 
 def test_the_node_gets_its_whole_budget_even_when_the_send_was_slow(quick_budget) -> None:  # noqa: ANN001
-    """THE regression this fix is for: the repeater was charged for the queue ahead of it.
+    """The regression that this fix is for: the node paid for the queue before it.
 
-    The budget times the *node's* answer, but it used to be counted from before
-    ``send_login_sync`` — which waits its turn on the library's mesh-request lock (held by
-    every telemetry poll and courier retry for a whole round trip) before it transmits at
-    all. A send that outlasted the budget therefore left the node no window whatsoever, and
-    a repeater that was up, listening and about to answer was recorded as silent.
+    The budget is the time for the answer of the node. But the count once started before
+    ``send_login_sync``. That function waits for the mesh-request lock of the library
+    before it transmits. Each telemetry poll and each courier retry holds the lock for a
+    whole round trip. Thus a send that took longer than the budget left the node no time to
+    answer. A repeater that was up, listening, and ready to answer was recorded as silent.
     """
     mc = _FakeMeshCore(late=_login_success(), late_delay=0.01, send_delay=0.2)
 
@@ -322,7 +327,7 @@ def test_the_node_gets_its_whole_budget_even_when_the_send_was_slow(quick_budget
 
 
 def test_the_listeners_are_released_even_when_the_send_blows_up() -> None:
-    """One pair of subscriptions per attempt; leaked ones would pile up over a session."""
+    """Each attempt makes one pair of subscriptions. Leaked pairs would collect in a session."""
 
     class _Exploding(_FakeCommands):
         async def send_login_sync(self, pubkey, password):  # noqa: ANN001
@@ -337,7 +342,7 @@ def test_the_listeners_are_released_even_when_the_send_blows_up() -> None:
 
 
 def test_a_companion_side_error_is_silence_not_a_denial(quick_budget) -> None:  # noqa: ANN001
-    """The request never left the radio, so the node cannot have rejected anything."""
+    """The request never left the radio, so the node cannot have rejected it."""
     from meshcore import EventType
 
     mc = _FakeMeshCore()
@@ -351,10 +356,11 @@ def test_a_companion_side_error_is_silence_not_a_denial(quick_budget) -> None:  
 
 
 def test_the_reply_budget_is_sized_to_the_route_the_login_has_to_walk() -> None:
-    """A neighbour's second or two would cut a multi-hop repeater off mid-flight.
+    """A budget of one or two seconds for a neighbour would stop a multi-hop repeater too soon.
 
-    The login goes out along the contact's route and the answer comes back over it, so the
-    wire carries twice the stored one-way hops — the same shape ``run_trace`` budgets for.
+    The login goes out along the route of the contact, and the answer comes back along it.
+    Thus the wire carries twice the stored one-way hops. ``run_trace`` makes its budget in
+    the same way.
     """
     import meshterm.core.connection as connection
 
@@ -373,19 +379,19 @@ def test_the_reply_budget_is_sized_to_the_route_the_login_has_to_walk() -> None:
     finally:
         connection.trace_timeout = real
 
-    # Each login asks twice: for its own walk, and for the routeless floor (hops ``0``)
-    # it may never be given less than.
+    # Each login asks twice: for its own walk, and for the floor of a contact with no route
+    # (hops ``0``). The budget is never less than the floor.
     assert asked == [4, 0, 0, 0]
-    assert real(4) > real(2) > real(1)  # and the budget grows with the walk
+    assert real(4) > real(2) > real(1)  # also, the budget grows with the walk
 
 
 def test_a_known_short_route_never_buys_less_patience_than_no_route_at_all() -> None:
-    """Knowing where a node is must not make us give up on it sooner.
+    """A known route to a node must not make MeshTerm stop waiting for it sooner.
 
-    A trace budget is sized for one small packet on an explicit path; a login is an admin
-    exchange out and back. Sized literally, a contact with a one-hop route would be given a
-    narrower window than the routeless contact beside it that floods — so the flood budget
-    is the floor, and the route only ever widens it.
+    A trace budget is for one small packet on an explicit path. A login is an admin
+    exchange, out and back. If the code used the trace budget as it is, a contact with a
+    one-hop route would get a shorter window than a contact with no route, which floods.
+    Thus the flood budget is the floor, and the route can only make the budget longer.
     """
     import meshterm.core.connection as connection
     import meshterm.core.tracing as tracing
@@ -394,7 +400,7 @@ def test_a_known_short_route_never_buys_less_patience_than_no_route_at_all() -> 
     real = connection.trace_timeout
 
     def spy(hops):  # noqa: ANN001
-        # The real shape, scaled down so the no-reply this provokes is not a real wait.
+        # The real shape, made smaller so that the no-reply that it causes is not a long wait.
         budget = real(hops) / 1000
         budgets.append(budget)
         return budget
@@ -407,22 +413,22 @@ def test_a_known_short_route_never_buys_less_patience_than_no_route_at_all() -> 
         connection.trace_timeout = real
 
     walked, floor = budgets
-    assert walked < floor  # the literal trace sizing really is the narrower of the two
-    assert real(2) < real(0) == tracing.TRACE_TIMEOUT_FLOOD_S  # and so at full scale
+    assert walked < floor  # the trace budget as it is gives the shorter of the two
+    assert real(2) < real(0) == tracing.TRACE_TIMEOUT_FLOOD_S  # the same at full scale
 
 
-# --- the simulator speaks the same three answers --------------------------------------
+# --- the simulator gives the same three results ---------------------------------------
 
 
 async def test_the_simulator_can_model_a_node_that_is_simply_down() -> None:
-    """``--mock`` has to be able to walk the down-repeater path, or nobody sees the dialog."""
+    """``--mock`` must be able to follow the path of a down repeater, or nobody sees the dialog."""
     device = MockDevice(admin_password="secret")
     await device.connect()
     node = (await device.get_contacts())[0]
     device._unreachable.add(node.name)
 
     assert await device.admin_login(node, "secret") is LoginResult.NO_REPLY
-    assert await device.admin_login(node, "wrong") is LoginResult.NO_REPLY  # still silence
+    assert await device.admin_login(node, "wrong") is LoginResult.NO_REPLY  # it is still silence
 
 
 # --- the callers ----------------------------------------------------------------------
@@ -430,7 +436,7 @@ async def test_the_simulator_can_model_a_node_that_is_simply_down() -> None:
 
 @pytest.fixture()
 def ctx(tmp_path: Path):
-    """A context whose device is the simulator and whose admin store is on disk."""
+    """A context with the simulator as its device and an admin store on disk."""
     settings = Settings(config_dir=tmp_path, db_path=tmp_path / "admin.db")
     context = AppContext(
         console=Console(file=io.StringIO()),
@@ -445,7 +451,7 @@ def ctx(tmp_path: Path):
 
 
 async def _mock_node(ctx, *, down: bool) -> Contact:  # noqa: ANN001
-    """The simulated repeater, optionally unreachable, with a password already stored."""
+    """The simulated repeater, unreachable if ``down`` is true, with a stored password."""
     device = await ctx.device()
     node = next(c for c in await device.get_contacts() if c.name == "Yagi-Repeater")
     if down:
@@ -455,7 +461,7 @@ async def _mock_node(ctx, *, down: bool) -> Contact:  # noqa: ANN001
 
 
 async def test_the_scripted_tool_keeps_the_password_when_the_node_is_down(ctx) -> None:  # noqa: ANN001
-    """``meshterm repeater-admin <node> <cmd>`` against a repeater that is off the air."""
+    """``meshterm repeater-admin <node> <cmd>`` for a repeater that is off the air."""
     from meshterm.tools.repeater_admin import RepeaterAdminTool
 
     node = await _mock_node(ctx, down=True)
@@ -467,7 +473,7 @@ async def test_the_scripted_tool_keeps_the_password_when_the_node_is_down(ctx) -
 
 
 async def test_the_scripted_tool_clears_the_password_the_node_rejected(ctx) -> None:  # noqa: ANN001
-    """The other half: a node that is reachable and says no really is a bad password."""
+    """The other half: a node that is reachable and says no has a bad password."""
     from meshterm.tools.repeater_admin import RepeaterAdminTool
 
     node = await _mock_node(ctx, down=False)
@@ -480,7 +486,7 @@ async def test_the_scripted_tool_clears_the_password_the_node_rejected(ctx) -> N
 
 
 async def test_the_tx_optimizer_keeps_the_password_when_the_node_is_down(ctx) -> None:  # noqa: ANN001
-    """The sweep logs in before tuning; a down node must not cost the credential either."""
+    """The sweep logs in before it tunes. A down node must not cost the credential."""
     from meshterm.tools.tx_optimize import TxOptimizeTool
 
     node = await _mock_node(ctx, down=True)
@@ -492,7 +498,7 @@ async def test_the_tx_optimizer_keeps_the_password_when_the_node_is_down(ctx) ->
 
 
 async def test_the_tx_optimizer_clears_the_password_the_node_rejected(ctx) -> None:  # noqa: ANN001
-    """And still forgets a password the node actually turned down."""
+    """The optimizer also forgets a password that the node refused."""
     from meshterm.tools.tx_optimize import TxOptimizeTool
 
     node = await _mock_node(ctx, down=False)
@@ -508,7 +514,7 @@ async def test_the_tx_optimizer_clears_the_password_the_node_rejected(ctx) -> No
 
 
 async def _step_until(predicate, *, limit: int = 200):
-    """Yield to the event loop until ``predicate()`` is truthy (the TUI test convention)."""
+    """Yield to the event loop until ``predicate()`` is true (the convention of the TUI tests)."""
     value = predicate()
     for _ in range(limit):
         if value:
@@ -519,11 +525,11 @@ async def _step_until(predicate, *, limit: int = 200):
 
 
 async def _run_login(ctx, node):  # noqa: ANN001
-    """Drive ``ui.repeater_admin._login`` to completion, reading and dismissing its dialog.
+    """Run ``ui.repeater_admin._login`` to its end, and read and close its dialog.
 
-    Returns the flow's own answer and the words it put on screen — both matter here: the
-    password's fate is one half of the fix and *not telling the user it was wrong* is the
-    other.
+    Returns the result of the flow and the words that it showed on the screen. Both are
+    important. What happens to the password is one half of the fix. The other half is that
+    the flow does not tell the user that a password was wrong when it was not.
     """
     from meshterm.ui.repeater_admin import _login
     from meshterm.ui.surface import TuiUi
@@ -555,7 +561,7 @@ async def _run_login(ctx, node):  # noqa: ANN001
 
 
 async def test_the_admin_flow_says_no_reply_and_keeps_the_password(ctx) -> None:  # noqa: ANN001
-    """The screen JP was on. It must not report a wrong password, and must not clear it."""
+    """The screen that JP was on. It must not report a wrong password, and must not clear it."""
     node = await _mock_node(ctx, down=True)
 
     ok, shown = await _run_login(ctx, node)
@@ -567,7 +573,7 @@ async def test_the_admin_flow_says_no_reply_and_keeps_the_password(ctx) -> None:
 
 
 async def test_the_admin_flow_still_clears_a_password_the_node_rejected(ctx) -> None:  # noqa: ANN001
-    """The behaviour that was right all along, kept honest while the other half changed."""
+    """This behaviour was always correct. The test makes sure that it stays correct."""
     node = await _mock_node(ctx, down=False)
     ctx.admin_store.remember(node, "not-the-password")
 
@@ -578,22 +584,22 @@ async def test_the_admin_flow_still_clears_a_password_the_node_rejected(ctx) -> 
     assert ctx.admin_store.get(node) is None
 
 
-# --- nobody gets to decide this locally again -------------------------------------------
+# --- no call site decides this locally again --------------------------------------------
 
 
 def test_every_login_caller_goes_through_the_one_credential_policy() -> None:
-    """A sixth caller must not re-derive the rule the other five got wrong.
+    """A sixth caller must not make the rule again, as the other five did, with errors.
 
-    Source-level on purpose: the failure mode is not a wrong branch, it is a call site that
-    never asks the question. Anything that logs in records the outcome through the store,
-    and nothing reaches for :meth:`AdminStore.forget` on its own to do it.
+    The test reads the source on purpose. The failure is not a wrong branch. The failure is
+    a call site that never asks the question. Each code path that logs in must record the
+    result through the store, and none can call :meth:`AdminStore.forget` to do it.
     """
     import ast
 
     import meshterm
 
     def calls_admin_login(tree: ast.AST) -> bool:
-        """A real call, not the word in a docstring — which is why this parses."""
+        """A real call, not the word in a docstring. This is why the test parses the source."""
         return any(
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)

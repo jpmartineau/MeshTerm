@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Shared menu-chrome tests: the furniture every select list builds the same way.
+"""Tests for the shared menu chrome: the parts that each select list builds in the same way.
 
-These pin the app's exit-affordance and lane conventions at their source, so a screen
-that builds its rows through :mod:`meshterm.ui.menus` inherits the standards and a
-regression here fails once rather than on every screen.
+These tests check the exit conventions and the lane conventions of the app at their
+source. A screen that builds its rows through :mod:`meshterm.ui.menus` gets the standards.
+Thus a regression fails one time here, and not on each screen.
 """
 
 from __future__ import annotations
@@ -29,16 +29,16 @@ from meshterm.ui.tui import Separator
 
 
 def test_exit_rows_clean_state_is_nothing_at_all() -> None:
-    """A list never advertises its own exit: with nothing staged there are no rows.
+    """A list never advertises its own exit: with nothing staged, there are no rows.
 
-    Esc leaves, on both platforms, so the app-wide ``Back`` row was retired — what
-    survives is the staged-changes pair below, which is a choice rather than an exit.
+    Esc leaves, on both platforms. Thus we removed the ``Back`` row of the app. The pair
+    for staged changes (the next test) remains, because it is a choice and not an exit.
     """
     assert exit_rows(0, apply_value="A", back_value="B") == []
 
 
 def test_exit_rows_staged_state_spells_out_the_consequence() -> None:
-    """Staged changes produce ✓ Apply above ✗ Back — discard, after one blank line."""
+    """Staged changes give "✓ Apply" above "✗ Back — discard", after one blank line."""
     rows = exit_rows(3, apply_value="A", back_value="B")
     assert isinstance(rows[0], Separator) and rows[0].title == " "
     apply_row, back_row = rows[1], rows[2]
@@ -48,7 +48,7 @@ def test_exit_rows_staged_state_spells_out_the_consequence() -> None:
 
 
 def test_menu_rows_align_descriptions_in_display_cells() -> None:
-    """Every description starts at the same cell column, wide emoji labels included."""
+    """Each description starts at the same cell column, also after a label with a wide emoji."""
     rows = menu_rows(
         [
             ("🔄 Reboot device…", "Restart it", 1),  # emoji = 2 cells
@@ -61,11 +61,11 @@ def test_menu_rows_align_descriptions_in_display_cells() -> None:
         cell_len(r.title.plain[: r.title.plain.index(d)])
         for r, d in zip(rows, ["Restart it", "Second"], strict=True)
     }
-    assert len(starts) == 1  # one shared description column
+    assert len(starts) == 1  # one description column for all rows
 
 
 def test_menu_rows_keep_a_styled_label_styled() -> None:
-    """A Text label (an err-tinted destructive row) keeps its spans in the built row."""
+    """A Text label (a destructive row with the err tint) keeps its spans in the built row."""
     rows = menu_rows([(Text("⚠ Danger", style="err"), "Careful", "x")])
     title = rows[0].title
     assert title.plain.startswith("⚠ Danger")
@@ -73,52 +73,53 @@ def test_menu_rows_keep_a_styled_label_styled() -> None:
 
 
 def test_section_heading_wears_the_dashes_and_the_heading_grey() -> None:
-    """Grouped-list headings read ── Label ── in the heading grey, never the frame's accent."""
+    """Headings of a grouped list read ── Label ── in the heading grey, not the frame accent."""
     sep = section_heading("Outbox")
     assert sep.title == "── Outbox ──"
     assert sep.style == "heading"
 
 
 def test_changes_phrase_pluralizes() -> None:
-    """One staged change is singular; any other count is plural."""
+    """One staged change is singular. Any other count is plural."""
     assert changes_phrase(1) == "1 staged change"
     assert changes_phrase(2) == "2 staged changes"
 
 
 def test_column_header_lays_each_label_over_its_lane() -> None:
-    """Lanes pad to their own width under the pointer indent, so labels sit over columns."""
+    """Lanes get padding to their own width under the pointer indent, so labels are over columns."""
     header = column_header([Lane("NAME", 8), Lane("KEY", 6), Lane("HEARD")], 40)
     assert header == "  NAME    KEY   HEARD"
 
 
 def test_column_header_abbreviates_from_the_right_to_fit() -> None:
-    """Too narrow for the full labels, lanes give their shorter forms — never a wrap."""
+    """If the width is too narrow for the full labels, lanes give shorter forms, never a wrap."""
     from rich.cells import cell_len
 
     lanes = [Lane("SETTING", 10), Lane(("DESCRIPTION", "DESC", "?"))]
     assert column_header(lanes, 40) == "  SETTING   DESCRIPTION"  # room for the full word
     assert column_header(lanes, 20) == "  SETTING   DESC"  # one step shorter, and it fits
     assert column_header(lanes, 13) == "  SETTING   ?"  # the last form still fits
-    # Nothing left to give: the line crops rather than wrapping onto a second row.
+    # Nothing is left to give: the line is cropped and does not wrap onto a second row.
     tight = column_header(lanes, 10)
     assert cell_len(tight) == 10 and tight.endswith("…") and "\n" not in tight
 
 
 def test_column_header_only_shortens_the_lanes_it_has_to() -> None:
-    """A lane keeps its full label while a lane to its right can still give cells back."""
+    """A lane keeps its full label while a lane to its right can still give cells."""
     from rich.cells import cell_len
 
     lanes = [Lane(("CONVERSATION", "CHAT"), 14), Lane(("LAST MESSAGE", "LAST MSG", "LAST"))]
     assert column_header(lanes, 24) == "  CONVERSATION  LAST MSG"
     assert column_header(lanes, 20) == "  CONVERSATION  LAST"
-    # Only once the right-hand lane is spent does the left one abbreviate — and a line that
-    # still cannot fit crops (its padded lanes have no cells to give), never wraps.
+    # The left lane abbreviates only after the right lane has no more cells to give. A line
+    # that still does not fit is cropped (its padded lanes have no cells to give), and never
+    # wraps.
     tight = column_header(lanes, 14)
     assert tight.startswith("  CHAT") and tight.endswith("…") and cell_len(tight) == 14
 
 
 def test_lane_header_heads_the_editor_lanes_and_shortens_description() -> None:
-    """The shared editor header matches lane_row's lanes and abbreviates the last label."""
+    """The shared editor header matches the lanes of lane_row and abbreviates the last label."""
     from meshterm.ui.menus import lane_row
 
     row = lane_row("Node name", Text("MockCompanion"), "Advertised name", 12, 20)
@@ -126,33 +127,34 @@ def test_lane_header_heads_the_editor_lanes_and_shortens_description() -> None:
     assert header.startswith("  SETTING")
     assert header.index("VALUE") == 2 + 12 + 2  # the pointer indent, then the label lane
     assert header.index("DESCRIPTION") == 2 + 12 + 2 + 20 + 2
-    # The row's own lanes start where the header's labels do (both padded the same way,
-    # the header offset by the pointer column the rows draw for themselves).
+    # The lanes of the row start where the labels of the header start. Both have the same
+    # padding, and the header has an offset for the pointer column that the rows draw
+    # themselves.
     assert row.plain.index("MockCompanion") == header.index("VALUE") - 2
     assert row.plain.index("Advertised name") == header.index("DESCRIPTION") - 2
-    assert lane_header(12, 20, 44).endswith("DESC")  # no room for the word — abbreviate
+    assert lane_header(12, 20, 44).endswith("DESC")  # no room for the word, so abbreviate
 
 
 def test_fit_cells_measures_display_cells_not_characters() -> None:
-    """Padding and truncation count display cells, so wide glyphs can't skew lanes."""
+    """Padding and truncation count display cells, so wide glyphs cannot skew lanes."""
     from rich.cells import cell_len
 
     assert fit_cells("abc", 5) == "abc  "
-    assert cell_len(fit_cells("日本語の名前", 5)) == 5  # wide chars: truncated by cells
+    assert cell_len(fit_cells("日本語の名前", 5)) == 5  # wide characters: truncated by cells
     assert fit_cells("abcdef", 5).endswith("…")
     assert fit_cells("ab", 5, align="right") == "   ab"
 
 
 def test_fit_cells_keeps_a_broken_name_inside_its_lane() -> None:
-    """A name is written by a stranger's radio, and no part of one may skew the lane.
+    """The radio of another user writes a name, and no part of it can skew the lane.
 
-    Two failures, one lane. A cut through the middle of an emoji sequence leaves a stranded
-    joiner, which folds the ellipsis appended after it into the glyph before it — the lane
-    then measures a cell short of what the terminal draws, and every column right of the
-    name starts late. And a name carrying a newline or an escape ends the row mid-lane
-    whatever it measures. Both are settled inside ``fit_cells`` (see
-    :mod:`meshterm.ui.tui.emoji_width`), so every column in the app is covered by the one
-    helper they all fit their labels through.
+    Two failures affect one lane. First, a cut in the middle of an emoji sequence leaves a
+    stranded joiner. The joiner folds the ellipsis that follows it into the glyph before it.
+    Then the lane measures one cell less than the terminal draws, and each column to the
+    right of the name starts late. Second, a name that has a newline or an escape ends the row
+    in the middle of the lane, whatever the measurement is. ``fit_cells`` corrects both
+    failures (refer to :mod:`meshterm.ui.tui.emoji_width`). Each column in the app uses this
+    one helper to fit its labels, so the correction covers each column.
     """
     from rich.cells import cell_len
 
@@ -163,29 +165,30 @@ def test_fit_cells_keeps_a_broken_name_inside_its_lane() -> None:
         for width in range(4, 24):
             assert cell_len(fit_cells(name, width)) == width, (name, width)
 
-    # The cut falls between glyphs: half a family is not a glyph, and half a flag is a letter.
-    assert family in fit_cells(f"Bob {family}", 8)  # it fits: the glyph is kept whole
-    assert "‍" not in fit_cells(f"Bob {family}", 5)  # it doesn't: no joiner left behind
-    assert fit_cells(f"{flag} Hub", 4).startswith(flag)  # the pair survives, or neither does
+    # The cut is between glyphs: half of a family is not a glyph, and half of a flag is a letter.
+    assert family in fit_cells(f"Bob {family}", 8)  # it fits: the glyph stays whole
+    assert "‍" not in fit_cells(f"Bob {family}", 5)  # it does not fit: no joiner stays
+    assert fit_cells(f"{flag} Hub", 4).startswith(flag)  # the pair stays, or neither stays
 
-    # What the terminal cannot draw never reaches it; an ordinary name is left alone.
+    # What the terminal cannot draw never reaches it. An ordinary name does not change.
     assert "\n" not in fit_cells("line\nbreak", 12)
     assert "\x1b" not in fit_cells("esc\x1b[31mape", 12)
     assert fit_cells("plain", 12).strip() == "plain"
 
 
 def test_main_menu_sections_answer_the_menus_own_question() -> None:
-    """Each section is a *doing*, in workflow order, and holds only what shares it.
+    """Each section is an action, in the order of the work, and holds only what belongs to it.
 
-    The menu asks "What would you like to do?", so the grouping is by verb rather than
-    by subject: the address book sits with the features that message from it, the
-    recorded history with the live views it is the past tense of, the two walks with the
-    topology they walk over, and a setting lands under the scope it changes — this radio,
-    someone else's over the mesh, or MeshTerm itself.
+    The menu asks "What would you like to do?". Thus the groups are by verb and not by
+    subject. The address book is with the features that send messages from it. The recorded
+    history is with the live views, because it is their past tense. The two walks are with
+    the topology that they walk over. A setting goes in the section that says whose it is:
+    this radio, the radio of another node over the mesh, or MeshTerm itself.
 
-    This app is the last of the three scopes and the reason it sorts last: it holds the
-    preferences that change the program, the diagnostics that state what it currently is,
-    and the pages that describe it — none of which is a thing to do *on the mesh*.
+    This app is the last of these three sections, and this is the reason that it sorts last.
+    It holds the preferences that change the program, the diagnostics that state what the
+    program is now, and the pages that describe it. None of these is something to do on the
+    mesh.
     """
     from meshterm.tools import load_all_tools
     from meshterm.tools.base import _CATEGORY_ORDER, all_tools
@@ -196,7 +199,7 @@ def test_main_menu_sections_answer_the_menus_own_question() -> None:
         if tool.menu_visible:
             sections.setdefault(tool.category, []).append(tool.name)
 
-    assert list(sections) == _CATEGORY_ORDER  # all_tools already sorts them this way
+    assert list(sections) == _CATEGORY_ORDER  # all_tools already sorts them in this order
     assert sections == {
         "Message": ["chat", "channels", "rooms", "courier", "contacts"],
         "Watch": ["dashboard", "livefeed", "watchtower", "timemachine"],
@@ -212,40 +215,40 @@ def test_main_menu_sections_answer_the_menus_own_question() -> None:
             "support",
         ],
     }
-    # No section is so big it stops being a grouping (the old Mesh bucket held seven of
-    # nineteen rows), and none is a bucket of one. This app is the one at six: it runs
-    # mutable, then live, then fixed — the row that *changes* MeshTerm, the row that states
-    # what MeshTerm is *right now* on this machine, then the four pages that say what
-    # MeshTerm is in general. Six of twenty-four rows is still a grouping; seven of
-    # nineteen was not.
+    # No section is so big that it stops being a group (the old Mesh section had seven of
+    # nineteen rows), and no section has only one row. This app is the section with six rows.
+    # Its order is changeable, then live, then fixed: the row that changes MeshTerm, the row
+    # that states what MeshTerm is now on this machine, then the four pages that say what
+    # MeshTerm is in general. Six of twenty-five rows is still a group. Seven of nineteen
+    # was not.
     assert all(2 <= len(names) <= 6 for names in sections.values())
 
 
-#: Two lexicon icons the terminal genuinely draws in different widths — the whole reason
-#: the icon column has to be measured. Of the app's icons, ten (``🗑 ✎ ⚙ ▶ ★ ↻ ↕ ⇄ ⌨ #``)
-#: draw one cell and the rest two.
+#: Two lexicon icons that the terminal draws in different widths. This is the reason that
+#: the code must measure the icon column. Of the icons of the app, ten (``🗑 ✎ ⚙ ▶ ★ ↻ ↕ ⇄ ⌨ #``)
+#: draw one cell, and the others draw two.
 _NARROW, _WIDE = "🗑", "📂"
 
 
 def test_the_icon_column_is_the_widest_mark_a_list_can_draw() -> None:
-    """A list declares its icons and the column measures them; an empty set has no column."""
+    """A list declares its icons and the column measures them. An empty set has no column."""
     from rich.cells import cell_len
 
     assert cell_len(_NARROW) == 1 and cell_len(_WIDE) == 2, "the premise of this whole lane"
-    assert icon_lane((_NARROW,)) == 1  # a list of only narrow marks keeps a narrow column
+    assert icon_lane((_NARROW,)) == 1  # a list that has only narrow marks keeps a narrow column
     assert icon_lane((_WIDE,)) == 2
-    assert icon_lane((_NARROW, _WIDE)) == 2  # a mixed list pads up to its widest
+    assert icon_lane((_NARROW, _WIDE)) == 2  # a mixed list pads to its widest mark
     assert icon_lane(()) == 0
-    assert icon_lane(("",)) == 0  # a row with no icon contributes no column
+    assert icon_lane(("",)) == 0  # a row with no icon adds no column
 
 
 def test_a_narrow_mark_pads_out_to_its_wider_siblings() -> None:
-    """THE fix for a row whose label started a column early (JP, 2026-09-01).
+    """The fix for a row whose label started one column early (JP, 2026-09-01).
 
-    ``🗑 Delete contact…`` sat one cell left of ``💾 Archive contact`` because the row wrote
-    ``icon + " "`` and the terminal draws the two icons in different widths. Both marks now
-    occupy the same number of *cells*, which is the only measure the terminal cares about —
-    the character counts still differ, and asserting on those is what hid this.
+    ``🗑 Delete contact…`` was one cell to the left of ``💾 Archive contact``. The row wrote
+    ``icon + " "``, and the terminal draws the two icons in different widths. Now both
+    marks use the same number of cells. Cells are the only measure that the terminal uses.
+    The character counts are still different, and a test of the counts hid this fault.
     """
     from rich.cells import cell_len
 
@@ -257,7 +260,7 @@ def test_a_narrow_mark_pads_out_to_its_wider_siblings() -> None:
 
 
 def test_marked_label_lines_up_a_mixed_list_when_told_its_lane() -> None:
-    """Labels start in the same cell once the caller passes the list's measured column."""
+    """Labels start in the same cell when the caller passes the measured column of the list."""
     from rich.cells import cell_len
 
     lane = icon_lane((_NARROW, _WIDE))
@@ -271,8 +274,8 @@ def test_marked_label_lines_up_a_mixed_list_when_told_its_lane() -> None:
     }
     assert starts == {lane + 1}
 
-    # Without the lane each mark measures itself, which is right for a list whose rows all
-    # lead with the same icon — and is exactly what misaligns a mixed one.
+    # Without the lane, each mark measures itself. This is correct for a list whose rows
+    # all start with the same icon. It misaligns a mixed list.
     solo = [marked_label(_NARROW, "A", "err"), marked_label(_WIDE, "B", "")]
     assert (
         len(
@@ -290,11 +293,11 @@ def _plain(label) -> str:
 
 
 def test_align_icons_starts_every_word_in_the_same_cell() -> None:
-    """A one-cell and a two-cell icon inside label strings pad out to one column.
+    """A one-cell icon and a two-cell icon in label strings get padding to one column.
 
-    The fault this closes kept reappearing a screen at a time (the node page, the main
-    menu, the repeater admin's ``↻``/``⌨`` rows), because each list had to remember to
-    measure its own icon column. Iconless labels pass through as the object they were.
+    This fault came back on one screen after another (the node page, the main menu, the
+    ``↻`` and ``⌨`` rows of the repeater admin). Each list had to remember to measure its
+    own icon column. A label with no icon passes through as the same object.
     """
     plain_row = "Reorder"
     labels = align_icons(
@@ -313,7 +316,7 @@ def test_align_icons_starts_every_word_in_the_same_cell() -> None:
 
 
 def test_align_icons_keeps_a_base_style_and_never_adds_to_an_existing_gap() -> None:
-    """A whole-row tint survives as a span; aligning an aligned list changes nothing."""
+    """A tint on the whole row stays as a span. To align a list that is aligned changes nothing."""
     danger = Text(f"{_NARROW} Factory reset…", style="err")
     once = align_icons([danger, f"{_WIDE} Sync clock…"])
     words = once[0].plain.index("Factory")
@@ -325,7 +328,7 @@ def test_align_icons_keeps_a_base_style_and_never_adds_to_an_existing_gap() -> N
 
 
 def test_menu_rows_line_up_mixed_icon_widths_without_being_told() -> None:
-    """A list built through menu_rows gets the icon column for free — no lane to pass."""
+    """A list that menu_rows builds gets the icon column with no lane to pass."""
     from rich.cells import cell_len
 
     rows = menu_rows(
@@ -343,7 +346,7 @@ def test_menu_rows_line_up_mixed_icon_widths_without_being_told() -> None:
 
 
 def test_align_icons_pads_nothing_where_the_platform_draws_no_icons() -> None:
-    """No icon lane: the icons go, and no padding is left standing in their place."""
+    """With no icon lane, the icons go, and no padding stays in their place."""
     from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 
     set_platform(PICOCALC_LYRA)
@@ -355,14 +358,14 @@ def test_align_icons_pads_nothing_where_the_platform_draws_no_icons() -> None:
 
 
 def test_the_main_menu_starts_every_title_in_the_same_cell() -> None:
-    """The app's front door obeys its own icon-column rule (JP, 2026-09-06).
+    """The main menu follows the icon-column rule of the app (JP, 2026-09-06).
 
-    The menu is the one list that never declares its icons — it takes whatever the tool
-    registry carries — so it is also the one that quietly drifts when a tool arrives with
-    a mark of a different width. ``⚙`` is that mark today: a single cell among
-    twenty-three two-cell siblings, which started *Preferences* a column left of every
-    other row. Asserting the shared start column rather than the gear itself keeps the
-    next narrow icon from re-opening it.
+    The menu is the only list that never declares its icons. It takes the icons that the
+    tool registry has. Thus it is also the list that drifts without a warning when a tool
+    has a mark of a different width. ``⚙`` was that mark: one cell among twenty-three
+    two-cell siblings. It started the row *Preferences* one column to the left of each other
+    row. The test checks the shared start column and not the gear itself. Thus the next
+    narrow icon does not cause the fault again.
     """
     from rich.cells import cell_len
 
@@ -385,10 +388,10 @@ def test_the_main_menu_starts_every_title_in_the_same_cell() -> None:
 def test_an_iconless_platform_collapses_the_column_and_keeps_the_tint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No icon lane means no cells spent and no separator — and the tint moves to the words.
+    """With no icon lane, the row uses no cells and no separator, and the tint moves to the words.
 
-    A destructive row announces itself by its red mark; drop the mark and the claim has to
-    land somewhere, or a delete reads like any other action.
+    A destructive row shows itself with its red mark. If the row has no mark, the tint must
+    go somewhere. If it does not, a delete reads as any other action.
     """
     from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 
