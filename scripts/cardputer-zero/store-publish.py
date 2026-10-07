@@ -24,6 +24,10 @@ stops with an error and does not publish.
 
 The script publishes nothing when the store already has this version, or when a pull
 request for it is open. Thus a second run of a release does not open a second pull request.
+It also publishes nothing while a pull request for an earlier version is open, because
+the two would add the same files and conflict. A release in that time goes out as usual,
+and its store job only shows a warning. After the merge, run that store job again, and it
+publishes the version.
 
     python scripts/cardputer-zero/store-publish.py --czdev ~/CardputerZero-AppBuilder \
         --deb dist/meshterm_0.10.4-1_arm64.deb
@@ -83,13 +87,15 @@ def _published_versions(package: str) -> set[str]:
     return versions
 
 
-def _open_pull_request(title: str, login: str, token: str) -> str | None:
-    """The URL of an open pull request of ``login`` with ``title``, or ``None``."""
+def _open_pull_requests(package: str, login: str, token: str) -> dict[str, str]:
+    """The open pull requests of ``login`` for ``package``, any version: title to URL."""
     pulls = _api(f"/repos/{TARGET}/pulls?state=open&per_page=100", token)
-    for pull in pulls:
-        if pull["user"]["login"] == login and pull["title"] == title:
-            return pull["html_url"]
-    return None
+    prefix = f"publish: {package} "
+    return {
+        pull["title"]: pull["html_url"]
+        for pull in pulls
+        if pull["user"]["login"] == login and pull["title"].startswith(prefix)
+    }
 
 
 def _set_up_git(login: str, token: str) -> None:
@@ -163,9 +169,17 @@ def main() -> int:
         return 0
     login = _api("/user", token)["login"]
     title = f"publish: {package} {version}"
-    already = _open_pull_request(title, login, token)
-    if already:
-        print(f"a pull request for {package} {version} is already open: {already}")
+    pending = _open_pull_requests(package, login, token)
+    if title in pending:
+        print(f"a pull request for {package} {version} is already open: {pending[title]}")
+        return 0
+    if pending:
+        # A second pull request would add the same files as the open one, and the two
+        # would conflict. Thus this version waits until the open one is merged. Then a
+        # rerun of the release's store job publishes it.
+        mark = "::warning::" if os.environ.get("GITHUB_ACTIONS") else ""
+        for other, url in pending.items():
+            print(f"{mark}{other} is still open ({url}); {version} waits for its merge")
         return 0
 
     _correct(publish, GitHubClient)

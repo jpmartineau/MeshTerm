@@ -185,7 +185,12 @@ If `store` failed, the usual causes are the `CARDPUTER_STORE_TOKEN` secret (miss
 token revoked) or a change in czdev: the job pins AppBuilder to one commit because
 `scripts/cardputer-zero/store-publish.py` corrects two of its functions, and the script
 refuses a czdev without them. A rerun is safe — the script publishes nothing when the store
-already has the version or a PR for it is open. The manifest's email must be
+already has the version or a PR for it is open. While a PR for an **earlier** version is
+still open (a first release waits for a maintainer and a video), the job only warns: a
+second PR would add the same files and conflict. The release itself is not held back. Once
+that PR is merged, rerun this release's store job and it publishes:
+`gh run rerun <run-id> --job <store-job-id>` (the job id is in `gh run view <run-id>
+--json jobs`). The manifest's email must be
 `johnputer@meshterm.net`; the script sets it, so check it once on the PR's files.
 
 The notes open with an install block the workflow writes from the tag — the same commands
