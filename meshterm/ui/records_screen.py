@@ -809,6 +809,13 @@ def node_geo_lookup(
     A record stores canonical ids. Thus the lookup matches them the same as the resolver
     does: a prefix on either side.
 
+    A hop that the topology could not resolve keeps its short hash (``3d``), and several
+    nodes can start with it. The lookup then makes a guess: the first entry that matches.
+    The score leaves such a hop out, so the drawing can show a point that the score did not
+    measure. JP chose this on 2026-10-07: the probable shape is more useful than a shape
+    that has lost a point. The name resolver makes the same guess, so the name and the pin
+    of a hop always agree.
+
     Args:
         heard: The heard nodes of the history (:meth:`Repository.heard_nodes`).
         contacts: The contacts of the device.
