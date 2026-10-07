@@ -242,17 +242,22 @@ def test_the_raster_draws_a_cell_in_its_colours() -> None:
 
 
 @pytest.mark.skipif(not hasattr(mmap, "MAP_SHARED"), reason="the panel is Linux's")
-def test_the_panel_is_written_through_its_mapping(tmp_path) -> None:
+def test_the_panel_is_written_through_its_mapping(tmp_path, monkeypatch) -> None:
     """The rows go to their stride through the map.
 
     The panel draws again only what the map makes dirty. A ``pwrite`` to the ``/dev/fb0`` of
     the Cardputer reaches the buffer, but it never reaches the glass. Thus MeshTerm ran
     behind the loading screen of the launcher. A plain file is a stand-in for the device.
     The test makes sure that the bytes go through the mapping, to the correct place.
+
+    The test removes the sysfs read. A Linux CI runner has a real
+    ``/sys/class/graphics/fb0``, and its stride is not the stride of this small file. With
+    that stride, the map was longer than the file, and ``mmap`` refused it.
     """
+    monkeypatch.setattr(Framebuffer, "_sysfs", lambda self, name: None)
     path = tmp_path / "fb0"
     path.write_bytes(bytes(8 * 4))
-    fb = Framebuffer(str(path), width=4, height=4)  # no sysfs here: the stride is width * 2
+    fb = Framebuffer(str(path), width=4, height=4)  # no sysfs: the stride is width * 2
     write = os.pwrite
     try:
         os.pwrite = lambda *a: pytest.fail("the panel must not be written with pwrite")  # type: ignore[assignment]
