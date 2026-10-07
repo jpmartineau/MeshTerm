@@ -1,37 +1,42 @@
 # Terminals, icons, and the Windows console
 
-Why MeshTerm looks right in some terminals and draws empty boxes in others, what it does
-about it on Windows, and how to turn all of that off.
+This page explains why MeshTerm looks correct in some terminals and draws empty boxes in
+others. It also tells what MeshTerm does about this on Windows, and how to turn that off.
 
-MeshTerm is drawn with emoji icons, braille charts, and powerline path chips. Whether you
-see them is up to your *terminal*, not really your font: a modern terminal, asked for a
-character its font doesn't have, quietly borrows it from another font on the machine.
-That's why the app looks right in Windows Terminal, in VS Code's terminal, and on macOS
-and Linux — usually with a font that contains almost none of it. The exception is macOS's
-Terminal app, where the charts may draw misaligned: no Mac monospace font has braille, so
-it is borrowed from a proportional one at the wrong width.
+MeshTerm draws emoji icons, braille charts, and powerline path chips. Your terminal decides
+if you see them. The font is less important. When a modern terminal must draw a character
+that its font does not have, it takes the character from another font on the machine. Thus
+the app looks correct in Windows Terminal, in the terminal of VS Code, and on macOS and
+Linux. This is usually true also when the font has almost none of these characters.
 
-The classic Windows console — the black `cmd.exe` window a double-click opens on
-Windows 10 — doesn't borrow. (Windows 11, 22H2 and later, opens Windows Terminal by
-default instead.) It draws what its one font holds and empty boxes for everything else, and
-no font fixes the icons there: the only two fonts on a Windows machine with emoji in them
-are proportional, and a console won't take a proportional font.
+The Terminal app of macOS is the exception. The charts can be misaligned there. No Mac
+monospace font has braille, so the terminal takes it from a proportional font, at the wrong
+width.
 
-So when MeshTerm lands in that console it just **moves to Windows Terminal** — it says
-so, and opens there. Nothing is installed and nothing is changed; it's one window instead
-of another, and it's the whole app exactly as the screenshots show it. Windows Terminal is
-already on every Windows 11 machine and is a free install on Windows 10.
+The classic Windows console does not take characters from other fonts. This is the black
+`cmd.exe` window that a double-click opens on Windows 10. (Windows 11, version 22H2 and
+later, opens Windows Terminal by default.) The console draws what its one font has, and
+empty boxes for all other characters. No font can correct the icons there. Only two fonts
+on a Windows machine have emoji, and both are proportional. A console does not accept a
+proportional font.
 
-Where there's no Windows Terminal to move to, and the console's font can't already draw
-the charts, MeshTerm offers the next best thing instead — the charts and marks, without
-the icons. It ships
-[Cascadia Mono PL](https://github.com/microsoft/cascadia-code), Microsoft's own console
-font and one of the very few monospace faces that carries braille at all, and will install
-it just for you: no administrator rights, nothing downloaded. If you already have a font
-that can draw the charts (Cascadia, or another such as Iosevka), it offers to switch to
-that one instead. Either way it asks first (`[y/N]`), and the answer defaults to no.
+When MeshTerm starts in this console, it **moves to Windows Terminal**. It tells you, and
+it opens the app there. MeshTerm does not install or change anything. You get one window
+instead of another, and the whole app looks exactly as the screenshots show. Windows
+Terminal is already on each Windows 11 machine. On Windows 10 it is a free install.
 
-Preferences → Display → Console setup turns all of this off if you'd rather stay put.
+Sometimes there is no Windows Terminal to move to, and the font of the console cannot
+draw the charts. Then MeshTerm offers the next best choice: the charts and marks, without
+the icons. MeshTerm includes
+[Cascadia Mono PL](https://github.com/microsoft/cascadia-code), the console font of
+Microsoft. It is one of the very few monospace fonts that have braille. MeshTerm can
+install it for your user account only. This needs no administrator rights and no download. If you
+already have a font that can draw the charts (Cascadia, or another such as Iosevka),
+MeshTerm offers to switch to that font instead. In each case, MeshTerm asks first
+(`[y/N]`), and the default answer is no.
 
-Where MeshTerm keeps its state, and how to point a trial run somewhere else, is in
-[Configuring MeshTerm](configuration.md).
+To keep the console that you have, turn all of this off. Go to Preferences → Display →
+Console setup.
+
+[Configuring MeshTerm](configuration.md) tells where MeshTerm keeps its state, and how to
+point a trial run to another place.
