@@ -1,17 +1,17 @@
 # MeshTerm
 
-**A full-featured TUI [MeshCore](https://meshcore.io/) client for your terminal** — tune
-your radio, chat across the mesh, watch the network live, and keep a longitudinal record
-of everything you overhear, all from a connected serial, Bluetooth, or network (TCP)
-companion.
+**A full-featured TUI [MeshCore](https://meshcore.io/) client for your terminal.** Use it
+to tune your radio, chat across the mesh, and watch the network live. It also keeps a
+long-term record of everything that you overhear. It works with a companion that is
+connected by serial, Bluetooth, or network (TCP).
 
-MeshTerm is interactive by default: a modern, keyboard-driven TUI built on
-[Rich](https://github.com/Textualize/rich) and
-[prompt_toolkit](https://github.com/prompt-toolkit/python-prompt-toolkit). It is also
-fully scriptable — **most screens have a mirror `meshterm` subcommand** — so the same
-capabilities drive both an evening of exploring the mesh and a cron job. Every packet the
-radio overhears is recorded to a local SQLite database, so the longer you run it, the more
-your mesh's history is worth.
+MeshTerm is interactive by default. It is a modern TUI that you operate with the keyboard,
+built on [Rich](https://github.com/Textualize/rich) and
+[prompt_toolkit](https://github.com/prompt-toolkit/python-prompt-toolkit). You can also
+use it in scripts. **Most screens have a mirror `meshterm` subcommand.** Thus the same
+functions work for an evening of exploration on the mesh and for a cron job. MeshTerm
+stores each packet that the radio overhears in a local SQLite database. The longer you
+run MeshTerm, the more the history of your mesh is worth.
 
 <p>
   <a href="https://github.com/jpmartineau/MeshTerm/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/jpmartineau/MeshTerm/actions/workflows/ci.yml/badge.svg"></a>
@@ -23,69 +23,74 @@ your mesh's history is worth.
   <a href="https://discord.gg/AZwe5Uvb3S"><img alt="Discord" src="https://img.shields.io/badge/chat-Discord-5865F2"></a>
 </p>
 
-> MeshTerm is a side project, run by one person. Bug reports are very welcome. Want to
-> change something? Say hello on [Discord](https://discord.gg/AZwe5Uvb3S) first.
-> [More on how it's run](#how-this-project-is-run).
+> MeshTerm is a side project, and one person runs it. We welcome bug reports. If you want to
+> change something, first say hello on [Discord](https://discord.gg/AZwe5Uvb3S).
+> [Read more about how the project is run](#how-this-project-is-run).
 
 https://github.com/user-attachments/assets/f91a6695-14d5-4ae0-8fdc-e65492d0955d
 
-<p align="center"><sub>Under two minutes on a real mesh.</sub></p>
+<p align="center"><sub>A video of less than two minutes, made on a real mesh.</sub></p>
 
 <p align="center">
-  <img src="docs/screenshots/dashboard.png" alt="The dashboard: a packets-per-minute timeline over the last two hours, and every packet class counted" width="49%">
-  <img src="docs/screenshots/map.png" alt="The map: repeaters named over an OpenStreetMap basemap of the Lachine Canal" width="49%">
+  <img src="docs/screenshots/dashboard.png" alt="The dashboard: a timeline of the packets for each minute over the last two hours, and a count for each class of packet" width="49%">
+  <img src="docs/screenshots/map.png" alt="The map: repeaters with their names, on an OpenStreetMap basemap of the Lachine Canal" width="49%">
 </p>
 <p align="center">
-  <img src="docs/screenshots/trace.png" alt="A trace: the route it walked drawn as chips, then the SNR of every hop" width="49%">
-  <img src="docs/screenshots/path.png" alt="Message paths: every route a channel message was heard over, drawn on the ground" width="49%">
+  <img src="docs/screenshots/trace.png" alt="A trace: the route that the trace went through, drawn as chips, then the SNR of each hop" width="49%">
+  <img src="docs/screenshots/path.png" alt="Message paths: each route over which a channel message was heard, drawn on the map" width="49%">
 </p>
 <p align="center">
-  <img src="docs/screenshots/picocalc.png" alt="MeshTerm on the PicoCalc, a 53-column console with a radio wired inside" width="38%">
+  <img src="docs/screenshots/picocalc.png" alt="MeshTerm on the PicoCalc, a console that is 53 columns wide, with a radio installed inside it" width="38%">
 </p>
-<p align="center"><sub>The dashboard, the map, a trace, the paths a message took — and the whole thing on a PicoCalc.</sub></p>
+<p align="center"><sub>The dashboard, the map, a trace, the paths of a message, and the whole app on a PicoCalc.</sub></p>
 
 ---
 
 ## Why MeshTerm
 
-- **One tool, two faces.** Launch `meshterm` for a full-screen menu; pass a subcommand for
-  a scripted one-shot. The registry that builds the menu builds the CLI, so they never
-  drift apart.
-- **It remembers.** A passive monitor logs every overheard advert and telemetry frame —
-  SNR, RSSI, shared location — to SQLite from the moment the radio opens. Maps, contact lists,
-  charts, and the Time Machine all read back that history.
-- **It measures.** Live trace with per-hop reliability, a coarse→refine→verify TX-power
-  sweep, and a walkable graph of how the mesh actually hangs together.
-- **It talks.** Live channel and direct messaging, room servers' message boards,
-  store-and-forward courier delivery for contacts that aren't there yet, and shareable
-  channels as QR codes and `meshcore://` links.
-- **It connects however your companion does.** Serial (USB), Bluetooth LE, or TCP (a Wi-Fi
-  board or a network proxy) — the discoverable transports are auto-found and picked
-  interactively, a network device is named by hand, and every kind reconnects live when a link
-  drops. It pairs a PIN-protected Bluetooth companion itself on Windows and Linux, and when a
-  connection fails it says which step failed and what to do. No radio? A built-in simulator
-  covers development.
-- **It works offline.** The street map caches OpenStreetMap tiles to disk and falls back to
-  a blank grid when there's no network — it never needs the internet to run.
+- **One tool, two faces.** To open a full-screen menu, start `meshterm`. To run one scripted
+  task, give a subcommand. The same registry builds the menu and the CLI, so they do not
+  become different from one another.
+- **It remembers.** A passive monitor stores each advert and each telemetry packet that it
+  overhears. This includes the SNR, the RSSI, and the shared position. The monitor starts
+  when the radio opens. The maps, the contact lists, the charts, and the Time Machine all
+  read this history.
+- **It measures.** It has a live trace with the reliability of each hop. It has a TX-power
+  sweep that goes from coarse to fine and then verifies the result. It also has a graph
+  that you can walk through, which shows how the mesh is really connected.
+- **It talks.** You can send live messages on a channel and direct messages. You can use the
+  message boards of room servers. A courier stores messages and sends them when a contact
+  is not yet there. You can share a channel as a QR code or as a `meshcore://` link.
+- **It connects in the same way as your companion.** It supports serial (USB), Bluetooth
+  LE, and TCP (a Wi-Fi board or a network proxy). It finds the serial and Bluetooth
+  devices automatically, and you select one from a list. You type the name of a network
+  device. MeshTerm reconnects live when a link of any kind drops. On Windows and Linux,
+  MeshTerm pairs with a Bluetooth companion that has a PIN. When a connection fails,
+  MeshTerm says which step failed and what to do. If you have no radio, a built-in
+  simulator is available for development.
+- **It works offline.** The street map caches OpenStreetMap tiles on disk. When there is no
+  network, it shows a blank grid. MeshTerm never needs the internet to run.
 
 ## Install
 
 ### Download a build
 
-One file, no Python needed — Windows, macOS (Intel and Apple silicon), and Linux (x64 and
-ARM64, so the uConsole is covered). Every command below fetches the
+A build is one file. You do not need Python. Builds are available for Windows, macOS (Intel
+and Apple silicon), and Linux (x64 and ARM64, so the uConsole is included). Each command
+below gets the
 **[⬇ latest release](https://github.com/jpmartineau/MeshTerm/releases/latest)**, whichever
-one that is, so none of them goes stale.
+release that is. Thus the commands do not become old.
 
 MeshTerm is a terminal program, so **open a terminal and run it from there.** You can
-double-click it and it will work, but you'll get whatever console your system picks, and
-if anything goes wrong at startup the window closes before you can read why.
+double-click the file and it will work. But then your system selects the console, and you
+cannot choose it. If an error occurs at startup, the window closes before you can read the
+error.
 
-#### macOS — download it with `curl`
+#### macOS: download it with `curl`
 
-**Don't use your browser.** A browser flags the file as downloaded, and macOS then refuses
-to open it at all — on Sequoia and later, right-click → Open no longer gets you past that
-either. `curl` flags nothing, so what it hands you simply runs. Open Terminal and paste:
+**Do not use your browser.** A browser marks the file as downloaded, and then macOS does not
+let you open it. On Sequoia and later, right-click → Open does not help. `curl` does not
+mark the file, so the file runs. Open Terminal and paste:
 
 ```bash
 curl -fL -o meshterm https://github.com/jpmartineau/MeshTerm/releases/latest/download/meshterm-macos-arm64
@@ -93,13 +98,13 @@ chmod +x meshterm
 ./meshterm
 ```
 
-That's the build for Apple silicon Macs (M1 and later). On an **Intel** Mac, swap `arm64`
-for `x64`. And if you already downloaded it with a browser, you don't have to start over:
-`xattr -d com.apple.quarantine meshterm` clears the flag.
+This is the build for Apple silicon Macs (M1 and later). On an **Intel** Mac, replace
+`arm64` with `x64`. If you already downloaded the file with a browser, you do not have to
+start again. Run `xattr -d com.apple.quarantine meshterm` to clear the mark.
 
-#### Linux — the same three lines
+#### Linux: the same three lines
 
-`linux-x64` on a PC, `linux-arm64` on a uConsole or another 64-bit ARM handheld.
+Use `linux-x64` on a PC. Use `linux-arm64` on a uConsole or another 64-bit ARM handheld.
 
 ```bash
 curl -fL -o meshterm https://github.com/jpmartineau/MeshTerm/releases/latest/download/meshterm-linux-x64
@@ -110,52 +115,54 @@ chmod +x meshterm
 #### Windows
 
 Download
-**[meshterm-windows-x64.exe](https://github.com/jpmartineau/MeshTerm/releases/latest/download/meshterm-windows-x64.exe)**,
-then open Windows Terminal or PowerShell, `cd` to your downloads, and run it:
+**[meshterm-windows-x64.exe](https://github.com/jpmartineau/MeshTerm/releases/latest/download/meshterm-windows-x64.exe)**.
+Then open Windows Terminal or PowerShell, use `cd` to go to your downloads folder, and run
+the file:
 
 ```powershell
 .\meshterm-windows-x64.exe
 ```
 
-Windows says *"Windows protected your PC"* the first time. Click **More info → Run anyway**.
+The first time, Windows says *"Windows protected your PC"*. Click **More info → Run anyway**.
 
-Whichever you took, you now have a single file: `meshterm` on macOS and Linux,
-`meshterm-windows-x64.exe` on Windows. Put it somewhere on your `PATH` (renamed to
-`meshterm.exe` on Windows) and it's just `meshterm` from anywhere.
+After these steps, you have one file: `meshterm` on macOS and Linux, or
+`meshterm-windows-x64.exe` on Windows. Put the file in a folder that is in your `PATH`. On
+Windows, rename it to `meshterm.exe`. Then you can run `meshterm` from any folder.
 
-> **These builds aren't code-signed yet**, which is why macOS and Windows both push back
-> the first time. **Windows signing is on its way.** MeshTerm has applied to the
+> **These builds are not code-signed yet.** For this reason, macOS and Windows both show a
+> warning the first time. **Windows signing will come.** MeshTerm applied to the
 > [SignPath Foundation](https://signpath.org), which signs open-source projects for free.
-> Once that's set up, every Windows download will be signed. The
-> [code signing policy](#code-signing-policy) below explains how. Mac builds will stay
-> unsigned, because Apple charges for signing and this is a free side project.
-> Every release ships a `SHA256SUMS` file if you'd rather check what you got, and
-> [installing with pip or pipx](#or-install-with-pip) sidesteps the whole business, since
-> nothing arrives as a downloaded binary.
+> After the setup is complete, each Windows download will be signed. The
+> [code signing policy](#code-signing-policy) below gives the details. The Mac builds will
+> stay unsigned, because Apple charges a fee for signing and this is a free side project.
+> Each release has a `SHA256SUMS` file. Use it to check the file that you got.
+> [Installing with pip or pipx](#or-install-with-pip) avoids the problem, because you do not
+> download a binary.
 >
-> Each release page also carries these commands written out for **that exact version**,
-> next to its own downloads.
+> The page of each release also has these commands, written for **that exact version**, next
+> to its own downloads.
 
 ### If your terminal draws empty boxes
 
-MeshTerm is drawn with emoji icons, braille charts, and powerline path chips, and whether
-you see them is up to your *terminal* rather than your font. Windows Terminal, VS Code's
-terminal, and anything modern on macOS and Linux all draw them correctly.
+MeshTerm draws emoji icons, braille charts, and powerline path chips. Your *terminal*
+decides if you see them, not your font. Windows Terminal, the terminal of VS Code, and each
+modern terminal on macOS and Linux draw them correctly.
 
-The classic Windows console — the black `cmd.exe` window you get from a double-click —
-does not. So when MeshTerm lands there it **moves to Windows Terminal**, says so, and
-opens there; nothing is installed and nothing is changed. Where there's no Windows
-Terminal to move to, it offers the charts and marks without the icons instead, and will
-install Microsoft's [Cascadia Mono PL](https://github.com/microsoft/cascadia-code) just
-for you — no administrator rights, nothing downloaded.
+The classic Windows console does not draw them. This is the black `cmd.exe` window that
+opens when you double-click the file. When MeshTerm starts there, it **moves to Windows
+Terminal**, tells you, and opens there. It does not install anything and does not change
+anything. If Windows Terminal is not available, MeshTerm offers the charts and marks without
+the icons. It also installs Microsoft's [Cascadia Mono PL](https://github.com/microsoft/cascadia-code)
+for you. This needs no administrator rights, and it downloads nothing.
 
-Preferences → Display → Console setup turns all of this off if you'd rather stay put.
-[Terminals, icons, and the Windows console](docs/guide/terminals.md) explains why any of it is
-necessary.
+To stay in the same console, turn off these actions in Preferences → Display → Console
+setup. [Terminals, icons, and the Windows console](docs/guide/terminals.md) explains why
+they are necessary.
 
-> **Trying a build without touching your real data.** MeshTerm keeps everything in
-> `~/.meshterm` — your history database, contacts, channel keys — and *every* copy of
-> MeshTerm uses that same folder. Set `MESHTERM_HOME` to try one in isolation:
+> **Try a build without a change to your real data.** MeshTerm keeps all its data in
+> `~/.meshterm`. This includes your history database, your contacts, and your channel
+> keys. *Each* copy of MeshTerm uses this same folder. To try a copy in isolation, set
+> `MESHTERM_HOME`:
 >
 > ```bash
 > MESHTERM_HOME=~/meshterm-test ./meshterm              # macOS, Linux
@@ -164,53 +171,54 @@ necessary.
 > $env:MESHTERM_HOME = "$HOME\meshterm-test"; .\meshterm-windows-x64.exe
 > ```
 >
-> Same variable if you run two radios and want them kept apart.
+> Use the same variable if you run two radios and you want to keep them separate.
 
 ### Or install with pip
 
-You need **Python 3.10 or newer**. That's the only requirement — MeshTerm pulls in
-everything else itself.
+You need **Python 3.10 or newer**. This is the only requirement. MeshTerm installs all
+other parts by itself.
 
 ```bash
 pip install git+https://github.com/jpmartineau/MeshTerm
 meshterm
 ```
 
-`meshterm` opens the full-screen menu. That's the whole install.
+`meshterm` opens the full-screen menu. This is the complete installation.
 
-**Rather not touch your system Python?** [pipx](https://pipx.pypa.io/) puts the app in its
-own private environment and still gives you a plain `meshterm` command:
+**Do you not want to change your system Python?** [pipx](https://pipx.pypa.io/) puts the
+app in its own private environment. It also gives you a normal `meshterm` command:
 
 ```bash
 pipx install git+https://github.com/jpmartineau/MeshTerm
 ```
 
-**No radio yet?** `meshterm --mock` runs the entire app against a simulated mesh, so you
-can have a look around before you buy anything.
+**Do you not have a radio yet?** `meshterm --mock` runs the complete app on a simulated
+mesh. You can look at the app before you buy anything.
 
 ### Coming
 
-**`pip install mesh-term`**, once the package is published. It isn't yet — the name
-question is still being sorted out ([why](https://github.com/pypi/support/issues/12162)).
+**`pip install mesh-term`** will work after the package is published. It is not published
+yet, because the question of the name is not resolved
+([read why](https://github.com/pypi/support/issues/12162)).
 
-Setting up for development instead? That's in [CONTRIBUTING.md](CONTRIBUTING.md).
+To set up a development environment, refer to [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Documentation
 
-**[The documentation index](docs/README.md)** lists everything, including the code survey
-kept as a historical record. The short version:
+**[The documentation index](docs/README.md)** lists all the documents. This includes the
+code survey, which we keep as a historical record. This table is a short version:
 
 | Read | For |
 | --- | --- |
-| **[The command line](docs/cli/README.md)** | Every subcommand and option, what each prints on the plain and JSON faces, the exit statuses, recipes. |
-| **[What MeshTerm does](docs/guide/features.md)** | Every screen the menu offers, and the command that does the same job without it. |
-| [The CLI cookbook](docs/cli/cookbook.md) | Common one-liners, by the thing you're trying to do. |
-| [Configuring MeshTerm](docs/guide/configuration.md) | Preferences, device profiles, and everything kept under `~/.meshterm`. |
-| [When a companion won't connect](docs/guide/connecting.md) | Bluetooth pairing on each system, finding the PIN, USB permissions, and every connection error, with what to do about it. |
-| [MeshTerm on hardware](docs/devices/README.md) | Which handheld manual is yours — the [PicoCalc](docs/devices/picocalc-lyra.md) build, or the [uConsole](docs/devices/uconsole.md), whose LoRa chip MeshTerm can drive directly. The [Cardputer Zero](docs/devices/cardputer-zero.md) is **not supported yet**. |
-| [How the code is laid out](docs/development/architecture.md) | The layering, and where a new feature goes. |
+| **[The command line](docs/cli/README.md)** | Each subcommand and option, what each prints on the plain face and on the JSON face, the exit statuses, and recipes. |
+| **[What MeshTerm does](docs/guide/features.md)** | Each screen that the menu has, and the command that does the same job without the menu. |
+| [The CLI cookbook](docs/cli/cookbook.md) | Common one-line commands, in groups by the task that you want to do. |
+| [Configuring MeshTerm](docs/guide/configuration.md) | The preferences, the device profiles, and all the files that MeshTerm keeps in `~/.meshterm`. |
+| [When a companion does not connect](docs/guide/connecting.md) | Bluetooth pairing on each system, how to find the PIN, USB permissions, and each connection error, with the action to take. |
+| [MeshTerm on hardware](docs/devices/README.md) | Which handheld manual is the correct one for you: the [PicoCalc](docs/devices/picocalc-lyra.md) build, or the [uConsole](docs/devices/uconsole.md), whose LoRa chip MeshTerm can control directly. The [Cardputer Zero](docs/devices/cardputer-zero.md) is **not supported yet**. |
+| [How the code is laid out](docs/development/architecture.md) | The layers of the code, and where to put a new feature. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | The development setup and the house rules. |
-| [CHANGELOG.md](CHANGELOG.md) | What changed, newest first. |
+| [CHANGELOG.md](CHANGELOG.md) | What changed, with the newest change first. |
 
 ## Quick start
 
@@ -237,40 +245,43 @@ meshterm --mock --platform picocalc-lyra
 meshterm specimen
 ```
 
-Putting MeshTerm on a handheld has its own manuals. **[MeshTerm on the
-PicoCalc](docs/devices/picocalc-lyra.md)** takes a stock PicoCalc from the shopping list to a
-Linux handheld with a LoRa radio soldered inside; **[MeshTerm on the
-uConsole](docs/devices/uconsole.md)** drives a uConsole's SPI LoRa board directly with
-`--spi`, or through a small bridge if you want the node on the mesh all the time. M5Stack's
-Cardputer Zero has a page too, but it is **[not supported yet](docs/devices/cardputer-zero.md)**.
-The device-side scripts the manuals run are in [`scripts/`](scripts/); not sure which
-manual is yours? [`docs/devices/README.md`](docs/devices/README.md) says.
+MeshTerm has its own manuals for handhelds. **[MeshTerm on the
+PicoCalc](docs/devices/picocalc-lyra.md)** goes from the shopping list for a stock PicoCalc
+to a Linux handheld that has a LoRa radio soldered inside. **[MeshTerm on the
+uConsole](docs/devices/uconsole.md)** shows how to control the SPI LoRa board of a uConsole
+directly with `--spi`. It also shows how to use a small bridge, if you want the node to be
+on the mesh at all times. M5Stack's Cardputer Zero also has a page, but it is **[not
+supported yet](docs/devices/cardputer-zero.md)**. The scripts that the manuals run on the
+device are in [`scripts/`](scripts/). If you do not know which manual is correct for you,
+refer to [`docs/devices/README.md`](docs/devices/README.md).
 
-A companion that won't connect? **[When a companion won't
-connect](docs/guide/connecting.md)** covers Bluetooth pairing on Windows, Linux, and macOS, the
-`dialout` group and ModemManager for USB on Linux, and every error message MeshTerm gives.
+Does a companion not connect? **[When a companion does not
+connect](docs/guide/connecting.md)** explains Bluetooth pairing on Windows, Linux, and
+macOS. It also explains the `dialout` group and ModemManager for USB on Linux, and each
+error message that MeshTerm gives.
 
 ## What it does
 
-The menu asks one question — *what would you like to do?* — and answers it in two halves.
-Three sections name a doing: **Message** is chat, channels, the courier outbox, and
-contacts; **Watch** is the dashboard, the live feed, the watchtower, and the time machine;
-**Explore** is the map, the mesh walk, tracing, and the trophy case. Three name whose it is:
-**This node** is the radio in your hand, **Other nodes** is someone else's over the mesh,
-and **This app** is MeshTerm itself — preferences, diagnostics, and the written pages.
+The menu asks one question: *what would you like to do?* It gives the answer in two halves.
+Three sections name an activity. **Message** has chat, channels, the courier outbox, and
+contacts. **Watch** has the dashboard, the live feed, the watchtower, and the time machine.
+**Explore** has the map, the mesh walk, tracing, and the trophy case. The other three
+sections name the owner. **This node** is the radio in your hand. **Other nodes** is the
+someone else's radio, which you reach over the mesh. **This app** is MeshTerm itself, with
+the preferences, the diagnostics, and the written pages.
 
-Nearly every one of them has a mirror `meshterm` subcommand — the same registry builds
-the menu and the CLI, so they can't drift apart. The live screens, such as the map and
-the dashboard, are only in the menu.
+Almost all of these have a mirror `meshterm` subcommand. The same registry builds the menu
+and the CLI, so they do not become different from one another. The live screens, such as the
+map and the dashboard, are only in the menu.
 
-**[What MeshTerm does](docs/guide/features.md)** is the full catalogue: every screen, what it
-does, and its scripted equivalent where one exists.
+**[What MeshTerm does](docs/guide/features.md)** is the complete catalogue. It shows each
+screen, what the screen does, and the scripted equivalent where there is one.
 
 ## Scripting it
 
-Nearly every command speaks `--json`, and the global options — `--profile/-p`, `--port`,
-`--ble`, `--ble-pin`, `--tcp`, `--spi`, `--mock`, `--db`, `--json`, `--absolute`, `--quiet/-q`,
-`--platform` — may be typed before or after the subcommand.
+Almost every command accepts `--json`. The global options are `--profile/-p`, `--port`,
+`--ble`, `--ble-pin`, `--tcp`, `--spi`, `--mock`, `--db`, `--json`, `--absolute`,
+`--quiet/-q`, and `--platform`. You can type them before or after the subcommand.
 
 ```bash
 # Every repeater's public key, for a script
@@ -288,44 +299,46 @@ meshterm config set radio_sf 9
 meshterm monitor --seconds 60
 ```
 
-**[The command line](docs/cli/README.md)** is the manual — every command and option, what each
-prints on both faces, and the exit statuses.
-**[The CLI cookbook](docs/cli/cookbook.md)** has more one-liners like these.
+**[The command line](docs/cli/README.md)** is the manual. It shows each command and option,
+what each prints on both faces, and the exit statuses.
+**[The CLI cookbook](docs/cli/cookbook.md)** has more one-line commands like these.
 
 ## How this project is run
 
-MeshTerm is one person working evenings and weekends. I'd rather tell you that up front
-than have you guess from how long things take.
+One person works on MeshTerm, in the evenings and at weekends. I want to tell you this at
+the start, so that you do not have to guess from the time that things take.
 
-**Issues are welcome — all of them.** Bugs, questions, "is this supposed to do that". The
-[bug form](https://github.com/jpmartineau/MeshTerm/issues/new?template=bug.yml) asks for a
-fair bit, and that's on purpose: how well a problem is described really does decide whether
-I can do anything with it. If I can reproduce it, I'll usually chase it. If I can't, I'm
-mostly guessing.
+**We welcome all issues.** This includes bugs, questions, and "is this a fault or is it
+correct". The
+[bug form](https://github.com/jpmartineau/MeshTerm/issues/new?template=bug.yml) asks for
+much information. This is intentional. The quality of the description of a problem
+decides if I can do something about it. If I can reproduce a problem, I will usually work
+on it. If I cannot reproduce it, I can only guess.
 
 **Ask before you write a pull request.** Join the [Discord](https://discord.gg/AZwe5Uvb3S)
-and say hello in `#contributing`. Tell us what you'd like to change. Then wait for a yes.
-That goes for small fixes too. I'm not being precious. MeshTerm has firm house rules
-about how screens get built (they're in [CLAUDE.md](CLAUDE.md)), and I'd hate for you to
-spend a weekend on something I then ask you to rewrite. A quick conversation first saves
-us both. AI tools are fine, as long as you say you used them.
-[CONTRIBUTING.md](CONTRIBUTING.md) has the details.
+and say hello in `#contributing`. Tell us what you want to change. Then wait for a yes.
+This applies to small corrections also. This is not because I am too careful. MeshTerm has
+firm house rules for how to build screens (they are in [CLAUDE.md](CLAUDE.md)). I do not
+want you to spend a weekend on a change that I then ask you to write again. A short
+conversation at the start saves time for both of us. You can use AI tools, but you must say
+that you used them. [CONTRIBUTING.md](CONTRIBUTING.md) has the details.
 
-**I can't promise timelines.** Some things get fixed the same night. Some sit for a month
-because life happened. If your issue goes quiet, please give it a nudge. That helps me.
+**I cannot promise a time.** Some problems are corrected the same night. Some wait for a
+month, because I had other tasks in my life. If your issue is quiet for a long time, please
+remind me. This helps me.
 
-**Where to report things.** Either works:
+**Where to report a problem.** You can use one of these two places:
 
-- **[GitHub issues](https://github.com/jpmartineau/MeshTerm/issues)** if you have an
-  account. This is where things get tracked and fixed, so it's the shortest path.
-- **[Discord](https://discord.gg/AZwe5Uvb3S)** if you don't, or if you're not sure it's a
-  bug yet. Ask in the support forum, or drop reproducible defects in `#bugs`. I move the
-  real ones over to GitHub myself.
+- **[GitHub issues](https://github.com/jpmartineau/MeshTerm/issues)**, if you have an
+  account. We track and correct problems here, so this is the shortest path.
+- **[Discord](https://discord.gg/AZwe5Uvb3S)**, if you do not have an account, or if you
+  are not sure that the problem is a bug. Ask in the support forum, or put defects that you
+  can reproduce in `#bugs`. I move the real bugs to GitHub myself.
 
-Don't worry about picking the wrong one. Getting told about a problem beats filing it
-tidily.
+Do not worry about the choice of the wrong place. It is better that you tell us about a
+problem than that you file it in a tidy way.
 
-Also here: [CONTRIBUTING.md](CONTRIBUTING.md) ·
+More documents: [CONTRIBUTING.md](CONTRIBUTING.md) ·
 [SECURITY.md](SECURITY.md) ·
 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) ·
 [CHANGELOG.md](CHANGELOG.md)
@@ -335,29 +348,33 @@ Also here: [CONTRIBUTING.md](CONTRIBUTING.md) ·
 Free code signing provided by [SignPath.io](https://signpath.io), certificate by
 [SignPath Foundation](https://signpath.org).
 
-This is for the Windows download. It's being set up now, so releases up to and including
-0.10.2 are still unsigned.
+This policy is for the Windows download. The setup is in progress, so the releases up to
+and including 0.10.2 are still unsigned.
 
-**How a build gets signed.** Every Windows build is made by GitHub Actions, straight from
-the public source code in this repository. SignPath only signs a file it can trace back to
-one of those builds, and only after the maintainer approves that release. A file built on
-anyone's own computer can't be signed this way, not even the maintainer's.
+**How a build is signed.** GitHub Actions makes each Windows build, directly from the public
+source code in this repository. SignPath signs only a file that it can trace to one of
+these builds, and only after the maintainer approves that release. This process cannot sign
+a file that was built on any person's own computer, and this includes the maintainer's
+computer.
 
 **Who does what.** MeshTerm has one maintainer,
-[Jean-Pierre Martineau](https://github.com/jpmartineau), who holds all three roles:
+[Jean-Pierre Martineau](https://github.com/jpmartineau), who has all three roles:
 
 - **Author:** writes the code and commits it.
-- **Reviewer:** reviews every change from anyone else before it goes in.
-- **Approver:** approves each release before it gets signed.
+- **Reviewer:** reviews each change from anyone else before it goes in.
+- **Approver:** approves each release before it is signed.
 
 **Privacy.** This program will not transfer any information to other networked systems
 unless specifically requested by the user or the person installing or operating it.
 
-In practice, MeshTerm goes online for one thing: map tiles. It downloads them from
-[OpenFreeMap](https://openfreemap.org/) when you open a screen that shows a map, and
-OpenFreeMap's [privacy policy](https://openfreemap.org/privacy) covers those downloads. It
-collects nothing about you and doesn't check for updates. Over the radio, it sends only
-what you ask it to send.
+In practice, MeshTerm goes online for only one purpose: map tiles. It downloads them from
+[OpenFreeMap](https://openfreemap.org/) when you open a screen that shows a map. The
+[privacy policy](https://openfreemap.org/privacy) of OpenFreeMap applies to these
+downloads. MeshTerm collects no information about you, and it does not check for updates.
+Over the radio, MeshTerm sends only what you tell it to send.
+
+<!-- ste: off -->
+<!-- Legal text: attribution and licence. It is not in ASD-STE100, on purpose. -->
 
 ## Acknowledgements & attribution
 
@@ -430,3 +447,5 @@ Each standalone build is a single file with `LICENSE`, `NOTICE`, and a generated
 three files are also attached to each release on the
 [releases page](https://github.com/jpmartineau/MeshTerm/releases), so you can read them
 without running anything.
+
+<!-- ste: on -->

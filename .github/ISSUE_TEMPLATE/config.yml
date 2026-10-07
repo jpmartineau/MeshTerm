@@ -1,15 +1,16 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Not sure it's a bug? Ask on Discord
+  - name: Not sure it is a bug? Ask on Discord
     url: https://discord.gg/AZwe5Uvb3S
     about: >
-      Setup trouble, "is it supposed to do this", or anything you want a second opinion
-      on. The #support forum is the place. Someone running your radio has probably hit it.
+      Use Discord for a problem with the setup, for the question "is it correct that it does
+      this", or when you want a second opinion. The #support forum is the correct place.
+      Probably someone who runs your radio had the same problem.
 
   - name: "No GitHub account? Report it in the #bugs forum instead"
     url: https://discord.gg/AZwe5Uvb3S
     about: >
-      One post per bug, tagged, with the diagnostics file attached. Real ones get opened
-      here and your post is renamed with the issue number, so you can follow it without an
-      account — and something comes back to tell you when it ships. Being told beats
-      filing it tidily.
+      Make one post for each bug. Add a tag, and attach the diagnostics file. I open an issue
+      here for each real bug, and I rename your post with the number of the issue. Thus you can
+      follow it without an account. You also get a message when the correction is released.
+      It is better that you tell us about a bug than that you file it in a tidy way.

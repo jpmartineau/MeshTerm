@@ -5,30 +5,30 @@ body:
   - type: markdown
     attributes:
       value: |
-        Hopefully you never need this form.
+        We hope that you never need this form.
 
-        If you do: start by running this, and attach the file it writes.
+        If you do need it, first run this command and attach the file that it writes.
 
         ```
         meshterm diagnostics --out bug.md
         ```
 
-        It answers which MeshTerm, on which machine, in which terminal, talking to which
-        radio over which transport and firmware — most of what I would otherwise ask one
-        question at a time, and the details people most often end up guessing at. Nothing
-        in it is private: no keys, no pairing PINs, no positions, no contacts. That is a
-        tested property, not a promise.
+        The file says which MeshTerm you use, on which machine, in which terminal, and with
+        which radio, transport, and firmware. This is most of the information that I would
+        otherwise ask for in single questions. It is also the information that people most
+        often guess. The file has no private information: no keys, no pairing PINs, no
+        positions, and no contacts. A test checks this. It is not only a promise.
 
-        The **Diagnostics** page in the menu saves the same file (with `s`, or F3 on the
-        PicoCalc), next to the log.
+        The **Diagnostics** page in the menu saves the same file next to the log. Press `s`,
+        or F3 on the PicoCalc.
 
-        The rest of this form asks only for what that file cannot know.
+        The rest of this form asks only for the information that the file cannot know.
 
   - type: textarea
     id: problem
     attributes:
-      label: What's the problem
-      description: What happens, and what you expected to happen instead.
+      label: What is the problem
+      description: What happens, and what you expected to happen.
     validations:
       required: true
 
@@ -47,11 +47,12 @@ body:
   - type: textarea
     id: repro
     attributes:
-      label: How do I make it happen
+      label: How can I make it happen
       description: >
-        The steps, in order, starting from launching MeshTerm. Screens and keys beat
-        descriptions — "Contacts, Enter on a node, Routes tab, Enter on the second route"
-        is worth more than "open a trace".
+        Write the steps in order. Start from the time that you start MeshTerm. Name the
+        screens and the keys. This is more useful than a description. For example,
+        "Contacts, Enter on a node, Routes tab, Enter on the second route" is better than
+        "open a trace".
       placeholder: |
         1.
         2.
@@ -64,15 +65,16 @@ body:
     attributes:
       label: Does it still happen with `meshterm --mock`
       description: >
-        `--mock` runs the whole app against a fake radio. If the bug survives that, it is
-        in MeshTerm and I can chase it without owning your hardware. If it doesn't, it is
-        in the link or the radio, which is a different hunt. This one question decides
-        which of those two jobs this is, so it is worth the minute it takes.
+        `--mock` runs the complete app with a fake radio. If the bug also occurs with
+        `--mock`, the bug is in MeshTerm, and I can look for it without your hardware. If
+        the bug does not occur with `--mock`, it is in the link or in the radio. This is a
+        different search. This one question tells me which of the two jobs this is, so
+        please take the minute to answer it.
       options:
         - "Yes, still happens with --mock"
         - "No, --mock is fine"
-        - "Haven't tried"
-        - "Doesn't apply — the problem is connecting"
+        - "I have not tried it"
+        - "Does not apply: the problem is the connection"
     validations:
       required: true
 
@@ -81,9 +83,9 @@ body:
     attributes:
       label: The diagnostics block
       description: >
-        Attach `bug.md` by dragging it in, or paste its contents here. If you genuinely
-        cannot produce one, because MeshTerm will not start at all, write down why instead,
-        along with your version, and I will work with that.
+        Drag `bug.md` into this field, or paste its contents here. If you cannot make the
+        file, because MeshTerm does not start at all, write the reason instead. Also write
+        your version. I will work with that information.
     validations:
       required: true
 
@@ -92,9 +94,9 @@ body:
     attributes:
       label: Which handheld, if it is a handheld
       description: >
-        Only if you are running on something the diagnostics file cannot name. It knows a
-        PicoCalc from a regular terminal, but a uConsole and a laptop look much the same to
-        it. Leave blank on a desktop, laptop, or Mac.
+        Answer this only if you use a device that the diagnostics file cannot name. The file
+        can tell a PicoCalc from a regular terminal. But a uConsole and a laptop look almost
+        the same to it. Leave this blank on a desktop, a laptop, or a Mac.
       placeholder: "ClockworkPi uConsole (CM4)"
 
   - type: input
@@ -102,10 +104,10 @@ body:
     attributes:
       label: Which radio and firmware, if MeshTerm could not reach it
       description: >
-        The diagnostics file reads the model and firmware off the radio itself, so when the
-        problem *is* connecting, it has nothing to read. That is the one case where I need
-        you to tell me. Be precise — "a Xiao" covers several boards that do not behave
-        alike.
+        The diagnostics file reads the model and the firmware from the radio itself. When
+        the problem is the connection, the file has nothing to read. In this one case, I
+        need you to tell me. Be exact. "A Xiao" can mean several boards that do not behave
+        in the same way.
       placeholder: "Seeed XIAO nRF52840 + Wio-SX1262, MeshCore 1.15.0"
 
   - type: textarea
@@ -113,8 +115,9 @@ body:
     attributes:
       label: The exact error, if there was one
       description: >
-        Copy it as text rather than photographing the screen — text can be searched, and a
-        photo of a terminal is hard to read. Paste the whole traceback if it crashed.
+        Copy it as text. Do not take a photograph of the screen. A search can find text, and
+        a photograph of a terminal is difficult to read. If MeshTerm crashed, paste the
+        complete traceback.
       render: text
 
   - type: textarea
@@ -122,22 +125,22 @@ body:
     attributes:
       label: The log file
       description: >
-        MeshTerm keeps one at `~/.meshterm/meshterm.log` (or wherever `MESHTERM_HOME`
-        points). Attach the file, or paste the last twenty lines inside a ``` fence. If the
-        problem is hard to catch, set **Log detail** to Debug on the Preferences page,
-        restart MeshTerm, do it once more, and send that instead. It records a great deal
-        more.
+        MeshTerm keeps a log at `~/.meshterm/meshterm.log` (or at the place that
+        `MESHTERM_HOME` points to). Attach the file, or paste the last twenty lines inside a
+        ``` fence. If the problem is difficult to catch, set **Log detail** to Debug on the
+        Preferences page and restart MeshTerm. Then do the action one more time, and send
+        that log instead. It records much more information.
 
   - type: textarea
     id: workaround
     attributes:
       label: Is there a way around it
-      description: Anything that avoids it, or gets you unstuck. Say so even if it's ugly.
+      description: Write anything that avoids the problem or lets you continue. Tell us also when the way around is not good.
 
   - type: textarea
     id: extra
     attributes:
       label: Anything else
       description: >
-        Did it used to work? Did it start after an update? Screenshots of a wrong-looking
-        screen are genuinely useful here, even though text is better for errors.
+        Did it work before? Did the problem start after an update? Screenshots of a screen
+        that looks wrong are very useful here. For errors, text is better.

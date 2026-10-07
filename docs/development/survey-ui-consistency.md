@@ -1,23 +1,25 @@
-# UI consistency survey — what is off, and what turned out to be fine
+# UI consistency survey: what is off, and what turned out to be fine
 
-> **A historical record.** This was a snapshot of the code on the date below, kept
-> because a project that writes down its own problems is easier to trust than one
-> that doesn't. Some of what's here has since been fixed and some hasn't; nothing in
-> it is a to-do list. Read it as "what this looked like then", not "what is wrong now".
+> **A historical record.** This was a snapshot of the code on the date below. We keep it,
+> because a project that writes down its own problems is easier to trust than a project
+> that does not. We have corrected some of these problems since then, and we have not
+> corrected others. Nothing in it is a list of tasks. Read it as "what the code looked like
+> then", not as "what is wrong now".
 
-Written 2026-08-22 against `main` @ `4b29248`. It covers the CLAUDE.md UX standard apart
-from navigation. A catalogue, not a change.
+The survey was written on 2026-08-22 against `main` @ `4b29248`. It covers the UX standard
+of CLAUDE.md, except navigation. It is a catalogue. It is not a change.
 
-**The short version: the standard is very well kept.** Six sweeps found nothing at all;
-what remains is nine small, specific things. That is the useful result — it means the list
-below is close to complete rather than a sample.
+**The short version: the code follows the standard very well.** Six sweeps found nothing at
+all. Nine small, specific points remain. This is the useful result. It means that the list
+below is almost complete and is not a sample.
 
 ---
 
-## Part 1 — the clean sweeps
+## Part 1: the clean sweeps
 
-Each of these was checked mechanically across the whole package, not spot-checked. The scripts
-are one-offs and were not kept; each is a dozen lines of `ast.walk` and is trivial to redo.
+We checked each of these with a program across the whole package. We did not check them by
+hand on a sample. We did not keep the scripts. Each script is a dozen lines of `ast.walk`,
+and it is easy to write again.
 
 | Rule (CLAUDE.md) | How it was checked | Result |
 |---|---|---|
@@ -27,31 +29,34 @@ are one-offs and were not kept; each is a dozen lines of `ast.walk` and is trivi
 | Filter atom is always `type to filter` | regex over all hints | **0 deviations** |
 | No emoji in a screen or dialog title | 86 title literals vs an emoji range | **0** (one hit was a `Choice` row title, where icons belong) |
 | Sentence case in titles | capitalised non-leading word, minus proper nouns | **0** (5 hits were markup-wrapped panel headings) |
-| Lexicon: "heard" not "seen"; "contacts" not "nodes list" | regex over all non-docstring literals | **0** |
+| Lexicon: "heard" and not "seen", "contacts" and not "nodes list" | regex over all non-docstring literals | **0** |
 | Status marks: never `✔ ✖ ✅ ❌` | scan of every source line | **0** (the 3 hits are the fold table that *normalizes* them, and a docstring warning against them) |
-| `…` on rows that open a prompt, none on rows that act | 40 row labels via the builders | **1 arguable** — see §2.7 |
+| `…` on rows that open a prompt, none on rows that act | 40 row labels via the builders | **1 arguable** (refer to §2.7) |
 | Empty state never parenthesised | scan of 53 empty-state-shaped strings | **0** |
 | `render.query_line` is the one query line | import graph | **exactly** the four screens CLAUDE.md names: select list, path composer, map, mesh walk |
 
-Two more worth calling out because they are the kind of rule that usually rots:
+Two more points are important, because rules of this kind usually decay:
 
-- **`Del` on a row is gated correctly.** The hint atom only appears when the highlighted row
-  is actually deletable ([`select.py:448`](../../meshterm/ui/tui/select.py#L448)) — a real
-  instance of "never advertise a key that would do nothing", implemented rather than assumed.
-- **The PicoCalc lane's "a chord earns a chip" rule holds.** The one bare-letter shortcut in
-  the app — Time Machine's `w` — has its F3 chip, with the reasoning written out in full at
+- **`Del` on a row is correctly gated.** The hint atom is visible only when the highlighted
+  row can be deleted ([`select.py:448`](../../meshterm/ui/tui/select.py#L448)). This is a
+  real example of "never advertise a key that would do nothing". The code implements the
+  rule, and the survey did not only assume it.
+- **The rule "a chord earns a chip" on the lane of the PicoCalc holds.** The app has one
+  bare-letter shortcut, which is `w` in the Time Machine. It has its F3 chip. The reason is
+  written in full at
   [`timemachine_screen.py:227-242`](../../meshterm/ui/timemachine_screen.py#L227).
 
 ---
 
-## Part 2 — the findings
+## Part 2: the findings
 
-Ordered by how visible each is to someone using the app.
+The findings are in order of how visible each one is to a person who uses the app.
 
 ### 2.1 Empty-state voice: four sites shout (rule: lowercase, muted, `— explanation`, no full stop)
 
-The house voice is `no contacts yet — receive an advert first`. These four break it, and they
-are the empty states of four whole screens, so each is the *only* thing on screen when it shows:
+The house voice is `no contacts yet — receive an advert first`. These four sites do not
+follow it. They are the empty states of four complete screens. Thus each one is the *only*
+thing on the screen when it shows:
 
 | Site | Current | House voice |
 |---|---|---|
@@ -60,158 +65,172 @@ are the empty states of four whole screens, so each is the *only* thing on scree
 | [`timemachine_screen.py:335-336`](../../meshterm/ui/timemachine_screen.py#L335) | `Nothing recorded in this window.` + `Press w to widen it.` | lowercase, no full stop |
 | [`timemachine_screen.py:453-454`](../../meshterm/ui/timemachine_screen.py#L453) | `Nothing sent in this window.` + `Press w to widen it.` | ditto |
 
-The two `Press w to widen it.` lines are a second question: they are *hints*, sitting in the
-body, on a screen whose F-key lane and footer already advertise `w`. Either the empty state
-absorbs it (`nothing recorded in this window — press w to widen it`) or it goes.
+The two `Press w to widen it.` lines raise a second question. They are *hints*, and they are
+in the body of a screen where the F-key lane and the footer already advertise `w`. There are
+two options. The empty state can include the hint (`nothing recorded in this window — press w to widen it`).
+Or we can remove the hint.
 
-Deliberately **not** on this list: `Never heard` ([`contacts_screen.py:258`](../../meshterm/ui/contacts_screen.py#L258))
-is a purge-ladder *row label*, and `No revisits` ([`records.py:237`](../../meshterm/services/records.py#L237))
-is a discipline *title*. Both correctly capitalised.
+These two sites are **not** on this list on purpose. `Never heard`
+([`contacts_screen.py:258`](../../meshterm/ui/contacts_screen.py#L258)) is the *row label* of
+a purge ladder. `No revisits` ([`records.py:237`](../../meshterm/services/records.py#L237))
+is the *title* of a discipline. Both are correctly capitalised.
 
 ### 2.2 One dialog inverts the button convention
 
-The rule: *safe way out on the left, committing verb on the right and default*.
+The rule is: *the safe way out is on the left, and the committing verb is on the right and
+is the default*.
 
-[`config_editor.py:538-541`](../../meshterm/ui/config_editor.py#L538) — the Location dialog:
+This is the Location dialog, at
+[`config_editor.py:538-541`](../../meshterm/ui/config_editor.py#L538):
 
 ```python
 [("Pick on map", "map"), ("Type coordinates", "type"), ("Clear", "clear")],
 title="Location",
 ```
 
-No `Cancel`, no `default=`. So the leftmost slot — reserved for the safe way out — holds an
-action, the rightmost — reserved for the default commit — holds the *destructive* option
-(`Clear`), and the default falls to index 0. Esc still cancels, so nothing is lost; but it is
-the only dialog in the app shaped this way, out of 49 call sites.
+It has no `Cancel` and no `default=`. Thus the leftmost slot, which is for the safe way out,
+holds an action. The rightmost slot, which is for the default commit, holds the *destructive*
+option (`Clear`). The default is index 0. Esc still cancels, so the user loses nothing. But
+this is the only dialog in the app with this shape, out of 49 call sites.
 
 ### 2.3 One dialog defaults to the middle button
 
-[`config_editor.py:988-992`](../../meshterm/ui/config_editor.py#L988) — `[Cancel, Preview, Apply]`
-with `default=1`, so Enter lands on **Preview**, not the rightmost `Apply`.
+This is at [`config_editor.py:988-992`](../../meshterm/ui/config_editor.py#L988). The buttons
+are `[Cancel, Preview, Apply]` with `default=1`. Thus Enter selects **Preview**, and not the
+rightmost button `Apply`.
 
-This is very likely deliberate — previewing before overwriting a whole device config is the
-cautious path — but the standard as written says the rightmost verb is the default, and this
-is the only three-button dialog with a real Cancel. Either the rule grows a clause ("with
-three buttons, the *cautious* commit defaults") or this changes.
+This is very probably intentional. Before it overwrites the complete config of a device, the
+dialog gives the user a preview, which is the careful path. But the standard, as it is
+written, says that the rightmost verb is the default. This is the only dialog with three
+buttons and a real Cancel. There are two options. The rule can get a clause ("with three
+buttons, the *careful* commit is the default"). Or this dialog changes.
 
-### 2.4 Two dialog *shapes* the standard doesn't describe
+### 2.4 Two dialog *shapes* that the standard does not describe
 
-Beyond confirms, the app has two other dialog shapes, both used consistently but neither
-written down:
+The app has two dialog shapes in addition to the confirm. The app uses both consistently,
+but the standard does not describe either:
 
-- **The toggle picker** — `[Off, On]` with the default tracking the current value
+- **The toggle picker.** It has `[Off, On]`, and the default follows the current value
   ([`config_editor.py:441`](../../meshterm/ui/config_editor.py#L441),
-  [`repeater_admin.py:313`](../../meshterm/ui/repeater_admin.py#L313)). No Cancel; `Esc keep`
-  carries it, which is exactly the footer verb CLAUDE.md reserves for a value picker. Correct
-  in practice, undescribed in the standard.
-- **The notification with an onward door** — `[Trophy case, Close]`, `default=1`
-  ([`trace_screen.py:637-639`](../../meshterm/ui/trace_screen.py#L637)). Appears unbidden after a
-  record-setting trace. `Close` is the default so a stray Enter dismisses rather than
-  navigating — the inverse of the usual rule, and right for a dialog the user did not ask for.
+  [`repeater_admin.py:313`](../../meshterm/ui/repeater_admin.py#L313)). It has no Cancel.
+  `Esc keep` does that job. This is the footer verb that CLAUDE.md reserves for a value
+  picker. It is correct in practice, but the standard does not describe it.
+- **The notification with a door to a next screen.** It has `[Trophy case, Close]` with
+  `default=1`
+  ([`trace_screen.py:637-639`](../../meshterm/ui/trace_screen.py#L637)). It opens without a
+  request from the user, after a trace that sets a record. `Close` is the default. Thus an
+  Enter that the user pressed by mistake closes the dialog and does not open another screen.
+  This is the opposite of the usual rule, and it is correct for a dialog that the user did
+  not ask for.
 
-Both are good designs. The gap is that CLAUDE.md describes only the confirm, so a future
-dialog of either shape has nothing to copy.
+Both designs are good. The gap is that CLAUDE.md describes only the confirm. Thus a future
+dialog of one of these two shapes has no example to copy.
 
-### 2.5 Two full screens have no F-key lane of their own — one of them is Trace
+### 2.5 Two full screens have no F-key lane of their own, and one of them is Trace
 
-Twelve classes declare `floating = False` (they are full screens, not dialogs). Ten override
-`fkey_lane`. Two do not, and so inherit `Screen.fkey_lane` → the raw `DEFAULT_LANE`
-([`fkeys.py:116`](../../meshterm/ui/tui/fkeys.py#L116)):
+Twelve classes declare `floating = False`. These are full screens and not dialogs. Ten of
+them override `fkey_lane`. Two do not override it. They use `Screen.fkey_lane`, which gives
+the raw `DEFAULT_LANE` ([`fkeys.py:116`](../../meshterm/ui/tui/fkeys.py#L116)):
 
 | Screen | |
 |---|---|
-| [`TraceScreen`](../../meshterm/ui/trace_screen.py#L345) (`trace_screen.py:345`) | the app's busiest screen |
+| [`TraceScreen`](../../meshterm/ui/trace_screen.py#L345) (`trace_screen.py:345`) | the busiest screen of the app |
 | [`TxSweepScreen`](../../meshterm/ui/tx_screen.py#L93) (`tx_screen.py:93`) | |
 
-`DEFAULT_LANE` is the *always-enabled* pager. The ten others build from
-`default_lane(nav=self.content_overflows)` ([`fkeys.py:131`](../../meshterm/ui/tui/fkeys.py#L131)),
-which dims the chips when the body already fits. So on PicoCalc both screens advertise live
-`Page ↑` / `Page ↓` chips whether or not there is anything to page — the one thing the lane's
-standing rule forbids.
+`DEFAULT_LANE` is the pager that is *always enabled*. The other ten screens build their lane
+from `default_lane(nav=self.content_overflows)`
+([`fkeys.py:131`](../../meshterm/ui/tui/fkeys.py#L131)). This dims the chips when the body
+fits on the screen. Thus on the PicoCalc, both screens show live `Page ↑` and `Page ↓`
+chips, also when there is nothing to page. The standing rule of the lane forbids exactly
+this.
 
-Trace is the one worth a proper look rather than a one-liner. Its footer
+Trace needs a proper examination, and not only a one-line change. Its footer
 ([`trace_screen.py:498-505`](../../meshterm/ui/trace_screen.py#L498)) reads
-`↑↓ actions · Enter run · PgUp/PgDn scroll · Esc back` — every key physical on the PicoCalc, so
-nothing is *undiscoverable*. But it is the screen where F1–F3 would earn their keep most
-(re-run, flip the path, open the composer are all one cursor move away today), and it is
-currently the only central screen that hasn't been through the lane pass. Worth deciding what
-its three free slots should say, not just gating the pager.
+`↑↓ actions · Enter run · PgUp/PgDn scroll · Esc back`. Each of these keys is a physical key
+on the PicoCalc, so no function is *hidden*. But Trace is the screen where F1 to F3 are most
+useful. To run again, to flip the path, and to open the composer, the user now needs only
+one move of the highlight. Trace is also the only central screen that has not had the lane
+pass. We must decide what its three free slots say, and not only gate the pager.
 
-`TxSweepScreen` genuinely is one line: `return default_lane(nav=self.content_overflows)`.
+`TxSweepScreen` really is one line: `return default_lane(nav=self.content_overflows)`.
 
-(The About page reads as an exception in a grep but isn't: it passes `floating=False` as a
-constructor argument rather than a class attribute, and it does define its own lane at
-[`about.py:115`](../../meshterm/ui/about.py#L115).)
+(The About page looks like an exception in a grep, but it is not. It gives `floating=False`
+as an argument of the constructor and not as a class attribute. It does define its own lane
+at [`about.py:115`](../../meshterm/ui/about.py#L115).)
 
 ### 2.6 Dialogs that scroll but declare no lane
 
-CLAUDE.md says `EMPTY_LANE` is for "a screen with none at all (**every dialog**)". Five
-surfaces set it explicitly — the confirms, the text prompt, the busy spinner, the reorder
-list, one trace dialog. But two floating dialogs that genuinely *do* page inherit
+CLAUDE.md says that `EMPTY_LANE` is for "a screen with none at all (**every dialog**)". Five
+surfaces set it explicitly: the confirms, the text prompt, the busy spinner, the reorder
+list, and one trace dialog. But two floating dialogs that really *do* page use
 `DEFAULT_LANE` instead:
 
-- `RecordDialog` ([`records_screen.py:146`](../../meshterm/ui/records_screen.py#L146)) — a record's
-  story, which scrolls
-- `PathComposerScreen` ([`path_composer.py`](../../meshterm/ui/path_composer.py)) — a windowed
-  list of hop suggestions
+- `RecordDialog` ([`records_screen.py:146`](../../meshterm/ui/records_screen.py#L146)). It
+  shows the story of a record, and it scrolls.
+- `PathComposerScreen` ([`path_composer.py`](../../meshterm/ui/path_composer.py)). It is a
+  list of hop suggestions, which shows a window of the list.
 
-Both arguably *want* the pager, which would make the doc's "every dialog" too strong. The
-question is whether the rule is "dialogs get no lane" (then these two need `EMPTY_LANE` and
-lose paging chips) or "a surface gets the pager iff it pages" (then the doc's parenthetical
-should read *every dialog that doesn't scroll*).
+It is possible that both *need* the pager. If so, "every dialog" in the document is too
+strong. We must decide between two rules. The first rule is "dialogs get no lane". Then
+these two dialogs need `EMPTY_LANE`, and they lose their paging chips. The second rule is
+"a surface gets the pager if and only if it pages". Then the parenthetical text in the
+document must say *every dialog that does not scroll*.
 
-### 2.7 One row label that may want an ellipsis
+### 2.7 One row label that possibly needs an ellipsis
 
-[`config_editor.py:787`](../../meshterm/ui/config_editor.py#L787) — `Share QR / URI`. The rule is
-"a row that opens further prompts ends with `…`". This one opens a *view* (the QR popup), not
-a prompt — so it turns on whether "further prompts" means "any further surface". Every other
-row in the app is unambiguous; this is the only edge.
+This is at [`config_editor.py:787`](../../meshterm/ui/config_editor.py#L787), and the label
+is `Share QR / URI`. The rule is "a row that opens further prompts ends with `…`". This row
+opens a *view* (the QR dialog), and it does not open a prompt. Thus the answer depends on the
+meaning of "further prompts": is it "each further surface"? Each other row in the app is
+clear. This is the only boundary case.
 
-Also worth a glance while there: `Share QR / URI` is the only row label in the app using ` / `
-as a separator.
+Also note: `Share QR / URI` is the only row label in the app that uses ` / ` as a separator.
 
-### 2.8 `★` carries two meanings
+### 2.8 `★` has two meanings
 
-CLAUDE.md itself lists it twice: `★ you (yellow)` under node types, and `★ best/winner` under
-concept icons. In practice both are live — the map and every path line draw `★` for our own
-node ([`pathline.SELF_GLYPH`](../../meshterm/ui/pathline.py)), while the trophy case and the
-new-record dialog draw `★` in accent for a record
+CLAUDE.md itself lists it two times: `★ you (yellow)` under node types, and `★ best/winner`
+under concept icons. In practice, both are in use. The map and each path line draw `★` for
+our node ([`pathline.SELF_GLYPH`](../../meshterm/ui/pathline.py)). The trophy case and
+the dialog of a new record draw `★` in the accent colour for a record
 ([`trace_screen.py:635-636`](../../meshterm/ui/trace_screen.py#L635)).
 
-They are never on the same surface, and the colours differ (yellow vs accent), so nothing is
-actually ambiguous today. Flagged only because it is the single glyph in the whole marks table
-with two entries, and the "one glyph per concept" heading promises otherwise. If a record ever
-needs to appear next to a path line, this is where it bites — `🏆` is already reserved for the
-trophy case and would carry it.
+The two uses are never on the same screen, and the colours are different (yellow and
+accent). Thus nothing is unclear today. We note it only because it is the single glyph in
+the whole table of marks that has two entries, and the heading "one glyph per concept" says
+that this does not occur. If a record must appear next to a path line in the future, this is
+where a problem will occur. `🏆` is already reserved for the trophy case, and it can carry
+the record.
 
-### 2.9 `node.unknown` vs `muted`, unverified
+### 2.9 `node.unknown` and `muted`, not verified
 
-CLAUDE.md is emphatic that an unidentified node takes `node.unknown` and that this is
+CLAUDE.md is clear that an unidentified node takes `node.unknown`, and that this is
 *deliberately not* `muted` ("muted is chrome and may sit a step darker, while an unidentified
-node is content you can still act on"). `node.unknown` appears at 11 sites. There are also 26
-`style="muted"` uses inside [`pathline.py`](../../meshterm/ui/pathline.py) and
-[`widgets.py`](../../meshterm/ui/widgets.py) — the two modules that draw nodes.
+node is content you can still act on"). `node.unknown` is used at 11 sites. There are also 26
+uses of `style="muted"` in [`pathline.py`](../../meshterm/ui/pathline.py) and
+[`widgets.py`](../../meshterm/ui/widgets.py). These are the two modules that draw nodes.
 
-Most of those 26 are certainly chrome (separators, labels, the un-lit part of a key, which the
-standard explicitly says stays muted). But this is the one rule in the standard that a
-mechanical sweep cannot settle: it needs a human to look at each and say "that's chrome" or
-"that's an unnamed node". Listed here as the one unaudited corner, not as a finding.
+Most of these 26 uses are certainly chrome (separators, labels, and the part of a key that
+is not lit, which the standard says must stay muted). But a program cannot decide this rule
+in a sweep. A person must look at each use and decide: "this is chrome" or "this is a node
+without a name". We list it here as the one corner that we did not audit. It is not a
+finding.
 
 ---
 
-## Part 3 — shortlist
+## Part 3: shortlist
 
 | # | Finding | Sites | Effort | Weight |
 |---|---|---|---|---|
-| 2.1 | Empty states shout on four screens | 4 (6 strings) | trivial | **high** — it is the whole screen |
-| 2.2 | Location dialog has no Cancel and defaults to an action | 1 | small | medium |
-| 2.5 | Trace and TX advertise a dead pager on PicoCalc; Trace has never had a lane pass | 2 | one line + one design pass | **medium-high** |
-| 2.3 | Restore dialog defaults to the middle button | 1 | decision, not code | low |
-| 2.6 | Two scrolling dialogs inherit the pager the doc says they shouldn't have | 2 | decision | low |
-| 2.4 | Two dialog shapes used consistently but undocumented | — | doc only | low |
-| 2.7 | `Share QR / URI` — ellipsis? separator? | 1 | trivial | low |
-| 2.8 | `★` has two entries in a "one glyph per concept" table | — | doc only | low |
-| 2.9 | `node.unknown` vs `muted` in the two node-drawing modules | ~26 to eyeball | manual | unknown |
+| 2.1 | Empty states shout on four screens | 4 (6 strings) | trivial | **high**, because it is the whole screen |
+| 2.2 | The Location dialog has no Cancel and its default is an action | 1 | small | medium |
+| 2.5 | Trace and TX advertise a dead pager on the PicoCalc. Trace has never had a lane pass | 2 | one line and one design pass | **medium-high** |
+| 2.3 | The Restore dialog defaults to the middle button | 1 | a decision, not code | low |
+| 2.6 | Two scrolling dialogs inherit the pager that the document says they must not have | 2 | a decision | low |
+| 2.4 | Two dialog shapes that the app uses consistently but that no document describes | none | document only | low |
+| 2.7 | `Share QR / URI`: an ellipsis or a different separator? | 1 | trivial | low |
+| 2.8 | `★` has two entries in a table of "one glyph per concept" | none | document only | low |
+| 2.9 | `node.unknown` and `muted` in the two modules that draw nodes | approximately 26 to examine | manual | unknown |
 
-Items 2.1, 2.2, 2.5 and 2.7 are code. The rest are decisions about the standard itself, and
-2.3, 2.4 and 2.8 may well resolve as "the standard should say what the code already does".
+Items 2.1, 2.2, 2.5, and 2.7 are code. The other items are decisions about the standard
+itself. For items 2.3, 2.4, and 2.8, the decision can be "the standard must say what the code
+already does".

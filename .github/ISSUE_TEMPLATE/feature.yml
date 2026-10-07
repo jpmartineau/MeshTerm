@@ -5,15 +5,15 @@ body:
   - type: markdown
     attributes:
       value: |
-        MeshTerm is one person's spare time, so the honest answer to a good idea is often
-        "yes, eventually". Saying what you are actually trying to do — rather than the
-        feature you have in mind — often finds something that already works.
+        One person works on MeshTerm in his spare time. For this reason, the honest answer to a
+        good idea is often "yes, but not soon". Tell us what you want to do, and not the
+        feature that you have in mind. Then we can often find a function that already works.
 
   - type: textarea
     id: problem
     attributes:
-      label: What are you trying to do
-      description: The situation you are in, not the feature. What are you trying to find out about your mesh?
+      label: What do you want to do
+      description: Describe your situation, and not the feature. What do you want to find out about your mesh?
     validations:
       required: true
 
@@ -21,10 +21,10 @@ body:
     id: idea
     attributes:
       label: What you had in mind
-      description: If you have a shape in mind — a screen, a key, a subcommand — describe it.
+      description: If you have an idea of the form, such as a screen, a key, or a subcommand, describe it.
 
   - type: textarea
     id: today
     attributes:
       label: What you do today instead
-      description: The workaround, if there is one. This says more about how much the feature is worth than anything else.
+      description: Describe the way around the problem, if there is one. This tells us more than anything else about how much the feature is worth.

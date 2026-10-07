@@ -1,28 +1,32 @@
-# MeshTerm configuration: where things live, and which device to talk to.
-# Copy to ~/.meshterm/config.toml (or pass --db / --port on the CLI).
+# MeshTerm configuration: where things are, and which device to talk to.
+# Copy this file to ~/.meshterm/config.toml (or give --db / --port on the CLI).
 #
-# How MeshTerm itself behaves — transmit cooldown, message retries, how much history it
-# keeps — is *not* here. Those are preferences: they live in ~/.meshterm/preferences.toml,
-# and are edited on the Preferences page (or with `meshterm preferences set <key> <value>`).
-# Every one has a built-in default, so that file only ever lists what you have changed.
+# This file does not have the settings for how MeshTerm itself behaves. These are the
+# transmit cooldown, the message retries, and how much history MeshTerm keeps. They are
+# preferences. They are in ~/.meshterm/preferences.toml, and you edit them on the
+# Preferences page (or with `meshterm preferences set <key> <value>`).
+# Each preference has a built-in default, so that file lists only what you changed.
 #
-# Profiles are optional. With no profile, no --port/--ble/--tcp, MeshTerm discovers attached
-# serial devices and nearby Bluetooth companions, lets you pick one (interactively) or uses the
-# single one present, and remembers the last device that connected as the default for next time.
-# A network (TCP) companion isn't discoverable — name it with --tcp host:port, a TCP profile, or
-# the picker's "add a network device" prompt. Define profiles below only to give your hardware
-# stable aliases (e.g. --profile yagi, --profile handheld for Bluetooth, --profile wifi for TCP).
+# Profiles are optional. When you give no profile and none of --port, --ble, or --tcp,
+# MeshTerm discovers the serial devices that are connected and the Bluetooth companions that
+# are near. It lets you select one (interactively), or it uses the one device that is
+# there. It remembers the last device that connected, and uses it as the default the next
+# time. A network (TCP) companion is not discoverable. To name one, use --tcp host:port, a
+# TCP profile, or the "add a network device" prompt of the picker. Define profiles below
+# only to give your hardware names that do not change (for example --profile yagi,
+# --profile handheld for Bluetooth, or --profile wifi for TCP).
 
-# Uncomment and name one of your own profiles below to make it the default. Left
-# commented, MeshTerm finds the device itself, as described above.
+# To make one of your own profiles the default, remove the comment mark below and write
+# the name of the profile. While the line is a comment, MeshTerm finds the device by
+# itself, as described above.
 # default_profile = "s3"
 
-# Open the radio link as soon as the menu appears. False opens it lazily instead — only
-# once monitoring is turned on or a tool first needs the radio.
+# Open the radio link when the menu appears. When the value is false, MeshTerm opens the
+# link later: when you turn on monitoring, or when a tool first needs the radio.
 connect_on_start = true
 # db_path = "C:/Users/you/meshterm/meshterm.db"
 
-# One [profiles.<name>] block per physical companion device.
+# Make one [profiles.<name>] block for each physical companion device.
 [profiles.s3]
 port = "COM5"
 baudrate = 115200
@@ -40,44 +44,46 @@ description = "Local-range repeater"
 port = "COM8"
 description = "XIAO observer running a bot"
 
-# A Bluetooth LE companion: give it an `address` (from `meshterm devices`) instead of a port.
-# The `transport = "ble"` line is optional — a bare `address` already implies Bluetooth.
+# A Bluetooth LE companion: give an `address` (from `meshterm devices`) and not a port.
+# The line `transport = "ble"` is optional. An `address` alone means Bluetooth.
 [profiles.handheld]
 address = "AA:BB:CC:DD:EE:FF"
 # transport = "ble"
-# ble_pin = "123456"   # only if your device requires a pairing PIN
+# ble_pin = "123456"   # only if your device needs a pairing PIN
 description = "Pocket handheld over Bluetooth"
 
-# A network (TCP) companion — a WiFi board, or a meshcored-style proxy — reachable at a
-# host:port. Give it a `host` (and optional `tcp_port`, default 5000); a bare `host` already
-# implies TCP, so the `transport = "tcp"` line is optional. A TCP companion isn't discoverable,
-# so a profile (or --tcp host:port, or the picker's "add a network device" prompt) is how you
-# reach one.
+# A network (TCP) companion, such as a WiFi board or a meshcored-style proxy, at a
+# host:port. Give a `host` (and an optional `tcp_port`, which is 5000 by default). A `host`
+# alone means TCP, so the line `transport = "tcp"` is optional. A TCP companion is not
+# discoverable. To reach one, use a profile, or --tcp host:port, or the "add a network
+# device" prompt of the picker.
 [profiles.wifi]
 host = "192.168.1.50"
 # tcp_port = 5000
 # transport = "tcp"
 description = "Basestation over WiFi"
 
-# A radio on this machine's own SPI bus: MeshTerm runs its node while it is connected.
-# The pins default to the uConsole AIO v1's, which needs nothing more than this (and is
-# listed on the device screen anyway, whenever /dev/spidev1.0 exists).
+# A radio on the own SPI bus of this machine: MeshTerm runs its node while the radio is
+# connected. The default pins are the pins of the uConsole AIO v1. That board needs only
+# this profile. The device screen also lists it, when /dev/spidev1.0 exists.
 [profiles.aio]
 transport = "spi"
 # [profiles.aio.spi]
 # en_pins = [27]   # the AIO v2 powers its radio from pin 27
 #
-# Which /dev/gpiochip<n> carries the pins is not a fact about the board: a uConsole's CM4
-# has its 40-pin header on chip 0, a CM5 had it on chip 4 under its early kernels, chip 0
-# once Raspberry Pi aliased it there, and another number again on some later kernels. So
-# gpio_chip defaults to -1, which finds the chip by its label (pinctrl-rp1 on a CM5,
-# pinctrl-bcm2711 on a CM4; `gpiodetect` lists them) and falls back to chip 0 where none
-# carries either. Give it a number only to override that:
+# The number of the /dev/gpiochip<n> that has the pins does not depend on the board. A
+# uConsole CM4 has its 40-pin header on chip 0. A CM5 had it on chip 4 with its early
+# kernels, and on chip 0 after Raspberry Pi made an alias there. Some later kernels use
+# another number. For this reason, gpio_chip is -1 by default. This value finds the chip by
+# its label (pinctrl-rp1 on a CM5, pinctrl-bcm2711 on a CM4, and `gpiodetect` lists them).
+# If no chip has one of these labels, MeshTerm uses chip 0. Give a number only to
+# override this:
 # gpio_chip = 4
 
-# Any other board states its whole wiring — every pin and both switches, because a key
-# left out keeps the AIO's value. Read them off the board's meshtasticd config; the
-# values here are an illustration only. docs/guide/configuration.md has the key-by-key mapping.
+# Any other board must give its complete wiring: each pin and both switches. A key that
+# you omit keeps the value of the AIO. Read the values from the meshtasticd config of the
+# board. The values here are only an example. docs/guide/configuration.md shows which
+# key matches which value.
 # [profiles.hat.spi]
 # bus_id = 0              # /dev/spidev0.0
 # cs_id = 0

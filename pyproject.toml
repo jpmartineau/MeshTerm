@@ -1,15 +1,15 @@
 [build-system]
-# 1.26 is where hatchling started writing the PEP 639 fields below (`License-Expression`,
-# `License-File`) into the metadata; an older one builds a wheel that says nothing about
-# the licence at all, silently.
+# Hatchling 1.26 is the first version that writes the PEP 639 fields below
+# (`License-Expression`, `License-File`) into the metadata. An older version builds a
+# wheel that says nothing about the licence, and it gives no warning.
 requires = ["hatchling>=1.26"]
 build-backend = "hatchling.build"
 
 [project]
-# The distribution name only. The import package and the console script both stay
-# `meshterm` — PyPI prohibits that name (see pypi/support#12162), and nothing about the
-# app changes because of it. `[tool.hatch.build.targets.wheel]` below is what keeps the
-# wheel shipping the `meshterm/` package under this different name.
+# This is only the name of the distribution. The import package and the console script stay
+# `meshterm`. PyPI prohibits that name (refer to pypi/support#12162), but the app does not
+# change because of this. The `[tool.hatch.build.targets.wheel]` section below makes the
+# wheel contain the `meshterm/` package under this different name.
 name = "mesh-term"
 dynamic = ["version"]
 description = "MeshTerm is a full-featured TUI MeshCore client for your terminal. Connects to a companion over USB, Bluetooth, or TCP. For Windows, macOS, and Linux."
@@ -19,7 +19,7 @@ authors = [{ name = "Jean-Pierre Martineau" }]
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 keywords = ["meshcore", "lora", "mesh", "radio", "cli"]
-# No `License ::` entry: PEP 639 forbids one alongside the SPDX expression above.
+# There is no `License ::` entry, because PEP 639 does not permit one with the SPDX expression above.
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
@@ -42,7 +42,7 @@ dependencies = [
     "pycryptodome>=3.20", # AES/HMAC for decrypting overheard channel packets
     "pyserial>=3.5",      # serial-port enumeration for device discovery
     "bleak>=0.22",        # Bluetooth LE scanning + companion connection
-    "typer>=0.12",        # scripted CLI; subcommands mirror the menu
+    "typer>=0.12",        # scripted CLI. The subcommands mirror the menu
     "rich>=13.7",         # modern console rendering (progress, tables, panels)
     "markdown-it-py>=3.0", # CommonMark parser behind the written About pages
     "prompt_toolkit>=3.0",  # full-screen interactive TUI (terminal, input, resize)
@@ -55,16 +55,17 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
-    # Pinned to a minor line, not floated. A formatter that drifts between machines is
-    # not a gate: 0.16 formats Python inside Markdown and 0.15 does not, so an
-    # unpinned `ruff>=0.4` had CI and a laptop disagreeing about a clean tree.
+    # The version is pinned to one minor line. A formatter that is different on different
+    # machines is not a gate. Ruff 0.16 formats Python inside Markdown and 0.15 does not.
+    # With an unpinned `ruff>=0.4`, CI and a laptop disagreed about a tree with no errors.
     "ruff>=0.16.6,<0.17",
-    # The SPI radio's node, run for real in tests/test_radionode_live.py on a fake radio.
-    # The bare library is pure Python everywhere; only the `hardware` extra is Linux-bound.
+    # The node of the SPI radio. tests/test_radionode_live.py runs it with a fake radio.
+    # The library alone is pure Python on all systems. Only the `hardware` extra needs Linux.
     "openhop-core>=1.1.3",
 ]
-# A LoRa chip on this machine's own SPI bus (the uConsole AIO), driven by a node MeshTerm
-# runs itself — see meshterm/core/spiradio.py. Linux only, and nowhere else worth carrying.
+# A LoRa chip on this machine's own SPI bus (the uConsole AIO). A node that MeshTerm runs
+# itself controls it (refer to meshterm/core/spiradio.py). It works only on Linux, so
+# the other systems do not need it.
 spi = [
     "openhop-core[hardware]>=1.1.3",
 ]
@@ -78,20 +79,21 @@ Changelog = "https://github.com/jpmartineau/MeshTerm/blob/main/CHANGELOG.md"
 [project.scripts]
 meshterm = "meshterm.cli:main"
 
-# The one place a version is written; `[project] version` is dynamic so the package
-# attribute and the distribution metadata cannot drift apart.
+# This is the one place where we write the version. `[project] version` is dynamic, so the
+# package attribute and the distribution metadata cannot become different.
 [tool.hatch.version]
 path = "meshterm/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["meshterm"]
 
-# The sdist is the package's source, not the repository's: what someone needs to build
-# and test the wheel. Hatchling's default is everything git does not ignore, which swept
-# in the Claude skills, the GitHub configuration, the PyInstaller spec, the device-side
-# shell scripts (one of which carries data under another licence) and the developer
-# environment template — none of which builds, tests, or documents the package. Kept:
-# the package, the tests and their fixture, the manual, and the files a build reads.
+# The sdist is the source of the package. It is not the source of the repository. It has
+# what a person needs to build and test the wheel. By default, Hatchling includes each file
+# that git does not ignore. This included the Claude skills, the GitHub configuration, the
+# PyInstaller spec, the shell scripts for the device (one of which has data under another
+# licence), and the template of the developer environment. None of these builds, tests, or
+# documents the package. The sdist keeps the package, the tests and their fixture, the
+# manual, and the files that a build reads.
 [tool.hatch.build.targets.sdist]
 exclude = [
     "/.claude",
@@ -108,23 +110,25 @@ exclude = [
 [tool.ruff]
 line-length = 100
 target-version = "py310"
-# Helper scripts for the Claude skills; they are not part of the package. And `docs/`,
-# which holds dated survey documents: ruff formats Python blocks inside Markdown, and the
-# code they quote is an excerpt of how a file looked on a past date. Reformatting a
-# quotation edits the record — and the excerpts are call fragments, not whole programs, so
-# the formatter's idea of "fixed" turns them into something that was never there.
+# The helper scripts for the Claude skills are not part of the package. Also exclude `docs/`.
+# It has survey documents with dates. Ruff formats Python blocks inside Markdown, and the
+# code in these documents is an excerpt that shows how a file looked on a past date. If
+# ruff formats a quotation, it changes the record. The excerpts are fragments of calls and
+# not complete programs. Thus the formatter would change them into something that never
+# existed.
 extend-exclude = [".claude", "docs"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "D"]
-ignore = ["D203", "D213"]  # pick one blank-line-before-class / multi-line-summary style
+ignore = ["D203", "D213"]  # select one style for the blank line before a class and for the multi-line summary
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
 [tool.ruff.lint.flake8-bugbear]
-# Typer declares CLI parameters by calling these in the default; the objects they
-# return are inert sentinels the command never mutates, which is what B008 guards.
+# Typer declares CLI parameters when the default value calls these functions. The objects
+# that they return are inert markers, and the command never changes them. B008 guards
+# against this kind of change.
 extend-immutable-calls = ["typer.Argument", "typer.Option"]
 
 [tool.pytest.ini_options]
