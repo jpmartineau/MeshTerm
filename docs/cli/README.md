@@ -1281,6 +1281,8 @@ the room).
 | `add INDEX NAME [--secret HEX]` | Add a channel. A `#` at the start of the name makes the channel public (the firmware derives the key from the name). Otherwise the channel is private, with a random key unless you give a key. |
 | `join INDEX NAME SECRET` | Join a channel from its name and its key of 32 hex characters. |
 | `import INDEX URL` | Import a `meshcore://channel/add` link. |
+| `import --file FILE [--dry-run]` | Add the channels of a file from `export` to the device. |
+| `export FILE` | Write each channel to a file, with its key, its send scope, and its mute. Another device can import the file. |
 | `share INDEX` | Print the share link of a slot. |
 | `clear INDEX --yes` | Clear a slot. This removes the channel from the device. |
 | `scope INDEX [REGION] [--clear]` | Show or set the region into which the channel's messages are flooded. |
@@ -1339,6 +1341,55 @@ $ meshterm channels share 1 --json
 
 `share` on an empty slot, and `clear` on a slot that is already empty, give exit `5` with
 the nulls and `"cleared":false`. There is nothing to report, and it is not a failure.
+
+**Export and import.** `export` and `import --file` move all the channels to another
+device. `export` writes one TOML file, with one `[[channels]]` table for each channel, in
+slot order:
+
+```toml
+[[channels]]
+name = "#news"
+
+[[channels]]
+name = "brigade"
+secret = "2c70ca416304d520b60a28d9db35d6b3"
+scope = "harbour"
+muted = true
+```
+
+A `#` channel has no `secret`, because the device derives its key from the name. A private
+channel has its key in the file. Thus the file is as secret as the keys in it. MeshTerm
+makes it readable only by you, where the system lets it, and `export` says on stderr how
+many keys of private channels the file holds. A file from `config backup` has a
+`[[channels]]` table of the same shape, so `import --file` can also read a config backup.
+
+`import --file` never removes a channel. It puts the channels of the file first, in the
+order of the file, and the other channels of the device after them. A channel that has no
+free slot is not added. The send scope and the mute of each channel go into the stores of
+this computer. A channel that has no scope or no mute in the file keeps the values that it
+has here. `--dry-run` prints the plan and changes nothing.
+
+```console
+$ meshterm channels import --file brigade.toml
+SLOT  NAME     ACTION
+   0  #news    add
+   1  brigade  add
+```
+
+`import --file` prints the layout of the device after the import, with one record for each
+channel. `ACTION` is `add`, `move`, or `keep`. A channel that has no free slot comes last,
+with the action `skip` and no slot. `export` prints only the path of the file. It writes no
+file and exits with `5` when the device has no channel. A file that MeshTerm cannot use is
+a usage error (exit `2`), and the message names the bad entry. If MeshTerm cannot read
+each slot of the device, the command changes nothing and exits with `4`.
+
+```console
+$ meshterm channels import --file brigade.toml --json
+{"dry_run":false,"added":2,"moved":0,"skipped":0,"channels":[{"slot":0,"name":"#news","action":"add"},{"slot":1,"name":"brigade","action":"add"}]}
+
+$ meshterm channels export channels.toml --json
+{"path":null,"channels":0,"private":0}
+```
 
 #### `meshterm courier`
 

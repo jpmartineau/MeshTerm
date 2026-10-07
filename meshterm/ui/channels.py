@@ -10,6 +10,11 @@ comes from the name), joining with a key that the user pastes, or importing a sc
 ``meshcore://`` link. Each change is written to the device at once, as in a phone app.
 Thus the list always shows the state of the radio.
 
+The section "Export and import" moves all the channels to another device. The export writes
+each channel, with its key, its send scope, and its mute, to one TOML file. The import adds
+the channels of such a file to the device, in the order of the file, and it never removes a
+channel (refer to :mod:`meshterm.core.channel_file`).
+
 Muting is the one setting of a channel that is a local *preference* and not a configuration
 of the device. The new messages of a muted channel do not make the unread badge higher.
 Its inbound messages do not add to the unread count, and muting sets the count to zero.
@@ -51,13 +56,23 @@ from __future__ import annotations
 import time
 from collections.abc import Awaitable, Callable
 from functools import lru_cache
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from rich.cells import cell_len
 from rich.console import Group
 from rich.text import Text
 
-from ..core.channel_probe import ChannelSlot
+from ..core.channel_file import (
+    ChannelFileError,
+    ImportPlan,
+    apply_preferences,
+    entry_from_slot,
+    plan_import,
+    read_channel_file,
+    write_channel_file,
+)
+from ..core.channel_probe import ChannelSlot, probe_channel_slots
 from ..core.channels import (
     DEFAULT_PUBLIC_SECRET,
     MAX_CHANNELS,
@@ -104,6 +119,8 @@ _DEFAULT_PUBLIC = "__default_public__"
 _JOIN = "__join__"
 _IMPORT = "__import__"
 _REORDER = "__reorder__"
+_EXPORT_FILE = "__export_file__"
+_IMPORT_FILE = "__import_file__"
 
 # The sentinels of the actions of the channel detail screen.
 _QR = "qr"
@@ -222,6 +239,10 @@ async def manage_channels(ctx: AppContext) -> int:
             changes += await _import_link(ctx, device, slots, capacity)
         elif choice == _REORDER:
             changes += await _reorder_channels(ctx, device, slots)
+        elif choice == _EXPORT_FILE:
+            await _export_channels(ctx, slots)  # it writes a file, and the device stays the same
+        elif choice == _IMPORT_FILE:
+            changes += await _import_channels(ctx, device, capacity)
         else:  # an existing slot index
             slot = next((s for s in slots if s.idx == choice), None)
             if slot is not None:
@@ -746,54 +767,70 @@ def _menu_items(
     # cells (＋ ＃ 🌐 🔑 🔗), and not one column early. The Organize row once corrected this
     # by hand, with two spaces and a comment of four lines. The column is empty where the
     # platform draws no icons, and the labels use the cells.
-    lane = icon_lane(("↕", "🌐", "＋", "＃", "🔑", "🔗"))
+    lane = icon_lane(("↕", "💾", "📂", "🌐", "＋", "＃", "🔑", "🔗"))
     if len(slots) > 1:
         items.append(section_heading("Organize"))
         reorder = marked_label("↕", "Reorder channels", "", lane=lane)
         items.append(Choice(title=reorder, value=_REORDER))
 
+    # Before "Add a channel", because that section ends early when each slot is full, and an
+    # import still has work then: it puts the channels in the order of its file.
+    transfer = []
+    if slots:
+        export = marked_label("💾", "Export channels…", "", lane=lane)
+        transfer.append((export, "Save them all to a file", _EXPORT_FILE))
+    import_file = marked_label("📂", "Import channels…", "", lane=lane)
+    transfer.append((import_file, "Add them from a file", _IMPORT_FILE))
+
+    adds = []
+    if _next_free_slot(slots, capacity) is not None:
+        # The Public channel of the firmware has a fixed key. It has one well-known secret, so
+        # it is the same channel on each slot. Offer to restore it only if no slot has it
+        # already.
+        if not any(s.secret == DEFAULT_PUBLIC_SECRET for s in slots):
+            adds.append(
+                (
+                    marked_label("🌐", "Standard Public channel", "", lane=lane),
+                    "MeshCore's built-in meshwide channel",
+                    _DEFAULT_PUBLIC,
+                )
+            )
+        adds.extend(
+            [
+                (
+                    marked_label("＋", "New private channel…", "", lane=lane),
+                    "A fresh random key",
+                    _CREATE,
+                ),
+                (
+                    marked_label("＃", "Public channel…", "", lane=lane),
+                    "Key derived from its name",
+                    _PUBLIC,
+                ),
+                (
+                    marked_label("🔑", "Join with a key…", "", lane=lane),
+                    "Paste a channel's 32-hex key",
+                    _JOIN,
+                ),
+                (
+                    marked_label("🔗", "Import a link…", "", lane=lane),
+                    "Paste a meshcore:// share link",
+                    _IMPORT,
+                ),
+            ]
+        )
+    # One call for the rows of the two sections, so that their descriptions start in the same
+    # column. Two calls aligned each section to its own widest label, four cells apart.
+    aligned = menu_rows(transfer + adds)
+    items.append(section_heading("Export and import"))
+    items.extend(aligned[: len(transfer)])
     items.append(section_heading("Add a channel"))
-    if _next_free_slot(slots, capacity) is None:
+    if adds:
+        items.extend(aligned[len(transfer) :])
+    else:
         # The list already knows that there is no free slot. It says so here, and it does not
         # offer four rows that all end in the same refusal.
         items.append(Separator("  every slot is full — clear one first"))
-        return f"Channels · {len(slots)}/{capacity} slots", items
-    rows = []
-    # The Public channel of the firmware has a fixed key. It has one well-known secret, so it
-    # is the same channel on each slot. Offer to restore it only if no slot has it already.
-    if not any(s.secret == DEFAULT_PUBLIC_SECRET for s in slots):
-        rows.append(
-            (
-                marked_label("🌐", "Standard Public channel", "", lane=lane),
-                "MeshCore's built-in meshwide channel",
-                _DEFAULT_PUBLIC,
-            )
-        )
-    rows.extend(
-        [
-            (
-                marked_label("＋", "New private channel…", "", lane=lane),
-                "A fresh random key",
-                _CREATE,
-            ),
-            (
-                marked_label("＃", "Public channel…", "", lane=lane),
-                "Key derived from its name",
-                _PUBLIC,
-            ),
-            (
-                marked_label("🔑", "Join with a key…", "", lane=lane),
-                "Paste a channel's 32-hex key",
-                _JOIN,
-            ),
-            (
-                marked_label("🔗", "Import a link…", "", lane=lane),
-                "Paste a meshcore:// share link",
-                _IMPORT,
-            ),
-        ]
-    )
-    items.extend(menu_rows(rows))
 
     # ``·`` chains a status atom. ``—`` introduces a subject, and the slot count is not the
     # subject of this screen (refer to Contacts, which reads "Contacts · 12 known").
@@ -1335,6 +1372,141 @@ async def _reorder_channels(ctx: AppContext, device: Device, slots: list[Channel
         return 0
 
 
+# --- export and import ---------------------------------------------------------
+
+#: The file that the export and import prompts offer. The user can type another path.
+_CHANNEL_FILE = "meshterm-channels.toml"
+
+
+async def _export_channels(ctx: AppContext, slots: list[ChannelSlot]) -> None:
+    """Write the channels of the device to a file, so that another device can import them.
+
+    Each channel goes into the file with its key, its send scope, and its mute, in slot
+    order (refer to :mod:`meshterm.core.channel_file`). The export writes nothing to the
+    device, so the list does not change. Thus a dialog says what the export wrote and where,
+    because nothing else on the screen shows that the file exists.
+    """
+    raw = await ctx.ui.path(
+        "Export channels", prompt="Write the channels to this file:", default=_CHANNEL_FILE
+    )
+    if not raw:
+        return
+    path = Path(raw).expanduser().resolve()
+    entries = [
+        entry_from_slot(slot, scope=_channel_scope(ctx, slot), muted=_is_muted(ctx, slot))
+        for slot in slots
+    ]
+    try:
+        write_channel_file(path, entries)
+    except OSError as exc:
+        await _say(ctx, f"could not write {path} — {exc.strerror or exc}", "err")
+        return
+    private = sum(1 for slot in slots if not slot.is_public)
+    text = f"{_count(len(entries), 'channel')} written to {path}"
+    if private:
+        text += f". It holds the keys of {_count(private, 'private channel')}: keep it private."
+    await _say(ctx, text, "ok")
+
+
+async def _import_channels(ctx: AppContext, device: Device, capacity: int) -> int:
+    """Add the channels of an exported file to the device, in the order of the file.
+
+    The import reads all the slots again before it plans. The plan writes many slots, and a
+    probe that stopped early makes a slot that holds a channel look free (refer to
+    :func:`_pick_free_slot` for the same reason on a single add). Then a dialog shows the
+    plan, and nothing is written until the user selects Import. A file that has nothing new
+    for the device still gives its send scopes and mutes.
+
+    Returns:
+        The number of slot writes that the import made.
+    """
+    raw = await ctx.ui.path(
+        "Import channels", prompt="Read the channels from this file:", default=_CHANNEL_FILE
+    )
+    if not raw:
+        return 0
+    path = Path(raw).expanduser()
+    try:
+        entries = read_channel_file(path)
+    except ChannelFileError as exc:
+        await _say(ctx, str(exc), "err")
+        return 0
+    async with ctx.ui.busy_dialog("reading channels…", title="Channels"):
+        slots, complete = await probe_channel_slots(device)
+    if not complete:
+        await _say(ctx, "could not read every slot — nothing was written", "err")
+        return 0
+    plan = plan_import(entries, slots, capacity)
+    kept = list(plan.present) + [entry for _, entry in plan.added]
+    if not plan.changes_device:
+        apply_preferences(kept, ctx.region_store, ctx.mute_store)
+        if plan.skipped:
+            await _say(ctx, "every slot is full — clear a channel, then import again", "warn")
+        else:
+            text = f"this device already has the {_count(len(entries), 'channel')} of {path.name}"
+            await _say(ctx, text, "ok")
+        return 0
+    choice = await ctx.ui.dialog(
+        _plan_text(path, entries, plan),
+        [("Cancel", None), ("Import", "import")],
+        title="Import channels",
+        default=1,
+    )
+    if choice != "import":
+        return 0
+    done = 0
+    try:
+        # One card for the whole import, as for a reorder. The card of each write is nested
+        # in it, and the count shows that the import advances.
+        async with ctx.ui.busy_dialog("importing channels…", title="Channels") as busy:
+            for position, (idx, name, secret) in enumerate(plan.writes, start=1):
+                what = f"saving {name}" if name else f"clearing slot {idx}"
+                busy.message = f"{what} · {position}/{len(plan.writes)}"
+                await write_channel(ctx, device, idx, name, secret)
+                done += 1
+    except Exception as exc:  # noqa: BLE001 - reported here, where the half-done state is known
+        # The same case as a reorder that stops: the writes have no transaction, so the
+        # slots are between the two layouts. Say so at once. The list reads the slots again
+        # when this round ends.
+        ctx.log.debug("channels: import stopped partway: %s", exc)
+        await _say(ctx, f"import stopped partway — {exc}", "err")
+        return done
+    apply_preferences(kept, ctx.region_store, ctx.mute_store)
+    if plan.skipped:
+        names = ", ".join(entry.name for entry in plan.skipped)
+        await _say(ctx, f"no free slot for {names} — clear a channel, then import again", "warn")
+    return done
+
+
+def _plan_text(path: Path, entries: list, plan: ImportPlan) -> Text:
+    """The body of the import dialog: what the import adds, moves, and cannot add.
+
+    The last line says that nothing is removed. A user who imports onto a device that has
+    channels of its own must know that before Import, and not find it after.
+    """
+    width = max((cell_len(entry.name) for _, entry in plan.added), default=0)
+    text = Text(f"{path.name} has {_count(len(entries), 'channel')}.\n")
+    for slot, entry in plan.added:
+        text.append(f"  + {channel_glyph(entry.name, entry.key)} ")
+        text.append(entry.name.ljust(width), style="brand")
+        text.append(f"  into slot {slot}\n", style="muted")
+    if plan.moved:
+        moved = _count(plan.moved, "channel")
+        text.append(f"  ↕ {moved} on this device change slot, to match the file\n")
+    if plan.skipped:
+        names = ", ".join(entry.name for entry in plan.skipped)
+        text.append(f"  ⚠ no free slot for {names}\n", style="warn")
+    if plan.present:
+        text.append(f"  {_count(len(plan.present), 'channel')} already on this device\n")
+    text.append("Nothing is removed from the device.", style="muted")
+    return text
+
+
+def _count(n: int, noun: str) -> str:
+    """``n`` and the noun, plural when ``n`` is not 1: ``1 channel``, ``3 channels``."""
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
 # --- shared views ------------------------------------------------------------
 
 
@@ -1434,7 +1606,7 @@ async def _say(ctx: AppContext, text: str, style: str) -> None:
     the user. Thus it goes to a dialog and not into the buffer that the menu empties when the
     whole tool has finished. A failed import once stayed in that buffer.
     """
-    mark = {"err": "✗", "warn": "⚠"}.get(style, "")
+    mark = {"err": "✗", "warn": "⚠", "ok": "✓"}.get(style, "")
     body = Text(f"{mark} {text}" if mark else text, style=style)
     session = getattr(ctx.ui, "session", None)
     if session is None:  # the scripted CLI has no dialogs, so print the text

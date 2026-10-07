@@ -6,7 +6,9 @@ In the menu, the tool opens a full-screen channel manager (refer to
 With it, the user can create a private channel, add a public ``#`` channel, join a channel
 with a key, import a scanned ``meshcore://`` link, and share any channel as a QR code. On
 the CLI, the tool gives the ``list``, ``add``, ``join``, ``import``, ``share``, ``clear``,
-and ``scope`` subcommands for use in scripts.
+``scope``, and ``export`` subcommands for use in scripts. ``export`` writes all the
+channels to a file, and ``import --file`` adds the channels of that file to another device
+(refer to :mod:`meshterm.core.channel_file`).
 
 The ``chat`` tool also lists the channels, so that the user can select a conversation. But
 this tool owns all the configuration of the slots.
@@ -14,6 +16,7 @@ this tool owns all the configuration of the slots.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import typer
@@ -21,6 +24,7 @@ import typer
 from ..context import AppContext
 from ..core import exitcodes
 from ..core.channels import (
+    MAX_CHANNELS,
     channel_hash,
     derive_secret,
     is_public_channel,
@@ -84,6 +88,10 @@ class ChannelsTool(Tool):
             return await self._cli_clear(ctx, params)
         if action == "scope":
             return await self._cli_scope(ctx, params)
+        if action == "export":
+            return await self._cli_export(ctx, params)
+        if action == "import_file":
+            return await self._cli_import_file(ctx, params)
         return await self._cli_list(ctx)
 
     async def _cli_list(self, ctx: AppContext) -> ToolResult:
@@ -246,6 +254,90 @@ class ChannelsTool(Tool):
             report=(_scoped(idx, slot.name, slot.secret, scope, changed=changed),),
         )
 
+    async def _cli_export(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
+        """Write all the channels of the device to a file, for ``channels import --file``.
+
+        The plain face prints only the path, as ``config backup`` does. The warning about
+        the keys in the file goes to stderr, next to the path on the screen and not in the
+        output. A device with no channels writes no file and exits 5, because there is
+        nothing to export.
+        """
+        from ..core.channel_file import entry_from_slot, write_channel_file
+
+        _, slots = await _complete_slots(ctx)
+        if not slots:
+            return ToolResult(
+                summary={"channels": 0},
+                report=(_exported(None, 0, 0),),
+                exit_code=exitcodes.NO_RESULT,
+            )
+        regions, mutes = ctx.region_store, ctx.mute_store
+        entries = [
+            entry_from_slot(
+                slot,
+                scope=regions.channel_scope(slot.identity) if regions is not None else None,
+                muted=mutes.is_muted(slot.identity) if mutes is not None else False,
+            )
+            for slot in slots
+        ]
+        path = write_channel_file(Path(params["path"]).expanduser().resolve(), entries)
+        private = sum(1 for slot in slots if not slot.is_public)
+        if private:
+            noun = "channel" if private == 1 else "channels"
+            ctx.ui.ack(
+                f"[warn]the file holds the keys of {private} private {noun}: keep it private[/warn]"
+            )
+        return ToolResult(
+            summary={"channels": len(entries)},
+            report=(_exported(path, len(entries), private),),
+        )
+
+    async def _cli_import_file(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
+        """Add the channels of a file from ``channels export`` to the device.
+
+        This is the script form of "Import channels…" on the Channels page, with the same
+        plan (:func:`~meshterm.core.channel_file.plan_import`): the channels of the file
+        first, in file order, then the other channels of the device. Nothing is removed.
+        The answer is the layout of the device after the import, one row for each channel,
+        with what the import does to it. A channel that has no free slot is a row with no
+        slot. ``--dry-run`` gives the same answer and writes nothing.
+        """
+        from ..core.channel_file import (
+            ChannelFileError,
+            apply_preferences,
+            plan_import,
+            read_channel_file,
+        )
+        from ..ui.channels import write_channel
+
+        try:
+            entries = read_channel_file(Path(params["file"]).expanduser())
+        except ChannelFileError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        device, slots = await _complete_slots(ctx)
+        capacity = await ctx.devstate.channel_capacity() or MAX_CHANNELS
+        plan = plan_import(entries, slots, capacity)
+        dry_run = bool(params.get("dry_run"))
+        if dry_run:
+            ctx.ui.ack("[muted]dry run — nothing was changed.[/muted]")
+        else:
+            for idx, name, secret in plan.writes:
+                await write_channel(ctx, device, idx, name, secret)
+            kept = list(plan.present) + [entry for _, entry in plan.added]
+            apply_preferences(kept, ctx.region_store, ctx.mute_store)
+        if plan.skipped:
+            names = ", ".join(entry.name for entry in plan.skipped)
+            ctx.ui.ack(f"[warn]no free slot for {names}: clear a channel first[/warn]")
+        return ToolResult(
+            summary={
+                "added": len(plan.added),
+                "moved": plan.moved,
+                "skipped": len(plan.skipped),
+                "dry_run": dry_run,
+            },
+            report=_imported(plan, dry_run),
+        )
+
     @staticmethod
     async def _show_qr(ctx: AppContext, name: str, url: str) -> None:
         """Draw the share link of a channel as a QR code, only in the menu.
@@ -297,12 +389,38 @@ class ChannelsTool(Tool):
                 self, {"cli_action": "join", "index": index, "name": name, "secret": secret}
             )
 
-        @channels_app.command("import", help="Import a meshcore:// channel link")
+        @channels_app.command(
+            "import", help="Import a meshcore:// link, or a file from 'channels export'"
+        )
         def _import_cmd(
-            index: int = typer.Argument(..., help="Channel slot index"),
-            url: str = typer.Argument(..., help="A meshcore://channel/add link"),
+            index: int | None = typer.Argument(None, help="Channel slot index (with a link)"),
+            url: str | None = typer.Argument(None, help="A meshcore://channel/add link"),
+            file: Path | None = typer.Option(
+                None, "--file", help="A file from 'channels export': add its channels"
+            ),
+            dry_run: bool = typer.Option(
+                False, "--dry-run", help="With --file: show the plan, change nothing"
+            ),
         ) -> None:
+            # One verb, two sources: a link brings one channel into a slot that the caller
+            # names, and a file brings many channels in the order of the file.
+            if file is not None:
+                if index is not None or url is not None:
+                    raise typer.BadParameter("Pass a slot and a link, or --file, not both.")
+                params = {"cli_action": "import_file", "file": file, "dry_run": dry_run}
+                run_tool_command(self, params)
+                return
+            if index is None or url is None:
+                raise typer.BadParameter("Pass a slot index and a meshcore:// link, or --file.")
+            if dry_run:
+                raise typer.BadParameter("--dry-run works only with --file.")
             run_tool_command(self, {"cli_action": "import", "index": index, "url": url})
+
+        @channels_app.command("export", help="Write every channel to a file, for another device")
+        def _export_cmd(
+            path: Path = typer.Argument(..., help="Destination file"),
+        ) -> None:
+            run_tool_command(self, {"cli_action": "export", "path": path})
 
         @channels_app.command("share", help="Print a channel's share link and QR code")
         def _share_cmd(
@@ -351,6 +469,84 @@ class ChannelsTool(Tool):
             )
 
         app.add_typer(channels_app, name=self.name)
+
+
+async def _complete_slots(ctx: AppContext) -> tuple[Any, list]:
+    """The device and all its channels, from a probe that read each slot.
+
+    An export from a probe that stopped early leaves channels out of the file, and an
+    import plans over a slot that looks free and is not. Thus a short probe is a device
+    failure here (exit 4), and the caller can try again.
+
+    Raises:
+        DeviceCommandError: If the probe did not read each slot.
+    """
+    from ..core.channel_probe import probe_channel_slots
+    from ..core.connection import DeviceCommandError
+
+    device = await ctx.device()
+    slots, complete = await probe_channel_slots(device)
+    if not complete:
+        raise DeviceCommandError("could not read every channel slot; nothing was changed")
+    return device, slots
+
+
+def _exported(path: Path | None, channels: int, private: int) -> Facts:
+    """What ``channels export`` wrote. The plain face prints only the path."""
+    from ..ui import fields
+    from ..ui.report import BARE, Facts
+
+    return Facts(
+        key="export",
+        fields=(
+            fields.word("path", "path"),
+            fields.integer("channels", "channels"),
+            fields.integer("private", "private"),
+        ),
+        values={"path": str(path) if path else None, "channels": channels, "private": private},
+        shape=BARE,
+        bare="path",
+    )
+
+
+def _imported(plan: Any, dry_run: bool) -> tuple[Facts, Listing]:
+    """What ``channels import --file`` did or plans to do: the counts, and the layout.
+
+    The listing is the device after the import, in slot order. Each row names the action:
+    ``add`` (the channel is new), ``move`` (it changes slot), or ``keep``. A channel of
+    the file that has no free slot comes last, with no slot and the action ``skip``.
+    """
+    from ..ui import fields
+    from ..ui.report import SILENT, Facts, Listing
+
+    rows = [{"slot": slot, "name": name, "action": action} for slot, name, action in plan.layout]
+    rows += [{"slot": None, "name": entry.name, "action": "skip"} for entry in plan.skipped]
+    facts = Facts(
+        key="import",
+        fields=(
+            fields.flag("dry_run", "dry_run"),
+            fields.integer("added", "added"),
+            fields.integer("moved", "moved"),
+            fields.integer("skipped", "skipped"),
+        ),
+        values={
+            "dry_run": dry_run,
+            "added": len(plan.added),
+            "moved": plan.moved,
+            "skipped": len(plan.skipped),
+        },
+        shape=SILENT,
+    )
+    listing = Listing(
+        key="channels",
+        columns=(
+            fields.integer("slot", "SLOT"),
+            fields.name("name", "NAME"),
+            fields.word("action", "ACTION"),
+        ),
+        rows=rows,
+    )
+    return facts, listing
 
 
 def _channel_listing(slots: list, store: object | None = None) -> Listing:
