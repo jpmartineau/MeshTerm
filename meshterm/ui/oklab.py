@@ -1,19 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
-"""OKLab — the perceptual colour space the UI measures and shades ``#rrggbb`` values in.
+"""OKLab: the perceptual colour space in which the UI measures and shades ``#rrggbb`` values.
 
-Where the app has to ask a question about two colours *as the eye sees them* — are these
-two chip fills the same to a reader, what is a slightly darker version of this one — it
-asks here, not in RGB and not by hue. sRGB is a device encoding: a fixed step in it is a
-different size to the eye in every region of the wheel (a step across the greens is a
-whisper, the same step across the cyans a shout), and a hue-only comparison is worse,
-blind to lightness and saturation altogether. OKLab (Björn Ottosson, 2020) is built so
-that Euclidean distance approximates perceived difference and so that changing ``L``
-alone changes lightness and nothing else, which is exactly the two operations wanted.
+Sometimes the app must compare two colours as the eye sees them. Two examples: are two
+chip fills the same to the user, and what is a slightly darker version of this fill? The
+app asks these questions here, not in RGB and not by hue. sRGB is a device encoding. A
+fixed step in sRGB has a different size to the eye in each region of the colour wheel. A
+step across the greens is small, but the same step across the cyans is large. A
+comparison of hue only is worse, because it does not see lightness or saturation at all.
+OKLab (Björn Ottosson, 2020) is made so that the Euclidean distance approximates the
+perceived difference. It is also made so that a change of ``L`` alone changes the
+lightness and nothing else. These are the two operations that the app needs.
 
-Everything is the reference transform, no dependencies: linear sRGB → LMS → cube root →
-Lab. ``L`` runs 0 (black) to 1 (white); ``a``/``b`` are the two chroma axes, roughly
-±0.4 at the sRGB gamut's edge. A distance of about 0.02 is a just-noticeable difference
-between two large patches.
+The module uses the reference transform with no dependencies: linear sRGB → LMS → cube
+root → Lab. ``L`` runs from 0 (black) to 1 (white). ``a`` and ``b`` are the two chroma
+axes, approximately ±0.4 at the edge of the sRGB gamut. A distance of approximately 0.02
+is the smallest difference that a user can see between two large patches.
 """
 
 from __future__ import annotations
@@ -25,20 +26,20 @@ Lab = tuple[float, float, float]
 
 
 def _linear(channel: float) -> float:
-    """The sRGB transfer function, 0–1 encoded → 0–1 linear."""
+    """The sRGB transfer function: 0–1 encoded to 0–1 linear."""
     return channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
 
 
 def _encoded(channel: float) -> float:
-    """The inverse: 0–1 linear → 0–1 sRGB encoded."""
+    """The inverse function: 0–1 linear to 0–1 sRGB encoded."""
     return 12.92 * channel if channel <= 0.0031308 else 1.055 * channel ** (1 / 2.4) - 0.055
 
 
 def from_hex(colour: str) -> Lab:
-    """``#rrggbb`` → OKLab.
+    """Change a ``#rrggbb`` colour to OKLab.
 
     Args:
-        colour: A six-digit hex colour, ``#`` optional, either case.
+        colour: A six-digit hex colour. The ``#`` is optional. The case does not matter.
 
     Raises:
         ValueError: If the string is not six hex digits.
@@ -58,19 +59,19 @@ def from_hex(colour: str) -> Lab:
 
 
 def to_hex(lab: Lab) -> str:
-    """OKLab → ``#rrggbb``, each channel clipped to the sRGB gamut.
+    """Change an OKLab colour to ``#rrggbb``. Each channel is clipped to the sRGB gamut.
 
-    Clipping is the honest answer for the one caller that can leave the gamut — a
-    saturated fill darkened at constant chroma pushes a channel below zero — because the
-    clipped colour is the nearest the terminal can show, and it stays the right hue to
-    the eye at the shifts the app asks for.
+    The clip is the correct answer for the one caller that can leave the gamut. A
+    saturated fill that is darkened at constant chroma pushes a channel below zero. The
+    clipped colour is the nearest colour that the terminal can show. At the shifts that
+    the app uses, it also keeps the correct hue to the eye.
     """
     linear = _linear_rgb(lab)
     return "#" + "".join(f"{round(_encoded(min(1.0, max(0.0, c))) * 255):02x}" for c in linear)
 
 
 def _linear_rgb(lab: Lab) -> tuple[float, float, float]:
-    """OKLab → linear sRGB. A channel outside 0 to 1 is outside the sRGB gamut."""
+    """Change an OKLab colour to linear sRGB. A channel outside 0 to 1 is outside the sRGB gamut."""
     lightness, a, b = lab
     l_ = lightness + 0.3963377774 * a + 0.2158037573 * b
     m_ = lightness - 0.1055613458 * a - 0.0638541728 * b
@@ -84,18 +85,18 @@ def _linear_rgb(lab: Lab) -> tuple[float, float, float]:
 
 
 def _in_gamut(lab: Lab) -> bool:
-    """Whether the sRGB gamut holds ``lab`` (a very small tolerance for rounding)."""
+    """Check if the sRGB gamut holds ``lab``. A very small tolerance is for rounding."""
     return all(-1e-6 <= channel <= 1 + 1e-6 for channel in _linear_rgb(lab))
 
 
 def fitted(lab: Lab) -> Lab:
     """``lab`` with its chroma lowered until the sRGB gamut holds it.
 
-    The lightness and the hue do not change. A colour that is already in the gamut comes
-    back unchanged. Use this instead of the clip in :func:`to_hex` when a set of colours
-    must stay apart: a dark, saturated colour leaves the gamut, and the clip moves many
-    such colours to one corner of the gamut. For example, two greens a few steps apart
-    on the hue wheel both clip to ``#008000``.
+    The lightness and the hue do not change. A colour that is already in the gamut is
+    returned unchanged. Use this function instead of the clip in :func:`to_hex` when a set
+    of colours must stay apart. A dark, saturated colour leaves the gamut, and the clip
+    moves many such colours to one corner of the gamut. For example, two greens that are
+    a few steps apart on the hue wheel both clip to ``#008000``.
     """
     if _in_gamut(lab):
         return lab
@@ -111,28 +112,30 @@ def fitted(lab: Lab) -> Lab:
 
 
 def distance(first: str, second: str) -> float:
-    """Perceived difference between two ``#rrggbb`` colours: Euclidean distance in OKLab.
+    """The perceived difference between two ``#rrggbb`` colours: the Euclidean distance in OKLab.
 
-    ``0`` for the same colour; about ``0.02`` at the threshold of noticing between two
-    large patches; ``1`` is black to white.
+    The distance is ``0`` for the same colour. Approximately ``0.02`` is the smallest
+    difference that a user can see between two large patches. The distance from black to
+    white is ``1``.
     """
     return math.dist(from_hex(first), from_hex(second))
 
 
 def shaded(colour: str, by: float, *, floor: float | None = None) -> str:
-    """``colour`` moved ``by`` in lightness, away from whichever end it is nearer.
+    """``colour`` moved ``by`` in lightness, away from the end of the scale that is nearer.
 
-    A light colour comes back darker and a dark one lighter, at the same chroma, so the
-    result is recognisably *the same colour, shaded* rather than a different one — the
-    version of a fill that draws a line on itself.
+    A light colour is returned darker and a dark colour is returned lighter, at the same
+    chroma. Thus the user sees the same colour, shaded, and not a different colour. This
+    is the version of a fill that draws a line on itself.
 
     Args:
-        colour: The ``#rrggbb`` to shade.
-        by: The lightness shift, in OKLab ``L`` (``0.1`` is a clear step, ``0.25`` bold).
-        floor: If given, the shift starts from this lightness rather than the colour's
-            own where that is further along — a caller guaranteeing the result clears a
-            *second* colour's lightness by ``by`` as well as this one's passes that
-            colour's ``L``. Read as "at least this far from both".
+        colour: The ``#rrggbb`` colour to shade.
+        by: The lightness shift, in OKLab ``L`` (``0.1`` is a clear step, ``0.25`` is bold).
+        floor: If it is given, the shift starts from this lightness instead of the
+            lightness of the colour, where this lightness is further along. A caller
+            that must clear the lightness of a second colour by ``by``, and also that of
+            this colour, passes the ``L`` of the second colour. The result is at least
+            this far from both colours.
     """
     lightness, a, b = from_hex(colour)
     if lightness >= 0.5:

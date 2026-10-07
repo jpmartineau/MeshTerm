@@ -1,34 +1,37 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The handhelds' glyph inventories — the glyph contract.
+"""The glyph inventories of the handhelds. They are the glyph contract.
 
-The PicoCalc panel draws through the kernel console with one 512-glyph PSF font
-(``meshterm.psf.gz``, built by ``scripts/picocalc-lyra/calculinux-console-font-6x12.sh``): the stock
-Terminus 6×12 base (a Cyrillic-coverage table — note there are **no accented Latin
-letters**), the full braille block, MeshTerm's own marks drawn into donor slots, and a
-few aliases. A character outside this set renders as a blank on the panel, so *nothing
-outside it may ever be emitted* on the picocalc-lyra platform — the render boundary folds
-text down to it (:func:`meshterm.ui.theme.fold_text`), and the dual-platform gallery
-asserts the fold held.
+The PicoCalc display draws through the kernel console with one 512-glyph PSF font
+(``meshterm.psf.gz``, built by ``scripts/picocalc-lyra/calculinux-console-font-6x12.sh``).
+The font has these parts: the stock Terminus 6×12 base (a table that covers Cyrillic,
+which has **no accented Latin letters**), the full braille block, the marks of MeshTerm
+that are drawn into donor slots, and a few aliases. The display shows a character that is
+not in this set as a blank. Thus MeshTerm must never send a character that is not in the
+set on the picocalc-lyra platform. The render boundary folds the text down to the set
+(:func:`meshterm.ui.theme.fold_text`), and the dual-platform gallery test makes sure that
+the fold held.
 
-This table is the **single source of truth** for that contract, shared by the runtime
-fold and the tests. It mirrors the font actually installed on the device: the base
-inventory was dumped live from the PSF's Unicode table (2026-08-01), minus the donor
-codepoints the build script now repurposes, plus the marks it draws in their place.
-If the build script's ``MARKS``/``DONORS``/``ALIASES`` change, this table must move in
-the same commit — and vice versa.
+This table is the only source of truth for that contract. The fold at run time and the
+tests share it. It copies the font that is installed on the handheld. The base inventory
+was dumped from the Unicode table of the PSF on the handheld (2026-08-01). The table has
+no donor codepoints that the build script now uses for other glyphs, and it has the marks
+that the script draws in their place. If the ``MARKS``, ``DONORS``, or ``ALIASES`` of the
+build script change, this table must change in the same commit. The reverse is also true.
 
-The Cardputer Zero has a contract of its own, :data:`CARDPUTER_ZERO_CODEPOINTS`: what its console
-host draws, which no kernel caps. :data:`FONTS` names both, for ``Platform.font``.
+The Cardputer Zero has its own contract, :data:`CARDPUTER_ZERO_CODEPOINTS`. It is what
+the console host draws, and no kernel limits it. :data:`FONTS` names both contracts, for
+``Platform.font``.
 """
 
 from __future__ import annotations
 
-#: Inclusive ``(first, last)`` codepoint ranges present in the font. 519 codepoints over
-#: 512 glyphs — aliases (the rounded corners onto the square ones, ``⋯`` onto ``…``) and
-#: shared slots give a few glyphs more than one codepoint. Verified against a live table
-#: dump of the installed font (2026-08-01, post-P3 build). On 2026-10-06, the two powerline
-#: chevrons of the path chips (U+E0B0, U+E0B1) took the donor slots of U+2559 and U+255B.
-#: The same day, a dump of the font installed on the Lyra matched this table exactly.
+#: Inclusive ``(first, last)`` codepoint ranges that are in the font. There are 519
+#: codepoints for 512 glyphs, because aliases (the rounded corners onto the square ones,
+#: ``⋯`` onto ``…``) and shared slots give a few glyphs more than one codepoint. We
+#: checked this table against a dump of the table of the installed font (2026-08-01,
+#: post-P3 build). On 2026-10-06, the two powerline chevrons of the path chips (U+E0B0,
+#: U+E0B1) took the donor slots of U+2559 and U+255B. The same day, a dump of the font
+#: that is installed on the Lyra was exactly the same as this table.
 # fmt: off
 FONT_RANGES: tuple[tuple[int, int], ...] = (
     (0x0020, 0x007F), (0x00A0, 0x00A0), (0x00A7, 0x00A7), (0x00A9, 0x00A9),
@@ -56,25 +59,27 @@ FONT_RANGES: tuple[tuple[int, int], ...] = (
 )
 # fmt: on
 
-#: Every codepoint the console font can draw, as one frozen set (built once at import;
-#: 519 members, so the set is small and the per-character membership test is a dict hit).
+#: All the codepoints that the console font can draw, as one frozen set. MeshTerm builds
+#: it one time, at import. It has 519 members, so it is small, and the membership test for
+#: each character is a fast hash lookup.
 FONT_CODEPOINTS: frozenset[int] = frozenset(
     cp for first, last in FONT_RANGES for cp in range(first, last + 1)
 )
 
 
 def in_font(char: str) -> bool:
-    """Whether the console font has a glyph for ``char``."""
+    """Check if the console font has a glyph for ``char``."""
     return ord(char) in FONT_CODEPOINTS
 
 
-#: The Cardputer Zero's inventory: what its emulator draws (:mod:`meshterm.emulator.font`)
-#: — Terminus 4.49's 12-pixel face, every one of its 1,356 glyphs, with MeshTerm's own
-#: marks drawn over it and ``⋯`` aliased onto the ellipsis, as on the PicoCalc. No 512-glyph
-#: cap here, so braille, the powerline chevrons and accented Latin are all simply present.
-#: Generated from ``ter-u12n.bdf`` plus the host's ``MARKS`` and ``ALIASES``; if either
-#: changes, this table moves in the same commit (``tests/test_emulator.py`` checks the
-#: marks, and the font itself wherever it is installed).
+#: The inventory of the Cardputer Zero. It is what its emulator draws
+#: (:mod:`meshterm.emulator.font`): the 12-pixel face of Terminus 4.49 with all its 1,356
+#: glyphs, with the marks of MeshTerm drawn over it, and ``⋯`` as an alias of the
+#: ellipsis, as on the PicoCalc. There is no 512-glyph limit here, so braille, the
+#: powerline chevrons, and accented Latin are all present. The table comes from
+#: ``ter-u12n.bdf`` plus the ``MARKS`` and ``ALIASES`` of the host. If either of them
+#: changes, this table must change in the same commit. ``tests/test_emulator.py`` checks
+#: the marks, and it checks the font itself where the font is installed.
 # fmt: off
 CARDPUTER_RANGES: tuple[tuple[int, int], ...] = (
     (0x0020, 0x007E), (0x00A0, 0x017F), (0x0186, 0x0186), (0x018E, 0x0190),
@@ -120,12 +125,12 @@ CARDPUTER_RANGES: tuple[tuple[int, int], ...] = (
 )
 # fmt: on
 
-#: The Cardputer's inventory as one frozen set.
+#: The inventory of the Cardputer as one frozen set.
 CARDPUTER_ZERO_CODEPOINTS: frozenset[int] = frozenset(
     cp for first, last in CARDPUTER_RANGES for cp in range(first, last + 1)
 )
 
-#: Every handheld's glyph inventory, by the name ``Platform.font`` gives it.
+#: The glyph inventory of each handheld, by the name that ``Platform.font`` gives it.
 FONTS: dict[str, frozenset[int]] = {
     "picocalc-lyra": FONT_CODEPOINTS,
     "cardputer-zero": CARDPUTER_ZERO_CODEPOINTS,

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Reusable Rich widgets: banner, status pill, trace tables, and progress bars."""
+"""Rich widgets for many screens: banner, status pill, trace tables, and progress bars."""
 
 from __future__ import annotations
 
@@ -66,18 +66,20 @@ if TYPE_CHECKING:
 
 
 def channel_glyph(name: str, secret: bytes | None) -> str:
-    """The one-character openness marker for a channel, shared across channel-facing screens.
+    """The one-character mark for the openness of a channel. The screens for channels share it.
 
-    ``＃`` marks a name-derived (``#``-style) channel, ``🌐`` a fixed-key well-known public
-    channel (e.g. the firmware default ``Public``), and ``🔒`` a private one — mapped
-    through :func:`~meshterm.ui.theme.glyph`, so PicoCalc draws the compact ``# @ ⚿``
-    instead. Within a platform every glyph is one width (double on regular, single on
-    PicoCalc), so callers can prefix rows with ``"{glyph} "`` without disturbing column
-    alignment. When the secret is unknown, the name alone is used to guess.
+    ``＃`` marks a channel with a name-derived key (a ``#`` channel). ``🌐`` marks a
+    well-known public channel with a fixed key (for example the firmware default
+    ``Public``). ``🔒`` marks a private channel. The function sends each mark through
+    :func:`~meshterm.ui.theme.glyph`, so the PicoCalc draws the compact ``# @ ⚿``
+    instead. On one platform, all the glyphs have the same width (double on regular,
+    single on the PicoCalc). Thus callers can put ``"{glyph} "`` before rows and the
+    columns stay aligned. When the secret is not known, the function uses the name alone
+    to guess.
 
     Args:
         name: The channel name.
-        secret: The channel's 16-byte secret, or ``None`` when only the name is known.
+        secret: The 16-byte secret of the channel, or ``None`` when only the name is known.
 
     Returns:
         A single-character glyph.
@@ -91,29 +93,32 @@ def channel_glyph(name: str, secret: bytes | None) -> str:
     return glyph("🔒")
 
 
-#: The concept icon for a region — a flood's scope (see ``CLAUDE.md``'s icon table).
+#: The concept icon for a region (the scope of a flood). Refer to the icon table of ``CLAUDE.md``.
 REGION_ICON = "🔖"
 
 
 def scope_text(scope: Scope | None, *, bare: bool = False) -> Text:
-    """THE rendering of a flood's scope, for every surface that states one.
+    """The only rendering of the scope of a flood, for each surface that states one.
 
-    Three readings, one per :attr:`~meshterm.core.regions.Scope.state`:
+    There are three forms, one for each :attr:`~meshterm.core.regions.Scope.state`:
 
-    * ``scope yul`` — a scoped flood whose region is known, the name in the ``scope``
-      style (a region is not a node, so it never takes a node hue);
-    * ``unknown scope 3fa1`` (``? 3fa1`` bare) — a scoped flood no known name
-      reproduces: the code is shown so
-      two frames can still be told to share a region, ``muted`` because it names nothing;
-    * ``unscoped`` — a plain flood, ``muted``: the ordinary case, stated not stressed.
+    * ``scope yul`` is a scoped flood with a known region. The name has the ``scope``
+      style (a region is not a node, so it never has a node hue).
+    * ``unknown scope 3fa1`` (``? 3fa1`` bare) is a scoped flood that no known name
+      reproduces. The widget shows the code, so that the user can still see that two
+      packets share a region. It is ``muted`` because it names nothing.
+    * ``unscoped`` is a plain flood. It is ``muted`` because it is the ordinary case, and
+      the widget states it without stress.
 
-    ``None`` (a direct frame, or one whose route type was never kept) draws nothing — a
-    repeater never region-filters those, so a word there would claim a meaning it lacks.
+    ``None`` (a direct packet, or a packet whose route type MeshTerm did not keep) draws
+    nothing. A repeater never filters these by region, so a word there claims a meaning
+    that it does not have.
 
     Args:
-        scope: The frame's scope (:meth:`~meshterm.core.region_store.RegionStore.scope_of`).
-        bare: Drop the ``scope`` lead-in and draw the region name alone, for a lane whose
-            heading already says what it holds.
+        scope: The scope of the packet
+            (:meth:`~meshterm.core.region_store.RegionStore.scope_of`).
+        bare: Remove the ``scope`` lead-in and draw the region name alone, for a lane
+            whose heading already says what it holds.
 
     Returns:
         The styled text (empty for ``None``).
@@ -126,8 +131,8 @@ def scope_text(scope: Scope | None, *, bare: bool = False) -> Text:
             text.append("scope ", style="muted")
         text.append(scope.region, style="scope")
     elif scope.scoped:
-        # No `·` inside the reading: a title chains its status atoms with `·`, and
-        # ``scoped · 3fa1`` there read as two atoms where it is one fact.
+        # Do not put a `·` inside the text. A title chains its status atoms with `·`, and
+        # ``scoped · 3fa1`` there looks like two atoms, but it is one fact.
         text.append("?" if bare else "unknown scope", style="muted")
         if scope.code:
             text.append(f" {scope.code}", style="muted")
@@ -137,20 +142,20 @@ def scope_text(scope: Scope | None, *, bare: bool = False) -> Text:
 
 
 def identity_label(label: str | None) -> str | None:
-    """Default node resolver: leave labels untouched."""
+    """The default node resolver: it does not change labels."""
     return label
 
 
 def banner(
     profile: str | None, mock: bool, selected_device: DiscoveredDevice | None = None
 ) -> Panel:
-    """Build the application header panel.
+    """Build the header panel of the application.
 
     Args:
-        profile: Active device profile name, if any.
-        mock: Whether the simulator is in use.
-        selected_device: The discovered device chosen for this session, if any, shown
-            when no named profile is in use.
+        profile: The name of the active device profile, if any.
+        mock: ``True`` if the simulator is in use.
+        selected_device: The discovered device that the user chose for this session, if
+            any. The panel shows it when no named profile is in use.
 
     Returns:
         A Rich :class:`Panel` showing the app name, version, and connection target.
@@ -170,13 +175,13 @@ def banner(
 
 
 def make_progress(console: Console) -> Progress:
-    """Create a themed progress bar for trace sweeps.
+    """Create a progress bar with the theme, for trace sweeps.
 
     Args:
         console: The console to render into.
 
     Returns:
-        A configured :class:`rich.progress.Progress` (use as a context manager).
+        A configured :class:`rich.progress.Progress` (use it as a context manager).
     """
     return Progress(
         SpinnerColumn(style="accent"),
@@ -197,23 +202,25 @@ def link_text(
     hash_bytes: int | None = None,
     device_hash: str | None = None,
 ) -> Text:
-    """Render an ``origin -> destination`` link through THE path widget.
+    """Render an ``origin -> destination`` link through the only path widget.
 
-    A two-node :func:`path_text` in the trace presentation: a known node as
-    ``name (hash)``, an unknown one as its bare hash, our own device as its label
-    (plus ``device_hash`` when supplied). Hashes are truncated to ``hash_bytes`` so
-    they match how the trace command addressed each node.
+    It is a :func:`path_text` of two nodes in the trace form. A known node is
+    ``name (hash)``, an unknown node is its bare hash, and our device is its label (plus
+    ``device_hash`` when the caller supplies it). The function truncates hashes to
+    ``hash_bytes``, so that they match the way the trace command addressed each node.
 
     Args:
         origin: The transmitting node (``None`` = our device).
         destination: The receiving node (``None`` = our device).
-        device_label: The label used for our own device.
+        device_label: The label for our device.
         resolve: Maps a raw hop hash to a friendly name when the node is known.
-        hash_bytes: Path-hash width (bytes) to truncate shown hashes to.
-        device_hash: Our own device's key/hash, shown alongside its label when known.
+        hash_bytes: The path-hash width (bytes) to which the function truncates the
+            hashes that it shows.
+        device_hash: The key or hash of our device. It is shown with its label when it
+            is known.
 
     Returns:
-        A :class:`Text` like ``us (a1) → Alice (3d)`` with the arrow muted.
+        A :class:`Text` such as ``us (a1) → Alice (3d)`` with a muted arrow.
     """
     ends = [None if not node or node == device_label else node for node in (origin, destination)]
     return path_text(
@@ -233,27 +240,30 @@ def traces_table(
     resolve: NodeResolver = identity_label,
     device_hash: str | None = None,
 ) -> Table:
-    """Render every trace's per-hop SNR side by side, one column per trace.
+    """Render the SNR of each hop of all traces side by side, with one column for each trace.
 
-    Hops are framed as ``origin -> destination`` links (the first originates at our
-    device, the last returns to it) and aligned by position across traces, so each
-    column is one trace's SNR readings down the shared path. Each node is annotated with
-    its hash at the command's path-hash width. A trailing ``min`` row shows each trace's
-    bottleneck — the per-trace values the run's *median min SNR* summarizes. Traces that
-    never replied appear as a ``✗`` column.
+    The table shows the hops as ``origin -> destination`` links. The first link starts at
+    our device, and the last link returns to it. The table aligns the hops by position
+    across the traces. Thus each column is the SNR readings of one trace down the shared
+    path. Each node has its hash at the path-hash width of the command. A ``min`` row at
+    the end shows the bottleneck of each trace. These are the values for each trace that
+    the *median min SNR* of the run summarizes. Traces that never received a reply
+    appear as a ``✗`` column.
 
     Args:
-        traces: The individual traces to display, in run order.
-        device_label: Name to show for our own device at the path's endpoints.
-        resolve: Maps a raw hop hash to a friendly contact name when known.
-        device_hash: Our own device's key/hash, annotated onto the path's endpoints.
+        traces: The individual traces to show, in the order of the run.
+        device_label: The name to show for our device at the endpoints of the path.
+        resolve: Maps a raw hop hash to a friendly contact name when it is known.
+        device_hash: The key or hash of our device. The table adds it to the endpoints of
+            the path.
 
     Returns:
-        A Rich :class:`Table` with a column per trace.
+        A Rich :class:`Table` with one column for each trace.
     """
     target = traces[0].target if traces else ""
-    # All traces in a run share the command's path-hash width; take it from the first
-    # successful one so node hashes render at the width they were addressed.
+    # All traces in a run have the path-hash width of the command. Take it from the first
+    # successful trace, so that node hashes render at the width at which they were
+    # addressed.
     hash_bytes = next((t.path_hash_bytes for t in traces if t.success), None)
     table = Table(title=f"Trace → {target}", border_style="muted", expand=False)
     table.add_column("HOP", justify="right", style="muted")
@@ -261,8 +271,9 @@ def traces_table(
     for i in range(1, len(traces) + 1):
         table.add_column(f"#{i}", justify="right")
 
-    # Index each trace's edges by hop position so columns line up even when traces
-    # take different-length paths (a missing hop shows as a muted dash).
+    # Index the edges of each trace by hop position. Thus the columns stay aligned also
+    # when the traces take paths of different lengths (a missing hop shows as a muted
+    # dash).
     edges_by_trace = [
         {e.index: e for e in t.edges(device_label)} if t.success else {} for t in traces
     ]
@@ -292,7 +303,8 @@ def traces_table(
                 row.append(Text(f"{edge.snr:+.1f}", style=snr_style(edge.snr)))
         table.add_row(*row)
 
-    # Bottleneck per trace: the weakest link the run's median min SNR is taken over.
+    # The bottleneck of each trace: the weakest link, from which MeshTerm takes the median
+    # min SNR of the run.
     min_row: list[Text] = [Text("min", style="muted"), Text("bottleneck", style="muted")]
     for trace in traces:
         if not trace.success:
@@ -319,51 +331,59 @@ def path_text(
     dim_from: int | None = None,
     hash_as_name: bool = False,
 ) -> Text:
-    """Render a hop sequence compactly on one line — THE path widget.
+    """Render a sequence of hops compactly on one line. This is the only path widget.
 
-    The one way MeshTerm shows a walked, relayed, or planned hop sequence, wherever one
-    appears: a packet's ``via`` row, a message's delivery paths, a feed note, a trace's
-    walked route or planned spec. Each hop renders as its resolved name — coloured in
-    the app-wide per-name hue, our own node pure white — or, unnamed, as its hash in
-    the ``node.unknown`` grey (colour marks an identified node, exactly as in the path
-    graph; an unresolvable hop never wears a hue its bytes would derive). Hops are
-    joined by muted ``→`` arrows and, by
-    default, no hash is repeated after a name, so the compact form survives a 72-column
-    row. The trace-flavoured options: ``show_hash`` annotates each named hop with the
-    hash it is addressed by (``Alice (3d63)``), a ``None`` hop is our own device at a
-    route's endpoints, and ``dim_from`` fades the tail a caller wants read as automatic
-    (a boomerang's mirrored return leg). ``hash_as_name`` reframes an *unnamed* hop as
-    its own identity — the hash at the path-hash-mode (``prefix_bytes``) width, muted
-    grey with no prefix lit (colour is the "this is a name" signal, and there is no
-    name), annotated with its addressed byte like a named hop (``e839f2 (e8)``) — where
-    the default instead lights the compact addressed hash. An empty path reads as
+    MeshTerm shows a walked, relayed, or planned sequence of hops in this one way, in each
+    place where it appears: the ``via`` row of a packet, the delivery paths of a message,
+    a feed note, and the walked route or planned spec of a trace. Each hop renders as its
+    resolved name, in the hue of the app for that name. Our node is pure white. An
+    unnamed hop renders as its hash in the grey of ``node.unknown``. (Colour marks an
+    identified node, as in the path graph. A hop that MeshTerm cannot resolve never has
+    the hue that its bytes give.) Muted ``→`` arrows join the hops. By default, the
+    widget does not repeat a hash after a name, so the compact form fits in a row of 72
+    columns.
+
+    These options are for traces. ``show_hash`` adds to each named hop the hash by which
+    it is addressed (``Alice (3d63)``). A ``None`` hop is our device at the endpoints of a
+    route. ``dim_from`` fades the tail that a caller wants the user to read as automatic
+    (the mirrored return leg of a boomerang).
+
+    ``hash_as_name`` shows an *unnamed* hop as its own identity. The identity is the hash
+    at the width of the path-hash mode (``prefix_bytes``), in muted grey with no prefix
+    lit. (Colour is the signal "this is a name", and there is no name.) The widget adds
+    to it the byte by which it is addressed, as for a named hop (``e839f2 (e8)``). By
+    default, the widget instead lights the compact addressed hash. An empty path reads as
     ``empty``.
 
     Args:
-        hops: The hops in propagation order — hex hashes, with ``None`` marking our
-            own device (empty strings are skipped; ``dim_from`` counts rendered hops).
-        resolve: Maps a hop hash to a friendly name when known.
-        prefix_bytes: Path-hash width an unnamed hop's identity hash presents at under
-            ``hash_as_name`` (unnamed hops are otherwise shown grey whole, no prefix lit).
-        self_name: Our own node's name — drawn in the white ``you`` style when a
-            resolved name matches it, and naming any ``None`` device hop.
-        empty: The muted text shown when there are no hops (e.g. ``"direct"``).
-        show_hash: Annotate named hops (and, with ``device_hash``, our device) with
-            their hash in parentheses — the trace presentation.
-        hash_bytes: Truncate shown/annotated hashes to this byte width (the width the
-            hops were addressed at); ``None`` shows them whole.
-        device_hash: Our own device's key, annotated onto ``None`` hops when
+        hops: The hops in the order of propagation. They are hex hashes, and ``None``
+            marks our device. (The function skips empty strings. ``dim_from`` counts the
+            hops that are rendered.)
+        resolve: Maps a hop hash to a friendly name when it is known.
+        prefix_bytes: The path-hash width at which the identity hash of an unnamed hop
+            shows under ``hash_as_name``. (In all other cases, unnamed hops are fully
+            grey, and no prefix is lit.)
+        self_name: The name of our node. The function draws a resolved name that matches
+            it in the white ``you`` style. It is also the name of each ``None`` device
+            hop.
+        empty: The muted text to show when there are no hops (for example ``"direct"``).
+        show_hash: Add the hash in parentheses to the named hops (and to our device, with
+            ``device_hash``). This is the form for traces.
+        hash_bytes: Truncate the hashes that the function shows or adds to this byte
+            width (the width at which the hops were addressed). ``None`` shows them whole.
+        device_hash: The key of our device. The function adds it to the ``None`` hops when
             ``show_hash`` is on.
-        dim_from: Render hops at/after this index — and the arrows into them — faint
-            (a planned route's return leg); ``None`` dims nothing.
-        hash_as_name: Present each unnamed hop as its identity hash — muted grey at the
-            ``prefix_bytes`` width, annotated with its addressed byte (``hash_bytes``)
-            like a named hop — rather than the compact prefix-lit addressed hash.
+        dim_from: Render the hops at this index and after it, and the arrows into them,
+            as faint (the return leg of a planned route). ``None`` dims nothing.
+        hash_as_name: Show each unnamed hop as its identity hash, in muted grey at the
+            ``prefix_bytes`` width, with the byte by which it is addressed
+            (``hash_bytes``), as for a named hop. The default is the compact addressed
+            hash with a lit prefix.
 
     Returns:
-        A one-line :class:`Text`. Space tighter than the path is the caller's call,
-        per surface: ellipsize (``no_wrap``), wrap under a hanging indent, or crop
-        with horizontal scrolling.
+        A one-line :class:`Text`. When the space is narrower than the path, the caller
+        decides what to do for each surface: ellipsize (``no_wrap``), wrap under a
+        hanging indent, or crop with horizontal scrolling.
     """
     shown = [h for h in hops if h is None or h]
     if not shown:
@@ -396,37 +416,43 @@ def revisit_note(
     prefix_bytes: int = 0,
     self_name: str | None = None,
 ) -> Text | None:
-    """The warning a path that touches one hop twice owes its reader, or ``None`` for none.
+    """The warning for a path that touches one hop twice, or ``None`` when there is none.
 
-    A route graph drawn with ``allow_duplicate_nodes``
-    (:func:`~meshterm.ui.pathgraph.render_path_graph`) plants two markers carrying the same
-    name, and the ``via`` row above it names the same node twice — both honest, both confusing
-    left unexplained. This is the one line that explains them, and it refuses to pick between the
-    two readings, because nothing in the packet can: an observed chain addresses its hops by a
-    hash a single byte wide, so a repeat is as easily two different nodes colliding on that byte
-    as one node the packet genuinely passed twice. It names the repeated hops through THE path
-    widget (:func:`path_text`), so each reads in its own name hue exactly as it does in the
-    ``via`` row the reader is comparing against.
+    A route graph that is drawn with ``allow_duplicate_nodes``
+    (:func:`~meshterm.ui.pathgraph.render_path_graph`) puts two markers with the same name.
+    The ``via`` row above it names the same node twice. Both are correct, but both confuse
+    the user if nothing explains them. This function makes the one line that explains
+    them. It does not choose between the two readings, because nothing in the packet can.
+    An observed chain addresses its hops with a hash that is one byte wide. Thus a repeat
+    is as probably two different nodes that have the same byte as one node that the packet
+    really passed twice. The function names the repeated hops through the only path widget
+    (:func:`path_text`). Thus each hop has its own name hue, the same as in the ``via``
+    row with which the user compares it.
 
-    Takes the repeated hops rather than the path itself, so the caller decides what "repeated"
-    means for its surface: one path asks :func:`~meshterm.ui.pathgraph.revisited_hops`, while a
-    surface drawing a *fan* of paths must union each path's own revisits — a hop two different
-    routes share is not a revisit at all, and pooling their hops would libel it as one.
+    The function takes the repeated hops and not the path itself. Thus the caller decides
+    what "repeated" means for its surface. One path asks
+    :func:`~meshterm.ui.pathgraph.revisited_hops`. A surface that draws a *fan* of paths
+    must join the own revisits of each path. A hop that two different routes share is not
+    a revisit. If the surface pools their hops, it wrongly calls that hop a revisit.
 
     Args:
-        repeats: The hops to warn about, already known repeated (empty = no warning).
-        resolve: Maps a hop hash to a friendly name when known.
-        prefix_bytes: Path-hash width to light in an unnamed hop's hash (0 = none).
-        self_name: Our own node's name, so a repeat of *us* draws in the white ``you`` style.
+        repeats: The hops to warn about, which are already known to be repeated (empty =
+            no warning).
+        resolve: Maps a hop hash to a friendly name when it is known.
+        prefix_bytes: The path-hash width to light in the hash of an unnamed hop (0 =
+            none).
+        self_name: The name of our node, so that a repeat of *us* draws in the white
+            ``you`` style.
 
     Returns:
-        A one-line :class:`Text` fitting 72 cells for the paths a radio really carries, or
-        ``None`` when ``repeats`` is empty and there is nothing to warn about.
+        A one-line :class:`Text` that fits in 72 cells for the paths that a radio really
+        carries. ``None`` when ``repeats`` is empty and there is nothing to warn about.
     """
     if not repeats:
         return None
-    # The mark carries its own span rather than riding the Text's base style, so nothing that
-    # follows can inherit ``warn`` — the names keep their node hues and the prose stays muted.
+    # The mark has its own span and does not use the base style of the Text. Thus nothing
+    # that follows can inherit ``warn``. The names keep their node hues, and the prose
+    # stays muted.
     note = Text()
     note.append("⚠ ", style="warn")
     for i, hop in enumerate(repeats):
@@ -449,7 +475,7 @@ def _path_node(
     dim: bool,
     hash_as_name: bool = False,
 ) -> Text:
-    """One node of :func:`path_text` (see there for the rendering rules)."""
+    """One node of :func:`path_text` (refer to that function for the rendering rules)."""
     note_style = "faint" if dim else "muted"
     if hop is None:
         text = Text(self_name or LOCAL_DEVICE_LABEL, style="faint" if dim else "you")
@@ -473,72 +499,76 @@ def _path_node(
     if dim:
         return Text(shown, style="faint")
     if hash_as_name:
-        # No name: the hash is the node's identity. Show it at the path-hash-mode
-        # width, fully muted (prefix_bytes=0 lights nothing — colour is the "this is
-        # a name" signal, and there is no name), then annotate it with the byte it
-        # was addressed by, exactly as a named hop is — unless that byte already *is*
-        # the whole shown hash. So a 3-byte mode reads ``e839f2 (e8)`` and still
-        # cross-references a byte-labelled route graph.
+        # There is no name, so the hash is the identity of the node. Show it at the width
+        # of the path-hash mode, fully muted (prefix_bytes=0 lights nothing, because colour
+        # is the signal "this is a name", and there is no name). Then add the byte by which
+        # it was addressed, as for a named hop, unless that byte is already the whole hash
+        # that the function shows. Thus a mode of 3 bytes reads ``e839f2 (e8)``, and it
+        # still cross-references a route graph that has labels of one byte.
         identity = _shorten_hash(hop, prefix_bytes or None)
         text = highlighted_hash(identity, 0, known=False)
         if show_hash and shown and shown != identity:
             text.append(f" ({shown})", style=note_style)
         return text
-    # No name resolved: the node is unknown, and an unknown node's hash is grey whole —
-    # the prefix never lights (colour marks an identified node; see highlighted_hash).
+    # No name resolved: the node is unknown, and the hash of an unknown node is fully grey.
+    # The prefix is never lit (colour marks an identified node, refer to highlighted_hash).
     return highlighted_hash(shown, prefix_bytes, known=False)
 
 
 def highlighted_hash(
     value: str, prefix_bytes: int, width: int | None = None, *, known: bool = True
 ) -> Text:
-    """Render a hex key with its leading path-hash prefix highlighted — THE hash widget.
+    """Render a hex key with its leading path-hash prefix lit. This is the only hash widget.
 
-    The one way MeshTerm displays a hash, wherever one appears: the first
-    ``prefix_bytes`` bytes are the slice other nodes address in a forced trace path
-    (the path-hash), lit in the node's hash-derived palette hue — the same hue its
-    name wears (see :func:`~meshterm.ui.theme.node_style`) — with the remainder muted,
-    so the addressable prefix stands out within the otherwise full key. A ``width``
-    budget shorter than the key ellipsizes it (the ``…`` takes the colour of the digit
-    it replaces, so a highlight wider than the budget still reads as one).
+    MeshTerm displays a hash in this one way, in each place where one appears. The first
+    ``prefix_bytes`` bytes are the slice that other nodes address in a forced trace path
+    (the path hash). The widget lights them in the palette hue that comes from the hash of
+    the node, which is the same hue as its name (refer to
+    :func:`~meshterm.ui.theme.node_style`). The remainder is muted. Thus the addressable
+    prefix is clear in the otherwise full key. If the ``width`` budget is shorter than the
+    key, the widget ellipsizes the key. The ``…`` has the colour of the digit that it
+    replaces, so a highlight that is wider than the budget still reads as one.
 
-    Colour marks an *identified* node (JP, 2026-08-08): a hash whose node nobody can
-    name passes ``known=False`` and reads whole in the app-wide ``node.unknown`` grey —
-    exactly as an unknown node draws in the path graph — never in a hue its bytes would
-    derive. ``prefix_bytes=0`` on a known node likewise lights nothing and the key,
-    standing in *as* a name, takes ``node.unknown`` rather than ``muted``: it is the
-    row's content, not the dim tail of a hash whose head already carries the hue.
+    Colour marks an *identified* node (JP, 2026-08-08). A hash for which nobody can name
+    the node has ``known=False``, and it reads fully in the ``node.unknown`` grey of the
+    app. An unknown node draws in the same way in the path graph. It never has a hue that
+    its bytes give. In the same way, ``prefix_bytes=0`` on a known node lights
+    nothing, and a key that is the name takes ``node.unknown`` and not ``muted``. It is the
+    content of the row. It is not the dim tail of a hash whose head already has the hue.
 
     Args:
-        value: The key as hex, optionally ``0x``-prefixed and mixed-case.
-        prefix_bytes: Number of leading bytes the current path-hash mode addresses; ``0``
-            (or negative) leaves the whole key un-highlighted.
-        width: Display budget in cells; a longer key is truncated to the whole leading
-            bytes that fit in ``width - 1`` cells (an even digit count — a hash reads in
-            bytes, two hex digits each) plus an ellipsis, a shorter one is right-padded to
-            the budget so lanes stay aligned. ``None`` shows the key whole, unpadded.
-        known: Whether the hash belongs to a node the caller can identify (name it, or
-            place it as a real contact). ``False`` greys the whole run, prefix included.
+        value: The key as hex. It can have the ``0x`` prefix and mixed case.
+        prefix_bytes: The number of leading bytes that the current path-hash mode
+            addresses. ``0`` (or a negative value) leaves the whole key without a
+            highlight.
+        width: The display budget in cells. The widget truncates a longer key to the
+            whole leading bytes that fit in ``width - 1`` cells (an even number of digits,
+            because a hash reads in bytes of two hex digits each) plus an ellipsis. It
+            pads a shorter key on the right to the budget, so that the lanes stay
+            aligned. ``None`` shows the whole key, without padding.
+        known: ``True`` if the hash belongs to a node that the caller can identify (name
+            it, or place it as a real contact). ``False`` makes the whole run grey,
+            also the prefix.
 
     Returns:
-        A styled :class:`Text` of the key (exactly ``width`` cells when given).
+        A styled :class:`Text` of the key (exactly ``width`` cells when it is given).
     """
     raw = value.lower().removeprefix("0x")
     split = max(0, prefix_bytes) * 2 if known else 0
     pad = 0
     ellipsis = False
     if width is not None and len(raw) > width:
-        # Truncate on a byte boundary: keep an even number of hex digits, the ellipsis
-        # taking the next cell and any odd cell left over padding out, so a mid-byte digit
-        # never shows and the lane still spans exactly ``width``.
+        # Truncate on a byte boundary. Keep an even number of hex digits. The ellipsis uses
+        # the next cell, and any odd cell that is left is padding. Thus a digit from the
+        # middle of a byte never shows, and the lane still has exactly ``width`` cells.
         kept = max(0, width - 1)
         kept -= kept % 2
         raw, ellipsis = raw[:kept], True
         pad = width - kept - 1
     elif width is not None:
         pad = width - len(raw)
-    # The hue derives from the untruncated key (any prefix agrees) — but only an
-    # identified node earns one at all; an unknown node's hash is grey throughout.
+    # The hue comes from the key that is not truncated (any prefix gives the same hue). But
+    # only an identified node has a hue. The hash of an unknown node is grey everywhere.
     hue = node_style(value) if known else "node.unknown"
     rest = "muted" if split else "node.unknown"
     text = Text()
@@ -551,26 +581,30 @@ def highlighted_hash(
 
 
 def name_chip(label: str, key: str | None = None, *, you: bool = False) -> Text:
-    """A node name drawn as a path line's single chip — THE way a surface *frames* a name.
+    """A node name drawn as the single chip of a path line: the only frame for a name.
 
-    Not an imitation of the chip language but a use of it: this builds a one-hop
-    :class:`~meshterm.ui.pathline.PathLine` and asks it for its line, so the fill, the
-    ink, the padding, the rounded cap and the closing point are all whatever a route's
-    segments are wearing today, and can never drift from them (JP, 2026-08-12). The colour
-    reads exactly as it does in a route. The name is in the node's hue, on a darker fill
-    of that hue. A node that no key can place takes the keyless grey, and our own end is
-    the map's ``★`` on its neutral dark grey instead of a name.
+    This is not an imitation of the chip language. It uses the chip language. The function
+    builds a :class:`~meshterm.ui.pathline.PathLine` with one hop and asks it for its line.
+    Thus the fill, the ink, the padding, the rounded cap, and the closing point are the
+    same as those of the segments of a route today, and they can never be different from
+    them (JP, 2026-08-12). The colour reads the same as in a route. The name has the hue
+    of the node, on a darker fill of that hue. A node that no key can place has the
+    keyless grey. Our own end is the ``★`` of the map on its neutral dark grey, and not a
+    name.
 
-    Degrading is inherited too: where the terminal can't draw powerline separators, a path
-    line is arrow-mode text and a lone hop is simply the name in its own hue — which is
-    what a sender label was before it was framed.
+    The degradation is also inherited. Where the terminal cannot draw powerline
+    separators, a path line is text in arrow mode, and a single hop is only the name in its
+    own hue. This is what a sender label was before it had a frame.
 
     Args:
-        label: The name as it should read (already resolved; this never renames it).
-            Ignored when ``you`` — our own end is the star, never our name.
-        key: Any known prefix of the node's key, which picks the hue. ``None`` is a node
-            we can't place: the keyless grey, colour being reserved for keyed identities.
-        you: This is our own node — the ``★``, exactly as a route draws our end of it.
+        label: The name as it must read (it is already resolved, and this function never
+            renames it). The function ignores it when ``you`` is true, because our own end
+            is the star and never our name.
+        key: Any known prefix of the key of the node, which selects the hue. ``None`` is a
+            node that MeshTerm cannot place. It has the keyless grey, because colour is
+            only for identities that have a key.
+        you: ``True`` if this is our node. It is the ``★``, the same as a route draws our
+            end of it.
 
     Returns:
         The chip as a one-line :class:`Text`.
@@ -583,45 +617,50 @@ def _shorten_hash(value: str, hash_bytes: int | None) -> str:
     """Return ``value`` as bare hex truncated to ``hash_bytes`` bytes.
 
     Args:
-        value: A hex hash, optionally ``0x``-prefixed and mixed-case.
-        hash_bytes: Width in bytes to truncate to; the full value when falsy/unknown.
+        value: A hex hash. It can have the ``0x`` prefix and mixed case.
+        hash_bytes: The width in bytes to which the function truncates. When it is empty
+            or unknown, the function returns the full value.
 
     Returns:
-        Lowercase hex with no ``0x`` prefix, at most ``hash_bytes`` bytes wide.
+        Hex in lower case, without the ``0x`` prefix, with a maximum width of
+        ``hash_bytes`` bytes.
     """
     raw = value.lower().removeprefix("0x")
     return raw[: hash_bytes * 2] if hash_bytes else raw
 
 
-#: The pure-white our-own-node hue, matching the ``you`` style — an endpoint that is us
-#: (and any relay resolving to our own name) takes it over its palette colour.
+#: The pure-white hue of our node, which matches the ``you`` style. An endpoint that is us
+#: (and each relay that resolves to our name) takes it instead of its palette colour.
 _SELF_RGB: RGB = (255, 255, 255)
 
 
 def _name_rgb(name: str, key: str | None = None) -> RGB:
-    """The RGB of a node's stable palette hue (``theme.name_style`` minus its bold).
+    """The RGB of the stable palette hue of a node (``theme.name_style`` without its bold).
 
-    A name with no resolvable key styles ``node.unknown`` (a theme name, not a hex), so
-    it lands on that grey here — the raster twin of the app-wide keyless-stays-grey rule.
+    A name that has no key that MeshTerm can resolve has the style ``node.unknown`` (a
+    theme name, not a hex). Thus it gets that grey here. This is the raster twin of the
+    rule of the app that a name without a key stays grey.
     """
     hexpart = name_style(name, key).split()[-1]
     return parse_hex(hexpart) if hexpart.startswith("#") else mark_rgb(hexpart)
 
 
 def name_rgb(name: str, key: str | None = None) -> RGB:
-    """The truecolour of a node's stable palette hue, for a braille canvas.
+    """The truecolour of the stable palette hue of a node, for a braille canvas.
 
-    The public face of :func:`_name_rgb` — the same hue :func:`~meshterm.ui.theme.name_style`
-    paints a name in (hash-derived when ``key`` is given), as an ``(r, g, b)`` tuple a
-    raster can plot. A caller colouring node markers by their mesh identity (the trophy
-    case's area drawing) mints them through here.
+    This is the public face of :func:`_name_rgb`. It gives the same hue that
+    :func:`~meshterm.ui.theme.name_style` paints a name in (it comes from the hash when
+    ``key`` is given), as an ``(r, g, b)`` tuple that a raster can plot. A caller that
+    colours node markers by their mesh identity (the drawing of the area in the trophy
+    case) makes them through this function.
     """
     return _name_rgb(name, key)
 
 
-#: Maps a relay hash to its node type (see the ``NODE_TYPE_*`` constants), or ``None`` when
-#: the type is unknown — the hook that lets the route graph mark a repeater ``▲`` and not
-#: just a generic ``●``. Endpoint sentinels are never passed to it.
+#: Maps a relay hash to its node type (refer to the ``NODE_TYPE_*`` constants), or to
+#: ``None`` when the type is unknown. It is the hook that lets the route graph mark a
+#: repeater as ``▲`` and not only as a generic ``●``. MeshTerm never passes the endpoint
+#: sentinels to it.
 TypeOf = Callable[[str], int | None]
 
 
@@ -634,48 +673,50 @@ def route_graph_style(
     type_of: TypeOf | None = None,
     key_of: NameKeyResolver | None = None,
 ) -> tuple[GlyphOf, LabelOf, LabelRgbOf]:
-    """Build the per-node callbacks that draw a route on THE route graph (``pathgraph``).
+    """Build the callbacks for each node that draw a route on the only route graph (``pathgraph``).
 
-    The shared presentation the Message paths dialog and the Trophy case both draw their
-    graphs with: the two endpoints carry node names, every relay in between its marker
-    plus the first byte of its hash, and each label takes its node's own name hue (us the
-    pure-white ``you``) so a byte reads as the mesh name it stands for. It maps the graph's
-    two endpoint sentinels — :data:`~meshterm.ui.pathgraph.SRC_NODE` on the left,
-    :data:`~meshterm.ui.pathgraph.DST_NODE` on the right — plus every relay hash, to a
-    glyph, a label, and a label colour.
+    The dialog for message paths and the Trophy case both draw their graphs with this
+    shared presentation. The two endpoints have node names. Each relay between them has
+    its marker and the first byte of its hash. Each label has the name hue of its node
+    (us: the pure-white ``you``), so a byte reads as the mesh name that it stands for. The
+    function maps the two endpoint sentinels of the graph and each relay hash to a glyph,
+    a label, and a label colour. The sentinels are :data:`~meshterm.ui.pathgraph.SRC_NODE`
+    on the left and :data:`~meshterm.ui.pathgraph.DST_NODE` on the right.
 
-    The right endpoint is *usually* us, and was once unconditionally so. That is right for
-    a route we walked or a message we received, and wrong for one we sent: with our own
-    name on both ends, every outgoing message's graph drew a round trip (JP, 2026-09-02).
-    ``destination`` names it when it is somebody else.
+    The right endpoint is *usually* us, and it was once always us. That is correct for a
+    route that we walked or a message that we received. It is wrong for a message that we
+    sent. With our name on both ends, the graph of each outgoing message drew a round trip
+    (JP, 2026-09-02). ``destination`` names the endpoint when it is another node.
 
     Args:
-        resolve: Maps a relay's hash to a friendly name when one is known.
-        self_name: Our own node's name — the right endpoint's label, drawn white.
-        source: The left endpoint's display name (a message's origin, or us for a walk
-            that starts at home — pass ``self_name`` to draw both ends as us). ``None``
-            reads as an unknown ``?`` origin.
-        destination: The right endpoint's display name, when the route does not end at us —
-            the recipient of a message we sent. ``None`` (the default) draws us, which is
-            what a walk and every received message want.
-        type_of: Maps a relay's hash to its node type, so a relay draws its own map marker
-            (``▲`` repeater, ``■`` room, ``◉`` sensor) in the shared palette instead of a
-            generic dot. ``None``, or a hash whose type it can't resolve, keeps the old
-            named-dot / unknown-ring fallback.
-        key_of: Maps the ``source`` display name back to its node's key (see
-            :func:`~meshterm.services.trace_runner.make_name_key_resolver`), so the left
-            endpoint's label takes its key-derived hue; ``None``, or a name it can't
-            place, leaves the origin muted — colour is reserved for keyed identities.
+        resolve: Maps the hash of a relay to a friendly name when one is known.
+        self_name: The name of our node. It is the label of the right endpoint, drawn in
+            white.
+        source: The display name of the left endpoint (the origin of a message, or us for
+            a walk that starts at home. Pass ``self_name`` to draw both ends as us).
+            ``None`` reads as an unknown origin ``?``.
+        destination: The display name of the right endpoint, when the route does not end at
+            us (the recipient of a message that we sent). ``None`` (the default) draws us.
+            A walk and each received message need this.
+        type_of: Maps the hash of a relay to its node type, so that a relay draws its own
+            map marker (``▲`` repeater, ``■`` room, ``◉`` sensor) in the shared palette
+            instead of a generic dot. For ``None``, or a hash whose type it cannot
+            resolve, the old fallback stays: a named dot or an unknown ring.
+        key_of: Maps the display name of ``source`` back to the key of its node (refer to
+            :func:`~meshterm.services.trace_runner.make_name_key_resolver`), so that the
+            label of the left endpoint has its hue from the key. For ``None``, or a name
+            that it cannot place, the origin stays muted, because colour is only for
+            identities that have a key.
 
     Returns:
-        The ``(glyph_of, label_of, label_rgb_of)`` triple to hand to
+        The ``(glyph_of, label_of, label_rgb_of)`` triple to give to
         :func:`~meshterm.ui.pathgraph.render_path_graph`.
     """
     src_is_self = bool(source) and source == self_name
     dst_is_self = not destination or destination == self_name
 
     def glyph_of(node: str) -> tuple[str, str]:
-        """Us a star, a typed relay its map marker, a named node a dot, else a ring."""
+        """Us: a star. A relay with a type: its map marker. A named node: a dot. Else: a ring."""
         if node == DST_NODE:
             return SELF_MARK if dst_is_self else NODE_MARK
         if node == SRC_NODE:
@@ -688,7 +729,7 @@ def route_graph_style(
         return NODE_MARK if named and named != node else UNKNOWN_MARK
 
     def label_of(node: str) -> str | None:
-        """Endpoints by name, relays by their first hash byte."""
+        """The endpoints have their names, and the relays have their first hash byte."""
         if node == DST_NODE:
             return (self_name or "you") if dst_is_self else destination
         if node == SRC_NODE:
@@ -696,11 +737,12 @@ def route_graph_style(
         return node[:2]
 
     def label_rgb_of(node: str) -> RGB:
-        """A label's colour: its node's name hue, us pure white, an unknown its ring.
+        """The colour of a label: the name hue of its node, white for us, the ring if unknown.
 
-        A relay we can't name keeps its *marker's* colour, so the hash under a repeater's
-        ``▲`` reads as that repeater rather than as a stray grey byte — which means this
-        resolves whatever ``glyph_of`` hands back, style name or hex alike.
+        A relay that MeshTerm cannot name keeps the colour of its *marker*. Thus the hash
+        under the ``▲`` of a repeater reads as that repeater, and not as a stray grey
+        byte. For this reason, this function resolves what ``glyph_of`` returns, a style
+        name or a hex.
         """
         if node == DST_NODE:
             if dst_is_self:
@@ -729,30 +771,31 @@ def route_path(
     bare_self: bool = False,
     show_hash: bool = True,
 ) -> PathLine:
-    """A trace's walked route as THE path widget's line object.
+    """The route that a trace walked, as the line object of the only path widget.
 
-    The same route :func:`_route_text` renders — this hands back the
-    :class:`~meshterm.ui.pathline.PathLine` itself, so a surface with room to spare
-    can wrap it at hop boundaries (:meth:`~meshterm.ui.pathline.PathLine.wrapped`)
-    rather than taking the one-liner and folding it mid-name.
+    It is the same route that :func:`_route_text` renders. This function returns the
+    :class:`~meshterm.ui.pathline.PathLine` itself. Thus a surface that has space can wrap
+    it at the hop boundaries (:meth:`~meshterm.ui.pathline.PathLine.wrapped`) and does
+    not take the one-line text and fold it in the middle of a name.
 
     Args:
-        result: The trace whose route to build.
-        device_label: Name to show for our own device at the path's endpoints.
-        resolve: Maps a raw hop hash to a friendly contact name when known.
-        device_hash: Our own device's key/hash, annotated onto its endpoints when known.
-        bare_self: Draw both ``us`` endpoints as their bare arrow — for a surface (the
-            trace screens' route lane) where a walk starting and ending on us is the
-            premise, not news.
-        show_hash: Annotate each *named* hop with the hash it was addressed by. On for
-            the scripted table output, where the hash is half the answer; off for the
-            live screens, whose route lane reads as the sequence of nodes and leaves
-            the hex to the wire-spec lane below it. Unnamed hops always show their
-            hash — it is the only identity they have.
+        result: The trace for which to build the route.
+        device_label: The name to show for our device at the endpoints of the path.
+        resolve: Maps a raw hop hash to a friendly contact name when it is known.
+        device_hash: The key or hash of our device. The function adds it to the endpoints
+            when it is known.
+        bare_self: Draw both ``us`` endpoints as their bare arrow. A surface (the route
+            lane of the trace screens) uses this where a walk that starts and ends on us
+            is the premise and not news.
+        show_hash: Add to each *named* hop the hash by which it was addressed. This is on
+            for the table output of scripts, where the hash is half of the answer. It is
+            off for the live screens. Their route lane reads as the sequence of nodes, and
+            the lane for the wire spec below it has the hex. Unnamed hops always show their
+            hash, because it is the only identity that they have.
 
     Returns:
-        The route's :class:`~meshterm.ui.pathline.PathLine` (hopless — reading
-        ``no hops recorded`` — when the trace recorded none).
+        The :class:`~meshterm.ui.pathline.PathLine` of the route. When the trace recorded
+        no hops, it has no hops and it reads ``no hops recorded``.
     """
     edges = result.edges(device_label)
     if not edges:
@@ -778,22 +821,22 @@ def _route_text(
     resolve: NodeResolver = identity_label,
     device_hash: str | None = None,
 ) -> Text:
-    """Render a trace's walked route through THE path widget, on one line.
+    """Render the route that a trace walked through the only path widget, on one line.
 
-    Shows the path the trace actually walked — the forced path, or the route the
-    device resolved when auto-routing — in the trace presentation: each node
-    annotated by its hash at the command's path-hash width, our own device
-    bracketing both ends, e.g.
-    ``Me (a1b2) → Alice (3d63) → Bob (f2a1) → Me (a1b2)``.
+    The function shows the path that the trace really walked. This is the forced path, or
+    the route that the device resolved with auto-routing. It uses the trace form. Each node
+    has its hash at the path-hash width of the command, and our device is at both ends. An
+    example is ``Me (a1b2) → Alice (3d63) → Bob (f2a1) → Me (a1b2)``.
 
     Args:
-        result: The trace whose route to display.
-        device_label: Name to show for our own device at the path's endpoints.
-        resolve: Maps a raw hop hash to a friendly contact name when known.
-        device_hash: Our own device's key/hash, annotated onto its endpoints when known.
+        result: The trace for which to show the route.
+        device_label: The name to show for our device at the endpoints of the path.
+        resolve: Maps a raw hop hash to a friendly contact name when it is known.
+        device_hash: The key or hash of our device. The function adds it to the endpoints
+            when it is known.
 
     Returns:
-        A :class:`Text` with the node sequence, or a muted note when no hops exist.
+        A :class:`Text` with the sequence of nodes, or a muted note when there are no hops.
     """
     return route_path(result, device_label, resolve, device_hash).text()
 
@@ -805,14 +848,16 @@ def _hop_medians_table(
     hash_bytes: int | None = None,
     device_hash: str | None = None,
 ) -> Table:
-    """Render the per-hop median SNR aggregated across a run's traces.
+    """Render the median SNR of each hop, aggregated across the traces of a run.
 
     Args:
-        hop_snrs: The per-hop aggregates to display.
-        device_label: Name to show for our own device at the path's endpoints.
-        resolve: Maps a raw hop hash to a friendly contact name when known.
-        hash_bytes: Path-hash width (bytes) to truncate shown node hashes to.
-        device_hash: Our own device's key/hash, annotated onto the path's endpoints.
+        hop_snrs: The aggregates for each hop to show.
+        device_label: The name to show for our device at the endpoints of the path.
+        resolve: Maps a raw hop hash to a friendly contact name when it is known.
+        hash_bytes: The path-hash width (bytes) to which the function truncates the node
+            hashes that it shows.
+        device_hash: The key or hash of our device. The function adds it to the endpoints
+            of the path.
 
     Returns:
         A compact Rich :class:`Table` of hop, link, and median SNR.
@@ -837,23 +882,24 @@ def stats_panel(
     route: TraceResult | None = None,
     device_hash: str | None = None,
 ) -> Panel:
-    """Summarize aggregated trace statistics in a panel.
+    """Summarize the aggregated trace statistics in a panel.
 
-    Includes the median SNR for every hop along the path (not just the bottleneck), so
-    a weak link anywhere in the route is visible. When a representative ``route`` trace
-    is given, the path it actually walked is shown as a node sequence, e.g.
-    ``Me → Alice → Bob → Me``.
+    The panel has the median SNR for each hop along the path (and not only the
+    bottleneck). Thus a weak link anywhere in the route is visible. When the caller gives
+    a representative ``route`` trace, the panel shows the path that it really walked as a
+    sequence of nodes, for example ``Me → Alice → Bob → Me``.
 
     Args:
-        stats: The aggregated statistics to display.
-        device_label: Name to show for our own device at the path's endpoints.
-        resolve: Maps a raw hop hash to a friendly contact name when known.
-        route: A representative trace whose walked route to display, if any.
-        device_hash: Our own device's key/hash, annotated onto the route endpoints.
+        stats: The aggregated statistics to show.
+        device_label: The name to show for our device at the endpoints of the path.
+        resolve: Maps a raw hop hash to a friendly contact name when it is known.
+        route: A representative trace for which to show the route that it walked, if any.
+        device_hash: The key or hash of our device. The function adds it to the endpoints
+            of the route.
 
     Returns:
-        A Rich :class:`Panel` with the route, success rate, robust SNR/RTT, and
-        per-hop medians.
+        A Rich :class:`Panel` with the route, the success rate, the robust SNR and RTT,
+        and the medians for each hop.
     """
     snr = stats.median_min_snr
     snr_text = Text(f"{snr:+.1f} dB", style=snr_style(snr)) if snr is not None else Text("n/a")
@@ -873,7 +919,7 @@ def stats_panel(
     if route is not None:
         sections.append(Text("Route", style="accent"))
         sections.append(_route_text(route, device_label, resolve, device_hash))
-        sections.append(Text())  # blank line before the stats block
+        sections.append(Text())  # a blank line before the block of statistics
     sections.append(summary)
     if stats.hop_snrs:
         sections.append(Text("\nPer-hop medians", style="accent"))
@@ -885,14 +931,15 @@ def stats_panel(
     return Panel(body, title="[accent]Trace summary[/accent]", border_style="accent", expand=False)
 
 
-# Node-type glyphs and their colours, consistent with the map's marker palette across the
-# whole app (see ui.map_render): our own node is the yellow ``★``, plain nodes the loud pink
-# ``●`` and repeaters the calmer violet ``▲``. The remaining types take map-safe hues that
-# stay distinct from those — a white square for rooms (the house glyph read poorly) and an
-# orange ringed dot for sensors. All are single-width BMP glyphs so columns stay aligned.
-# The colours are the theme's ``type.*`` entries rather than raw hex, so the 16-slot console
-# picks its slot deliberately (the violet would otherwise downsample to grey, and a repeater
-# would read as an unknown node); on the regular platform they *are* the map's hues.
+# The glyphs and colours of the node types. They are the same as the marker palette of the
+# map in the whole app (refer to ui.map_render). Our node is the yellow ``★``, plain nodes
+# are the loud pink ``●``, and repeaters are the calmer violet ``▲``. The other types have
+# hues that are safe on the map and different from those: a white square for rooms (the
+# house glyph was difficult to read) and an orange dot with a ring for sensors. All are
+# single-width BMP glyphs, so the columns stay aligned. The colours are the ``type.*``
+# entries of the theme and not raw hex. Thus the 16-slot console chooses its slot on
+# purpose (otherwise the violet downsamples to grey, and a repeater looks like an unknown
+# node). On the regular platform, they *are* the hues of the map.
 NODE_GLYPHS: dict[int, tuple[str, str]] = {
     NODE_TYPE_REPEATER: (REPEATER_MARK[0], "type.repeater"),
     NODE_TYPE_ROOM: ("■", "type.room"),
@@ -903,49 +950,50 @@ DEFAULT_GLYPH: tuple[str, str] = (NODE_MARK[0], "type.node")
 
 
 def node_marker(node_type: int | None) -> tuple[str, RGB]:
-    """The map-palette glyph and colour for a node type, as a ``(glyph, rgb)`` pair.
+    """The glyph and colour from the map palette for a node type, as a ``(glyph, rgb)`` pair.
 
-    The shared node-type marks (``▲`` repeater, ``■`` room, ``◉`` sensor, ``●`` plain
-    node) in the map's own colours, minted here for a braille raster the way
-    :data:`NODE_GLYPHS` mints them for a Rich row — so a spatial drawing pins its nodes
-    in the exact glyphs and hues the map and the nodes list use. Both read the same
-    ``type.*`` theme entry (through :func:`~meshterm.ui.theme.mark_rgb` here), so the
-    raster and the row agree on whatever the platform's palette can afford. An unknown
-    type falls back to the plain node mark.
+    These are the shared node-type marks (``▲`` repeater, ``■`` room, ``◉`` sensor, ``●``
+    plain node) in the own colours of the map. This function makes them for a braille
+    raster, as :data:`NODE_GLYPHS` makes them for a Rich row. Thus a spatial drawing pins
+    its nodes with the same glyphs and hues that the map and the list of nodes use. Both
+    read the same ``type.*`` entry of the theme (here through
+    :func:`~meshterm.ui.theme.mark_rgb`). Thus the raster and the row agree on the colour
+    that the palette of the platform can show. An unknown type uses the plain node mark.
     """
     glyph, style = NODE_GLYPHS.get(node_type or -1, DEFAULT_GLYPH)
     return glyph, mark_rgb(style)
 
 
 def self_marker() -> tuple[str, RGB]:
-    """Our own node's map marker — the yellow ``★`` — as a ``(glyph, rgb)`` pair."""
+    """The map marker of our node, the yellow ``★``, as a ``(glyph, rgb)`` pair."""
     return SELF_MARK[0], parse_hex(SELF_MARK[1])
 
 
-# A heat-map gradient for a node's heard age, hottest (most recently heard) to coldest: white
-# → yellow → orange → red → grey. Each stop pairs an age anchor (log10 of seconds since heard)
-# with an RGB colour; :func:`_recency_style` interpolates continuously between them, so the
-# colour glides with recency rather than snapping between a handful of discrete shades.
+# A heat-map gradient for the heard age of a node, from the hottest (heard most recently) to
+# the coldest: white → yellow → orange → red → grey. Each stop pairs an age anchor (log10 of
+# the seconds since the node was heard) with an RGB colour. :func:`_recency_style`
+# interpolates continuously between the stops. Thus the colour glides with the recency, and
+# does not snap between a few separate shades.
 _HEAT_STOPS: tuple[tuple[float, tuple[int, int, int]], ...] = (
-    (math.log10(300), (255, 255, 255)),  # ≤5m — white (fresh)
-    (math.log10(3600), (250, 204, 21)),  # ~1h  — yellow
-    (math.log10(21600), (251, 146, 60)),  # ~6h  — orange
-    (math.log10(86400), (248, 113, 113)),  # ~1d  — red
-    (math.log10(604800), (148, 163, 184)),  # ~1w  — grey
-    (math.log10(2592000), (100, 116, 139)),  # ~30d+ — cold slate
+    (math.log10(300), (255, 255, 255)),  # ≤5m: white (fresh)
+    (math.log10(3600), (250, 204, 21)),  # ~1h: yellow
+    (math.log10(21600), (251, 146, 60)),  # ~6h: orange
+    (math.log10(86400), (248, 113, 113)),  # ~1d: red
+    (math.log10(604800), (148, 163, 184)),  # ~1w: grey
+    (math.log10(2592000), (100, 116, 139)),  # ~30d+: cold slate
 )
-_RECENCY_NEVER = "#64748b"  # never heard — the coldest slate
+_RECENCY_NEVER = "#64748b"  # never heard: the coldest slate
 
 
 def age_seconds(when: datetime | None) -> float | None:
-    """Seconds since ``when`` (aware UTC), or ``None`` when unknown/naive."""
+    """The seconds since ``when`` (aware UTC), or ``None`` when it is unknown or naive."""
     if when is None or getattr(when, "tzinfo", None) is None:
         return None
     return max(0.0, (utcnow() - when).total_seconds())
 
 
 def format_age(secs: float | None) -> str:
-    """A compact relative age — ``now``, ``5m``, ``3h``, ``2d``, ``4w`` — or ``never``."""
+    """A compact relative age (``now``, ``5m``, ``3h``, ``2d``, ``4w``), or ``never``."""
     if secs is None:
         return "never"
     if secs < 60:
@@ -960,17 +1008,18 @@ def format_age(secs: float | None) -> str:
 
 
 def body_heading(title: str, note: str = "") -> Text:
-    """A section heading inside a screen's body: accent title, optional muted ``  ·  note``.
+    """A section heading in a screen body: an accent title, and an optional muted ``  ·  note``.
 
-    THE form for a heading that sits *in* a page's prose or drawings (the Time Machine's
-    Volume / SNR / Rhythm, a record's Stats / Area walked / Route), as opposed to a grouped
-    list's ``── Label ──`` landmark (:func:`~meshterm.ui.menus.section_heading`), which
-    pins and is jumped to. The note reads the block back — its unit, its window, what its
-    labels mean — and is muted so the title stays the landmark.
+    This is the only form for a heading that is *in* the prose or the drawings of a page
+    (Volume, SNR, and Rhythm in the Time Machine, and Stats, Area walked, and Route in a
+    record). It is not the ``── Label ──`` landmark of a grouped list
+    (:func:`~meshterm.ui.menus.section_heading`), which pins and which the section jumps
+    go to. The note explains the block: its unit, its window, and what its labels mean. It
+    is muted so that the title stays the landmark.
 
     Args:
-        title: The section's name, sentence case.
-        note: An aside after the roomy separator, or ``""`` for none.
+        title: The name of the section, in sentence case.
+        note: An aside after the wide separator, or ``""`` for none.
 
     Returns:
         The heading as one styled line.
@@ -982,32 +1031,34 @@ def body_heading(title: str, note: str = "") -> Text:
 
 
 def format_ago(secs: float | None) -> str:
-    """The relative-age *phrase* — ``now``, ``5m ago``, ``never`` — for running prose.
+    """The relative-age *phrase* (``now``, ``5m ago``, ``never``) for prose.
 
-    The canonical grammar for every "heard … (…)" and "delivered …" row: a fresh
-    sighting reads as bare ``now`` and an unknown one as bare ``never`` (neither takes
-    the suffix — "now ago" is nonsense), while any measured age reads ``5m ago``.
-    Callers embedding an age in a sentence or parenthetical use this;
-    :func:`format_age` stays the bare column form for aligned age lanes.
+    This is the standard grammar for each row "heard … (…)" and "delivered …". A packet
+    that MeshTerm heard now reads as the bare ``now``, and an unknown age reads as the
+    bare ``never``. Neither takes the suffix, because "now ago" is nonsense. Each measured
+    age reads ``5m ago``. Callers that put an age in a sentence or in parentheses use this
+    function. :func:`format_age` stays the bare form for the columns of aligned age lanes.
     """
     age = format_age(secs)
     return age if age in ("now", "never") else f"{age} ago"
 
 
 def _recency_style(secs: float | None) -> str:
-    """The heat-map colour for a node's heard age of ``secs`` (hotter = more recent).
+    """The heat-map colour for a heard age of ``secs`` for a node (hotter = more recent).
 
-    Dispatches to the platform-bound implementation: the regular platform's continuous
-    gradient, or PicoCalc's quantized steps (a 16-slot palette has no room to glide).
+    The function calls the implementation that is bound to the platform. It is the
+    continuous gradient of the regular platform, or the quantized steps of the PicoCalc (a
+    16-slot palette has no space for a glide).
     """
     return _recency_impl(secs)
 
 
 def _recency_gradient(secs: float | None) -> str:
-    """The regular platform's heat: continuous interpolation over :data:`_HEAT_STOPS`.
+    """The heat of the regular platform: continuous interpolation over :data:`_HEAT_STOPS`.
 
-    Interpolates the RGB channels between the two stops bracketing ``secs`` (in log-age
-    space), clamping to white below the first stop and cold slate above the last.
+    The function interpolates the RGB channels between the two stops on each side of
+    ``secs`` (in log-age space). Below the first stop, it gives white. Above the last stop,
+    it gives cold slate.
     """
     if secs is None:
         return _RECENCY_NEVER
@@ -1025,25 +1076,26 @@ def _recency_gradient(secs: float | None) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
-#: The heat ladder as ``(younger than, style)``, hottest first — JP's spec. Every boundary
-#: is a plain human unit, so a colour change always lands on a number you can say out loud
-#: ("under five minutes", "over a week"). Past a year nothing is worth distinguishing from
-#: never heard, so the two share the coldest step.
+#: The heat ladder as ``(younger than, style)``, with the hottest first (JP's spec). Each
+#: boundary is a plain human unit. Thus a colour change is always at a number that a person
+#: can say aloud ("under five minutes", "over a week"). After one year, a node is not
+#: different enough from a node that was never heard, so the two share the coldest step.
 _HEAT_STEPS: tuple[tuple[float, str], ...] = (
-    (300, "heat.now"),  # under 5 minutes — white
-    (3600, "heat.minutes"),  # 5 minutes       — yellow
-    (86400, "heat.hours"),  # 1 hour          — light red
-    (604800, "heat.days"),  # 1 day           — brown
-    (2592000, "heat.weeks"),  # 1 week          — red
-    (31536000, "heat.months"),  # 1 month         — light grey
-)  # 1 year / never  — dark grey (heat.never)
+    (300, "heat.now"),  # under 5 minutes: white
+    (3600, "heat.minutes"),  # 5 minutes      : yellow
+    (86400, "heat.hours"),  # 1 hour         : light red
+    (604800, "heat.days"),  # 1 day          : brown
+    (2592000, "heat.weeks"),  # 1 week         : red
+    (31536000, "heat.months"),  # 1 month        : light grey
+)  # 1 year / never: dark grey (heat.never)
 
 
 def _recency_quantized(secs: float | None) -> str:
-    """PicoCalc's heat: the gradient stepped onto the theme's ``heat.*`` rungs.
+    """The heat of the PicoCalc: the gradient in steps, on the ``heat.*`` rungs of the theme.
 
-    Same scale as the regular platform's gradient and the same anchors — a console that
-    can't spend a hue per second spends one per unit instead (see :data:`_HEAT_STEPS`).
+    The scale and the anchors are the same as for the gradient of the regular platform. A
+    console that cannot use a hue for each second uses one hue for each unit instead (refer
+    to :data:`_HEAT_STEPS`).
     """
     if secs is None:
         return "heat.never"
@@ -1058,42 +1110,43 @@ _recency_impl: Callable[[float | None], str] = _recency_gradient
 
 @on_platform
 def _bind_heat(platform: Platform) -> None:
-    """Pick the heat implementation for the platform (runs now and on every switch)."""
+    """Pick the heat implementation for the platform (runs now and at each switch)."""
     global _recency_impl
     _recency_impl = _recency_gradient if platform.truecolor else _recency_quantized
 
 
 def _key_id(value: str) -> str:
-    """Normalise a key/prefix to the lowercased 12-hex id used to match heard nodes."""
+    """Normalize a key or prefix to the 12-hex id, in lower case, that matches heard nodes."""
     return value.lower().removeprefix("0x")[:12]
 
 
 def contact_packets(contact: Contact, counts: dict[str, int]) -> int | None:
-    """The overheard-packet tally for ``contact``, or ``None`` if never overheard."""
+    """The count of overheard packets for ``contact``, or ``None`` if it was never overheard."""
     ident = contact.public_key or contact.key_prefix
     return counts.get(_key_id(ident)) if ident else None
 
 
-# The columns the contact list can be sorted by, left-to-right, and the direction each opens on
-# — name A→Z, most-recently-heard first, most packets first — chosen so a fresh sort shows
-# the "interesting" end at the top.
+# The columns by which the contact list can be sorted, from left to right, and the direction
+# in which each one opens: name A→Z, most recently heard first, most packets first. We chose
+# these so that a new sort shows the interesting end at the top.
 _SORT_COLUMNS: tuple[str, ...] = ("name", "heard", "packets")
 _SORT_OPENS_ASCENDING: dict[str, bool] = {"name": True, "heard": True, "packets": False}
 
 
 @dataclass
 class ContactsSort:
-    """Which column the contact list is sorted by, and in which direction.
+    """The column by which the contact list is sorted, and the direction.
 
-    ``column`` is one of :attr:`columns`; ``ascending`` sorts the column's underlying
-    metric low-to-high — name A→Z, *age* (so ascending = most recently heard first), packet
-    count low-to-high. The interactive screen mutates this in place as the user presses the
-    arrows.
+    ``column`` is one of :attr:`columns`. ``ascending`` sorts the metric of the column from
+    low to high. For the name this is A→Z. For the *age* it is the most recently heard
+    first (ascending). For the packet count it is from low to high. The screen changes this
+    object in place when the user presses the arrows.
 
-    The sort *ring* is per-instance: :attr:`columns` and :attr:`opens_ascending` default to
-    the Contacts list's three (:data:`_SORT_COLUMNS`), but the Time Machine picker passes a
-    wider set — it adds a sortable ``hash`` column — so the same model drives both without a
-    module-global column list that one screen would have to share with the other.
+    The sort *ring* belongs to each instance. By default, :attr:`columns` and
+    :attr:`opens_ascending` are the three columns of the Contacts list
+    (:data:`_SORT_COLUMNS`). But the picker of the Time Machine passes a wider set. It adds
+    a sortable ``hash`` column. Thus the same model works for both, and the two screens do
+    not need to share a global list of columns of the module.
     """
 
     column: str = "name"
@@ -1103,11 +1156,11 @@ class ContactsSort:
 
     @classmethod
     def names(cls, columns: tuple[str, ...] = _SORT_COLUMNS) -> tuple[str, ...]:
-        """The orders :meth:`from_name` accepts — what a caller may legitimately ask for.
+        """The orders that :meth:`from_name` accepts: what a caller can validly ask for.
 
-        :meth:`from_name` answers "which sort is this?" and forgives anything it does not
-        recognise. A surface that wants to *refuse* an unknown order needs the set itself,
-        which is this.
+        :meth:`from_name` answers "which sort is this?" and accepts anything that it does
+        not recognize. A surface that must *refuse* an unknown order needs the set itself,
+        and this method returns it.
         """
         return columns
 
@@ -1118,18 +1171,18 @@ class ContactsSort:
         columns: tuple[str, ...] = _SORT_COLUMNS,
         opens_ascending: dict[str, bool] | None = None,
     ) -> ContactsSort:
-        """Build a sort for ``name`` over ``columns``, opening in that column's natural direction.
+        """Build a sort for ``name`` over ``columns``, in the natural direction of that column.
 
-        Falls back to the ring's first column when ``name`` isn't one of ``columns`` (so a
-        stale saved key can't wedge the sort). ``opens_ascending`` defaults to the Nodes
-        list's directions when omitted.
+        If ``name`` is not one of ``columns``, the function uses the first column of the
+        ring. Thus an old stored key cannot block the sort. If the caller does not give
+        ``opens_ascending``, the function uses the directions of the Nodes list.
         """
         opens = opens_ascending if opens_ascending is not None else _SORT_OPENS_ASCENDING
         column = name if name in columns else columns[0]
         return cls(column, opens[column], columns, opens)
 
     def move(self, delta: int) -> None:
-        """Step the active column ``delta`` places (wrapping), adopting its natural direction."""
+        """Move the active column ``delta`` places (it wraps), and use its natural direction."""
         index = (self.columns.index(self.column) + delta) % len(self.columns)
         self.column = self.columns[index]
         self.ascending = self.opens_ascending[self.column]
@@ -1138,17 +1191,18 @@ class ContactsSort:
 def ordered_contacts(
     contacts: list[Contact], counts: dict[str, int], sort: ContactsSort
 ) -> list[Contact]:
-    """Contacts sorted per ``sort`` (our own node is pinned separately, above these).
+    """The contacts, sorted as ``sort`` says (our node is pinned separately, above these).
 
-    The active column's metric drives the order (reversed for a descending sort); ties always
-    break by case-folded name *ascending*, so two contacts sharing a metric (e.g. the same
-    ``heard`` age) keep a stable A→Z order instead of flipping with the primary direction.
-    Never-heard / never-overheard rows carry an extreme metric so they gather at the ascending
-    end.
+    The metric of the active column sets the order (reversed for a descending sort). A tie
+    always breaks by the case-folded name, *ascending*. Thus two contacts with the same
+    metric (for example the same ``heard`` age) keep a stable A→Z order, and the order does
+    not flip with the primary direction. The rows that were never heard or never overheard
+    have an extreme metric, so they gather at the ascending end.
     """
     if sort.column == "heard":
-        # One clock snapshot for the whole sort: per-row utcnow() calls would skew two
-        # identical last_seen stamps apart by microseconds and defeat the name tie-break.
+        # Use one clock snapshot for the whole sort. If each row calls utcnow(), two
+        # identical last_seen stamps differ by a few microseconds, and the tie-break by
+        # name does not work.
         now = utcnow()
 
         def metric(c: Contact) -> float:
@@ -1164,21 +1218,22 @@ def ordered_contacts(
         def metric(c: Contact) -> object:
             return c.name.casefold()
 
-    # Name-ascending first, then a stable sort by the primary metric: equal-metric rows retain
-    # their A→Z order under both directions (reversing the whole list would flip the tiebreak).
+    # Sort by name ascending first, then make a stable sort by the primary metric. Rows with
+    # the same metric keep their A→Z order in both directions. (If the code reverses the
+    # whole list, it flips the tie-break.)
     ordered = sorted(contacts, key=lambda c: c.name.casefold())
     ordered.sort(key=metric, reverse=not sort.ascending)
     return ordered
 
 
 def _sort_header(label: str, column: str, sort: ContactsSort) -> str:
-    """A column header: plain-muted, or lit with a direction triangle when it's the sort key.
+    """A column header: plain and muted, or lit with a direction triangle when it is the sort key.
 
-    The active column's name and its triangle are lit together in the app's ``cursor`` white
-    (so the interactive left/right selection is obvious) — ``▲`` for ascending, ``▼`` for
-    descending. Same ink as the highlighted *row*, because it is the same claim one axis
-    over. The column reserves its width (see :func:`contacts_table`) so toggling the sort
-    doesn't shift the row.
+    The name of the active column and its triangle are lit together in the ``cursor`` white
+    of the app, so that the selection with left and right is clear. The triangle is ``▲``
+    for ascending and ``▼`` for descending. The ink is the same as that of the highlighted
+    *row*, because it is the same claim on the other axis. The column keeps its width
+    (refer to :func:`contacts_table`), so a change of the sort does not shift the row.
     """
     if column != sort.column:
         return label
@@ -1186,27 +1241,29 @@ def _sort_header(label: str, column: str, sort: ContactsSort) -> str:
     return f"[cursor]{label} {triangle}[/]"
 
 
-#: The legend's word for each node type: the type's one name (:data:`NODE_TYPE_LABELS`),
-#: except where a shorter word is unmistakable beside its glyph — ``room`` for a room
-#: server (JP, 2026-10-02). The name everywhere else, the CLI's included, stays whole.
+#: The word of the legend for each node type: the one name of the type
+#: (:data:`NODE_TYPE_LABELS`). The exception is where a shorter word is clear next to its
+#: glyph: ``room`` for a room server (JP, 2026-10-02). In all other places, including the
+#: CLI, the name stays whole.
 _LEGEND_WORDS = {**NODE_TYPE_LABELS, NODE_TYPE_ROOM: "room"}
 
 
 def node_type_legend(indent: str = "", width: int | None = None) -> Text:
-    """The key to the node-type marks: ``★ you   ▲ repeater   ● companion   …``.
+    """The legend for the node-type marks: ``★ you   ▲ repeater   ● companion   …``.
 
-    Every glyph in its shared map colour (see :data:`NODE_GLYPHS`), each named muted after
-    it (:data:`_LEGEND_WORDS`). THE legend for any surface that draws typed node markers —
-    the contacts list under its table, the route graph under its lanes — so one glyph means
-    one thing app-wide.
+    Each glyph has its shared map colour (refer to :data:`NODE_GLYPHS`), and its name
+    follows it in muted style (:data:`_LEGEND_WORDS`). This is the only legend for each
+    surface that draws node markers with types: the contacts list under its table, and the
+    route graph under its lanes. Thus one glyph has one meaning in the whole app.
 
-    One line where it fits: 52 cells, inside the handhelds' 53. Where it does not — an
-    indent, a narrower box — it breaks onto a second line between entries, never inside
-    one, so a mark is never parted from its name and no name is cropped.
+    The legend has one line where it fits: 52 cells, inside the 53 cells of the handhelds.
+    Where it does not fit (an indent, a narrower box), it breaks onto a second line between
+    entries and never inside an entry. Thus a mark is never separated from its name, and
+    no name is cropped.
 
     Args:
-        indent: Leading spaces to sit the legend under a table or graph body.
-        width: The cells available. None keeps the legend on one line.
+        indent: The leading spaces that put the legend under the body of a table or graph.
+        width: The cells that are available. ``None`` keeps the legend on one line.
     """
     entries = [Text.assemble((SELF_MARK[0], SELF_MARK[1]), (" you", "muted"))]
     for node_type in (NODE_TYPE_REPEATER, NODE_TYPE_CHAT, NODE_TYPE_ROOM, NODE_TYPE_SENSOR):
@@ -1229,89 +1286,96 @@ def node_type_legend(indent: str = "", width: int | None = None) -> Text:
     return legend
 
 
-#: Blank rows of air around a tab strip — one above and one under on the desktop; none
-#: on the PicoCalc (JP, 2026-08-08), where rows are the scarce resource and both lines go
-#: to the stage instead (the route graph's ceiling, the location preview's growth room).
-#: Rides the same frugality signal as the borderless frame, and is bound at
-#: platform-switch time like every platform-derived constant — never branched per paint.
+#: The blank rows of air around a tab strip: one above and one under on the desktop, and
+#: none on the PicoCalc (JP, 2026-08-08). On the PicoCalc, rows are scarce, and both lines
+#: go to the stage instead (the ceiling of the route graph, and the room for the preview of
+#: the location to grow). The constant follows the same signal of frugality as the
+#: borderless frame. MeshTerm binds it when the platform switches, as it does for each
+#: constant that comes from the platform. It never branches for each paint.
 _TAB_AIR = 1
 
 
 @on_platform
 def _bind_tab_air(platform: Platform) -> None:
-    """Bind the strip's air to the platform (runs now and on every switch)."""
+    """Bind the air of the strip to the platform (runs now and at each switch)."""
     global _TAB_AIR
     _TAB_AIR = 1 if platform.frame_border else 0
 
 
 def tab_air() -> int:
-    """Blank rows a tabbed page spends above its strip and under it (see :data:`_TAB_AIR`).
+    """The blank rows that a tabbed page uses above and under its strip (refer to :data:`_TAB_AIR`).
 
-    Read by every screen that draws :func:`tab_strip` — the node page, a record — so the
-    strip sits in the same air everywhere, and loses it on the same platform.
+    Each screen that draws :func:`tab_strip` reads it, for example the node page and a
+    record. Thus the strip has the same air everywhere, and it loses the air on the same
+    platform.
     """
     return _TAB_AIR
 
 
-#: The viewport, in rows, below which a frame is *short* and spends its rows on content:
-#: a tabbed page draws its strip on one row (see :func:`tab_strip`'s ``compact``), and a
-#: graph's caption and node-type key step aside so the list under it gets the rows. The
-#: boxed strip alone costs three; on the Cardputer's 11-row viewport that was the
-#: difference between a page's actions on screen and below the fold. Read from the
-#: viewport rather than the platform, so a desktop terminal dragged short gets the same
-#: answer the handheld does.
+#: The viewport, in rows, under which a frame is *short* and uses its rows for content.
+#: A tabbed page draws its strip on one row (refer to ``compact`` of :func:`tab_strip`).
+#: The caption and the node-type legend of a graph step aside, so that the list under it
+#: gets the rows. The boxed strip alone costs three rows. On the viewport of 11 rows of the
+#: Cardputer, this was the difference between the actions of a page on the screen and
+#: below the fold. The value comes from the viewport and not from the platform. Thus a
+#: desktop terminal that the user drags to a short size gets the same result as the
+#: handheld.
 SHORT_FRAME_BELOW = 16
 
 
 def short_frame(viewport: int) -> bool:
-    """Whether a page with ``viewport`` rows is short (see :data:`SHORT_FRAME_BELOW`)."""
+    """Check if a page with ``viewport`` rows is short (refer to :data:`SHORT_FRAME_BELOW`)."""
     return viewport < SHORT_FRAME_BELOW
 
 
 def tab_strip(labels: Sequence[str], active: int, width: int, *, compact: bool = False) -> Group:
-    """A boxed tab strip: every tab always boxed on top, the active one open into the page.
+    """A boxed tab strip: each tab has a box on top, and the active tab is open into the page.
 
-    THE navigation header for a screen that pages one full-height view at a time between a
-    handful of named views (the node detail page's ``Info`` / ``Routes``) instead of stacking
-    them. Every tab is always drawn as a full-topped box — a dim ``faint`` outline by
-    default, lit ``accent`` when active — instead of only the active one; this keeps every
-    tab's width fixed regardless of which is selected, so switching tabs never shifts the
-    labels that come after it. Tabs share a vertical between neighbours (one glyph, not
-    two), and each shared *top* corner is drawn as if the tab to the left sits on top of the
-    tab to the right: it "opens" (rounds toward the tab starting there) only at the very
-    first tab and at the active tab's own left edge, and "closes" (rounds back, ceding the
-    position to the tab on its left) everywhere else — so the active tab is the one exception
-    that always wins both of its top corners, reading as lifted in front of its neighbours.
+    This is the only navigation header for a screen that shows one view of the full height
+    at a time, between a few named views (for example ``Info`` and ``Routes`` on the node
+    detail page), and does not stack them. Each tab always has a box with a full top. The
+    box has a dim ``faint`` outline by default, and a lit ``accent`` outline when the tab
+    is active. It is not only the active tab that has a box. Thus the width of each tab is
+    fixed, in any selection, and a switch of tabs never shifts the labels that follow it.
+    Neighbouring tabs share a vertical line (one glyph, not two). Each shared *top* corner
+    is drawn as if the tab on the left sits on top of the tab on the right. It "opens"
+    (rounds toward the tab that starts there) only at the first tab and at the left edge of
+    the active tab. It "closes" (rounds back, and gives the position to the tab on its
+    left) in all other places. Thus the active tab is the one exception. It always wins both
+    of its top corners, and it looks lifted in front of its neighbours.
 
-    The *bottom* border is a single continuous accent-coloured rule — it's one line, so it
-    carries one colour throughout, the active tab's — that the inactive tabs sit flush
-    against: they get no corners or seams of their own down there, just the rule passing
-    behind them, broken only under the active tab, which is why it reads as merged into the
-    page below it: the rule turns up into ``╯`` (closing off the flat run from the west,
-    turning north into the tab's wall), leaves the active tab's width open (no line — that
-    gap *is* the page starting), then turns back down through ``╰`` (the wall meeting the
-    flat run continuing east) and carries on flat. A lone tab collapses to the plain accent
-    heading (:func:`~meshterm.ui.menus.section_heading`'s ``── Label ──`` form) since there
-    is nothing to switch between or layer. When there's slack in ``width``, the tab boxes
-    (top and label rows) sit two columns in from the left; the bottom rule is one continuous
-    line regardless, so it fills that margin rather than being indented with them. The
-    owning screen switches the active index (``Tab``/``Shift+Tab``); the strip itself is
-    pure presentation.
+    The *bottom* border is a single continuous rule with the accent colour. It is one line,
+    so it has one colour throughout, the colour of the active tab. The inactive tabs sit
+    flush against it. They have no corners or seams of their own there. The rule only
+    passes behind them. It is broken only under the active tab, and thus the tab looks
+    merged into the page below it. The rule turns up into ``╯`` (it closes the flat run
+    from the west, and turns north into the wall of the tab). It leaves the width of the
+    active tab open (no line, because that gap *is* the start of the page). Then it turns
+    back down through ``╰`` (the wall meets the flat run that continues east) and goes on
+    flat. A lone tab becomes the plain accent heading (the ``── Label ──`` form of
+    :func:`~meshterm.ui.menus.section_heading`), because there is nothing to switch
+    between or to layer. When ``width`` has more space than necessary, the tab boxes (the
+    top row and the label row) are two columns from the left. The bottom rule is one
+    continuous line in all cases, so it fills that margin and does not have the indent of
+    the boxes. The screen that owns the strip changes the active index (``Tab`` and
+    ``Shift+Tab``). The strip itself is only a presentation.
 
-    Where rows are scarcer than that (``compact``, see :func:`short_frame`) the same strip is
-    drawn on its own bottom rule, in one row: ``──┤ Info ├── Routes ──────``. The active tab
-    stands on the rule between tees, lit; an inactive one is its label on the rule, faint.
-    Every tab is the same width in either state, so switching still never moves a label.
+    Where rows are scarcer than that (``compact``, refer to :func:`short_frame`), the
+    function draws the same strip on its own bottom rule, in one row:
+    ``──┤ Info ├── Routes ──────``. The active tab stands on the rule between tees, and it is
+    lit. An inactive tab is its label on the rule, in faint style. In both states, each tab
+    has the same width, so a switch still never moves a label.
 
     Args:
-        labels: The tab names in display order.
-        active: Index of the lit tab.
-        width: The strip's render width — the closing rule fills out to it.
+        labels: The tab names, in the order of display.
+        active: The index of the lit tab.
+        width: The render width of the strip. The closing rule fills to it.
         compact: Draw the strip on one row instead of three.
 
     Returns:
-        A :class:`~rich.console.Group` of one line (a lone tab, none, or a compact strip) or
-        three (the shared top border, the boxed labels, and the shared bottom rule).
+        A :class:`~rich.console.Group` of one line (a lone tab, no tab, or a compact strip)
+        or three lines (the shared top border, the boxed labels, and the shared bottom
+        rule).
     """
     if not labels:
         return Group(Text(""))
@@ -1337,17 +1401,18 @@ def tab_strip(labels: Sequence[str], active: int, width: int, *, compact: bool =
     pad = " " * margin
 
     def top_owner(junction: int) -> int:
-        """Which tab's top corner glyph sits at this junction — see the docstring's rule."""
+        """The tab whose top corner glyph is at this junction (refer to the docstring rule)."""
         return junction if junction == 0 or junction == active else junction - 1
 
     def top_style(junction: int) -> str:
         return "accent" if top_owner(junction) == active else "faint"
 
     def bot_glyph(junction: int) -> str:
-        """The bottom rule's glyph at this junction.
+        """The glyph of the bottom rule at this junction.
 
-        A corner turning into or out of the active tab's wall, else a flat
-        pass-through. Always accent — see the enclosing docstring for why.
+        It is a corner that turns into or out of the wall of the active tab, or else a flat
+        pass-through. It always has the accent colour. Refer to the enclosing docstring for
+        the reason.
         """
         if junction == active:
             return "╯"
@@ -1375,7 +1440,7 @@ def tab_strip(labels: Sequence[str], active: int, width: int, *, compact: bool =
 
 
 def _contacts_legend() -> Text:
-    """The node-type legend, indented to sit under the contacts table body."""
+    """The node-type legend, with an indent so that it is under the body of the contacts table."""
     return node_type_legend(indent="  ")
 
 
@@ -1387,32 +1452,34 @@ def contacts_table(
     counts: dict[str, int],
     sort: ContactsSort | None = None,
 ) -> Group:
-    """List this node and its known contacts with recency, packets, type, key, and legend.
+    """List our node and its known contacts with the age, packets, type, key, and legend.
 
-    Our own node is the first row (``★``, name in the white ``you`` style); contacts follow
-    in ``sort`` order.
-    A per-type glyph marks each node in the app's shared colours, the name takes the node's
-    hash-derived palette hue, the heard age glows with recency heat (brighter = fresher),
-    and the full key is shown with its path-hash prefix lit — chopped with an ellipsis only
+    Our node is the first row (``★``, with the name in the white ``you`` style). The
+    contacts follow in the order of ``sort``. A glyph for the type marks each node in the
+    shared colours of the app. The name has the palette hue that comes from the hash of the
+    node. The heard age glows with the heat of recency (brighter = fresher). The table
+    shows the full key with its path-hash prefix lit. It cuts the key with an ellipsis only
     when the terminal is too narrow.
 
     Args:
-        self_name: This node's advertised name.
-        self_key: This node's full public key (hex); blank renders as ``?``.
-        contacts: Known contacts, listed after our own node.
-        prefix_bytes: Path-hash width in bytes to highlight in every key.
-        counts: Overheard-packet counts keyed by lowercased 12-hex node id (from
-            monitoring); a contact with no entry shows ``—``.
-        sort: The active sort (column + direction); defaults to name-ascending. The sorted
-            column's header is lit cyan with an up/down direction triangle.
+        self_name: The advertised name of our node.
+        self_key: The full public key of our node (hex). If it is blank, the table shows
+            ``?``.
+        contacts: The known contacts, listed after our node.
+        prefix_bytes: The path-hash width in bytes to light in each key.
+        counts: The counts of overheard packets, keyed by the 12-hex node id in lower case
+            (from monitoring). A contact with no entry shows ``—``.
+        sort: The active sort (column and direction). The default is name ascending. The
+            header of the sorted column is lit cyan, with a triangle for the direction.
 
     Returns:
-        A Rich :class:`Group` of the frameless table and its glyph legend.
+        A Rich :class:`Group` of the table without a frame and its legend of glyphs.
     """
     sort = sort if sort is not None else ContactsSort()
 
-    # expand=True lets the key column (the only flexible one) soak up all spare width and be
-    # the sole column Rich squeezes when narrow — the fixed columns keep their natural size.
+    # expand=True lets the key column (the only flexible column) take all the spare width.
+    # It is also the only column that Rich squeezes when the terminal is narrow. The fixed
+    # columns keep their natural size.
     table = Table(
         title=f"[accent]Contacts[/accent]  [muted]· {len(contacts)} known[/muted]",
         title_justify="left",
@@ -1423,9 +1490,10 @@ def contacts_table(
         expand=True,
         padding=(0, 2, 0, 0),
     )
-    # Each sortable header reserves two extra columns for its " ▲" direction marker (via
-    # min_width = label + 2) so the same width holds whether or not it's the active sort —
-    # switching the sort never widens a column and shifts the rest of the row.
+    # Each sortable header keeps two more columns for its " ▲" direction marker (with
+    # min_width = label + 2). Thus the width is the same if the header is the active sort or
+    # not. A change of the sort never makes a column wider and never shifts the rest of the
+    # row.
     table.add_column("", no_wrap=True)  # node-type glyph
     table.add_column(_sort_header("NAME", "name", sort), no_wrap=True, min_width=6)
     table.add_column(
@@ -1434,13 +1502,13 @@ def contacts_table(
     table.add_column(
         _sort_header("PKTS", "packets", sort), justify="right", no_wrap=True, min_width=6
     )
-    # The full key, chopped to an ellipsis by Rich only when the row won't otherwise fit.
+    # The full key. Rich cuts it to an ellipsis only when the row does not fit in another way.
     table.add_column("KEY", no_wrap=True, overflow="ellipsis", ratio=1, min_width=10)
 
     unknown = Text("?", style="muted")
     table.add_row(
         Text(SELF_MARK[0], style=SELF_MARK[1]),
-        # Our own name is the app-wide pure-white "you" style, never a palette hue.
+        # Our name has the pure-white "you" style of the app, and never a palette hue.
         Text.assemble((self_name, "you"), ("  (you)", "muted")),
         Text("—", style="faint"),
         Text("—", style="faint"),
@@ -1462,10 +1530,10 @@ def contacts_table(
 
 
 def tx_opt_table(result: TxOptResult) -> Table:
-    """Render every measured TX level of an optimization sweep, best row highlighted.
+    """Render each measured TX level of an optimization sweep, with the best row highlighted.
 
     Args:
-        result: The optimization result to display.
+        result: The optimization result to show.
 
     Returns:
         A Rich :class:`Table` of TX level, target SNR, success rate, and sample count.
@@ -1484,7 +1552,7 @@ def tx_opt_table(result: TxOptResult) -> Table:
         marker = "[ok]★[/ok] " if is_best else "  "
         snr = lv.target_snr
         snr_cell = Text(f"{snr:+.1f}", style=snr_style(snr)) if snr is not None else Text("—")
-        # Highlight anything short of a perfect success rate — reliability comes first.
+        # Highlight each rate that is less than a perfect success rate. Reliability is first.
         rate = lv.success_rate
         rate_style = "ok" if rate >= 1.0 else ("warn" if rate > 0 else "err")
         rate_cell = Text(f"{rate:.0%}", style=rate_style)
@@ -1495,13 +1563,14 @@ def tx_opt_table(result: TxOptResult) -> Table:
 
 
 def tx_opt_summary(result: TxOptResult) -> Panel:
-    """Summarize a TX optimization outcome.
+    """Summarize the result of a TX optimization.
 
     Args:
         result: The optimization result to summarize.
 
     Returns:
-        A Rich :class:`Panel` stating the chosen optimum and whether it was applied.
+        A Rich :class:`Panel` that states the optimum that was chosen and if MeshTerm
+        applied it.
     """
     snr = result.best_snr
     snr_text = Text(f"{snr:+.1f} dB", style=snr_style(snr)) if snr is not None else Text("n/a")
@@ -1535,70 +1604,77 @@ def tx_opt_summary(result: TxOptResult) -> Panel:
 
 # -- battery gauge --------------------------------------------------------------------------
 
-#: Unicode braille pattern base; add an 8-bit dot mask (a 2×4 cell) to get the glyph.
+#: The base of the Unicode braille patterns. Add an 8-bit dot mask (a cell of 2×4) to get
+#: the glyph.
 _BRAILLE_BASE = 0x2800
 
-#: Dot bit per (column, row) within a braille cell — the Unicode standard layout, the same
-#: mapping the map canvas rasters with. Kept here so the one-cell battery glyph needn't reach
-#: into the canvas module for two constants.
+#: The dot bit for each (column, row) in a braille cell. This is the standard layout of
+#: Unicode, and it is the same mapping that the map canvas uses for its rasters. It is
+#: here, so that the one-cell battery glyph does not need to reach into the canvas module
+#: for two constants.
 _BRAILLE_DOTS = ((0x01, 0x02, 0x04, 0x40), (0x08, 0x10, 0x20, 0x80))
 
-#: The fuel-gauge bands: ``(percent floor, style)``, highest first. Colour answers *how much
-#: pack is left* in three broad steps — light green on green over half, yellow on brown over a
-#: quarter, light red on red below — while the eight-rung braille fill inside the block
-#: answers *how much more precisely*. Two questions, two channels: a band that stayed put
-#: while the dots climbed is what makes the cell readable at a glance and still exact on a
-#: second look.
+#: The bands of the fuel gauge: ``(percent floor, style)``, with the highest first. The
+#: colour answers *how much of the battery is left* in three broad steps: light green on
+#: green above half, yellow on brown above a quarter, and light red on red below. The
+#: braille fill with eight rungs in the block answers *how much, more exactly*. There are
+#: two questions and two channels. A band that stays the same while the dots climb makes
+#: the cell readable at a glance, and it is still exact at a second look.
 _BATTERY_BANDS: tuple[tuple[int, str], ...] = (
     (50, "batt.full"),
     (25, "batt.mid"),
     (0, "batt.low"),
 )
 
-#: Steps in the fill: one braille cell is 2×4 dots, and each dot row lights left-then-right,
-#: so the cell reads as an eight-rung ladder — one rung per 12.5% of charge.
+#: The steps in the fill. One braille cell is 2×4 dots, and each row of dots lights from
+#: left to right. Thus the cell reads as a ladder with eight rungs, one rung for each 12.5%
+#: of charge.
 _BATTERY_STEPS = 8
 
-#: Halfway down the last rung the cell starts alarming, and it does it by dropping the ground
-#: rather than by changing hue: black dots on red one frame (``batt.flash``), the light red on
-#: the bare page the next (``batt.flash.off``). Every other cell in the app's gauge is a
-#: filled block, so a beat with no fill at all is the loudest thing the palette can say.
-#: A percentage rather than a rung because half a rung is not a rung: a rung is ``100 / 8`` =
-#: 12.5% of the pack, so its midpoint is 6.25% — the last dot half spent.
+#: Halfway down the last rung, the cell starts to alarm. It does this by dropping the
+#: ground, and not by a change of hue. In one frame it shows black dots on red
+#: (``batt.flash``), and in the next frame the light red on the bare page
+#: (``batt.flash.off``). Each other cell of the gauge of the app is a filled block. Thus a
+#: beat with no fill at all is the loudest thing that the palette can say. The threshold
+#: is a percentage and not a rung, because half of a rung is not a rung. A rung is
+#: ``100 / 8`` = 12.5% of the battery, so its midpoint is 6.25%, where the last dot is half
+#: spent.
 #:
-#: The alternation is ours, drawn a frame at a time. The console's own blink attribute is no
-#: use even where a terminal honours it: SGR 5 toggles the *foreground* and leaves the ground
-#: alone, which is the half of this that matters (and the PicoCalc's framebuffer console
-#: ignores it outright — device-checked, along with its want of bright backgrounds).
+#: MeshTerm makes the alternation itself, one frame at a time. The blink attribute of the
+#: console is not useful, also where a terminal supports it. SGR 5 toggles the
+#: *foreground* and leaves the ground, and the ground is the half that matters here. (The
+#: framebuffer console of the PicoCalc ignores it completely. We checked this on the
+#: handheld, with its lack of bright backgrounds.)
 _BATTERY_FLASH_PCT = 100 / _BATTERY_STEPS / 2
 
-#: Frames in the charging sweep: empty → four fills → round again (bottom-to-full loop).
+#: The frames in the charging sweep: empty → four fills → round again (a loop from the
+#: bottom to full).
 _CHARGE_FRAMES = 5
 
-#: A full pack reads ``100``, with no ``%`` — the one charge whose sign is dropped, so the
-#: reading is three cells wide exactly as ``99%`` is.
+#: A full battery reads ``100`` with no ``%``. It is the only charge for which MeshTerm
+#: removes the sign, so the reading has three cells, the same as ``99%``.
 #:
-#: Which matters because 99 and 100 are the two numbers a topped-off pack sits *between*:
-#: the charger cuts out at full, the pack settles back to 99, the charger restarts, and the
-#: companion reports the flip every poll for as long as it is plugged in (JP, 2026-09-09).
-#: The gauge is pinned to the header's right edge and the pulse takes what is left, so a
-#: number that grew a cell at the top of the range took that cell off the sparkline and
-#: redrew the whole activity history at a new scale, twice a minute, on a device sitting
-#: still. Every other width change in the range — 9 to 10 on the way down — is a boundary a
-#: discharging pack crosses once and never comes back over, so it costs one repaint and
-#: needs no answer.
+#: This is important because a battery that is topped off is *between* 99 and 100. The
+#: charger stops at full, the battery goes back to 99, the charger starts again, and the
+#: companion reports the change at each poll as long as it is plugged in (JP, 2026-09-09).
+#: The gauge is pinned to the right edge of the header, and the pulse takes what is left.
+#: Thus a number that grew by a cell at the top of the range took that cell from the
+#: sparkline. It drew the whole activity history again at a new scale, twice each minute,
+#: on a device that was not moving. All other width changes in the range, for example 9 to
+#: 10 on the way down, are a boundary that a discharging battery crosses one time and never
+#: crosses again. They cost one repaint and need no answer.
 #:
-#: A bare ``100`` beside a full block reads as a percentage without being told; ``%`` is
-#: doing its work at the readings that could be mistaken for something else.
+#: A bare ``100`` next to a full block reads as a percentage without a sign. The ``%`` does
+#: its work at the readings that a user can mistake for something else.
 _BATTERY_FULL = "100"
 
 
 def _braille_fill(steps: int) -> str:
-    """A single braille cell filled from the bottom by ``steps`` (0–8) half-rows.
+    """A single braille cell that is filled from the bottom by ``steps`` (0–8) half-rows.
 
-    Each dot row is two steps: the left dot lights first, then the right one completes the
-    row, so the fill climbs in half-rows rather than whole ones and one cell carries eight
-    distinguishable levels.
+    Each row of dots is two steps. The left dot lights first, and then the right dot
+    completes the row. Thus the fill climbs in half-rows and not in whole rows, and one
+    cell has eight levels that the user can tell apart.
     """
     steps = max(0, min(_BATTERY_STEPS, steps))
     bits = 0
@@ -1609,21 +1685,22 @@ def _braille_fill(steps: int) -> str:
 
 
 def _battery_steps(percent: int) -> int:
-    """How many half-rows a charge lights: one rung per 12.5%, never fewer than one.
+    """The half-rows that a charge lights: one rung for each 12.5%, and never fewer than one.
 
-    The bands are ``0–12.5`` → one rung … ``87.5–100`` → the full cell, each one taking its
-    lower bound. A pack on its last percent still lights a single dot, so the gauge is never
-    an empty cell while the pack is still running.
+    The bands are ``0–12.5`` → one rung … ``87.5–100`` → the full cell. Each band takes its
+    lower bound. A battery at its last percent still lights a single dot. Thus the gauge is
+    never an empty cell while the battery is still running.
     """
     pct = max(0, min(100, int(percent)))
     return max(1, min(_BATTERY_STEPS, int(pct * _BATTERY_STEPS / 100) + 1))
 
 
 def _battery_band(percent: int) -> str:
-    """The band a charge draws in (see :data:`_BATTERY_BANDS`) — always the *true* charge.
+    """The band in which a charge draws (refer to :data:`_BATTERY_BANDS`): the *true* charge.
 
-    Read off the pack rather than off the cell, so the charging sweep keeps saying what the
-    pack holds while its fill climbs through frames that mean nothing on their own.
+    The function reads the value from the battery and not from the cell. Thus the charging
+    sweep keeps showing what the battery holds, while its fill climbs through frames that
+    have no meaning on their own.
     """
     for floor, style in _BATTERY_BANDS:
         if percent >= floor:
@@ -1632,65 +1709,70 @@ def _battery_band(percent: int) -> str:
 
 
 def battery_cell(percent: int, *, charging: bool = False, frame: int = 0) -> Text:
-    """The status-bar battery gauge: one filled braille block, then its ``%``.
+    """The battery gauge of the status bar: one filled braille block, then its ``%``.
 
-    The cell is a lit foreground over its own darker ground — a *block*, coloured by band
-    (:data:`_BATTERY_BANDS`): light green on green over half, yellow on brown over a quarter,
-    light red on red below. Inside that block the braille fills from the bottom up in eight
-    half-row steps (see :func:`_braille_fill`), one rung per 12.5% of charge, the left dot of
-    a row lighting before the right. So the block answers *roughly how much* from across the
-    room and the dots answer *exactly how much* on a second look. Two live states animate off
-    the caller's ``frame`` counter (advanced one step per repaint tick), so the gauge moves
-    without any per-frame plumbing:
+    The cell is a lit foreground over its own darker ground. It is a *block*, with a colour
+    for each band (:data:`_BATTERY_BANDS`): light green on green above half, yellow on brown
+    above a quarter, and light red on red below. In that block, the braille fills from the
+    bottom up in eight half-row steps (refer to :func:`_braille_fill`), one rung for each
+    12.5% of charge. The left dot of a row lights before the right dot. Thus the block
+    answers *approximately how much* from across the room, and the dots answer *exactly how
+    much* at a second look. Two live states animate from the ``frame`` counter of the
+    caller (it advances one step for each repaint tick). Thus the gauge moves, and no
+    plumbing for each frame is necessary.
 
-    * **Charging** overrides the fill: the cell sweeps empty-to-full on a loop, so a
-      plugged-in pack visibly climbs. The band does *not* sweep with it — colour keeps
-      answering for the real charge, since a frame of the animation means nothing on its own
-      — and neither does the number beside it, which stays the true percent throughout. The
-      sweep climbs by whole dot rows, not by the fill's half-rows: it is a "power is coming
-      in" animation rather than a reading, and its tick is slow enough (a step per repaint)
-      that five frames say that better than nine.
-    * **Below :data:`_BATTERY_FLASH_PCT`** — half the last dot's worth of charge, and only
-      when nothing is charging it — the cell alternates between black dots on red and the
-      light red on the bare page. Dropping the ground for a beat is a bigger change than any
-      hue swap in a palette where every other cell is filled, which is the point: it is the
-      last warning a handheld gives before it dies.
+    * **Charging** replaces the fill. The cell sweeps from empty to full in a loop, so the
+      user can see a plugged-in battery climb. The band does *not* sweep with it. The colour
+      keeps answering for the real charge, because a frame of the animation has no meaning
+      on its own. The number next to the cell does not sweep either, and it stays the true
+      percent. The sweep climbs by whole rows of dots, and not by the half-rows of the
+      fill. It is an animation for "power is coming in" and not a reading. Its tick is slow
+      (one step for each repaint), so five frames show this better than nine.
+    * **Below** :data:`_BATTERY_FLASH_PCT` (half of the charge of the last dot, and only
+      when nothing charges the battery), the cell alternates between black dots on red and
+      the light red on the bare page. When the ground drops for a beat, the change is bigger
+      than any change of hue in a palette where each other cell is filled. This is the
+      purpose: it is the last warning that a handheld gives before it dies.
 
-    Both run on every platform, stepping at whatever that platform repaints at — 2 s on the
-    PicoCalc, where the header is rebuilt on the idle tick anyway, so an animation costs a
-    colour swap in a frame already being painted and nothing else. Neither is behind
-    ``Platform.effects``: one *is* the charging state, and the other is the last warning a
-    handheld gives before it dies.
+    Both states run on each platform. They step at the rate at which that platform
+    repaints. On the PicoCalc this is every 2 s, where the header is rebuilt on the idle
+    tick in any case. Thus an animation costs only a colour swap in a frame that MeshTerm
+    already paints. Neither state is behind ``Platform.effects``, because one of them *is*
+    the charging state, and the other is the last warning that a handheld gives before it
+    dies.
 
-    A pack at 100% is drawn as **not charging** whichever way the flag reads: a full cell
-    resting full is the honest picture, and a topped-off charger left plugged in shouldn't
-    leave the gauge sweeping forever. It also drops its ``%`` (:data:`_BATTERY_FULL`), so
-    that full reading is the same three cells as the 99% it keeps flipping back to and the
-    header stops resizing under a pack on a charger.
+    A battery at 100% is drawn as **not charging**, for each value of the flag. A full cell
+    that stays full is the correct picture, and a charger that is topped off and left
+    plugged in must not leave the gauge sweeping forever. The function also removes its
+    ``%`` (:data:`_BATTERY_FULL`). Thus the full reading has the same three cells as the 99%
+    to which it keeps flipping back, and the header does not change its size under a
+    battery on a charger.
 
     Args:
-        percent: State of charge, 0–100 (clamped).
-        charging: Whether the pack is taking charge (drives the fill sweep). Ignored at 100%.
-        frame: A monotonically advancing tick; only its phase is read, so any
-            steadily-incrementing integer animates the two live states.
+        percent: The state of charge, 0–100 (clamped).
+        charging: ``True`` if the battery takes charge (it drives the fill sweep). The
+            function ignores it at 100%.
+        frame: A tick that always advances. The function reads only its phase, so any
+            integer that increases steadily animates the two live states.
 
     Returns:
-        A Rich :class:`Text`: the coloured block, a space, and ``NN%`` in muted text — a
-        full pack's bare ``100`` the one exception (:data:`_BATTERY_FULL`) — with the
-        block's colours on the glyph's span alone, so the ground stops at the cell.
+        A Rich :class:`Text`: the coloured block, a space, and ``NN%`` in muted text. The
+        one exception is the bare ``100`` of a full battery (:data:`_BATTERY_FULL`). The
+        colours of the block are on the span of the glyph alone, so the ground stops at the
+        cell.
     """
     pct = max(0, min(100, int(percent)))
-    # The sweep climbs by whole rows, so the loop stays legible. Colour comes off the pack
-    # either way: a sweep frame is an animation, not a reading, and must not be coloured
-    # as though it were one.
+    # The sweep climbs by whole rows, so the loop stays easy to read. In both cases, the
+    # colour comes from the battery. A sweep frame is an animation and not a reading, and
+    # it must not have a colour as if it were a reading.
     sweeping = charging and pct < 100
     steps = (frame % _CHARGE_FRAMES) * 2 if sweeping else _battery_steps(pct)
     color = _battery_band(pct)
     if not sweeping and pct < _BATTERY_FLASH_PCT:
         color = "batt.flash.off" if frame % 2 else "batt.flash"
-    # The colours ride the *glyph's own span*, never the Text's base style: the block paints
-    # a background, and a base style merges into every span, so a base block would drag the
-    # muted percent onto the coloured ground alongside the cell.
+    # The colours are on the *own span of the glyph* and never on the base style of the Text.
+    # The block paints a background, and a base style merges into each span. If the block
+    # is the base style, the muted percent goes onto the coloured ground next to the cell.
     out = Text()
     out.append(_braille_fill(steps), style=color)
     out.append(f" {_BATTERY_FULL if pct == 100 else f'{pct}%'}", style="muted")

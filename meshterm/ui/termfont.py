@@ -1,79 +1,82 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Terminal capability detection — what can this terminal actually draw?
+"""Terminal capability detection: what can this terminal draw?
 
-Two questions, both answered out-of-band because a terminal cannot be asked in-band: a
-glyph it does not have still occupies its cell, so the screen looks the same whether the
-character arrived or not.
+There are two questions. MeshTerm answers both out-of-band, because it cannot ask a
+terminal in-band. A glyph that the terminal does not have still occupies its cell, so the
+screen looks the same if the character arrived or not.
 
-**Powerline separators**, below, are a *font* question — read the terminal's configured
-face and match it against fonts known to carry the block.
+**Powerline separators**, below, are a question about the font. MeshTerm reads the
+configured face of the terminal and matches it against fonts that are known to have the
+block.
 
-**Emoji** (:func:`emoji_support`) are a *host* question, and only on Windows. The classic
-console — ``conhost``, which is what a double-clicked program still gets — rasterises
-through GDI with the console font and nothing behind it, so an emoji lands as a
-replacement box however the font is configured. Everything that replaced it draws them
-fine. So the verdict identifies the host, structurally rather than from the environment
-(``WT_SESSION`` is inherited across process launches, so a program started from Windows
-Terminal into a console of its own still claims to be in one), and a ``False`` routes
-every icon through the compact single-glyph table :func:`meshterm.ui.theme.glyph` already
-keeps for the PicoCalc — that whole vocabulary is BMP, so it draws wherever the plain
-status marks already do.
+**Emoji** (:func:`emoji_support`) are a question about the host, and only on Windows. The
+classic console (``conhost``, which a program that the user double-clicks still gets)
+rasterizes through GDI with the console font and nothing behind it. Thus an emoji is a
+replacement box, in any font configuration. All the hosts that replaced it draw emoji
+correctly. So the verdict identifies the host, from its structure and not from the
+environment. (``WT_SESSION`` is inherited across process launches. A program that starts
+from Windows Terminal into a console of its own still says that it is in Windows
+Terminal.) A ``False`` sends each icon through the compact single-glyph table
+:func:`meshterm.ui.theme.glyph`, which MeshTerm already keeps for the PicoCalc. All of
+this vocabulary is in the BMP, so it draws wherever the plain status marks draw.
 
-Both verdicts are hints that pick a default, and both have an override for the reader who
-knows better than the probe: ``MESHTERM_POWERLINE`` and ``MESHTERM_EMOJI``.
+Both verdicts are hints that pick a default. Each has an override for the user who knows
+better than the probe: ``MESHTERM_POWERLINE`` and ``MESHTERM_EMOJI``.
 
-The path-line widget (:mod:`~meshterm.ui.pathline`) can render a hop sequence as
-interlocking powerline segments — each hop a colour-filled chip, joined by the solid
-triangle U+E0B0 whose foreground is the previous chip's fill and whose background is
-the next's, the oh-my-posh look. That triangle lives in the Private Use Area, so it
-only draws when the *terminal's configured font* (or the terminal itself) supplies the
-glyph; a font without it shows tofu boxes. Nothing in-band can ask "do you have this
-glyph?" — a missing glyph still occupies its cell, so even cursor-position probes see
-nothing — which makes this an *out-of-band* detection problem: identify the terminal,
-read its configuration, and match the configured face against fonts known to carry the
-powerline block.
+The path-line widget (:mod:`~meshterm.ui.pathline`) can render a sequence of hops as
+interlocking powerline segments. Each hop is a chip with a colour fill. The solid
+triangle U+E0B0 joins the chips. Its foreground is the fill of the previous chip, and its
+background is the fill of the next chip (the oh-my-posh look). That triangle is in the
+Private Use Area, so it draws only when the configured font of the terminal (or the
+terminal itself) supplies the glyph. A font without the glyph shows tofu boxes. MeshTerm
+cannot ask in-band if the terminal has this glyph. A missing glyph still occupies its
+cell, so even a probe of the cursor position sees nothing. Thus this is a problem of
+out-of-band detection. MeshTerm identifies the terminal, reads its configuration, and
+matches the configured face against fonts that are known to have the powerline block.
 
-Four sources of truth, in confidence order:
+There are four sources of truth, in the order of confidence:
 
-* **An explicit override** — ``MESHTERM_POWERLINE`` (``1``/``full``, ``core``,
-  ``0``/``off``) always wins, the same gate pattern as ``MESHTERM_FULL_WIDTH``. The
-  user knows their glass better than any probe.
-* **A handheld's own font.** Where the platform names a glyph contract
-  (:attr:`~meshterm.platforms.Platform.font`), every frame is folded down to that font
-  at the render boundary, whatever terminal started the app — so the inventory is the
-  answer, and asking the terminal would be asking the wrong glass. The Cardputer's panel
-  is Terminus, which carries the core chevrons. The PicoCalc's 512-glyph console font
-  draws the two chevrons in two donor slots. Thus the paths are chips on both handhelds.
-  Nothing is probed: :data:`~meshterm.ui.fontset.FONTS` already says what each font can
-  draw.
-* **The configured font**, resolved per terminal: Windows Terminal (``WT_SESSION`` +
-  ``WT_PROFILE_ID`` → the profile's ``font.face`` in ``settings.json``), VS Code's
-  integrated terminal (``TERM_PROGRAM=vscode`` → ``terminal.integrated.fontFamily``,
-  workspace over user, falling back to ``editor.fontFamily``), and classic conhost
-  (``GetCurrentConsoleFontEx`` — trusted only when no ConPTY host is detected, because
-  the hidden conhost under one reports a stub face, not what's on screen). The face is
-  matched against :data:`RECOMMENDED_FONTS` — the list MeshTerm recommends to users —
-  with the alias spellings Nerd Fonts ship under (``Hack Nerd Font Mono`` / ``Hack
-  NFM``), plus a generic "any Nerd Font" rule, since every Nerd Font patch carries the
-  full powerline block.
-* **The terminal's own renderer**: several terminals draw the core triangles
-  regardless of font — Windows Terminal falls back to its bundled Cascadia Code NF for
-  the symbol ranges (≥ 1.22), VS Code's terminal draws them as custom glyphs
-  (``terminal.integrated.customGlyphs``, default on), and kitty / WezTerm / Alacritty
-  ship built-in powerline glyphs. Those count as ``core`` support even when the
-  configured font matches nothing.
+* **An explicit override.** ``MESHTERM_POWERLINE`` (``1``/``full``, ``core``,
+  ``0``/``off``) always wins. It is the same gate pattern as ``MESHTERM_FULL_WIDTH``. The
+  user knows their own display better than any probe.
+* **The font of a handheld.** Where the platform names a glyph contract
+  (:attr:`~meshterm.platforms.Platform.font`), the render boundary folds each frame down
+  to that font, in any terminal that started the app. Thus the inventory is the answer,
+  and a question to the terminal is a question to the wrong display. The panel of the
+  Cardputer is Terminus, which has the core chevrons. The 512-glyph console font of the
+  PicoCalc draws the two chevrons in two donor slots. Thus the paths are chips on both
+  handhelds. MeshTerm does not probe: :data:`~meshterm.ui.fontset.FONTS` already says
+  what each font can draw.
+* **The configured font**, found for each terminal. The terminals are Windows Terminal
+  (``WT_SESSION`` + ``WT_PROFILE_ID`` → the ``font.face`` of the profile in
+  ``settings.json``), the integrated terminal of VS Code (``TERM_PROGRAM=vscode`` →
+  ``terminal.integrated.fontFamily``, the workspace before the user, with
+  ``editor.fontFamily`` as the fallback), and classic conhost (``GetCurrentConsoleFontEx``,
+  which MeshTerm trusts only when it detects no ConPTY host, because the hidden conhost
+  under a ConPTY host reports a stub face and not what is on the screen). MeshTerm
+  matches the face against :data:`RECOMMENDED_FONTS` (the list of fonts that MeshTerm
+  recommends to users). The list has the alias spellings that Nerd Fonts use (``Hack Nerd
+  Font Mono`` / ``Hack NFM``). A generic rule, "any Nerd Font", is also in the match,
+  because each Nerd Font patch has the full powerline block.
+* **The renderer of the terminal.** Several terminals draw the core triangles in any
+  font. Windows Terminal falls back to its bundled Cascadia Code NF for the symbol ranges
+  (version 1.22 and later). The terminal of VS Code draws them as custom glyphs
+  (``terminal.integrated.customGlyphs``, on by default). kitty, WezTerm, and Alacritty
+  have built-in powerline glyphs. These terminals count as ``core`` support, also when
+  the configured font matches nothing.
 
-Coverage comes in two levels: ``full`` (a Nerd Font patch — triangles *and* the
-extended block: rounded caps, slants) and ``core`` (just U+E0B0–U+E0B3, which many
-stock coder fonts — Fira Code, JetBrains Mono, Source Code Pro — include natively).
-The path widget only uses the core triangle, so ``core`` is enough to switch it on;
-``full`` is headroom for fancier chrome. When nothing can be known — an ssh session
-(the font lives on the far client's machine), an unrecognised terminal — the verdict
-is honestly ``unknown`` and callers should keep the plain-arrow rendering.
+There are two levels of coverage. ``full`` is a Nerd Font patch: the triangles and the
+extended block (rounded caps and slants). ``core`` is only U+E0B0–U+E0B3, which many
+stock coder fonts (Fira Code, JetBrains Mono, Source Code Pro) have natively. The path
+widget uses only the core triangle, so ``core`` is enough to switch it on. ``full`` is
+more than the widget needs, for more complex chrome. When MeshTerm cannot know the
+answer, for example in an ssh session (the font is on the machine of the far client) or
+in an unrecognized terminal, the verdict is ``unknown``. Then callers must keep the
+plain-arrow rendering.
 
-Every probe is best-effort: unreadable settings, missing registry keys, or a failed
-Win32 call degrade the verdict, never raise. The result is a *hint that picks a
-default*, not a gate the user has to fight.
+Each probe does its best. Unreadable settings, missing registry keys, or a failed Win32
+call lower the verdict, and never raise an exception. The result is a hint that picks a
+default. It is not a gate that the user must fight.
 """
 
 from __future__ import annotations
@@ -91,7 +94,7 @@ from ..core import win32dll
 from ..platforms import Platform, on_platform
 from .fontset import FONTS
 
-#: Coverage levels a verdict (or a recommended font) can carry, strongest first.
+#: The levels of coverage that a verdict (or a recommended font) can have, the strongest first.
 FULL = "full"
 CORE = "core"
 NONE = "none"
@@ -100,16 +103,16 @@ UNKNOWN = "unknown"
 
 @dataclass(frozen=True)
 class RecommendedFont:
-    """One font MeshTerm recommends for powerline path rendering.
+    """One font that MeshTerm recommends for the rendering of powerline paths.
 
     Attributes:
-        name: The canonical display name (what a recommendation screen shows).
-        aliases: Normalised name prefixes that identify the family — every spelling a
-            terminal config might hold, lower-case with collapsed spaces (Nerd Fonts
-            deliberately ship several: ``hack nerd font mono`` and ``hack nfm`` are the
-            same file).
-        coverage: :data:`FULL` when the family carries the whole powerline block
-            (Nerd Font patches), :data:`CORE` when it ships just the four triangles.
+        name: The canonical display name (what a screen of recommendations shows).
+        aliases: The normalized name prefixes that identify the family. They are all the
+            spellings that the config of a terminal can have, in lower case with
+            collapsed spaces. Nerd Fonts have several spellings on purpose: ``hack nerd
+            font mono`` and ``hack nfm`` are the same file.
+        coverage: :data:`FULL` when the family has the whole powerline block (Nerd Font
+            patches). :data:`CORE` when it has only the four triangles.
     """
 
     name: str
@@ -117,9 +120,10 @@ class RecommendedFont:
     coverage: str
 
 
-#: The fonts MeshTerm recommends, full-coverage Nerd Fonts first — order matters, the
-#: first alias hit wins, so ``JetBrainsMono Nerd Font`` must match its ``full`` entry
-#: before the plain ``JetBrains Mono`` prefix could claim it as ``core``.
+#: The fonts that MeshTerm recommends, with the full-coverage Nerd Fonts first. The order
+#: is important, because the first alias that matches wins. Thus ``JetBrainsMono Nerd
+#: Font`` must match its ``full`` entry before the plain ``JetBrains Mono`` prefix can
+#: claim it as ``core``.
 RECOMMENDED_FONTS: tuple[RecommendedFont, ...] = (
     RecommendedFont(
         "MesloLGM Nerd Font",
@@ -179,9 +183,10 @@ RECOMMENDED_FONTS: tuple[RecommendedFont, ...] = (
     RecommendedFont("Iosevka", ("iosevka",), CORE),
 )
 
-#: The catch-all for a patched font the explicit list doesn't spell out: any family
-#: whose name carries the Nerd Font branding — the long ``… Nerd Font [Mono|Propo]``
-#: or the v3 short suffixes ``NF``/``NFM``/``NFP`` — has the full powerline block.
+#: The catch-all for a patched font that the explicit list does not name. Each family
+#: whose name has the Nerd Font branding has the full powerline block. The branding is the
+#: long ``… Nerd Font [Mono|Propo]`` or the short suffixes of version 3
+#: (``NF``/``NFM``/``NFP``).
 NERD_FONT_GENERIC = RecommendedFont("Nerd Font (patched)", (), FULL)
 
 _NERD_RE = re.compile(r"\bnerd font\b|\bnf[mp]?\b")
@@ -189,10 +194,10 @@ _NERD_RE = re.compile(r"\bnerd font\b|\bnf[mp]?\b")
 
 @dataclass(frozen=True)
 class FontDetection:
-    """The configured terminal font, and which terminal it was read from.
+    """The configured terminal font, and the terminal that MeshTerm read it from.
 
     Attributes:
-        face: The font family name as configured (unnormalised).
+        face: The font family name as configured (not normalized).
         source: ``"windows-terminal"``, ``"vscode"``, or ``"conhost"``.
     """
 
@@ -202,17 +207,17 @@ class FontDetection:
 
 @dataclass(frozen=True)
 class PowerlineSupport:
-    """The verdict: how confidently this terminal can draw powerline separators.
+    """The verdict: how certain MeshTerm is that this terminal can draw powerline separators.
 
     Attributes:
         level: :data:`FULL`, :data:`CORE`, :data:`NONE`, or :data:`UNKNOWN`.
-        source: What decided it — ``"env"`` (the override), ``"platform:<name>"`` (a
-            handheld's own font inventory), ``"font:<terminal>"``
-            (a configured face matched, or definitively didn't), ``"renderer:<terminal>"``
-            (the terminal draws the glyphs itself), ``"ssh"`` (the font lives on the far
-            client, unknowable), or ``"unknown"``.
-        face: The configured face when one was found, for the curious.
-        matched: The recommended-list entry the face matched, if any.
+        source: What decided the verdict. ``"env"`` is the override. ``"platform:<name>"``
+            is the font inventory of a handheld. ``"font:<terminal>"`` is a configured
+            face that matched, or that definitely did not match. ``"renderer:<terminal>"``
+            is a terminal that draws the glyphs itself. ``"ssh"`` is a font on the far
+            client, which MeshTerm cannot know. ``"unknown"`` is all other cases.
+        face: The configured face, when MeshTerm found one. It is for information.
+        matched: The entry of the recommended list that the face matched, if any.
     """
 
     level: str
@@ -222,7 +227,7 @@ class PowerlineSupport:
 
     @property
     def capable(self) -> bool:
-        """Whether the core triangle (all the path widget needs) will draw."""
+        """Check if the core triangle (the only glyph that the path widget needs) will draw."""
         return self.level in (FULL, CORE)
 
 
@@ -230,29 +235,29 @@ class PowerlineSupport:
 
 
 def primary_family(value: str) -> str:
-    """The first family of a CSS-style font list, unquoted.
+    """The first family of a font list in the CSS style, without quotes.
 
-    VS Code stores ``"'Hack Nerd Font Mono', monospace"``; the first family is the
-    one the renderer tries first, so it is the one we judge.
+    VS Code stores ``"'Hack Nerd Font Mono', monospace"``. The renderer tries the first
+    family first, so MeshTerm judges that family.
 
     Args:
-        value: A font-family setting value (single name or comma list).
+        value: The value of a font-family setting (a single name or a comma list).
 
     Returns:
-        The first family with quotes and outer whitespace stripped.
+        The first family, with the quotes and the outer whitespace removed.
     """
     first = value.split(",")[0]
     return first.strip().strip("'\"").strip()
 
 
 def normalize_face(face: str) -> str:
-    """Fold a face name to its matchable form: lower-case, single-spaced, unquoted.
+    """Fold a face name to its form for a match: lower case, single-spaced, without quotes.
 
     Args:
         face: A font family name as a config file spells it.
 
     Returns:
-        The normalised name (may be empty).
+        The normalized name (it can be empty).
     """
     return " ".join(face.strip().strip("'\"").lower().split())
 
@@ -260,17 +265,17 @@ def normalize_face(face: str) -> str:
 def match_recommended(face: str | None) -> RecommendedFont | None:
     """Match a configured face against the recommended-font list.
 
-    A face matches an entry when it *is* one of the entry's aliases or extends one as
-    a longer family name (``hack nerd font mono`` extends ``hack nerd font``); the
-    generic Nerd Font rule (:data:`NERD_FONT_GENERIC`) catches patched families the
-    explicit list doesn't spell out.
+    A face matches an entry when it is one of the aliases of the entry, or when it extends
+    one alias as a longer family name (``hack nerd font mono`` extends ``hack nerd
+    font``). The generic Nerd Font rule (:data:`NERD_FONT_GENERIC`) matches the patched
+    families that the explicit list does not name.
 
     Args:
-        face: The configured font family (single name or comma list); ``None`` is a
-            polite no-op.
+        face: The configured font family (a single name or a comma list). ``None`` does
+            nothing and is not an error.
 
     Returns:
-        The matched :class:`RecommendedFont`, or ``None`` when the face is unknown.
+        The matched :class:`RecommendedFont`, or ``None`` when the face is not known.
     """
     if not face:
         return None
@@ -289,7 +294,7 @@ def match_recommended(face: str | None) -> RecommendedFont | None:
 
 
 def _strip_jsonc(text: str) -> str:
-    """Strip ``//`` and ``/* */`` comments from JSON-with-comments, string-safely."""
+    """Remove the ``//`` and ``/* */`` comments from JSON with comments. Strings are safe."""
     out: list[str] = []
     i, n = 0, len(text)
     in_string = False
@@ -297,7 +302,7 @@ def _strip_jsonc(text: str) -> str:
         ch = text[i]
         if in_string:
             out.append(ch)
-            if ch == "\\" and i + 1 < n:  # keep the escaped char verbatim
+            if ch == "\\" and i + 1 < n:  # keep the escaped character exactly
                 out.append(text[i + 1])
                 i += 2
                 continue
@@ -326,12 +331,12 @@ def _strip_jsonc(text: str) -> str:
 
 
 def _read_jsonc(path: Path) -> dict | None:
-    """Parse a JSONC settings file (comments, trailing commas), ``None`` on any failure.
+    """Parse a JSONC settings file (comments, trailing commas). Return ``None`` on any failure.
 
-    Both Windows Terminal and VS Code write JSON-with-comments; a strict parser dies
-    on the first ``//``. Trailing commas are swept with a best-effort regex after the
-    string-aware comment strip (a *string* containing ``", }"`` could theoretically be
-    clipped — no font config holds one).
+    Windows Terminal and VS Code both write JSON with comments. A strict parser fails at
+    the first ``//``. After the removal of the comments, which does not change strings,
+    a regex removes the trailing commas. The regex does its best. A string that contains
+    ``", }"`` can in theory be cut, but no font config has such a string.
     """
     try:
         text = path.read_text(encoding="utf-8-sig")
@@ -342,17 +347,17 @@ def _read_jsonc(path: Path) -> dict | None:
 
 
 def _profile_face(profile: object) -> str | None:
-    """A Windows Terminal profile's configured font face.
+    """The configured font face of a Windows Terminal profile.
 
-    Reads the new ``font.face`` or the legacy ``fontFace``, and answers ``None`` when
-    the profile leaves the choice to the defaults chain.
+    The function reads the new ``font.face`` or the legacy ``fontFace``. It returns
+    ``None`` when the profile leaves the choice to the chain of defaults.
     """
     if not isinstance(profile, dict):
         return None
     font = profile.get("font")
     if isinstance(font, dict):
         face = font.get("face")
-        if isinstance(face, list) and face:  # defensive: an array face takes its head
+        if isinstance(face, list) and face:  # defensive: for an array face, use its first item
             face = face[0]
         if isinstance(face, str) and face.strip():
             return face
@@ -363,9 +368,10 @@ def _profile_face(profile: object) -> str | None:
 
 
 def _wt_settings_paths(environ: Mapping[str, str]) -> list[Path]:
-    """Where Windows Terminal might keep its ``settings.json``.
+    """The places where Windows Terminal can keep its ``settings.json``.
 
-    The packaged, preview, and unpackaged locations — existing files only.
+    These are the packaged, preview, and unpackaged locations. The list has only files
+    that exist.
     """
     local = environ.get("LOCALAPPDATA")
     if not local:
@@ -385,12 +391,13 @@ def _wt_settings_paths(environ: Mapping[str, str]) -> list[Path]:
 
 
 def _windows_terminal_face(environ: Mapping[str, str]) -> str:
-    """The face Windows Terminal is rendering this session with.
+    """The face that Windows Terminal uses to render this session.
 
-    Resolved the way the terminal itself does: the ``WT_PROFILE_ID`` profile's font,
-    else ``profiles.defaults``, else the built-in default ``Cascadia Mono``. An
-    unreadable settings file lands on the built-in default too — a pristine install
-    is exactly that.
+    The function finds the face in the same way as the terminal. First it uses the font
+    of the ``WT_PROFILE_ID`` profile. If there is none, it uses ``profiles.defaults``.
+    If there is none, it uses the built-in default ``Cascadia Mono``. An unreadable
+    settings file also gives the built-in default, which is the same as a new
+    installation.
     """
     guid = (environ.get("WT_PROFILE_ID") or "").strip().lower()
     for path in _wt_settings_paths(environ):
@@ -403,7 +410,7 @@ def _windows_terminal_face(environ: Mapping[str, str]) -> str:
         if isinstance(profiles, dict):
             plist = profiles.get("list") or []
             defaults = profiles.get("defaults") or {}
-        elif isinstance(profiles, list):  # the ancient flat-list schema
+        elif isinstance(profiles, list):  # the old flat-list schema
             plist = profiles
         profile = (
             next(
@@ -420,15 +427,15 @@ def _windows_terminal_face(environ: Mapping[str, str]) -> str:
         face = _profile_face(profile) or _profile_face(defaults)
         if face:
             return face
-        break  # a parsed settings file with no face set → the built-in default
+        break  # a settings file that parsed but has no face: use the built-in default
     return "Cascadia Mono"
 
 
 def _vscode_settings_paths(environ: Mapping[str, str], start: Path | None) -> list[Path]:
-    """VS Code's settings files, nearest first.
+    """The settings files of VS Code, the nearest first.
 
-    The closest workspace, then the user's own (stable and Insiders, in their
-    per-platform locations) — existing files only.
+    First is the closest workspace. Then come the user files (stable and Insiders, in
+    their locations for each platform). The list has only files that exist.
     """
     paths: list[Path] = []
     try:
@@ -457,7 +464,7 @@ def _vscode_settings_paths(environ: Mapping[str, str], start: Path | None) -> li
 
 
 def _vscode_default_face() -> str:
-    """VS Code's per-platform default editor font family's first name."""
+    """The first name of the default editor font family of VS Code on this platform."""
     if sys.platform == "win32":
         return "Consolas"
     if sys.platform == "darwin":
@@ -466,11 +473,11 @@ def _vscode_default_face() -> str:
 
 
 def _vscode_face(environ: Mapping[str, str], start: Path | None = None) -> str:
-    """The face VS Code's integrated terminal is rendering with.
+    """The face that the integrated terminal of VS Code uses to render.
 
-    ``terminal.integrated.fontFamily`` wins over ``editor.fontFamily`` (VS Code's own
-    fallback), and within each key the workspace file wins over the user file. The
-    stored value is a CSS-style comma list; the first family is judged.
+    ``terminal.integrated.fontFamily`` wins over ``editor.fontFamily`` (the own fallback
+    of VS Code). For each key, the workspace file wins over the user file. The stored
+    value is a comma list in the CSS style, and MeshTerm judges the first family.
     """
     paths = _vscode_settings_paths(environ, start)
     settings = [data for data in (_read_jsonc(p) for p in paths) if data is not None]
@@ -483,11 +490,11 @@ def _vscode_face(environ: Mapping[str, str], start: Path | None = None) -> str:
 
 
 def _conhost_face() -> str | None:
-    """The classic-console face via ``GetCurrentConsoleFontEx``, or ``None``.
+    """The face of the classic console, from ``GetCurrentConsoleFontEx``, or ``None``.
 
-    Only meaningful on a *genuine* conhost — the caller gates on the absence of ConPTY
-    markers first, because the hidden conhost under Windows Terminal / VS Code reports
-    a stub face, not the glyphs on screen.
+    The result has a meaning only on a real conhost. The caller first makes sure that
+    there are no ConPTY markers, because the hidden conhost under Windows Terminal or
+    VS Code reports a stub face and not the glyphs on the screen.
     """
     if sys.platform != "win32":
         return None
@@ -531,19 +538,26 @@ def detect_terminal_font(
     cwd: Path | None = None,
     conhost_probe: Callable[[], str | None] = _conhost_face,
 ) -> FontDetection | None:
-    """Identify the terminal and read the font it is configured to render with.
+    """Identify the terminal and read the font that it is configured to render with.
 
-    The ladder, most to least certain: Windows Terminal (``WT_SESSION`` names the app,
-    ``WT_PROFILE_ID`` the exact profile), VS Code (``TERM_PROGRAM=vscode``), then a
-    genuine classic conhost (no ConPTY markers, no ``TERM`` — a set ``TERM`` means some
-    other emulator is hosting the console) asked directly via Win32. Anything else —
-    an unrecognised terminal, an ssh session — is ``None``: the face is unknowable
-    from here.
+    The ladder goes from the most certain to the least certain source:
+
+    * Windows Terminal. ``WT_SESSION`` names the app and ``WT_PROFILE_ID`` names the
+      exact profile.
+    * VS Code (``TERM_PROGRAM=vscode``).
+    * A real classic conhost, which the function asks directly through Win32. It has no
+      ConPTY markers and no ``TERM``. A ``TERM`` that is set means that another emulator
+      hosts the console.
+
+    For all other cases the result is ``None``, for example an unrecognized terminal or an
+    ssh session. MeshTerm cannot know the face from here.
 
     Args:
-        environ: The environment to inspect (defaults to ``os.environ``).
-        cwd: Where the VS Code workspace walk starts (defaults to the process cwd).
-        conhost_probe: The classic-console face reader (injectable for tests).
+        environ: The environment to examine (the default is ``os.environ``).
+        cwd: Where the search for the VS Code workspace starts (the default is the cwd of
+            the process).
+        conhost_probe: The function that reads the face of the classic console (a
+            parameter, so that tests can replace it).
 
     Returns:
         The configured face and its source, or ``None`` when no source applies.
@@ -561,13 +575,13 @@ def detect_terminal_font(
 
 
 def _renderer_backed(environ: Mapping[str, str]) -> str | None:
-    """The terminal id when the terminal draws the core triangles itself.
+    """The terminal id, when the terminal draws the core triangles itself.
 
-    Windows Terminal falls back to its bundled Cascadia Code NF for the powerline
-    symbol ranges (≥ 1.22), VS Code's terminal draws them as custom glyphs
-    (``terminal.integrated.customGlyphs``, default on), and kitty / WezTerm /
-    Alacritty ship built-in powerline glyphs — on those, the separators render
-    whatever the configured font holds.
+    Windows Terminal falls back to its bundled Cascadia Code NF for the powerline symbol
+    ranges (version 1.22 and later). The terminal of VS Code draws them as custom glyphs
+    (``terminal.integrated.customGlyphs``, on by default). kitty, WezTerm, and Alacritty
+    have built-in powerline glyphs. In these terminals, the separators render in any
+    configured font.
     """
     if environ.get("WT_SESSION"):
         return "windows-terminal"
@@ -587,16 +601,21 @@ def _renderer_backed(environ: Mapping[str, str]) -> str | None:
     return None
 
 
-#: The glyphs the path widget draws at ``core``: the solid triangle every seam is, and the
-#: thin one that joins two fills the eye can't tell apart (:mod:`~meshterm.ui.pathline`).
+#: The glyphs that the path widget draws at ``core``: the solid triangle that each seam
+#: is, and the thin triangle that joins two fills that the eye cannot tell apart
+#: (:mod:`~meshterm.ui.pathline`).
 _CORE_GLYPHS = (0xE0B0, 0xE0B1)
 
-#: What ``full`` adds that the widget uses: the rounded caps a path's square ends become.
+#: What ``full`` adds that the widget uses: the rounded caps that replace the square ends
+#: of a path.
 _FULL_GLYPHS = (0xE0B4, 0xE0B6)
 
 
 def _inventory_coverage(inventory: frozenset[int]) -> str:
-    """The coverage level a known glyph inventory earns — no guess, it is all listed."""
+    """The level of coverage that a known glyph inventory has.
+
+    The result is not a guess, because the inventory lists all the glyphs.
+    """
     if not all(code in inventory for code in _CORE_GLYPHS):
         return NONE
     return FULL if all(code in inventory for code in _FULL_GLYPHS) else CORE
@@ -609,14 +628,16 @@ def _powerline_support(
     conhost_probe: Callable[[], str | None] = _conhost_face,
     handheld: tuple[str, frozenset[int]] | None = None,
 ) -> PowerlineSupport:
-    """The uncached verdict (see :func:`powerline_support` for the ladder).
+    """The verdict without the cache (refer to :func:`powerline_support` for the ladder).
 
     Args:
-        environ: The environment to inspect (defaults to ``os.environ``).
-        cwd: Where the VS Code workspace walk starts (defaults to the process cwd).
-        conhost_probe: The classic-console face reader (injectable for tests).
-        handheld: The platform's name and glyph inventory where a handheld's own font
-            draws the screen, or ``None`` on a terminal.
+        environ: The environment to examine (the default is ``os.environ``).
+        cwd: Where the search for the VS Code workspace starts (the default is the cwd of
+            the process).
+        conhost_probe: The function that reads the face of the classic console (a
+            parameter, so that tests can replace it).
+        handheld: The name and the glyph inventory of the platform, where the own font of
+            a handheld draws the screen. ``None`` on a terminal.
     """
     env = os.environ if environ is None else environ
     override = (env.get("MESHTERM_POWERLINE") or "").strip().lower()
@@ -637,7 +658,7 @@ def _powerline_support(
     backed = _renderer_backed(env)
     if backed:
         return PowerlineSupport(CORE, f"renderer:{backed}", detected.face if detected else None)
-    if detected:  # a face we could read, matching nothing, on a terminal with no fallback
+    if detected:  # MeshTerm read a face, it matches nothing, and the terminal has no fallback
         return PowerlineSupport(NONE, f"font:{detected.source}", detected.face)
     if env.get("SSH_CONNECTION") or env.get("SSH_TTY") or env.get("SSH_CLIENT"):
         return PowerlineSupport(UNKNOWN, "ssh")
@@ -646,14 +667,20 @@ def _powerline_support(
 
 @lru_cache(maxsize=1)
 def powerline_support() -> PowerlineSupport:
-    """The session's powerline verdict, decided once and cached.
+    """The powerline verdict of the session. MeshTerm decides it one time and caches it.
 
-    The ladder: the ``MESHTERM_POWERLINE`` override, then a handheld platform's own font
-    inventory, then the configured font matched against :data:`RECOMMENDED_FONTS`, then
-    a renderer that draws the glyphs itself, then an honest ``none`` (face read, no
-    match, no fallback) or ``unknown`` (ssh, or a terminal we can't identify). Cached
-    because the environment and settings files don't change mid-session, and cleared on
-    a platform switch (:func:`_bind`); tests exercise :func:`_powerline_support` directly.
+    The ladder has these steps, in this order:
+
+    * The ``MESHTERM_POWERLINE`` override.
+    * The own font inventory of a handheld platform.
+    * The configured font, matched against :data:`RECOMMENDED_FONTS`.
+    * A renderer that draws the glyphs itself.
+    * ``none`` (MeshTerm read the face, but there is no match and no fallback) or
+      ``unknown`` (an ssh session, or a terminal that MeshTerm cannot identify).
+
+    The result is cached, because the environment and the settings files do not change
+    during a session. A switch of platform clears the cache (:func:`_bind`). Tests call
+    :func:`_powerline_support` directly.
 
     Returns:
         The :class:`PowerlineSupport` verdict.
@@ -662,31 +689,31 @@ def powerline_support() -> PowerlineSupport:
 
 
 def powerline_enabled() -> bool:
-    """Whether path lines should default to powerline separators (see ``.capable``)."""
+    """Check if path lines must use powerline separators by default (refer to ``.capable``)."""
     return powerline_support().capable
 
 
 def powerline_full() -> bool:
-    """Whether the *extended* block is there too — the rounded caps at U+E0B4+.
+    """Check if the extended block is also present: the rounded caps at U+E0B4 and later.
 
-    Only a Nerd Font patch carries them, so this is strictly narrower than
-    :func:`powerline_enabled`: a stock coder font (Fira Code, JetBrains Mono) draws
-    the core triangles natively and nothing beyond, and a terminal that supplies the
-    separators from its own renderer is only promising those four. Callers use it for
-    chrome that must degrade — :mod:`~meshterm.ui.pathline` rounds a path's two outer
-    ends when it is true and squares them off when it isn't.
+    Only a Nerd Font patch has these glyphs. Thus this check is narrower than
+    :func:`powerline_enabled`. A stock coder font (Fira Code, JetBrains Mono) draws the
+    core triangles natively and no other glyph. A terminal that supplies the separators
+    from its own renderer promises only those four glyphs. Callers use this check for
+    chrome that must degrade. When it is true, :mod:`~meshterm.ui.pathline` rounds the
+    two outer ends of a path. When it is false, the module squares them off.
     """
     return powerline_support().level == FULL
 
 
-#: The active handheld's name and glyph inventory, or ``None`` where a terminal draws
-#: whatever it is sent. Bound at platform-switch time (:func:`_bind`).
+#: The name and the glyph inventory of the active handheld, or ``None`` where a terminal
+#: draws all that it receives. MeshTerm binds it when the platform switches (:func:`_bind`).
 _HANDHELD_FONT: tuple[str, frozenset[int]] | None = None
 
 
 @on_platform
 def _bind(platform: Platform) -> None:
-    """Bind the handheld font the verdict reads, and drop the verdict the last one made."""
+    """Bind the handheld font that the verdict reads, and clear the verdict of the last font."""
     global _HANDHELD_FONT
     inventory = FONTS.get(platform.font)
     _HANDHELD_FONT = (platform.name, inventory) if inventory is not None else None
@@ -697,7 +724,7 @@ def _bind(platform: Platform) -> None:
 
 
 def _installed_families() -> Iterable[str]:
-    """Every installed font family name this platform will admit to, best-effort."""
+    """All the installed font family names that this platform reports. It does its best."""
     if sys.platform == "win32":
         try:
             import winreg
@@ -735,13 +762,13 @@ def _installed_families() -> Iterable[str]:
 
 
 def installed_recommended() -> RecommendedFont | None:
-    """The best recommended font *installed* on this machine, selected or not.
+    """The best recommended font that is installed on this machine, selected or not.
 
-    The weaker, always-available check that a future recommendation screen splits its
-    message on: "not installed — here's the list" versus "installed but not selected
-    in your terminal's profile" versus "active". Prefers :data:`FULL` coverage over
-    :data:`CORE`; returns ``None`` when nothing recommended is installed (or the
-    platform offers no way to ask).
+    This check is weaker, but it is always available. A future screen of recommendations
+    can use it to choose between three messages: "not installed — here's the list",
+    "installed but not selected in your terminal's profile", and "active". The function
+    prefers :data:`FULL` coverage to :data:`CORE`. It returns ``None`` when no
+    recommended font is installed, or when the platform has no way to ask.
     """
     best: RecommendedFont | None = None
     for family in _installed_families():
@@ -759,14 +786,15 @@ def installed_recommended() -> RecommendedFont | None:
 
 @dataclass(frozen=True)
 class EmojiSupport:
-    """Whether this terminal can show an emoji at all, and what decided that.
+    """The verdict if this terminal can show an emoji at all, and what decided it.
 
     Attributes:
-        supported: ``True`` when an emoji icon reaches the screen as itself.
+        supported: ``True`` when an emoji icon reaches the screen as the emoji.
         source: ``"env"`` (the ``MESHTERM_EMOJI`` override), ``"platform"`` (not Windows,
-            so not the classic console's problem), ``"console"`` (the host was identified
-            — see :func:`_is_classic_console`), or ``"no-console"`` (nothing to identify:
-            output is redirected, or the call failed).
+            so the problem of the classic console does not apply), ``"console"`` (the
+            host was identified, refer to :func:`_is_classic_console`), or
+            ``"no-console"`` (there is nothing to identify: the output is redirected, or
+            the call failed).
     """
 
     supported: bool
@@ -774,37 +802,38 @@ class EmojiSupport:
 
 
 def _is_classic_console() -> bool | None:
-    """Whether this process is drawing into a genuine ``conhost`` window.
+    """Check if this process draws into a real ``conhost`` window.
 
-    Which is the whole question, because that host renders through GDI with the console
-    font and no emoji font behind it, while everything that replaced it — Windows
-    Terminal, VS Code's terminal, anything over ssh — draws emoji as a matter of course.
+    This is the whole question. That host renders through GDI with the console font and
+    has no emoji font behind it. All the hosts that replaced it draw emoji correctly.
+    These are Windows Terminal, the terminal of VS Code, and anything over ssh.
 
-    It cannot be asked in band. A missing glyph still occupies its cell, so the screen
-    reads back exactly as it would have if the character had drawn: measured on Windows 10
-    22H2, a classic console stores ``📡`` intact and advances two cells while showing a
-    single replacement box, and a ConPTY (which does draw it) reads back as U+FFFD because
-    the buffer behind it is updated asynchronously. A write-and-read-back probe answers
-    both hosts *backwards*, which is the trap this docstring exists to record.
+    MeshTerm cannot ask in band. A missing glyph still occupies its cell, so the screen
+    reads back the same as if the character had drawn. We measured this on Windows 10
+    22H2. A classic console stores ``📡`` correctly and advances two cells, but it shows
+    a single replacement box. A ConPTY (which does draw the emoji) reads back as U+FFFD,
+    because the buffer behind it is updated asynchronously. A probe that writes and reads
+    back gives the wrong answer for both hosts. This docstring records this trap.
 
-    Nor can the environment be trusted alone: ``WT_SESSION`` is inherited by child
-    processes, so a program launched from Windows Terminal into a console of its own still
-    carries it and would answer for the wrong host.
+    MeshTerm also cannot trust the environment alone. Child processes inherit
+    ``WT_SESSION``. A program that starts from Windows Terminal into a console of its own
+    still has it, and the answer is for the wrong host.
 
-    So the host is identified structurally, from two independent facts, and both must
-    agree before anything is dimmed (the costly mistake is stripping icons from a terminal
-    that could draw them):
+    So MeshTerm identifies the host from its structure, with two independent facts. Both
+    facts must agree before MeshTerm dims anything. The costly mistake is to remove the
+    icons from a terminal that can draw them.
 
-    * **The console font has a real pixel width.** A ConPTY's hidden conhost reports a
-      stub — face ``Consolas``, cell width ``0`` — because nothing is rasterised there.
+    * **The console font has a real pixel width.** The hidden conhost of a ConPTY reports
+      a stub (face ``Consolas``, cell width ``0``), because it rasterizes nothing.
     * **The buffer is taller than its window.** A classic console owns its scrollback
-      (9001 rows by default); under a ConPTY the terminal owns it, so the buffer is
-      exactly the window.
+      (9001 rows by default). Under a ConPTY the terminal owns the scrollback, so the
+      buffer is the same as the window.
 
     Returns:
-        ``True`` for a genuine classic console, ``False`` for anything else drawing to a
-        console, and ``None`` when there is no console on stdout (redirected output, not
-        Windows, or the call failed) — an unknown is never a reason to degrade.
+        ``True`` for a real classic console. ``False`` for all other hosts that draw to a
+        console. ``None`` when there is no console on stdout (the output is redirected,
+        the platform is not Windows, or the call failed). An unknown result is never a
+        reason to degrade.
     """
     if sys.platform != "win32":
         return None
@@ -842,9 +871,10 @@ def _is_classic_console() -> bool | None:
                 ("FaceName", ctypes.c_wchar * 32),
             ]
 
-        # Safe to declare: this handle is ours alone (see meshterm.core.win32dll). The
-        # explicit restype matters — ctypes would assume a 32-bit int and truncate the
-        # 64-bit HANDLE, turning every later call into a silent failure.
+        # It is safe to declare these types, because this handle is only ours (refer to
+        # meshterm.core.win32dll). The explicit restype is important. Without it, ctypes
+        # assumes a 32-bit int and cuts the 64-bit HANDLE, and each later call fails
+        # without a message.
         kernel32 = win32dll.kernel32()
         kernel32.GetStdHandle.argtypes = [wintypes.DWORD]
         kernel32.GetStdHandle.restype = wintypes.HANDLE
@@ -859,8 +889,9 @@ def _is_classic_console() -> bool | None:
 
         handle = kernel32.GetStdHandle(wintypes.DWORD(-11).value)  # STD_OUTPUT_HANDLE
         info = _CSBI()
-        # Fails when stdout is a pipe or a file — nothing is being drawn, so there is
-        # nothing to answer, and this is what keeps redirected and CI runs out of it.
+        # This call fails when stdout is a pipe or a file. Then MeshTerm draws nothing and
+        # there is no answer. This is the reason that redirected runs and CI runs do not
+        # use the rest of this function.
         if not kernel32.GetConsoleScreenBufferInfo(handle, ctypes.byref(info)):
             return None
 
@@ -872,7 +903,7 @@ def _is_classic_console() -> bool | None:
         rasterised = font.dwFontSize.X > 0
         owns_scrollback = info.dwSize.Y > (info.srWindow.Bottom - info.srWindow.Top + 1)
         return rasterised and owns_scrollback
-    except Exception:  # pragma: no cover - a probe that fails is an unknown, not a crash
+    except Exception:  # pragma: no cover - a probe that fails gives an unknown result, not a crash
         return None
 
 
@@ -882,7 +913,7 @@ def _emoji_support(
     console_probe: Callable[[], bool | None] = _is_classic_console,
     system: str | None = None,
 ) -> EmojiSupport:
-    """The uncached verdict (see :func:`emoji_support` for the ladder)."""
+    """The verdict without the cache (refer to :func:`emoji_support` for the ladder)."""
     env = os.environ if environ is None else environ
     override = (env.get("MESHTERM_EMOJI") or "").strip().lower()
     if override in {"0", "off", "no", "none", "false"}:
@@ -900,22 +931,24 @@ def _emoji_support(
 
 @lru_cache(maxsize=1)
 def classic_console() -> bool:
-    """Whether this session is drawing into a genuine ``conhost`` window.
+    """Check if this session draws into a real ``conhost`` window.
 
-    The one host with no font fallback of its own, so the only one where the configured
-    font's own repertoire decides what the reader sees. See :func:`_is_classic_console`
-    for how it is identified, and why not from the environment.
+    This is the only host that has no font fallback of its own. Thus it is the only host
+    where the glyphs of the configured font decide what the user sees. Refer to
+    :func:`_is_classic_console` for how MeshTerm identifies it, and why it does not use
+    the environment.
     """
     return _is_classic_console() is True
 
 
 @lru_cache(maxsize=1)
 def emoji_support() -> EmojiSupport:
-    """Whether emoji icons can be drawn here, decided once and cached.
+    """Check if emoji icons can be drawn here. MeshTerm decides one time and caches it.
 
-    The ladder: the ``MESHTERM_EMOJI`` override, then everything that isn't Windows (where
-    a UTF-8 terminal draws them as a matter of course), then :func:`_is_classic_console`.
-    Cached because a session does not change host halfway through.
+    The ladder has these steps, in this order: the ``MESHTERM_EMOJI`` override, then all
+    platforms that are not Windows (where a UTF-8 terminal draws emoji correctly), then
+    :func:`_is_classic_console`. The result is cached, because a session does not change
+    its host during the session.
 
     Returns:
         The :class:`EmojiSupport` verdict.
@@ -924,50 +957,52 @@ def emoji_support() -> EmojiSupport:
 
 
 def emoji_enabled() -> bool:
-    """Whether icons should render as emoji rather than through the compact table."""
+    """Check if icons must render as emoji instead of through the compact table."""
     return emoji_support().supported
 
 
 # --- chart glyphs -----------------------------------------------------------------
 
 
-#: Families measured to carry the Braille Patterns block (U+2800–U+28FF) that
-#: :mod:`meshterm.ui.braillechart` draws every timeline from.
+#: The families that we measured to have the Braille Patterns block (U+2800–U+28FF).
+#: :mod:`meshterm.ui.braillechart` draws each timeline from this block.
 #:
-#: The list is short on purpose, and each entry is a measurement rather than a
-#: reputation: reading the ``cmap`` of every font installed on a development machine
-#: (2026-09-07) found that nearly no monospace font carries the block at all. Hack Nerd
-#: Font, JetBrains Mono, Fira Code, Source Code Pro, Consolas, Lucida Console and — the
-#: surprise — DejaVu Sans *Mono* all measure zero of 256. DejaVu *Sans*, which is
-#: proportional, carries all 256, which is where the widespread "install DejaVu for
-#: braille" advice comes from: it works only because terminals fall back from the mono
-#: face to the proportional one for that block.
+#: The list is short on purpose. Each entry is a measurement, not a reputation. On
+#: 2026-09-07 we read the ``cmap`` of each font that is installed on a development
+#: machine. Almost no monospace font has the block. Hack Nerd Font, JetBrains Mono, Fira
+#: Code, Source Code Pro, Consolas, Lucida Console, and DejaVu Sans *Mono* (a surprise)
+#: all measure zero of 256. DejaVu *Sans* is proportional, and it has all 256. This is
+#: the source of the common advice "install DejaVu for braille". The advice works only
+#: because terminals fall back from the mono face to the proportional face for that
+#: block.
 #:
-#: Which is the point. On every host that falls back — Windows Terminal, VS Code's
-#: terminal, macOS, Linux — the charts draw whatever the chosen font holds, so this list
-#: never has to be right. It matters on the one host with no fallback at all, the classic
-#: Windows console, where a font outside this list means boxes where the charts should be.
+#: This is the important point. On each host that falls back (Windows Terminal, the
+#: terminal of VS Code, macOS, Linux), the charts draw in any chosen font. Thus this list
+#: does not have to be correct there. It matters on the one host that has no fallback, the
+#: classic Windows console. There, a font that is not in this list gives boxes where the
+#: charts must be.
 CHART_FONTS: tuple[str, ...] = (
-    # Microsoft's console font: 44/44, and the family MeshTerm bundles (see
-    # meshterm.core.consolefont). Covers the PL and NF builds by prefix.
+    # The console font of Microsoft: 44/44, and the family that MeshTerm bundles (refer to
+    # meshterm.core.consolefont). The prefix also matches the PL and NF builds.
     "cascadia mono",
     "cascadia code",
-    # The Nerd Font patches of the same, which keep what they patch.
+    # The Nerd Font patches of the same fonts. They keep what they patch.
     "caskaydiacove",
     "caskaydiamono",
-    # Widely reported to carry the block; not measured here, no copy to hand.
+    # Many reports say that it has the block. We did not measure it, because we have no
+    # copy.
     "iosevka",
 )
 
 
 def face_draws_charts(face: str | None) -> bool:
-    """Whether ``face`` can draw the braille the timelines are made of.
+    """Check if ``face`` can draw the braille that the timelines use.
 
     Args:
         face: A configured font family, in any spelling, or ``None``.
 
     Returns:
-        Whether it is one of :data:`CHART_FONTS`.
+        ``True`` if it is one of :data:`CHART_FONTS`.
     """
     if not face:
         return False
@@ -978,11 +1013,12 @@ def face_draws_charts(face: str | None) -> bool:
 def installed_chart_font() -> str | None:
     """The first installed family that can draw the charts, or ``None``.
 
-    What separates "select the font they already have" — every Windows 11 machine, and
-    anyone who has installed Windows Terminal — from "offer to install ours".
+    The result decides between two actions: "select the font that the user already has"
+    (each Windows 11 machine, and each user who installed Windows Terminal) and "offer to
+    install our font".
 
     Returns:
-        The family name as installed, or ``None`` when nothing installed can do it.
+        The family name as installed, or ``None`` when no installed family can do it.
     """
     for family in _installed_families():
         if face_draws_charts(family):

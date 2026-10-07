@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Shared Rich theme and console factory for a consistent, modern look.
+"""The shared Rich theme and the console factory, for a consistent, modern look.
 
-Two palettes, one vocabulary: every style *name* here exists in both
-:data:`MESH_THEME` (the regular platform's truecolor look) and :data:`MESH_THEME_16`
-(the PicoCalc console's 16-slot look), so screens never know which one is active — they
-ask for ``"warn"`` or ``"snr.good"`` and the platform decides what that means. The
-active theme, the name-colouring rule, the icon funnel and the render-boundary fold are
-all **bound at platform-switch time** through :func:`meshterm.platforms.on_platform`:
-the hot render paths read module globals and never re-derive platform state per call.
+There are two palettes and one vocabulary. Each style name here is in both
+:data:`MESH_THEME` (the truecolor look of the regular platform) and :data:`MESH_THEME_16`
+(the 16-slot look of the PicoCalc console). Thus screens do not know which theme is
+active. They ask for ``"warn"`` or ``"snr.good"``, and the platform decides what that
+means. The active theme, the rule for the colour of names, the icon funnel, and the fold
+at the render boundary are all **bound when the platform switches**, through
+:func:`meshterm.platforms.on_platform`. The hot render paths read module globals, and
+they never find the platform state again for each call.
 """
 
 from __future__ import annotations
@@ -28,155 +29,172 @@ MESH_THEME = Theme(
     {
         "brand": "bold #5eead4",
         "accent": "bold #818cf8",
-        # THE reverse-video chip — a dialog's committing button, a running action's Abort,
-        # the composer's insertion slot where there is no chip fill to carry it. A *grey*
-        # block with the page's own ink showing through, because the cyan it used to be
-        # was the wordmark's teal doing a third job (identity, and a node hue, and now a
-        # selection), and a chip is chrome: it marks where a press lands, it does not
-        # claim a colour. The slate is ``muted``'s, light enough that the reversed ink —
-        # whatever the terminal's background happens to be — reads on it. It must be a
-        # *single* theme name: Rich silently drops a style string that mixes a theme name
-        # with an attribute (e.g. "reverse muted" renders as plain text), so the reverse is
-        # baked into the definition here rather than tacked on at the call site.
+        # The only reverse-video chip: the committing button of a dialog, the Abort of a
+        # running action, and the insertion slot of the composer where no chip fill carries
+        # it. It is a *grey* block, and the ink of the page shows through it. It was cyan
+        # before. That cyan was the teal of the wordmark with a third job (identity, a
+        # node hue, and now a selection). A chip is chrome. It shows where a press lands,
+        # and it does not claim a colour. The slate is the slate of ``muted``. It is light
+        # enough that the reversed ink reads on it, in any background of the terminal. It
+        # must be a *single* theme name. Rich removes without a message a style string that
+        # mixes a theme name with an attribute (for example "reverse muted" renders as plain
+        # text). Thus the reverse is part of the definition here, and the call site does
+        # not add it.
         "selected": "reverse bold #94a3b8",
-        # THE ink of "this is the one you picked" — the row the ❯ points at, in every
-        # select list and in every screen that draws its own rows (feed, routes, records,
-        # walk, composer), and the lit column heading one axis over where a list is
-        # sorted. White, and deliberately *not* ``brand``: the highlight used to borrow
-        # the wordmark's teal, which put the app's identity ink and "the row you're on"
-        # on the same hue, and worse, teal/cyan is itself a node hue — a cyan-keyed
-        # node's name vanished into its own highlight. White is outside the per-node
-        # spectrum (see node_style) so it can never collide with an identity. It does
-        # share ink with ``you``, which is the accepted cost. Spans that set their own
-        # colour keep it over the base — the heat of an age, an SNR reading, a red badge
-        # — with the one exception the highlight is *for*: a node's own key-derived hue
-        # folds to this white on the cursor row (see theme.is_identity_style and
-        # ui.tui.render._whiten_identities), so the row the reader is on reads as one
-        # thing rather than as a name competing with its own selection. Bold like
-        # ``brand`` was, so the dim-slot ``not bold`` pins that protect a span inside a
-        # highlighted row (see MESH_THEME_16) go on meaning what they meant.
+        # The only ink for "this is the one that the user selected". It is the row that the
+        # ❯ points at, in each select list and in each screen that draws its own rows
+        # (feed, routes, records, walk, composer). It is also the lit column heading one
+        # axis over, where a list is sorted. It is white, and not ``brand`` on purpose. The
+        # highlight once used the teal of the wordmark. Then the identity ink of the app and
+        # "the row you are on" had the same hue. Also, teal/cyan is a node hue, so the name
+        # of a node with a cyan key disappeared into its own highlight. White is outside the
+        # spectrum of the nodes (refer to node_style), so it can never be the same as an
+        # identity. It has the same ink as ``you``, and we accept that cost. Spans that set
+        # their own colour keep it over the base: the heat of an age, an SNR reading, a red
+        # badge. The highlight exists for one exception. The hue of a node, which comes from
+        # its key, folds to this white on the cursor row (refer to theme.is_identity_style
+        # and ui.tui.render._whiten_identities). Thus the row that the user is on reads as
+        # one thing, and not as a name that competes with its own selection. It is bold, as
+        # ``brand`` was. Thus the ``not bold`` pins of the dim slots (refer to
+        # MESH_THEME_16), which protect a span in a highlighted row, keep their meaning.
         "cursor": "bold #ffffff",
-        # THE mark a path line puts around its own hops (PathLine._render), so the cursor
-        # row's identity fold can see where a route starts and stops
-        # (ui.tui.render._whiten_identities): inside a path line a node's hue is not
-        # decoration on a name, it is what tells one hop from the next — and what the
-        # graph drawn above the row cross-references, since a graph label is only a
-        # marker and one byte of hash. Folding those to white made a picked route read as
-        # one long white smear with no way back to the picture. Chips were never affected
-        # (their fills sit outside the fold's vocabulary); this is what makes the arrow
-        # form — every path line on the PicoCalc, and on any terminal without the
-        # powerline glyphs — say the same thing. Renders as nothing: it exists to be read
-        # at the render boundary, not seen.
+        # The only mark that a path line puts around its own hops (PathLine._render). The
+        # identity fold of the cursor row (ui.tui.render._whiten_identities) uses it to see
+        # where a route starts and stops. In a path line, the hue of a node is not a
+        # decoration on a name. It shows the difference between one hop and the next. The
+        # graph above the row also cross-references it, because a label of the graph is
+        # only a marker and one byte of a hash. When the fold made these hues white, a
+        # selected route looked like one long white smear, and the user could not find the
+        # way back to the picture. Chips were never affected, because their fills are
+        # outside the vocabulary of the fold. This mark makes the arrow form say the same
+        # thing. The arrow form is every path line on the PicoCalc, and every path line on
+        # a terminal without the powerline glyphs. The mark renders as nothing. The render
+        # boundary reads it, and the user does not see it.
         "pathline": "none",
-        # Reversed error (the text-editor cursor sitting on an over-budget character). Baked
-        # in for the same reason as ``selected`` — "reverse err" would render as plain text.
+        # Reversed error (the cursor of the text editor on a character over the budget). It
+        # is part of the definition for the same reason as ``selected``: "reverse err"
+        # renders as plain text.
         "err.reverse": "reverse bold #f87171",
-        # Our own node, anywhere it is named: pure white, deliberately outside the
-        # per-node hue spectrum (see node_style) so "you" is always easy to spot.
+        # Our node, in each place where it has a name: pure white, and outside the spectrum
+        # of the node hues on purpose (refer to node_style). Thus the user can always find
+        # "you" easily.
         "you": "bold #ffffff",
-        # A confirmed companion's name on the startup device picker: pure white so the
-        # devices we've actually talked to before jump out above the merely-detected ports.
+        # The name of a confirmed companion on the picker for the startup device: pure
+        # white. Thus the devices that we talked to before are more visible than the ports
+        # that MeshTerm only detected.
         "device.known": "bold #ffffff",
-        # A QR code's modules: pure white ink on a pure black field, both ends named so
-        # no palette can dilute the contrast a camera reads (see ui/qr.py). Never black
-        # on white — a light-on-dark code is what a scanner expects of a screen.
+        # The modules of a QR code: pure white ink on a pure black field. Both ends have
+        # names, so no palette can reduce the contrast that a camera reads (refer to
+        # ui/qr.py). The code is never black on white, because a scanner expects a code
+        # that is light on dark on a screen.
         "qr": "#ffffff on #000000",
-        # The picker's Bluetooth TYPE badge: a white rune on the official Bluetooth blue
-        # (Pantone 300, #0057b8), echoing the real logo so BLE reads at a glance.
+        # The Bluetooth TYPE badge of the picker: a white rune on the official Bluetooth
+        # blue (Pantone 300, #0057b8). It is like the real logo, so the user can see BLE
+        # at a glance.
         "bluetooth": "bold #ffffff on #0057b8",
-        # The badge's tapered edges: half-block glyphs drawn in the same blue as the
-        # foreground (over the terminal's own background), so only their inner half fills and
-        # the badge reads a touch wider than the single rune cell without a hard rectangle.
+        # The tapered edges of the badge: half-block glyphs in the same blue as the
+        # foreground (over the background of the terminal). Only their inner half fills.
+        # Thus the badge looks a little wider than the single rune cell, and it has no hard
+        # rectangle.
         "bluetooth.edge": "#0057b8",
         "ok": "bold #4ade80",
         "warn": "bold #fbbf24",
         "err": "bold #f87171",
         "muted": "#94a3b8",
-        # A node we can't identify — its ``○`` ring, and its label wherever a bare key or
-        # hash stands in for a name (see name_style's keyless return). Its own name rather
-        # than plain ``muted`` because the two must not track each other: ``muted`` is
-        # chrome and may sit a step down from body text, while an unidentified node is
-        # *content* you can still act on. On the console that difference is the whole
-        # ladder — chrome takes the dark grey slot, this one the light grey.
+        # A node that MeshTerm cannot identify: its ``○`` ring, and its label where a bare
+        # key or hash is the name (refer to the return of name_style when there is no key).
+        # It has its own name and does not use ``muted``, because the two styles must not
+        # change together. ``muted`` is chrome, and it can be a step darker than the body
+        # text. An unidentified node is *content* on which the user can still act. On the
+        # console this difference is the whole ladder: chrome takes the dark grey slot,
+        # and this style takes the light grey slot.
         "node.unknown": "#94a3b8",
-        # Panel/dialog titles: the same hue as the border they sit in, one shade brighter,
-        # so the title reads as part of its frame while still standing out from it. One
-        # entry per border style the frame compositor is given (see theme.title_style).
+        # The titles of panels and dialogs: the same hue as the border that they are in,
+        # one shade brighter. Thus the title reads as part of its frame, and it is still
+        # different from the frame. There is one entry for each border style that the frame
+        # compositor receives (refer to theme.title_style).
         "title.accent": "bold #a5b4fc",
         "title.muted": "bold #cbd5e1",
         "title.warn": "bold #fcd34d",
         "title.err": "bold #fca5a5",
         "title.ok": "bold #86efac",
         "title.brand": "bold #99f6e4",
-        # Panel/dialog footer hints: the border's hue one shade *darker* (and not bold), the
-        # mirror image of the ``title.*`` brightening — the hint reads as part of the frame
-        # while receding behind it. One entry per border style (see theme.hint_style).
+        # The footer hints of panels and dialogs: the hue of the border, one shade *darker*
+        # (and not bold). This is the opposite of the brightening of the ``title.*`` styles.
+        # The hint reads as part of the frame, and it stays behind the frame. There is one
+        # entry for each border style (refer to theme.hint_style).
         "hint.accent": "#6366f1",
         "hint.muted": "#64748b",
         "hint.warn": "#f59e0b",
         "hint.err": "#ef4444",
         "hint.ok": "#22c55e",
         "hint.brand": "#2dd4bf",
-        # A step darker than ``muted`` for placeholder dashes (a node's missing packet count /
-        # age) that should recede below the real, muted values around them.
+        # A step darker than ``muted``, for placeholder dashes (the missing packet count or
+        # age of a node). They must stay behind the real, muted values around them.
         "faint": "#64748b",
-        # A section heading's ``── Label ──`` — a grouped list's, a chat's day divider. A
-        # dark grey, never the frame's accent: in the border's own colour a heading's rule
-        # read as part of the frame it sits in (JP, 2026-10-02). Bold, so the label still
-        # reads as a landmark at that shade.
+        # The ``── Label ──`` of a section heading: in a grouped list, and the day divider
+        # of a chat. It is a dark grey, and never the accent of the frame. When the rule of
+        # a heading had the colour of the border, it looked like part of the frame that it
+        # is in (JP, 2026-10-02). It is bold, so the label is still a landmark at that
+        # shade.
         "heading": "bold #64748b",
-        # A further step darker than ``faint``, for a meter's unlit track (the SNR quality
-        # bars): dark enough to read as background, not as a dimmer version of the reading.
+        # A further step darker than ``faint``, for the unlit track of a meter (the SNR
+        # quality bars). It is dark enough to look like a background, and not like a
+        # dimmer version of the reading.
         "track": "#334155",
         "snr.good": "bold #4ade80",
         "snr.ok": "bold #fbbf24",
         "snr.bad": "bold #f87171",
-        # The status-bar battery gauge: a filled block, not four thin dots. Every cell is a
-        # lit foreground over its own darker ground of the same hue — light green on green
-        # over half, yellow on brown over a quarter, light red on red below — so the gauge
-        # reads as a *block* at a glance and the braille fill inside it says how much of the
-        # pack is left. ``batt.flash`` and ``batt.flash.off`` are the two beats of the
-        # last-percent alarm: black dots on red, alternating with the light red on the bare
-        # page. Losing the ground for a beat is a bigger change than any hue swap could be,
-        # which is what makes it read across a room.
+        # The battery gauge of the status bar: a filled block, and not four thin dots. Each
+        # cell is a lit foreground over its own darker ground of the same hue: light green
+        # on green above half, yellow on brown above a quarter, light red on red below.
+        # Thus the gauge looks like a *block* at a glance, and the braille fill in it shows
+        # how much of the battery is left. ``batt.flash`` and ``batt.flash.off`` are the two
+        # beats of the alarm for the last percent: black dots on red, then in turn the light
+        # red on the bare page. When the ground is lost for one beat, the change is bigger
+        # than a change of hue. Thus the user can see it from across a room.
         "batt.full": "bold #4ade80 on #15803d",
         "batt.mid": "bold #fbbf24 on #a16207",
         "batt.low": "bold #f87171 on #991b1b",
         "batt.flash": "not bold #000000 on #dc2626",
         "batt.flash.off": "bold #f87171",
-        # The node-type *marks* — THE colours behind ● ▲ ■ ◉ wherever a typed node is
-        # drawn (see ui.widgets.NODE_GLYPHS), and the map's own marker language: clients
-        # the loud pink, repeaters the calmer violet, rooms a white square, sensors an
-        # orange ringed dot. Named styles rather than raw hex so the 16-slot console picks
-        # its slot *deliberately* — a naive downsample of the violet lands on grey, which
-        # would make a repeater read as an unknown node.
+        # The node-type *marks*: the only colours for ● ▲ ■ ◉ where a node with a type is
+        # drawn (refer to ui.widgets.NODE_GLYPHS). They are also the language of the markers
+        # of the map: clients are the loud pink, repeaters are the calmer violet, rooms are
+        # a white square, and sensors are an orange dot with a ring. They are named styles
+        # and not raw hex, so the 16-slot console chooses its slot *on purpose*. A naive
+        # downsample of the violet gives grey, and a repeater looks like an unknown node.
         "type.node": "#f472b6",
         "type.repeater": "#a78bfa",
         "type.room": "#ffffff",
         "type.sensor": "#fb923c",
-        # A region name (a flood's scope). Not a node, so no hue from the node wheel: a
-        # light slate, set apart from prose by its slant the way a tag is from a sentence.
+        # A region name (the scope of a flood). It is not a node, so it has no hue from the
+        # node wheel. It is a light slate. Its slant makes it different from prose, as a
+        # tag is different from a sentence.
         "scope": "italic #cbd5e1",
-        # The basemap features whose *hue* is the information — water is blue, parks are
-        # green, a highway is the warm one — and which a naive downsample therefore ruins
-        # (the dark blue lands on grey, the dark green on black, the amber on bright red).
-        # Named for the same reason as ``type.*``: the console picks the slot itself. The
-        # rest of the basemap is grey by design and quantizes honestly, so minor roads,
-        # rail, boundaries and labels stay literal hex in ui.map_render.
+        # The features of the basemap for which the *hue* is the information: water is
+        # blue, parks are green, and a highway is the warm colour. A naive downsample
+        # damages them (the dark blue becomes grey, the dark green becomes black, and the
+        # amber becomes bright red). They have names for the same reason as ``type.*``: the
+        # console chooses the slot itself. The rest of the basemap is grey by design, and
+        # it quantizes correctly. Thus minor roads, rail, boundaries, and labels stay
+        # literal hex in ui.map_render.
         "map.water": "#153b56",
         "map.river": "#49b0ec",
         "map.stream": "#3f8fbf",
         "map.ditch": "#3a7ba6",
         "map.park": "#173a29",
         "map.highway": "#f2a13d",
-        # The heard-age heat scale's steps, named for how old the node they colour is:
-        # a node heard eight minutes ago is ``heat.minutes``, one heard eight days ago is
-        # ``heat.days``. Seven steps from white-hot to cold ash (JP's spec) — a cooling
-        # ember, then what's left of it. ``heat.never`` is both "over a year" and "never
-        # heard": past a year the distinction stops being worth a colour.
+        # The steps of the heat scale for the heard age. Each step has the name of the age
+        # of the node that it colours: a node that MeshTerm heard eight minutes ago is
+        # ``heat.minutes``, and a node that it heard eight days ago is ``heat.days``. There
+        # are seven steps, from white-hot to cold ash (JP's spec). It is a cooling ember,
+        # and then what is left of it. ``heat.never`` is both "over a year" and "never
+        # heard", because after one year a different colour is not worth the difference.
         # The regular platform interpolates a continuous gradient over the same anchors
-        # rather than stepping (see ui.widgets._recency_style), so these are its ladder
-        # spelled out — every style name resolves on both platforms either way.
+        # and does not use steps (refer to ui.widgets._recency_style). Thus these styles
+        # are its ladder, written out. Each style name resolves on both platforms in
+        # both cases.
         "heat.now": "#ffffff",  # under 5 minutes
         "heat.minutes": "#facc15",  # 5 minutes
         "heat.hours": "#f87171",  # 1 hour
@@ -184,26 +202,29 @@ MESH_THEME = Theme(
         "heat.weeks": "#dc2626",  # 1 week
         "heat.months": "#94a3b8",  # 1 month
         "heat.never": "#64748b",  # 1 year, and never heard
-        # The PicoCalc F-key lane's chip fills (see ui.tui.fkeys): gray for the plain
-        # F1-F5 bank, green while the Shift watcher reports F6-F10. White text on both —
-        # defined here too so the style names resolve on every platform, even though
-        # only PicoCalc's footer_fkeys ever asks for them.
+        # The chip fills of the F-key lane of the PicoCalc (refer to ui.tui.fkeys): grey for
+        # the plain F1-F5 bank, and green while the Shift watcher reports F6-F10. The text
+        # is white on both. They are also defined here so that the style names resolve on
+        # each platform, although only footer_fkeys of the PicoCalc asks for them.
         "fkey.chip": "bold #ffffff on #475569",
         "fkey.chip.shift": "bold #ffffff on #16a34a",
-        # The Cardputer Zero deck's fills, taken from its own keyboard (JP, 2026-09-30):
-        # the orange-red the fn key and its F4–F8 legends are printed in, and while Shift
-        # is held, the dark blue of the Shift key in M5's product photo. The print's
-        # #ff6633 holds white text at only 2.9:1, so the chip is that colour a step darker
-        # in OKLab at the same hue and chroma (L 0.70 → 0.62, h 38°): 4.0:1, still a
-        # vermilion — chroma is in gamut all the way down, so nothing greys it to brown.
+        # The fills of the Cardputer Zero deck, taken from its own keyboard (JP,
+        # 2026-09-30). The normal fill is the orange-red in which the fn key and its F4–F8
+        # legends are printed. While Shift is held, the fill is the dark blue of the Shift
+        # key in the product photo of M5. White text on the #ff6633 of the print has a
+        # contrast of only 2.9:1. Thus the chip is that colour, a step darker in OKLab at
+        # the same hue and chroma (L 0.70 → 0.62, h 38°). The contrast is 4.0:1, and the
+        # colour is still a vermilion. The chroma is in the gamut all the way down, so
+        # nothing makes it a grey brown.
         "fkey.chip.cardputer_zero": "bold #ffffff on #e34b0f",
         "fkey.chip.cardputer_zero.shift": "bold #ffffff on #0f72bd",
-        # The prose voices — what a markdown page's inline marks are drawn in (see
-        # ui.markdown). Headings borrow the styles the rest of the app already heads
-        # sections with (``brand``, ``accent``), so only the *body* marks need names of
-        # their own: emphasis brighter than the page, an aside dimmer than it, code and
-        # links in the two hues nothing else in a body claims, a struck-out run receding
-        # to the placeholder grey, and the bullet/rail chrome a list or a quote hangs on.
+        # The prose voices: the styles of the inline marks of a markdown page (refer to
+        # ui.markdown). Headings use the styles that the rest of the app already uses for
+        # section headings (``brand``, ``accent``). Thus only the *body* marks need their own
+        # names. Emphasis is brighter than the page. An aside is dimmer than the page. Code
+        # and links have the two hues that nothing else in a body uses. A struck-out run
+        # goes back to the placeholder grey. The bullet and the rail are the chrome on which
+        # a list or a quote hangs.
         "md.strong": "bold #e2e8f0",
         "md.em": "italic #cbd5e1",
         "md.code": "#7dd3fc",
@@ -215,25 +236,26 @@ MESH_THEME = Theme(
     }
 )
 
-#: The PicoCalc console's 16 palette slots — the **standard kernel VT palette**, by JP's
-#: decision (2026-08-01): the console is not remapped, so other software looks stock and
-#: the black background stays black. :data:`MESH_THEME_16` is designed against these
-#: RGBs, and the fold's stray-truecolor quantizer matches against them. Rules that still
-#: bind:
+#: The 16 palette slots of the PicoCalc console. They are the **standard kernel VT
+#: palette**, by the decision of JP (2026-08-01): the console is not remapped, so other
+#: software looks stock and the black background stays black. :data:`MESH_THEME_16` is
+#: designed for these RGB values, and the quantizer of the fold for stray truecolor
+#: matches against them. These rules still apply:
 #:
-#: * The kernel VT renders **bold as brightness**: ``bold`` on a 0–7 foreground jumps it
-#:   to slot N+8. So a dim-slot style must say what it means about bold — it cannot leave
-#:   the question open, because Rich merges a *base* style into every span it wraps and a
-#:   selected row's ``bold`` would then recolour the span outright (a light-grey unknown
-#:   hash arriving as white "you", a purple repeater as pink). Every dim-slot style is
-#:   therefore either explicitly ``not bold`` (the colour is load-bearing; keep it) or
-#:   explicitly ``bold`` (the promotion *is* the intent — only ``title.muted``). Never
-#:   silent, and never bold on 5/6, whose partners are claimed by *different* semantics
-#:   here (5 purple = the repeater mark, 13 pink = the node mark; 6 cyan = hint.brand,
-#:   14 bright cyan = brand).
-#: * Backgrounds can only address slots 0–7 (SGR 40–47).
-#: * The six *chromatic bright* slots (9-14) are the node-name spectrum's landing zone —
-#:   the console's rendering of the key-derived hue wheel (see :data:`_NODE_SLOT_HEXES`).
+#: * The kernel VT renders **bold as brightness**. ``bold`` on a foreground in slots 0–7
+#:   moves it to slot N+8. Thus a style for a dim slot must say what it means about
+#:   bold. It cannot leave the question open, because Rich merges a *base* style into
+#:   each span that it wraps. Then the ``bold`` of a selected row changes the colour of
+#:   the span completely (a light-grey unknown hash becomes the white "you", and a purple
+#:   repeater becomes pink). Thus each style for a dim slot is explicitly ``not bold``
+#:   (the colour is necessary, so keep it) or explicitly ``bold`` (the promotion is the
+#:   intent, and only ``title.muted`` has it). A style is never silent. Never use bold on
+#:   5 and 6, because *different* meanings use their partners here (5 purple = the
+#:   repeater mark, 13 pink = the node mark. 6 cyan = hint.brand, 14 bright cyan = brand).
+#: * Backgrounds can use only slots 0–7 (SGR 40–47).
+#: * The six *chromatic bright* slots (9-14) are the place where the spectrum of node
+#:   names lands. They are the console rendering of the hue wheel that comes from the key
+#:   (refer to :data:`_NODE_SLOT_HEXES`).
 _VT_SLOTS: tuple[tuple[int, str, str], ...] = (
     (0, "background (black)", "#000000"),
     (1, "red (hint.err)", "#aa0000"),
@@ -266,12 +288,14 @@ def slot_hex(slot: int) -> str:
 #: and the bright slot is the text on it.
 DIM_TWIN: dict[str, str] = {slot_hex(n + 8): slot_hex(n) for n in range(8)}
 
-#: The custom 16-slot remap P3 originally shipped (tailwind-family RGBs programmed via
-#: ``setvtrgb``) — **archived, not installed**: JP chose the standard palette but asked
-#: to keep this in case he changes his mind. Reinstall with
+#: The custom 16-slot remap that P3 shipped first (tailwind-family RGB values that
+#: ``setvtrgb`` programs). It is **archived and not installed**. JP chose the standard
+#: palette, but he asked us to keep this remap in case he changes his mind. To install it
+#: again, run
 #: ``MESHTERM_CUSTOM_PALETTE=1 sh scripts/picocalc-lyra/calculinux-console-font-6x12.sh``
-#: (whose opt-in block a test keeps byte-identical to :func:`vtrgb_lines`); MESH_THEME_16 would then
-#: want re-tuning against it (see git history at c6485c6 for the matching theme).
+#: (a test makes sure that its opt-in block is byte-identical to :func:`vtrgb_lines`).
+#: Then MESH_THEME_16 needs a new adjustment for this remap (refer to the git history at
+#: c6485c6 for the matching theme).
 _VT_SLOTS_CUSTOM: tuple[tuple[int, str, str], ...] = (
     (0, "background slate", "#0f172a"),
     (1, "red (hint.err)", "#ef4444"),
@@ -295,9 +319,10 @@ _VT_SLOTS_CUSTOM: tuple[tuple[int, str, str], ...] = (
 def vtrgb_lines() -> str:
     """The ``setvtrgb`` file content for the **archived custom** palette (three CSV lines).
 
-    Not installed by default — see :data:`_VT_SLOTS_CUSTOM`. The deploy script's opt-in
-    block carries this same content literally (a test keeps the two in sync), so the
-    remap stays one environment variable away without running Python.
+    MeshTerm does not install it by default (refer to :data:`_VT_SLOTS_CUSTOM`). The
+    opt-in block of the deploy script has this same content as literal text (a test makes
+    sure that the two are the same). Thus the remap needs only one environment variable,
+    and it does not need Python.
     """
     channels = []
     for shift in (16, 8, 0):
@@ -306,29 +331,32 @@ def vtrgb_lines() -> str:
     return "\n".join(channels) + "\n"
 
 
-#: The 16-slot palette theme: the same style names as :data:`MESH_THEME`, expressed as
-#: ``color(N)`` references into :data:`_VT_SLOTS` — the **standard** VT palette. Kept
-#: literal (rather than derived) so a slot choice is reviewable next to its meaning; the
-#: bold-brightness and background rules it must obey are documented on
-#: :data:`_VT_SLOTS` and pinned by tests. Notable stock-palette wins: bright pink (13)
-#: is the map's client colour for free, and dim purple (5) stands in for the map's
-#: repeater violet. The cost: the three grey depths (muted/faint/track) all collapse
-#: onto slot 8 — the stock palette has exactly one dark grey.
+#: The 16-slot palette theme. It has the same style names as :data:`MESH_THEME`, written
+#: as ``color(N)`` references into :data:`_VT_SLOTS`, which is the **standard** VT
+#: palette. The theme is literal and not derived, so a reviewer can see each slot choice
+#: next to its meaning. The rules for bold-brightness and for backgrounds, which the
+#: theme must obey, are in the documentation of :data:`_VT_SLOTS`, and tests pin them.
+#: The stock palette gives two important results. Bright pink (13) is the colour of the
+#: clients on the map, at no cost. Dim purple (5) replaces the violet of the repeaters
+#: on the map. The cost is that the three greys (muted, faint, track) all become slot 8,
+#: because the stock palette has only one dark grey.
 MESH_THEME_16 = Theme(
     {
         "brand": "bold color(14)",
         "accent": "bold color(12)",
-        # Slot 7 is the only grey the VT can put *behind* a reverse: backgrounds stop at
-        # the dim bank, and slot 8's dark grey lands on black there. It is the same light
-        # grey the F-key lane already fills its chips with, which is the point — one chip
-        # look on the device. ``not bold`` because 7 is a dim slot (see the bold rule).
+        # Slot 7 is the only grey that the VT can put *behind* a reverse. Backgrounds stop at
+        # the dim bank, and the dark grey of slot 8 becomes black there. It is the same
+        # light grey that the F-key lane already uses to fill its chips. This is the
+        # purpose: the handheld has one chip look. It is ``not bold`` because 7 is a dim
+        # slot (refer to the bold rule).
         "selected": "reverse not bold color(7)",
-        # Slot 15, the top of the bright bank — so the row's bold cannot promote it
-        # further, and every dim-slot span inside it behaves exactly as it did under the
-        # old bold slot-14 highlight.
+        # Slot 15 is the top of the bright bank. Thus the bold of the row cannot promote it
+        # more, and each span for a dim slot in the row behaves as it did under the old
+        # highlight, which was bold slot 14.
         "cursor": "bold color(15)",
-        # The path line's extent mark — see the regular theme. Nothing to draw, but both
-        # themes name the same styles, and the fold that reads it runs on both.
+        # The mark for the extent of a path line (refer to the regular theme). It draws
+        # nothing. Both themes have the same style names, and the fold that reads it runs on
+        # both.
         "pathline": "none",
         "err.reverse": "reverse bold color(9)",
         "you": "bold color(15)",
@@ -340,12 +368,12 @@ MESH_THEME_16 = Theme(
         "warn": "bold color(11)",
         "err": "bold color(9)",
         "muted": "color(8)",
-        # Light grey, a step *above* muted's dark grey: the console has exactly two greys,
-        # and an unidentified node's hash is content, not chrome.
+        # Light grey, a step *above* the dark grey of muted. The console has only two greys,
+        # and the hash of an unidentified node is content, not chrome.
         "node.unknown": "not bold color(7)",
         "title.accent": "bold color(12)",
-        # The one deliberate promotion: bold takes slot 7 to 15, and near-white is exactly
-        # what this title wants (the regular theme spells it #cbd5e1).
+        # The one promotion on purpose: bold moves slot 7 to 15. This title needs a colour
+        # that is almost white (the regular theme writes it as #cbd5e1).
         "title.muted": "bold color(7)",
         "title.warn": "bold color(11)",
         "title.err": "bold color(9)",
@@ -358,15 +386,16 @@ MESH_THEME_16 = Theme(
         "hint.ok": "not bold color(2)",
         "hint.brand": "not bold color(6)",
         "faint": "color(8)",
-        # The console's one dark grey; slot 8 is already the bright bank, so bold moves nothing.
+        # The one dark grey of the console. Slot 8 is already in the bright bank, so bold
+        # changes nothing.
         "heading": "bold color(8)",
         "track": "color(8)",
         "snr.good": "bold color(10)",
         "snr.ok": "bold color(11)",
         "snr.bad": "bold color(9)",
-        # Each band is its bright slot over its own dim one — the console has exactly one
-        # pair per hue, and backgrounds stop at the dim bank, so the block look is the
-        # palette's natural shape rather than a compromise with it.
+        # Each band is its bright slot over its own dim slot. The console has only one pair
+        # for each hue, and backgrounds stop at the dim bank. Thus the block look is the
+        # natural shape of the palette, and it is not a compromise.
         "batt.full": "bold color(10) on color(2)",
         "batt.mid": "bold color(11) on color(3)",
         "batt.low": "bold color(9) on color(1)",
@@ -376,24 +405,27 @@ MESH_THEME_16 = Theme(
         "type.repeater": "not bold color(5)",
         "type.room": "color(15)",
         "type.sensor": "not bold color(3)",
-        # A region name: the VT has no italic and every chromatic slot is a node hue, so
-        # the plain light grey — the word "scope" in front of it does the setting apart.
+        # A region name: the VT has no italic, and each chromatic slot is a node hue. Thus
+        # the style is the plain light grey. The word "scope" in front of it makes it
+        # different from other text.
         "scope": "not bold color(7)",
-        # The basemap on the console: a water body is the dim blue, every watercourse
-        # crossing it the bright blue one rung up (the palette has exactly one of each —
-        # a river's depth of shade is a truecolour luxury, and all three waterway shades
-        # land on the same rung here), parks the dim green, highways brown. Backgrounds
-        # never come into it: the canvas paints these as braille dots in the foreground.
+        # The basemap on the console: a body of water is the dim blue, and each watercourse
+        # that crosses it is the bright blue, one step up. (The palette has only one of
+        # each. A depth of shade for a river is a luxury of truecolour, and all three
+        # shades of waterway are the same step here.) Parks are the dim green, and highways
+        # are brown. Backgrounds are not used here, because the canvas paints these as
+        # braille dots in the foreground.
         "map.water": "not bold color(4)",
         "map.river": "color(12)",
         "map.stream": "color(12)",
         "map.ditch": "color(12)",
         "map.park": "not bold color(2)",
         "map.highway": "not bold color(3)",
-        # JP's ladder, slot by slot: white-hot, yellow, the ember's light red, brown as it
-        # chars, dark red as it dies, then ash — light grey, and cold grey for what may as
-        # well never have been heard. Six of the sixteen slots do the whole scale; the
-        # three in the dim bank say ``not bold`` or a selected row would jump them a rung.
+        # The ladder of JP, slot by slot: white-hot, yellow, the light red of the ember,
+        # brown as it chars, dark red as it dies, then ash (light grey), and cold grey for
+        # a node that is the same as never heard. Six of the sixteen slots make the whole
+        # scale. The three styles in the dim bank say ``not bold``. If they do not, a
+        # selected row moves them up one step.
         "heat.now": "bold color(15)",
         "heat.minutes": "color(11)",
         "heat.hours": "color(9)",
@@ -401,25 +433,26 @@ MESH_THEME_16 = Theme(
         "heat.weeks": "not bold color(1)",
         "heat.months": "not bold color(7)",
         "heat.never": "color(8)",
-        # The F-key lane's chip fills: light-grey background (the palette's only "gray"
-        # addressable as a background — see _VT_SLOTS) for the plain bank, green for the
-        # Shift bank, white text on both.
+        # The chip fills of the F-key lane: a light-grey background for the plain bank (the
+        # only grey in the palette that a background can use, refer to _VT_SLOTS), green for
+        # the Shift bank, and white text on both.
         "fkey.chip": "bold color(15) on color(7)",
         "fkey.chip.shift": "bold color(15) on color(2)",
-        # The Cardputer deck's fills, for name parity: that panel is truecolor, so these
-        # are only its colours' nearest slots — red for the fn key's orange, blue for the
-        # Shift blue.
+        # The fills of the Cardputer deck, so that the names are the same on both. That
+        # display is truecolor, so these are only the nearest slots to its colours: red for
+        # the orange of the fn key, and blue for the blue of Shift.
         "fkey.chip.cardputer_zero": "bold color(15) on color(1)",
         "fkey.chip.cardputer_zero.shift": "bold color(15) on color(4)",
-        # Prose on the console. The page's body text is the default light grey (slot 7),
-        # so emphasis is the one place the VT's bold-is-brightness rule *is* the design:
-        # ``md.strong`` says bold on purpose and lands on white, exactly the step up the
-        # truecolor theme spells out. Its opposite, ``md.em``, keeps slot 7 by saying so.
-        # Code takes the dim cyan (never bold — slot 6's bright partner is the brand),
-        # links the bright blue, and the chrome (bullets, rails, a struck run) the two
-        # greys, so a page reads as text with landmarks rather than as a colour chart.
-        # No underline anywhere: the VT renders it by swapping in the console's own
-        # underline colour, which would take the link's hue away from it.
+        # Prose on the console. The body text of the page is the default light grey (slot
+        # 7). Thus emphasis is the one place where the rule of the VT, bold is brightness,
+        # is the design. ``md.strong`` says bold on purpose and becomes white. This is the
+        # same step up that the truecolor theme writes out. Its opposite, ``md.em``, keeps
+        # slot 7 because it says so. Code uses the dim cyan (never bold, because the bright
+        # partner of slot 6 is the brand). Links use the bright blue. The chrome (bullets,
+        # rails, a struck-out run) uses the two greys. Thus a page reads as text with
+        # landmarks and not as a colour chart. There is no underline anywhere. The VT
+        # renders it with the own underline colour of the console, and this removes the hue
+        # of the link.
         "md.strong": "bold color(7)",
         "md.em": "not bold color(7)",
         "md.code": "not bold color(6)",
@@ -433,29 +466,32 @@ MESH_THEME_16 = Theme(
 
 
 def active_theme() -> Theme:
-    """The platform's theme — :data:`MESH_THEME`, or :data:`MESH_THEME_16` on PicoCalc."""
+    """The theme of the platform: :data:`MESH_THEME`, or :data:`MESH_THEME_16` on the PicoCalc."""
     return _ACTIVE_THEME
 
 
 def mark_rgb(colour: str) -> tuple[int, int, int]:
-    """A marker colour as an RGB triple — for the braille rasters.
+    """A marker colour as an RGB triple, for the braille rasters.
 
-    A canvas paints in RGB, not in styles (see :mod:`~meshterm.ui.mapcanvas`), so a marker
-    that wants to agree with its Rich-drawn twin resolves the *same colour* through here.
-    Takes either encoding the marker language uses: a literal ``#rrggbb`` (the fixed map
-    marks in :mod:`~meshterm.ui.marks`) or a theme style name (the node-type marks, which
-    are named so each platform picks its own — see the theme's ``type.*``).
+    A canvas paints in RGB and not in styles (refer to :mod:`~meshterm.ui.mapcanvas`). A
+    marker that must agree with its twin that Rich draws gets the *same colour* through
+    this function. The function accepts both encodings that the marker language uses. One
+    is a literal ``#rrggbb`` (the fixed map marks in :mod:`~meshterm.ui.marks`). The other
+    is a theme style name (the node-type marks, which have names so that each platform
+    chooses its own colour, refer to ``type.*`` of the theme).
 
-    On the 16-slot theme a ``color(N)`` entry resolves to that slot's own :data:`_VT_SLOTS`
-    RGB rather than Rich's stock triple: Rich's palette is a shade off ours and the fold's
-    quantizer matches against ours, so the round trip would otherwise land the marker on a
-    neighbouring slot. Memoized (cleared on a platform switch); a raster asks per node.
+    On the 16-slot theme, a ``color(N)`` entry gives the own :data:`_VT_SLOTS` RGB of that
+    slot, and not the stock triple of Rich. The palette of Rich is a shade different from
+    ours, and the quantizer of the fold matches against ours. If the function used the
+    stock triple, the round trip would put the marker on a neighbouring slot. The
+    function caches its results (a platform switch clears the cache). A raster asks for
+    each node.
 
     Args:
-        colour: ``#rrggbb``, or a style name defined in both themes.
+        colour: ``#rrggbb``, or a style name that both themes define.
 
     Returns:
-        The ``(r, g, b)`` triple; mid-grey for a style with no colour of its own.
+        The ``(r, g, b)`` triple. For a style that has no colour of its own, it is mid-grey.
     """
     cached = _STYLE_RGB.get(colour)
     if cached is None:
@@ -475,11 +511,12 @@ def mark_rgb(colour: str) -> tuple[int, int, int]:
 
 
 def make_console() -> Console:
-    """Create the application's themed Rich console.
+    """Create the Rich console of the application, with its theme.
 
-    On legacy Windows consoles the standard streams default to ``cp1252``, which cannot
-    encode the box-drawing and marker glyphs (``◆ ● ★``) the UI uses; this reconfigures
-    them to UTF-8 where the runtime supports it so output never raises ``UnicodeEncodeError``.
+    On legacy Windows consoles, the standard streams use ``cp1252`` by default. It cannot
+    encode the box-drawing and marker glyphs (``◆ ● ★``) that the UI uses. This function
+    sets the streams to UTF-8 where the runtime lets it, so that the output never raises
+    ``UnicodeEncodeError``.
 
     Returns:
         A :class:`rich.console.Console` configured with the platform's theme.
@@ -491,94 +528,101 @@ def make_console() -> Console:
         if reconfigure is not None:
             try:
                 reconfigure(encoding="utf-8")
-            except (ValueError, OSError):  # pragma: no cover - stream not reconfigurable
+            except (ValueError, OSError):  # pragma: no cover - the stream cannot be set again
                 pass
     return Console(theme=_ACTIVE_THEME)
 
 
 def title_style(border_style: str) -> str:
-    """Return the title style matching a panel's border: the same hue, brighter.
+    """Return the title style that matches the border of a panel: the same hue, brighter.
 
     Args:
-        border_style: The theme name the panel's border is drawn in (``"accent"``,
-            ``"warn"``, ...).
+        border_style: The theme name in which the border of the panel is drawn
+            (``"accent"``, ``"warn"``, and other names).
 
     Returns:
-        The matching ``title.*`` theme name, or ``border_style`` itself when no brighter
-        variant is defined (so an unknown border still gets a consistently-tinted title).
+        The matching ``title.*`` theme name. If no brighter variant is defined, it is
+        ``border_style`` itself. Thus an unknown border still gets a title with a
+        consistent tint.
     """
     name = f"title.{border_style}"
     return name if name in MESH_THEME.styles else border_style
 
 
 def hint_style(border_style: str) -> str:
-    """Return the footer-hint style matching a panel's border: the same hue, muted.
+    """Return the footer-hint style that matches the border of a panel: the same hue, muted.
 
-    The bottom-border counterpart of :func:`title_style` — where the title brightens the
-    border's hue, the hint darkens it, so both read as part of the frame with the right
-    emphasis.
+    This is the counterpart of :func:`title_style` for the bottom border. The title
+    brightens the hue of the border, and the hint darkens it. Thus both read as part of
+    the frame, with the correct emphasis.
 
     Args:
-        border_style: The theme name the panel's border is drawn in (``"accent"``,
-            ``"warn"``, ...).
+        border_style: The theme name in which the border of the panel is drawn
+            (``"accent"``, ``"warn"``, and other names).
 
     Returns:
-        The matching ``hint.*`` theme name, or ``"muted"`` when no variant is defined (so
-        an unknown border keeps the old neutral hint rather than a loud one).
+        The matching ``hint.*`` theme name. If no variant is defined, it is ``"muted"``.
+        Thus an unknown border keeps the old neutral hint, and not a loud hint.
     """
     name = f"hint.{border_style}"
     return name if name in MESH_THEME.styles else "muted"
 
 
-#: The per-node hue *spectrum*: a node's first key byte maps straight onto the HSV colour
-#: wheel — ``0x00`` is red, sweeping the full spectrum round to ``0xff`` — at a fixed
-#: saturation and value tuned to stay vivid and readable on the dark theme across every hue.
-#: So all 256 first-byte values give 256 distinct hues on a truecolor terminal. The app-wide
-#: rule holds on every platform: a node's *name* is always coloured — by this wheel, keyed
-#: on the node's key (see :func:`node_style`) so the colour is the node's identity, surviving
-#: renames and colouring every surface that knows any prefix of the key identically — and our
-#: own node is always the pure-white ``you`` style instead, so "us" never blends into the
-#: crowd. Shared by the node lists, the chat transcript, the dashboard feed, and the packet
-#: viewer, so one node reads as one colour everywhere.
+#: The per-node hue *spectrum*. The first key byte of a node maps directly onto the HSV
+#: colour wheel. ``0x00`` is red, and the full spectrum goes round to ``0xff``. The
+#: saturation and the value are fixed, and they are tuned to stay vivid and readable on
+#: the dark theme in all hues. Thus the 256 values of the first byte give 256 different
+#: hues on a truecolor terminal. The rule of the whole app is the same on each platform:
+#: the *name* of a node always has a colour. The colour comes from this wheel, and the key
+#: of the node selects it (refer to :func:`node_style`). Thus the colour is the identity
+#: of the node. It stays the same after a rename, and it is the same on each surface that
+#: knows any prefix of the key. Our node always has the pure-white ``you`` style instead,
+#: so "us" never merges into the crowd. The node lists, the chat transcript, the feed of
+#: the dashboard, and the packet viewer share this wheel. Thus one node has one colour
+#: everywhere.
 _NODE_HUE_SAT = 0.65
 _NODE_HUE_VAL = 0.95
 
-#: The same wheel at the PicoCalc console's resolution: the six *chromatic bright* palette
-#: slots, listed in hue order from red so index ``round(byte / 256 * 6) % 6`` is the sector
-#: the byte's hue falls in — 60° apart, an even sixth of the wheel each. Written as the
-#: slots' own :data:`_VT_SLOTS` RGBs rather than as ``color(N)`` so the value is still a
-#: hex a caller can parse into an RGB (the map canvas and the mesh walk read the hue back
-#: out of the style string), and so every downsample on the way out — Rich's, and the
-#: fold's :func:`_quantize_sgr` — lands on that exact slot rather than guessing.
+#: The same wheel at the resolution of the PicoCalc console: the six *chromatic bright*
+#: palette slots. They are in hue order, from red. Thus the index ``round(byte / 256 * 6)
+#: % 6`` is the sector in which the hue of the byte is. The sectors are 60° apart, and
+#: each is an equal sixth of the wheel. They are written as the own :data:`_VT_SLOTS` RGB
+#: values of the slots and not as ``color(N)``. Thus the value is still a hex that a
+#: caller can parse into an RGB (the map canvas and the mesh walk read the hue from the
+#: style string). Also, each downsample on the way out (the downsample of Rich, and
+#: :func:`_quantize_sgr` of the fold) gives exactly that slot, and does not guess.
 # fmt: off
 _NODE_SLOT_HEXES: tuple[str, ...] = (
-    "#ff5555",   # 9  red      —   0°
-    "#ffff55",   # 11 yellow   —  60°
-    "#55ff55",   # 10 green    — 120°
-    "#55ffff",   # 14 cyan     — 180°
-    "#5555ff",   # 12 blue     — 240°
-    "#ff55ff",   # 13 magenta  — 300°
+    "#ff5555",   # 9  red      :   0°
+    "#ffff55",   # 11 yellow   :  60°
+    "#55ff55",   # 10 green    : 120°
+    "#55ffff",   # 14 cyan     : 180°
+    "#5555ff",   # 12 blue     : 240°
+    "#ff55ff",   # 13 magenta  : 300°
 )
 # fmt: on
 
 
 def node_style(key: str) -> str:
-    """The stable spectrum hue a node's *key* selects — the hash-derived node colour.
+    """The stable spectrum hue that the *key* of a node selects: the node colour from its hash.
 
-    The node's first key byte is mapped straight onto the HSV colour wheel (``0x00`` red,
-    sweeping round to ``0xff``), so the colour is the node's identity: it survives a
-    rename, and only the first byte picks it, so any prefix a surface happens to hold — a
-    2-hex path hop, the stored 12-hex id, the full 64-hex public key — lands on the same
-    hue. One node, one colour, however it was learned.
+    The first key byte of the node maps directly onto the HSV colour wheel (``0x00`` is
+    red, and the wheel goes round to ``0xff``). Thus the colour is the identity of the
+    node. It stays the same after a rename. Only the first byte selects it, so each prefix
+    that a surface has gives the same hue. A prefix can be a 2-hex path hop, the stored
+    12-hex id, or the full 64-hex public key. One node has one colour, in whatever way
+    MeshTerm learned it.
 
-    The *rule* is the platform's only constant here; its resolution is not. The regular
-    platform spends the full spectrum (:func:`_node_style_spectrum`, 256 distinct hues at
-    a fixed saturation/value); PicoCalc snaps the same hue to the nearest of the console's
-    six chromatic slots (:func:`_node_style_quantized`), exactly as the heard-age heat
-    scale quantizes its gradient there. Bound at platform-switch time.
+    The *rule* is the only constant of the platform here, but the resolution is not. The
+    regular platform uses the full spectrum (:func:`_node_style_spectrum`, 256 different
+    hues at a fixed saturation and value). The PicoCalc snaps the same hue to the nearest
+    of the six chromatic slots of the console (:func:`_node_style_quantized`). The heat
+    scale of the heard age quantizes its gradient in the same way there. MeshTerm binds
+    this function when the platform switches.
 
     Args:
-        key: The node's key/hash as hex (any length ≥ 1 byte, ``0x``/mixed-case tolerated).
+        key: The key or hash of the node as hex (any length of 1 byte or more. The
+            function accepts ``0x`` and mixed case).
 
     Returns:
         A ``"bold #rrggbb"`` style string.
@@ -587,39 +631,40 @@ def node_style(key: str) -> str:
 
 
 def _key_byte(key: str) -> int:
-    """The node's first key byte — the only slice any hue derives from."""
+    """The first key byte of the node: the only slice from which each hue comes."""
     raw = key.lower().removeprefix("0x")
     try:
         return int(raw[:2], 16)
-    except ValueError:  # not hex — fall back to the character sum so *something* stable shows
+    except ValueError:  # not hex: use the sum of the characters, so that a stable colour shows
         return sum(map(ord, raw)) % 256
 
 
 def _node_style_spectrum(key: str) -> str:
-    """Regular platform: the full 256-hue wheel at :data:`_NODE_HUE_SAT`/``_VAL``."""
+    """The regular platform: the full 256-hue wheel at :data:`_NODE_HUE_SAT`/``_VAL``."""
     r, g, b = colorsys.hsv_to_rgb(_key_byte(key) / 256, _NODE_HUE_SAT, _NODE_HUE_VAL)
     return f"bold #{round(r * 255):02x}{round(g * 255):02x}{round(b * 255):02x}"
 
 
 def _node_style_quantized(key: str) -> str:
-    """PicoCalc: the same hue, snapped to its sixth of the wheel (:data:`_NODE_SLOT_HEXES`).
+    """The PicoCalc: the same hue, snapped to its sixth of the wheel (:data:`_NODE_SLOT_HEXES`).
 
-    Deliberate rather than left to a nearest-RGB downsample: the spectrum's pastels sit
-    close enough to white that a naive match would drain the loudest hues toward grey,
-    and grey is ``muted``'s — an unkeyed sender. Snapping by hue keeps all six families
-    saturated and evenly populated (~43 of the 256 first bytes each).
+    This is on purpose, and a downsample to the nearest RGB does not do it. The pastels of
+    the spectrum are near white. A naive match moves the loudest hues toward grey, and
+    grey is the colour of ``muted``, which is for a sender without a key. A snap by hue
+    keeps all six families saturated and evenly populated (approximately 43 of the 256
+    first bytes for each family).
     """
     sector = round(_key_byte(key) / 256 * len(_NODE_SLOT_HEXES)) % len(_NODE_SLOT_HEXES)
     return f"bold {_NODE_SLOT_HEXES[sector]}"
 
 
-#: Every style string a node's key can mint, on *either* platform: the 256-hue spectrum
-#: and the console's six chromatic slots. A surface that has to *recognise* identity ink
-#: rather than produce it matches against this — today that is the cursor row, where a
-#: name gives way to the highlight's white. Both vocabularies live in the one set so the
-#: answer never depends on which platform happens to be bound, and they cannot collide:
-#: the spectrum's channels top out at ``0xf2`` (value 0.95) while every console slot
-#: spells ``0xff``.
+#: All the style strings that the key of a node can make, on *each* platform: the 256-hue
+#: spectrum and the six chromatic slots of the console. A surface that must *recognize*
+#: identity ink, and does not make it, matches against this set. Today this is the cursor
+#: row, where a name gives way to the white of the highlight. Both vocabularies are in the
+#: one set. Thus the answer does not depend on the platform that is bound, and the two
+#: vocabularies cannot collide: the channels of the spectrum have a maximum of ``0xf2``
+#: (value 0.95), and each console slot has ``0xff``.
 _IDENTITY_STYLES: frozenset[str] = frozenset(
     [_node_style_spectrum(f"{byte:02x}") for byte in range(256)]
     + [f"bold {hex_}" for hex_ in _NODE_SLOT_HEXES]
@@ -627,177 +672,185 @@ _IDENTITY_STYLES: frozenset[str] = frozenset(
 
 
 def is_identity_style(style: str) -> bool:
-    """Is ``style`` a hue some node's key minted — a *name's* ink rather than the page's?
+    """Check if ``style`` is a hue that the key of a node made (the ink of a *name*).
 
-    :func:`node_style` read backwards, for the one surface that needs the vocabulary as a
-    question: the cursor row, whose node names are drawn in its white instead of their own
-    hue (see :func:`~meshterm.ui.tui.render.render_to_ansi`). Deliberately narrow — only a
-    key-derived hue answers yes, so ``node.unknown``'s grey (a node we *cannot* identify,
-    which the highlight has no business claiming to know), the ``you`` white, and every
-    context colouring keep exactly what they were given.
+    This function is :func:`node_style` read in reverse. One surface needs the vocabulary
+    as a question: the cursor row, which draws node names in its white and not in their
+    own hue (refer to :func:`~meshterm.ui.tui.render.render_to_ansi`). The check is narrow
+    on purpose. Only a hue that comes from a key gives ``True``. Thus the grey of
+    ``node.unknown`` (a node that MeshTerm *cannot* identify, and the highlight must not
+    claim to know it), the white of ``you``, and each colouring for a context keep the
+    colour that they have.
 
     Args:
         style: A style string as it appears on a span.
 
     Returns:
-        ``True`` if it is one of the hues :func:`node_style` mints.
+        ``True`` if it is one of the hues that :func:`node_style` makes.
     """
     return style in _IDENTITY_STYLES
 
 
 def name_style(name: str, key: str | None = None) -> str:
-    """The stable colour a node or sender name is drawn in — keyed on the node's key.
+    """The stable colour of the name of a node or sender. The key of the node selects it.
 
-    One rule on every platform: the hue is :func:`node_style`'s key-derived spectrum, so a
-    rename keeps the colour and every surface that knows any prefix of the key agrees.
-    Only the *resolution* changes with the platform (see :func:`node_style`).
+    The rule is the same on each platform. The hue is the spectrum of :func:`node_style`
+    that comes from the key. Thus a rename keeps the colour, and each surface that knows
+    any prefix of the key gives the same colour. Only the *resolution* changes with the
+    platform (refer to :func:`node_style`).
 
     Args:
-        name: The display name (unused for the hue; kept so every call site reads
-            ``name_style(name, key)`` and the pair stays greppable).
-        key: Any known prefix of the node's key/hash. ``None``/empty marks a sender whose
-            key we couldn't resolve — drawn ``node.unknown``, because colour is reserved
-            for keyed identities (callers with only a name resolve it first via
-            :func:`~meshterm.services.trace_runner.make_name_key_resolver`).
+        name: The display name. It does not change the hue. It is a parameter so that each
+            call site reads ``name_style(name, key)``, and a search finds the pair.
+        key: Any known prefix of the key or hash of the node. ``None`` or an empty value
+            marks a sender whose key MeshTerm could not resolve. The name is drawn as
+            ``node.unknown``, because colour is only for identities that have a key.
+            (A caller that has only a name must first resolve it with
+            :func:`~meshterm.services.trace_runner.make_name_key_resolver`.)
 
     Returns:
-        A style for the name; the same node always maps to the same style on a given
-        platform, so it keeps its colour across screens and sessions.
+        A style for the name. On one platform, the same node always has the same style.
+        Thus it keeps its colour across screens and sessions.
     """
     return node_style(key) if key else "node.unknown"
 
 
 # -- the compact icon language (PicoCalc) ---------------------------------------------
 
-#: Emoji → single console-font character: the PicoCalc icon language. One glyph per
-#: concept, chosen from what the 512-glyph font actually holds (see ui.fontset);
-#: concepts that only ever share a *family* (outbound ↑, route ∟) share deliberately.
-#: The node-type marks (★●▲■◉○) and status marks (✓ ✗ ⚠ ● ○) are already font-native
-#: and never appear here. ``glyph()`` consumes this table at explicit icon call sites
-#: (a 1-cell lane the screen composes); the render-boundary fold consumes it for
-#: everything else, padding to the emoji's measured width so layout survives.
+#: The map from an emoji to a single console-font character. It is the icon language of
+#: the PicoCalc. There is one glyph for each concept, chosen from the glyphs that the
+#: 512-glyph font has (refer to ui.fontset). Concepts that only share a *family* (outbound
+#: ↑, route ∟) share a glyph on purpose. The node-type marks (★●▲■◉○) and the status marks
+#: (✓ ✗ ⚠ ● ○) are already native to the font, and they are never in this table.
+#: ``glyph()`` uses this table at the explicit icon call sites (a lane of 1 cell that the
+#: screen composes). The fold at the render boundary uses it for all other cases. It adds
+#: padding to the measured width of the emoji, so that the layout stays correct.
 # fmt: off
 _GLYPH_MAP: dict[str, str] = {
     # Packet classes (KIND_ICONS)
-    "📢": "☼",   # advert — a node radiating its presence
-    "📊": "≈",   # telemetry — a waveform of readings
-    "📦": "▬",   # packet — a plain slab of payload
-    "💬": "¶",   # message — text
+    "📢": "☼",   # advert: a node that radiates its presence
+    "📊": "≈",   # telemetry: a waveform of readings
+    "📦": "▬",   # packet: a plain slab of payload
+    "💬": "¶",   # message: text
     "✅": "✓",   # ack (the ok-family check)
-    "❔": "·",   # unknown class — a neutral dot
-    # Raw payload classes (PAYLOAD_ICONS); raw ADVERT/ACK reuse ☼/✓ above
-    "📥": "↑",   # REQ — a question going out
-    "📮": "↓",   # RESPONSE — the answer coming back
-    "📩": "→",   # TEXT_MSG (overheard direct message) — text in flight
-    "📻": "#",   # GRP_TXT — channel text (the # channel mark)
-    "💽": "§",   # GRP_DATA — a data section on a channel
-    "🎭": "?",   # ANON_REQ — a request from an unproven identity
-    "🧭": "∟",   # PATH — a route with a bend in it
-    "🎯": "⌖",   # TRACE — the crosshair (also the map's position mark)
-    "🧩": "▒",   # MULTIPART — a frame in fragments
-    "🧰": "↨",   # CONTROL — adjustment up-and-down
+    "❔": "·",   # unknown class: a neutral dot
+    # Raw payload classes (PAYLOAD_ICONS). Raw ADVERT and ACK use ☼ and ✓ above
+    "📥": "↑",   # REQ: a question that goes out
+    "📮": "↓",   # RESPONSE: the answer that comes back
+    "📩": "→",   # TEXT_MSG (an overheard direct message): text in flight
+    "📻": "#",   # GRP_TXT: channel text (the # channel mark)
+    "💽": "§",   # GRP_DATA: a data section on a channel
+    "🎭": "?",   # ANON_REQ: a request from an identity that is not proven
+    "🧭": "∟",   # PATH: a route with a bend in it
+    "🎯": "⌖",   # TRACE: the crosshair (also the position mark of the map)
+    "🧩": "▒",   # MULTIPART: a packet in fragments
+    "🧰": "↨",   # CONTROL: adjustment up and down
     # Channel openness (widgets.channel_glyph)
     "＃": "#",   # name-derived channel
     "🌐": "@",   # well-known public channel
     "🔒": "⚿",   # private channel, locked contact (the padlock mark)
-    "🔓": "⚿",   # unlock — the same padlock; the row's word says which way it turns
+    "🔓": "⚿",   # unlock: the same padlock. The word of the row says which way it turns
     # Concept icons (menu/list rows)
-    "📡": "☼",   # advert tool — same concept as the advert class
+    "📡": "☼",   # advert tool: the same concept as the advert class
     "🕒": "◷",   # clock/sync (the clock-face mark)
-    "🔄": "°",   # reboot — the power dot
-    "💾": "⌂",   # backup — put it somewhere safe
-    "📂": "^",   # restore — bring it back up
-    "🔑": "*",   # channel/credential key — masked-secret asterisk
-    "🔐": "*",   # identity/auth secret — same secret-material mark
-    "🗑": "✗",   # clear/delete — the destructive mark
-    "✎": "~",   # compose/edit — a scribble
+    "🔄": "°",   # reboot: the power dot
+    "💾": "⌂",   # backup: put it in a safe place
+    "📂": "^",   # restore: bring it back up
+    "🔑": "*",   # channel/credential key: the asterisk of a masked secret
+    "🔐": "*",   # identity/auth secret: the same mark for secret material
+    "🗑": "✗",   # clear/delete: the destructive mark
+    "✎": "~",   # compose/edit: a scribble
     "⚡": "!",   # explore/probe
-    "⭐": "+",   # watch — added to the watchlist
+    "⭐": "+",   # watch: added to the watchlist
     "📤": "↑",   # send now (outbound family)
-    "📨": "=",   # courier/queue — stacked letters
-    "🔔": "•",   # notify — the badge dot
-    "🔕": "·",   # mute — the hollowed-out dot
-    "📱": "▓",   # QR — a dense block
-    "🔗": "&",   # link — the joining glyph
-    "🏆": "★",   # trophy case — the best/winner star
-    "⌨": "❯",   # command line — the prompt cursor
-    "📖": "¶",   # read/about — a page of prose (the text mark, as ¶ is for a message)
-    "💰": "$",   # support/donate — the plainest possible money mark
-    "🚪": "",    # quit — no icon; the word carries it
+    "📨": "=",   # courier/queue: stacked letters
+    "🔔": "•",   # notify: the badge dot
+    "🔕": "·",   # mute: the hollowed-out dot
+    "📱": "▓",   # QR: a dense block
+    "🔗": "&",   # link: the joining glyph
+    "🏆": "★",   # trophy case: the best/winner star
+    "⌨": "❯",   # command line: the prompt pointer
+    "📖": "¶",   # read/about: a page of prose (the text mark, as ¶ is for a message)
+    "💰": "$",   # support/donate: the plainest money mark
+    "🚪": "",    # quit: no icon, because the word carries it
     "🌍": "@",   # map/world (globe family)
     "🕸": "∟",   # mesh walk (route family)
     "🚨": "⚠",   # watchtower alert
     "🛣": "∟",   # longest-haul route (route family)
-    "🏹": "►",   # longest leg — the arrow in flight (▶ is the run *action*, not this)
+    "🏹": "►",   # longest leg: the arrow in flight (▶ is the run *action*, not this)
     "🧳": "→",   # trip/journey
-    "🔆": "°",   # brightest sighting
-    "📶": "≥",   # TX power sweep — the power ramp
+    "🔆": "°",   # the brightest reception
+    "📶": "≥",   # TX power sweep: the power ramp
     "🔧": "⚙",   # config (parameter concept)
     "📋": "i",   # info
-    "🩺": "?",   # diagnostics — the question a diagnosis answers (🎭 shares the mark)
-    "📰": "…",   # live feed — a stream of items
-    "🎧": "≈",   # monitor — listening to the waveform
-    "🗼": "▲",   # repeater admin — the repeater mark itself
-    "📌": "■",   # rooms — the room server mark itself
-    "🔌": "~",   # serial port — the cable
-    "📍": "╨",   # a radio on the host's SPI bus — the antenna on its board
-    "🔖": "╬",   # region/scope — a flood's label; the grid square of an area
+    "🩺": "?",   # diagnostics: the question that a diagnosis answers (🎭 has the same mark)
+    "📰": "…",   # live feed: a stream of items
+    "🎧": "≈",   # monitor: listening to the waveform
+    "🗼": "▲",   # repeater admin: the repeater mark itself
+    "📌": "■",   # rooms: the room server mark itself
+    "🔌": "~",   # serial port: the cable
+    "📍": "╨",   # a radio on the SPI bus of the host: the antenna on its board
+    "🔖": "╬",   # region/scope: the label of a flood. It is the grid square of an area
     "👤": "%",   # a person (two-circle silhouette)
-    "👥": "%",   # contacts — people
-    "👋": "",    # a wave in prose — the words carry it
+    "👥": "%",   # contacts: people
+    "👋": "",    # a wave in prose: the words carry it
     "⏳": "…",   # pending/waiting
-    "＋": "+",   # fullwidth plus (channels' add row)
+    "＋": "+",   # fullwidth plus (the add row of the channels)
 }
 # fmt: on
 
 
 def glyph(icon: str) -> str:
-    """The platform's rendering of an icon: the emoji itself, or its compact glyph.
+    """The rendering of an icon on the platform: the emoji itself, or its compact glyph.
 
-    On the regular platform this is the identity — emoji icons render as themselves.
-    On PicoCalc every icon funnels to a single console-font character via
-    :data:`_GLYPH_MAP` (an unmapped icon passes through and is caught by the glyph
-    whitelist test / render-boundary fold, not silently invented here). Note the
-    compact form is *one cell* where the emoji was two: call sites compose their lanes
-    from the returned glyph, so the lane simply tightens on PicoCalc.
+    On the regular platform, this function returns the icon unchanged, and emoji icons
+    render as themselves. On the PicoCalc, each icon goes through :data:`_GLYPH_MAP` to a
+    single console-font character. An icon that is not in the map passes through. The test
+    for the glyph whitelist or the fold at the render boundary finds it. This function
+    does not invent a glyph without a message. The compact form is *one cell*, where the
+    emoji was two cells. Call sites compose their lanes from the returned glyph, so the
+    lane becomes narrower on the PicoCalc.
 
     Args:
         icon: An emoji, a node/status mark, or any literal character.
 
     Returns:
-        The character(s) to render for it on the active platform.
+        The characters to render for it on the active platform.
     """
     return _glyph_impl(icon)
 
 
 def _glyph_identity(icon: str) -> str:
-    """Regular platform: icons render as themselves."""
+    """The regular platform: icons render as themselves."""
     return icon
 
 
 def _glyph_compact(icon: str) -> str:
-    """PicoCalc: icons collapse to their single-cell console-font glyph."""
+    """The PicoCalc: icons become their single-cell console-font glyph."""
     return _GLYPH_MAP.get(icon, icon)
 
 
 # -- the render-boundary fold (the handhelds) ------------------------------------------
 
-#: The active platform's glyph inventory (``Platform.font``), bound in :func:`_bind`: the
-#: PicoCalc's 512-glyph console font, or what the Cardputer's emulator draws.
+#: The glyph inventory of the active platform (``Platform.font``). :func:`_bind` binds it.
+#: It is the 512-glyph console font of the PicoCalc, or what the emulator of the Cardputer
+#: draws.
 _FOLD_FONT: frozenset[int] = FONT_CODEPOINTS
 
-#: What may survive the fold: every font codepoint, plus the C0 controls the rendered
-#: ANSI itself is built from (ESC in its sequences, the newlines between lines).
+#: The characters that the fold lets stay: each font codepoint, and the C0 controls from
+#: which the rendered ANSI is made (ESC in its sequences, and the newlines between lines).
 _FOLD_ALLOWED: frozenset[int] = _FOLD_FONT.union(range(0x00, 0x20))
 
-#: Whether the fold also quantizes embedded truecolor/256-colour SGR to the 16 slots — a
-#: console that has no more (the PicoCalc's), never a panel the host paints in 24 bits.
+#: Shows if the fold also quantizes embedded truecolor and 256-colour SGR to the 16 slots.
+#: It does this for a console that has no more colours (the PicoCalc). It never does this
+#: for a display that the host paints in 24 bits.
 _FOLD_QUANTIZE = True
 
-#: Width-1 characters outside the font with a natural width-1 stand-in. Applied by the
-#: fold's translation table (storage is never touched). Characters *in* the font —
-#: ``— … ⋯ ⚠ ⌫ ⇧ ⚙ ↻ ◷ ⌖ ⚿ ← ↑ → ↓ ↔ ↕ • ·`` and the Cyrillic block — never appear
-#: here: they pass through untranslated.
+#: The characters of width 1 that are not in the font and have a natural stand-in of width
+#: 1. The translation table of the fold applies them (MeshTerm never changes the stored
+#: data). The characters that are *in* the font are never here, and they pass through
+#: without a change. These are ``— … ⋯ ⚠ ⌫ ⇧ ⚙ ↻ ◷ ⌖ ⚿ ← ↑ → ↓ ↔ ↕ • ·`` and the Cyrillic
+#: block.
 # fmt: off
 _FOLD_SINGLES: dict[str, str] = {
     "–": "-", "−": "-", "‒": "-", "―": "—",
@@ -811,28 +864,29 @@ _FOLD_SINGLES: dict[str, str] = {
     "œ": "o", "Œ": "O", "æ": "a", "Æ": "A", "ø": "o", "Ø": "O",
     "ß": "s", "þ": "p", "Þ": "P", "ð": "d", "Ð": "D", "đ": "d", "Đ": "D",
     "ł": "l", "Ł": "L", "ı": "i",
-    # Powerline path-pill chrome (private-use): caps become half-blocks, the separator
-    # a plain wedge.
+    # Chrome of the powerline path pills (private use): the caps become half-blocks, and
+    # the separator becomes a plain wedge.
     "": ">", "": "▌", "": "▐",
-    # Zero-width machinery folds away entirely (width 0 → empty keeps cell math exact):
-    # VS16, ZWJ, ZWSP.
+    # The zero-width characters fold away completely (width 0 becomes empty, and the
+    # arithmetic of the cells stays exact): VS16, ZWJ, ZWSP.
     "️": "", "‍": "", "​": "",
 }
 # fmt: on
 
-#: Built lazily on first fold: ``str.translate`` table = accent folds (NFKD, computed
-#: over the Latin ranges once) + :data:`_FOLD_SINGLES` + the emoji map padded to each
-#: emoji's measured cell width.
+#: MeshTerm builds it lazily, at the first fold. It is the ``str.translate`` table. It has
+#: the accent folds (NFKD, computed one time over the Latin ranges), :data:`_FOLD_SINGLES`,
+#: and the emoji map padded to the measured cell width of each emoji.
 _FOLD_TABLE: dict[int, str] | None = None
 
-#: Truecolor / 256-colour SGR sequences embedded in *pre-rendered* ANSI. The rasterizer
-#: console downsamples everything it renders itself, but the braille canvases
-#: (``ui.mapcanvas``) emit their own truecolor escapes which pass through Rich verbatim
-#: — the fold quantizes those to the 16 slots so the contract holds for every byte out.
-#: Any SGR sequence, its parameter list captured whole. The quantizer walks the list
-#: rather than matching a colour standing alone: Rich writes a style's foreground and
-#: background as *one* sequence (``ESC[38;2;255;255;255;48;2;0;0;0m`` — a QR module),
-#: and a colour in the middle of such a list is no less a colour for having company.
+#: The SGR sequences for truecolor and 256 colours that are embedded in *pre-rendered*
+#: ANSI. The rasterizer console downsamples all that it renders itself. But the braille
+#: canvases (``ui.mapcanvas``) emit their own truecolor escapes, which pass through Rich
+#: without a change. The fold quantizes those to the 16 slots, so that the contract holds
+#: for each byte that goes out. The pattern matches any SGR sequence, and it captures its
+#: whole parameter list. The quantizer walks the list and does not match a colour that
+#: stands alone. Rich writes the foreground and the background of a style as *one*
+#: sequence (``ESC[38;2;255;255;255;48;2;0;0;0m``, a QR module). A colour in the middle of
+#: such a list is a colour also when other parameters are with it.
 _SGR = _re.compile(r"\x1b\[([\d;]*)m")
 
 _SLOT_RGBS: tuple[tuple[int, int, int], ...] = tuple(
@@ -840,28 +894,32 @@ _SLOT_RGBS: tuple[tuple[int, int, int], ...] = tuple(
     for _, _, h in _VT_SLOTS
 )
 
-#: (is_background, r, g, b) → the replacement SGR string. The app uses a few dozen
-#: distinct colours; this stays tiny.
+#: The map from (is_background, r, g, b) to the replacement SGR string. The app uses a few
+#: dozen different colours, so this cache stays very small.
 _SLOT_CACHE: dict[tuple[bool, int, int, int], str] = {}
 
 
 def _nearest_slot_params(background: bool, r: int, g: int, b: int) -> str:
-    """The 16-colour SGR *parameters* closest to ``(r, g, b)`` in the :data:`_VT_SLOTS` palette.
+    """The 16-colour SGR *parameters* closest to ``(r, g, b)`` in :data:`_VT_SLOTS`.
 
-    ``22;31``, ``91``, ``40`` — without the ``ESC[…m`` around them, so the answer can be
-    spliced into a sequence that carries other parameters too (:func:`_quantize_sgr`).
+    Examples are ``22;31``, ``91``, and ``40``. They do not have the ``ESC[…m`` around
+    them. Thus the caller can splice the answer into a sequence that also has other
+    parameters (:func:`_quantize_sgr`).
 
-    Foregrounds may land on any slot (30–37 / 90–97); backgrounds only on 0–7 (the VT has
-    no bright backgrounds), so a bright colour used as a fill picks its dim-bank cousin.
+    A foreground can be in any slot (30–37 and 90–97). A background can be only in slots
+    0–7 (the VT has no bright backgrounds). Thus a bright colour that is used as a fill
+    gets the related colour in the dim bank.
 
-    A **dim-bank foreground states its intent** (``22;3N``, normal intensity) rather than
-    emitting a bare ``3N``. Bold is brightness on the VT, and ``9N`` *is* how the console
-    spells bright — so a bare ``31`` immediately after a ``90`` inherits the intensity bit
-    and silently renders as ``91``. Quantized art is a run of adjacent colour spans with
-    no style boundaries to reset between them (the wordmark's every-other-span slate
-    bevel; a map raster's neighbouring cells), so the promotion lands mid-row and colours
-    half a row wrong: the narrow wordmark's fourth row — its only dim-slot row — came out
-    part red, part light red, split at each span that happened to follow the bevel.
+    A **foreground in the dim bank states its intent** (``22;3N``, normal intensity), and
+    does not emit a bare ``3N``. Bold is brightness on the VT, and ``9N`` is the way that
+    the console spells bright. Thus a bare ``31`` immediately after a ``90`` inherits the
+    intensity bit, and renders as ``91`` without a message. Quantized art is a run of
+    colour spans that are next to each other, and no style boundary between them resets
+    the intensity (the bevel of the wordmark has a slate span in every other span, and a
+    map raster has neighbouring cells). Thus the promotion happens in the middle of a row
+    and gives the wrong colour to half a row. The fourth row of the narrow wordmark (its
+    only row with a dim slot) was part red and part light red. The split was at each span
+    that followed the bevel.
     """
     key = (background, r, g, b)
     cached = _SLOT_CACHE.get(key)
@@ -886,7 +944,7 @@ def _nearest_slot_params(background: bool, r: int, g: int, b: int) -> str:
 
 
 def _rgb_of_256(index: int) -> tuple[int, int, int]:
-    """The canonical RGB of xterm-256 ``index`` (cube and grayscale ramps)."""
+    """The canonical RGB of xterm-256 ``index`` (the cube and the ramps of grey)."""
     if index < 16:
         return _SLOT_RGBS[index]
     if index < 232:
@@ -898,10 +956,11 @@ def _rgb_of_256(index: int) -> tuple[int, int, int]:
 
 
 def _quantize_sgr(text: str) -> str:
-    """Fold any embedded truecolor / 256-colour SGR down to the 16 palette slots.
+    """Fold each embedded truecolor or 256-colour SGR down to the 16 palette slots.
 
-    Every sequence's parameter list is walked (see :data:`_SGR`), so a colour folds
-    whether it stands alone or shares its sequence with a second colour or an attribute.
+    The function walks the parameter list of each sequence (refer to :data:`_SGR`). Thus a
+    colour folds when it stands alone, and when it shares its sequence with a second
+    colour or an attribute.
     """
     if "8;2;" not in text and "8;5;" not in text:
         return text
@@ -909,7 +968,7 @@ def _quantize_sgr(text: str) -> str:
 
 
 def _quantize_params(match: _re.Match[str]) -> str:
-    """One SGR sequence with each ``38/48;2;r;g;b`` and ``38/48;5;n`` in it folded to a slot."""
+    """One SGR sequence, in which each ``38/48;2;r;g;b`` and ``38/48;5;n`` is folded to a slot."""
     params = match.group(1).split(";")
     out: list[str] = []
     i = 0
@@ -933,18 +992,19 @@ def _quantize_params(match: _re.Match[str]) -> str:
 
 
 def _build_fold_table() -> dict[int, str]:
-    """Compose the full translation table (see :data:`_FOLD_TABLE`).
+    """Compose the full translation table (refer to :data:`_FOLD_TABLE`).
 
-    Only for what the active font lacks: a character it draws passes as itself, so the
-    Cardputer keeps the accents, chevrons and the rest Terminus has that the PicoCalc's
-    512 glyphs don't.
+    The table has only what the active font does not have. A character that the font
+    draws passes as itself. Thus the Cardputer keeps the accents, the chevrons, and the
+    other glyphs that Terminus has and the 512 glyphs of the PicoCalc do not have.
     """
     import unicodedata
 
     table: dict[int, str] = {}
-    # Accented Latin (the font's base table is Cyrillic-coverage Terminus: *no* accented
-    # Latin at all) plus fullwidth forms: NFKD-decompose, drop combining marks, keep a
-    # clean single ASCII survivor. é→e, Å→A, ＃→#, ﬁ→(skipped: two chars).
+    # Accented Latin (the base table of the font is Terminus with Cyrillic coverage, with
+    # *no* accented Latin at all) and the fullwidth forms. Decompose with NFKD, remove the
+    # combining marks, and keep one clean ASCII character, if there is one. é→e, Å→A, ＃→#,
+    # ﬁ→(skipped, because it is two characters).
     for first, last in ((0x00A1, 0x024F), (0x1E00, 0x1EFF), (0xFF01, 0xFF5E)):
         for cp in range(first, last + 1):
             if cp in _FOLD_FONT:
@@ -965,16 +1025,19 @@ def _build_fold_table() -> dict[int, str]:
 
 @lru_cache(maxsize=4096)
 def _fold_to_font(text: str) -> str:
-    """Fold ``text`` down to the console font's inventory, cell widths preserved.
+    """Fold ``text`` down to the inventory of the console font. The cell widths stay the same.
 
-    Three stages, cheapest first: the translation table (accents, symbol stand-ins,
-    the emoji map — one C-level pass), then only if something non-ASCII survives, a
-    per-character sweep replacing anything still outside the font with ``?`` at the
-    character's own cell width. The sweep is the safety net that makes the platform's
-    no-wide-glyphs guarantee (see ``session._has_wide_glyph``) true *by construction*:
-    an emoji this module has never heard of still leaves as narrow ``?``s, never as a
-    tofu box that breaks the frame's cell math. Cached — render output repeats heavily
-    frame to frame, and the fold is platform-independent once this impl is bound.
+    There are three stages, and the cheapest is first. The first stage is the translation
+    table (accents, symbol stand-ins, and the emoji map), in one pass at the C level. The
+    second stage is only for text in which a non-ASCII character is still present. It is
+    a sweep of each character. It replaces each character that is still not in the font
+    with ``?`` at the cell width of the character. The sweep is the safety net. It makes
+    the guarantee of the platform, that there are no wide glyphs (refer to
+    ``session._has_wide_glyph``), true *by construction*. An emoji that this module does
+    not know still leaves as narrow ``?`` characters, and never as a tofu box that breaks
+    the cell arithmetic of the frame. The function is cached, because the render output
+    repeats much from one frame to the next. When this implementation is bound, the fold
+    does not depend on the platform.
     """
     global _FOLD_TABLE
     if _FOLD_TABLE is None:
@@ -988,31 +1051,33 @@ def _fold_to_font(text: str) -> str:
 
 
 def fold_text(text: str) -> str:
-    """The render-boundary text filter for the active platform.
+    """The text filter at the render boundary for the active platform.
 
-    Identity on the regular platform. On PicoCalc, folds any string that is about to be
-    drawn — names, message bodies, whole rendered ANSI lines — down to characters the
-    console font can shape (see :func:`_fold_to_font`); storage is never touched. ANSI
-    escape sequences pass through untouched (they are pure ASCII, and the fold never
-    rewrites ASCII). Applied once, centrally, in :func:`meshterm.ui.tui.render.render_to_ansi`
-    — individual screens should not need to call it.
+    On the regular platform, it returns the text unchanged. On the PicoCalc, it folds each
+    string that MeshTerm is about to draw, down to the characters that the console font
+    can show (refer to :func:`_fold_to_font`). The strings are names, message bodies, and
+    whole rendered ANSI lines. MeshTerm never changes the stored data. ANSI escape
+    sequences pass through without a change, because they are pure ASCII and the fold
+    never changes ASCII. The function is applied one time, in one central place, in
+    :func:`meshterm.ui.tui.render.render_to_ansi`. A screen does not need to call it.
 
     Args:
-        text: The text to fold (or pass through).
+        text: The text to fold (or to pass through).
 
     Returns:
-        The folded text; cell widths are preserved (wide emoji become glyph + pad).
+        The folded text. The cell widths stay the same (a wide emoji becomes a glyph and
+        padding).
     """
     return _fold_impl(text)
 
 
 def _no_fold(text: str) -> str:
-    """Regular platform: text renders as stored."""
+    """The regular platform: text renders as it is stored."""
     return text
 
 
 def snr_style(snr: float | None) -> str:
-    """Return a theme style name describing an SNR value's quality.
+    """Return a theme style name that shows the quality of an SNR value.
 
     Args:
         snr: An SNR reading in dB, or ``None``.
@@ -1036,14 +1101,14 @@ _node_impl: Callable[[str], str] = _node_style_spectrum
 _glyph_impl: Callable[[str], str] = _glyph_identity
 _fold_impl: Callable[[str], str] = _no_fold
 
-#: Marker colour → RGB, filled by :func:`mark_rgb` and dropped on a platform switch (the
-#: answer is the *active* theme's).
+#: The map from a marker colour to RGB. :func:`mark_rgb` fills it, and a platform switch
+#: clears it (the answer is from the *active* theme).
 _STYLE_RGB: dict[str, tuple[int, int, int]] = {}
 
 
 @on_platform
 def _bind(platform: Platform) -> None:
-    """Bind the theme's platform-dependent choices (runs now and on every switch)."""
+    """Bind the choices of the theme that depend on the platform (runs now and at each switch)."""
     global _ACTIVE_THEME, _node_impl, _glyph_impl, _fold_impl, _FOLD_TABLE
     global _FOLD_FONT, _FOLD_ALLOWED, _FOLD_QUANTIZE
     _ACTIVE_THEME = MESH_THEME if platform.truecolor else MESH_THEME_16
@@ -1056,8 +1121,9 @@ def _bind(platform: Platform) -> None:
     _FOLD_QUANTIZE = not platform.truecolor
     _fold_impl = _fold_to_font if font is not None else _no_fold
     _STYLE_RGB.clear()
-    # The fold table's emoji pads are computed with cell_len at build time. Cell widths
-    # can be re-measured/patched (the emoji-width calibration on the regular platform),
-    # so a platform switch drops the table and cache rather than trusting stale pads.
+    # MeshTerm computes the emoji pads of the fold table with cell_len when it builds the
+    # table. The cell widths can be measured again or patched (the calibration of the emoji
+    # width on the regular platform). Thus a platform switch clears the table and the
+    # cache, and does not trust old pads.
     _FOLD_TABLE = None
     _fold_to_font.cache_clear()
