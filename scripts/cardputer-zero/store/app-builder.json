@@ -9,10 +9,12 @@
       "Radio & Comms"
     ],
     "screenshots": [
+      "screenshots/splash.png",
       "screenshots/menu.png",
       "screenshots/chat.png",
+      "screenshots/contact.png",
       "screenshots/map.png",
-      "screenshots/contacts.png"
+      "screenshots/livefeed.png"
     ],
     "icon": "icon.png",
     "license": "Apache-2.0",
