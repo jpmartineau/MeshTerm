@@ -5295,7 +5295,11 @@ class MockDevice(Device):
 
     async def get_channel(self, index: int) -> dict | None:  # noqa: D102
         if index >= self._max_channels:
-            raise DeviceCommandError(f"channel index {index} out of range")
+            # The same error that the real companion raises for the firmware's "no such
+            # slot" (``_ok`` on ``ERR_CODE_NOT_FOUND``). The slot probe reads it as the end
+            # of the slots. A DeviceCommandError here was a failed read to the probe, so a
+            # probe on the simulator was never complete, and the session never cached it.
+            raise RuntimeError(f"device rejected the command: channel index {index} out of range")
         return self._channels.get(index)
 
     async def set_name(self, name: str) -> None:  # noqa: D102 - inherited docstring
