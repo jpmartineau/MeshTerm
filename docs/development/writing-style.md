@@ -147,8 +147,11 @@ Use a bend only when it helps the reader. In all other cases, use the STE rule.
 
 - A comment that explains is written in STE sentences. A short comment can be a phrase
   ("Clamp at both ends.").
-- Keep the tool comments exactly as they are: `noqa`, `type: ignore`, `pragma`, `fmt:`,
-  and the SPDX line.
+- Keep the tool part of a tool comment exactly as it is: `noqa: BLE001`,
+  `type: ignore[attr-defined]`, `pragma: no cover`, `fmt: off`, and the SPDX line. The
+  explanation after the tool part is prose: write it in STE
+  (`# noqa: BLE001 - an optional read. Its absence is acceptable.`).
+- Write a quoted UX label in code font or in double quotation marks, never in italics.
 - Keep the `#:` mark of an attribute comment. Write its text in STE.
 - Keep the layout of a diagram, a table, or an example in a comment. Change only its
   words.
