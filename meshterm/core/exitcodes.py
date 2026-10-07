@@ -39,10 +39,12 @@ causes below is :data:`FAILURE`. No part of MeshTerm makes a new code of its own
 +------+--------------+--------------------------------------------------------+
 
 :data:`NO_RESULT` is the code that is most important to explain. A script wants this
-code most, and no other tool gives it. For example, ``grep`` treats "found nothing" and
-"worked" as the same result. A caller that must count the output lines to know an empty
-mesh from a full mesh must parse the output. With this code, the caller can make a
-branch on the status instead.
+code most, and few tools give it. Most tools exit with 0 when they find nothing, the same
+as when they find something. A caller of such a tool must count the output lines to know
+an empty mesh from a full mesh, thus it must parse the output. ``grep`` is the usual
+exception: it exits with 1 when it finds no line, and with 2 on an error. In MeshTerm,
+1 is already :data:`FAILURE`, so "nothing to report" has a code of its own. With this
+code, the caller can make a branch on the status instead.
 """
 
 from __future__ import annotations
