@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Shared fixtures and helpers: plain-text screen reading, and fixed path rendering.
+"""Shared fixtures and helpers: plain-text screen reading, fixed path rendering, project files.
 
 :func:`plain` is the only way that a test reads a rendered screen. Each screen test must
 first remove the ANSI colour escapes and join the rendered lines. Only then can it make
@@ -18,13 +18,18 @@ powerline pass explicit modes, or they patch the widget's own switch with
 and keeps attributes. This silently makes each colour assertion in the suite useless (a
 shell that an agent harness runs sets it). The autouse fixture below deletes it. Thus the
 tests always see the colours that the app really sends.
+
+:func:`not_ignored` keeps a test that walks a folder to the files of the project. Git
+ignores the other files in the checkout, and these files are not ours to examine.
 """
 
 from __future__ import annotations
 
 import os
 import re
+import subprocess
 from collections.abc import Callable, Iterable, Iterator
+from pathlib import Path
 
 import pytest
 
@@ -45,6 +50,39 @@ def plain(rendered: str | Iterable[str]) -> str:
     if not isinstance(rendered, str):
         rendered = "\n".join(rendered)
     return _ANSI.sub("", rendered)
+
+
+#: The root of the checkout.
+_ROOT = Path(__file__).resolve().parent.parent
+
+
+def not_ignored(paths: Iterable[Path]) -> list[Path]:
+    """The paths in ``paths`` that git does not ignore, in their order.
+
+    A test that walks a folder of the checkout must examine only the files of the project.
+    A folder can also hold files that git ignores. An example is the MeshCore checkout that
+    ``build-firmware.sh`` makes in ``scripts/``, with its third-party code and its build
+    tree. Git never ignores a tracked file. When git is not available (for example, in an
+    unpacked source archive), the function returns all the paths, and the test examines
+    each file, as it did before.
+    """
+    paths = list(paths)
+    relative = [path.resolve().relative_to(_ROOT).as_posix() for path in paths]
+    try:
+        result = subprocess.run(
+            ["git", "check-ignore", "--stdin", "-z"],
+            cwd=_ROOT,
+            input="\0".join(relative),
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+    except OSError:
+        return paths
+    if result.returncode not in (0, 1):  # 1 is "nothing ignored", 128 is "not a repository"
+        return paths
+    ignored = set(result.stdout.split("\0"))
+    return [path for path, name in zip(paths, relative, strict=True) if name not in ignored]
 
 
 @pytest.fixture(autouse=True)

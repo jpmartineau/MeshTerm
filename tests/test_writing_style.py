@@ -20,6 +20,8 @@ import re
 import tokenize
 from pathlib import Path
 
+from tests.conftest import not_ignored
+
 ROOT = Path(__file__).resolve().parent.parent
 
 #: The folders whose Python files are examined.
@@ -81,7 +83,7 @@ def _blank_quotes(text: str) -> str:
 def _python_files() -> list[Path]:
     files = [p for d in PYTHON_DIRS for p in (ROOT / d).rglob("*.py")]
     files += [ROOT / p for p in PYTHON_EXTRA]
-    return sorted(p for p in files if p.exists() and "__pycache__" not in p.parts)
+    return not_ignored(sorted(p for p in files if p.exists() and "__pycache__" not in p.parts))
 
 
 def _python_prose(path: Path) -> list[tuple[int, str]]:
@@ -125,7 +127,7 @@ def _documents() -> list[Path]:
     for name in DOCUMENTS:
         path = ROOT / name
         files += sorted(path.rglob("*.md")) if path.is_dir() else [path]
-    return files
+    return not_ignored(files)
 
 
 def _markdown_prose(path: Path) -> list[tuple[int, str]]:

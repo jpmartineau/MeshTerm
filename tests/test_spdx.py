@@ -10,6 +10,8 @@ identifier. Thus this gate makes sure that no file has no marking.
 
 from pathlib import Path
 
+from tests.conftest import not_ignored
+
 
 def test_spdx_headers():
     """Each Python file must have an SPDX-License-Identifier header."""
@@ -33,7 +35,7 @@ def test_spdx_headers():
         python_files.append(spi_bridge)
 
     missing_spdx = []
-    for filepath in sorted(python_files):
+    for filepath in not_ignored(sorted(python_files)):
         # A file that MeshTerm cannot read as UTF-8 is a finding. The test must not skip it.
         # Each source file here is UTF-8, and a skip with no message lets a file with no
         # marking pass.
