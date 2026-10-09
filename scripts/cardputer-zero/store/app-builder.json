@@ -32,6 +32,28 @@
       "additional_hardware": true,
       "background_service": false,
       "external_display": false
+    },
+    "locales": {
+      "en": {
+        "title": "MeshTerm",
+        "summary": "A full-featured MeshCore client. Uses the Cap LoRa-1262 or a companion.",
+        "description": "MeshTerm is a full-featured MeshCore client. On the Cardputer Zero, it runs the Cap LoRa-1262 as its own radio, or it connects to a MeshCore companion over USB, Bluetooth, or TCP. Chat on channels and in direct messages, see the mesh on a map, trace paths, manage repeaters and rooms, and keep a record of every node heard. Fn+4 to Fn+8 drive the row of labels at the bottom of the display. Hold Esc to quit."
+      },
+      "zh-CN": {
+        "title": "MeshTerm",
+        "summary": "功能完整的 MeshCore 客户端，可使用 Cap LoRa-1262 或 companion 设备。",
+        "description": "MeshTerm 是一款功能完整的 MeshCore 客户端。在 Cardputer Zero 上，它可以直接把 Cap LoRa-1262 用作自己的无线电，也可以通过 USB、蓝牙或 TCP 连接 MeshCore companion 设备。你可以在频道和私信中聊天、在地图上查看网络、追踪路径、管理中继器和房间，并记录收到过的每一个节点。Fn+4 至 Fn+8 操作屏幕底部的功能标签。长按 Esc 退出。"
+      },
+      "zh-TW": {
+        "title": "MeshTerm",
+        "summary": "功能完整的 MeshCore 用戶端，可使用 Cap LoRa-1262 或 companion 裝置。",
+        "description": "MeshTerm 是一款功能完整的 MeshCore 用戶端。在 Cardputer Zero 上，它可以直接把 Cap LoRa-1262 當作自己的無線電，也可以透過 USB、藍牙或 TCP 連線 MeshCore companion 裝置。你可以在頻道和私訊中聊天、在地圖上檢視網路、追蹤路徑、管理中繼器和房間，並記錄收到過的每一個節點。Fn+4 至 Fn+8 操作螢幕底部的功能標籤。長按 Esc 結束。"
+      },
+      "ja": {
+        "title": "MeshTerm",
+        "summary": "フル機能の MeshCore クライアント。Cap LoRa-1262 またはコンパニオン端末を使用。",
+        "description": "MeshTerm はフル機能の MeshCore クライアントです。Cardputer Zero では Cap LoRa-1262 を自身の無線機として直接使うことも、USB・Bluetooth・TCP 経由で MeshCore のコンパニオン端末に接続することもできます。チャンネルやダイレクトメッセージでのチャット、地図上でのメッシュの表示、経路のトレース、リピーターやルームの管理ができ、受信したすべてのノードを記録します。画面下部のラベルは Fn+4〜Fn+8 で操作します。Esc を長押しすると終了します。"
+      }
     }
   }
 }
