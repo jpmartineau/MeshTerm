@@ -11,15 +11,20 @@
 #          declares a HardwareSerial for ESP32 only, and nRF52 needs Serial1)
 #        * add a Xiao_nrf52_companion_radio_serial env: the companion is on D6/D7, and I2C
 #          moves off those pads (to internal pins 16/17), so that I2C cannot take them
-#   3. builds that environment
-#   4. converts the .hex to .uf2
+#   3. applies meshcore-frame-timeout.patch, which makes the link recover by itself: the
+#      serial parser drops a frame whose bytes stop coming, so one lost byte cannot make
+#      the companion ignore every command after it
+#   4. builds that environment
+#   5. converts the .hex to .uf2
 #
-# The patch has the form that upstream needs, and we submitted it to MeshCore. After it is
-# merged, delete the `git apply` step below. The env is then part of the firmware, and
-# nothing needs a patch.
+# Each patch has the form that upstream needs. When upstream merges one, remove it from
+# PATCHES below. When both are merged, the env is part of the firmware, and nothing needs
+# a patch.
 #
-# Prerequisites: git, and the PlatformIO CLI on PATH (`pio`). Install pio with:
-#     pip install platformio
+# Prerequisites: git, and the PlatformIO CLI (`pio`). Install it with the official installer
+# script (refer to Step 11 of docs/devices/picocalc-lyra.md). The script finds `pio` on the
+# PATH, or else in ~/.platformio/penv, where the installer and the PlatformIO extension of
+# VS Code put it. Thus you do not have to change the PATH.
 #
 # Usage:
 #     sh build-firmware.sh                 # clone+build into ./_meshcore-build
@@ -28,30 +33,50 @@
 set -eu
 
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-PATCH="$HERE/meshcore-uart1.patch"
+PATCHES="meshcore-uart1.patch meshcore-frame-timeout.patch"
 MC="${MESHCORE_DIR:-$HERE/_meshcore-build}"
 ENV=Xiao_nrf52_companion_radio_serial
-# The commit that this patch is made against (a `dev` commit, because `dev` is the branch
+# The commit that the patches are made against (a `dev` commit, because `dev` is the branch
 # where MeshCore takes new work). A newer MeshCore can need the edits to be applied again by
-# hand (refer to the README, "Updating"). Set MESHCORE_COMMIT= to follow upstream.
+# hand (refer to the guide, "Building by hand"). Set MESHCORE_COMMIT= to follow upstream.
 PIN="${MESHCORE_COMMIT:-e9edfc8e}"
 
 command -v git >/dev/null 2>&1 || { echo "ERROR: git not found"; exit 1; }
-command -v pio >/dev/null 2>&1 || command -v platformio >/dev/null 2>&1 || {
-    echo "ERROR: PlatformIO CLI (pio) not found. Install with: pip install platformio"; exit 1; }
-PIO=$(command -v pio 2>/dev/null || command -v platformio)
+PIO=$(command -v pio 2>/dev/null || command -v platformio 2>/dev/null) || PIO=
+if [ -z "$PIO" ]; then
+    # The installer does not put pio on the PATH. Look where it does put it: bin/ on Linux
+    # and macOS, Scripts/ on Windows.
+    for c in "$HOME/.platformio/penv/bin/pio" "$HOME/.platformio/penv/Scripts/pio.exe"; do
+        if [ -x "$c" ]; then PIO=$c; break; fi
+    done
+fi
+[ -n "$PIO" ] || {
+    echo "ERROR: PlatformIO (pio) not found, on the PATH or in ~/.platformio/penv."
+    echo "Install it with the official installer script (Step 11 of the PicoCalc guide)."
+    exit 1; }
+echo ">> using $PIO"
+# The Python that runs uf2conv.py. PlatformIO's own Python comes first, because it is
+# always there when pio is. A bare `python` is absent on many Linux systems, and on Windows
+# `python3` can be a stub that opens the Microsoft Store.
+PY=
+for c in "$(dirname -- "$PIO")/python" "$(dirname -- "$PIO")/python.exe"; do
+    if [ -x "$c" ]; then PY=$c; break; fi
+done
+[ -n "$PY" ] || PY=$(command -v python3 2>/dev/null || command -v python)
 
 if [ ! -d "$MC/.git" ]; then
     echo ">> cloning MeshCore into $MC"
     git clone https://github.com/meshcore-dev/MeshCore.git "$MC"
 fi
 
-echo ">> checkout $PIN + apply patch"
+echo ">> checkout $PIN + apply patches"
 git -C "$MC" fetch --quiet --tags origin 2>/dev/null || true
 git -C "$MC" checkout -f "$PIN" 2>/dev/null || {
     echo "   (pinned commit not found; using current checkout)"; }
-git -C "$MC" apply "$PATCH"
-echo "   applied meshcore-uart1.patch"
+for p in $PATCHES; do
+    git -C "$MC" apply "$HERE/$p"
+    echo "   applied $p"
+done
 
 echo ">> building $ENV (first build downloads the nRF52 toolchain; be patient)"
 ( cd "$MC" && "$PIO" run -e "$ENV" )
@@ -60,8 +85,9 @@ HEX="$MC/.pio/build/$ENV/firmware.hex"
 UF2CONV="$MC/bin/uf2conv/uf2conv.py"
 OUT="$HERE/meshcore-xiao-radio.uf2"
 echo ">> converting to uf2"
-python "$UF2CONV" "$HEX" -c -f 0xADA52840 -o "$OUT"
+"$PY" "$UF2CONV" "$HEX" -c -f 0xADA52840 -o "$OUT"
 
 echo ""
 echo "DONE.  Firmware: $OUT"
-echo "Next: put the XIAO in bootloader (double-tap reset) and run:  python flash.py"
+echo "Next: connect the USB-C port of the XIAO to this machine, and run:  python3 flash.py"
+echo "      (on Windows: py flash.py)"

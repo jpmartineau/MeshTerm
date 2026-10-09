@@ -611,21 +611,27 @@ mode. Come back to this phase when you have the soldering iron out.
 
 ### Step 11: Install PlatformIO
 
-On your PC, install PlatformIO:
+PlatformIO builds the firmware and loads it onto the XIAO. If you already have it (for
+example, the PlatformIO extension of VS Code), go to Step 12.
+
+On your PC, install PlatformIO with its
+[official installer script](https://docs.platformio.org/en/latest/core/installation/methods/installer-script.html).
+The script puts PlatformIO in a Python environment of its own, `~/.platformio/penv`, and
+does not change your system Python:
 
 ```bash
-# on the PC
-pip install platformio
+# on the PC (Git Bash or WSL on Windows)
+curl -fsSL -o get-platformio.py https://raw.githubusercontent.com/platformio/platformio-core-installer/master/get-platformio.py
+python3 get-platformio.py          # on Windows: py get-platformio.py
 ```
 
-If you do not want to change the system Python, use the
-[official installer script](https://docs.platformio.org/en/latest/core/installation/methods/installer-script.html)
-instead. Then make sure that `pio` is on your PATH:
+The installer ends with the full path of `platformio`, and it tells you to add its directory
+to your PATH. You do not have to. `build-firmware.sh` and `flash.py` look for PlatformIO in
+`~/.platformio/penv` when it is not on the PATH.
 
-```bash
-# on the PC
-pio --version
-```
+Do not use `pip install platformio`. Many systems refuse a `pip install` into the system
+Python (Debian, Ubuntu, and Homebrew mark it "externally managed"). Also, in a shell with an
+active virtual environment, the package goes into that environment.
 
 The first firmware build downloads the nRF52 toolchain, which is several hundred
 megabytes. Do this where you have a good connection.
@@ -633,16 +639,18 @@ megabytes. Do this where you have a good connection.
 ### Step 12: Build the firmware
 
 ```bash
-# on the PC (Git Bash or WSL on Windows)
+# on the PC (Git Bash or WSL on Windows), from your MeshTerm checkout
 cd scripts/picocalc-lyra/xiao-radio
 sh build-firmware.sh
 ```
 
-The script clones MeshCore, applies a patch, and builds. It ends with this output:
+The script clones MeshCore, applies two patches, and builds. The first build takes several
+minutes. The script ends with this output:
 
 ```
 DONE.  Firmware: /path/to/scripts/picocalc-lyra/xiao-radio/meshcore-xiao-radio.uf2
-Next: put the XIAO in bootloader (double-tap reset) and run:  python flash.py
+Next: connect the USB-C port of the XIAO to this machine, and run:  python3 flash.py
+      (on Windows: py flash.py)
 ```
 
 These are the actions of the script. You can do them by hand if you must:
@@ -650,15 +658,15 @@ These are the actions of the script. You can do them by hand if you must:
 1. Clone [MeshCore](https://github.com/meshcore-dev/MeshCore) into
    `scripts/picocalc-lyra/xiao-radio/_meshcore-build`.
 2. Check out the pinned commit `e9edfc8e` on the `dev` branch. This is the commit that the
-   patch applies to and builds against without a problem.
-3. Apply `meshcore-uart1.patch`.
+   patches apply to and build against without a problem.
+3. Apply `meshcore-uart1.patch`, then `meshcore-frame-timeout.patch`.
 4. Build the `Xiao_nrf52_companion_radio_serial` PlatformIO environment:
    `pio run -e Xiao_nrf52_companion_radio_serial`.
 5. Convert the resulting `.hex` file to a `.uf2` file with MeshCore's own converter.
    Use the UF2 family id of the nRF52840:
    `python bin/uf2conv/uf2conv.py firmware.hex -c -f 0xADA52840 -o meshcore-xiao-radio.uf2`.
 
-#### What the patch changes, and why it is still necessary
+#### What the patches change, and why they are still necessary
 
 `meshcore-uart1.patch` changes two files. Both changes are necessary:
 
@@ -687,6 +695,20 @@ still has no `_serial` companion environment. To build with the patch is the nor
 here, not a temporary measure. When the patch is merged, you can delete the `git apply`
 step and the patch file.
 
+`meshcore-frame-timeout.patch` changes the serial parser of the companion,
+`src/helpers/ArduinoSerialInterface.cpp` and its header. Each protocol frame starts with `<`
+and a length of two bytes, and the parser then reads that number of bytes. Without the
+patch, the parser has no time limit. If one byte is lost or damaged on the wire, the parser
+can read a wrong length of up to 65,535 bytes. Then it ignores each command until that many
+bytes come in. MeshTerm sends one short request when it connects. Thus the radio does not
+answer for many starts in sequence, and only a power cycle of the XIAO clears the fault.
+
+With the patch, the parser drops a frame when its bytes stop for 200 ms, and the next
+command starts a new frame. Bytes that wait in the receive buffer while the firmware is
+busy still belong to the frame. Only silence on the wire resets the parser. All the serial
+companions of MeshCore have this parser, thus the patch is also a candidate for upstream.
+We have not submitted it yet.
+
 #### Building by hand
 
 If you want to follow a newer MeshCore and not the pinned commit, run:
@@ -697,13 +719,16 @@ git clone https://github.com/meshcore-dev/MeshCore.git
 cd MeshCore
 git checkout dev                            # or MESHCORE_COMMIT=dev sh build-firmware.sh
 git apply /path/to/scripts/picocalc-lyra/xiao-radio/meshcore-uart1.patch
+git apply /path/to/scripts/picocalc-lyra/xiao-radio/meshcore-frame-timeout.patch
 pio run -e Xiao_nrf52_companion_radio_serial
 python bin/uf2conv/uf2conv.py .pio/build/Xiao_nrf52_companion_radio_serial/firmware.hex \
     -c -f 0xADA52840 -o meshcore-xiao-radio.uf2
 ```
 
-If `git apply` fails, upstream has changed and the context of the patch does not match. The
-two hunks are small, so you can make them by hand:
+If `git apply` fails, upstream has changed and the context of the patch does not match. If
+`meshcore-frame-timeout.patch` fails, open it and make its changes by hand in the two files
+that it names. The two hunks of `meshcore-uart1.patch` are small, so you can also make them
+by hand:
 
 1. In `examples/companion_radio/main.cpp`, find the line
    `HardwareSerial companion_serial(1);` and replace it with:
@@ -745,22 +770,25 @@ two hunks are small, so you can make them by hand:
      densaugeo/base64 @ ~1.4.0
    ```
 
-Only the pinned commit (`e9edfc8e`) is known to build without a problem with this patch. A
+Only the pinned commit (`e9edfc8e`) is known to build without a problem with these patches. A
 newer `dev` can need small changes.
 
 ### Step 13: Flash the XIAO
 
 CAUTION: Make sure that the XIAO is the board that you flash and that it has the S140 v7
 bootloader. A flash to the wrong board, or to the wrong SoftDevice, can leave a board that
-does not start. `flash.py` checks both before it writes.
+does not start. `flash.py` checks both before it writes to a UF2 drive. Through serial DFU,
+it accepts only the USB ids of the XIAO bootloader.
 
-1. Connect the **USB-C port of the XIAO itself** to your PC. It does not matter yet if the
-   XIAO is also wired to the Lyra.
-2. Run the flash tool:
+1. Connect the **USB-C port of the XIAO itself** to your PC. Do this before you wire the
+   XIAO in Step 14. To flash a XIAO that is already wired, follow "Updating the radio
+   firmware" in [Day-to-day](#day-to-day) instead. The USB power of a wired XIAO goes
+   backward into the Lyra.
+2. Run the flash tool, in the same directory as Step 12:
 
 ```bash
-# on the PC
-python flash.py
+# on the PC (Git Bash or WSL on Windows)
+python3 flash.py          # on Windows: py flash.py
 ```
 
 The tool first tries a 1200-baud "touch" over USB serial. This resets the XIAO into its
@@ -768,7 +796,8 @@ bootloader. The touch targets only the USB vendor id of Seeed. Thus it does not 
 another nRF52840 board on the same bench. If the touch does not work, **double-tap the reset
 button of the XIAO** and run the tool again.
 
-When the tool finds the bootloader, it checks two things before it writes anything:
+The bootloader then shows a UF2 drive, or only a serial port. When it shows a drive, the
+tool checks two things before it writes anything:
 
 - **The `Model` field of `INFO_UF2.TXT`** must say a XIAO. A drive letter is not an
   identity. Another board can have the letter that your XIAO just gave up.
@@ -782,17 +811,17 @@ If you are certain, `--force` overrides both checks. A good flash ends with this
 DONE. XIAO flashed and rebooting into the radio firmware.
 ```
 
-**If no UF2 drive ever shows**, this is not always an error. Some XIAO bootloaders show
-only a serial port and no mass-storage drive. `flash.py` knows this case. It prints the
-fallback command and does not fail silently:
+**When the bootloader shows only a serial port**, the tool loads the firmware through serial
+DFU itself. The XIAO that we tested has this type of bootloader. The tool runs the
+PlatformIO upload in `_meshcore-build`, which sends the firmware that Step 12 built. This
+takes approximately one minute. The USB ids of the port identify the XIAO bootloader. The
+upload ends with these lines:
 
-```bash
-# on the PC, from your MeshCore checkout
-pio run -e Xiao_nrf52_companion_radio_serial -t upload --upload-port <bootloader port>
 ```
-
-This command ends with `Device programmed.` and the XIAO restarts itself into the radio
-firmware.
+Device programmed.
+...
+DONE. XIAO flashed and rebooting into the radio firmware.
+```
 
 After the flash, the USB serial port of the XIAO is **silent** to companion frames. The
 companion protocol is now on D6/D7, not on USB. This silence is correct. It does not mean
@@ -938,6 +967,24 @@ If an update adds new glyphs to the console font, build the font again afterward
 sh /home/meshterm/MeshTerm/scripts/picocalc-lyra/calculinux-console-font-6x12.sh
 ```
 
+**Updating the radio firmware.** A new firmware for the XIAO goes in through its USB-C port,
+as in Step 13. But the 3V3 wire of Step 14 connects the XIAO to the Lyra. When the XIAO gets
+USB power, that wire powers the Lyra backward.
+
+1. On the PC, build the firmware first ([Step 12](#step-12-build-the-firmware)). Then the
+   cable stays connected only for the flash.
+2. On the PicoCalc, run `sudo poweroff`. Then set the power switch to off.
+3. Remove the back of the shell. Then remove the batteries.
+
+CAUTION: Remove the batteries before you connect the USB-C port of the XIAO. Through the
+3V3 wire, the USB power of the XIAO goes backward into the Lyra and the circuits next to
+it.
+
+4. Connect the USB-C port of the XIAO to your PC.
+5. Run `flash.py` ([Step 13](#step-13-flash-the-xiao)).
+6. When the tool shows `DONE`, disconnect the cable.
+7. Put the batteries and the back of the shell in again. Then turn the PicoCalc on.
+
 **Changing Wi-Fi.** Run `uwific` as root, as in [Step 7](#step-7-join-wi-fi). The kick at
 boot time finds the new network by itself. It needs only that `iwd` knows the network.
 
@@ -974,7 +1021,7 @@ You do not need to do anything to keep the shell's own font.
 | The port opens but the radio never answers | Flash again with the **`_serial`** environment, not `_ble` or `_usb`. Only `_serial` defines `SERIAL_RX`/`SERIAL_TX`. When the XIAO runs the radio firmware, its USB serial must be silent. This is expected and is not a fault. |
 | Still silent, and the wiring is correct | Make sure that the firmware has the I²C remap (`PIN_WIRE_SCL=16`, `PIN_WIRE_SDA=17`). A build without the second hunk of the patch looks the same until you check this. |
 | The flash was good, but the XIAO never comes back | The board or the SoftDevice is wrong. `INFO_UF2.TXT` must report a XIAO and **S140 v7**, not `6.1.1`. `flash.py` refuses to flash with either mismatch unless you use `--force`. |
-| `flash.py` finds no UF2 drive | This is expected on a bootloader that has only CDC. Use the `pio … -t upload --upload-port` command that the tool prints. |
+| `flash.py` finds no UF2 drive | This is expected on a bootloader that has only a serial port. The tool then loads the firmware through serial DFU itself. If it says that there is no build, run `build-firmware.sh` first. |
 | Nothing on `/dev/ttyS1` after a reboot | Run `systemctl status uart1-radio-mux`, then `journalctl -b -u uart1-radio-mux`. The pin-mux poke must run at each boot. If the oneshot fails, the log tells you why. |
 
 ---
@@ -991,6 +1038,18 @@ checked these items by hand:
 - the need for the two hunks of the patch on `dev`
 - the nRF52840 UF2 family id
 - the XIAO bootloader ids, against the board files of Adafruit
+
+On 2026-10-08, the author flashed the radio again, with the frame timeout, and checked these
+items on the bench:
+
+- the build and the flash with the commands of this guide, on a Windows PC that did not
+  have the PlatformIO command-line tool
+- that the bootloader of this XIAO shows only a serial port, and that `flash.py` then loads
+  the firmware through serial DFU
+- that the USB power of a wired XIAO goes backward into the Lyra
+- that the radio keeps its identity through the flash
+- that, after the flash, a frame that breaks off no longer blocks the link: the next
+  `APP_START` after 0.5 s of silence gets its reply
 
 The other facts are the findings of one bench. A second device can give other results:
 

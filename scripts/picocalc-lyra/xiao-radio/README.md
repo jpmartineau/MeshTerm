@@ -10,8 +10,8 @@ It has the parts, the firmware build and an explanation of the patch, the flashi
 wiring, the setup of the Lyra, and what we proved on only one bench. The header of
 `uart1-mux.py` explains what the register write does. This page is the bench card.
 
-**Licensing.** The firmware is MeshCore, under the MIT License. The `meshcore-uart1.patch`
-changes the source of MeshCore, and `build-firmware.sh` makes a MeshCore binary. The licence
+**Licensing.** The firmware is MeshCore, under the MIT License. The two patches
+(`meshcore-uart1.patch` and `meshcore-frame-timeout.patch`) change the source of MeshCore, and `build-firmware.sh` makes a MeshCore binary. The licence
 is [`LICENSE.MeshCore`](LICENSE.MeshCore) in this directory.
 
 There are three steps on two machines:
@@ -20,8 +20,10 @@ There are three steps on two machines:
 # 1. dev machine: build (needs git + PlatformIO)
 cd scripts/picocalc-lyra/xiao-radio && sh build-firmware.sh
 
-# 2. dev machine: flash, with the XIAO's own USB-C plugged in
-python flash.py            # double-tap reset if the touch doesn't take
+# 2. dev machine: flash, with the XIAO's own USB-C plugged in. If the XIAO is already
+#    wired, shut the PicoCalc down and remove its batteries first: the USB power of the
+#    XIAO goes backward into the Lyra.
+python3 flash.py           # on Windows: py flash.py
 
 # 3. the Lyra, as root
 sh scripts/picocalc-lyra/xiao-radio/lyra-setup.sh          # MT_USER=meshterm by default

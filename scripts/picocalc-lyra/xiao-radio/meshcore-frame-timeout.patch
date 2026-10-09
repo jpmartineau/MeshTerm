@@ -1,0 +1,54 @@
+diff --git a/src/helpers/ArduinoSerialInterface.cpp b/src/helpers/ArduinoSerialInterface.cpp
+index a01fa58..49f98aa 100644
+--- a/src/helpers/ArduinoSerialInterface.cpp
++++ b/src/helpers/ArduinoSerialInterface.cpp
+@@ -5,6 +5,13 @@
+ #define RECV_STATE_LEN1_FOUND  2
+ #define RECV_STATE_LEN2_FOUND  3
+ 
++// A frame whose bytes stop coming is dropped after this long. Without it, one lost or
++// damaged byte can leave the parser waiting for a length of up to 65535 bytes, and every
++// command after it is swallowed until that many bytes have arrived.
++#ifndef RECV_FRAME_TIMEOUT_MILLIS
++  #define RECV_FRAME_TIMEOUT_MILLIS  200
++#endif
++
+ void ArduinoSerialInterface::enable() { 
+   _isEnabled = true;
+   _state = RECV_STATE_IDLE;
+@@ -37,9 +44,17 @@ size_t ArduinoSerialInterface::writeFrame(const uint8_t src[], size_t len) {
+ }
+ 
+ size_t ArduinoSerialInterface::checkRecvFrame(uint8_t dest[]) {
++  // Only silence on the line counts: nothing waiting, and nothing read for a while. Bytes
++  // that queued up while the loop was busy still belong to the frame in progress.
++  if (_state != RECV_STATE_IDLE && !_serial->available()
++      && millis() - _last_rx > RECV_FRAME_TIMEOUT_MILLIS) {
++    _state = RECV_STATE_IDLE;   // the frame broke off: look for the next '<'
++  }
++
+   while (_serial->available()) {
+     int c = _serial->read();
+     if (c < 0) break;
++    _last_rx = millis();
+ 
+     switch (_state) {
+       case RECV_STATE_IDLE:
+diff --git a/src/helpers/ArduinoSerialInterface.h b/src/helpers/ArduinoSerialInterface.h
+index c408635..b6b8be3 100644
+--- a/src/helpers/ArduinoSerialInterface.h
++++ b/src/helpers/ArduinoSerialInterface.h
+@@ -8,11 +8,12 @@ class ArduinoSerialInterface : public BaseSerialInterface {
+   uint8_t _state;
+   uint16_t _frame_len;
+   uint16_t rx_len;
++  unsigned long _last_rx;
+   Stream* _serial;
+   uint8_t rx_buf[MAX_FRAME_SIZE];
+ 
+ public:
+-  ArduinoSerialInterface() { _isEnabled = false; _state = 0; }
++  ArduinoSerialInterface() { _isEnabled = false; _state = 0; _last_rx = 0; }
+ 
+   void begin(Stream& serial) { 
+     _serial = &serial; 

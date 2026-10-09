@@ -6,21 +6,93 @@ This script runs on your development machine. The USB-C port of the XIAO must be
 to that machine. It works on Windows, Linux, and macOS.
 
 The XIAO goes into bootloader mode in one of two ways. The first way is a physical
-**double-tap of its reset button**. Then it mounts as the ``XIAO-SENSE`` drive. The second
-way is for a XIAO that runs app firmware with a serial port. This script first tries an
-automatic 1200-baud "touch" on that port.
+**double-tap of its reset button**. The second way is for a XIAO that runs app firmware
+with a serial port. This script first tries an automatic 1200-baud "touch" on that port.
+
+A XIAO bootloader shows one of two things. Some bootloaders mount a UF2 drive
+(``XIAO-SENSE``), and the script copies the .uf2 file to it. Other bootloaders show only a
+serial port. Then the script loads the firmware through serial DFU itself: it runs the
+PlatformIO upload in the MeshCore checkout that ``build-firmware.sh`` built.
+
+The script needs ``pyserial`` for the touch and for the search of the serial port. When the
+Python that runs the script does not have it, the script runs itself again with the Python
+of PlatformIO, which always has it.
 
 Usage:
-    python flash.py                       # flash ./meshcore-xiao-radio.uf2
-    python flash.py path/to/firmware.uf2  # flash a specific file
+    python3 flash.py                       # flash ./meshcore-xiao-radio.uf2
+    python3 flash.py path/to/firmware.uf2  # flash a specific file
 """
 
 import glob
 import os
+import shutil
+import subprocess
 import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+#: The PlatformIO environment that ``build-firmware.sh`` builds.
+ENV = "Xiao_nrf52_companion_radio_serial"
+
+#: The seconds that the script waits for a UF2 drive after the bootloader port shows. A
+#: bootloader with a drive mounts it within this time. A bootloader without one never does.
+DRIVE_GRACE_S = 5
+
+
+def platformio_penv():
+    """Return the directory of the PlatformIO environment, or None.
+
+    The official installer and the PlatformIO extension of VS Code both put it in
+    ``~/.platformio/penv``. The programs are in ``Scripts`` on Windows and in ``bin`` on
+    other systems.
+    """
+    base = os.path.join(os.path.expanduser("~"), ".platformio", "penv")
+    for sub in ("Scripts", "bin"):
+        path = os.path.join(base, sub)
+        if os.path.isdir(path):
+            return path
+    return None
+
+
+def find_pio():
+    """Return the path of the PlatformIO CLI: on the PATH first, else in its environment."""
+    found = shutil.which("pio") or shutil.which("platformio")
+    if found:
+        return found
+    penv = platformio_penv()
+    if penv:
+        for name in ("pio.exe", "pio"):
+            path = os.path.join(penv, name)
+            if os.path.isfile(path):
+                return path
+    return None
+
+
+def ensure_pyserial():
+    """Make sure that ``pyserial`` imports, or run this script again with a Python that has it.
+
+    Without ``pyserial``, the touch and the search of the bootloader port cannot run. In the
+    past, both stopped without a message, and the script then asked for a double-tap that
+    could not help.
+    """
+    try:
+        import serial  # noqa: F401 - only a check that the module exists
+
+        return
+    except ImportError:
+        pass
+    penv = platformio_penv()
+    if penv:
+        for name in ("python.exe", "python"):
+            python = os.path.join(penv, name)
+            same = os.path.abspath(python) == os.path.abspath(sys.executable)
+            if os.path.isfile(python) and not same:
+                print(f"   (no pyserial here, so the script runs again with {python})", flush=True)
+                sys.exit(subprocess.call([python, os.path.abspath(__file__)] + sys.argv[1:]))
+    sys.exit(
+        "ERROR: flash.py needs pyserial. Install PlatformIO (Step 11), or run: pip install pyserial"
+    )
 
 
 def find_uf2_drive():
@@ -123,6 +195,33 @@ def check_drive_is_ours(drive, force=False):
     return True
 
 
+def flash_serial_dfu(port, uf2_given=False):
+    """Load the firmware through the serial DFU of a bootloader that shows no drive.
+
+    The PlatformIO upload makes the DFU package from the build and sends it. Thus it loads
+    the firmware that ``build-firmware.sh`` built in the MeshCore checkout, and not a .uf2
+    file. The checkout is ``MESHCORE_DIR``, or else ``_meshcore-build`` next to this script,
+    as in ``build-firmware.sh``.
+    """
+    checkout = os.environ.get("MESHCORE_DIR") or os.path.join(HERE, "_meshcore-build")
+    command = ["run", "-e", ENV, "-t", "upload", "--upload-port", port]
+    pio = find_pio()
+    print(f">> the bootloader on {port} has no UF2 drive: loading through serial DFU")
+    if uf2_given:
+        print("   note: serial DFU loads the build in the MeshCore checkout, not the file you gave")
+    if not pio or not os.path.isdir(os.path.join(checkout, ".pio", "build", ENV)):
+        sys.exit(
+            f"ERROR: no {'PlatformIO' if not pio else 'build in ' + checkout} for serial DFU.\n"
+            "Run build-firmware.sh first. To load by hand, run in the MeshCore checkout:\n"
+            f"    pio {' '.join(command)}"
+        )
+    sys.stdout.flush()  # keep this script's lines before the lines of the upload
+    status = subprocess.call([pio] + command, cwd=checkout)
+    if status != 0:
+        sys.exit(f"ERROR: the serial DFU upload failed (exit {status}).")
+    print("DONE. XIAO flashed and rebooting into the radio firmware.")
+
+
 def main():
     """Put the XIAO in its bootloader and copy the firmware onto the drive that it shows.
 
@@ -136,32 +235,39 @@ def main():
     if not os.path.exists(uf2):
         sys.exit(f"ERROR: firmware not found: {uf2}\n(run build-firmware.sh first)")
 
+    ensure_pyserial()
     print(">> looking for XIAO bootloader drive ...")
     drive = find_uf2_drive()
     before = drive
+    port = None
     if not drive:
         touch_1200()
+        port_since = None
         for _ in range(30):
             drive = find_uf2_drive()
             if drive:
                 break
+            port = bootloader_port()
+            if port:
+                # A bootloader that mounts a drive does it within a few seconds of its port.
+                # After that, it is a bootloader with only a serial port.
+                port_since = port_since or time.monotonic()
+                if time.monotonic() - port_since >= DRIVE_GRACE_S:
+                    break
             time.sleep(1)
     if drive and drive == before:
         # The letter was there before we touched anything, so it can belong to a different
         # board. Check what the drive reports. Do not trust the letter.
         print(f"   note: {drive} was already mounted before the touch")
     if not drive:
-        port = bootloader_port()
+        port = port or bootloader_port()
         if port:
-            sys.exit(
-                f"ERROR: the XIAO is in its bootloader on {port} but exposes no UF2 drive.\n"
-                "This bootloader presents a serial port only, so copy-to-drive can't work.\n"
-                "Flash it over serial DFU instead, from your MeshCore checkout:\n"
-                f"    pio run -e Xiao_nrf52_companion_radio_serial -t upload --upload-port {port}"
-            )
+            flash_serial_dfu(port, uf2_given=bool(args))
+            return
         sys.exit(
-            "ERROR: no UF2 bootloader drive and no XIAO bootloader serial port found.\n"
-            "Double-tap the XIAO's reset button, then re-run."
+            "ERROR: no XIAO found: no UF2 bootloader drive, and no XIAO serial port.\n"
+            "Connect the USB-C port of the XIAO. If it is connected, double-tap its reset\n"
+            "button, then run this again."
         )
 
     check_drive_is_ours(drive, force=force)
