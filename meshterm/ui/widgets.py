@@ -58,6 +58,7 @@ from .marks import (
     parse_hex,
 )
 from .pathline import SELF_GLYPH, PathHop, PathLine, path_line
+from .termfont import powerline_enabled
 from .theme import glyph, mark_rgb, name_style, node_style, snr_style
 
 if TYPE_CHECKING:
@@ -580,7 +581,17 @@ def highlighted_hash(
     return text
 
 
-def name_chip(label: str, key: str | None = None, *, you: bool = False) -> Text:
+#: The roles of a lone chip in a route that it does not draw (the ``role`` of
+#: :func:`name_chip`). The chip of an *origin* closes on the point, because the route goes
+#: on from it: the author of a message. The chip of a *destination* opens on the notch,
+#: because the route came to it: the node that a mention names.
+ORIGIN = "origin"
+DESTINATION = "destination"
+
+
+def name_chip(
+    label: str, key: str | None = None, *, you: bool = False, role: str | None = None
+) -> Text:
     """A node name drawn as the single chip of a path line: the only frame for a name.
 
     This is not an imitation of the chip language. It uses the chip language. The function
@@ -592,9 +603,19 @@ def name_chip(label: str, key: str | None = None, *, you: bool = False) -> Text:
     keyless grey. Our own end is the ``★`` of the map on its neutral dark grey, and not a
     name.
 
+    The ends of the chip say the same thing as the ends of a route. With no ``role``, the
+    node is the whole route, and the two ends are square (or rounded where the font has
+    the caps). A ``role`` puts the chip at one end of a route that is not drawn, and the
+    other end of the chip shows that the route continues there (refer to
+    :data:`ORIGIN` and :data:`DESTINATION`). A message goes from its author toward the
+    nodes that it names. Thus the author closes on the point and a mention opens on the
+    notch, as the first and the last hop of a route do (JP, 2026-10-10).
+
     The degradation is also inherited. Where the terminal cannot draw powerline
     separators, a path line is text in arrow mode, and a single hop is only the name in its
-    own hue. This is what a sender label was before it had a frame.
+    own hue. This is what a sender label was before it had a frame. There the ``role`` does
+    nothing. A lone name with a stray ``→`` before or after it reads as a broken route, and
+    not as a sender or as a mention (JP, 2026-10-10).
 
     Args:
         label: The name as it must read (it is already resolved, and this function never
@@ -605,12 +626,15 @@ def name_chip(label: str, key: str | None = None, *, you: bool = False) -> Text:
             only for identities that have a key.
         you: ``True`` if this is our node. It is the ``★``, the same as a route draws our
             end of it.
+        role: :data:`ORIGIN`, :data:`DESTINATION`, or ``None`` for a node alone.
 
     Returns:
         The chip as a one-line :class:`Text`.
     """
     hop = PathHop(SELF_GLYPH, you=True) if you else PathHop(label, key=key or None)
-    return PathLine([hop]).text()
+    if not powerline_enabled():
+        role = None
+    return PathLine([hop], from_origin=role != DESTINATION, to_destination=role != ORIGIN).text()
 
 
 def _shorten_hash(value: str, hash_bytes: int | None) -> str:

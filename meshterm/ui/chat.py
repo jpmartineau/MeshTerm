@@ -32,8 +32,9 @@ from ..core.events import EventKind, MeshEvent
 from ..core.models import ChatMessage, Contact, Conversation, Message, utcnow
 from ..core.regions import WILDCARD
 from ..platforms import Platform, on_platform
+from .pathline import PATH_INK
 from .qr import QrScreen, qr_strip
-from .theme import name_style, snr_style
+from .theme import snr_style
 from .tui.prompt import (
     CHANNEL_BYTE_LIMIT,
     DM_BYTE_LIMIT,
@@ -43,7 +44,7 @@ from .tui.prompt import (
 from .tui.render import render_hanging, render_lines, right_aligned_tail
 from .tui.screen import CANCEL, Screen
 from .tui.spinner import Spinner, spinner_interval
-from .widgets import name_chip
+from .widgets import DESTINATION, ORIGIN, name_chip
 
 if TYPE_CHECKING:
     from ..context import AppContext
@@ -671,14 +672,19 @@ class ChatScreen(Screen):
         sender looks exactly like that node as a hop in a route, also for our messages:
         the ``★``, never our name.
 
-        Only this name is in a chip. An ``@mention`` in a body (refer to
-        :meth:`_render_mentions`) is a part of what the sender said. A chip for it puts a
-        chip in the middle of a sentence.
+        Our star comes from the direction of the message (``outbound``), not from the
+        ``"you"`` label. Thus a remote sender with the name ``you`` still gets the hue of
+        its key, and does not look like our node.
+
+        The sender is the origin of the route of each message under it. Thus the chip
+        closes on the point, the mark of a route that goes on. An ``@mention`` in a body is
+        the other end, and it opens on the notch (refer to :meth:`_render_mentions`).
         """
         if message.outbound:
-            return name_chip("", you=True)
+            return name_chip("", you=True, role=ORIGIN)
         # ``·`` is a channel line that arrived with no sender prefix: there is no key to use.
-        return name_chip(sender, None if sender == "·" else self._header_key(sender, message))
+        key = None if sender == "·" else self._header_key(sender, message)
+        return name_chip(sender, key, role=ORIGIN)
 
     def _header_key(self, sender: str, message: ChatMessage) -> str | None:
         """The key that gives the colour of the sender chip of a group: the key of the name.
@@ -718,6 +724,8 @@ class ChatScreen(Screen):
         prefix.append(f"{stamp:%H:%M}  ", style="cursor" if selected else "muted")
         body_text = self._body_text(body, message, selected=selected)
         whole = [m.span() for m in _WORD.finditer(body_text.plain) if links.urls(m.group())]
+        # A mention is a chip, and a chip never breaks across two lines.
+        whole += [(s.start, s.end) for s in body_text.spans if str(s.style) == PATH_INK]
         lines = render_hanging(
             prefix, body_text, width, indent=prefix.cell_len, whole=whole, gutter=_URL_GUTTER
         )
@@ -760,13 +768,19 @@ class ChatScreen(Screen):
         return Text(f"  · scope {message.scope}", style="muted")
 
     def _render_mentions(self, body: str, *, selected: bool) -> Text:
-        """Render body text, and change each ``@[Name]`` token to a ``@Name`` in its hue.
+        """Render body text, and change each ``@[Name]`` token to a ``@Name`` chip.
 
         The reply flow puts an ``@[Name]`` token in the compose line (refer to
-        :meth:`_begin_reply`). Here it shows as a bare ``@Name`` in the stable hue of that
-        sender. Thus the user sees that a mention belongs to the person that it names. The
-        text around the mentions keeps the base style of the line (``cursor`` when the
-        message is the selected reply target, or else no style).
+        :meth:`_begin_reply`). Here it shows as ``@Name`` in a chip of the hue of that
+        node. Thus the user sees that a mention belongs to the node that it names. The text
+        around the mentions keeps the base style of the line (``cursor`` when the message
+        is the selected reply target, or else no style).
+
+        The chip opens on the notch, because the node that a mention names is the
+        destination of a route that came from the sender (refer to :meth:`_group_header`,
+        whose chip closes on the point). The ``@`` stays in the chip. A chip keeps the words
+        of the arrow mode, where a mention is ``@Name`` with no frame, as it was before the
+        chip (JP, 2026-10-10).
         """
         base = "cursor" if selected else None
         text = Text()
@@ -775,7 +789,8 @@ class ChatScreen(Screen):
             if match.start() > pos:
                 text.append(body[pos : match.start()], style=base)
             name = match.group(1)
-            text.append(f"@{name}", style=self._sender_style(name, mention=True))
+            key = self._sender_key(name, mention=True)
+            text.append_text(name_chip(f"@{name}", key, role=DESTINATION))
             pos = match.end()
         if pos < len(body):
             text.append(body[pos:], style=base)
@@ -811,44 +826,24 @@ class ChatScreen(Screen):
             )
         return Text("Enter to see the paths this message took · End to cancel", style="accent")
 
-    def _sender_style(self, sender: str, *, is_self: bool = False, mention: bool = False) -> str:
-        """Get a stable colour for a sender name, from the node key of the sender.
-
-        Our messages are white. This comes from ``is_self`` (the message is outbound), not
-        from the ``"you"`` label. Thus a remote sender with the name ``you`` still gets a
-        hue from the palette, and does not look like our node. ``·`` (unknown) takes
-        ``node.unknown``. Each other sender name is resolved to a key (the contacts, then
-        the names that the recorder stored, and in a direct thread the *sender label*
-        falls back to the key of the peer), and takes the hue of that key. A name that no
-        known node has also stays ``node.unknown``: the rule of the app is that colour
-        marks an identity that has a key.
-
-        Each grey here is the *node* grey, never ``muted``. An unidentified sender is
-        content that you can still do actions on (select the message, open its paths),
-        not chrome. The two greys must not follow each other: on the console, ``muted`` is
-        the dark slot and ``node.unknown`` is the light one (JP, 2026-08-12).
-
-        ``mention=True`` gives the style of an ``@mention`` in the body, not of a sender
-        label. A mention names any person, so the fallback to the key of the peer must
-        not apply. Thus a mention that is not resolved stays grey in a direct chat,
-        exactly as it does in a channel.
-        """
-        if is_self:
-            return "you"  # white, outside the range of sender hues, so always easy to see
-        if sender == "·":
-            return "node.unknown"
-        return name_style(sender, self._sender_key(sender, mention=mention))
-
     def _sender_key(self, sender: str, *, mention: bool = False) -> str | None:
         """The key of a sender name, or ``None`` when nothing gives a key for it.
 
         The contacts first, then the names that the recorder stored. In a *direct* thread,
         a sender label with no key falls back to the key of the peer, because the only two
-        persons in the conversation are we and the peer. A mention names any person, so
-        that fallback must not apply to a mention.
+        persons in the conversation are we and the peer. A mention names any node, so
+        that fallback must not apply to a mention. Thus a mention that is not resolved
+        stays grey in a direct chat, exactly as it does in a channel.
 
-        The colour (:meth:`_sender_style`) and the chip (:meth:`_group_header`) share this
-        method. Thus the two cannot disagree about the identity of a name.
+        A name with no key is drawn in the *node* grey, never in ``muted`` (the chip does
+        this, refer to :func:`~meshterm.ui.widgets.name_chip`). An unidentified sender is
+        content that you can still do actions on (select the message, open its paths),
+        not chrome. On the console, ``muted`` is the dark slot and ``node.unknown`` is the
+        light one (JP, 2026-08-12).
+
+        The sender chip (:meth:`_group_header`) and the mention chips
+        (:meth:`_render_mentions`) share this method. Thus the two cannot disagree about
+        the identity of a name.
         """
         key = self._key_of(sender)
         if not key and not self._multiparty and not mention:

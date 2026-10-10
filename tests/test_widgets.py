@@ -15,12 +15,15 @@ from meshterm.core.models import node_type_label
 from meshterm.ui.pathline import (
     POWERLINE_ROUND_CLOSE,
     POWERLINE_ROUND_OPEN,
+    POWERLINE_SEP,
     PathHop,
     PathLine,
     _chip_fill,
 )
 from meshterm.ui.theme import node_style
 from meshterm.ui.widgets import (
+    DESTINATION,
+    ORIGIN,
     format_age,
     format_ago,
     name_chip,
@@ -270,6 +273,35 @@ def test_name_chip_greys_a_node_it_cannot_place(powerline) -> None:
     keyless = name_chip("·")
 
     assert _span_style(keyless, "·").bgcolor.name == "#64748b"  # the keyless grey
+
+
+def test_name_chip_of_an_origin_closes_on_the_point(powerline) -> None:
+    """The author of a message is where a route starts, and the route goes on from it."""
+    powerline(True)
+    chip = name_chip("Alice", "a1b2", role=ORIGIN)
+    hop = PathLine([PathHop("Alice", key="a1b2")], to_destination=False).text()
+
+    assert chip.plain == POWERLINE_ROUND_OPEN + " Alice " + POWERLINE_SEP
+    assert [(s.start, s.end, str(s.style)) for s in chip.spans] == [
+        (s.start, s.end, str(s.style)) for s in hop.spans
+    ]
+
+
+def test_name_chip_of_a_destination_opens_on_the_notch(powerline) -> None:
+    """The node that a mention names is where a route ends, and the route came to it."""
+    powerline(True)
+    chip = name_chip("@Bob", "c3d4", role=DESTINATION)
+
+    assert chip.plain == POWERLINE_SEP + " @Bob " + POWERLINE_ROUND_CLOSE
+    assert _span_style(chip, POWERLINE_SEP).reverse  # the notch, cut out of the fill
+
+
+def test_name_chip_role_changes_nothing_without_powerline(powerline) -> None:
+    """In arrow mode, a lone name has no ends to shape, and a stray arrow reads as a cut route."""
+    powerline(False)
+
+    for role in (ORIGIN, DESTINATION):
+        assert name_chip("Alice", "a1b2", role=role).plain == "Alice"
 
 
 def test_name_chip_falls_back_to_the_bare_name_without_powerline(powerline) -> None:

@@ -415,6 +415,17 @@ def _keys_of(mapping: dict[str, str]):
     return lambda name: mapping.get(name.casefold())
 
 
+def _ink(text, run: str) -> str:
+    """The style that colours ``run`` in ``text``: its identity span, not the path line's stamp."""
+    from meshterm.ui.pathline import PATH_INK
+
+    return next(
+        str(s.style)
+        for s in text.spans
+        if text.plain[s.start : s.end] == run and str(s.style) != PATH_INK
+    )
+
+
 def test_preview_prefixes_own_messages_only() -> None:
     """Only an outbound message gets a ``you:`` prefix. Inbound text shows exactly as it is.
 
@@ -982,16 +993,10 @@ def test_at_mention_renders_as_name_in_sender_hue() -> None:
 
     assert "@Alice" in text.plain  # the token with brackets became a bare mention
     assert "@[Alice]" not in text.plain and "[Alice]" not in text.plain
-    # The "@Alice" text has the hue of the key (the same hue that the header uses).
-    hue = screen._sender_style("Alice")
-    assert hue == node_style("60")  # the spectrum hue from the key of the sender
-    at = text.plain.index("@Alice")
-    hue_spans = [
-        s for s in text.spans if s.style == hue and s.start <= at and at + len("@Alice") <= s.end
-    ]
-    assert hue_spans
+    # The "@Alice" text has the spectrum hue of the key (the same hue that the header uses).
+    assert _ink(text, "@Alice") == node_style("60")
     # The unknown @Zed gets the unknown-node grey, because it has no key and no hue.
-    assert screen._sender_style("Zed") == "node.unknown"
+    assert _ink(text, "@Zed") == "node.unknown"
 
 
 def test_direct_chat_unknown_mention_stays_muted() -> None:
@@ -1019,13 +1024,14 @@ def test_direct_chat_unknown_mention_stays_muted() -> None:
         key_of=_keys_of({"alice": "60" + "0" * 62}),
     )
 
+    body = screen._render_mentions("@[Alice] and @[Zed]", selected=False)
     # A mention that resolves still lights in the hue of its own key…
-    assert screen._sender_style("Alice", mention=True) == node_style("60")
+    assert _ink(body, "@Alice") == node_style("60")
     # …but an unknown mention is grey. It does not get the hue (d4…) of the peer.
-    assert screen._sender_style("Zed", mention=True) == "node.unknown"
-    assert screen._sender_style("Zed", mention=True) != node_style("d4")
+    assert _ink(body, "@Zed") == "node.unknown"
     # The sender label keeps the fallback to the peer key (the behaviour is the same).
-    assert screen._sender_style("Zed") == node_style("d4")
+    inbound = ChatMessage(text="hi", peer="d4e5f6a7")
+    assert _ink(screen._group_header("Zed", inbound), "Zed") == node_style("d4")
 
 
 def test_direct_transcript_groups_under_sender_headers() -> None:
@@ -1182,9 +1188,16 @@ def test_channel_transcript_groups_by_sender() -> None:
     assert stamps[0] != stamps[1]  # the grouped Alice messages show different times
 
 
-def test_transcript_inscribes_the_sender_label_but_never_a_mention(powerline) -> None:
-    """The name that opens a group is a chip. The same name in a body is prose."""
-    from meshterm.ui.widgets import name_chip
+def test_transcript_draws_the_sender_as_an_origin_and_a_mention_as_a_destination(
+    powerline,
+) -> None:
+    """The sender chip closes on the point, and a mention chip opens on the notch.
+
+    A message goes from its author toward the node that it names. Thus the two chips are
+    the two ends of one route that is not drawn (JP, 2026-10-10).
+    """
+    from meshterm.ui.pathline import POWERLINE_SEP
+    from meshterm.ui.widgets import DESTINATION, ORIGIN, name_chip
 
     powerline(True)  # this test is about the chip, so ask for a terminal that draws one
     conv = Conversation(label="#public", is_channel=True, channel_idx=0)
@@ -1194,11 +1207,34 @@ def test_transcript_inscribes_the_sender_label_but_never_a_mention(powerline) ->
     screen = ChatScreen(conv, messages, send=None, names={}, session=_StubSession())
     rendered = _strip_ansi("\n".join(screen._render_grouped(80)))
 
-    # The test builds the chip through the widget, not as literal text. The end caps are the
-    # caps of the path line, and the test asserts the framing, not the glyph.
-    assert name_chip("Alice").plain in rendered  # the header, as a chip
-    assert "@Bob" in rendered  # the mention, as the user typed it
-    assert name_chip("Bob").plain not in rendered  # …and not framed in the middle of a sentence
+    # The test builds the chips through the widget, not as literal text. The end caps are
+    # the caps of the path line, and the test asserts the framing, not the glyph.
+    sender = name_chip("Alice", role=ORIGIN).plain
+    mention = name_chip("@Bob", role=DESTINATION).plain
+    assert sender.endswith(POWERLINE_SEP) and sender in rendered  # the header goes on
+    assert mention.startswith(POWERLINE_SEP) and mention in rendered  # the mention is reached
+    assert f"{mention} you around?" in rendered  # in its place in the sentence
+
+
+def test_a_mention_chip_moves_to_the_next_line_whole(powerline) -> None:
+    """The wrap breaks a body at a space, but never at a space inside a mention chip.
+
+    A chip has a pad at each side of its label, and a name can have spaces. Without the
+    hold, the notch stays at the end of one line and the name starts the next line.
+    """
+    from meshterm.ui.widgets import DESTINATION, name_chip
+
+    powerline(True)
+    conv = Conversation(label="#public", is_channel=True, channel_idx=0)
+    text = "Alice: the relay on the hill looks bad @[Bob Smith] you around?"
+    messages = [ChatMessage(text=text, is_channel=True, channel_idx=0)]
+    screen = ChatScreen(conv, messages, send=None, names={}, session=_StubSession())
+    mention = name_chip("@Bob Smith", role=DESTINATION).plain
+
+    for width in range(30, 60):
+        lines = [_strip_ansi(line).rstrip() for line in screen._render_grouped(width)]
+        assert sum(mention.strip() in line for line in lines) == 1, width
+        assert all(cell_len(line) <= width for line in lines), width
 
 
 def test_unidentified_sender_takes_the_node_grey_not_the_chrome_grey() -> None:
@@ -1210,9 +1246,10 @@ def test_unidentified_sender_takes_the_node_grey_not_the_chrome_grey() -> None:
     """
     conv = Conversation(label="#public", is_channel=True, channel_idx=0)
     screen = ChatScreen(conv, [], send=None, names={}, session=_StubSession())
+    inbound = ChatMessage(text="hi", is_channel=True, channel_idx=0)
 
-    assert screen._sender_style("·") == "node.unknown"
-    assert screen._sender_style("nobody-knows-me") == "node.unknown"  # no key and no hue
+    for sender in ("·", "nobody-knows-me"):  # no prefix, and a name with no key and no hue
+        assert _ink(screen._group_header(sender, inbound), sender) == "node.unknown"
 
 
 def _two_day_messages():
@@ -1442,11 +1479,13 @@ def test_channel_self_style_keyed_on_concept_not_label() -> None:
     """
     from meshterm.ui.theme import node_style
 
+    ours = ChatMessage(text="hi", is_channel=True, channel_idx=0, outbound=True)
+    theirs = ChatMessage(text="you: hi", is_channel=True, channel_idx=0)
     screen = _channel_screen([])
-    assert screen._sender_style("you", is_self=True) == "you"  # us: white
-    assert screen._sender_style("you", is_self=False) == "node.unknown"  # no key: grey
+    assert _ink(screen._group_header("you", ours), "★") == "you"  # us: the white star
+    assert _ink(screen._group_header("you", theirs), "you") == "node.unknown"  # no key: grey
     keyed = _channel_screen([], key_of=_keys_of({"you": "d4" + "0" * 62}))
-    remote = keyed._sender_style("you", is_self=False)
+    remote = _ink(keyed._group_header("you", theirs), "you")
     assert remote == node_style("d4")  # the spectrum hue of the key
 
 

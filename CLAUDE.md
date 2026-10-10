@@ -462,6 +462,14 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   where the route began or ended (`PathLine(from_origin=…, to_destination=…)`, defaulting
   to a whole route). Arrow mode spells the same claim with the separator alone, a leading
   or trailing `→` with no hop on the far side of it.
+- **A lone chip can stand at one end of a route it doesn't draw** (`name_chip(role=…)`).
+  A message goes from its author toward the nodes it names, so a chat's sender chip is an
+  `ORIGIN` — square (or round) on the left, the point on the right — and an `@mention` in
+  a body is a `DESTINATION` chip, `@` kept, opening on the notch and ending square. No
+  role is a node alone, square at both ends. Arrow mode ignores the role: a lone name
+  with a stray `→` reads as a cut route, so there the sender is its bare name and the
+  mention its bare `@Name`, as before. A chip in prose never breaks across lines
+  (`render_hanging` holds every `whole` run together, spaces and all).
 - Concept icons: 📡 advert · 🕒 clock/sync · 🔄 reboot · 💾 backup · 📂 restore ·
   🔑 channel/credential key · 🔐 identity/auth secret ·
   🔒 lock (a locked contact, a private channel) · 🔓 unlock · 🗑 clear/delete · ✎ compose/edit ·

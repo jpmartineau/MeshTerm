@@ -395,13 +395,15 @@ def render_hanging(
 
     ``whole`` names runs of the body that must not be cut where the screen can hold them.
     A URL is such a run: a terminal can open it, and a user can copy it, only while it is
-    on one line. For a run that fits the hanging lane, nothing is necessary, because the
-    wrap already moves a word to the next line and does not split it. A run that is wider than the
-    lane, but not wider than the screen, steps out of the block onto a line of its own. It
-    starts at ``gutter``, or as far to the right of the gutter as still fits. After it,
-    the body continues under its indent, unless the text that follows is short enough to
-    finish the line of the run. Only a run wider than the full screen is folded, as
-    before, because no line can hold it.
+    on one line. A chip is another: a mention that breaks between its notch and its name
+    reads as two things. A run that fits the hanging lane moves to the next line as one
+    word. The wrap breaks only at a space, and a space inside a run does not count for it
+    (refer to :func:`_held`), because a chip has its pads and a name can have spaces. A
+    run that is wider than the lane, but not wider than the screen, steps out of the block
+    onto a line of its own. It starts at ``gutter``, or as far to the right of the gutter
+    as still fits. After it, the body continues under its indent, unless the text that
+    follows is short enough to finish the line of the run. Only a run wider than the full
+    screen is folded, as before, because no line can hold it.
 
     Args:
         prefix: The leading run (for example, a pointer and a timestamp), shown one time,
@@ -427,15 +429,19 @@ def render_hanging(
         (start, end) for start, end in sorted(whole) if avail < cell_len(plain[start:end]) <= width
     ]
     rows: list[tuple[int, Text]] = []  # (left pad, line). The pad of the first row is the prefix.
+    held, stand_in = _held(body, whole)
 
     def hang(start: int, end: int) -> None:
         """Wrap ``body[start:end]`` under the indent, and trim the seams next to a run."""
         if out:
-            while start < end and plain[start].isspace() and start:
+            while start < end and held.plain[start].isspace() and start:
                 start += 1
-            while end > start and plain[end - 1].isspace():
+            while end > start and held.plain[end - 1].isspace():
                 end -= 1
-        lines = list(body[start:end].wrap(console, avail)) if end > start else []
+        lines = list(held[start:end].wrap(console, avail)) if end > start else []
+        if stand_in:
+            for line in lines:
+                line.plain = line.plain.replace(stand_in, " ")
         if not rows and not lines:
             lines = [Text("")]  # the line of the prefix, also when the body starts with a run
         rows.extend((indent, line) for line in lines)
@@ -467,3 +473,32 @@ def render_hanging(
         combined.append_text(prefix if i == 0 else Text(" " * pad))
         combined.append_text(line)
     return render_lines(combined, width)
+
+
+def _held(body: Text, runs: Sequence[tuple[int, int]]) -> tuple[Text, str]:
+    """A copy of ``body`` in which no run has a space, and the character that stands in for one.
+
+    The wrap of Rich breaks a line only at whitespace. Thus a run that has no space in it
+    moves to the next line whole, and a run that has spaces can break at each of them. In
+    the copy, each space inside a run is a character that the body does not use, from the
+    private use area. It has one cell, the same as the space, so the wrap measures the same
+    widths. The caller wraps the copy, then puts the spaces back on each line.
+
+    Args:
+        body: The text that is about to wrap.
+        runs: ``(start, end)`` offsets into ``body.plain`` of the runs to keep together.
+
+    Returns:
+        ``(copy, stand_in)``. When no run has a space, this is the body itself and ``""``.
+    """
+    plain = body.plain
+    spaced = [(start, end) for start, end in runs if " " in plain[start:end]]
+    if not spaced:
+        return body, ""
+    stand_in = next(c for c in map(chr, range(0xE000, 0xF900)) if c not in plain)
+    chars = list(plain)
+    for start, end in spaced:
+        chars[start:end] = [stand_in if c == " " else c for c in chars[start:end]]
+    held = body.copy()
+    held.plain = "".join(chars)  # the same length, so each span stays where it was
+    return held, stand_in

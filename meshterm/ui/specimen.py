@@ -20,7 +20,7 @@ from ..platforms import get_platform
 from .packet_viewer import KIND_ICONS, PAYLOAD_ICONS
 from .theme import _VT_SLOTS, fold_text, glyph, name_style, snr_style
 from .tui.fkeys import FPair, active_deck
-from .widgets import _recency_style, channel_glyph, name_chip
+from .widgets import DESTINATION, ORIGIN, _recency_style, channel_glyph, name_chip
 
 #: Demonstration identities for the row of name colours: ``(name, key)``. The keys are
 #: synthetic. We chose them so that their first bytes are in three different sectors of
@@ -131,17 +131,22 @@ def specimen_lines() -> list[RenderableType]:
     names.append("me", style="you")
     lines.append(names)
 
-    # The same names as chips. These are the sender labels of the chat. The path line's
+    # The same names as chips, as the chat draws them. A sender label closes on the point,
+    # because a message goes on from its author. The mention at the end opens on the
+    # notch, because the node that it names is where the message goes. The path line's
     # own segment draws them, so this row is also a one-hop sample of the route language:
     # the hue in the fill, the star for our end, and the keyless grey for a node that
     # nobody can identify.
     chips = Text("chips   ")
     for name, key in _DEMO_NAMES[:2]:
-        chips.append_text(name_chip(name, key))
+        chips.append_text(name_chip(name, key, role=ORIGIN))
         chips.append(" ")
-    chips.append_text(name_chip("", you=True))
+    chips.append_text(name_chip("", you=True, role=ORIGIN))
     chips.append(" ")
-    chips.append_text(name_chip("·"))
+    chips.append_text(name_chip("·", role=ORIGIN))
+    chips.append(" ")
+    name, key = _DEMO_NAMES[2]
+    chips.append_text(name_chip(f"@{name}", key, role=DESTINATION))
     lines.append(chips)
 
     lines.append(Text("heard   ").append_text(_ages_row()))
