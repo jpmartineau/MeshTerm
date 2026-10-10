@@ -158,7 +158,7 @@ def test_packet_viewer_follows_the_stream_off_the_top_of_a_live_list() -> None:
         source=lambda: list(feed),
         on_pin=lambda: pinned_by_viewer.append(True),
     )
-    assert not viewer._pinned, "opening a packet named that packet, not the stream"
+    assert not viewer._pinned, "an open without pinned holds the packet, not the stream"
     assert "↑ follow" in viewer.footer_hint
 
     viewer.handle("up")
@@ -174,6 +174,35 @@ def test_packet_viewer_follows_the_stream_off_the_top_of_a_live_list() -> None:
     viewer.handle("down")
     assert not viewer._pinned and viewer._entries[viewer._index] is newer
     assert "1/2" in viewer.title  # the viewer holds that packet, which now moves down the list
+
+
+def test_packet_viewer_opens_on_the_pin_of_a_live_list() -> None:
+    """``pinned`` opens on the pin: the card follows the stream from the first paint.
+
+    The open does not call ``on_pin``, because the list is already on its own pin. Over a
+    snapshot, ``pinned`` does nothing, because there is no stream to follow.
+    """
+    old = PacketEntry(when=utcnow(), kind="advert", node="aa")
+    feed = [old]
+    pinned_by_viewer = []
+    viewer = PacketViewer(
+        list(feed),
+        0,
+        pinned=True,
+        resolve=lambda h: "",
+        source=lambda: list(feed),
+        on_pin=lambda: pinned_by_viewer.append(True),
+    )
+    assert viewer._pinned and viewer.title.endswith("· following")
+    assert "↓ hold packet" in viewer.footer_hint
+    assert pinned_by_viewer == []
+
+    newer = PacketEntry(when=utcnow(), kind="message", node="bb", text="new!")
+    feed.insert(0, newer)
+    assert "new!" in _plain(viewer.render_body(80))
+
+    snapshot = PacketViewer([newer, old], 0, pinned=True, resolve=lambda h: "")
+    assert not snapshot._pinned and "following" not in snapshot.title
 
 
 def test_packet_viewer_over_a_snapshot_has_nothing_to_follow() -> None:

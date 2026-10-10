@@ -57,9 +57,11 @@ itself with the same ``↑``/``↓``. If an overheard channel-text packet names 
 which we have the key, the viewer decrypts it. **The viewer has the two stops too.** It
 holds the same pin above the newest packet, so ``↑`` from the top follows the stream
 there too (each packet that arrives becomes the card that the user reads). The viewer
-also moves the cursor of the feed with it, the pin included. Thus, when the dialog
-closes, the feed is on the stop that the user had in the dialog, not on the stop that
-the user left when the dialog opened.
+opens on the stop that the feed has. Enter on the pin opens the viewer on the pin, so
+the card follows the stream immediately, and Enter on a selected packet opens that
+packet and holds it. The viewer also moves the cursor of the feed with it, the pin
+included. Thus, when the dialog closes, the feed is on the stop that the user had in the
+dialog, not on the stop that the user left when the dialog opened.
 
 The screen has no subscriptions of its own. The opener (:func:`open_livefeed`) connects
 the hub subscription and the paint that occurs one time each second, and removes them
@@ -556,14 +558,17 @@ class LiveFeedScreen(Screen):
 
         When the user pages in the viewer, the feed highlight moves with it (through
         ``on_navigate``). Thus, when the viewer closes, the feed is on the packet that the
-        user saw last. For the same reason, this method removes the pin when it opens the
-        viewer. Enter names this packet. If the pin stays, the packets that arrive during a
-        long read move the cursor off this packet. Then, when the viewer closes, the feed
-        is on a row that the user did not select.
+        user saw last.
+
+        The viewer opens on the stop that the feed has, and Enter does not change it. On
+        the pin, the viewer opens on the pin too, and the card follows the stream. On a
+        selected packet, the viewer holds that packet. JP decided this on 2026-10-10.
+        Before, Enter removed the pin, because Enter named the packet under it. But a user
+        who watches the feed and opens the card continues to watch, and ``↓`` in the viewer
+        holds the visible packet with one key press.
         """
         if self._selected is None or not self._feed:
             return
-        self._select_row(self._selected)
 
         def follow(entry: PacketEntry) -> None:
             # The feed may have more rows after the snapshot. Thus find the entry itself.
@@ -575,6 +580,7 @@ class LiveFeedScreen(Screen):
         viewer = PacketViewer(
             list(self._feed),
             self._selected,
+            pinned=self._pinned,
             resolve=self._resolve,
             prefix_bytes=self._prefix_bytes,
             self_name=self._self_name,

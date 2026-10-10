@@ -366,12 +366,30 @@ def test_livefeed_home_resumes_following_from_deep_in_the_history() -> None:
     assert screen._selected == 0  # the feed follows again, and does not stay on the old newest
 
 
-def test_livefeed_opening_a_packet_drops_the_pin() -> None:
-    """Enter names this packet, so an arrival during a long read cannot move the highlight."""
+def test_livefeed_opening_a_packet_keeps_the_pin() -> None:
+    """Enter on the pin opens the viewer on the pin, so the feed and the card both follow.
+
+    JP decided this on 2026-10-10. Before, Enter removed the pin.
+    """
     screen = _screen(seed=[_obs(node="n0", age_s=1)])
-    screen.future = _Fut()
     assert screen._pinned
-    screen._select_row(0)  # this is what _open_packet does before it floats the viewer
+    screen.handle("enter")
+    viewer = screen._session.opened
+    assert viewer is not None and viewer._pinned and "following" in viewer.title
+    assert screen._pinned, "Enter knocked the feed out of the stream"
+
+    screen.on_event(MeshEvent.observation_event(_obs(node="a1b2")))
+    assert screen._selected == 0, "the pin let go of the top"
+    assert "Alice" in _plain(viewer.render_body(72)), "the card did not follow the stream"
+
+
+def test_livefeed_opening_a_selected_packet_holds_it() -> None:
+    """Enter on a selected packet holds it, so an arrival during a long read cannot move it."""
+    screen = _screen(seed=[_obs(node="n0", age_s=1)])
+    screen.handle("down")  # off the pin, onto the newest packet
+    screen.handle("enter")
+    viewer = screen._session.opened
+    assert viewer is not None and not viewer._pinned
     assert not screen._pinned and screen._selected == 0
     screen.on_event(MeshEvent.observation_event(_obs(node="a1b2")))
     assert screen._selected == 1, "the cursor left the packet being viewed"
@@ -380,11 +398,12 @@ def test_livefeed_opening_a_packet_drops_the_pin() -> None:
 def test_livefeed_viewer_that_walks_up_to_the_stream_re_pins_the_feed() -> None:
     """The viewer has the second stop of this screen, and it returns the pin through it.
 
-    Enter still names this packet, so the dialog opens with one packet. The user can press
-    up at the top of the viewer. This is the same move as up at the top of the feed. Thus
-    the feed follows the stream again, and it still follows when the dialog closes.
+    Enter on a selected packet opens the dialog on that packet. The user can press up at
+    the top of the viewer. This is the same move as up at the top of the feed. Thus the
+    feed follows the stream again, and it still follows when the dialog closes.
     """
     screen = _screen(seed=[_obs(node="n0", age_s=2), _obs(node="n1", age_s=1)])
+    screen.handle("down")  # off the pin, onto the newest packet
     screen.handle("enter")
     viewer = screen._session.opened
     assert viewer is not None and not screen._pinned

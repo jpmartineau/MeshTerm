@@ -42,9 +42,9 @@ packet, and Home from anywhere, go to the **pin**. On the pin, the viewer holds 
 position instead of a packet. Thus each new packet becomes the card that the user reads,
 and the title says ``following`` instead of ``n/total``. ``↓`` steps off the pin onto
 the packet that shows at that moment. That packet then moves down the list as newer
-packets arrive. Thus a user who opened a packet to read it keeps it, and a user who
-walked up to the top gets the stream. These are the same two stops, with the same keys,
-as the feed under the dialog.
+packets arrive. The viewer opens on the stop that the list had (``pinned``). Thus a user
+who opened a packet to read it keeps it, and a user who watched the stream continues to
+watch it. These are the same two stops, with the same keys, as the feed under the dialog.
 """
 
 from __future__ import annotations
@@ -465,6 +465,7 @@ class PacketViewer(Screen):
         self_name: str | None = None,
         on_navigate: Callable[[PacketEntry], None] | None = None,
         on_pin: Callable[[], None] | None = None,
+        pinned: bool = False,
         channels: Sequence[tuple[str, bytes]] = (),
         source: Callable[[], Sequence[PacketEntry]] | None = None,
         type_of: TypeOf | None = None,
@@ -486,6 +487,10 @@ class PacketViewer(Screen):
                 same stop (the live feed) can also follow the stream, and still follows it
                 when the dialog closes. It is never called without a ``source``, because
                 the pin is a stop only where the list is live.
+            pinned: Whether to open on the pin instead of on the packet at ``index``.
+                The live feed gives its own stop here, so the viewer follows the stream
+                when the feed did. The open does not call ``on_pin``, because the list is
+                already on the pin. Without a ``source``, the viewer ignores this value.
             channels: The configured channels of the device, as ``(name, secret)``
                 pairs. The viewer tries them on the channel-text packet of an overheard
                 ``packet`` entry (refer to
@@ -532,18 +537,19 @@ class PacketViewer(Screen):
         self._key_of = key_of
         self._scope_of: ScopeOf = scope_of or unnamed_scope
         self._message_scope = message_scope
-        #: The packet that shows now, followed by identity. Thus a live prepend to the
-        #: source (which moves each index) never moves the viewer onto another packet.
-        self._current: PacketEntry | None = self._entries[self._index] if self._entries else None
         #: Whether the viewer is on the pin: the stop above the newest packet, which
         #: holds the top position instead of a packet. It means that ``_index == 0``. The
         #: pin is a mode on the newest entry, so all the code that reads the viewer (the
         #: card, the scroll, the cache) needs no special case. Only the title and the
-        #: moves are different. An open never goes to the pin, because Enter selected
-        #: this packet (refer to
-        #: :meth:`~meshterm.ui.livefeed_screen.LiveFeedScreen._open_packet`). Thus the
-        #: user walks up to the stream on purpose, or not at all.
-        self._pinned = False
+        #: moves are different. An open goes to the pin only when the list was on its own
+        #: pin (refer to
+        #: :meth:`~meshterm.ui.livefeed_screen.LiveFeedScreen._open_packet`).
+        self._pinned = pinned and self._can_pin and bool(self._entries)
+        if self._pinned:
+            self._index = 0
+        #: The packet that shows now, followed by identity. Thus a live prepend to the
+        #: source (which moves each index) never moves the viewer onto another packet.
+        self._current: PacketEntry | None = self._entries[self._index] if self._entries else None
         self._update_footer()
         self._set_title()
 
