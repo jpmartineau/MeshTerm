@@ -30,8 +30,10 @@ say "and if it's the trace picker…".
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from rich.cells import cell_len
 from rich.text import Text
@@ -571,6 +573,7 @@ class ContactListScreen(SelectScreen):
         tail: list | None = None,
         footer_hint: str = _HINT,
         lanes: tuple[ContactLane, ...] = DEFAULT_LANES,
+        key_hint: Callable[[Any], str] | None = None,
     ) -> None:
         """Build the list over rows that are already resolved.
 
@@ -599,6 +602,9 @@ class ContactListScreen(SelectScreen):
             footer_hint: The key hint of the footer. The default shows the full grammar.
             lanes: The fixed lanes drawn between the name and the key of each row. Refer
                 to :data:`DEFAULT_LANES`, :data:`TRACE_LANES`, and :data:`ARCHIVED_LANES`.
+            key_hint: The hint atoms for the shortcut keys that act on the highlighted row
+                (refer to :class:`~meshterm.ui.tui.select.SelectScreen`). ``None`` for a list
+                with no such keys.
         """
         self._contact_rows = rows
         self._prefix_bytes = prefix_bytes
@@ -615,6 +621,7 @@ class ContactListScreen(SelectScreen):
             self._compose_items(),
             prompt=prompt,
             footer_hint=footer_hint,
+            key_hint=key_hint,
         )
 
     def _compose_items(self) -> list:

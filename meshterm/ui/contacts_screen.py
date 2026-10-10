@@ -9,7 +9,8 @@ type-to-filter. Thus the whole app has one contact list, for each source of data
 highlighted node (:mod:`~meshterm.ui.node_detail_screen`). That page shows the identity of
 the node, a preview of its location, the routes that MeshTerm observed to it, and the ways
 to go further (trace, map, Time Machine). When the user backs out of that page, the list is
-as it was. The one-shot CLI (``meshterm contacts --sort …``) still renders the static
+as it was. ^L opens the map on the highlighted node, when it has a location. The one-shot
+CLI (``meshterm contacts --sort …``) still renders the static
 :func:`~meshterm.ui.widgets.contacts_table`. Only the menu gets the live list.
 
 Below the contacts is the maintenance action of the list: **Archive contacts**. It is the
@@ -45,13 +46,15 @@ from .archived_screen import open_archived
 from .contactlist import ContactListScreen, ContactRow
 from .menus import icon_lane, marked_label
 from .sweep_screen import archive_contacts
-from .tui import Choice, Separator
+from .tui import Choice, KeyRequest, Separator
 from .tui.screen import CANCEL
 from .widgets import ContactsSort, contact_packets
 
 if TYPE_CHECKING:
     from ..context import AppContext
     from ..core.models import Contact
+    from .map_render import MapMarker
+    from .map_screen import Locator
 
 #: A stable identity for the row of our node. The lane data of this row has no key when no
 #: device answered. Enter on this row opens the detail page of our node.
@@ -75,8 +78,34 @@ class ContactsScreen(ContactListScreen):
 
     Enter resolves the highlighted row, our node (:data:`YOU`) or a
     :class:`~meshterm.core.models.Contact`, so that :func:`open_contacts` opens it in the
-    Node detail page. The shared list handles the sort, the filter, and the navigation.
+    Node detail page. ^L resolves a :class:`~meshterm.ui.tui.select.KeyRequest` with the
+    marker of the highlighted node, so that :func:`open_contacts` opens the map on it. The
+    shared list handles the sort, the filter, and the navigation.
     """
+
+    @property
+    def picocalc_lyra_lane(self):
+        """The lane of the contact list, with ``Map`` (^L) on the Shift half of F1.
+
+        This is the key of ``Map`` in the chat too. F1 itself keeps ``Sect ↑`` when the
+        list has sections (the contacts, and the archive rows under them), and it stays
+        empty when the list has none. ``Map`` is lit while the highlighted node has a
+        location.
+        """
+        from .tui.fkeys import FPair
+
+        lane = list(super().picocalc_lyra_lane)
+        if self._locator is not None:
+            sect = lane[0]
+            lane[0] = FPair(
+                sect.label if sect else "",
+                sect.action if sect else "",
+                "Map",
+                "locate",
+                enabled=sect.enabled if sect else False,
+                opp_enabled=self._highlighted_marker() is not None,
+            )
+        return lane
 
     def __init__(
         self,
@@ -88,6 +117,7 @@ class ContactsScreen(ContactListScreen):
         sort: ContactsSort,
         archived: int = 0,
         locked: frozenset[str] = frozenset(),
+        locator: Locator | None = None,
     ) -> None:
         """Create the contacts screen over contact data that MeshTerm already got.
 
@@ -110,8 +140,11 @@ class ContactsScreen(ContactListScreen):
                 because a screen must not offer a way into an empty list.
             locked: The full keys (lowercase hex) of the contacts that are locked against
                 archiving. Each of those rows ends its name lane with a padlock.
+            locator: The located nodes, for ^L: the map on the highlighted node (refer to
+                :class:`~meshterm.ui.map_screen.Locator`). With ``None``, ^L does nothing.
         """
         self._self_name, self._self_key = self_name, self_key
+        self._locator = locator
         self._contacts, self._counts = contacts, counts
         rows = self._contact_rows_for(locked)
         # The maintenance actions close the list, after each contact, for each sort. First
@@ -153,6 +186,7 @@ class ContactsScreen(ContactListScreen):
             prefix_bytes=prefix_bytes,
             sort=sort,
             tail=tail,
+            key_hint=lambda value: "^L map" if self._marker_of(value) is not None else "",
         )
         if archived:
             self.short_title = f"Contacts · {known} + {archived}"
@@ -176,6 +210,29 @@ class ContactsScreen(ContactListScreen):
             )
         return rows
 
+    def _marker_of(self, value: object) -> MapMarker | None:
+        """The marker of the node of a row value, or ``None`` (a tail row, or no location)."""
+        if self._locator is None:
+            return None
+        if value == YOU:
+            return self._locator.you()
+        key = getattr(value, "public_key", None) or getattr(value, "key_prefix", None)
+        return self._locator.find(key) if isinstance(key, str) else None
+
+    def _highlighted_marker(self) -> MapMarker | None:
+        """The marker of the highlighted node, or ``None`` when ^L does nothing."""
+        current = self._current_choice()
+        return self._marker_of(current.value) if current is not None else None
+
+    def handle(self, action: str, data: str = "") -> None:
+        """^L asks :func:`open_contacts` to open the map. The list handles all other actions."""
+        if action == "locate":
+            marker = self._highlighted_marker()
+            if marker is not None:
+                self.resolve(KeyRequest("locate", marker))
+            return
+        super().handle(action, data)
+
     def refresh_locks(self, locked: frozenset[str]) -> None:
         """Draw the padlocks again in place, after a detail page can lock or unlock a contact.
 
@@ -196,7 +253,7 @@ async def open_contacts(
     counts: dict[str, int],
     sort: ContactsSort,
 ) -> None:
-    """Open the interactive contacts list. Enter opens Node detail, and Esc leaves.
+    """Open the interactive contacts list. Enter opens Node detail, ^L the map, and Esc leaves.
 
     The list stays pushed for the whole visit. Thus the detail page of the node that Enter
     selects, the archive flow, and the archived list (the tail actions open the last two)
@@ -224,12 +281,14 @@ async def open_contacts(
         RuntimeError: If the caller is outside the interactive menu (no full-screen
             session).
     """
+    from .map_screen import Locator
     from .node_detail_screen import open_node_detail
     from .surface import TuiUi
 
     if not isinstance(ctx.ui, TuiUi):  # pragma: no cover - the caller is for the menu only
         raise RuntimeError("the interactive contacts list is only available in the menu")
     session = ctx.ui.session
+    locator = await Locator.gather(ctx)
 
     def build() -> ContactsScreen:
         """The screen over the current contacts, with the live archived count on its tail."""
@@ -242,6 +301,7 @@ async def open_contacts(
             sort,
             archived=_archived_count(ctx, self_key),
             locked=_locked_keys(ctx, self_key),
+            locator=locator,
         )
 
     screen = build()
@@ -252,6 +312,11 @@ async def open_contacts(
                 chosen = await visit.result()
                 if chosen is CANCEL or chosen is None:  # Esc
                     return
+                if isinstance(chosen, KeyRequest):
+                    # ^L: the map goes on the stack above the list, and Esc on the map comes
+                    # back to the same row.
+                    await locator.show(chosen.value)
+                    continue
                 if chosen == _ARCHIVE:
                     # The archive ladder, its preview, and its confirm all float over the
                     # list, which is already the backdrop. A sweep that archived a contact
@@ -286,6 +351,7 @@ async def open_contacts(
         if not rebuild:
             return
         contacts = await ctx.devstate.contacts()
+        locator = await Locator.gather(ctx)
         screen = build()
 
 

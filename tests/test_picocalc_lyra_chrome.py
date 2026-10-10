@@ -392,15 +392,15 @@ def test_map_locate_is_reachable_from_both_control_keys() -> None:
 
     Thus both Ctrl keys and F2 do the same action.
 
-    The letter is the mnemonic of the action: ^Y for "you". Thus it is the same chord on each
-    screen that can point to our node. It is not the initial of one screen.
+    The letter is the mnemonic of the action: ^L to locate. Thus it is the same chord on each
+    screen that can show a node on the map. It is not the initial of one screen.
     """
     from prompt_toolkit.keys import Keys
 
     from meshterm.ui.tui.session import _CTRL_LETTER_CHORDS, _KEY_ACTIONS
 
-    assert _CTRL_LETTER_CHORDS["y"] == "locate"  # the half for the right-Ctrl rescue
-    assert _KEY_ACTIONS[Keys.ControlY] == "locate"  # the ordinary binding, made from it
+    assert _CTRL_LETTER_CHORDS["l"] == "locate"  # the half for the right-Ctrl rescue
+    assert _KEY_ACTIONS[Keys.ControlL] == "locate"  # the ordinary binding, made from it
 
 
 def test_host_battery_reads_the_sysfs_supply(tmp_path, monkeypatch) -> None:
@@ -500,7 +500,7 @@ def test_an_atom_the_lane_only_half_covers_stands() -> None:
     # The atom also describes the arrows, and no slot has them.
     assert strip_lane_atoms("↑↓ PgUp/PgDn scroll", DEFAULT_LANE) == "↑↓ PgUp/PgDn scroll"
     # A second key in the verb half keeps the whole atom (region/you of the map).
-    assert strip_lane_atoms("Home/^Y region/you", DEFAULT_LANE) == "Home/^Y region/you"
+    assert strip_lane_atoms("Home/^L region/you", DEFAULT_LANE) == "Home/^L region/you"
 
 
 def test_a_dimmed_chip_still_covers_its_atom() -> None:

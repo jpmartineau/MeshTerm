@@ -21,6 +21,7 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
+from rich.cells import cell_len
 from rich.console import Group, RenderableType
 from rich.text import Text
 
@@ -46,6 +47,8 @@ from .widgets import name_chip
 
 if TYPE_CHECKING:
     from ..context import AppContext
+    from .map_render import MapMarker
+    from .map_screen import Locator
 
 
 #: The delivery marks for a *resolved* outbound direct message, at the end of its line:
@@ -77,6 +80,25 @@ def _bind(platform: Platform) -> None:
     _URL_CODES = platform.url_codes
 
 
+#: The maximum width of a footer hint, in cells (refer to the UX standards).
+_HINT_CELLS = 72
+
+
+def _fit_hint(atoms: list[str], spare: tuple[str, ...] = ()) -> str:
+    """Join the hint atoms that are not empty, and remove ``spare`` atoms until the hint fits.
+
+    The ``spare`` atoms go in the given order, and only while the hint is wider than
+    :data:`_HINT_CELLS`. Thus a key that the line can hold stays on it.
+    """
+    kept = [atom for atom in atoms if atom]
+    for atom in spare:
+        if cell_len(" · ".join(kept)) <= _HINT_CELLS:
+            break
+        if atom in kept:
+            kept.remove(atom)
+    return " · ".join(kept)
+
+
 class ChatScreen(Screen):
     """A live conversation: a transcript that scrolls, above a pinned input line.
 
@@ -88,7 +110,9 @@ class ChatScreen(Screen):
     opens the delivery paths of the message. In the two types of chat, ^P opens the paths
     of the selected message. A path belongs to one message, so when no message is
     selected, there is nothing to show. ^U shows the links of the selected message as QR
-    codes, on the share screen. When no message is selected, Esc leaves the chat.
+    codes, on the share screen. ^L opens the map on the node of the author of the selected
+    message, when that node has a location. When no message is selected, Esc leaves the
+    chat.
 
     A channel with a send scope shows its region in the title (``#ops · yul``). There, ^R
     sends a message again *unscoped*: the selected message, or the newest when no message is
@@ -142,6 +166,11 @@ class ChatScreen(Screen):
         The two are actions *on* the selected message: the codes of its links on a share
         screen, larger than the codes under it in the transcript. ``QR`` is lit while the
         selection has a URL.
+
+        ``Map`` (^L) is on the Shift half of F1, the one slot that the rest of the lane
+        leaves free. It is lit while the author of the selected message has a location
+        (refer to :meth:`_locate_target`). The room puts ``Log in`` in that slot instead
+        (refer to :class:`~meshterm.ui.room.RoomScreen`).
         """
         from .tui.fkeys import FPair, default_lane
 
@@ -154,7 +183,17 @@ class ChatScreen(Screen):
             self._messages[0].created_at.astimezone().date()
             != self._messages[-1].created_at.astimezone().date()
         )
-        lane[0] = FPair("Day ↑", "ctrl_pageup", enabled=days)
+        if self._locator is not None:
+            lane[0] = FPair(
+                "Day ↑",
+                "ctrl_pageup",
+                "Map",
+                "locate",
+                enabled=days,
+                opp_enabled=self._locate_target() is not None,
+            )
+        else:
+            lane[0] = FPair("Day ↑", "ctrl_pageup", enabled=days)
         lane[1] = FPair(
             "Day ↓",
             "ctrl_pagedown",
@@ -193,6 +232,7 @@ class ChatScreen(Screen):
         key_of: Callable[[str], str | None] | None = None,
         scope: str | None = None,
         resend_unscoped: Callable[[ChatMessage], Awaitable[ChatMessage | None]] | None = None,
+        locator: Locator | None = None,
     ) -> None:
         """Build the chat screen.
 
@@ -224,6 +264,9 @@ class ChatScreen(Screen):
             resend_unscoped: An async callable that sends the text of a channel message
                 again, unscoped, and returns the stored message (channels only. With
                 ``None``, ^R does nothing there).
+            locator: The located nodes, for ^L: the map on the author of the selected
+                message (refer to :class:`~meshterm.ui.map_screen.Locator`). With ``None``,
+                ^L does nothing.
         """
         super().__init__()
         self._scope = scope if conversation.is_channel else None
@@ -251,6 +294,7 @@ class ChatScreen(Screen):
         self._resend = resend
         self._resend_unscoped = resend_unscoped if conversation.is_channel else None
         self._paths = paths
+        self._locator = locator
         self._names = names
         self._session = session
         self._editor = LineEditor()
@@ -263,6 +307,7 @@ class ChatScreen(Screen):
         self._status = ""
         self._stick = True  # keep the newest message visible until the user scrolls up
         self._paths_open = False  # one paths dialog at a time
+        self._map_open = False  # one map at a time
         self._codes_open = False  # one share screen of links at a time
         self._paste_open = False  # one paste-confirm dialog at a time
         self._resend_open = False  # one resend-unscoped confirm at a time
@@ -299,23 +344,45 @@ class ChatScreen(Screen):
 
         Only the keys that do something show. ``^P paths`` must have a selected message to
         show the paths *of*. ``^U QR`` must have a selected message with a URL in it
-        (refer to :meth:`_picked_urls`). ``^R retry failed`` must have something to retry
-        (refer to :meth:`_retry_target`). The F-key lane uses the same rules to dim its
-        slots.
+        (refer to :meth:`_picked_urls`). ``^L map`` must have a selected message whose
+        author has a location (refer to :meth:`_locate_target`). ``^R retry failed`` must
+        have something to retry (refer to :meth:`_retry_target`). The F-key lane uses the
+        same rules to dim its slots.
         """
         if self._selected is not None:
-            code = " · ^U QR" if self._picked_urls() else ""
+            code = "^U QR" if self._picked_urls() else ""
+            where = "^L map" if self._locate_target() is not None else ""
             if self._is_channel and self._retry_target() is not None:
                 # A selected scoped message of ours can be sent again unscoped, and the hint
                 # must name that key. The "(@mention)" of the reply and ^End are removed to
                 # keep the line inside 72 cells (Esc still cancels the selection, and Enter
-                # still says what it does). ↑↓ is also removed when the hint must also name
-                # the code of a link.
-                pick = "" if code else " · ↑↓ pick"
-                return f"Enter reply · ^P paths{code} · ^R resend unscoped{pick} · Esc cancel"
-            if self._is_channel:
-                return f"Enter reply (@mention) · ^P paths{code} · ↑↓ pick · ^End/Esc cancel"
-            return f"Enter paths{code} · ↑↓ pick · ^End/Esc cancel"
+                # still says what it does). If the line is still too long, ↑↓ goes first,
+                # then ^P, which the hint of each other selected message names.
+                return _fit_hint(
+                    [
+                        "Enter reply",
+                        "^P paths",
+                        code,
+                        where,
+                        "^R resend unscoped",
+                        "↑↓ pick",
+                        "Esc cancel",
+                    ],
+                    spare=("↑↓ pick", "^P paths"),
+                )
+            if self._replies:
+                return _fit_hint(
+                    [
+                        "Enter reply (@mention)",
+                        "^P paths",
+                        code,
+                        where,
+                        "↑↓ pick",
+                        "^End/Esc cancel",
+                    ],
+                    spare=("↑↓ pick",),
+                )
+            return _fit_hint(["Enter paths", code, where, "↑↓ pick", "^End/Esc cancel"])
         if self._retry_target() is not None:
             if self._is_channel:
                 return "Enter send · ↑ pick a message · ^R resend unscoped · Esc back"
@@ -801,10 +868,10 @@ class ChatScreen(Screen):
         Ctrl+PgUp/PgDn (day dividers), and the viewport moves with it. Enter on a selected
         message starts a reply with an ``@mention`` in a channel, and opens the delivery
         paths in a direct chat. In the two types of chat, ^P opens the paths of the
-        selected message, and ^U the QR codes of its links. The two do nothing when no
-        message is selected. ^End (or a move past the newest message) goes back to the
-        compose line. The first Esc clears the selection, and the second Esc leaves the
-        screen.
+        selected message, ^U the QR codes of its links, and ^L the map on its author. The
+        three do nothing when no message is selected. ^End (or a move past the newest
+        message) goes back to the compose line. The first Esc clears the selection, and the
+        second Esc leaves the screen.
         """
         if action == "enter":
             if self._selected is not None:
@@ -820,6 +887,8 @@ class ChatScreen(Screen):
             self._open_paths(self._selected)
         elif action == "url_code":
             self._open_codes()
+        elif action == "locate":
+            self._open_map()
         elif action == "retry":
             if self._is_channel:
                 self._begin_resend_unscoped()
@@ -875,6 +944,44 @@ class ChatScreen(Screen):
                 await self._paths(message)
             finally:
                 self._paths_open = False
+                self._session.invalidate()
+
+        self._session.run_detached(run())
+
+    def _locate_target(self) -> MapMarker | None:
+        """The marker of the author of the selected message, or ``None`` when ^L does nothing.
+
+        The author is the node whose key gives the colour of the chip of the message (refer
+        to :meth:`_header_key`). Our own message has our node as its author. A message with
+        no sender, or an author that has no location, has no marker.
+        """
+        if self._locator is None or self._selected is None or not self._messages:
+            return None
+        message = self._messages[max(0, min(self._selected, len(self._messages) - 1))]
+        if message.outbound:
+            return self._locator.you()
+        sender, _body = self._sender_and_body(message)
+        if sender == "·":
+            return None
+        return self._locator.find(self._header_key(sender, message))
+
+    def _open_map(self) -> None:
+        """Open the map on the author of the selected message (^L). One map at a time.
+
+        The map is a screen, and it goes on the stack above the chat. Esc on the map comes
+        back to the chat, with the same message selected.
+        """
+        target = self._locate_target()
+        if target is None or self._locator is None or self._map_open:
+            return
+        locator = self._locator
+        self._map_open = True
+
+        async def run() -> None:
+            try:
+                await locator.show(target)
+            finally:
+                self._map_open = False
                 self._session.invalidate()
 
         self._session.run_detached(run())
@@ -1345,6 +1452,8 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
                 ctx, lambda: ctx.chat.resend_direct(conversation.contact, message)
             )
 
+    from .map_screen import Locator
+
     paths = await _make_paths_presenter(ctx, conversation, device)
     screen = ChatScreen(
         conversation,
@@ -1357,6 +1466,7 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
         key_of=key_of,
         scope=scope,
         resend_unscoped=resend_unscoped,
+        locator=await Locator.gather(ctx),
     )
     ctx.chat.set_active(conversation.key)
 

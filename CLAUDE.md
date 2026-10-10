@@ -281,7 +281,7 @@ deliberately, one at a time, and say why in the code.
 - **A bare-letter shortcut only where nothing is typed.** A screen that filters, finds or
   composes as you type has no free letters, so its verbs are Ctrl chords — one table,
   `session._CTRL_LETTER_CHORDS`, each letter the mnemonic of its action (`^P` paths,
-  `^U` URL, `^Y` you, `^L` log in). One verb per letter across screens is the preference,
+  `^U` URL, `^L` locate, `^O` log in). One verb per letter across screens is the preference,
   not the rule (JP, 2026-10-10): a screen that has no use for a letter's verb may give the
   letter a verb of its own, so long as nothing between the keyboard and the app takes it —
   `^A`/`^B` are screen's and tmux's prefixes, and `^M`/`^I`/`^H`/`^J` *are* Enter, Tab,
@@ -758,7 +758,7 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   thing that just isn't available this paint. Dimming is presentational — `handle` stays
   the authority and no-ops. The lane is also the *only* affordance advertisement here, so
   anything the desktop reaches by a chord or a bare letter (a list's `^PgUp/^PgDn` section
-  jumps, the Time Machine's `w`, the map's `^Y`, a row's `Del`) earns a slot — otherwise
+  jumps, the Time Machine's `w`, the map's `^L`, a row's `Del`) earns a slot — otherwise
   it is undiscoverable on the device.
 - **Each handheld deals its own lane.** Everything about the lane that belongs to one
   keyboard is a `LaneDeck` (`fkeys.PICOCALC_LYRA_DECK`, `fkeys.CARDPUTER_ZERO_DECK`), named by

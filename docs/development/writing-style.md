@@ -255,6 +255,7 @@ and in quoted text.
 | visible | On the screen | in view |
 | viewport | The part of a page, or of the map, that the screen shows. A page that is taller than its viewport scrolls | view, window (for this) |
 | list window | The visible rows of a list that scrolls inside a screen (`ListWindow`) | window (alone) |
+| locate | Open the map on a node, or move the map to our node (the `locate` action, ^L) | find (for this) |
 
 ### The program
 

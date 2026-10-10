@@ -3205,3 +3205,22 @@ def test_stamping_leaves_the_callers_rows_untouched() -> None:
     before = list(rows)
     attribution.stamp(rows, 70, full=True)
     assert rows == before
+
+
+def test_the_locator_finds_a_node_by_its_key_or_its_key_prefix() -> None:
+    """A key prefix finds the node with the full key, and a full key finds a key prefix."""
+    from meshterm.core.models import MapMarker
+    from meshterm.ui.map_screen import Locator
+
+    full = MapMarker(label="Alice", lat=45.5, lon=-73.6, key="A1B2C3D4" + "0" * 56)
+    short = MapMarker(label="Bob", lat=45.4, lon=-73.5, key="b2c3d4e5f6a7")
+    us = MapMarker(label="Base", lat=45.3, lon=-73.4, is_self=True, key="ee" * 32)
+    locator = Locator(None, [full, short, us])  # type: ignore[arg-type]
+
+    assert locator.find("a1b2c3d4") is full  # the four bytes that sign a room post
+    assert locator.find("0xA1B2C3D4" + "0" * 56) is full
+    assert locator.find("b2c3d4e5f6a7" + "9" * 52) is short  # stored history knows six bytes
+    assert locator.find("c3c3c3c3") is None
+    assert locator.find(None) is None and locator.find("") is None
+    assert locator.you() is us
+    assert Locator(None, [full]).you() is None  # type: ignore[arg-type]

@@ -52,6 +52,23 @@ def plain(rendered: str | Iterable[str]) -> str:
     return _ANSI.sub("", rendered)
 
 
+def recording_locator(markers: list) -> object:
+    """A real :class:`~meshterm.ui.map_screen.Locator` whose map is a list, ``shown``.
+
+    It finds markers with the rule of the app. Instead of a map, :meth:`show` appends the
+    marker that the map would open on to ``shown``.
+    """
+    from meshterm.ui.map_screen import Locator
+
+    class _Recording(Locator):
+        async def show(self, marker) -> None:  # noqa: ANN001 - a MapMarker
+            self.shown.append(marker)
+
+    locator = _Recording(None, markers)  # type: ignore[arg-type]
+    locator.shown = []  # type: ignore[attr-defined]
+    return locator
+
+
 #: The root of the checkout.
 _ROOT = Path(__file__).resolve().parent.parent
 

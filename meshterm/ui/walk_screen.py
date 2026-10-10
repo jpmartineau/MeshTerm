@@ -51,7 +51,7 @@ while it fits. If it does not fit, it is *cropped* at each edge where the walk
 continues: the chip breaks on its own half block, the same as each path row in the app
 that is too long for its lane. At rest, the window is at the tail. Thus the focus and the
 last steps are visible, and the crop removes the start of the walk. **←→ slide the
-window**, so that you can read back over a long walk. **^Y** puts the focus on our node
+window**, so that you can read back over a long walk. **^L** puts the focus on our node
 again. **Typing finds**: a filter over all the nodes in the graph, islands also. While you
 type, it also narrows the fan on the canvas to the neighbours that match, and the focus
 stays. Enter teleports the focus to the highlighted match. The trail then starts again
@@ -253,7 +253,7 @@ class WalkScreen(Screen):
         to stand in for *Top* and leave *Bottom* blank to keep up the pretence. Instead, it
         takes a slot of this screen (JP, 2026-08-09), because F1-F3 are for this purpose.
         The Shift bank of the pager then has the same meaning here as in all other places:
-        the two ends of the list that this screen scrolls. On a keyboard, ^Y does the same
+        the two ends of the list that this screen scrolls. On a keyboard, ^L does the same
         action. The map uses the same chord for our node.
 
         The two navigation slots must have rows to move through, and a leaf node in a
@@ -301,7 +301,7 @@ class WalkScreen(Screen):
         self._self_label = self_label
         self._prefix_bytes = prefix_bytes
         #: The walked trail of canonical ids. The focus is its last entry. A walk appends,
-        #: ⌫ pops, ^Y resets the trail to our node, and a find teleport starts it again.
+        #: ⌫ pops, ^L resets the trail to our node, and a find teleport starts it again.
         self._trail: list[str] = [topo.self_id]
         #: The cells by which the breadcrumb line is scrolled off its *tail* end (refer to
         #: :meth:`_trail_text`). 0 is the rest state (the focus at the right edge). Each
@@ -450,7 +450,7 @@ class WalkScreen(Screen):
         atoms = ["↑↓ move"]
         if scrolls:
             atoms.append("←→ trail")
-        atoms += ["Enter focus", "⌫ back", "^Y you"]
+        atoms += ["Enter focus", "⌫ back", "^L you"]
         if not scrolls:
             atoms.append("type to find")
         atoms.append("Esc back")
@@ -460,7 +460,7 @@ class WalkScreen(Screen):
         """Move the highlight, walk, step back, find, or close.
 
         Home/End go to the ends of the list here, the same as on each other screen that
-        scrolls. The jump back to our node is ``locate`` (^Y, and F3 on the lane), which is
+        scrolls. The jump back to our node is ``locate`` (^L, and F3 on the lane), which is
         not a position in this list. Refer to :attr:`picocalc_lyra_lane`.
         """
         rows = self._rows()
@@ -512,7 +512,7 @@ class WalkScreen(Screen):
         elif action == "right":
             self._trail_scroll = max(0, self._trail_scroll - _HSCROLL_STEP)
         elif action == "locate":
-            # ^Y (and F3): stop the walk, instead of a move inside it. The trail goes back
+            # ^L (and F3): stop the walk, instead of a move inside it. The trail goes back
             # to only our node, and a find that narrows the list is also removed.
             self._trail = [self._topo.self_id]
             self._filter = ""
@@ -676,7 +676,7 @@ class WalkScreen(Screen):
         is measured only when the two marks are known, or the line draws one cell past the
         row. The slide stops when the head becomes visible, so the line does not move off
         the edge. Each change to the trail resets the slide: a walk, a step back, a
-        teleport, and ^Y all end with the focus visible, because the user reads the next
+        teleport, and ^L all end with the focus visible, because the user reads the next
         move from there.
         """
         self._trail_width = width

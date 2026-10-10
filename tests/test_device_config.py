@@ -1689,3 +1689,40 @@ async def test_a_locked_contact_is_never_offered_to_the_sweep() -> None:
     ranked = {s.contact.name: s for s in await _rank(ctx, contacts, "cc" * 32)}
     assert ranked["Kept"].protection == PROTECT_LOCKED
     assert not ranked["Loose"].protected
+
+
+async def test_contacts_screen_l_opens_the_map_on_the_highlighted_node() -> None:
+    """^L asks for the map on the highlighted node. The hint and F6 name it only where it acts."""
+    from meshterm.core.models import Contact, MapMarker
+    from meshterm.ui.contacts_screen import ContactsScreen
+    from meshterm.ui.tui import KeyRequest, fkeys
+    from tests.conftest import recording_locator
+
+    contacts = [
+        Contact(name="Alice", public_key="aa" * 32),
+        Contact(name="Bob", public_key="bb" * 32),
+    ]
+    alice = MapMarker(label="Alice", lat=45.5, lon=-73.6, key="aa" * 32)
+    screen = ContactsScreen(
+        "Us", "cc" * 32, contacts, 1, {}, _contacts_sort(), locator=recording_locator([alice])
+    )
+    resolved: list = []
+    screen.resolve = lambda value: resolved.append(value)  # type: ignore[method-assign]
+
+    # Our node is first, and it has no location here.
+    assert "^L" not in screen.footer_hint
+    lane = screen.picocalc_lyra_lane
+    assert (lane[0].label, lane[0].opp_label) == ("Sect ↑", "Map")  # Map is Shift+F1 (F6)
+    assert lane[0].opp_enabled is False
+    screen.handle("locate")
+    assert resolved == []
+
+    screen.handle("down")  # Alice
+    assert "^L map" in screen.footer_hint
+    assert screen.picocalc_lyra_lane[0].opp_enabled is True
+    assert fkeys.PICOCALC_LYRA_DECK.action_for(screen.picocalc_lyra_lane, 6) == "locate"
+    screen.handle("locate")
+    assert resolved == [KeyRequest("locate", alice)]
+
+    screen.handle("down")  # Bob, with no location
+    assert "^L" not in screen.footer_hint

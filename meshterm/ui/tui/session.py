@@ -76,9 +76,13 @@ from .spinner import spinner_interval
 #: ``Keys.ControlM``/``ControlI``/``ControlH``. If this table claims them, it binds those
 #: keys again.
 #: The letter of a chord is the mnemonic of the action, not of the word that one screen uses
-#: for it. ``locate`` is ^Y for **you** (JP, 2026-08-09). It is the same keyboard key on the
-#: map and in the mesh walk, because on both it names our node. It was ^U until 2026-10-01.
-#: Then U went to ``url_code``: the links of a chat message as QR codes.
+#: for it. ``locate`` is ^L: on the map and in the mesh walk it goes to our node, and in the
+#: chat and on Contacts it opens the map on the node of the selected row. It was ^U until
+#: 2026-10-01, then ^Y until 2026-10-10, when ``login`` moved from ^L to ^O (JP). One action
+#: for each letter in all screens is the preference, not the rule (JP, 2026-10-10). A screen
+#: that has no use for the action of a letter can give the letter a different action, if no
+#: terminal or multiplexer takes it. ^A and ^B are not free for this reason: they are the
+#: prefix keys of GNU screen and tmux.
 #:
 #: Two of these chords are for the full app, not for one screen:
 #:
@@ -96,8 +100,10 @@ from .spinner import spinner_interval
 #: ``IXON``/``IXOFF``, so ^Q is not XON here.
 _CTRL_LETTER_CHORDS: dict[str, str] = {
     "c": "quit",
-    # ^L logs in to the room that a room screen shows.
-    "l": "login",
+    "l": "locate",
+    # ^O logs in to the room that a room screen shows. The raw mode of prompt_toolkit clears
+    # IEXTEN, so a terminal on macOS or BSD does not take ^O to discard output.
+    "o": "login",
     "p": "paths",
     "q": "quit",
     "r": "retry",
@@ -108,7 +114,6 @@ _CTRL_LETTER_CHORDS: dict[str, str] = {
     "u": "url_code",
     "v": "paste_clipboard",
     "w": "to_menu",
-    "y": "locate",
 }
 
 #: Maps the prompt_toolkit keys to the normalized action names that the screens understand.

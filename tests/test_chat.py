@@ -23,6 +23,7 @@ from meshterm.core.models import (
     ChatMessage,
     Contact,
     Conversation,
+    MapMarker,
     Message,
     conversation_key,
 )
@@ -2744,3 +2745,106 @@ def test_only_the_acks_the_radio_could_still_push_are_awaited(repo: Repository) 
     assert messages[0].acked is False
     chat._settle_ack(f"{39:08x}")
     assert messages[39].acked is True
+
+
+# --- ^L: the map on the author ------------------------------------------------------------
+
+#: A node with a location, and our node.
+_ALICE_AT = MapMarker(label="Alice", lat=45.5, lon=-73.6, key="a1" * 32)
+_US_AT = MapMarker(label="Base", lat=45.4, lon=-73.5, is_self=True, key="ee" * 32)
+
+
+async def test_chat_locate_opens_the_map_on_the_author_of_the_selected_message() -> None:
+    """^L opens the map on the author of the selected message, and is named only where it acts."""
+    from tests.conftest import recording_locator
+
+    locator = recording_locator([_ALICE_AT, _US_AT])
+    keys = {"alice": "a1" * 32, "bob": "b2" * 32}
+    screen = ChatScreen(
+        Conversation(label="#public", is_channel=True, channel_idx=0),
+        [
+            ChatMessage(text="Alice: hi", is_channel=True, channel_idx=0),
+            ChatMessage(text="Bob: yo", is_channel=True, channel_idx=0),
+            ChatMessage(text="hello", outbound=True, is_channel=True, channel_idx=0),
+        ],
+        send=None,
+        names={},
+        session=_StubSession(),
+        key_of=lambda name: keys.get(name.casefold()),
+        locator=locator,  # type: ignore[arg-type]
+    )
+    # With no selected message, ^L does nothing. The hint does not name it, and its chip on
+    # the Shift half of F1 is dim.
+    screen.handle("locate")
+    await asyncio.sleep(0)
+    assert locator.shown == []
+    assert "^L" not in screen.footer_hint
+    assert screen.picocalc_lyra_lane[0].opp_label == "Map"
+    assert screen.picocalc_lyra_lane[0].opp_enabled is False
+
+    # Our own message: its author is our node.
+    screen.handle("up")
+    assert "^L map" in screen.footer_hint
+    screen.handle("locate")
+    await asyncio.sleep(0)
+    assert locator.shown == [_US_AT]
+
+    # Bob has a key but no location, so there is nothing to show.
+    screen.handle("up")
+    assert "^L" not in screen.footer_hint
+    assert screen.picocalc_lyra_lane[0].opp_enabled is False
+    screen.handle("locate")
+    await asyncio.sleep(0)
+    assert locator.shown == [_US_AT]
+
+    # Alice has a location. The chip is lit, and F6 sends the same action as ^L.
+    screen.handle("up")
+    assert "^L map" in screen.footer_hint
+    assert screen.picocalc_lyra_lane[0].opp_enabled is True
+    assert fkeys.PICOCALC_LYRA_DECK.action_for(screen.picocalc_lyra_lane, 6) == "locate"
+    screen.handle("locate")
+    await asyncio.sleep(0)
+    assert locator.shown == [_US_AT, _ALICE_AT]
+
+
+def test_chat_without_a_locator_has_no_map_chip() -> None:
+    """A chat that cannot locate leaves the Shift half of F1 empty, not dim."""
+    screen = _screen(_StubSession(), send=None, messages=[ChatMessage(text="hi", peer="d4e5f6a7")])
+    assert screen.picocalc_lyra_lane[0].opp_label == ""
+
+
+def test_chat_hint_with_all_its_keys_fits_in_72_cells() -> None:
+    """The longest hint (a scoped message of ours, with a link, on the map) fits in 72 cells.
+
+    The ↑↓ atom goes first, then ^P. The keys that only this message offers stay.
+    """
+
+    async def resend_unscoped(message: ChatMessage) -> ChatMessage | None:
+        return None
+
+    from tests.conftest import recording_locator
+
+    screen = ChatScreen(
+        Conversation(label="#ops", is_channel=True, channel_idx=1),
+        [
+            ChatMessage(
+                text="map at https://meshterm.net",
+                outbound=True,
+                is_channel=True,
+                channel_idx=1,
+                scope="yul",
+            )
+        ],
+        send=None,
+        names={},
+        session=_StubSession(),
+        scope="yul",
+        resend_unscoped=resend_unscoped,
+        locator=recording_locator([_US_AT]),  # type: ignore[arg-type]
+    )
+    screen.handle("up")
+    hint = screen.footer_hint
+    assert cell_len(hint) <= 72
+    for atom in ("Enter reply", "^U QR", "^L map", "^R resend unscoped", "Esc cancel"):
+        assert atom in hint
+    assert "↑↓ pick" not in hint and "^P paths" not in hint

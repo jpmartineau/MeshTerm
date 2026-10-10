@@ -9,6 +9,21 @@ can change how things behave. It does not only add new things.
 
 ## [Unreleased]
 
+### Added
+
+- **^L shows a node on the map from a chat and from Contacts.** In a chat or on the board
+  of a room, select a message and press ^L. The map opens on the node that wrote it. On
+  the Contacts page, ^L opens the map on the highlighted contact. The key works only when
+  MeshTerm knows where the node is, and the hint at the bottom of the screen names it only
+  then. On the handhelds, the chip is `Map`, on Shift+F1. The board of a room has no free
+  chip for it yet.
+
+### Changed
+
+- **^L is now the map key, and ^O logs in to a room.** On the map and in the mesh walk, ^L
+  goes back to your own node. That key was ^Y. On the board of a room, ^O logs in. That
+  key was ^L.
+
 ## [0.10.3] - 2026-10-07
 
 **You can join room servers, move your channels to a new device, and find the public

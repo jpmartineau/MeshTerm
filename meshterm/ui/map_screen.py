@@ -16,7 +16,7 @@ draws the map again through :func:`~meshterm.ui.map_render.render_map`. The keys
 * ``Home`` centres the viewport again and fits it to the dense core of the nodes. This is
   the area that the mesh covers (the ``Region`` chip), and it is also the default viewport
   when the map opens.
-* ``^Y`` (for "you") centres the viewport on **our node**. It keeps the zoom that the user
+* ``^L`` (to locate) centres the viewport on **our node**. It keeps the zoom that the user
   selected, and it clears the find query. The ``You`` chip on the F-key lane does the
   same, and its Shift half also zooms in close.
 * **Type to find nodes.** Each letter key adds to a live name filter. The matching nodes
@@ -310,7 +310,7 @@ class MapScreen(Screen):
         Thus the typed text is always visible in a fixed place.
 
         The line uses all of its 72 cells. Thus the two keys that move the viewport to a
-        destination share one atom (``Home/^Y region/you``). The ``⇧ fine`` atom gives
+        destination share one atom (``Home/^L region/you``). The ``⇧ fine`` atom gives
         its space to them. That atom only refines a key that the line already names, and
         it is the only atom here that shows a modifier instead of a key binding. The
         state of the basemap was once a suffix at the end of this line. That state is a
@@ -320,7 +320,7 @@ class MapScreen(Screen):
         """
         if self._filter:
             return f"find: {self._filter}▏ · ^Enter frame · ⌫ erase · Enter/Esc clear"
-        return "↑↓←→ pan · PgUp/PgDn zoom · Home/^Y region/you · type to find · Esc back"
+        return "↑↓←→ pan · PgUp/PgDn zoom · Home/^L region/you · type to find · Esc back"
 
     def consume_edge_scrub(self) -> int:
         """How many right-edge cells the session must paint again at the next paint (0 is none).
@@ -1057,7 +1057,7 @@ class MapScreen(Screen):
         first an active filter, and the map itself only when the filter is clear.
 
         Three actions fit the viewport again, and each has a key and an F-key chip:
-        ``home`` fits the full region, ``locate`` (^Y, for "you") goes to our node, and
+        ``home`` fits the full region, ``locate`` (^L) goes to our node, and
         ``frame`` (^Enter) fits the find matches. ``locate_zoom`` is the Shift-bank
         variant of ``locate`` that also zooms in. ``clear_find`` clears the query and does
         not move the viewport, and plain **Enter** does the same.
@@ -1143,7 +1143,7 @@ class MapScreen(Screen):
         return next((m for m in self._markers if m.is_self), None)
 
     def _locate(self, vp: Viewport, *, zoom_in: bool = False) -> None:
-        """Centre the viewport on our node (``^Y`` or the ``You`` chip), and clear the find query.
+        """Centre the viewport on our node (``^L`` or the ``You`` chip), and clear the find query.
 
         Plain ``You`` keeps the zoom that the user selected. Two presses do the same thing
         two times, and one more press of Zoom + adds the zoom. Its Shift half (``You +``)
@@ -1535,3 +1535,73 @@ async def open_map(
         # paint, so that the menu drawn under the map starts from a clean terminal and
         # does not keep that garbage.
         session.request_full_repaint()
+
+
+class Locator:
+    """The nodes of the mesh that have a location, and the map that opens on one of them.
+
+    This is the ^L key (``locate``) of a screen that shows other nodes: the author of a chat
+    message, or the highlighted contact. At each paint, the screen asks :meth:`find` if the
+    node of its selected row is on the map. Thus its hint and its F-key lane name ^L only
+    when the key acts. Then :meth:`show` opens the map on that node, the same as the map
+    action of the node page.
+
+    The markers come from :func:`~meshterm.services.markers.gather_markers` one time, when
+    the screen opens. A node that advertises a location while the screen is open gets a
+    marker at the next visit.
+    """
+
+    def __init__(self, ctx: AppContext, markers: list[MapMarker]) -> None:
+        """Hold the markers that :meth:`show` draws.
+
+        Args:
+            ctx: The shared application context (it must be in the interactive menu).
+            markers: The located nodes of the mesh.
+        """
+        self._ctx = ctx
+        self._markers = markers
+        # The result of each key that find() got. A screen asks at each paint, and the
+        # answer for one key does not change while the markers stay the same.
+        self._found: dict[str, MapMarker | None] = {}
+
+    @classmethod
+    async def gather(cls, ctx: AppContext) -> Locator:
+        """A locator over the markers that MeshTerm has now. With no markers, nothing is found."""
+        from ..services.markers import gather_markers
+
+        try:
+            markers = await gather_markers(ctx)
+        except Exception:  # noqa: BLE001 - with no markers, ^L does nothing, and the screen works
+            markers = []
+        return cls(ctx, markers)
+
+    def find(self, key: str | None) -> MapMarker | None:
+        """The marker of the node with ``key`` (a full key or a key prefix), or ``None``.
+
+        A key prefix finds the node whose full key starts with it, and a full key finds the
+        marker of a node that MeshTerm knows only by its key prefix. The contacts come
+        first in the markers, so a contact wins over an overheard node with the same key
+        prefix.
+        """
+        if not key:
+            return None
+        needle = key.lower().removeprefix("0x")
+        if needle not in self._found:
+            self._found[needle] = next(
+                (m for m in self._markers if _same_node(m.key, needle)), None
+            )
+        return self._found[needle]
+
+    def you(self) -> MapMarker | None:
+        """The marker of our node, or ``None`` when our node has no location."""
+        return next((m for m in self._markers if m.is_self), None)
+
+    async def show(self, marker: MapMarker) -> None:
+        """Open the map on ``marker``, with its name as the find query, so that it is bright."""
+        await open_map(self._ctx, self._markers, focus=(marker.lat, marker.lon), find=marker.label)
+
+
+def _same_node(marker_key: str | None, needle: str) -> bool:
+    """Whether a marker key and a lowercase key (or key prefix) name the same node."""
+    key = (marker_key or "").lower().removeprefix("0x")
+    return bool(key) and (key.startswith(needle) or needle.startswith(key))

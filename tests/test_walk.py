@@ -373,7 +373,7 @@ def test_walk_trail_names_carry_their_node_hues() -> None:
 
 
 def test_walk_locate_refocuses_us_and_home_end_walk_the_list() -> None:
-    """^Y resets the walk to our own node from anywhere. Home and End go to the ends of the list."""
+    """^L resets the walk to our own node from anywhere. Home and End go to the ends of the list."""
     # A hub with spokes from one of our neighbours: a focus away from us, with a list to move in.
     topo = MeshTopology(US, contacts=[Hub])
     hub = topo.canonical(Hub.public_key)

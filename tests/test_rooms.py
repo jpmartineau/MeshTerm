@@ -696,6 +696,7 @@ def _view(
     access: RoomAccess | None = RoomAccess.MEMBER,
     joined: bool = True,
     login: RoomLogin | None = None,
+    locator: object = None,
 ) -> tuple[RoomScreen, dict]:
     """A board with stub hooks. ``calls`` records the requests to the hooks."""
     calls: dict = {"auto": 0, "joins": [], "sent": []}
@@ -726,6 +727,7 @@ def _view(
         join=join,
         joined=joined,
         access=access,
+        locator=locator,  # type: ignore[arg-type]
     )
     return screen, calls
 
@@ -806,7 +808,7 @@ async def test_after_silence_nothing_can_be_posted_and_the_line_says_why() -> No
     screen.begin_auto_login()
     await _settled(screen)
     assert screen.title.endswith(NO_REPLY)
-    assert "no answer" in _compose(screen) and "^L" in _compose(screen)
+    assert "no answer" in _compose(screen) and "^O" in _compose(screen)
     for ch in "hi":
         screen.handle("text", ch)
     screen.handle("enter")
@@ -816,18 +818,18 @@ async def test_after_silence_nothing_can_be_posted_and_the_line_says_why() -> No
 
 
 async def test_control_l_runs_the_explained_login() -> None:
-    """^L gives the login to the Rooms flow, with its dialogs over the board, and shows the end."""
+    """^O gives the login to the Rooms flow, with its dialogs over the board, and shows the end."""
     screen, calls = _view(access=None, login=RoomLogin(LoginResult.ACCEPTED, RoomAccess.ADMIN))
     screen.handle("login")
     assert screen._login_open
-    assert "^L log in" not in screen.footer_hint  # a second press does nothing
+    assert "^O log in" not in screen.footer_hint  # a second press does nothing
     await _settled(screen)
     assert calls["joins"] == [False]
     assert screen.title == f"{ROOM.name} · admin" and screen._composing
 
 
 async def test_a_read_only_member_is_asked_for_another_password_and_offered_no_retry() -> None:
-    """^L asks, because the room password lets a read-only member post. ^R is only dropped."""
+    """^O asks, because the room password lets a read-only member post. ^R is only dropped."""
     unacked = ChatMessage(text="lost", outbound=True, peer=ROOM.key_prefix, acked=False)
     screen, calls = _view([unacked], access=RoomAccess.READ_ONLY)
     assert "read-only" in _compose(screen)
@@ -876,9 +878,9 @@ async def test_a_read_only_member_picks_a_post_to_see_its_paths_not_to_reply() -
 
 
 def test_the_hint_names_log_in_and_fits() -> None:
-    """The hint names ^L where it acts, in 72 cells, with or without a selected post."""
+    """The hint names ^O where it acts, in 72 cells, with or without a selected post."""
     screen, _ = _view(_board())
-    assert "^L log in" in screen.footer_hint
+    assert "^O log in" in screen.footer_hint
     assert cell_len(screen.footer_hint) <= 72
     screen.handle("up")
     assert cell_len(screen.footer_hint) <= 72
@@ -890,6 +892,30 @@ def test_the_handheld_lane_puts_log_in_behind_f1() -> None:
     lane = screen.picocalc_lyra_lane
     assert lane[0].opp_label == "Log in"
     assert fkeys.PICOCALC_LYRA_DECK.action_for(lane, 6) == "login"
+
+
+async def test_l_opens_the_map_on_the_author_of_a_post() -> None:
+    """^L opens the map on the author of the selected post. ^O keeps the login."""
+    from meshterm.core.models import MapMarker
+    from tests.conftest import recording_locator
+
+    alice = MapMarker(label="Alice", lat=45.5, lon=-73.6, key=ALICE_KEY + "0" * 56)
+    locator = recording_locator([alice])
+    screen, _ = _view(_board(), locator=locator)
+    for _ in range(4):
+        screen.handle("up")  # the oldest post, by Alice
+    assert "^L map" in screen.footer_hint
+    screen.handle("locate")
+    await asyncio.sleep(0)
+    assert locator.shown == [alice]
+    # No marker places the stranger, so ^L does nothing, and the hint does not name it.
+    screen.handle("down")
+    assert "^L" not in screen.footer_hint
+    screen.handle("locate")
+    await asyncio.sleep(0)
+    assert locator.shown == [alice]
+    # The room keeps Log in on the Shift half of F1. Thus Map has no chip here.
+    assert screen.picocalc_lyra_lane[0].opp_label == "Log in"
 
 
 # --- joining: the explained flow ------------------------------------------------------

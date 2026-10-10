@@ -226,8 +226,9 @@ class LaneDeck:
         """The action that F-key ``number`` resolves to on this lane, or ``None``.
 
         A plain key takes the action of its slot, and a Shift-bank key takes the action of
-        its companion. The result is ``None`` where the slot has no action (a lone slot, or
-        an unassigned slot), and where the keyboard key is not a key of this deck. A dim
+        its companion. The result is ``None`` where the slot has no action (a lone slot, a
+        slot that has only a Shift-bank companion, or an unassigned slot), and where the
+        keyboard key is not a key of this deck. A dim
         slot still resolves. Dimming is how the lane draws an action on which the screen
         does nothing anyway. Because the action resolves in all cases, a lane that was
         built from stale metrics can never block a key press that works (refer to the
@@ -244,7 +245,7 @@ class LaneDeck:
             return None
         if shifted:
             return pair.opp_action or None
-        return pair.action
+        return pair.action or None
 
     def lane_text(self, lane: Lane, *, shifted: bool = False) -> Text:
         """Render the lane as this deck's chips: coloured fill, white text, each at its column.
@@ -366,10 +367,10 @@ _HINT_KEY_ACTIONS: dict[str, str] = {
 }
 
 #: Marks a word as a key notation of some type, also where this module cannot map it: a
-#: chord (``^Y``), a shifted key (``⇧Tab``), or a bare glyph key (``⌫``). If the verb half
+#: chord (``^L``), a shifted key (``⇧Tab``), or a bare glyph key (``⌫``). If the verb half
 #: of an atom has one of these marks, the atom names more than the keys at its start. Thus
 #: the atom is never removed because of the keys that it did name (the map's
-#: ``Home/^Y region/you``).
+#: ``Home/^L region/you``).
 _KEYISH = ("^", "⇧", "⌫", "↑", "↓", "←", "→")
 
 
