@@ -281,7 +281,11 @@ deliberately, one at a time, and say why in the code.
 - **A bare-letter shortcut only where nothing is typed.** A screen that filters, finds or
   composes as you type has no free letters, so its verbs are Ctrl chords — one table,
   `session._CTRL_LETTER_CHORDS`, each letter the mnemonic of its action (`^P` paths,
-  `^U` URL, `^Y` you, `^L` log in). A screen that takes no typing may spend a bare letter instead (the
+  `^U` URL, `^Y` you, `^L` log in). One verb per letter across screens is the preference,
+  not the rule (JP, 2026-10-10): a screen that has no use for a letter's verb may give the
+  letter a verb of its own, so long as nothing between the keyboard and the app takes it —
+  `^A`/`^B` are screen's and tmux's prefixes, and `^M`/`^I`/`^H`/`^J` *are* Enter, Tab,
+  Backspace and LF. A screen that takes no typing may spend a bare letter instead (the
   Time Machine's `w`, the dashboard's `s`, the device splash's `h`). Either way the key
   is named where it acts: in the hint, and on the PicoCalc's lane.
 - Empty states are lowercase muted, optionally `— explanation`, never parenthesized.
