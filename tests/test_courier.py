@@ -543,6 +543,21 @@ def test_outbox_rows_recompute_live_state_per_repaint(tmp_path: Path) -> None:
     assert "try 1" in _outbox_plain(screen)
 
 
+def test_outbox_draws_each_recipient_as_a_destination_chip(tmp_path: Path, powerline) -> None:
+    """A queued message goes to its recipient, so the recipient opens on the notch.
+
+    A waiting recipient has the hue of its key. A finished one is muted with the rest of its
+    row, because the finished section is history.
+    """
+    from meshterm.ui.pathline import POWERLINE_ROUND_CLOSE, POWERLINE_SEP
+
+    powerline(True)
+    titles = _outbox_titles(tmp_path)
+    for name in ("Waiting", "Landed", "Lost"):
+        row = next(title for title in titles if name in title)
+        assert f"{POWERLINE_SEP} {name} {POWERLINE_ROUND_CLOSE}" in row
+
+
 def _title_plain(choice) -> str:
     """The label of a row as plain text.
 

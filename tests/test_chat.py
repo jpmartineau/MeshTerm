@@ -459,6 +459,23 @@ def test_preview_colours_channel_sender_and_mentions() -> None:
     assert any(s.style == "node.unknown" and s.start <= zed < s.end for s in preview.spans)
 
 
+def test_preview_draws_the_author_and_the_mentions_as_the_transcript_does(powerline) -> None:
+    """With chips, the author closes on the point and a mention opens on the notch.
+
+    The point says what the colon said, so the chip has no colon. Our own author is the
+    ``★``, as the sender chip of our messages in the transcript.
+    """
+    from meshterm.ui.pathline import POWERLINE_ROUND_CLOSE, POWERLINE_ROUND_OPEN, POWERLINE_SEP
+
+    powerline(True)
+    theirs = ChatMessage(text="Bob: hi @[Alice]", is_channel=True, channel_idx=0)
+    author = POWERLINE_ROUND_OPEN + " Bob " + POWERLINE_SEP
+    mention = POWERLINE_SEP + " @Alice " + POWERLINE_ROUND_CLOSE
+    assert _preview_text(theirs, _NO_KEYS).plain == f"{author} hi {mention}"
+    mine = ChatMessage(text="yo", outbound=True, is_channel=True, channel_idx=0)
+    assert _preview_text(mine, _NO_KEYS).plain == f"{POWERLINE_ROUND_OPEN} ★ {POWERLINE_SEP} yo"
+
+
 def test_preview_keeps_the_whole_message() -> None:
     """The preview is built whole. The cut of the row is the part that the ←→ scroll passes."""
     long = ChatMessage(text="x" * 300, is_channel=True, channel_idx=0)

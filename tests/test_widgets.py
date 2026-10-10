@@ -13,6 +13,7 @@ from rich.text import Text
 
 from meshterm.core.models import node_type_label
 from meshterm.ui.pathline import (
+    PATH_INK,
     POWERLINE_ROUND_CLOSE,
     POWERLINE_ROUND_OPEN,
     POWERLINE_SEP,
@@ -26,9 +27,11 @@ from meshterm.ui.widgets import (
     ORIGIN,
     format_age,
     format_ago,
+    hop_chip,
     name_chip,
     path_text,
     revisit_note,
+    route_ends,
 )
 
 
@@ -302,6 +305,31 @@ def test_name_chip_role_changes_nothing_without_powerline(powerline) -> None:
 
     for role in (ORIGIN, DESTINATION):
         assert name_chip("Alice", "a1b2", role=role).plain == "Alice"
+
+
+def test_a_lone_hop_in_arrow_mode_is_a_name_and_not_a_route(powerline) -> None:
+    """Only a route keeps its hues on a highlighted row. A lone name turns white like any name."""
+    powerline(False)
+    chip = hop_chip(PathHop("Alice", key="a1b2"), role=ORIGIN)
+
+    assert str(chip.style) != PATH_INK
+    assert all(str(s.style) != PATH_INK for s in chip.spans)
+
+
+def test_route_ends_face_each_other_across_one_cell_of_page(powerline) -> None:
+    """The middle is not drawn, so no seam joins the two ends. A seam makes them neighbours."""
+    powerline(True)
+    line = route_ends(PathHop("Alice", key="a1"), PathHop("Bob", key="c3"))
+
+    opening = POWERLINE_ROUND_OPEN + " Alice " + POWERLINE_SEP
+    assert line.plain == opening + " " + POWERLINE_SEP + " Bob " + POWERLINE_ROUND_CLOSE
+
+
+def test_route_ends_are_the_arrow_of_the_app_without_powerline(powerline) -> None:
+    """A terminal with no chips reads the two ends as it always did."""
+    powerline(False)
+
+    assert route_ends(PathHop("Alice", key="a1"), PathHop("Bob", key="c3")).plain == "Alice → Bob"
 
 
 def test_name_chip_falls_back_to_the_bare_name_without_powerline(powerline) -> None:

@@ -435,6 +435,37 @@ def test_packet_viewer_lays_out_what_a_frame_addressed() -> None:
     assert _plain(lines).count("dest_hash") == 0
 
 
+def test_packet_viewer_draws_each_end_of_the_route_as_the_chip_of_that_end(powerline) -> None:
+    """The sender closes on the point and the recipient opens on the notch, around ``via``."""
+    from meshterm.ui.pathline import POWERLINE_ROUND_CLOSE, POWERLINE_ROUND_OPEN, POWERLINE_SEP
+
+    powerline(True)
+    entry = PacketEntry(
+        when=utcnow(),
+        kind="packet",
+        path="3d",
+        raw={
+            "payload_typename": "TEXT_MSG",
+            "route_typename": "FLOOD",
+            "dest_hash": "c0",
+            "src_hash": "a1",
+        },
+    )
+    viewer = PacketViewer(
+        [entry],
+        0,
+        resolve=lambda h: {"c0": "Waymarker", "a1": "Alice"}.get(h, ""),
+        prefix_bytes=1,
+        self_name="Waymarker",
+    )
+    lines = _stripped(viewer.render_body(80))
+    to_row = next(ln for ln in lines if ln.startswith("to"))
+    from_row = next(ln for ln in lines if ln.startswith("from"))
+
+    assert f"{POWERLINE_SEP} Waymarker {POWERLINE_ROUND_CLOSE}  c0" in to_row  # us, reached
+    assert f"{POWERLINE_ROUND_OPEN} Alice {POWERLINE_SEP}  a1" in from_row  # the route goes on
+
+
 def test_packet_viewer_names_a_tokened_frame_by_its_token() -> None:
     """An ack points to the message that it answers. A trace points to its own tag."""
     ack = PacketEntry(

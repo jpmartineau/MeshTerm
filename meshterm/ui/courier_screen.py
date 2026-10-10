@@ -38,9 +38,18 @@ from ..core.courier_store import DELIVERED, QUEUED, QueuedMessage
 from ..core.models import Contact, is_direct_messageable, utcnow
 from .contactlist import SORT_COLUMNS, SORT_OPENS_ASCENDING, ContactListScreen, ContactRow
 from .menus import icon_lane, marked_label, run_steps, section_heading
+from .pathline import PathHop
 from .tui import CANCEL, DM_BYTE_LIMIT, Choice, SelectScreen, Separator
 from .watchtower_screen import contact_watch_key
-from .widgets import ContactsSort, age_seconds, contact_packets, format_ago
+from .widgets import (
+    DESTINATION,
+    ContactsSort,
+    age_seconds,
+    contact_packets,
+    format_ago,
+    hop_chip,
+    name_chip,
+)
 
 if TYPE_CHECKING:
     from ..context import AppContext
@@ -302,9 +311,13 @@ def _entry_mark(mark: str, style: str, lane: int) -> Text:
 
 
 def _waiting_row(ctx: AppContext, message: QueuedMessage, lane: int = _MARK_LANE) -> Text:
-    """One waiting entry: the recipient, the body, and what the entry waits for."""
+    """One waiting entry: the recipient, the body, and what the entry waits for.
+
+    The recipient is the destination of the message, so it is a chip that opens on the
+    notch (refer to :func:`~meshterm.ui.widgets.hop_chip`), in the hue of its key.
+    """
     row = _entry_mark("⏳", "warn", lane)
-    row.append(message.node_name)
+    row.append_text(name_chip(message.node_name, message.node_key, role=DESTINATION))
     row.append(f"  “{_shorten(message.text)}”", style="muted")
     row.append("  ·  ", style="muted")
     now = utcnow()
@@ -327,12 +340,16 @@ def _waiting_row(ctx: AppContext, message: QueuedMessage, lane: int = _MARK_LANE
 
 
 def _done_row(message: QueuedMessage, lane: int = _MARK_LANE) -> Text:
-    """One finished entry: the outcome mark, the recipient, the body, and when it ended."""
+    """One finished entry: the outcome mark, the recipient, the body, and when it ended.
+
+    The recipient is a destination chip, the same as in the outbox. But a finished entry is
+    history, and all of its row is muted. Thus the chip is muted too.
+    """
     if message.status == DELIVERED:
         row = _entry_mark("✓", "ok", lane)
     else:
         row = _entry_mark("✗", "err", lane)
-    row.append(message.node_name, style="muted")
+    row.append_text(hop_chip(PathHop(message.node_name, style="muted"), role=DESTINATION))
     row.append(f"  “{_shorten(message.text)}”", style="muted")
     when = message.finished or message.created
     verb = "delivered" if message.status == DELIVERED else "gave up"

@@ -58,9 +58,20 @@ from ..services.trace_runner import (
 from ..ui import renderers
 from ..ui.fields import ChannelRef, NodeRef
 from ..ui.menus import Lane, column_header, fit_cells, section_heading
+from ..ui.pathline import SELF_GLYPH, PathHop
+from ..ui.termfont import powerline_enabled
 from ..ui.theme import name_style
 from ..ui.tui import Choice, DeleteRequest, Separator
-from ..ui.widgets import NODE_GLYPHS, age_seconds, channel_glyph, format_age
+from ..ui.widgets import (
+    DESTINATION,
+    NODE_GLYPHS,
+    ORIGIN,
+    age_seconds,
+    channel_glyph,
+    format_age,
+    hop_chip,
+    name_chip,
+)
 from .base import Tool, ToolResult, register
 
 if TYPE_CHECKING:
@@ -1020,14 +1031,16 @@ def _preview_text(
 
     It is the same as the live transcript:
 
-    - Our own messages get a ``you:`` prefix.
-    - In a received channel message, the inline ``Name:`` sender gets the hue that comes from
-      its key (muted when no known node has the name).
+    - Our own messages start with our author (refer to :func:`_append_author`).
+    - In a received channel message, the inline ``Name:`` sender is the author, in the hue
+      that comes from its key (the node grey when no known node has the name).
     - A room post starts with its author, named by key in the same way as the room screen
       names authors (:func:`~meshterm.ui.room.author_label`).
-    - Each ``@[Name]`` mention shows as a bare ``@Name``, in the same way.
+    - Each ``@[Name]`` mention shows as ``@Name``, in the same way (refer to
+      :func:`_append_body`).
 
-    Thus the list and the chat use the same colour language.
+    Thus the list and the chat use the same colour language, and where the terminal draws
+    chips, the same chips: the author closes on the point and a mention opens on the notch.
 
     The preview is made *in full*, however long the message is. Before, it was cut to a
     fixed 40 cells, and nothing could undo that cut. Now ←→ scroll the row. A preview that
@@ -1037,13 +1050,13 @@ def _preview_text(
     body_raw = last.text.replace("\n", " ")
     text = Text()
     if last.outbound:
-        text.append("you: ", style="accent")
+        _append_author(text, PathHop(SELF_GLYPH, you=True), Text("you: ", style="accent"))
         _append_body(text, body_raw, key_of)
     elif last.is_channel:
         name, body = split_channel_sender(body_raw)
         if name is not None:
-            text.append(name, style=name_style(name, key_of(name)))
-            text.append(": ", style="muted")
+            key = key_of(name)
+            _append_author(text, PathHop(name, key=key), _byline(name, key))
             _append_body(text, body, key_of)
         else:
             _append_body(text, body_raw, key_of)
@@ -1051,26 +1064,48 @@ def _preview_text(
         from ..ui.room import author_label
 
         name, key = author_label(last.author, name_of)
-        text.append(name, style=name_style(name, key))
-        text.append(": ", style="muted")
+        _append_author(text, PathHop(name, key=key), _byline(name, key))
         _append_body(text, body_raw, key_of)
     else:
         _append_body(text, body_raw, key_of)
     return text
 
 
+def _append_author(text: Text, hop: PathHop, byline: Text) -> None:
+    """Append the author of a preview: an origin chip where chips are drawn, else ``byline``.
+
+    The chip closes on the point, the same as the sender chip of the transcript, and the
+    body follows it after one space. The point says what the colon of ``Name:`` says, so
+    the chip does not carry a colon. Where the terminal draws no chips, the author is the
+    ``byline`` (``Name: ``, or ``you: `` for us), as it always was (JP, 2026-10-10).
+    """
+    if powerline_enabled():
+        text.append_text(hop_chip(hop, role=ORIGIN))
+        text.append(" ")
+    else:
+        text.append_text(byline)
+
+
+def _byline(name: str, key: str | None) -> Text:
+    """The author of a preview as text: the name in its hue, then a muted colon."""
+    text = Text(name, style=name_style(name, key))
+    text.append(": ", style="muted")
+    return text
+
+
 def _append_body(text: Text, body: str, key_of: NameKeyResolver) -> None:
     """Append ``body`` to ``text``, muted, and light the names that it mentions.
 
-    Each ``@[Name]`` is drawn in the hue that comes from the key of that node. It stays
-    muted when the name resolves to no node that we know.
+    Each ``@[Name]`` is drawn in the hue that comes from the key of that node, as a chip
+    that opens on the notch where the terminal draws chips (the same as in the transcript).
+    It takes the node grey when the name resolves to no node that we know.
     """
     pos = 0
     for match in MENTION.finditer(body):
         if match.start() > pos:
             text.append(body[pos : match.start()], style="muted")
         name = match.group(1)
-        text.append(f"@{name}", style=name_style(name, key_of(name)))
+        text.append_text(name_chip(f"@{name}", key_of(name), role=DESTINATION))
         pos = match.end()
     if pos < len(body):
         text.append(body[pos:], style="muted")

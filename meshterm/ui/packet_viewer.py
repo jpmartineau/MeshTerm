@@ -65,19 +65,22 @@ from ..services.trace_runner import NodeResolver
 from .marks import SELF_MARK, UNKNOWN_MARK
 from .menus import SEP_COMPACT, SEP_ROOMY
 from .pathgraph import PathLayer, render_path_graph, revisited_hops
-from .pathline import PathLine, hops_atom, path_line
+from .pathline import PathHop, PathLine, hops_atom, path_line
 from .theme import glyph, name_style, snr_style
 from .trace_screen import snr_bar
 from .tui.render import render_lines, render_to_ansi
 from .tui.screen import Screen
 from .widgets import (
     DEFAULT_GLYPH,
+    DESTINATION,
     NODE_GLYPHS,
+    ORIGIN,
     NameKeyResolver,
     TypeOf,
     age_seconds,
     format_ago,
     highlighted_hash,
+    hop_chip,
     node_type_legend,
     revisit_note,
     route_graph_style,
@@ -843,7 +846,13 @@ class PacketViewer(Screen):
             glyph, glyph_style = self._node_marker(entry, style)
             who.append(glyph, style=glyph_style)
             who.append(" ")
-            who.append(label, style=style)
+            if style == "muted":  # a bare hash: no name to put in a chip
+                who.append(label, style=style)
+            else:
+                # The node that sent the packet is the origin of its route. Thus it is a chip
+                # that closes on the point, and the ``via`` row continues that route.
+                hop = PathHop(label, you=True) if style == "you" else PathHop(label, key=entry.node)
+                who.append_text(hop_chip(hop, role=ORIGIN))
             if entry.node and label != entry.node:
                 who.append("  ")
                 who.append_text(highlighted_hash(entry.node, self._prefix_bytes))
@@ -1146,10 +1155,10 @@ class PacketViewer(Screen):
         rows: list[tuple[str, RenderableType]] = []
         dest = raw.get("dest_hash")
         if dest:
-            rows.append(("to", self._endpoint(dest)))
+            rows.append(("to", self._endpoint(dest, DESTINATION)))
         src = raw.get("src_key") or raw.get("src_hash")
         if src:
-            rows.append(("from", self._endpoint(src)))
+            rows.append(("from", self._endpoint(src, ORIGIN)))
         if raw.get("trace_tag"):
             rows.append(("tag", Text(raw["trace_tag"], style="muted")))
         readings = raw.get("trace_snrs")
@@ -1184,22 +1193,26 @@ class PacketViewer(Screen):
             line.append(f"{value:+.2f} dB", style=snr_style(value))
         return line
 
-    def _endpoint(self, value: str) -> Text:
+    def _endpoint(self, value: str, role: str) -> Text:
         """One end of an addressed packet: its resolved name, then the key that named it.
 
         This is the presentation of the ``from`` row, without the node-type glyph: a
         one-byte hash is too weak an identity for a type mark. A node that we cannot name
         shows only the hash, all grey (``known=False``), as each unknown-node hash in the
         app does.
+
+        A name is a chip at its end of the route (``role``). The sender closes on the point
+        and the recipient opens on the notch. The ``via`` row opens and closes on both,
+        because it is the middle (refer to :meth:`_via_path`). Thus the shape of each chip
+        shows which part of the one route its row names.
         """
         text = Text()
         named = self._resolve(value)
         known = bool(named and named != value)
         if known:
-            style = (
-                "you" if self._self_name and named == self._self_name else name_style(named, value)
-            )
-            text.append(named, style=style)
+            ours = bool(self._self_name and named == self._self_name)
+            hop = PathHop(named, you=True) if ours else PathHop(named, key=value)
+            text.append_text(hop_chip(hop, role=role))
             text.append("  ")
         text.append_text(highlighted_hash(value, self._prefix_bytes or 1, known=known))
         return text

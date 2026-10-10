@@ -95,11 +95,11 @@ from .packet_viewer import (
     node_label,
     unnamed_scope,
 )
-from .pathline import SELF_GLYPH, PathHop, PathLine
+from .pathline import SELF_GLYPH, PathHop, cut_to
 from .theme import name_style, snr_style
 from .tui.render import crop_cells, render_to_ansi
 from .tui.screen import ListWindow, Screen
-from .widgets import NameKeyResolver, TypeOf, scope_text
+from .widgets import NameKeyResolver, TypeOf, route_ends, scope_text
 
 if TYPE_CHECKING:
     from ..context import AppContext
@@ -781,7 +781,8 @@ class LiveFeedScreen(Screen):
           (:func:`~meshterm.core.channels.identify_channel`). A channel for which we have
           no key shows the fingerprint that it advertises.
         * **direct message, request, response, returned path, anonymous request**: about
-          the two nodes between which it travels, drawn as ``sender → recipient``
+          the two nodes between which it travels, drawn as an origin chip and a destination
+          chip, or as ``sender → recipient`` where the terminal draws no chips
           (:meth:`_endpoints`).
         * **ack**: about the message that it acknowledges, named by the checksum of that
           message.
@@ -865,12 +866,14 @@ class LiveFeedScreen(Screen):
     def _endpoints(self, raw: dict) -> Text:
         """An addressed packet's subject: the two nodes between which it travels.
 
-        The subject is drawn as ``sender → recipient`` with the only hop-sequence widget
-        (:mod:`~meshterm.ui.pathline`). Thus the endpoints of a delivery show the same as
-        the hops of a route: resolved to contact names, each in the hue of its key, and
-        our node in white when a packet is addressed to us (or from us). The widget uses
-        plain arrows, not chips. This is a lane in a table row, and the padding of a chip
-        uses the cells that are necessary for the names.
+        The subject is drawn with the only hop-sequence widget (:mod:`~meshterm.ui.pathline`).
+        Thus the endpoints of a delivery show the same as the hops of a route: resolved to
+        contact names, each in the hue of its key, and our node as the ``★`` when a packet
+        is addressed to us (or from us). Where the terminal draws chips, the sender is an
+        origin chip and the recipient is a destination chip, and the relays between them
+        are not drawn (:func:`~meshterm.ui.widgets.route_ends`). Elsewhere the line is
+        ``sender → recipient``. The chips use more cells than the arrow, but the two ends of
+        a route read as two ends at a glance (JP, 2026-10-10).
 
         The packet names each endpoint by one byte of its key. This is the same one-byte
         identity that a relay hop has, with the same probability of a collision. Thus a
@@ -882,18 +885,21 @@ class LiveFeedScreen(Screen):
 
         If the two names do not fit in the lane, the recipient keeps its name and the
         sender changes to its hash. The packet is addressed, so the recipient is the half
-        that gets the cells.
+        that gets the cells. A recipient that is still too wide is cut at the lane
+        (:func:`~meshterm.ui.pathline.cut_to`). A chip breaks off in its own colour, and an
+        arrow line ends on ``…``.
         """
         dest = raw.get("dest_hash") or ""
         src = raw.get("src_key") or raw.get("src_hash") or ""
         if not src:
             return self._token("to", dest)
-        named = PathLine([self._hop(src), self._hop(dest)], mode="plain").text()
+        named = route_ends(self._hop(src), self._hop(dest))
         if named.cell_len <= self._lanes.subject:
             return named
         # Too wide: the sender changes to its hash, so the recipient keeps all of its name
         # (or as much of it as the lane holds), and is not the half that gets cut.
-        return PathLine([self._hop(src, named=False), self._hop(dest)], mode="plain").text()
+        hashed = route_ends(self._hop(src, named=False), self._hop(dest))
+        return cut_to(hashed, self._lanes.subject)
 
     def _hop(self, value: str, *, named: bool = True) -> PathHop:
         """One endpoint as a path hop: its contact name, or its one-byte hash in its hue.

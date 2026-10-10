@@ -582,11 +582,71 @@ def highlighted_hash(
 
 
 #: The roles of a lone chip in a route that it does not draw (the ``role`` of
-#: :func:`name_chip`). The chip of an *origin* closes on the point, because the route goes
-#: on from it: the author of a message. The chip of a *destination* opens on the notch,
-#: because the route came to it: the node that a mention names.
+#: :func:`hop_chip`). The chip of an *origin* closes on the point, because the route goes
+#: on from it: the author of a message, the sender of a packet. The chip of a
+#: *destination* opens on the notch, because the route came to it: the node that a
+#: mention names, the recipient of a packet or of a queued message.
 ORIGIN = "origin"
 DESTINATION = "destination"
+
+
+def hop_chip(hop: PathHop, *, role: str | None = None) -> Text:
+    """One hop drawn alone, as the single chip of a path line.
+
+    The ends of the chip say the same thing as the ends of a route. With no ``role``, the
+    node is the whole route, and the two ends are square (or rounded where the font has
+    the caps). A ``role`` puts the chip at one end of a route that is not drawn, and the
+    other end of the chip shows that the route continues there (refer to
+    :data:`ORIGIN` and :data:`DESTINATION`). A message goes from its author toward the
+    nodes that it names. Thus the author closes on the point and a mention opens on the
+    notch, as the first and the last hop of a route do (JP, 2026-10-10).
+
+    Where the terminal cannot draw powerline separators, a path line is text in arrow mode,
+    and a single hop is only its label in its own style. There the ``role`` does nothing.
+    A lone name with a stray ``→`` before or after it reads as a broken route, and not as a
+    sender or as a mention (JP, 2026-10-10). The text there also has no
+    :data:`~meshterm.ui.pathline.PATH_INK` stamp. A lone name in arrow mode is a name, and
+    not a route whose hues tell one hop from the next. Thus the highlight of a list row
+    changes it to white, as it changes each other name on the row
+    (refer to :func:`~meshterm.ui.tui.render._whiten_identities`).
+
+    Args:
+        hop: The hop to draw.
+        role: :data:`ORIGIN`, :data:`DESTINATION`, or ``None`` for a node alone.
+
+    Returns:
+        The chip as a one-line :class:`Text`.
+    """
+    if not powerline_enabled():
+        line = PathLine([hop]).text()
+        line.style = ""
+        return line
+    return PathLine([hop], from_origin=role != DESTINATION, to_destination=role != ORIGIN).text()
+
+
+def route_ends(origin: PathHop, destination: PathHop) -> Text:
+    """The two ends of a route whose middle is not drawn: an origin chip and a destination chip.
+
+    The point of the origin and the notch of the destination face each other across one
+    cell of page. Thus the line reads as a route from the one to the other, and it does not
+    claim that the two are neighbours. A seam between two chips makes that claim. Where the
+    terminal draws no chips, the two ends are joined by the arrow of the app
+    (``sender → recipient``), which says the same thing in text.
+
+    Args:
+        origin: The node where the route starts (the sender).
+        destination: The node where the route ends (the recipient).
+
+    Returns:
+        The line, not fitted. A caller that must fit it to a lane cuts it with
+        :func:`~meshterm.ui.pathline.cut_to`, so that a chip cracks and is not elided.
+    """
+    if not powerline_enabled():
+        return PathLine([origin, destination]).text()
+    line = hop_chip(origin, role=ORIGIN)
+    line.append(" ")
+    line.append_text(hop_chip(destination, role=DESTINATION))
+    return line
 
 
 def name_chip(
@@ -601,21 +661,9 @@ def name_chip(
     them (JP, 2026-08-12). The colour reads the same as in a route. The name has the hue
     of the node, on a darker fill of that hue. A node that no key can place has the
     keyless grey. Our own end is the ``★`` of the map on its neutral dark grey, and not a
-    name.
-
-    The ends of the chip say the same thing as the ends of a route. With no ``role``, the
-    node is the whole route, and the two ends are square (or rounded where the font has
-    the caps). A ``role`` puts the chip at one end of a route that is not drawn, and the
-    other end of the chip shows that the route continues there (refer to
-    :data:`ORIGIN` and :data:`DESTINATION`). A message goes from its author toward the
-    nodes that it names. Thus the author closes on the point and a mention opens on the
-    notch, as the first and the last hop of a route do (JP, 2026-10-10).
-
-    The degradation is also inherited. Where the terminal cannot draw powerline
-    separators, a path line is text in arrow mode, and a single hop is only the name in its
-    own hue. This is what a sender label was before it had a frame. There the ``role`` does
-    nothing. A lone name with a stray ``→`` before or after it reads as a broken route, and
-    not as a sender or as a mention (JP, 2026-10-10).
+    name. The ``role`` and the arrow mode are those of :func:`hop_chip`. In arrow mode, a
+    name is only the name in its own hue. This is what a sender label was before it had a
+    frame.
 
     Args:
         label: The name as it must read (it is already resolved, and this function never
@@ -632,9 +680,7 @@ def name_chip(
         The chip as a one-line :class:`Text`.
     """
     hop = PathHop(SELF_GLYPH, you=True) if you else PathHop(label, key=key or None)
-    if not powerline_enabled():
-        role = None
-    return PathLine([hop], from_origin=role != DESTINATION, to_destination=role != ORIGIN).text()
+    return hop_chip(hop, role=role)
 
 
 def _shorten_hash(value: str, hash_bytes: int | None) -> str:

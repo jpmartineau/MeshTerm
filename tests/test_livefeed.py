@@ -243,6 +243,36 @@ def test_livefeed_addressed_frame_is_about_its_two_ends() -> None:
     assert "a1 → Hilltop-Repe" in _rows(wide, 100)[0]
 
 
+def test_livefeed_addressed_frame_draws_its_two_ends_as_chips(powerline) -> None:
+    """With chips, the sender's point and the recipient's notch face each other across a cell.
+
+    A seam would claim that the two are neighbours, and the relays between them are not
+    drawn. A pair that is too wide for the lane cracks at the lane, and is not elided.
+    """
+    from meshterm.ui.pathline import CRACK_TAIL, POWERLINE_SEP
+
+    powerline(True)
+    screen = _screen(self_name="Us")
+    raw = {"payload_typename": "TEXT_MSG", "dest_hash": "c0", "src_hash": "a1"}
+    screen.on_event(MeshEvent.observation_event(_obs(node="", kind="packet", raw=raw)))
+    assert f" Alice {POWERLINE_SEP} {POWERLINE_SEP} ★ " in _rows(screen, 100)[0]
+
+    wide = _screen()
+    wide._resolve = lambda h: {"a1": "Alice-With-A-Long-Name", "3d": "Hilltop-Repeater"}.get(h, "")
+    wide.on_event(
+        MeshEvent.observation_event(
+            _obs(
+                node="",
+                kind="packet",
+                raw={"payload_typename": "REQ", "dest_hash": "3d", "src_hash": "a1"},
+            )
+        )
+    )
+    row = _rows(wide, 100)[0]
+    assert f" a1 {POWERLINE_SEP} {POWERLINE_SEP} Hilltop" in row
+    assert CRACK_TAIL in row and "…" not in row
+
+
 def test_livefeed_tokened_classes_are_about_their_token() -> None:
     """An ack names the message that it answers. A trace names its tag. Neither says "packet"."""
     screen = _screen()
