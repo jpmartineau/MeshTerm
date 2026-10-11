@@ -2419,7 +2419,7 @@ def test_channel_and_dm_lanes_share_f1_to_f3_and_keep_their_own_verbs_behind_shi
     )
     for screen in (direct, channel):
         lane = screen.picocalc_lyra_lane
-        assert [pair.label for pair in lane[:3]] == ["Paths", "QR", "Map"]
+        assert [pair.label for pair in lane[:3]] == ["Paths", "URL→QR", "Map"]
         assert [pair.action for pair in lane[:3]] == ["paths", "url_code", "locate"]
     assert direct.picocalc_lyra_lane[0].opp_label == "Retry"
     assert channel.picocalc_lyra_lane[0].opp_label == "Resend"

@@ -132,7 +132,7 @@ class ChatScreen(Screen):
         """The PicoCalc lane of a conversation: the same lane in a channel, a DM, and a room.
 
         The plain bank of F1 to F3 has the verbs that all three screens share, in the order
-        of the hint: ``Paths`` (^P), ``QR`` (^U), and ``Map`` (^L). The Shift bank of F1 to
+        of the hint: ``Paths`` (^P), ``URL→QR`` (^U), and ``Map`` (^L). The Shift bank of F1 to
         F3 has the verbs of one screen only. ``Retry`` (^R) is on the Shift half of F1 in a
         DM and in a room, and ``Resend`` (the same ^R, unscoped) is there in a channel. A
         room adds ``Log in`` (^O) on the Shift half of F2 (refer to
@@ -140,9 +140,11 @@ class ChatScreen(Screen):
         the three screens, and the user finds a verb in the same place (JP, 2026-10-10).
 
         The three shared verbs act *on* the selected message. ``Paths`` is lit while a
-        message is selected. ``QR`` shows the codes of the links of the selection on a
-        share screen, larger than the codes under it in the transcript, and is lit while the
-        selection has a URL (refer to :meth:`_picked_urls`). ``Map`` is lit while the author
+        message is selected. ``URL→QR`` shows the codes of the links of the selection on a
+        share screen, one code at a time with its full URL, and is lit while the selection
+        has a URL (refer to :meth:`_picked_urls`). On the Cardputer it is the only way to a
+        code. On the PicoCalc, the transcript already draws each code under its message in
+        the same size, so there the chip only shows one code alone. ``Map`` is lit while the author
         of the selection has a location (refer to :meth:`_locate_target`), and its slot is
         empty when the screen has no locator.
 
@@ -185,7 +187,7 @@ class ChatScreen(Screen):
             enabled=self._selected is not None and self._paths is not None,
             opp_enabled=self._retry_target() is not None,
         )
-        lane[1] = FPair("QR", "url_code", enabled=bool(self._picked_urls()))
+        lane[1] = FPair("URL→QR", "url_code", enabled=bool(self._picked_urls()))
         if self._locator is not None:
             lane[2] = FPair("Map", "locate", enabled=self._locate_target() is not None)
         lane[3] = FPair("Page ↓", "pagedown", "Latest", "ctrl_end", enabled=live, opp_enabled=live)

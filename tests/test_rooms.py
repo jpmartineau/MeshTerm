@@ -897,7 +897,7 @@ def test_the_handheld_lane_puts_log_in_behind_f2() -> None:
     assert fkeys.PICOCALC_LYRA_DECK.action_for(lane, 7) == "login"
     assert lane[0].opp_label == "Retry"
     # The plain bank of F1 to F3 is the one of each conversation (refer to test_chat).
-    assert [pair.label for pair in lane[:2]] == ["Paths", "QR"]
+    assert [pair.label for pair in lane[:2]] == ["Paths", "URL→QR"]
 
 
 async def test_l_opens_the_map_on_the_author_of_a_post() -> None:

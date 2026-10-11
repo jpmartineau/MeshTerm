@@ -776,7 +776,7 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   it is undiscoverable on the device. One exception, by JP's choice (2026-10-10): the
   chat's day jump (`^PgUp/^PgDn`) has no chip; `Day ↑`/`Day ↓` were taken off F1/F2.
 - **The three conversations share one lane** (channel, DM, room; JP, 2026-10-10): what
-  they share sits on F1–F3 plain, in the hint's order — `Paths` (^P), `QR` (^U), `Map`
+  they share sits on F1–F3 plain, in the hint's order — `Paths` (^P), `URL→QR` (^U), `Map`
   (^L, empty without a locator) — and each screen's own verbs ride the Shift bank: ^R on
   Shift+F1 (`Retry` in a DM and a room, `Resend` in a channel), the room's `Log in` (^O)
   on Shift+F2. F4/F5 stay the pager, with `Latest`/`Oldest` behind Shift. A verb new to
