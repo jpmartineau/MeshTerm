@@ -15,14 +15,27 @@ can change how things behave. It does not only add new things.
   of a room, select a message and press ^L. The map opens on the node that wrote it. On
   the Contacts page, ^L opens the map on the highlighted contact. The key works only when
   MeshTerm knows where the node is, and the hint at the bottom of the screen names it only
-  then. On the handhelds, the chip is `Map`, on Shift+F1. The board of a room has no free
-  chip for it yet.
+  then. On the handhelds, the chip is `Map`, on F3.
+- **^O opens the page of the node that wrote a message.** In a chat or on the board of a
+  room, select a message and press ^O. The node page opens, the same page that the
+  Contacts list opens. For a message of yours, the page of your own node opens. The key
+  works only when the author is one of your contacts. On the handhelds, the chip is
+  `Author`, on Shift+F3.
 
 ### Changed
 
-- **^L is now the map key, and ^O logs in to a room.** On the map and in the mesh walk, ^L
-  goes back to your own node. That key was ^Y. On the board of a room, ^O logs in. That
+- **^L is now the map key, and ^G logs in to a room.** On the map and in the mesh walk, ^L
+  goes back to your own node. That key was ^Y. On the board of a room, ^G logs in. That
   key was ^L.
+- **A channel, a direct chat, and a room have the same F-key chips.** On the handhelds,
+  F1, F2, and F3 are `Paths`, `URL→QR`, and `Map` on the three screens. With Shift, these
+  keys hold what only one screen has: `Retry` or `Resend`, and `Log in` on a room. The
+  `Day ↑` and `Day ↓` chips are gone. On the desktop, ^PgUp and ^PgDn still move from one
+  day to the next.
+- **Chips show where a route starts and where it ends.** Where your terminal draws path
+  chips, the author of a message has a point on the right of its chip. A mention is a chip
+  with a notch on its left. The packet viewer, the live feed, the Messages list, and the
+  courier show the sender and the recipient in the same way.
 
 ## [0.10.3] - 2026-10-07
 

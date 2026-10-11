@@ -19,7 +19,7 @@ password worked before. The page then offers the next step as buttons: try by fl
 first forgets the stale route), try again, or try another password. Each of these is one
 more login that the user asked for. MeshTerm never sends one on its own.
 
-This flow (:func:`join_room`) is shared. The ^O key of the board also runs it. The
+This flow (:func:`join_room`) is shared. The ^G key of the board also runs it. The
 ``rooms join`` command of the command line explains a silent room in the same words
 (:func:`silence_explanation`).
 

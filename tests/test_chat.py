@@ -2899,6 +2899,83 @@ def test_chat_without_a_locator_has_no_map_chip() -> None:
     assert screen.picocalc_lyra_lane[2] is None
 
 
+async def test_chat_author_page_opens_the_node_page_of_the_author_of_the_selection() -> None:
+    """^O opens the node page of the author of the selected message, named only where it acts.
+
+    It is the twin of ^L: the same author, found by the same key. Its chip is ``Author``,
+    on the Shift half of F3, behind ``Map``.
+    """
+    from tests.conftest import recording_pages
+
+    alice = Contact(name="Alice", public_key="a1" * 32, key_prefix="a1" * 6)
+    pages = recording_pages([alice])
+    keys = {"alice": "a1" * 32, "bob": "b2" * 32}
+    screen = ChatScreen(
+        Conversation(label="#public", is_channel=True, channel_idx=0),
+        [
+            ChatMessage(text="Alice: hi", is_channel=True, channel_idx=0),
+            ChatMessage(text="Bob: yo", is_channel=True, channel_idx=0),
+            ChatMessage(text="hello", outbound=True, is_channel=True, channel_idx=0),
+        ],
+        send=None,
+        names={},
+        session=_StubSession(),
+        key_of=lambda name: keys.get(name.casefold()),
+        pages=pages,  # type: ignore[arg-type]
+    )
+    # With no selected message, ^O does nothing. The hint does not name it, and its chip is
+    # dim. The screen has no locator, so the plain half of F3 is empty.
+    screen.handle("author_page")
+    await asyncio.sleep(0)
+    assert pages.shown == []
+    assert "^O" not in screen.footer_hint
+    lane = screen.picocalc_lyra_lane
+    assert (lane[2].label, lane[2].opp_label) == ("", "Author")
+    assert lane[2].opp_enabled is False
+
+    # Our own message: its author is our node, whose page has no contact.
+    screen.handle("up")
+    assert "^O author" in screen.footer_hint
+    screen.handle("author_page")
+    await asyncio.sleep(0)
+    assert pages.shown == [None]
+
+    # Bob has a key but he is not a contact, so there is no page to open.
+    screen.handle("up")
+    assert "^O" not in screen.footer_hint
+    assert screen.picocalc_lyra_lane[2].opp_enabled is False
+    screen.handle("author_page")
+    await asyncio.sleep(0)
+    assert pages.shown == [None]
+
+    # Alice is a contact. The chip is lit, and Shift+F3 sends the same action as ^O.
+    screen.handle("up")
+    assert "^O author" in screen.footer_hint
+    assert screen.picocalc_lyra_lane[2].opp_enabled is True
+    assert fkeys.PICOCALC_LYRA_DECK.action_for(screen.picocalc_lyra_lane, 8) == "author_page"
+    screen.handle("author_page")
+    await asyncio.sleep(0)
+    assert pages.shown == [None, alice]
+
+
+def test_a_direct_chat_finds_the_page_of_its_peer() -> None:
+    """In a DM, the author of an inbound message is the peer, and the peer is a contact."""
+    from tests.conftest import recording_pages
+
+    peer = Contact(name="Alice", public_key="d4" + "0" * 62, key_prefix="d4e5f6a7")
+    screen = ChatScreen(
+        Conversation(label="Alice", is_channel=False, contact=peer),
+        [ChatMessage(text="hi", peer="d4e5f6a7")],
+        send=None,
+        names={"d4e5f6a7": "Alice"},
+        session=_StubSession(),
+        pages=recording_pages([peer]),  # type: ignore[arg-type]
+    )
+    screen.handle("up")
+    assert "^O author" in screen.footer_hint
+    assert cell_len(screen.footer_hint) <= 72
+
+
 def test_chat_hint_with_all_its_keys_fits_in_72_cells() -> None:
     """The longest hint (a scoped message of ours, with a link, on the map) fits in 72 cells.
 
@@ -2934,3 +3011,64 @@ def test_chat_hint_with_all_its_keys_fits_in_72_cells() -> None:
     for atom in ("Enter reply", "^U QR", "^L map", "^R resend unscoped", "Esc cancel"):
         assert atom in hint
     assert "↑↓ pick" not in hint and "^P paths" not in hint
+
+
+def test_chat_resend_hint_drops_our_own_page_third() -> None:
+    """With ^O too, the resend hint drops ↑↓, then ^P, then ^O: the message is ours."""
+
+    async def resend_unscoped(message: ChatMessage) -> ChatMessage | None:
+        return None
+
+    from tests.conftest import recording_locator, recording_pages
+
+    screen = ChatScreen(
+        Conversation(label="#ops", is_channel=True, channel_idx=1),
+        [
+            ChatMessage(
+                text="map at https://meshterm.net",
+                outbound=True,
+                is_channel=True,
+                channel_idx=1,
+                scope="yul",
+            )
+        ],
+        send=None,
+        names={},
+        session=_StubSession(),
+        scope="yul",
+        resend_unscoped=resend_unscoped,
+        locator=recording_locator([_US_AT]),  # type: ignore[arg-type]
+        pages=recording_pages([]),  # type: ignore[arg-type]
+    )
+    screen.handle("up")
+    hint = screen.footer_hint
+    assert cell_len(hint) <= 72
+    for atom in ("Enter reply", "^U QR", "^L map", "^R resend unscoped", "Esc cancel"):
+        assert atom in hint
+    assert "↑↓ pick" not in hint and "^P paths" not in hint and "^O" not in hint
+
+
+def test_chat_reply_hint_with_every_key_of_a_selection_fits_in_72_cells() -> None:
+    """A message of a located contact, with a link: the reply hint takes its short words.
+
+    With ^U, ^L, and ^O, the long words (``(@mention)``, ``^End/Esc``) do not fit. The
+    short words of the resend hint do, and then each key of the selection stays.
+    """
+    from tests.conftest import recording_locator, recording_pages
+
+    alice = Contact(name="Alice", public_key="a1" * 32, key_prefix="a1" * 6)
+    screen = ChatScreen(
+        Conversation(label="#public", is_channel=True, channel_idx=0),
+        [ChatMessage(text="Alice: map at https://meshterm.net", is_channel=True, channel_idx=0)],
+        send=None,
+        names={},
+        session=_StubSession(),
+        key_of=lambda name: "a1" * 32 if name.casefold() == "alice" else None,
+        locator=recording_locator([_ALICE_AT]),  # type: ignore[arg-type]
+        pages=recording_pages([alice]),  # type: ignore[arg-type]
+    )
+    screen.handle("up")
+    hint = screen.footer_hint
+    assert cell_len(hint) <= 72
+    for atom in ("Enter reply", "^P paths", "^U QR", "^L map", "^O author", "Esc cancel"):
+        assert atom in hint

@@ -1242,6 +1242,74 @@ def _located(lat: float | None, lon: float | None) -> bool:
 # -- data gathering + the action loop -----------------------------------------
 
 
+class ContactPages:
+    """The contacts whose node page a screen can open, and the page that opens on one of them.
+
+    This is the ^O key (``author_page``) of a conversation: the page of the node that wrote
+    the selected message. At each paint, the screen asks :meth:`find` for the contact of
+    the author. Thus its hint and its F-key lane name ^O only when the key acts. Then
+    :meth:`show` opens the page that the Contacts list opens for that contact. It is the
+    twin of :class:`~meshterm.ui.map_screen.Locator`, which ^L uses for the map.
+
+    The contacts come from the device one time, when the screen opens.
+    """
+
+    def __init__(self, ctx: AppContext, contacts: list[Contact]) -> None:
+        """Hold the contacts that :meth:`find` searches.
+
+        Args:
+            ctx: The shared application context (it must be in the interactive menu).
+            contacts: The contacts of the device.
+        """
+        self._ctx = ctx
+        self._contacts = contacts
+        # The result of each key that find() got. A screen asks at each paint, and the
+        # answer for one key does not change while the contacts stay the same.
+        self._found: dict[str, Contact | None] = {}
+
+    @classmethod
+    async def gather(cls, ctx: AppContext) -> ContactPages:
+        """The pages of the contacts that the device has now. With no contacts, nothing is found."""
+        try:
+            contacts = await ctx.devstate.contacts()
+        except Exception:  # noqa: BLE001 - with no contacts, ^O opens only our own page
+            contacts = []
+        return cls(ctx, list(contacts))
+
+    def find(self, key: str | None) -> Contact | None:
+        """The contact with ``key`` (a full key or a key prefix), or ``None``.
+
+        The rule is the same as the rule of the map (refer to
+        :meth:`~meshterm.ui.map_screen.Locator.find`). A key prefix finds the contact whose
+        full key starts with it, and a full key finds a contact that MeshTerm knows only by
+        its key prefix.
+        """
+        if not key:
+            return None
+        needle = key.lower().removeprefix("0x")
+        if needle not in self._found:
+            self._found[needle] = next(
+                (c for c in self._contacts if _same_key(c.public_key or c.key_prefix, needle)),
+                None,
+            )
+        return self._found[needle]
+
+    async def show(self, contact: Contact | None) -> None:
+        """Open the node page of ``contact``, or of our node when it is ``None``.
+
+        The page opens to look, not to manage (``manage=False``). The management verbs
+        (lock, archive, restore, delete) belong to the list that the contact is in, and a
+        conversation is not that list.
+        """
+        await open_node_detail(self._ctx, contact, manage=False)
+
+
+def _same_key(contact_key: str | None, needle: str) -> bool:
+    """Whether the key of a contact and a lowercase key (or key prefix) name the same node."""
+    key = (contact_key or "").lower().removeprefix("0x")
+    return bool(key) and (key.startswith(needle) or needle.startswith(key))
+
+
 async def open_node_detail(
     ctx: AppContext, contact: Contact | None, *, manage: bool = True
 ) -> bool:

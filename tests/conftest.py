@@ -69,6 +69,23 @@ def recording_locator(markers: list) -> object:
     return locator
 
 
+def recording_pages(contacts: list) -> object:
+    """A real :class:`~meshterm.ui.node_detail_screen.ContactPages` whose pages are a list.
+
+    It finds contacts with the rule of the app. Instead of a node page, :meth:`show` appends
+    the contact that the page would open on to ``shown`` (``None`` is our node).
+    """
+    from meshterm.ui.node_detail_screen import ContactPages
+
+    class _Recording(ContactPages):
+        async def show(self, contact) -> None:  # noqa: ANN001 - a Contact, or None for us
+            self.shown.append(contact)
+
+    pages = _Recording(None, contacts)  # type: ignore[arg-type]
+    pages.shown = []  # type: ignore[attr-defined]
+    return pages
+
+
 #: The root of the checkout.
 _ROOT = Path(__file__).resolve().parent.parent
 

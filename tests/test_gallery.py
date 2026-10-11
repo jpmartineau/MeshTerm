@@ -540,7 +540,7 @@ def _room(cols: int, rows: int, *, access=None, retry: bool = False) -> Screen: 
 
     The board has a post by a contact (with a name, in its hue), a post by an author that
     nothing names (the grey hash), a notice that the room posted itself, and our own post.
-    If ``retry`` is set, our post has no ack, so ^R joins ^O on the hint. This is the longest
+    If ``retry`` is set, our post has no ack, so ^R joins ^G on the hint. This is the longest
     that the hint gets.
     """
     from meshterm.core.models import LoginResult, RoomAccess, RoomLogin
@@ -676,7 +676,7 @@ def _room_read_only(cols: int, rows: int) -> Screen:
 
 
 def _room_retry(cols: int, rows: int) -> Screen:
-    """A post of ours with no ack: ^R retry joins ^O on the hint."""
+    """A post of ours with no ack: ^R retry joins ^G on the hint."""
     return _room(cols, rows, retry=True)
 
 

@@ -78,11 +78,13 @@ from .spinner import spinner_interval
 #: The letter of a chord is the mnemonic of the action, not of the word that one screen uses
 #: for it. ``locate`` is ^L: on the map and in the mesh walk it goes to our node, and in the
 #: chat and on Contacts it opens the map on the node of the selected row. It was ^U until
-#: 2026-10-01, then ^Y until 2026-10-10, when ``login`` moved from ^L to ^O (JP). One action
-#: for each letter in all screens is the preference, not the rule (JP, 2026-10-10). A screen
-#: that has no use for the action of a letter can give the letter a different action, if no
-#: terminal or multiplexer takes it. ^A and ^B are not free for this reason: they are the
-#: prefix keys of GNU screen and tmux.
+#: 2026-10-01, then ^Y until 2026-10-10, when ``login`` moved from ^L to ^O (JP). On
+#: 2026-10-11, ``login`` moved again to ^G, and ^O became ``author_page``: the node page of
+#: the author of the selected message, the same as ^L opens the map on that author (JP).
+#: One action for each letter in all screens is the preference, not the rule (JP,
+#: 2026-10-10). A screen that has no use for the action of a letter can give the letter a
+#: different action, if no terminal or multiplexer takes it. ^A and ^B are not free for
+#: this reason: they are the prefix keys of GNU screen and tmux.
 #:
 #: Two of these chords are for the full app, not for one screen:
 #:
@@ -100,10 +102,14 @@ from .spinner import spinner_interval
 #: ``IXON``/``IXOFF``, so ^Q is not XON here.
 _CTRL_LETTER_CHORDS: dict[str, str] = {
     "c": "quit",
+    # ^G logs in to the room that a room screen shows. In the input, ^G is not a special key:
+    # it is the bell only in output, and no terminal or multiplexer takes it.
+    "g": "login",
     "l": "locate",
-    # ^O logs in to the room that a room screen shows. The raw mode of prompt_toolkit clears
-    # IEXTEN, so a terminal on macOS or BSD does not take ^O to discard output.
-    "o": "login",
+    # ^O opens the node page of the author of the selected message. The raw mode of
+    # prompt_toolkit clears IEXTEN, so a terminal on macOS or BSD does not take ^O to
+    # discard output.
+    "o": "author_page",
     "p": "paths",
     "q": "quit",
     "r": "retry",

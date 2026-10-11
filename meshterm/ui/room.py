@@ -22,7 +22,7 @@ Three things make it different, and each one belongs to the room:
   (:mod:`meshterm.ui.rooms`). Here, when the user opens a joined room, MeshTerm logs in to
   it again only if the room has been quiet
   (:meth:`~meshterm.services.rooms.RoomService.login_due`). It does this quietly, and the
-  board is open to read. ^O runs the explained login when the user wants it.
+  board is open to read. ^G runs the explained login when the user wants it.
 * **Posting waits for the room.** A room drops, with no message, a post from anyone that it
   does not know, or that it knows at the read-only access. Thus the compose line opens only
   when we are logged in and can post. Until then, it says why it is not open and which key
@@ -52,6 +52,7 @@ from .chat import ChatScreen, _belongs, _contact_names, _make_paths_presenter, _
 if TYPE_CHECKING:
     from ..context import AppContext
     from .map_screen import Locator
+    from .node_detail_screen import ContactPages
 
 #: The title's login atom while a login is in flight.
 LOGGING_IN = "logging in…"
@@ -96,16 +97,17 @@ class RoomScreen(ChatScreen):
 
     It does everything that a chat does. When the user selects a post, Enter replies with an
     ``@mention``. ^P shows the paths that a post took. ^L opens the map on the author of a
-    post. ^R tries again a post that the room did not acknowledge. It also has ^O, which
-    logs in to the room. It uses the remembered password, or it asks for a password when
-    none is remembered or when the last login got no answer.
+    post, and ^O opens the node page of that author. ^R tries again a post that the room did
+    not acknowledge. It also has ^G, which logs in to the room. It uses the remembered
+    password, or it asks for a password when none is remembered or when the last login got
+    no answer.
     """
 
     _empty_text = "No posts yet"
 
     @property
     def picocalc_lyra_lane(self):
-        """The lane of the chat, with *Log in* on the Shift half of F2 (F7), where ^O has no key.
+        """The lane of the chat, with *Log in* on the Shift half of F2 (F7), where ^G has no key.
 
         Each chord that the desktop has needs a chip on the handheld. The plain bank of F1
         to F3 has the verbs that a room shares with a channel and a DM, and the Shift bank
@@ -138,6 +140,7 @@ class RoomScreen(ChatScreen):
         paths: Callable[[ChatMessage], Awaitable[None]] | None = None,
         key_of: Callable[[str], str | None] | None = None,
         locator: Locator | None = None,
+        pages: ContactPages | None = None,
     ) -> None:
         """Build the room screen.
 
@@ -165,6 +168,7 @@ class RoomScreen(ChatScreen):
             paths: Shows the paths that a selected post took (^P).
             key_of: Gives the key of its node for a name, for the hues of ``@mention``.
             locator: The located nodes, for ^L: the map on the author of a post.
+            pages: The contacts, for ^O: the node page of the author of a post.
         """
         super().__init__(
             conversation,
@@ -176,6 +180,7 @@ class RoomScreen(ChatScreen):
             paths=paths,
             key_of=key_of,
             locator=locator,
+            pages=pages,
         )
         self._label = conversation.label
         self._resolve = resolve
@@ -191,7 +196,7 @@ class RoomScreen(ChatScreen):
     # --- the login ----------------------------------------------------------------------
 
     def begin_login(self, *, ask: bool = False) -> None:
-        """^O: the explained login flow, with its prompt and its result floating over the board.
+        """^G: the explained login flow, with its prompt and its result floating over the board.
 
         Args:
             ask: Ask for the password also when one is remembered. A member at the read-only
@@ -209,7 +214,7 @@ class RoomScreen(ChatScreen):
         title says ``logging in…`` while the login runs, and the compose line waits for the
         answer. A room that has forgotten us drops each post that we send. Thus the compose
         line opens only when the room has let us in. If the room does not answer, this shows
-        in the same two places, and ^O is the explained retry.
+        in the same two places, and ^G is the explained retry.
         """
         if self._login_open:
             return
@@ -305,16 +310,16 @@ class RoomScreen(ChatScreen):
         # Each reason is inside the 53 columns of the handhelds, so it is one line everywhere.
         why = {
             LOGGING_IN: "logging in… posting opens once the room lets you in",
-            NO_REPLY: "not logged in: no answer from the room · ^O to retry",
-            REFUSED: "not logged in: the login was refused · ^O to retry",
-            FAILED: "not logged in · ^O to try again",
-            NOT_JOINED: "not joined · ^O to join",
+            NO_REPLY: "not logged in: no answer from the room · ^G to retry",
+            REFUSED: "not logged in: the login was refused · ^G to retry",
+            FAILED: "not logged in · ^G to try again",
+            NOT_JOINED: "not joined · ^G to join",
         }.get(self._login_state or "")
         if why is None:
             why = (
-                "read-only — the room drops your posts · ^O to log in"
+                "read-only — the room drops your posts · ^G to log in"
                 if self._access is RoomAccess.READ_ONLY
-                else "not logged in · ^O to log in"
+                else "not logged in · ^G to log in"
             )
         return Text(why, style="muted")
 
@@ -324,10 +329,10 @@ class RoomScreen(ChatScreen):
             super()._submit()
 
     def handle(self, action: str, data: str = "") -> None:
-        """^O logs in. The chat handles all the other actions."""
+        """^G logs in. The chat handles all the other actions."""
         if action == "login":
             # The remembered password of a member at the read-only access gave all that it
-            # can, so ^O asks for another password. For each other member, the flow tries
+            # can, so ^G asks for another password. For each other member, the flow tries
             # the remembered password first and asks only if it fails.
             self.begin_login(ask=self._access is RoomAccess.READ_ONLY)
             self._session.invalidate()
@@ -343,7 +348,7 @@ class RoomScreen(ChatScreen):
 
     @property
     def footer_hint(self) -> str:
-        """The hint of the chat, in the words of a board, with ^O when a login can start.
+        """The hint of the chat, in the words of a board, with ^G when a login can start.
 
         A selected post has the hint of a selected message in the chat. With no place for a
         reply, Enter shows the paths of the post there too.
@@ -355,7 +360,7 @@ class RoomScreen(ChatScreen):
         if self._retry_target() is not None:
             atoms.append("^R retry failed")
         if not self._login_open:
-            atoms.append("^O log in")
+            atoms.append("^G log in")
         atoms.append("Esc back")
         return " · ".join(atoms)
 
@@ -368,7 +373,7 @@ async def open_room(ctx: AppContext, conversation: Conversation) -> int:
     board is readable. The login starts the catch-up of the room again. A room that MeshTerm
     heard from recently sends nothing. The Rooms page joins a room
     (:mod:`meshterm.ui.rooms`). Thus a room that is not joined opens only to read its
-    stored posts, and ^O joins it. Posts that arrive while the board is open are added at
+    stored posts, and ^G joins it. Posts that arrive while the board is open are added at
     once, and the unread count of the room stays clear while the user is on the board.
 
     Args:
@@ -380,6 +385,7 @@ async def open_room(ctx: AppContext, conversation: Conversation) -> int:
     """
     from ..services import trace_runner
     from .map_screen import Locator
+    from .node_detail_screen import ContactPages
     from .rooms import join_room
 
     session = ctx.ui.session
@@ -434,6 +440,7 @@ async def open_room(ctx: AppContext, conversation: Conversation) -> int:
         paths=await _make_paths_presenter(ctx, conversation, device),
         key_of=trace_runner.make_name_key_resolver(contacts, stored_names),
         locator=await Locator.gather(ctx),
+        pages=ContactPages(ctx, list(contacts)),
     )
     ctx.chat.set_active(conversation.key)
 

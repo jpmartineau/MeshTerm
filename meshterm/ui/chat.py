@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from ..context import AppContext
     from .map_render import MapMarker
     from .map_screen import Locator
+    from .node_detail_screen import ContactPages
 
 
 #: The delivery marks for a *resolved* outbound direct message, at the end of its line:
@@ -132,21 +133,26 @@ class ChatScreen(Screen):
         """The PicoCalc lane of a conversation: the same lane in a channel, a DM, and a room.
 
         The plain bank of F1 to F3 has the verbs that all three screens share, in the order
-        of the hint: ``Paths`` (^P), ``URL→QR`` (^U), and ``Map`` (^L). The Shift bank of F1 to
-        F3 has the verbs of one screen only. ``Retry`` (^R) is on the Shift half of F1 in a
-        DM and in a room, and ``Resend`` (the same ^R, unscoped) is there in a channel. A
-        room adds ``Log in`` (^O) on the Shift half of F2 (refer to
+        of the hint: ``Paths`` (^P), ``URL→QR`` (^U), and ``Map`` (^L). The Shift bank of F1
+        and F2 has the verbs of one screen only. ``Retry`` (^R) is on the Shift half of F1 in
+        a DM and in a room, and ``Resend`` (the same ^R, unscoped) is there in a channel. A
+        room adds ``Log in`` (^G) on the Shift half of F2 (refer to
         :class:`~meshterm.ui.room.RoomScreen`). Thus a key does the same thing on each of
         the three screens, and the user finds a verb in the same place (JP, 2026-10-10).
 
-        The three shared verbs act *on* the selected message. ``Paths`` is lit while a
-        message is selected. ``URL→QR`` shows the codes of the links of the selection on a
-        share screen, one code at a time with its full URL, and is lit while the selection
-        has a URL (refer to :meth:`_picked_urls`). On the Cardputer it is the only way to a
-        code. On the PicoCalc, the transcript already draws each code under its message in
-        the same size, so there the chip only shows one code alone. ``Map`` is lit while the author
-        of the selection has a location (refer to :meth:`_locate_target`), and its slot is
-        empty when the screen has no locator.
+        The shared verbs act *on* the selected message. ``Paths`` is lit while a message is
+        selected. ``URL→QR`` shows the codes of the links of the selection on a share
+        screen, one code at a time with its full URL, and is lit while the selection has a
+        URL (refer to :meth:`_picked_urls`). On the Cardputer it is the only way to a code.
+        On the PicoCalc, the transcript already draws each code under its message in the
+        same size, so there the chip only shows one code alone. ``Map`` is lit while the
+        author of the selection has a location (refer to :meth:`_locate_target`).
+
+        ``Author`` (^O, the node page of the author of the selection) is the fourth shared
+        verb, and the plain bank has only three slots. Thus it is on the Shift half of F3,
+        behind ``Map``, the other verb about the author. It is lit while the author has a
+        page (refer to :meth:`_author_page`). Each of the two halves of F3 is empty when
+        the screen has nothing to find that node with.
 
         The Shift half of F1 follows the two rules of the lane. In a channel with no
         resend connected, it is empty, because a channel message is never acknowledged and
@@ -188,8 +194,15 @@ class ChatScreen(Screen):
             opp_enabled=self._retry_target() is not None,
         )
         lane[1] = FPair("URL→QR", "url_code", enabled=bool(self._picked_urls()))
-        if self._locator is not None:
-            lane[2] = FPair("Map", "locate", enabled=self._locate_target() is not None)
+        if self._locator is not None or self._pages is not None:
+            where = ("Map", "locate") if self._locator is not None else ("", "")
+            who = ("Author", "author_page") if self._pages is not None else ("", "")
+            lane[2] = FPair(
+                *where,
+                *who,
+                enabled=self._locate_target() is not None,
+                opp_enabled=self._author_page() is not None,
+            )
         lane[3] = FPair("Page ↓", "pagedown", "Latest", "ctrl_end", enabled=live, opp_enabled=live)
         lane[4] = FPair("Page ↑", "pageup", "Oldest", "ctrl_home", enabled=live, opp_enabled=live)
         return lane
@@ -208,6 +221,7 @@ class ChatScreen(Screen):
         scope: str | None = None,
         resend_unscoped: Callable[[ChatMessage], Awaitable[ChatMessage | None]] | None = None,
         locator: Locator | None = None,
+        pages: ContactPages | None = None,
     ) -> None:
         """Build the chat screen.
 
@@ -242,6 +256,9 @@ class ChatScreen(Screen):
             locator: The located nodes, for ^L: the map on the author of the selected
                 message (refer to :class:`~meshterm.ui.map_screen.Locator`). With ``None``,
                 ^L does nothing.
+            pages: The contacts, for ^O: the node page of the author of the selected
+                message (refer to :class:`~meshterm.ui.node_detail_screen.ContactPages`).
+                With ``None``, ^O does nothing.
         """
         super().__init__()
         self._scope = scope if conversation.is_channel else None
@@ -270,6 +287,7 @@ class ChatScreen(Screen):
         self._resend_unscoped = resend_unscoped if conversation.is_channel else None
         self._paths = paths
         self._locator = locator
+        self._pages = pages
         self._names = names
         self._session = session
         self._editor = LineEditor()
@@ -283,6 +301,7 @@ class ChatScreen(Screen):
         self._stick = True  # keep the newest message visible until the user scrolls up
         self._paths_open = False  # one paths dialog at a time
         self._map_open = False  # one map at a time
+        self._page_open = False  # one node page at a time
         self._codes_open = False  # one share screen of links at a time
         self._paste_open = False  # one paste-confirm dialog at a time
         self._resend_open = False  # one resend-unscoped confirm at a time
@@ -320,44 +339,60 @@ class ChatScreen(Screen):
         Only the keys that do something show. ``^P paths`` must have a selected message to
         show the paths *of*. ``^U QR`` must have a selected message with a URL in it
         (refer to :meth:`_picked_urls`). ``^L map`` must have a selected message whose
-        author has a location (refer to :meth:`_locate_target`). ``^R retry failed`` must
-        have something to retry (refer to :meth:`_retry_target`). The F-key lane uses the
-        same rules to dim its slots.
+        author has a location (refer to :meth:`_locate_target`). ``^O author`` must have a
+        selected message whose author has a node page (refer to :meth:`_author_page`).
+        ``^R retry failed`` must have something to retry (refer to :meth:`_retry_target`).
+        The F-key lane uses the same rules to dim its slots.
         """
         if self._selected is not None:
             code = "^U QR" if self._picked_urls() else ""
             where = "^L map" if self._locate_target() is not None else ""
+            who = "^O author" if self._author_page() is not None else ""
             if self._is_channel and self._retry_target() is not None:
                 # A selected scoped message of ours can be sent again unscoped, and the hint
                 # must name that key. The "(@mention)" of the reply and ^End are removed to
                 # keep the line inside 72 cells (Esc still cancels the selection, and Enter
                 # still says what it does). If the line is still too long, ↑↓ goes first,
-                # then ^P, which the hint of each other selected message names.
+                # then ^P, which the hint of each other selected message names, then ^O.
+                # The message is ours here, so ^O only opens our own page.
                 return _fit_hint(
                     [
                         "Enter reply",
                         "^P paths",
                         code,
                         where,
+                        who,
                         "^R resend unscoped",
                         "↑↓ pick",
                         "Esc cancel",
                     ],
-                    spare=("↑↓ pick", "^P paths"),
+                    spare=("↑↓ pick", "^P paths", "^O author"),
                 )
             if self._replies:
-                return _fit_hint(
+                # With all the keys of a selection, the long words do not fit in 72 cells.
+                # Then the hint uses the short words of the resend hint above.
+                hint = _fit_hint(
                     [
                         "Enter reply (@mention)",
                         "^P paths",
                         code,
                         where,
+                        who,
                         "↑↓ pick",
                         "^End/Esc cancel",
                     ],
                     spare=("↑↓ pick",),
                 )
-            return _fit_hint(["Enter paths", code, where, "↑↓ pick", "^End/Esc cancel"])
+                if cell_len(hint) <= _HINT_CELLS:
+                    return hint
+                return _fit_hint(
+                    ["Enter reply", "^P paths", code, where, who, "↑↓ pick", "Esc cancel"],
+                    spare=("↑↓ pick",),
+                )
+            return _fit_hint(
+                ["Enter paths", code, where, who, "↑↓ pick", "^End/Esc cancel"],
+                spare=("↑↓ pick",),
+            )
         if self._retry_target() is not None:
             if self._is_channel:
                 return "Enter send · ↑ pick a message · ^R resend unscoped · Esc back"
@@ -858,6 +893,8 @@ class ChatScreen(Screen):
             self._open_codes()
         elif action == "locate":
             self._open_map()
+        elif action == "author_page":
+            self._open_author_page()
         elif action == "retry":
             if self._is_channel:
                 self._begin_resend_unscoped()
@@ -951,6 +988,47 @@ class ChatScreen(Screen):
                 await locator.show(target)
             finally:
                 self._map_open = False
+                self._session.invalidate()
+
+        self._session.run_detached(run())
+
+    def _author_page(self) -> Callable[[], Awaitable[None]] | None:
+        """The node page that ^O opens for the selected message, or ``None`` when there is none.
+
+        The page belongs to the author of the message: our node for a message of ours, or
+        the contact that the key of the author finds (refer to :meth:`_header_key`, the
+        same key that gives the colour of the sender chip). A message with no sender, or an
+        author that is not a contact, has no page. The hint and the F-key lane ask this at
+        each paint, so that they name ^O only when it acts.
+        """
+        pages = self._pages
+        if pages is None or self._selected is None or not self._messages:
+            return None
+        message = self._messages[max(0, min(self._selected, len(self._messages) - 1))]
+        if message.outbound:
+            return lambda: pages.show(None)
+        sender, _body = self._sender_and_body(message)
+        if sender == "·":
+            return None
+        contact = pages.find(self._header_key(sender, message))
+        return None if contact is None else (lambda: pages.show(contact))
+
+    def _open_author_page(self) -> None:
+        """Open the node page of the author of the selected message (^O). One page at a time.
+
+        The page is a screen, and it goes on the stack above the chat. Esc on the page comes
+        back to the chat, with the same message selected.
+        """
+        page = self._author_page()
+        if page is None or self._page_open:
+            return
+        self._page_open = True
+
+        async def run() -> None:
+            try:
+                await page()
+            finally:
+                self._page_open = False
                 self._session.invalidate()
 
         self._session.run_detached(run())
@@ -1422,6 +1500,7 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
             )
 
     from .map_screen import Locator
+    from .node_detail_screen import ContactPages
 
     paths = await _make_paths_presenter(ctx, conversation, device)
     screen = ChatScreen(
@@ -1436,6 +1515,7 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
         scope=scope,
         resend_unscoped=resend_unscoped,
         locator=await Locator.gather(ctx),
+        pages=await ContactPages.gather(ctx),
     )
     ctx.chat.set_active(conversation.key)
 

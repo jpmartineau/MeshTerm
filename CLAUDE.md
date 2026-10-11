@@ -280,9 +280,10 @@ deliberately, one at a time, and say why in the code.
 - A row that opens further prompts ends with `…`; a row that acts immediately doesn't.
 - **A bare-letter shortcut only where nothing is typed.** A screen that filters, finds or
   composes as you type has no free letters, so its verbs are Ctrl chords — one table,
-  `session._CTRL_LETTER_CHORDS`, each letter the mnemonic of its action (`^P` paths,
-  `^U` URL, `^L` locate, `^O` log in). One verb per letter across screens is the preference,
-  not the rule (JP, 2026-10-10): a screen that has no use for a letter's verb may give the
+  `session._CTRL_LETTER_CHORDS`, each letter the mnemonic of its action where it can be
+  (`^P` paths, `^U` URL, `^L` locate, `^O` open the author's page; `^G` logs in to a room,
+  JP's pick, 2026-10-11). One verb per letter across screens is the preference, not the
+  rule (JP, 2026-10-10): a screen that has no use for a letter's verb may give the
   letter a verb of its own, so long as nothing between the keyboard and the app takes it —
   `^A`/`^B` are screen's and tmux's prefixes, and `^M`/`^I`/`^H`/`^J` *are* Enter, Tab,
   Backspace and LF. A screen that takes no typing may spend a bare letter instead (the
@@ -778,9 +779,11 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
 - **The three conversations share one lane** (channel, DM, room; JP, 2026-10-10): what
   they share sits on F1–F3 plain, in the hint's order — `Paths` (^P), `URL→QR` (^U), `Map`
   (^L, empty without a locator) — and each screen's own verbs ride the Shift bank: ^R on
-  Shift+F1 (`Retry` in a DM and a room, `Resend` in a channel), the room's `Log in` (^O)
+  Shift+F1 (`Retry` in a DM and a room, `Resend` in a channel), the room's `Log in` (^G)
   on Shift+F2. F4/F5 stay the pager, with `Latest`/`Oldest` behind Shift. A verb new to
-  one of them goes on the Shift bank; one all three gain goes on the plain bank.
+  one of them goes on the Shift bank; one all three gain goes on the plain bank — and once
+  that is full, on Shift+F3: `Author` (^O, the author's node page, `ContactPages`) rides
+  there behind `Map`, its twin about the same author.
 - **Each handheld deals its own lane.** Everything about the lane that belongs to one
   keyboard is a `LaneDeck` (`fkeys.PICOCALC_LYRA_DECK`, `fkeys.CARDPUTER_ZERO_DECK`), named by
   `Platform.lane_deck`: which keycodes drive the slots, where the chips sit on the row, how
