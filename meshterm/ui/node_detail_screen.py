@@ -23,7 +23,7 @@ screen is the node itself, in full:
     faint ``…`` marks at the edges, the same as a long path line scrolls on the Routes
     tab. Then, when the node has advertised a location, a static basemap preview (refer
     to :class:`~meshterm.ui.minimap.MiniMap`) centred on the node. The preview grows into
-    the rows of the viewport that remain.
+    the rows of the viewport that remain. A short frame (the Cardputer) does not show it.
 
     The actions of the tab: ``Open full map`` opens the full map, centred here, with its
     find filter set to this node, so the node is lit among the others. Then
@@ -884,7 +884,7 @@ class NodeDetailScreen(Screen):
         if tab is not None:
             if tab.kind == "info":
                 budget = viewport - len(lines) - action_lines - 1  # the line of the rule
-                lines.extend(self._info_stage(width, budget))
+                lines.extend(self._info_stage(width, budget, short=short))
             else:
                 route_blocks = [
                     self._route_row_lines(route, i == self._row_index, width)
@@ -936,17 +936,18 @@ class NodeDetailScreen(Screen):
         self._scroll_total = max(1, len(lines))
         return lines
 
-    def _info_stage(self, width: int, budget: int) -> list[str]:
+    def _info_stage(self, width: int, budget: int, *, short: bool = False) -> list[str]:
         """The block of vitals and, with a fix, the location preview grown to fit.
 
         ``budget`` is the number of visible lines that remain for the full stage. The rows
         of vitals are never truncated. The preview changes its size instead: it takes the
-        lines that the vitals and its caption leave, up to ``_MAP_MAX_ROWS``. When that is
-        less than ``_MAP_MIN_ROWS``, the preview is not shown at all (a short frame keeps
-        its header and actions visible instead). Each row, but not the key, hangs under
-        itself when it wraps. The key keeps its one line and scrolls (refer to
-        :meth:`_key_line`). Thus the row count that sets the size of the preview cannot
-        change while the user scrolls through a long key.
+        lines that the vitals and its caption leave, between ``_MAP_MIN_ROWS`` and
+        ``_MAP_MAX_ROWS``. When the vitals leave less than the minimum, the preview keeps
+        its minimum and the page scrolls. On a ``short`` frame, the preview is not shown at
+        all, because its minimum alone pushes the header or the actions off the screen.
+        Each row, but not the key, hangs under itself when it wraps. The key keeps its one
+        line and scrolls (refer to :meth:`_key_line`). Thus the row count that sets the
+        size of the preview cannot change while the user scrolls through a long key.
         """
         lines: list[str] = [""] * tab_air()  # the space of the stage under the strip, if any
         for label, value in self._info_rows:
@@ -961,17 +962,16 @@ class NodeDetailScreen(Screen):
                     indent=_LABEL_LANE,
                 )
             )
-        if self._minimap is not None:
+        # A short frame has no rows for the preview. The 14 rows of the Cardputer leave it
+        # two, and its minimum pushes the identity header and the actions off the screen.
+        if self._minimap is not None and not short:
             caption = 1 if self._map_caption is not None else 0
             room = budget - len(lines) - 1 - caption  # minus the blank line above it
-            # Below its minimum, the preview is not shown. It does not push the identity
-            # header and the actions off a short frame (the 14 rows of the Cardputer leave
-            # it two).
-            if room >= _MAP_MIN_ROWS:
-                lines.append("")
-                lines.extend(self._minimap.render(width, min(_MAP_MAX_ROWS, room)))
-                if self._map_caption is not None:
-                    lines.extend(render_lines(self._map_caption, width, no_wrap=True))
+            rows = max(_MAP_MIN_ROWS, min(_MAP_MAX_ROWS, room))
+            lines.append("")
+            lines.extend(self._minimap.render(width, rows))
+            if self._map_caption is not None:
+                lines.extend(render_lines(self._map_caption, width, no_wrap=True))
         return lines
 
     def _key_line(self, label: str, value: Text, width: int) -> str:

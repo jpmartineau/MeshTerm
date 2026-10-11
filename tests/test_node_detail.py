@@ -1369,6 +1369,39 @@ def test_node_detail_screen_tabs_switch_the_stage() -> None:
     assert screen.picocalc_lyra_lane[2].label == "Info"
 
 
+def test_node_detail_preview_keeps_its_minimum_except_on_a_short_frame() -> None:
+    """The preview shows at its minimum when the actions leave less. A short frame has none.
+
+    A contact page has many action rows, so on a terminal of 24 rows they leave the preview
+    less than its minimum. The preview keeps its minimum and the page scrolls. The 11-row
+    viewport of the Cardputer is a short frame, and there the preview is not shown.
+    """
+    mini = MiniMap(
+        _FakeSession(),
+        _OfflineSource(),
+        14,
+        center_lat=45.5,
+        center_lon=-73.6,
+        zoom=13,
+        markers=[MapMarker(label="Hub", lat=45.5, lon=-73.6, key="3d63aa")],
+    )
+    actions = [_Action(f"a{i}", "⚙", "", f"Action {i}") for i in range(8)]
+    screen = _screen(
+        minimap=mini,
+        map_caption=Text("Hub · centred here", style="faint"),
+        info_actions=actions,
+    )
+    screen.note_viewport(21)
+    body = _plain(screen.render_body(72)).splitlines()
+    caption = next(i for i, line in enumerate(body) if "centred here" in line)
+    vitals = next(i for i, line in enumerate(body) if line.startswith("packets"))
+    assert caption - vitals - 2 >= 5  # the rows between the blank line and the caption
+    assert len(body) > 21  # the preview did not shrink under its minimum: the page scrolls
+
+    screen.note_viewport(11)
+    assert "centred here" not in _plain(screen.render_body(53))
+
+
 def test_node_detail_single_tab_hides_the_switch_hint() -> None:
     """A page with only one tab does not have the ←→ tab atom in its footer."""
     screen = _screen(tabs=[_Tab("Info", "info")])  # our node: no Routes tab
