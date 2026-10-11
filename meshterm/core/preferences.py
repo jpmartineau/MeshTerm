@@ -54,6 +54,7 @@ from .advert_store import DEFAULT_QUIET_S, QUIET_CHOICES_S
 from .atomicwrite import write_atomically
 from .courier_store import DONE_CAP
 from .geo import DEFAULT_VIEW_FRACTION
+from .models import NAME_OVERLAP_DAYS
 from .watch_store import ALERT_CAP, DEFAULT_SILENCE_HOURS, OFF, SILENCE_CHOICES_H
 
 if sys.version_info >= (3, 11):
@@ -487,6 +488,21 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         default="6x12",
         choices=_CONSOLE_FONT_CHOICES,
         platforms=frozenset({"picocalc-lyra"}),
+    ),
+    PrefSpec(
+        key="name_overlap_days",
+        label="Shared names",
+        help="Grey a name two nodes used within this many days",
+        group="Display",
+        value_type="int",
+        # A channel message gives only the name of its sender. When two keys used that
+        # name within this window, MeshTerm cannot know which one sent it, and the name
+        # is grey. Outside the window, the key heard most recently gets the name. A larger
+        # value makes more names grey. 0 always gives the name to the newest key.
+        default=NAME_OVERLAP_DAYS,
+        minimum=0,
+        maximum=3650,
+        unit="days",
     ),
     # --- Diagnostics ---------------------------------------------------------------
     PrefSpec(

@@ -248,6 +248,16 @@ def utcnow() -> datetime:
 #: "now" for as long as the false timestamp stays ahead of the wall clock.
 ADVERT_FUTURE_SKEW_S = 300
 
+#: How close together (in days) two keys must use one name before MeshTerm calls the name
+#: unsure. A name is a label that the owner of a key chooses, and a new key for the same
+#: name is usual on a mesh: a reflash with an erase makes a new identity. Thus the key heard
+#: most recently gets the name. Only two keys that both used the name within this window
+#: make it unsure, because then two nodes claim it at the same time (refer to
+#: :func:`~meshterm.services.trace_runner.make_name_key_resolver`). Seven days, from the
+#: history of a real mesh (JP, 2026-10-11): it kept the colour of each node that was given
+#: a new key, and made grey the names that two active nodes shared.
+NAME_OVERLAP_DAYS = 7
+
 
 def advert_time(last_advert: object) -> datetime | None:
     """Change the Unix timestamp of an advert into a plausible UTC datetime, or ``None``.

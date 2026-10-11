@@ -1406,7 +1406,7 @@ async def open_node_detail(
     except Exception:  # noqa: BLE001 - optional reads. Safe defaults keep the page working.
         prefix_bytes, width_bytes = 0, 1
 
-    stored_names = ctx.repo.node_names()
+    stored_names, named_at = ctx.repo.node_names_with_times()
     # One resolver from hash to name for the full page. The route list and the route graph
     # all name their hops through it (the contacts first, then the history of the recorder).
     resolve = make_node_resolver(contacts, stored_names)
@@ -1559,7 +1559,7 @@ async def open_node_detail(
             width_bytes,
             resolve=resolve,
             type_of=make_node_type_resolver(contacts),
-            key_of=make_name_key_resolver(contacts, stored_names),
+            key_of=make_name_key_resolver(contacts, stored_names, heard=named_at),
             style=route_graph_style,
             self_name=self_name,
             node_label=label,

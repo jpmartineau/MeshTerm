@@ -227,8 +227,8 @@ class ChatTool(Tool):
         # app-wide colour rule). A name that no contact and no stored advert has stays
         # muted. A room post names its author by key, which resolves in the other
         # direction.
-        stored_names = ctx.repo.node_names()
-        key_of = make_name_key_resolver(contacts, stored_names)
+        stored_names, named_at = ctx.repo.node_names_with_times()
+        key_of = make_name_key_resolver(contacts, stored_names, heard=named_at)
         name_of = make_node_resolver(contacts, stored_names)
 
         # List the contacts by recency: first the contacts with messages, with the newest

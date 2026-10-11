@@ -1022,10 +1022,10 @@ async def open_livefeed(ctx: AppContext) -> None:
     # The contacts first, then each name that the recorder overheard, as the fallback.
     # This is the rule of all of the app: a node that we can name never renders as a bare
     # hash.
-    stored_names = ctx.repo.node_names()
+    stored_names, named_at = ctx.repo.node_names_with_times()
     resolve = trace_runner.make_node_resolver(contacts, stored_names)
     type_of = trace_runner.make_node_type_resolver(contacts)
-    key_of = trace_runner.make_name_key_resolver(contacts, stored_names)
+    key_of = trace_runner.make_name_key_resolver(contacts, stored_names, heard=named_at)
     prefix_bytes = await ctx.devstate.routing_prefix_bytes()
 
     # The cap is the only limit: the newest _FEED_CAP packets that were ever stored, also

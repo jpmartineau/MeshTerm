@@ -20,6 +20,25 @@ def repo(tmp_path: Path) -> Repository:
     r.close()
 
 
+def test_node_names_with_times_gives_each_latest_name_and_when_it_was_heard(
+    repo: Repository,
+) -> None:
+    """One scan gives the names and their times. ``node_names`` is the first half of it."""
+    from meshterm.core.models import Observation
+
+    run = repo.start_run("monitor", {})
+    early = datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc)
+    late = datetime(2026, 10, 10, 12, 0, tzinfo=timezone.utc)
+    repo.record_observation(run, Observation(node="aa11bb22cc33", name="Smog", observed_at=early))
+    repo.record_observation(run, Observation(node="aa11bb22cc33", name="Smog 2", observed_at=late))
+    repo.record_observation(run, Observation(node="dd44ee55ff66", name="Bob", observed_at=early))
+
+    names, times = repo.node_names_with_times()
+    assert names == {"aa11bb22cc33": "Smog 2", "dd44ee55ff66": "Bob"}
+    assert times == {"aa11bb22cc33": late, "dd44ee55ff66": early}
+    assert repo.node_names() == names
+
+
 def _make_trace(
     target: str,
     *hops: tuple[str | None, float],

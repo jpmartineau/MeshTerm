@@ -175,25 +175,82 @@ def test_make_name_key_resolver_contacts_win_over_stored_names() -> None:
     assert key_of("Zed") is None  # no node has the name
 
 
-def test_a_name_that_two_keys_use_resolves_to_no_key() -> None:
-    """Two nodes with one name: MeshTerm cannot know which one a name means, so it is grey.
+def test_a_name_that_two_keys_use_at_the_same_time_resolves_to_no_key() -> None:
+    """Two nodes that used one name within the window: MeshTerm cannot tell them apart.
 
     A channel message carries only the name of its sender. A second key that takes a name
-    must not get the hue, the map, and the page of the first (JP, 2026-10-11).
+    while the first is still in use must not get the hue, the map, and the page of either.
     """
+    from datetime import datetime, timedelta, timezone
+
     from meshterm.core.models import Contact
     from meshterm.services.trace_runner import make_name_key_resolver
 
-    old = Contact(name="LOG.IC 3R", public_key="5d" + "0" * 62)
-    new = Contact(name="LOG.IC 3R", public_key="47" + "0" * 62)
-    assert make_name_key_resolver([old, new])("LOG.IC 3R") is None
-    assert make_name_key_resolver([new, old])("log.ic 3r") is None  # the order does not matter
+    now = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
+    old = Contact(name="LOG.IC 3R", public_key="5d" + "0" * 62, last_seen=now - timedelta(days=3))
+    new = Contact(name="LOG.IC 3R", public_key="47" + "0" * 62, last_seen=now)
+    assert make_name_key_resolver([old, new], overlap_days=7)("LOG.IC 3R") is None
+    assert make_name_key_resolver([new, old], overlap_days=7)("log.ic 3r") is None  # any order
 
     # A stranger that we only heard is a claim too, and it makes the name of a contact unsure.
+    alice = Contact(name="Alice", public_key="d4" + "0" * 62, last_seen=now)
     stranger = {"77ee00112233": "Alice"}
-    alice = Contact(name="Alice", public_key="d4" + "0" * 62)
-    assert make_name_key_resolver([alice], stranger)("Alice") is None
-    assert make_name_key_resolver([alice])("Alice") == "d4" + "0" * 62
+    heard = {"77ee00112233": now - timedelta(hours=1)}
+    assert make_name_key_resolver([alice], stranger, heard=heard, overlap_days=7)("Alice") is None
+    assert make_name_key_resolver([alice], overlap_days=7)("Alice") == "d4" + "0" * 62
+
+
+def test_a_name_goes_to_the_newest_key_when_the_old_one_went_quiet() -> None:
+    """A new key for a name is usual: a reflash makes a new identity (JP, 2026-10-11).
+
+    An old key that has been silent for longer than the window is the earlier identity of
+    the owner. It does not make the name unsure, and the newest key gets the name.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from meshterm.core.models import Contact
+    from meshterm.services.trace_runner import make_name_key_resolver
+
+    now = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
+    smog = Contact(name="Smog", public_key="fa" + "0" * 62, last_seen=now - timedelta(days=1))
+    september = {"def5e1786fff": "Smog", "caae7a09503d": "Smog"}
+    heard = {"def5e1786fff": now - timedelta(days=21), "caae7a09503d": now - timedelta(days=19)}
+    key_of = make_name_key_resolver([smog], september, heard=heard, overlap_days=7)
+    assert key_of("Smog") == "fa" + "0" * 62
+
+    # A wider window reaches the old keys again, and the name is unsure.
+    wide = make_name_key_resolver([smog], september, heard=heard, overlap_days=30)
+    assert wide("Smog") is None
+
+    # The window is measured from the newest key, whichever list it is in.
+    renamed = make_name_key_resolver(
+        [smog], {"0123456789ab": "Smog"}, heard={"0123456789ab": now}, overlap_days=0
+    )
+    assert renamed("Smog") == "0123456789ab"
+
+
+def test_a_key_with_no_time_never_wins_and_no_times_at_all_is_unsure() -> None:
+    """A contact that was never heard is not in use. With no time at all, nothing decides."""
+    from datetime import datetime, timezone
+
+    from meshterm.core.models import Contact
+    from meshterm.services.trace_runner import make_name_key_resolver
+
+    heard = Contact(
+        name="Bob", public_key="b0" + "0" * 62, last_seen=datetime(2026, 10, 1, tzinfo=timezone.utc)
+    )
+    never = Contact(name="Bob", public_key="c0" + "0" * 62)
+    assert make_name_key_resolver([never, heard], overlap_days=7)("Bob") == "b0" + "0" * 62
+    other = Contact(name="Bob", public_key="d0" + "0" * 62)
+    assert make_name_key_resolver([never, other], overlap_days=7)("Bob") is None
+
+
+def test_the_window_is_the_name_overlap_preference() -> None:
+    """With no window given, the resolver reads the preference: a value that a user can change."""
+    from meshterm.core.models import NAME_OVERLAP_DAYS
+    from meshterm.core.preferences import current
+
+    assert current().name_overlap_days == NAME_OVERLAP_DAYS == 7
 
 
 def test_name_style_without_a_key_is_the_unknown_grey() -> None:

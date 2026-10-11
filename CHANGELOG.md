@@ -32,11 +32,14 @@ can change how things behave. It does not only add new things.
   keys hold what only one screen has: `Retry` or `Resend`, and `Log in` on a room. The
   `Day ↑` and `Day ↓` chips are gone. On the desktop, ^PgUp and ^PgDn still move from one
   day to the next.
-- **A name that two nodes use is grey.** A channel message names its sender only by the
-  name that the sender typed, and any node can use any name. When two nodes use the same
-  name, MeshTerm cannot know which one wrote the message. Thus the name is grey, as an
-  unknown node is, and ^L and ^O do not open anything for it. Before, MeshTerm chose one
-  of the two nodes, and the name got the colour, the map, and the page of that node.
+- **A name that two nodes use at the same time is grey.** A channel message names its
+  sender only by the name that the sender typed, and any node can use any name. When two
+  nodes used the same name within a week, MeshTerm cannot know which one wrote the
+  message. Thus the name is grey, as an unknown node is, and ^L and ^O do not open
+  anything for it. When the old node has been quiet for longer than that, the name goes
+  to the node heard most recently, because a radio that is flashed again gets a new
+  identity. Before, MeshTerm chose one of the two nodes, often the old one. The new
+  **Shared names** preference on the Preferences page sets the week.
 - **Chips show where a route starts and where it ends.** Where your terminal draws path
   chips, the author of a message has a point on the right of its chip. A mention is a chip
   with a notch on its left. The packet viewer, the live feed, the Messages list, and the

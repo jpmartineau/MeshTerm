@@ -1734,6 +1734,21 @@ class Repository:
             The latest name that is not empty, keyed by the stored node id (the key
             prefix of 12 hex digits).
         """
+        return self.node_names_with_times()[0]
+
+    def node_names_with_times(self) -> tuple[dict[str, str], dict[str, datetime]]:
+        """The latest name of each node (as :meth:`node_names` gives it), and when it used it.
+
+        The time is the latest reception that carried the name, with the time from our
+        clock. The name resolver needs it to know which of two keys that use one name is
+        the one in use now (refer to
+        :func:`~meshterm.services.trace_runner.make_name_key_resolver`). The same scan
+        gives the two, because a second scan of all the history costs as much again, and
+        a screen that resolves names opens with it.
+
+        Returns:
+            ``(names, times)``, each keyed by the stored node id. The times are aware UTC.
+        """
         # The SQLite bare-column-with-MAX guarantee: in a group with ``MAX(observed_at)``,
         # the ungrouped ``name`` comes from the row that has the maximum. Thus one
         # aggregate scan gives the latest name of each node, and Python does not walk all
@@ -1741,11 +1756,13 @@ class Repository:
         # ``idx_observations_node`` row by row (one random-access read for each entry,
         # which is measurably slower than the scan).
         rows = self._conn.execute(
-            "SELECT node, name, MAX(observed_at) FROM observations NOT INDEXED "
+            "SELECT node, name, MAX(observed_at) AS last FROM observations NOT INDEXED "
             "WHERE node IS NOT NULL AND name IS NOT NULL AND name != '' "
             "AND kind != 'packet' GROUP BY node"
         ).fetchall()
-        return {row["node"]: row["name"] for row in rows}
+        names = {row["node"]: row["name"] for row in rows}
+        times = {row["node"]: datetime.fromisoformat(row["last"]) for row in rows}
+        return names, times
 
     def last_heard_by_node(self) -> dict[str, datetime]:
         """The most recent reception of each node, with the time from our clock.

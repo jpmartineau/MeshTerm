@@ -1749,6 +1749,7 @@ full_width                   auto                                  auto         
 color_depth                  auto                                  auto                                  How many colours to send this terminal (next launch)
 console_setup                auto                                  auto                                  Move to a better terminal when this console can't draw MeshTerm
 console_font                 6x12                                  6x12                                  Bigger text, or more rows on the handheld's panel
+name_overlap_days            7                                     7                                     Grey a name two nodes used within this many days
 log_level                    WARNING                               WARNING                               How much MeshTerm writes to its log file (next launch)
 ```
 

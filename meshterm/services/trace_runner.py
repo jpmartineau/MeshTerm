@@ -12,8 +12,10 @@ this module.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from datetime import datetime, timedelta, timezone
 
+from ..core import preferences
 from ..core.connection import Device
 from ..core.models import Contact, NameKeyResolver, NodeResolver, TraceResult
 
@@ -182,6 +184,9 @@ def make_key_resolver(contacts: list[Contact] | None) -> NodeResolver:
 def make_name_key_resolver(
     contacts: list[Contact] | None,
     stored_names: dict[str, str] | None = None,
+    *,
+    heard: Mapping[str, datetime] | None = None,
+    overlap_days: int | None = None,
 ) -> NameKeyResolver:
     """Build a resolver that finds the key of a display name.
 
@@ -194,48 +199,79 @@ def make_name_key_resolver(
     no node has resolves to ``None``. The caller renders it in the grey of an unknown node,
     because colour is only for identities with a key.
 
-    **A name that two or more nodes use also resolves to** ``None``. A name is a label that
-    the owner of a key chooses, and nothing stops a second key from taking it. A channel
+    **When more than one key uses a name, the key heard most recently gets it**, unless
+    another of those keys used the name within ``overlap_days`` of it. Then the name
+    resolves to ``None``. A name is a label that the owner of a key chooses. A new key for
+    the same name is usual: a reflash with an erase makes a new identity, and an old key
+    that is silent for weeks is the earlier identity of the same owner. But a channel
     message carries only the name of its sender, as text that each holder of the channel
-    secret can write. Thus, when two keys use one name, MeshTerm cannot know which one
-    sent the message, and a choice between the two is a guess that the hue, the map (^L),
-    and the node page (^O) then show as a fact. Before, the last contact in the list won.
-    A second "LOG.IC 3R" with a new key then took the hue and the map of the first, which
-    nothing proved (JP, 2026-10-11). Two ids are one node when one is a prefix of the
-    other: the full key of a contact and the stored id of the same node are one claim, not
-    two.
+    secret can write. When two keys use the name at the same time, MeshTerm cannot know
+    which one sent the message, and a choice between the two is a guess that the hue, the
+    map (^L), and the node page (^O) then show as a fact.
+
+    This rule replaced two others. First, the last contact in the list won: a second
+    "LOG.IC 3R" with a new key then took the hue and the map of the first. Then each name
+    that two keys ever used was grey: an old key, silent since September, then made "Smog"
+    grey in October (JP, 2026-10-11). A key with no time (a contact that was never heard)
+    never wins against a key with a time. When no key of a name has a time, the name is
+    unsure. Two ids are one node when one is a prefix of the other: the full key of a
+    contact and the stored id of the same node are one claim, not two.
 
     Args:
         contacts: The known contacts to resolve against (name → public key/key prefix).
+            Their ``last_seen`` is when each was last heard.
         stored_names: The latest advertised name of each stored node id in the recorder
             (:meth:`~meshterm.persistence.repository.Repository.node_names`). This
             function inverts it into a fallback from name → node id.
+        heard: When each stored node id last used its name
+            (:meth:`~meshterm.persistence.repository.Repository.node_names_with_times`).
+        overlap_days: The window, in days. ``None`` reads the ``name_overlap_days``
+            preference.
 
     Returns:
         A callable that takes a display name and returns the best key hex that we have
-        for it, or ``None`` when the name matches no known node, or more than one.
+        for it, or ``None`` when the name matches no known node, or two that use it at
+        the same time.
     """
-    # The ids of the nodes that use each name, one entry for each node.
-    claims: dict[str, list[str]] = {}
+    if overlap_days is None:
+        overlap_days = preferences.current().name_overlap_days
+    window = timedelta(days=max(0, overlap_days))
+    times = heard or {}
+    # The nodes that use each name: one [id, last time] entry for each node.
+    claims: dict[str, list[list]] = {}
 
-    def claim(name: str, ident: str, *, canonical: bool) -> None:
+    def claim(name: str, ident: str, when: datetime | None, *, canonical: bool) -> None:
         held = claims.setdefault(name.casefold(), [])
-        for i, other in enumerate(held):
-            if other.startswith(ident) or ident.startswith(other):
+        when = _aware(when)
+        for entry in held:
+            if entry[0].startswith(ident) or ident.startswith(entry[0]):
                 if canonical:
-                    held[i] = ident  # the key of a contact replaces the stored id
+                    entry[0] = ident  # the key of a contact replaces the stored id
+                if when is not None and (entry[1] is None or when > entry[1]):
+                    entry[1] = when
                 return
-        held.append(ident)
+        held.append([ident, when])
 
     for node, name in (stored_names or {}).items():
         ident = node.lower().removeprefix("0x")
         if name and ident:
-            claim(name, ident, canonical=False)
+            claim(name, ident, times.get(node), canonical=False)
     for c in contacts or []:
         ident = (c.public_key or c.key_prefix or "").lower().removeprefix("0x")
         if c.name and ident:
-            claim(c.name, ident, canonical=True)
-    keys = {name: ids[0] for name, ids in claims.items() if len(ids) == 1}
+            claim(c.name, ident, c.last_seen, canonical=True)
+    keys: dict[str, str] = {}
+    for name, held in claims.items():
+        if len(held) == 1:
+            keys[name] = held[0][0]
+            continue
+        dated = [entry for entry in held if entry[1] is not None]
+        if not dated:
+            continue  # nothing tells which key uses the name now
+        newest = max(when for _ident, when in dated)
+        live = [ident for ident, when in dated if when >= newest - window]
+        if len(live) == 1:
+            keys[name] = live[0]
 
     def key_of(name: str) -> str | None:
         if not name:
@@ -243,6 +279,13 @@ def make_name_key_resolver(
         return keys.get(name.casefold())
 
     return key_of
+
+
+def _aware(when: datetime | None) -> datetime | None:
+    """``when`` as an aware time. A time with no zone is UTC, as MeshTerm stores each time."""
+    if when is None or when.tzinfo is not None:
+        return when
+    return when.replace(tzinfo=timezone.utc)
 
 
 def parse_trace_path(spec: str, contacts: list[Contact] | None = None) -> str:

@@ -1468,7 +1468,8 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
     )
     contacts = await ctx.devstate.contacts()
     names = _contact_names(contacts)
-    key_of = trace_runner.make_name_key_resolver(contacts, ctx.repo.node_names())
+    stored_names, named_at = ctx.repo.node_names_with_times()
+    key_of = trace_runner.make_name_key_resolver(contacts, stored_names, heard=named_at)
 
     async def send(text: str) -> ChatMessage | None:
         if conversation.is_channel:
@@ -1727,10 +1728,10 @@ async def _make_paths_presenter(
 
     session = ctx.ui.session
     contacts = await ctx.devstate.contacts()
-    stored_names = ctx.repo.node_names()
+    stored_names, named_at = ctx.repo.node_names_with_times()
     resolve = trace_runner.make_node_resolver(contacts, stored_names)
     type_of = trace_runner.make_node_type_resolver(contacts)
-    key_of = trace_runner.make_name_key_resolver(contacts, stored_names)
+    key_of = trace_runner.make_name_key_resolver(contacts, stored_names, heard=named_at)
     prefix_bytes = await ctx.devstate.routing_prefix_bytes()
     self_name: str | None = None
     self_key: str | None = None

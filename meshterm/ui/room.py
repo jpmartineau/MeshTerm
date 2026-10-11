@@ -404,7 +404,7 @@ async def open_room(ctx: AppContext, conversation: Conversation) -> int:
         posts_only=True,
     )
     contacts = await ctx.devstate.contacts()
-    stored_names = ctx.repo.node_names()
+    stored_names, named_at = ctx.repo.node_names_with_times()
 
     async def send(text: str) -> ChatMessage | None:
         return await _with_restore(ctx, lambda: ctx.chat.send_post(room, text))
@@ -438,7 +438,7 @@ async def open_room(ctx: AppContext, conversation: Conversation) -> int:
         access=ctx.rooms.access(room),
         resend=resend,
         paths=await _make_paths_presenter(ctx, conversation, device),
-        key_of=trace_runner.make_name_key_resolver(contacts, stored_names),
+        key_of=trace_runner.make_name_key_resolver(contacts, stored_names, heard=named_at),
         locator=await Locator.gather(ctx),
         pages=ContactPages(ctx, list(contacts)),
     )

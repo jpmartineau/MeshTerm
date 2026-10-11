@@ -795,6 +795,9 @@ class _PickerRepo:
     def node_names(self) -> dict:
         return {}
 
+    def node_names_with_times(self) -> tuple[dict, dict]:
+        return {}, {}
+
 
 def _chat_picker(cols: int, rows: int) -> Screen:
     """The conversation picker, built through the tool's own row funnel.
