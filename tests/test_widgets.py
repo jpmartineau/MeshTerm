@@ -162,17 +162,38 @@ def test_path_text_dims_the_tail_from_dim_from() -> None:
 
 
 def test_make_name_key_resolver_contacts_win_over_stored_names() -> None:
-    """Contacts resolve first, stored advert names resolve strangers, and misses are None."""
+    """Contacts give the canonical key, stored advert names resolve strangers, misses are None."""
     from meshterm.core.models import Contact
     from meshterm.services.trace_runner import make_name_key_resolver
 
     contacts = [Contact(name="Alice", public_key="d4" + "0" * 62)]
-    stored = {"60aabbccdd11": "Bob", "77ee00112233": "Alice"}  # an old stored Alice
+    stored = {"60aabbccdd11": "Bob", "d40000000000": "Alice"}  # Alice's own stored id
     key_of = make_name_key_resolver(contacts, stored)
     assert key_of("Alice") == "d4" + "0" * 62  # the key of the contact, not the stored id
     assert key_of("alice") == "d4" + "0" * 62  # case-folded
     assert key_of("Bob") == "60aabbccdd11"  # a stranger with a stored name still resolves
     assert key_of("Zed") is None  # no node has the name
+
+
+def test_a_name_that_two_keys_use_resolves_to_no_key() -> None:
+    """Two nodes with one name: MeshTerm cannot know which one a name means, so it is grey.
+
+    A channel message carries only the name of its sender. A second key that takes a name
+    must not get the hue, the map, and the page of the first (JP, 2026-10-11).
+    """
+    from meshterm.core.models import Contact
+    from meshterm.services.trace_runner import make_name_key_resolver
+
+    old = Contact(name="LOG.IC 3R", public_key="5d" + "0" * 62)
+    new = Contact(name="LOG.IC 3R", public_key="47" + "0" * 62)
+    assert make_name_key_resolver([old, new])("LOG.IC 3R") is None
+    assert make_name_key_resolver([new, old])("log.ic 3r") is None  # the order does not matter
+
+    # A stranger that we only heard is a claim too, and it makes the name of a contact unsure.
+    stranger = {"77ee00112233": "Alice"}
+    alice = Contact(name="Alice", public_key="d4" + "0" * 62)
+    assert make_name_key_resolver([alice], stranger)("Alice") is None
+    assert make_name_key_resolver([alice])("Alice") == "d4" + "0" * 62
 
 
 def test_name_style_without_a_key_is_the_unknown_grey() -> None:

@@ -188,11 +188,22 @@ def make_name_key_resolver(
     The app-wide colour rule takes the hue of each name from the key of the node. Some
     places in the UI (the inline sender of a channel message, an ``@mention``, the origin
     of a route graph) have only a *name*. This resolver changes that name (casefolded)
-    back into a key. The contacts of the device win (their keys are canonical). Then the
+    back into a key. The contacts of the device give the canonical key of a node. Then the
     stored names of the recorder add the nodes that the companion never added as
     contacts. Thus a known node that is not a contact still gets its own hue. A name that
-    no node has resolves to ``None``. The caller renders it muted, because colour is only
-    for identities with a key.
+    no node has resolves to ``None``. The caller renders it in the grey of an unknown node,
+    because colour is only for identities with a key.
+
+    **A name that two or more nodes use also resolves to** ``None``. A name is a label that
+    the owner of a key chooses, and nothing stops a second key from taking it. A channel
+    message carries only the name of its sender, as text that each holder of the channel
+    secret can write. Thus, when two keys use one name, MeshTerm cannot know which one
+    sent the message, and a choice between the two is a guess that the hue, the map (^L),
+    and the node page (^O) then show as a fact. Before, the last contact in the list won.
+    A second "LOG.IC 3R" with a new key then took the hue and the map of the first, which
+    nothing proved (JP, 2026-10-11). Two ids are one node when one is a prefix of the
+    other: the full key of a contact and the stored id of the same node are one claim, not
+    two.
 
     Args:
         contacts: The known contacts to resolve against (name → public key/key prefix).
@@ -202,17 +213,29 @@ def make_name_key_resolver(
 
     Returns:
         A callable that takes a display name and returns the best key hex that we have
-        for it, or ``None`` when the name matches no known node.
+        for it, or ``None`` when the name matches no known node, or more than one.
     """
-    keys: dict[str, str] = {}
+    # The ids of the nodes that use each name, one entry for each node.
+    claims: dict[str, list[str]] = {}
+
+    def claim(name: str, ident: str, *, canonical: bool) -> None:
+        held = claims.setdefault(name.casefold(), [])
+        for i, other in enumerate(held):
+            if other.startswith(ident) or ident.startswith(other):
+                if canonical:
+                    held[i] = ident  # the key of a contact replaces the stored id
+                return
+        held.append(ident)
+
     for node, name in (stored_names or {}).items():
         ident = node.lower().removeprefix("0x")
         if name and ident:
-            keys.setdefault(name.casefold(), ident)
+            claim(name, ident, canonical=False)
     for c in contacts or []:
         ident = (c.public_key or c.key_prefix or "").lower().removeprefix("0x")
         if c.name and ident:
-            keys[c.name.casefold()] = ident  # contacts win over stored names
+            claim(c.name, ident, canonical=True)
+    keys = {name: ids[0] for name, ids in claims.items() if len(ids) == 1}
 
     def key_of(name: str) -> str | None:
         if not name:

@@ -496,8 +496,9 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   node's key (its first byte — any known prefix agrees) so a rename keeps the colour.
   One rule on **every** platform; only the resolution changes (see **Platforms**).
   A surface holding only a name resolves it first (`make_name_key_resolver`); a node no
-  key can place — an unresolved sender, a bare hash standing in as a name, an `○` ring —
-  takes `node.unknown`, THE light grey for an unidentified node, everywhere and on both
+  key can place — an unresolved sender, a name two or more keys use (a name is a claim
+  anyone can make, so MeshTerm never picks between them; JP, 2026-10-11), a bare hash
+  standing in as a name, an `○` ring — takes `node.unknown`, THE light grey for an unidentified node, everywhere and on both
   platforms. Colour is reserved for keyed identities, never seeded from a name's
   characters. `node.unknown` is deliberately not `muted`: muted is chrome and may sit a
   step darker, while an unidentified node is content you can still act on. Our own node
