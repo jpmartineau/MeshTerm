@@ -129,95 +129,67 @@ class ChatScreen(Screen):
 
     @property
     def picocalc_lyra_lane(self):
-        """The PicoCalc lane in the words of the transcript: Latest/Oldest, Paths, Retry.
+        """The PicoCalc lane of a conversation: the same lane in a channel, a DM, and a room.
 
-        The Shift bank of the shared lane sends the plain ``end``/``home`` actions. But
-        here the cursor of the compose line already uses them (refer to :meth:`handle`).
-        Thus, without a change, the two keyboard keys go to the same fallback ("clear the
-        selection, stay at the tail"), and each one seems to scroll to the bottom. Instead,
-        the two Shift slots send ``ctrl_end``/``ctrl_home``, and their labels say what
-        these actions do to a conversation: go back to the *latest* message and the
-        compose line, or go back to the *oldest*. This is the shared pair with new labels
-        in the same slots. Thus it keeps the shared sides: each jump is still behind the
-        page key that goes in the same direction (refer to
-        :data:`~meshterm.ui.tui.fkeys.DEFAULT_LANE`). F4/F5 keep the shared paging pair.
-        From the outside, the transcript moves by one screen, also when it is the selection
-        that moves.
+        The plain bank of F1 to F3 has the verbs that all three screens share, in the order
+        of the hint: ``Paths`` (^P), ``QR`` (^U), and ``Map`` (^L). The Shift bank of F1 to
+        F3 has the verbs of one screen only. ``Retry`` (^R) is on the Shift half of F1 in a
+        DM and in a room, and ``Resend`` (the same ^R, unscoped) is there in a channel. A
+        room adds ``Log in`` (^O) on the Shift half of F2 (refer to
+        :class:`~meshterm.ui.room.RoomScreen`). Thus a key does the same thing on each of
+        the three screens, and the user finds a verb in the same place (JP, 2026-10-10).
 
-        The F3 pair follows the two rules of the lane. *Retry* is not there in a channel,
-        because a channel message is never acknowledged, so there is nothing to retry. In
-        a direct chat with nothing outstanding, it is only dim. The Shift slot of a channel
-        is *Resend* instead: the selected message (or the newest) again, unscoped (refer
-        to :meth:`_retry_target`). It is there when a resend is connected, and it is dim
-        until that message is one of ours that went out under a region. *Paths* must have
-        a selected message to show the paths of, and the two navigation slots must have a
-        transcript to move through.
+        The three shared verbs act *on* the selected message. ``Paths`` is lit while a
+        message is selected. ``QR`` shows the codes of the links of the selection on a
+        share screen, larger than the codes under it in the transcript, and is lit while the
+        selection has a URL (refer to :meth:`_picked_urls`). ``Map`` is lit while the author
+        of the selection has a location (refer to :meth:`_locate_target`), and its slot is
+        empty when the screen has no locator.
 
-        F1/F2 have the **day** jump: the section step of the transcript (its dividers are
-        days). A grouped select list does the same with ``Sect ↑``/``Sect ↓``, on the same
-        keyboard keys, which send the same ``ctrl_pageup``/``ctrl_pagedown``. The label
-        names what the sections *are* here, because of the lane rule that a chip names an
-        action. A left-hand pair rises toward F1. Thus ``Day ↑`` (back through the
-        transcript) is on the outer side of ``Day ↓``, the same as the pager on the right
-        and the list that it copies. These chips are lit only when there is more than one
-        day to step between. A conversation in one afternoon has no sections, the same as
-        a list with one section.
+        The Shift half of F1 follows the two rules of the lane. In a channel with no
+        resend connected, it is empty, because a channel message is never acknowledged and
+        there is nothing to retry. In a DM with nothing outstanding, it is only dim.
+        ``Resend`` sends the selected message (or the newest) again, unscoped (refer to
+        :meth:`_retry_target`), and it is dim until that message is one of ours that went
+        out under a region.
 
-        ``QR`` (^U) is on the Shift half of F2, next to ``Retry`` on the Shift half of F3.
-        The two are actions *on* the selected message: the codes of its links on a share
-        screen, larger than the codes under it in the transcript. ``QR`` is lit while the
-        selection has a URL.
+        The day jump (``ctrl_pageup``/``ctrl_pagedown``) has no chip. ``Day ↑`` and
+        ``Day ↓`` were on F1 and F2, and JP removed them (2026-10-10). The desktop keeps
+        the jump on ^PgUp and ^PgDn.
 
-        ``Map`` (^L) is on the Shift half of F1, the one slot that the rest of the lane
-        leaves free. It is lit while the author of the selected message has a location
-        (refer to :meth:`_locate_target`). The room puts ``Log in`` in that slot instead
-        (refer to :class:`~meshterm.ui.room.RoomScreen`).
+        F4/F5 keep the shared paging pair. The Shift bank of the shared lane sends the plain
+        ``end``/``home`` actions. But here the cursor of the compose line already uses them
+        (refer to :meth:`handle`). Thus, without a change, the two keyboard keys go to the
+        same fallback ("clear the selection, stay at the tail"), and each one seems to
+        scroll to the bottom. Instead, the two Shift slots send ``ctrl_end``/``ctrl_home``,
+        and their labels say what these actions do to a conversation: go back to the
+        *latest* message and the compose line, or go back to the *oldest*. Each jump is
+        still behind the page key that goes in the same direction (refer to
+        :data:`~meshterm.ui.tui.fkeys.DEFAULT_LANE`). From the outside, the transcript moves
+        by one screen, also when it is the selection that moves.
         """
         from .tui.fkeys import FPair, default_lane
 
         lane = list(default_lane(nav=bool(self._messages)))
         live = bool(self._messages)
-        # The messages are in time order. Thus there are two days exactly when the two ends
-        # have different dates. This costs O(1). A walk through the dividers dates the full
-        # transcript again at each paint.
-        days = live and (
-            self._messages[0].created_at.astimezone().date()
-            != self._messages[-1].created_at.astimezone().date()
-        )
-        if self._locator is not None:
-            lane[0] = FPair(
-                "Day ↑",
-                "ctrl_pageup",
-                "Map",
-                "locate",
-                enabled=days,
-                opp_enabled=self._locate_target() is not None,
-            )
-        else:
-            lane[0] = FPair("Day ↑", "ctrl_pageup", enabled=days)
-        lane[1] = FPair(
-            "Day ↓",
-            "ctrl_pagedown",
-            "QR",
-            "url_code",
-            enabled=days,
-            opp_enabled=bool(self._picked_urls()),
-        )
-        lane[3] = FPair("Page ↓", "pagedown", "Latest", "ctrl_end", enabled=live, opp_enabled=live)
-        lane[4] = FPair("Page ↑", "pageup", "Oldest", "ctrl_home", enabled=live, opp_enabled=live)
         if not self._is_channel:
-            retry = ("Retry", "retry")
+            again = ("Retry", "retry")
         elif self._resend_unscoped is not None:
-            retry = ("Resend", "retry")
+            again = ("Resend", "retry")
         else:
-            retry = ("", "")
-        lane[2] = FPair(
+            again = ("", "")
+        lane[0] = FPair(
             "Paths",
             "paths",
-            *retry,
+            *again,
             enabled=self._selected is not None and self._paths is not None,
             opp_enabled=self._retry_target() is not None,
         )
+        lane[1] = FPair("QR", "url_code", enabled=bool(self._picked_urls()))
+        if self._locator is not None:
+            lane[2] = FPair("Map", "locate", enabled=self._locate_target() is not None)
+        lane[3] = FPair("Page ↓", "pagedown", "Latest", "ctrl_end", enabled=live, opp_enabled=live)
+        lane[4] = FPair("Page ↑", "pageup", "Oldest", "ctrl_home", enabled=live, opp_enabled=live)
         return lane
 
     def __init__(

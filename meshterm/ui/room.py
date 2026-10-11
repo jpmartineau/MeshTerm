@@ -105,24 +105,19 @@ class RoomScreen(ChatScreen):
 
     @property
     def picocalc_lyra_lane(self):
-        """The lane of the chat, with *Log in* on the Shift half of F1 (F6), where ^O has no key.
+        """The lane of the chat, with *Log in* on the Shift half of F2 (F7), where ^O has no key.
 
-        Each chord that the desktop has needs a chip on the handheld. The chat puts
-        ``Map`` (^L) on the Shift half of F1, its one free slot. A room needs ``Log in``
-        more, because a room takes no posts from a user who did not log in. Thus, in a
-        room, ``Map`` has no chip. The chip is dim while a login is in progress.
+        Each chord that the desktop has needs a chip on the handheld. The plain bank of F1
+        to F3 has the verbs that a room shares with a channel and a DM, and the Shift bank
+        has the verbs of the screen (refer to :attr:`ChatScreen.picocalc_lyra_lane`). Thus
+        ``Retry`` (^R) stays on the Shift half of F1, as in a DM, and ``Log in`` is next to
+        it. The chip is dim while a login is in progress.
         """
-        from .tui.fkeys import FPair
+        from dataclasses import replace
 
         lane = list(super().picocalc_lyra_lane)
-        day = lane[0]
-        lane[0] = FPair(
-            day.label,
-            day.action,
-            "Log in",
-            "login",
-            enabled=day.enabled,
-            opp_enabled=not self._login_open,
+        lane[1] = replace(
+            lane[1], opp_label="Log in", opp_action="login", opp_enabled=not self._login_open
         )
         return lane
 

@@ -773,7 +773,14 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   the authority and no-ops. The lane is also the *only* affordance advertisement here, so
   anything the desktop reaches by a chord or a bare letter (a list's `^PgUp/^PgDn` section
   jumps, the Time Machine's `w`, the map's `^L`, a row's `Del`) earns a slot — otherwise
-  it is undiscoverable on the device.
+  it is undiscoverable on the device. One exception, by JP's choice (2026-10-10): the
+  chat's day jump (`^PgUp/^PgDn`) has no chip; `Day ↑`/`Day ↓` were taken off F1/F2.
+- **The three conversations share one lane** (channel, DM, room; JP, 2026-10-10): what
+  they share sits on F1–F3 plain, in the hint's order — `Paths` (^P), `QR` (^U), `Map`
+  (^L, empty without a locator) — and each screen's own verbs ride the Shift bank: ^R on
+  Shift+F1 (`Retry` in a DM and a room, `Resend` in a channel), the room's `Log in` (^O)
+  on Shift+F2. F4/F5 stay the pager, with `Latest`/`Oldest` behind Shift. A verb new to
+  one of them goes on the Shift bank; one all three gain goes on the plain bank.
 - **Each handheld deals its own lane.** Everything about the lane that belongs to one
   keyboard is a `LaneDeck` (`fkeys.PICOCALC_LYRA_DECK`, `fkeys.CARDPUTER_ZERO_DECK`), named by
   `Platform.lane_deck`: which keycodes drive the slots, where the chips sit on the row, how

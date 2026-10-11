@@ -886,12 +886,18 @@ def test_the_hint_names_log_in_and_fits() -> None:
     assert cell_len(screen.footer_hint) <= 72
 
 
-def test_the_handheld_lane_puts_log_in_behind_f1() -> None:
-    """Each chord has a chip where the keyboard has no Ctrl key to reach it."""
+def test_the_handheld_lane_puts_log_in_behind_f2() -> None:
+    """Each chord has a chip where the keyboard has no Ctrl key to reach it.
+
+    Log in is a verb of the room only, so it is in the Shift bank, next to Retry.
+    """
     screen, _ = _view(_board())
     lane = screen.picocalc_lyra_lane
-    assert lane[0].opp_label == "Log in"
-    assert fkeys.PICOCALC_LYRA_DECK.action_for(lane, 6) == "login"
+    assert lane[1].opp_label == "Log in"
+    assert fkeys.PICOCALC_LYRA_DECK.action_for(lane, 7) == "login"
+    assert lane[0].opp_label == "Retry"
+    # The plain bank of F1 to F3 is the one of each conversation (refer to test_chat).
+    assert [pair.label for pair in lane[:2]] == ["Paths", "QR"]
 
 
 async def test_l_opens_the_map_on_the_author_of_a_post() -> None:
@@ -914,8 +920,9 @@ async def test_l_opens_the_map_on_the_author_of_a_post() -> None:
     screen.handle("locate")
     await asyncio.sleep(0)
     assert locator.shown == [alice]
-    # The room keeps Log in on the Shift half of F1. Thus Map has no chip here.
-    assert screen.picocalc_lyra_lane[0].opp_label == "Log in"
+    # Map is on F3, as in each conversation, and Log in is on the Shift half of F2.
+    assert screen.picocalc_lyra_lane[2].label == "Map"
+    assert screen.picocalc_lyra_lane[1].opp_label == "Log in"
 
 
 # --- joining: the explained flow ------------------------------------------------------

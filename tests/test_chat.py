@@ -1108,14 +1108,14 @@ async def test_chat_fkey_lane_dims_retry_and_the_nav_slots() -> None:
     failed = ChatMessage(text="oops", outbound=True, peer="d4e5f6a7", acked=False)
     screen = _screen(_StubSession(), send=None, messages=[failed], resend=resend)
     assert all(pair.enabled for pair in screen.picocalc_lyra_lane[3:])  # the pager moves the pick
-    assert screen.picocalc_lyra_lane[2].opp_enabled is True  # F8 Retry: the message has no ack
+    assert screen.picocalc_lyra_lane[0].opp_enabled is True  # F6 Retry: the message has no ack
 
     screen.handle("retry")
     await asyncio.sleep(0)
     assert failed.acked is True
-    assert screen.picocalc_lyra_lane[2].opp_enabled is False  # acknowledged: nothing to retry
+    assert screen.picocalc_lyra_lane[0].opp_enabled is False  # acknowledged: nothing to retry
     assert (
-        screen.picocalc_lyra_lane[2].opp_label == "Retry"
+        screen.picocalc_lyra_lane[0].opp_label == "Retry"
     )  # dim, not removed: it is part of this screen
 
 
@@ -1130,7 +1130,7 @@ def test_chat_fkey_lane_speaks_the_transcript_and_drops_channel_retry() -> None:
     assert [pair.opp_label for pair in direct.picocalc_lyra_lane[3:]] == ["Latest", "Oldest"]
     assert [pair.opp_action for pair in direct.picocalc_lyra_lane[3:]] == ["ctrl_end", "ctrl_home"]
     assert [pair.label for pair in direct.picocalc_lyra_lane[3:]] == ["Page ↓", "Page ↑"]
-    assert direct.picocalc_lyra_lane[2].opp_label == "Retry"
+    assert direct.picocalc_lyra_lane[0].opp_label == "Retry"
 
     channel = ChatScreen(
         Conversation(label="#general", is_channel=True, channel_id="1"),
@@ -1141,8 +1141,8 @@ def test_chat_fkey_lane_speaks_the_transcript_and_drops_channel_retry() -> None:
     )
     # A channel message has no acknowledgement, so a retry is not possible here. The slot is
     # empty (it is not dim), and its key resolves to nothing.
-    assert channel.picocalc_lyra_lane[2].opp_label == ""
-    assert fkeys.PICOCALC_LYRA_DECK.action_for(channel.picocalc_lyra_lane, 8) is None
+    assert channel.picocalc_lyra_lane[0].opp_label == ""
+    assert fkeys.PICOCALC_LYRA_DECK.action_for(channel.picocalc_lyra_lane, 6) is None
 
 
 def test_chat_screen_up_picks_and_ctrl_end_returns_to_compose() -> None:
@@ -1375,7 +1375,7 @@ async def test_chat_paths_key_needs_a_picked_message() -> None:
     await asyncio.sleep(0)
     assert shown == []
     assert "^P" not in screen.footer_hint
-    assert screen.picocalc_lyra_lane[2].enabled is False
+    assert screen.picocalc_lyra_lane[0].enabled is False
 
     screen.handle("up")
     screen.handle("up")  # select the older message
@@ -1386,7 +1386,7 @@ async def test_chat_paths_key_needs_a_picked_message() -> None:
     # direct chat has no reply to prepare. (The hint of a channel keeps the ^P atom beside
     # its Enter reply.)
     assert "Enter paths" in screen.footer_hint
-    assert screen.picocalc_lyra_lane[2].enabled is True
+    assert screen.picocalc_lyra_lane[0].enabled is True
 
 
 async def test_chat_direct_enter_on_a_pick_opens_paths() -> None:
@@ -2355,29 +2355,16 @@ async def test_channel_slot_change_drops_the_cached_channel_list(repo: Repositor
     await device.disconnect()
 
 
-def test_chat_fkey_lane_steps_by_day_on_the_free_left_pair() -> None:
-    """The sections of the transcript are days, so F1 and F2 name the section step ``Day``.
+def test_chat_fkey_lane_has_no_day_jump() -> None:
+    """No chip sends the day jump: JP removed ``Day ↑`` and ``Day ↓`` (2026-10-10).
 
-    The keys and the actions are the same as ``Sect ↑`` and ``Sect ↓`` of a grouped select
-    list. The lane names what the sections are here. The chips are lit only if there is
-    more than one day to step between, as a list with one section has no section jump.
+    The desktop keeps the jump on ^PgUp and ^PgDn.
     """
     from datetime import timedelta
 
     from meshterm.core.models import utcnow
 
     now = utcnow()
-    one_day = [ChatMessage(text="hi", peer="d4e5f6a7", created_at=now)]
-    single = _screen(_StubSession(), send=None, messages=one_day)
-    assert [pair.label for pair in single.picocalc_lyra_lane[:2]] == ["Day ↑", "Day ↓"]
-    assert [pair.action for pair in single.picocalc_lyra_lane[:2]] == [
-        "ctrl_pageup",
-        "ctrl_pagedown",
-    ]
-    assert not any(
-        pair.enabled for pair in single.picocalc_lyra_lane[:2]
-    )  # one day: no place to step to
-
     spread = _screen(
         _StubSession(),
         send=None,
@@ -2386,12 +2373,57 @@ def test_chat_fkey_lane_steps_by_day_on_the_free_left_pair() -> None:
             ChatMessage(text="now", peer="d4e5f6a7", created_at=now),
         ],
     )
-    assert all(pair.enabled for pair in spread.picocalc_lyra_lane[:2])
-    # A left-hand pair rises toward F1, so a step back through the transcript is the outer
-    # key. This is the same direction as the pager on the right.
-    assert fkeys.PICOCALC_LYRA_DECK.action_for(spread.picocalc_lyra_lane, 1) == "ctrl_pageup"
-    spread.handle(fkeys.PICOCALC_LYRA_DECK.action_for(spread.picocalc_lyra_lane, 1))
-    assert spread._selected == 0  # moved to the first message of the older day
+    lane = spread.picocalc_lyra_lane
+    actions = {action for pair in lane if pair for action in (pair.action, pair.opp_action)}
+    assert not actions & {"ctrl_pageup", "ctrl_pagedown"}
+    deck = fkeys.PICOCALC_LYRA_DECK
+    assert "Day" not in deck.lane_text(lane).plain + deck.lane_text(lane, shifted=True).plain
+
+    spread.handle("ctrl_pageup")
+    assert spread._selected == 0  # the key still moves to the first message of the older day
+
+
+def test_channel_and_dm_lanes_share_f1_to_f3_and_keep_their_own_verbs_behind_shift() -> None:
+    """The plain bank of F1 to F3 is the same in each conversation (JP, 2026-10-10).
+
+    The verbs that the screens share are there, in the order of the hint. The Shift bank
+    has the verbs of one screen: ``Retry`` in a DM and ``Resend`` in a channel, both ^R.
+    """
+    from tests.conftest import recording_locator
+
+    messages = [ChatMessage(text="hi", peer="d4e5f6a7")]
+    direct = ChatScreen(
+        Conversation(
+            label="Alice",
+            is_channel=False,
+            contact=Contact(name="Alice", public_key="d4" + "0" * 62, key_prefix="d4e5f6a7"),
+        ),
+        messages,
+        send=None,
+        names={},
+        session=_StubSession(),
+        locator=recording_locator([]),  # type: ignore[arg-type]
+    )
+
+    async def resend_unscoped(message: ChatMessage) -> ChatMessage:
+        return message
+
+    channel = ChatScreen(
+        Conversation(label="#general", is_channel=True, channel_id="1"),
+        [ChatMessage(text="Bob: hi", is_channel=True, channel_idx=0)],
+        send=None,
+        names={},
+        session=_StubSession(),
+        resend_unscoped=resend_unscoped,
+        locator=recording_locator([]),  # type: ignore[arg-type]
+    )
+    for screen in (direct, channel):
+        lane = screen.picocalc_lyra_lane
+        assert [pair.label for pair in lane[:3]] == ["Paths", "QR", "Map"]
+        assert [pair.action for pair in lane[:3]] == ["paths", "url_code", "locate"]
+    assert direct.picocalc_lyra_lane[0].opp_label == "Retry"
+    assert channel.picocalc_lyra_lane[0].opp_label == "Resend"
+    assert channel.picocalc_lyra_lane[0].opp_action == direct.picocalc_lyra_lane[0].opp_action
 
 
 # -- URL codes (the PicoCalc) ---------------------------------------------------
@@ -2579,10 +2611,8 @@ def test_ctrl_u_is_named_only_on_a_picked_message_with_a_link() -> None:
     linked.handle("up")
     plain.handle("up")
     assert "^U QR" in linked.footer_hint and "^U" not in plain.footer_hint
-    assert (
-        fkeys.PICOCALC_LYRA_DECK.action_for(linked.picocalc_lyra_lane, 7) == "url_code"
-    )  # Shift+F2
-    assert linked.picocalc_lyra_lane[1].opp_enabled and not plain.picocalc_lyra_lane[1].opp_enabled
+    assert fkeys.PICOCALC_LYRA_DECK.action_for(linked.picocalc_lyra_lane, 2) == "url_code"  # F2
+    assert linked.picocalc_lyra_lane[1].enabled and not plain.picocalc_lyra_lane[1].enabled
 
     # The hint of each selection state, with a link in it, fits in the 72-cell budget.
     direct = _screen(
@@ -2615,7 +2645,7 @@ def test_on_the_cardputer_a_link_takes_the_share_screen_as_on_the_desktop() -> N
     screen = _url_chat(f"the road list is at {url}")
     assert not _code_rows(_strip_ansi(screen._render_grouped(53)).splitlines())
     screen.handle("up")
-    assert fkeys.CARDPUTER_ZERO_DECK.action_for(screen.cardputer_zero_lane, 17) == "url_code"
+    assert fkeys.CARDPUTER_ZERO_DECK.action_for(screen.cardputer_zero_lane, 5) == "url_code"
 
     share = QrScreen(url, title="Links")
     share.note_viewport(14)
@@ -2830,13 +2860,13 @@ async def test_chat_locate_opens_the_map_on_the_author_of_the_selected_message()
         locator=locator,  # type: ignore[arg-type]
     )
     # With no selected message, ^L does nothing. The hint does not name it, and its chip on
-    # the Shift half of F1 is dim.
+    # F3 is dim.
     screen.handle("locate")
     await asyncio.sleep(0)
     assert locator.shown == []
     assert "^L" not in screen.footer_hint
-    assert screen.picocalc_lyra_lane[0].opp_label == "Map"
-    assert screen.picocalc_lyra_lane[0].opp_enabled is False
+    assert screen.picocalc_lyra_lane[2].label == "Map"
+    assert screen.picocalc_lyra_lane[2].enabled is False
 
     # Our own message: its author is our node.
     screen.handle("up")
@@ -2848,25 +2878,25 @@ async def test_chat_locate_opens_the_map_on_the_author_of_the_selected_message()
     # Bob has a key but no location, so there is nothing to show.
     screen.handle("up")
     assert "^L" not in screen.footer_hint
-    assert screen.picocalc_lyra_lane[0].opp_enabled is False
+    assert screen.picocalc_lyra_lane[2].enabled is False
     screen.handle("locate")
     await asyncio.sleep(0)
     assert locator.shown == [_US_AT]
 
-    # Alice has a location. The chip is lit, and F6 sends the same action as ^L.
+    # Alice has a location. The chip is lit, and F3 sends the same action as ^L.
     screen.handle("up")
     assert "^L map" in screen.footer_hint
-    assert screen.picocalc_lyra_lane[0].opp_enabled is True
-    assert fkeys.PICOCALC_LYRA_DECK.action_for(screen.picocalc_lyra_lane, 6) == "locate"
+    assert screen.picocalc_lyra_lane[2].enabled is True
+    assert fkeys.PICOCALC_LYRA_DECK.action_for(screen.picocalc_lyra_lane, 3) == "locate"
     screen.handle("locate")
     await asyncio.sleep(0)
     assert locator.shown == [_US_AT, _ALICE_AT]
 
 
 def test_chat_without_a_locator_has_no_map_chip() -> None:
-    """A chat that cannot locate leaves the Shift half of F1 empty, not dim."""
+    """A chat that cannot locate leaves F3 empty, not dim."""
     screen = _screen(_StubSession(), send=None, messages=[ChatMessage(text="hi", peer="d4e5f6a7")])
-    assert screen.picocalc_lyra_lane[0].opp_label == ""
+    assert screen.picocalc_lyra_lane[2] is None
 
 
 def test_chat_hint_with_all_its_keys_fits_in_72_cells() -> None:

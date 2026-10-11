@@ -426,7 +426,7 @@ async def test_resend_unscoped_targets_only_a_newest_scoped_message() -> None:
     assert screen._retry_target() is scoped
     assert "^R resend unscoped" in screen.footer_hint
     lane = screen.picocalc_lyra_lane
-    assert lane[2].opp_label == "Resend" and lane[2].opp_enabled
+    assert lane[0].opp_label == "Resend" and lane[0].opp_enabled  # Shift+F1, the ^R of each chat
 
     screen.handle("retry")
     await asyncio.sleep(0.05)
@@ -498,7 +498,7 @@ def test_a_channel_with_nothing_to_resend_dims_the_chip() -> None:
 
     screen = _channel_chat(_Session(), [unscoped], resend=resend)
     lane = screen.picocalc_lyra_lane
-    assert lane[2].opp_label == "Resend" and not lane[2].opp_enabled
+    assert lane[0].opp_label == "Resend" and not lane[0].opp_enabled
     assert fkeys.PICOCALC_LYRA_DECK.lane_text(lane, shifted=True).plain
 
 
