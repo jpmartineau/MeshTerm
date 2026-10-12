@@ -9,8 +9,25 @@ can change how things behave. It does not only add new things.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-12
+
+**MeshTerm supports the Cardputer Zero, and from a message you can open its author on the
+map or on a node page.** Each release now has a package for the Cardputer Zero, and the
+release sends it to M5Stack's app store. In a chat or on the board of a room, ^L opens the
+map on the author of a message, and ^O opens the page of that node. A name that two nodes
+use at the same time is now grey, because MeshTerm cannot tell which node wrote the
+message. On the handhelds, a channel, a direct chat, and a room have the same F-key chips.
+
 ### Added
 
+- **MeshTerm supports the Cardputer Zero.** Each release has a Debian package for the
+  handheld, `meshterm_<version>-1_arm64.deb`, and the release also sends it to M5Stack's
+  app store. The package has all that MeshTerm needs, which includes the radio library for
+  the Cap LoRa-1262 and the font of the display. Install it from the store on the
+  handheld, or from the release page. The store shows a new app after M5Stack examines
+  it. The [Cardputer Zero
+  page](https://github.com/jpmartineau/MeshTerm/blob/main/docs/devices/cardputer-zero.md)
+  has the details.
 - **^L shows a node on the map from a chat and from Contacts.** In a chat or on the board
   of a room, select a message and press ^L. The map opens on the node that wrote it. On
   the Contacts page, ^L opens the map on the highlighted contact. The key works only when
@@ -44,6 +61,22 @@ can change how things behave. It does not only add new things.
   chips, the author of a message has a point on the right of its chip. A mention is a chip
   with a notch on its left. The packet viewer, the live feed, the Messages list, and the
   courier show the sender and the recipient in the same way.
+- **Enter on the live feed keeps it on the newest packet.** When the live feed follows new
+  packets (the pin at the top), Enter opens the packet viewer, and the viewer also follows
+  new packets. The feed stays on the pin. Before, Enter stopped the feed on one packet.
+  Enter on a packet that you selected still opens that packet and holds it.
+
+### Fixed
+
+- **The page of a contact shows its map preview again.** On a terminal of 24 rows, the
+  action rows left too little space, and the preview was gone. Now the preview keeps its
+  size and the page scrolls. Only the short display of the Cardputer Zero leaves it out.
+- **The PicoCalc's radio recovers when a byte is lost on its serial line.** One lost or
+  damaged byte could make the XIAO wait for data that never came. Then each start of
+  MeshTerm said "No response from meshcore node". The firmware that the PicoCalc guide
+  builds now drops an incomplete command after 200 ms of silence. To get this repair, build
+  and flash the firmware again, as the guide says. The steps of the guide that install
+  PlatformIO and flash the XIAO are also correct now.
 
 ## [0.10.3] - 2026-10-07
 
@@ -466,7 +499,8 @@ commands.
 MeshTerm is free and open source, under the Apache 2.0 licence. The licence does not cover
 the name and the logo (refer to `NOTICE`). A fork is welcome under its own name.
 
-[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.10.3...HEAD
+[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.0
 [0.10.3]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.10.3
 [0.10.2]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.10.2
 [0.10.1]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.10.1
