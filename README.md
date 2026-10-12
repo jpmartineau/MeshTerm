@@ -195,6 +195,11 @@ pipx install git+https://github.com/jpmartineau/MeshTerm
 **Do you not have a radio yet?** `meshterm --mock` runs the complete app on a simulated
 mesh. You can look at the app before you buy anything.
 
+### On the Cardputer Zero
+
+Install MeshTerm from M5Stack's app store on the handheld. Its share code is `MTRM`.
+[MeshTerm on the Cardputer Zero](docs/devices/cardputer-zero.md) has the details.
+
 ### Coming
 
 **`pip install mesh-term`** will work after the package is published. It is not published
@@ -215,7 +220,7 @@ code survey, which we keep as a historical record. This table is a short version
 | [The CLI cookbook](docs/cli/cookbook.md) | Common one-line commands, in groups by the task that you want to do. |
 | [Configuring MeshTerm](docs/guide/configuration.md) | The preferences, the device profiles, and all the files that MeshTerm keeps in `~/.meshterm`. |
 | [When a companion does not connect](docs/guide/connecting.md) | Bluetooth pairing on each system, how to find the PIN, USB permissions, and each connection error, with the action to take. |
-| [MeshTerm on hardware](docs/devices/README.md) | Which handheld manual is the correct one for you: the [PicoCalc](docs/devices/picocalc-lyra.md) build, or the [uConsole](docs/devices/uconsole.md), whose LoRa chip MeshTerm can control directly. The [Cardputer Zero](docs/devices/cardputer-zero.md) is **not supported yet**. |
+| [MeshTerm on hardware](docs/devices/README.md) | Which handheld manual is the correct one for you: the [PicoCalc](docs/devices/picocalc-lyra.md) build, the [uConsole](docs/devices/uconsole.md), whose LoRa chip MeshTerm can control directly, or the [Cardputer Zero](docs/devices/cardputer-zero.md), which gets MeshTerm from M5Stack's app store. |
 | [How the code is laid out](docs/development/architecture.md) | The layers of the code, and where to put a new feature. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | The development setup and the house rules. |
 | [CHANGELOG.md](CHANGELOG.md) | What changed, with the newest change first. |
@@ -250,10 +255,11 @@ PicoCalc](docs/devices/picocalc-lyra.md)** goes from the shopping list for a sto
 to a Linux handheld that has a LoRa radio soldered inside. **[MeshTerm on the
 uConsole](docs/devices/uconsole.md)** shows how to control the SPI LoRa board of a uConsole
 directly with `--spi`. It also shows how to use a small bridge, if you want the node to be
-on the mesh at all times. M5Stack's Cardputer Zero also has a page, but it is **[not
-supported yet](docs/devices/cardputer-zero.md)**. The scripts that the manuals run on the
-device are in [`scripts/`](scripts/). If you do not know which manual is correct for you,
-refer to [`docs/devices/README.md`](docs/devices/README.md).
+on the mesh at all times. **[MeshTerm on the Cardputer
+Zero](docs/devices/cardputer-zero.md)** shows how to install MeshTerm from M5Stack's app
+store. On that handheld, MeshTerm drives the Cap LoRa-1262 radio directly. The scripts
+that the manuals run on the device are in [`scripts/`](scripts/). If you do not know which
+manual is correct for you, refer to [`docs/devices/README.md`](docs/devices/README.md).
 
 Does a companion not connect? **[When a companion does not
 connect](docs/guide/connecting.md)** explains Bluetooth pairing on Windows, Linux, and

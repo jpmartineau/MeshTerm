@@ -15,7 +15,7 @@ has its own manual with numbered steps. This page tells you which manual is your
 | a ClockworkPi **PicoCalc**, stock or already running Calculinux on a Luckfox Lyra, and I want MeshTerm on its own display | **[MeshTerm on the PicoCalc](picocalc-lyra.md)**: from the shopping list to a working machine |
 | …and I want a **radio** inside it | the same manual, [Phase 3](picocalc-lyra.md#phase-3-add-the-radio): a XIAO nRF52840 + Wio-SX1262 soldered to the UART of the Lyra |
 | a ClockworkPi **uConsole** with the hackergadgets AIO board (an SX1262 on the SPI bus of the host) | **[MeshTerm on the uConsole](uconsole.md)**: MeshTerm drives the radio directly with `--spi`. A bridge service can also present the radio as a companion, if you want it always on |
-| an M5Stack **Cardputer Zero**, the one with a Raspberry Pi inside (not the ESP32 Cardputer or the Cardputer-Adv) | **[MeshTerm on the Cardputer Zero](cardputer-zero.md)**: ⚠️ **not supported yet**. MeshTerm has never run on the handheld. The page tells you what works in the emulator |
+| an M5Stack **Cardputer Zero**, the one with a Raspberry Pi inside (not the ESP32 Cardputer or the Cardputer-Adv) | **[MeshTerm on the Cardputer Zero](cardputer-zero.md)**: install MeshTerm from M5Stack's app store. MeshTerm drives the Cap LoRa-1262 directly, or it uses a companion |
 | a MeshCore companion on USB, Bluetooth, or Wi-Fi | nothing here. Read the [README](../../README.md). If the companion does not connect, read [When a companion does not connect](../guide/connecting.md) |
 
 The handhelds have nothing in common except MeshTerm. Each manual runs scripts on the
@@ -78,8 +78,10 @@ meshterm platform                          # which platform this terminal resolv
 ```
 
 The **cardputer-zero** platform is the display of the Cardputer Zero, which is 53×14.
-MeshTerm draws this display itself. The platform is [not supported yet](cardputer-zero.md),
-thus MeshTerm never detects it. Only `--platform cardputer-zero` selects it.
+MeshTerm draws this display itself. MeshTerm does not detect this platform. On the
+handheld, the launcher starts MeshTerm's own console, and the console selects the platform
+(refer to [the Cardputer Zero page](cardputer-zero.md)). On another computer,
+`--platform cardputer-zero` selects it.
 
 The platform needs two things from the console: a font that has the glyphs that the
 interface draws, and the stock sixteen-slot palette. The setup script in the PicoCalc

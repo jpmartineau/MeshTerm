@@ -1,23 +1,16 @@
 # MeshTerm on the Cardputer Zero
 
-> [!CAUTION]
-> **The Cardputer Zero is not supported yet.**
->
-> MeshTerm now runs on a real Cardputer Zero, with M5Stack's Cap LoRa-1262 as its
-> radio. But it runs only from a copy of the source code that you set up yourself. There is
-> no package in M5Stack's app store. Also, nobody has typed on the keyboard. Its keys
-> are checked only when you send key events to it from another computer.
->
-> Do not buy a Cardputer Zero to run MeshTerm on it yet. This page will tell you when that
-> changes.
-
 M5Stack makes three Cardputers. This page is about the **Cardputer Zero**. It has a
 Raspberry Pi Compute Module 0 inside, and it runs Linux. The original Cardputer and the
 Cardputer-Adv are ESP32 microcontroller boards. They cannot run MeshTerm, and nothing on
 this page applies to them.
 
+MeshTerm is an app in M5Stack's app store for the Cardputer Zero. It starts from the
+launcher of the handheld and draws on its display. It can drive M5Stack's Cap LoRa-1262
+radio directly, or it can use a MeshCore companion.
+
 - [The device](#the-device)
-- [Where the work stands](#where-the-work-stands)
+- [What works](#what-works)
 - [Installing it on the device](#installing-it-on-the-device)
 - [Trying it in the emulator](#trying-it-in-the-emulator)
 - [Radios](#radios)
@@ -41,9 +34,9 @@ The launcher gives an app the whole display and the keyboard, but it gives no te
 to run in. Thus MeshTerm has its own console. This is a small program inside MeshTerm. It
 draws each character on the display itself and reads the keys directly.
 
-## Where the work stands
+## What works
 
-**Done, and tried on a real Cardputer Zero:**
+All of these were tried on a real Cardputer Zero:
 
 - MeshTerm starts from M5Stack's app launcher and draws on the display itself.
 - MeshTerm has a layout for the display of 14 rows. The title bar also shows the unread
@@ -61,19 +54,36 @@ draws each character on the display itself and reads the keys directly.
   forces it. A short press of **Esc** still goes back one screen, as on all other
   handhelds.
 
-**Not done:**
-
-- MeshTerm in M5Stack's app store. `scripts/cardputer-zero/build-deb.sh` builds the
-  package, but the store does not have it yet. Until it does, you install MeshTerm
-  yourself (refer to the next section).
-- Typing on the real keyboard. Key events for the arrows, Enter, Esc, Fn+4 to Fn+8, and
-  Shift were sent to the keyboard from another computer. They worked. The symbols on the
-  Sym layer agree with M5Stack's own keymap on the handheld. Nobody has typed a
-  message on it yet.
-
 ## Installing it on the device
 
-This section is for users who know a Linux command line. The Cardputer Zero must be on
+### From the app store
+
+1. On the Cardputer Zero, open M5Stack's app store.
+2. Find **MeshTerm**. It is in the **Radio & Comms** category. Its share code is `MTRM`.
+3. Install it.
+
+MeshTerm now has an icon in the launcher. The package has all that MeshTerm needs: its
+Python libraries, the radio library for the Cap, and the font of the display. Each new
+version of MeshTerm also goes to the store.
+
+M5Stack examines a new app before the store shows it. If the store does not have MeshTerm
+yet, install the same package from GitHub.
+
+### From GitHub
+
+Each [release of MeshTerm](https://github.com/jpmartineau/MeshTerm/releases/latest) has the
+package that the store has, `meshterm_<version>-1_arm64.deb`. Copy it to the Cardputer
+Zero, for example with `scp`. Then install it from a command line on the handheld:
+
+```bash
+sudo apt install ./meshterm_*_arm64.deb
+```
+
+To remove it, run `sudo apt remove meshterm`.
+
+### From the source code
+
+This way is for developers who know a Linux command line. The Cardputer Zero must be on
 Wi-Fi. You also need a way to type commands on it. SSH from another computer is the
 easiest way.
 
@@ -174,7 +184,8 @@ command line.
 
 The Cap has no MeshCore firmware of its own. It is only a radio chip. Thus, while MeshTerm
 is open, MeshTerm is the node, as it is on the AIO board of a uConsole. MeshTerm needs the
-radio library, installed next to it:
+radio library. The package from the store has it. If you install MeshTerm with pip,
+install the library next to it:
 
 ```bash
 pip install 'mesh-term[spi]'

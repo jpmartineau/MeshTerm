@@ -37,7 +37,7 @@ MeshCore companion on USB, Bluetooth, or Wi-Fi does not need them.
 | **[MeshTerm on hardware](devices/README.md)** | Start here. It says which of the manuals below is the correct one for you, and what the scripts on the device do. |
 | [MeshTerm on the PicoCalc](devices/picocalc-lyra.md) | How to change a stock ClockworkPi PicoCalc into a Linux handheld that has a LoRa radio soldered inside: the shopping list, the change to a Luckfox Lyra core, Calculinux, and the radio. |
 | [MeshTerm on the uConsole](devices/uconsole.md) | A uConsole (CM4 or CM5) with the hackergadgets AIO LoRa board. Its SX1262 is on the computer's own SPI bus. MeshTerm can control it directly with `--spi`. Or a small bridge can make it a companion for a node that is always on. |
-| [MeshTerm on the Cardputer Zero](devices/cardputer-zero.md) | ⚠️ **Not supported yet.** What exists for M5Stack's Linux Cardputer, and how to try it in the desktop emulator. |
+| [MeshTerm on the Cardputer Zero](devices/cardputer-zero.md) | M5Stack's Linux Cardputer: how to install MeshTerm from the app store, use the Cap LoRa-1262 radio, and try the layout in the desktop emulator. |
 
 ## Reading the code
 
