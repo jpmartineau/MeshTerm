@@ -5,7 +5,8 @@ r"""Publish the Cardputer Zero package to M5Stack's app store, with ``czdev`` an
 ``czdev publish`` (M5Stack's CardputerZero-AppBuilder) uploads the ``.deb`` to a release in
 the fork of ``CardputerZero/packages``, pushes a branch with the store listing, and opens a
 pull request. The store merges an update by itself when its checks pass. This script runs
-``czdev`` in its own process with two corrections, and it sets up ``git`` for it:
+``czdev`` in its own process with two corrections. It also sets up ``git`` for it, and it
+brings the fork up to date first:
 
 * The manifest records the email of the uploader. ``czdev`` takes the public email of the
   GitHub profile. MeshTerm uses only ``johnputer@meshterm.net`` (JP, 2026-10-07), so the
@@ -17,6 +18,13 @@ pull request. The store merges an update by itself when its checks pass. This sc
 * ``czdev`` pushes to ``git@github.com:``. A CI runner or a Cardputer has no SSH key for
   GitHub, so the script sends ``git`` over HTTPS with the token, and gives it a name and an
   email for the commit. These settings are in the environment of this process only.
+* ``czdev`` starts its branch from the default branch of the fork, and the store's check
+  compares the pull request's branch with the store's ``main`` directly. Thus, if the fork
+  is behind, each file that the store removed since then looks like a new file of the pull
+  request, and the check fails on it. This occurred on 2026-10-12, when M5Stack removed
+  all apps from the store to start the reviews again. The script brings the fork's
+  default branch up to the store's ``main`` before ``czdev`` starts. If it cannot, it
+  publishes nothing.
 
 The corrections replace two functions of ``czdev``. Thus the release workflow pins
 AppBuilder to one commit. If a later ``czdev`` does not have these functions, the script
@@ -43,6 +51,7 @@ import json
 import os
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -56,10 +65,11 @@ PUBLISHED_INDEX = "https://cardputerzero.github.io/packages/dists/stable/main/bi
 TOKEN_ENV = "CARDPUTER_STORE_TOKEN"
 
 
-def _api(path: str, token: str) -> object:
-    """GET one GitHub API path, as JSON."""
+def _api(path: str, token: str, body: dict[str, str] | None = None) -> object:
+    """Call one GitHub API path, as JSON: a GET, or a POST of ``body``."""
     request = urllib.request.Request(
         f"https://api.github.com{path}",
+        data=None if body is None else json.dumps(body).encode(),
         headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
     )
     with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310 - a fixed https host
@@ -96,6 +106,30 @@ def _open_pull_requests(package: str, login: str, token: str) -> dict[str, str]:
         for pull in pulls
         if pull["user"]["login"] == login and pull["title"].startswith(prefix)
     }
+
+
+def _sync_fork(login: str, token: str) -> str | None:
+    """Bring the fork's default branch up to the store's ``main``. Return a problem, or ``None``.
+
+    GitHub's merge-upstream does a fast-forward when the fork has no commits of its own. If
+    it has some and the merge fails, the script must not publish (refer to the module
+    docstring). With no fork, there is nothing to do: ``czdev`` makes one from the store's
+    current ``main``.
+    """
+    try:
+        fork = _api(f"/repos/{login}/{TARGET.split('/')[1]}", token)
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return None
+        raise
+    if (fork.get("parent") or {}).get("full_name") != TARGET:
+        return f"{fork['full_name']} is not a fork of {TARGET}"
+    branch = fork["default_branch"]
+    try:
+        _api(f"/repos/{fork['full_name']}/merge-upstream", token, {"branch": branch})
+    except urllib.error.HTTPError as error:
+        return f"cannot bring {fork['full_name']} {branch} up to {TARGET} (HTTP {error.code})"
+    return None
 
 
 def _set_up_git(login: str, token: str) -> None:
@@ -181,6 +215,10 @@ def main() -> int:
         for other, url in pending.items():
             print(f"{mark}{other} is still open ({url}); {version} waits for its merge")
         return 0
+    problem = _sync_fork(login, token)
+    if problem:
+        sys.stderr.write(f"store-publish: {problem}\n")
+        return 1
 
     _correct(publish, GitHubClient)
     _set_up_git(login, token)

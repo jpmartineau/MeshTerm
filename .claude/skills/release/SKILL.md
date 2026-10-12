@@ -184,7 +184,10 @@ gh pr list -R CardputerZero/packages --author jpmartineau --state all --limit 3
 If `store` failed, the usual causes are the `CARDPUTER_STORE_TOKEN` secret (missing, or the
 token revoked) or a change in czdev: the job pins AppBuilder to one commit because
 `scripts/cardputer-zero/store-publish.py` corrects two of its functions, and the script
-refuses a czdev without them. A rerun is safe — the script publishes nothing when the store
+refuses a czdev without them. The script also fast-forwards JP's fork of the store before
+czdev branches from it; it stops if that fails (the fork has commits of its own), because
+a stale fork makes the store's check fail on every file the store has removed since. A
+rerun is safe — the script publishes nothing when the store
 already has the version or a PR for it is open. While a PR for an **earlier** version is
 still open (a first release waits for a maintainer and a video), the job only warns: a
 second PR would add the same files and conflict. The release itself is not held back. Once
