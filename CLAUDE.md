@@ -477,6 +477,18 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   `sender → recipient`), and a lone hop carries no `PATH_INK`, so a cursor row whitens it
   like any name. A chip in prose never breaks across lines (`render_hanging` holds every
   `whole` run together, spaces and all).
+- **In a chat, we go by our name** (channel, DM, room, and the Messages list's preview —
+  nowhere else; JP, 2026-10-13). A route's bare `★` says "you already know who this is",
+  but a chat is a conversation between names, so our sender chip and every `@mention` of
+  our name are `widgets.self_chip`: `★ Name` (a mention: `★ @Name`, the star before the
+  `@`) on the chip of *our key's hue, turned over* — dark ink on a light fill of the hue
+  (`PathHop.inverse`, the same pair as any chip in the other order), the one light chip
+  among the senders. The `★` takes the chip's dark ink: a yellow star measured under 3:1
+  on the light fill for 238 of 256 hues, and outside the chip on the page it was tried
+  and put back (JP, 2026-10-13). Arrow mode draws it as a padded reverse-video block. The
+  PicoCalc can't put a bright slot behind text, so there it keeps the normal colours and
+  the `★` alone marks us. With no name or key from the device, the bare `★` chip stays.
+  Path lines (delivery paths, the packet viewer, routes) keep `★`.
 - Concept icons: 📡 advert · 🕒 clock/sync · 🔄 reboot · 💾 backup · 📂 restore ·
   🔑 channel/credential key · 🔐 identity/auth secret ·
   🔒 lock (a locked contact, a private channel) · 🔓 unlock · 🗑 clear/delete · ✎ compose/edit ·

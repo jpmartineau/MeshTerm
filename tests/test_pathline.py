@@ -236,6 +236,18 @@ def picocalc(monkeypatch: pytest.MonkeyPatch) -> None:
     set_platform(PICOCALC_LYRA)
 
 
+def test_the_picocalc_cannot_turn_our_chat_chip_over(picocalc: None) -> None:
+    """The console has no light background, so our chat chip keeps the colours of each chip.
+
+    Its fill would be a bright slot, and the VT draws a background only from slots 0 to 7.
+    In a chat, the ``★`` in the label still tells our node from the others.
+    """
+    from meshterm.ui.pathline import _slot_colours
+
+    ours = PathHop(f"{SELF_GLYPH} Me", key="1c", inverse=True)
+    assert _slot_colours(ours) == _slot_colours(PathHop("Me", key="1c"))
+
+
 def test_the_picocalc_draws_chips_from_its_eight_backgrounds(picocalc: None) -> None:
     """The chip of a node is the dim twin of its hue, and the label is the hue itself.
 

@@ -58,7 +58,7 @@ from ..services.trace_runner import (
 from ..ui import renderers
 from ..ui.fields import ChannelRef, NodeRef
 from ..ui.menus import Lane, column_header, fit_cells, section_heading
-from ..ui.pathline import SELF_GLYPH, PathHop
+from ..ui.pathline import PathHop
 from ..ui.termfont import powerline_enabled
 from ..ui.theme import name_style
 from ..ui.tui import Choice, DeleteRequest, Separator
@@ -71,6 +71,7 @@ from ..ui.widgets import (
     format_age,
     hop_chip,
     name_chip,
+    self_chip,
 )
 from .base import Tool, ToolResult, register
 
@@ -230,6 +231,10 @@ class ChatTool(Tool):
         stored_names, named_at = ctx.repo.node_names_with_times()
         key_of = make_name_key_resolver(contacts, stored_names, heard=named_at)
         name_of = make_node_resolver(contacts, stored_names)
+        # Our name and key, for our own messages and the mentions of us in the previews.
+        from ..ui.chat import our_node
+
+        us = await our_node(ctx)
 
         # List the contacts by recency: first the contacts with messages, with the newest
         # exchange at the top. Then the contacts with no messages, in alphabetical order
@@ -253,7 +258,7 @@ class ChatTool(Tool):
         for conversation in channels:
             items.append(
                 Choice(
-                    title=_row_title(ctx, conversation, live, key_of, lanes),
+                    title=_row_title(ctx, conversation, live, key_of, lanes, us=us),
                     value=conversation,
                     # ←→ move only the message. The lanes before it stay (_Lanes.head).
                     hscroll_from=lanes.head,
@@ -264,7 +269,9 @@ class ChatTool(Tool):
         for conversation in rooms:
             items.append(
                 Choice(
-                    title=_row_title(ctx, conversation, live, key_of, lanes, name_of=name_of),
+                    title=_row_title(
+                        ctx, conversation, live, key_of, lanes, name_of=name_of, us=us
+                    ),
                     value=conversation,
                     deletable=lasts.get(conversation.key) is not None,
                     hscroll_from=lanes.head,
@@ -280,7 +287,7 @@ class ChatTool(Tool):
             for conversation in direct:
                 items.append(
                     Choice(
-                        title=_row_title(ctx, conversation, live, key_of, lanes),
+                        title=_row_title(ctx, conversation, live, key_of, lanes, us=us),
                         value=conversation,
                         # Del offers to delete the stored history of this thread, only
                         # where there is history to delete.
@@ -895,6 +902,7 @@ def _row_title(
     lanes: _Lanes,
     *,
     name_of: NodeResolver | None = None,
+    us: tuple[str | None, str | None] = (None, None),
 ) -> Callable[[], str | Text]:
     """Return the row title as a *callable* that the select screen renders on each paint.
 
@@ -911,11 +919,13 @@ def _row_title(
         key_of: Maps a sender name back to the key of its node, for the hues of the preview.
         lanes: The measured lane widths of the list.
         name_of: Maps the author key of a room post to a name (only for rooms).
+        us: The name and the key of our node (refer to
+            :func:`~meshterm.ui.chat.our_node`), for our own chip in the preview.
 
     Returns:
         A callable with no arguments, which makes the current row title.
     """
-    return lambda: _title(ctx, conversation, lasts, key_of, lanes, name_of=name_of)
+    return lambda: _title(ctx, conversation, lasts, key_of, lanes, name_of=name_of, us=us)
 
 
 def _title(
@@ -926,6 +936,7 @@ def _title(
     lanes: _Lanes,
     *,
     name_of: NodeResolver | None = None,
+    us: tuple[str | None, str | None] = (None, None),
 ) -> str | Text:
     """Make a picker row from lanes of fixed width, with colour codes.
 
@@ -951,6 +962,7 @@ def _title(
             node.
         lanes: The measured lane widths of the list.
         name_of: Maps the author key of a room post to a name (only for rooms).
+        us: The name and the key of our node, for our own chip in the preview.
 
     Returns:
         The row title as a styled :class:`~rich.text.Text`.
@@ -979,7 +991,7 @@ def _title(
     text.append(f"{age:>{_AGE_WIDTH}}", style="muted")
     text.append("  ")
     if last is not None:
-        text.append_text(_preview_text(last, key_of, name_of))
+        text.append_text(_preview_text(last, key_of, name_of, us=us))
     return text
 
 
@@ -1025,13 +1037,18 @@ def _append_marker(
 
 
 def _preview_text(
-    last: ChatMessage, key_of: NameKeyResolver, name_of: NodeResolver | None = None
+    last: ChatMessage,
+    key_of: NameKeyResolver,
+    name_of: NodeResolver | None = None,
+    *,
+    us: tuple[str | None, str | None] = (None, None),
 ) -> Text:
     """A muted preview of the last message, with sender names and ``@mentions`` lit in their hue.
 
     It is the same as the live transcript:
 
-    - Our own messages start with our author (refer to :func:`_append_author`).
+    - Our own messages start with our chip, ``★ Name`` turned over, and a mention of our
+      name takes the same chip (refer to :func:`~meshterm.ui.widgets.self_chip`).
     - In a received channel message, the inline ``Name:`` sender is the author, in the hue
       that comes from its key (the node grey when no known node has the name).
     - A room post starts with its author, named by key in the same way as the room screen
@@ -1050,29 +1067,39 @@ def _preview_text(
     body_raw = last.text.replace("\n", " ")
     text = Text()
     if last.outbound:
-        _append_author(text, PathHop(SELF_GLYPH, you=True), Text("you: ", style="accent"))
-        _append_body(text, body_raw, key_of)
+        name, key = us
+        chip = self_chip(name, key, role=ORIGIN)
+        # Where no chips are drawn, the chip is a block in reverse video. Our node with no
+        # name keeps the old byline.
+        byline = chip + Text(" ") if name and key else Text("you: ", style="accent")
+        _append_author(text, chip, byline)
+        _append_body(text, body_raw, key_of, us)
     elif last.is_channel:
         name, body = split_channel_sender(body_raw)
         if name is not None:
             key = key_of(name)
-            _append_author(text, PathHop(name, key=key), _byline(name, key))
-            _append_body(text, body, key_of)
+            _append_author(text, _origin(name, key), _byline(name, key))
+            _append_body(text, body, key_of, us)
         else:
             _append_body(text, body_raw, key_of)
     elif last.author and name_of is not None:
         from ..ui.room import author_label
 
         name, key = author_label(last.author, name_of)
-        _append_author(text, PathHop(name, key=key), _byline(name, key))
-        _append_body(text, body_raw, key_of)
+        _append_author(text, _origin(name, key), _byline(name, key))
+        _append_body(text, body_raw, key_of, us)
     else:
-        _append_body(text, body_raw, key_of)
+        _append_body(text, body_raw, key_of, us)
     return text
 
 
-def _append_author(text: Text, hop: PathHop, byline: Text) -> None:
-    """Append the author of a preview: an origin chip where chips are drawn, else ``byline``.
+def _origin(name: str, key: str | None) -> Text:
+    """The chip of the author of a preview: it closes on the point, as in the transcript."""
+    return hop_chip(PathHop(name, key=key), role=ORIGIN)
+
+
+def _append_author(text: Text, chip: Text, byline: Text) -> None:
+    """Append the author of a preview: its origin ``chip`` where chips are drawn, else ``byline``.
 
     The chip closes on the point, the same as the sender chip of the transcript, and the
     body follows it after one space. The point says what the colon of ``Name:`` says, so
@@ -1080,7 +1107,7 @@ def _append_author(text: Text, hop: PathHop, byline: Text) -> None:
     ``byline`` (``Name: ``, or ``you: `` for us), as it always was (JP, 2026-10-10).
     """
     if powerline_enabled():
-        text.append_text(hop_chip(hop, role=ORIGIN))
+        text.append_text(chip)
         text.append(" ")
     else:
         text.append_text(byline)
@@ -1093,19 +1120,28 @@ def _byline(name: str, key: str | None) -> Text:
     return text
 
 
-def _append_body(text: Text, body: str, key_of: NameKeyResolver) -> None:
+def _append_body(
+    text: Text,
+    body: str,
+    key_of: NameKeyResolver,
+    us: tuple[str | None, str | None] = (None, None),
+) -> None:
     """Append ``body`` to ``text``, muted, and light the names that it mentions.
 
     Each ``@[Name]`` is drawn in the hue that comes from the key of that node, as a chip
     that opens on the notch where the terminal draws chips (the same as in the transcript).
-    It takes the node grey when the name resolves to no node that we know.
+    It takes the node grey when the name resolves to no node that we know. A mention of our
+    own name (``us``) takes our chip, as in the transcript.
     """
     pos = 0
     for match in MENTION.finditer(body):
         if match.start() > pos:
             text.append(body[pos : match.start()], style="muted")
         name = match.group(1)
-        text.append_text(name_chip(f"@{name}", key_of(name), role=DESTINATION))
+        if us[0] and name == us[0]:
+            text.append_text(self_chip(name, us[1], mention=True, role=DESTINATION))
+        else:
+            text.append_text(name_chip(f"@{name}", key_of(name), role=DESTINATION))
         pos = match.end()
     if pos < len(body):
         text.append(body[pos:], style="muted")

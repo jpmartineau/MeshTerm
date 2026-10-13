@@ -20,13 +20,23 @@ from ..platforms import get_platform
 from .packet_viewer import KIND_ICONS, PAYLOAD_ICONS
 from .theme import _VT_SLOTS, fold_text, glyph, name_style, snr_style
 from .tui.fkeys import FPair, active_deck
-from .widgets import DESTINATION, ORIGIN, _recency_style, channel_glyph, name_chip
+from .widgets import (
+    DESTINATION,
+    ORIGIN,
+    _recency_style,
+    channel_glyph,
+    name_chip,
+    self_chip,
+)
 
 #: Demonstration identities for the row of name colours: ``(name, key)``. The keys are
 #: synthetic. We chose them so that their first bytes are in three different sectors of
 #: the hue wheel. On the console, these are three different palette slots (refer to
 #: ``theme._NODE_SLOT_HEXES``).
 _DEMO_NAMES = (("Alice", "a1b2"), ("Lakeside", "3d63"), ("Lounge", "cc10"))
+
+#: The key of our own node in the specimen, which gives the hue of its chat chip.
+_DEMO_SELF_KEY = "5e7f"
 
 
 def _palette_row() -> Text:
@@ -135,13 +145,15 @@ def specimen_lines() -> list[RenderableType]:
     # because a message goes on from its author. The mention at the end opens on the
     # notch, because the node that it names is where the message goes. The path line's
     # own segment draws them, so this row is also a one-hop sample of the route language:
-    # the hue in the fill, the star for our end, and the keyless grey for a node that
-    # nobody can identify.
+    # the hue in the fill and the keyless grey for a node that nobody can identify. Our own
+    # messages go under ``★ me``, on the one chip that is turned over (dark on a light fill
+    # of our hue). The console of the PicoCalc has no light background, so there only the
+    # star marks it.
     chips = Text("chips   ")
     for name, key in _DEMO_NAMES[:2]:
         chips.append_text(name_chip(name, key, role=ORIGIN))
         chips.append(" ")
-    chips.append_text(name_chip("", you=True, role=ORIGIN))
+    chips.append_text(self_chip("me", _DEMO_SELF_KEY, role=ORIGIN))
     chips.append(" ")
     chips.append_text(name_chip("·", role=ORIGIN))
     chips.append(" ")

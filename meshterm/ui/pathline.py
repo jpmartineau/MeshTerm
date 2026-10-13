@@ -309,6 +309,11 @@ class PathHop:
             continues again". A chip says the opposite: that a node in the route has the
             name ``⋯``. Arrow mode does not need a special case, because a bare label
             between two arrows is already the same thing.
+        inverse: Draw the chip turned over: the hue of ``key`` is the fill, and the darker
+            fill of each other chip is the ink. It is our node in a chat (refer to
+            :func:`~meshterm.ui.widgets.self_chip`). Arrow mode draws the label in reverse
+            video, with the padding of a chip. The console of the PicoCalc has no light
+            background, so there the chip keeps the colours of each other chip.
     """
 
     label: str
@@ -320,6 +325,7 @@ class PathHop:
     style: str | None = None
     cursor: bool = False
     gap: bool = False
+    inverse: bool = False
 
 
 def elision_hop() -> PathHop:
@@ -1001,6 +1007,8 @@ class PathLine:
             text.append(hop.label, style="selected")
         elif hop.dim:
             text.append(hop.label, style="faint")
+        elif hop.inverse and hop.key:
+            text.append(f" {hop.label} ", style=f"{node_style(hop.key)} reverse")
         elif hop.style:
             text.append(hop.label, style=hop.style)
         elif hop.you:
@@ -1201,6 +1209,10 @@ def _spectrum_colours(hop: PathHop) -> _ChipColours:
     automatic return home, a mirrored return leg). Our end must recede with the rest of
     that automatic half, and not keep its yellow among the greys. Plain mode says the same
     thing when it fades the name.
+
+    A chip that is turned over (``inverse``, our node in a chat) has the same two colours
+    as the chip of its key, in the other order: the hue is the fill, and the dark fill is
+    the ink. It is the one light chip in a chat, and the contrast of the pair stays the same.
     """
     if hop.cursor:
         return _ChipColours(_style_hex("cursor") or _KEYLESS_BG, _CHIP_FG, _CHIP_FG)
@@ -1209,9 +1221,11 @@ def _spectrum_colours(hop: PathHop) -> _ChipColours:
         return _ChipColours(_chip_fill(resolved), resolved, resolved)
     if hop.dim:
         return _ChipColours(_DIM_BG, _DIM_FG, _DIM_FG)
+    hue = _style_hex(node_style(hop.key)) if hop.key else None
+    if hop.inverse and hue:
+        return _ChipColours(hue, _chip_fill(hue), _chip_fill(hue))
     if hop.you:
         return _ChipColours(_YOU_BG, _SELF_INK, _SELF_INK)
-    hue = _style_hex(node_style(hop.key)) if hop.key else None
     if hue:
         return _ChipColours(_chip_fill(hue), hue, hue)
     return _ChipColours(_KEYLESS_BG, _KEYLESS_FG, _KEYLESS_FG)
@@ -1233,6 +1247,10 @@ def _slot_colours(hop: PathHop) -> _ChipColours:
     yellow, a faded hop in the dark grey, and the slot as a white ``+`` in a break of the
     ribbon. The order of the rules is the same as on a truecolor terminal
     (:func:`_spectrum_colours`).
+
+    A chip that is turned over (``inverse``) keeps the colours of each other chip here. Its
+    fill would be a bright slot, and the console cannot draw one as a background. In a chat,
+    the ``★`` in its label still tells our node from the others.
     """
     if hop.cursor:
         return _ChipColours(_SLOT_PAGE, _SLOT_WHITE, _SLOT_WHITE)

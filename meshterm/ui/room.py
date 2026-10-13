@@ -47,7 +47,14 @@ from ..core.models import (
     RoomAccess,
     RoomLogin,
 )
-from .chat import ChatScreen, _belongs, _contact_names, _make_paths_presenter, _with_restore
+from .chat import (
+    ChatScreen,
+    _belongs,
+    _contact_names,
+    _make_paths_presenter,
+    _with_restore,
+    our_node,
+)
 
 if TYPE_CHECKING:
     from ..context import AppContext
@@ -141,6 +148,8 @@ class RoomScreen(ChatScreen):
         key_of: Callable[[str], str | None] | None = None,
         locator: Locator | None = None,
         pages: ContactPages | None = None,
+        self_name: str | None = None,
+        self_key: str | None = None,
     ) -> None:
         """Build the room screen.
 
@@ -169,6 +178,8 @@ class RoomScreen(ChatScreen):
             key_of: Gives the key of its node for a name, for the hues of ``@mention``.
             locator: The located nodes, for ^L: the map on the author of a post.
             pages: The contacts, for ^O: the node page of the author of a post.
+            self_name: The name of our node, on our posts and on the mentions of us.
+            self_key: Our public key, which gives the hue of that chip.
         """
         super().__init__(
             conversation,
@@ -181,6 +192,8 @@ class RoomScreen(ChatScreen):
             key_of=key_of,
             locator=locator,
             pages=pages,
+            self_name=self_name,
+            self_key=self_key,
         )
         self._label = conversation.label
         self._resolve = resolve
@@ -425,6 +438,7 @@ async def open_room(ctx: AppContext, conversation: Conversation) -> int:
     async def join(ask: bool) -> RoomLogin | None:
         return await join_room(ctx, await fresh(), ask=ask)
 
+    self_name, self_key = await our_node(ctx)
     screen = RoomScreen(
         conversation,
         board,
@@ -441,6 +455,8 @@ async def open_room(ctx: AppContext, conversation: Conversation) -> int:
         key_of=trace_runner.make_name_key_resolver(contacts, stored_names, heard=named_at),
         locator=await Locator.gather(ctx),
         pages=ContactPages(ctx, list(contacts)),
+        self_name=self_name,
+        self_key=self_key,
     )
     ctx.chat.set_active(conversation.key)
 

@@ -44,7 +44,7 @@ from .tui.prompt import (
 from .tui.render import render_hanging, render_lines, right_aligned_tail
 from .tui.screen import CANCEL, Screen
 from .tui.spinner import Spinner, spinner_interval
-from .widgets import DESTINATION, ORIGIN, name_chip
+from .widgets import DESTINATION, ORIGIN, name_chip, self_chip
 
 if TYPE_CHECKING:
     from ..context import AppContext
@@ -222,6 +222,8 @@ class ChatScreen(Screen):
         resend_unscoped: Callable[[ChatMessage], Awaitable[ChatMessage | None]] | None = None,
         locator: Locator | None = None,
         pages: ContactPages | None = None,
+        self_name: str | None = None,
+        self_key: str | None = None,
     ) -> None:
         """Build the chat screen.
 
@@ -259,8 +261,13 @@ class ChatScreen(Screen):
             pages: The contacts, for ^O: the node page of the author of the selected
                 message (refer to :class:`~meshterm.ui.node_detail_screen.ContactPages`).
                 With ``None``, ^O does nothing.
+            self_name: The name of our node (refer to :func:`our_node`). Our messages and
+                the mentions of our name show it (:func:`~meshterm.ui.widgets.self_chip`).
+            self_key: Our public key, which gives the hue of that chip.
         """
         super().__init__()
+        self._self_name = self_name
+        self._self_key = self_key
         self._scope = scope if conversation.is_channel else None
         self.title = f"{conversation.label} · {self._scope}" if self._scope else conversation.label
         self._is_channel = conversation.is_channel
@@ -678,10 +685,12 @@ class ChatScreen(Screen):
         The chip makes a *label* different from the prose under it. A name alone above its
         messages then reads as a tag, not as a coloured word that a person typed. It is the
         chip of a path line (refer to :func:`~meshterm.ui.widgets.name_chip`). Thus a
-        sender looks exactly like that node as a hop in a route, also for our messages:
-        the ``★``, never our name.
+        sender looks exactly like that node as a hop in a route.
 
-        Our star comes from the direction of the message (``outbound``), not from the
+        Our messages are the exception. They go under our name, as ``★ Name`` on a chip
+        that is turned over (refer to :func:`~meshterm.ui.widgets.self_chip`). A route
+        shows our end as the bare ``★``, but a chat is a conversation between names.
+        Our chip comes from the direction of the message (``outbound``), not from the
         ``"you"`` label. Thus a remote sender with the name ``you`` still gets the hue of
         its key, and does not look like our node.
 
@@ -690,7 +699,7 @@ class ChatScreen(Screen):
         the other end, and it opens on the notch (refer to :meth:`_render_mentions`).
         """
         if message.outbound:
-            return name_chip("", you=True, role=ORIGIN)
+            return self_chip(self._self_name, self._self_key, role=ORIGIN)
         # ``·`` is a channel line that arrived with no sender prefix: there is no key to use.
         key = None if sender == "·" else self._header_key(sender, message)
         return name_chip(sender, key, role=ORIGIN)
@@ -783,7 +792,9 @@ class ChatScreen(Screen):
         :meth:`_begin_reply`). Here it shows as ``@Name`` in a chip of the hue of that
         node. Thus the user sees that a mention belongs to the node that it names. The text
         around the mentions keeps the base style of the line (``cursor`` when the message
-        is the selected reply target, or else no style).
+        is the selected reply target, or else no style). A mention of our own name takes
+        our chip (:func:`~meshterm.ui.widgets.self_chip`), so that a message that names us
+        is easy to see.
 
         The chip opens on the notch, because the node that a mention names is the
         destination of a route that came from the sender (refer to :meth:`_group_header`,
@@ -798,8 +809,11 @@ class ChatScreen(Screen):
             if match.start() > pos:
                 text.append(body[pos : match.start()], style=base)
             name = match.group(1)
-            key = self._sender_key(name, mention=True)
-            text.append_text(name_chip(f"@{name}", key, role=DESTINATION))
+            if self._self_name and name == self._self_name:
+                chip = self_chip(name, self._self_key, mention=True, role=DESTINATION)
+            else:
+                chip = name_chip(f"@{name}", self._sender_key(name, mention=True), role=DESTINATION)
+            text.append_text(chip)
             pos = match.end()
         if pos < len(body):
             text.append(body[pos:], style=base)
@@ -1423,6 +1437,24 @@ class ChatScreen(Screen):
             pass
 
 
+async def our_node(ctx: AppContext) -> tuple[str | None, str | None]:
+    """The name and the public key of our node, from the cache of the session.
+
+    A chat shows them on our messages (refer to :func:`~meshterm.ui.widgets.self_chip`),
+    and a direct chat names one end of each of its packets with the key. The read uses the
+    cache, so it does not ask the device again.
+
+    Returns:
+        ``(name, key)``. An item is ``None`` when the device did not report it, or when the
+        read failed. Our node with no name only keeps the bare ``★`` in a chat.
+    """
+    try:
+        info = await ctx.devstate.self_info()
+    except Exception:  # noqa: BLE001 - our node with no name keeps the bare star
+        return None, None
+    return str(info.get("name") or "") or None, str(info.get("public_key") or "") or None
+
+
 async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
     """Open the live chat screen for ``conversation`` and run it until the user closes it.
 
@@ -1504,6 +1536,7 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
     from .node_detail_screen import ContactPages
 
     paths = await _make_paths_presenter(ctx, conversation, device)
+    self_name, self_key = await our_node(ctx)
     screen = ChatScreen(
         conversation,
         history,
@@ -1517,6 +1550,8 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
         resend_unscoped=resend_unscoped,
         locator=await Locator.gather(ctx),
         pages=await ContactPages.gather(ctx),
+        self_name=self_name,
+        self_key=self_key,
     )
     ctx.chat.set_active(conversation.key)
 
@@ -1733,16 +1768,10 @@ async def _make_paths_presenter(
     type_of = trace_runner.make_node_type_resolver(contacts)
     key_of = trace_runner.make_name_key_resolver(contacts, stored_names, heard=named_at)
     prefix_bytes = await ctx.devstate.routing_prefix_bytes()
-    self_name: str | None = None
-    self_key: str | None = None
-    try:
-        info = await ctx.devstate.self_info()
-        self_name = str(info.get("name") or "") or None
-        # Our key names one end of each direct packet in this conversation. The key of
-        # the contact names the other end (refer to :func:`direct_arrivals`).
-        self_key = str(info.get("public_key") or "") or None
-    except Exception:  # noqa: BLE001 - our node with no name only gets no white highlight
-        self_name = None
+    # Our key names one end of each direct packet in this conversation. The key of the
+    # contact names the other end (refer to :func:`direct_arrivals`). Our node with no name
+    # only gets no white highlight.
+    self_name, self_key = await our_node(ctx)
 
     secret = conversation.secret
     if conversation.is_channel and not secret and conversation.channel_idx is not None:

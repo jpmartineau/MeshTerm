@@ -683,6 +683,40 @@ def name_chip(
     return hop_chip(hop, role=role)
 
 
+def self_chip(
+    name: str | None, key: str | None, *, mention: bool = False, role: str | None = None
+) -> Text:
+    """Our node in a chat: ``★ Name``, in the hue of our key, on a chip that is turned over.
+
+    A chat (a channel, a direct chat, a room) names each sender, and our node too. A route
+    shows our end as the bare ``★``, because the user never has to be told who that is. A
+    chat is a conversation between names, so our messages go under our name (JP,
+    2026-10-13). Two things make it different from the name of each other node. The ``★``
+    of the app comes first. Also, the chip is turned over: the other senders are a light
+    hue on a dark fill, and ours is dark on a light fill of our hue. The console of the
+    PicoCalc cannot draw a light background, so there only the ``★`` marks us (refer to
+    :attr:`~meshterm.ui.pathline.PathHop.inverse`). A mention of our name in a message
+    takes the same chip, so that a message that names us is easy to see.
+
+    Our node with no name or no key (the device did not report them) keeps the bare ``★``
+    chip of a route.
+
+    Args:
+        name: The name of our node.
+        key: Our public key, which gives the hue.
+        mention: ``True`` for an ``@mention`` of our name. The label is ``★ @Name``:
+            the star comes before the ``@`` (JP, 2026-10-13).
+        role: :data:`ORIGIN`, :data:`DESTINATION`, or ``None``, as for :func:`name_chip`.
+
+    Returns:
+        The chip as a one-line :class:`Text`.
+    """
+    if not name or not key:
+        return name_chip("", you=True, role=role)
+    label = f"{SELF_GLYPH} @{name}" if mention else f"{SELF_GLYPH} {name}"
+    return hop_chip(PathHop(label, key=key, inverse=True), role=role)
+
+
 def _shorten_hash(value: str, hash_bytes: int | None) -> str:
     """Return ``value`` as bare hex truncated to ``hash_bytes`` bytes.
 

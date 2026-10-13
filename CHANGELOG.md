@@ -9,6 +9,16 @@ can change how things behave. It does not only add new things.
 
 ## [Unreleased]
 
+### Changed
+
+- **In a chat, your messages show your name.** A channel, a direct chat, and a room put
+  your messages under `★` and your node's name, and the Messages list shows them in the
+  same way. Your name has the colour of your key, but in reverse: dark text on a light
+  fill, where each other sender has light text on a dark fill. A mention of your name in a
+  message has the same mark, so a message that names you is easy to see. On the PicoCalc,
+  the console cannot draw a light fill, so there the `★` alone marks your messages. Before,
+  your messages showed only the `★`.
+
 ## [0.11.1] - 2026-10-13
 
 **Show private key shows the key again, and the uConsole and the Cardputer Zero can import

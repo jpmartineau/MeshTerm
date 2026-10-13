@@ -415,6 +415,10 @@ def _keys_of(mapping: dict[str, str]):
     return lambda name: mapping.get(name.casefold())
 
 
+#: The public key of our node in the tests of our chat chip.
+_OUR_KEY = "5e" + "7f" * 31
+
+
 def _ink(text, run: str) -> str:
     """The style that colours ``run`` in ``text``: its identity span, not the path line's stamp."""
     from meshterm.ui.pathline import PATH_INK
@@ -438,7 +442,9 @@ def test_preview_prefixes_own_messages_only() -> None:
     dm_in = ChatMessage(text="hey", peer="aa", peer_name="Bob")
     assert _preview_text(dm_in, _NO_KEYS).plain == "hey"
     mine = ChatMessage(text="yo", outbound=True, is_channel=True, channel_idx=0)
-    assert _preview_text(mine, _NO_KEYS).plain == "you: yo"
+    assert _preview_text(mine, _NO_KEYS).plain == "you: yo"  # our node with no name
+    # With our name, the preview shows our chat chip: a padded block in reverse video.
+    assert _preview_text(mine, _NO_KEYS, us=("Me", _OUR_KEY)).plain == " ★ Me  yo"
 
 
 def test_preview_colours_channel_sender_and_mentions() -> None:
@@ -462,8 +468,9 @@ def test_preview_colours_channel_sender_and_mentions() -> None:
 def test_preview_draws_the_author_and_the_mentions_as_the_transcript_does(powerline) -> None:
     """With chips, the author closes on the point and a mention opens on the notch.
 
-    The point says what the colon said, so the chip has no colon. Our own author is the
-    ``★``, as the sender chip of our messages in the transcript.
+    The point says what the colon said, so the chip has no colon. Our own author is
+    ``★ Name``, as the sender chip of our messages in the transcript, and a mention of our
+    name takes the same chip. With no name for our node, the bare ``★`` stays.
     """
     from meshterm.ui.pathline import POWERLINE_ROUND_CLOSE, POWERLINE_ROUND_OPEN, POWERLINE_SEP
 
@@ -474,6 +481,11 @@ def test_preview_draws_the_author_and_the_mentions_as_the_transcript_does(powerl
     assert _preview_text(theirs, _NO_KEYS).plain == f"{author} hi {mention}"
     mine = ChatMessage(text="yo", outbound=True, is_channel=True, channel_idx=0)
     assert _preview_text(mine, _NO_KEYS).plain == f"{POWERLINE_ROUND_OPEN} ★ {POWERLINE_SEP} yo"
+    us = ("Me", _OUR_KEY)
+    ours = f"{POWERLINE_ROUND_OPEN} ★ Me {POWERLINE_SEP} yo"
+    assert _preview_text(mine, _NO_KEYS, us=us).plain == ours
+    named = ChatMessage(text="Bob: hi @[Me]", is_channel=True, channel_idx=0)
+    assert "★ @Me" in _preview_text(named, _NO_KEYS, us=us).plain
 
 
 def test_preview_keeps_the_whole_message() -> None:
@@ -1190,12 +1202,20 @@ def test_channel_transcript_groups_by_sender() -> None:
             text="hello all", outbound=True, is_channel=True, channel_idx=0, created_at=at(9)
         ),
     ]
-    screen = ChatScreen(conv, messages, send=None, names={}, session=_StubSession())
+    screen = ChatScreen(
+        conv,
+        messages,
+        send=None,
+        names={},
+        session=_StubSession(),
+        self_name="Me",
+        self_key=_OUR_KEY,
+    )
     rendered = _strip_ansi("\n".join(screen._render_grouped(80)))
 
     assert rendered.count("Alice") == 1  # the two Alice messages share one header
-    # The header of our group is the ★ that a route uses for our end, not our name.
-    assert "Bob" in rendered and "★" in rendered
+    # The header of our group is our name after the ★ (JP, 2026-10-13), not the bare ★.
+    assert "Bob" in rendered and "★ Me" in rendered
     assert "hi" in rendered and "again" in rendered  # the bodies are there, without the prefix
     assert "Alice: hi" not in rendered  # the raw name prefix moved into the header
     # Each message keeps its own timestamp on its line, also when grouped under one sender.
@@ -1489,7 +1509,7 @@ def test_chat_channel_home_moves_the_compose_cursor() -> None:
 
 
 def test_channel_self_style_keyed_on_concept_not_label() -> None:
-    """Our white 'self' style depends on the message being outbound, not on the 'you' label.
+    """Our own chip depends on the message being outbound, not on the 'you' label.
 
     A remote sender with the name 'you' must not take the white style that is only for us.
     It reads as a normal sender (the hue of its key if the key resolves, and muted if not).
@@ -1498,8 +1518,11 @@ def test_channel_self_style_keyed_on_concept_not_label() -> None:
 
     ours = ChatMessage(text="hi", is_channel=True, channel_idx=0, outbound=True)
     theirs = ChatMessage(text="you: hi", is_channel=True, channel_idx=0)
+    mine = _channel_screen([], self_name="Me", self_key=_OUR_KEY)
+    turned = f"{node_style(_OUR_KEY)} reverse"
+    assert _ink(mine._group_header("you", ours), " ★ Me ") == turned  # our name, turned over
     screen = _channel_screen([])
-    assert _ink(screen._group_header("you", ours), "★") == "you"  # us: the white star
+    assert _ink(screen._group_header("you", ours), "★") == "you"  # no name: the white star
     assert _ink(screen._group_header("you", theirs), "you") == "node.unknown"  # no key: grey
     keyed = _channel_screen([], key_of=_keys_of({"you": "d4" + "0" * 62}))
     remote = _ink(keyed._group_header("you", theirs), "you")
@@ -1515,13 +1538,24 @@ def test_channel_own_messages_do_not_merge_with_remote_namesake() -> None:
         ChatMessage(text="you: impostor", is_channel=True, channel_idx=0, created_at=base),
         ChatMessage(text="mine", outbound=True, is_channel=True, channel_idx=0, created_at=base),
     ]
-    screen = _channel_screen(messages)
+    screen = _channel_screen(messages, self_name="Me", self_key=_OUR_KEY)
     rendered = _strip_ansi("\n".join(screen._render_grouped(80)))
-    # Two headers, and they are not only apart: theirs is the name that they sent, ours is the ★.
-    assert rendered.count("you") == 1 and rendered.count("★") == 1
+    # Two headers, and they are not only apart: theirs is the name that they sent, ours is
+    # our name after the ★.
+    assert rendered.count("you") == 1 and rendered.count("★ Me") == 1
 
 
-def _channel_screen(messages, session=None, key_of=None) -> ChatScreen:
+def test_a_mention_of_our_name_takes_our_chip() -> None:
+    """A message that names us is easy to see. A mention of each other node is as before."""
+    screen = _channel_screen([], self_name="Me", self_key=_OUR_KEY)
+    text = screen._render_mentions("hi @[Me] and @[Bob]", selected=False)
+    assert "★ @Me" in text.plain and "@Bob" in text.plain
+    assert "★ Bob" not in text.plain
+
+
+def _channel_screen(
+    messages, session=None, key_of=None, self_name=None, self_key=None
+) -> ChatScreen:
     """Build a channel ChatScreen for ``messages``, for the selection and reply tests."""
     conv = Conversation(label="#public", is_channel=True, channel_idx=0)
     return ChatScreen(
@@ -1531,6 +1565,8 @@ def _channel_screen(messages, session=None, key_of=None) -> ChatScreen:
         names={},
         session=session or _StubSession(),
         key_of=key_of,
+        self_name=self_name,
+        self_key=self_key,
     )
 
 

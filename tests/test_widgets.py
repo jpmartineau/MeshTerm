@@ -32,6 +32,7 @@ from meshterm.ui.widgets import (
     path_text,
     revisit_note,
     route_ends,
+    self_chip,
 )
 
 
@@ -346,6 +347,45 @@ def test_name_chip_draws_us_as_the_star_never_as_our_name(powerline) -> None:
 
     assert "★" in chip.plain and "you" not in chip.plain
     assert _span_style(chip, "★").bgcolor.name == "#3f3f46"  # a neutral grey, not a hue
+
+
+def test_self_chip_is_the_chip_of_our_key_turned_over(powerline) -> None:
+    """In a chat, our messages go under ``★ Name``, dark on a light fill of our hue.
+
+    The two colours are those of the chip of our key, in the other order. Thus the contrast
+    stays the same, and it is the one light chip among the senders (JP, 2026-10-13).
+    """
+    powerline(True)
+    ours = self_chip("Me", "5e7f", role=ORIGIN)
+    theirs = name_chip("Me", "5e7f", role=ORIGIN)
+
+    assert "★ Me" in ours.plain
+    ink, normal = _span_style(ours, "★ Me"), _span_style(theirs, "Me")
+    assert (ink.color.name, ink.bgcolor.name) == (normal.bgcolor.name, normal.color.name)
+
+
+def test_self_chip_is_a_block_in_reverse_video_without_powerline(powerline) -> None:
+    """With no chips, our name is still dark on the hue of our key, padded as a chip is."""
+    powerline(False)
+    chip = self_chip("Me", "5e7f")
+
+    assert chip.plain == " ★ Me "
+    style = _span_style(chip, " ★ Me ")
+    assert style.reverse and style.color.name == node_style("5e7f").removeprefix("bold ")
+
+
+def test_self_chip_of_a_mention_keeps_its_at(powerline) -> None:
+    """A mention of our name takes our chip, with the star before the ``@``."""
+    powerline(True)
+    assert "★ @Me" in self_chip("Me", "5e7f", mention=True, role=DESTINATION).plain
+
+
+def test_self_chip_keeps_the_bare_star_without_our_name_or_key(powerline) -> None:
+    """A device that did not report our name or key leaves the star of a route."""
+    powerline(True)
+    star = name_chip("", you=True).plain
+    assert self_chip(None, "5e7f").plain == star
+    assert self_chip("Me", None).plain == star
 
 
 def test_name_chip_greys_a_node_it_cannot_place(powerline) -> None:
