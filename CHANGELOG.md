@@ -25,9 +25,11 @@ can change how things behave. It does not only add new things.
 - **Show private key shows the key again.** On Device config, **Identity key…** → **Show
   private key** showed its warning and no key. This occurred on each device since 0.10.0.
   On the command line, `meshterm config export-key` always printed the key.
+  ([#26](https://github.com/jpmartineau/MeshTerm/issues/26))
 - **You can import a key on the uConsole and on the Cardputer Zero.** On these handhelds,
   MeshTerm runs the node itself, and that node refused each import. Now MeshTerm writes
   the key into the node's `identity.key`, and then restarts the node to use it.
+  ([#26](https://github.com/jpmartineau/MeshTerm/issues/26))
 - **A firmware that does not accept an imported key says so.** Some firmware builds turn
   the import off. MeshTerm waited until the command timed out, and then showed a refusal
   with no cause.
