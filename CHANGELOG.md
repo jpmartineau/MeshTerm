@@ -9,6 +9,14 @@ can change how things behave. It does not only add new things.
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-10-13
+
+**Show private key shows the key again, and the uConsole and the Cardputer Zero can import
+an identity key.** On each device, the menu showed the warning of Show private key and no
+key. On the handhelds that MeshTerm drives over SPI, an import of a key failed. An import
+now also reads a file and accepts a 32-byte seed. MeshTerm no longer keeps the private key
+in its history of commands.
+
 ### Added
 
 - **You can import an identity key from a file.** On Device config, **Identity key…** has
@@ -532,7 +540,8 @@ commands.
 MeshTerm is free and open source, under the Apache 2.0 licence. The licence does not cover
 the name and the logo (refer to `NOTICE`). A fork is welcome under its own name.
 
-[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.1
 [0.11.0]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.0
 [0.10.3]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.10.3
 [0.10.2]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.10.2
