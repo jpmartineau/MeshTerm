@@ -41,11 +41,16 @@ from tests.conftest import plain as _strip_ansi  # the only strip-and-join scree
 class _StubSession:
     """A session stand-in that counts the requests for a paint."""
 
-    def __init__(self) -> None:
+    def __init__(self, rows: int = 24) -> None:
         self.invalidations = 0
+        self.rows = rows
 
     def invalidate(self) -> None:
         self.invalidations += 1
+
+    def terminal_rows(self) -> int:
+        """The rows of the terminal, for the space between authors."""
+        return self.rows
 
     def run_detached(self, work):  # noqa: ANN001, ANN201
         """Start the flow of a key handler as a task, as ``TuiSession.run_detached`` does."""
@@ -1545,17 +1550,20 @@ def test_channel_own_messages_do_not_merge_with_remote_namesake() -> None:
     assert rendered.count("you") == 1 and rendered.count("★ Me") == 1
 
 
-def test_a_blank_line_closes_each_author_where_the_rows_allow() -> None:
-    """A terminal and the PicoCalc put a blank line after the messages of each author.
+def test_a_blank_line_closes_each_author_where_the_rows_allow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With ``auto``, a terminal of 24 rows or more puts a blank line after each author.
 
     The blank line also comes before the divider of a new day, and never before the first
-    line. The 14 rows of the Cardputer Zero have no row to spare for it. A second paint
-    reads the cached lines, and the divider of the second day still pins at its own line,
-    not at the blank line before it.
+    line. A terminal of fewer rows (the 14 of the Cardputer Zero) has no row to spare for
+    it. A second paint reads the cached lines, and the divider of the second day still pins
+    at its own line, not at the blank line before it. ``on`` and ``off`` ignore the rows,
+    and a change applies at the next paint.
     """
     from datetime import datetime, timedelta, timezone
 
-    from meshterm.platforms import CARDPUTER_ZERO, REGULAR, set_platform
+    from meshterm.core import preferences
 
     base = datetime(2026, 7, 5, 14, 24, tzinfo=timezone.utc)
 
@@ -1570,8 +1578,9 @@ def test_a_blank_line_closes_each_author_where_the_rows_allow() -> None:
             ChatMessage(text="Bob: later", is_channel=True, channel_idx=0, created_at=at(1440)),
         ]
 
-    set_platform(REGULAR)
-    screen = _channel_screen(transcript())
+    prefs = preferences.Preferences()
+    monkeypatch.setattr(preferences, "current", lambda: prefs)
+    screen = _channel_screen(transcript(), session=_StubSession(rows=24))
     lines = [_strip_ansi(line) for line in screen._render_grouped(53)]
     assert lines[0].startswith("──") and lines[1] == "Alice"
     assert lines[4] == "" and lines[5] == "Bob"  # after the two messages of Alice
@@ -1581,9 +1590,16 @@ def test_a_blank_line_closes_each_author_where_the_rows_allow() -> None:
     screen._render_grouped(53)  # the cached lines
     assert screen._sticky_headers == first and [at for at, _ in first] == [0, 8]
 
-    set_platform(CARDPUTER_ZERO)
-    screen = _channel_screen(transcript())
+    short = _channel_screen(transcript(), session=_StubSession(rows=14))
+    assert "" not in [_strip_ansi(line) for line in short._render_grouped(53)]
+
+    prefs.set("chat_author_spacing", "on")  # always, also on 14 rows
+    assert "" in [_strip_ansi(line) for line in short._render_grouped(53)]
+    prefs.set("chat_author_spacing", "off")  # never, and the cached lines change too
     assert "" not in [_strip_ansi(line) for line in screen._render_grouped(53)]
+    prefs.set("chat_author_spacing", "auto")
+    prefs.set("chat_author_spacing_min_rows", 14)
+    assert "" in [_strip_ansi(line) for line in short._render_grouped(53)]
 
 
 def test_a_mention_of_our_name_takes_our_chip() -> None:

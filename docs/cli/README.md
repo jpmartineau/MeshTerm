@@ -1727,31 +1727,34 @@ If you give no subcommand, it runs `show`.
 
 ```console
 $ meshterm preferences show
-PREFERENCE                   VALUE                                 DEFAULT                               DESCRIPTION
-set_clock_on_connect         off                                   off                                   Set the device clock from this computer when it connects
-trace_cooldown_s             5                                     5                                     Wait this long before transmitting again
-flood_advert_cooldown_s      60                                    60                                    Extra wait before another mesh-wide advert
-weekly_flood_advert          off                                   off                                   Flood an advert after a week without one
-advert_quiet_s               30                                    30                                    Silence to wait for before the weekly advert
-direct_message_soft_retries  0                                     0                                     Times to resend a message that gets no reply
-tx_opt_min                   18                                    18                                    Weakest power it will try
-tx_opt_max                   28                                    28                                    Strongest power it will try
-tx_snr_tolerance_db          1                                     1                                     Signals this close are a tie, so less power wins
-watch_silence_hours          12                                    12                                    Warn when a watched node goes quiet this long
-watch_alerts_kept            200                                   200                                   How many past alerts to keep
-map_view_fraction            0.5                                   0.5                                   Share of nodes to fit on screen; 1 shows them all
-basemap_tilejson_url         https://tiles.openfreemap.org/planet  https://tiles.openfreemap.org/planet  Where map images come from (next launch)
-history_days                 365                                   365                                   Older ones are deleted; 0 keeps everything
-chat_history_limit           200                                   200                                   Old messages to load when you open a chat
-courier_history_kept         100                                   100                                   Finished outbox messages to keep
-cli_time_format              relative                              relative                              Whether the command line prints ages or timestamps
-fast_render                  on                                    on                                    Faster screen updates; turn off if it looks wrong (next launch)
-full_width                   auto                                  auto                                  Use the extra column some terminals hide
-color_depth                  auto                                  auto                                  How many colours to send this terminal (next launch)
-console_setup                auto                                  auto                                  Move to a better terminal when this console can't draw MeshTerm
-console_font                 6x12                                  6x12                                  Bigger text, or more rows on the handheld's panel
-name_overlap_days            7                                     7                                     Grey a name two nodes used within this many days
-log_level                    WARNING                               WARNING                               How much MeshTerm writes to its log file (next launch)
+PREFERENCE                    VALUE                                 DEFAULT                               DESCRIPTION
+set_clock_on_connect          off                                   off                                   Set the device clock from this computer when it connects
+trace_cooldown_s              5                                     5                                     Wait this long before transmitting again
+flood_advert_cooldown_s       60                                    60                                    Extra wait before another mesh-wide advert
+weekly_flood_advert           off                                   off                                   Flood an advert after a week without one
+advert_quiet_s                30                                    30                                    Silence to wait for before the weekly advert
+direct_message_soft_retries   0                                     0                                     Times to resend a message that gets no reply
+room_relogin_minutes          30                                    30                                    Opening a room this quiet logs in again
+tx_opt_min                    18                                    18                                    Weakest power it will try
+tx_opt_max                    28                                    28                                    Strongest power it will try
+tx_snr_tolerance_db           1                                     1                                     Signals this close are a tie, so less power wins
+watch_silence_hours           12                                    12                                    Warn when a watched node goes quiet this long
+watch_alerts_kept             200                                   200                                   How many past alerts to keep
+map_view_fraction             0.5                                   0.5                                   Share of nodes to fit on screen; 1 shows them all
+basemap_tilejson_url          https://tiles.openfreemap.org/planet  https://tiles.openfreemap.org/planet  Where map images come from (next launch)
+history_days                  365                                   365                                   Older ones are deleted; 0 keeps everything
+chat_history_limit            200                                   200                                   Old messages to load when you open a chat
+courier_history_kept          100                                   100                                   Finished outbox messages to keep
+cli_time_format               relative                              relative                              Whether the command line prints ages or timestamps
+fast_render                   on                                    on                                    Faster screen updates; turn off if it looks wrong (next launch)
+full_width                    auto                                  auto                                  Use the extra column some terminals hide
+color_depth                   auto                                  auto                                  How many colours to send this terminal (next launch)
+console_setup                 auto                                  auto                                  Move to a better terminal when this console can't draw MeshTerm
+console_font                  6x12                                  6x12                                  Bigger text, or more rows on the handheld's panel
+name_overlap_days             7                                     7                                     Grey a name two nodes used within this many days
+chat_author_spacing           auto                                  auto                                  A blank line after each author in a chat
+chat_author_spacing_min_rows  24                                    24                                    With auto: the smallest terminal that gets it
+log_level                     WARNING                               WARNING                               How much MeshTerm writes to its log file (next launch)
 ```
 
 **`DESCRIPTION`** says what each preference does, because the name of a key does not give

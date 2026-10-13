@@ -23,8 +23,11 @@ can change how things behave. It does not only add new things.
   the node uses when it makes its own key. A firmware companion still gets the full 64-byte
   key, because it accepts only that form.
 - **In a chat, a blank line comes after the messages of each author.** Thus the
-  conversation is easier to follow when many people write. The Cardputer Zero has no
-  blank line there, because its screen has only 14 rows and each row shows a message.
+  conversation is easier to follow when many people write. By default, the line shows on
+  a terminal of 24 rows or more. A smaller terminal, and the 14 rows of the Cardputer Zero,
+  keep each row for a message. Two new preferences in the Display group control the line:
+  **Author spacing** (`auto`, `on`, or `off`) and **Spacing from** (the smallest terminal,
+  in rows, that gets the line with `auto`).
 
 ## [0.11.1] - 2026-10-13
 

@@ -25,7 +25,7 @@ from rich.cells import cell_len
 from rich.console import Group, RenderableType
 from rich.text import Text
 
-from ..core import links
+from ..core import links, preferences
 from ..core.channels import MENTION, split_channel_sender
 from ..core.connection import ContactNotOnDeviceError
 from ..core.events import EventKind, MeshEvent
@@ -75,26 +75,21 @@ _URL_GUTTER = 2
 _URL_CODES = False
 
 
-#: Whether a blank line closes the messages of each author. It costs one row for each
-#: group. The PicoCalc (26 rows) and a terminal (24) have the rows for it. The 14 rows of
-#: the Cardputer Zero do not: there a blank line on each group is a message less on the
-#: screen (JP, 2026-10-13).
-_GROUP_GAP = True
-
-#: The fewest rows (``Platform.readable_rows``) for which a transcript has that blank line.
-_GROUP_GAP_MIN_ROWS = 20
+#: The rows of the terminal when the session cannot say (a stand-in session with no
+#: ``terminal_rows``): the design minimum of the platform (``Platform.readable_rows``).
+_FALLBACK_ROWS = 24
 
 
 @on_platform
 def _bind(platform: Platform) -> None:
     """Bind the transcript to the platform (now and at each switch).
 
-    The platform says whether codes hang under URLs, and whether it has the rows for a
-    blank line after each author.
+    The platform says whether codes hang under URLs, and how many rows to assume when the
+    session cannot tell the height of the terminal.
     """
-    global _URL_CODES, _GROUP_GAP
+    global _URL_CODES, _FALLBACK_ROWS
     _URL_CODES = platform.url_codes
-    _GROUP_GAP = platform.readable_rows >= _GROUP_GAP_MIN_ROWS
+    _FALLBACK_ROWS = platform.readable_rows
 
 
 #: The maximum width of a footer hint, in cells (refer to the UX standards).
@@ -583,7 +578,8 @@ class ChatScreen(Screen):
         messages = self._messages
         total = len(messages)
         cache = self._render_cache
-        if cache is not None and cache["width"] == width:
+        spacing = self._author_spacing()
+        if cache is not None and cache["width"] == width and cache["spacing"] == spacing:
             cached_ids = cache["ids"]
             cached_acked = cache["acked"]
             cached_selected = cache["selected"]
@@ -628,10 +624,10 @@ class ChatScreen(Screen):
                 and cached_ids[idx] == id(message)
                 and cached_acked[idx] == message.acked
             )
-            # A blank line closes the messages of an author, where the platform has the rows
-            # for it (:data:`_GROUP_GAP`). It is the first line of the slice of the message
+            # A blank line closes the messages of an author, where the preferences ask for
+            # it (:meth:`_author_spacing`). It is the first line of the slice of the message
             # that starts the next group, so a cached slice brings it back with it.
-            gap = _GROUP_GAP and bool(lines) and (new_day or group != prev_group)
+            gap = spacing and bool(lines) and (new_day or group != prev_group)
             if reusable:
                 start = cached_boundaries[idx - 1] if idx > 0 else 0
                 slice_lines = cached_lines[start : cached_boundaries[idx]]
@@ -675,6 +671,7 @@ class ChatScreen(Screen):
 
         self._render_cache = {
             "width": width,
+            "spacing": spacing,
             "ids": ids,
             "acked": ackeds,
             "selected": selecteds,
@@ -682,6 +679,24 @@ class ChatScreen(Screen):
             "boundaries": boundaries,
         }
         return lines
+
+    def _author_spacing(self) -> bool:
+        """Whether a blank line closes the messages of each author, at this paint.
+
+        The ``chat_author_spacing`` preference decides: ``on`` and ``off`` are fixed, and
+        ``auto`` puts the line on a terminal of ``chat_author_spacing_min_rows`` rows or
+        more. The line costs one row for each group of messages, so a short terminal (the
+        Cardputer Zero, or a small window) keeps the transcript dense. The test reads the
+        rows of the terminal before the paint, and reads the preferences at each paint,
+        so a change on the Preferences page applies when the user comes back.
+        """
+        prefs = preferences.current()
+        mode = prefs.chat_author_spacing
+        if mode != "auto":
+            return mode == "on"
+        rows = getattr(self._session, "terminal_rows", None)
+        height = rows() if callable(rows) else _FALLBACK_ROWS
+        return height >= prefs.chat_author_spacing_min_rows
 
     def _sender_and_body(self, message: ChatMessage) -> tuple[str, str]:
         """Return the display sender and the clean body of a message.

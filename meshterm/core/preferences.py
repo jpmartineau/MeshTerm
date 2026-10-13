@@ -173,6 +173,10 @@ _QUIET_CHOICES: dict[int, str] = {s: f"{s} s" for s in QUIET_CHOICES_S}
 #: column, and for the cost when MeshTerm reclaims a column that is not hidden.
 _WIDTH_CHOICES: dict[str, str] = {"auto": "auto", "yes": "yes", "no": "no"}
 
+#: When a chat puts a blank line after the messages of each author. ``auto`` puts it on a
+#: terminal that has at least ``chat_author_spacing_min_rows`` rows.
+_SPACING_CHOICES: dict[str, str] = {"auto": "auto", "on": "on", "off": "off"}
+
 #: How many colours to send to the terminal. ``auto`` is the honest default, and it is the
 #: only value that is not a depth. It means "take prompt_toolkit's verdict unless we can
 #: positively establish better". This rule is the difference between a repaired host and a
@@ -503,6 +507,32 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         minimum=0,
         maximum=3650,
         unit="days",
+    ),
+    PrefSpec(
+        key="chat_author_spacing",
+        label="Author spacing",
+        help="A blank line after each author in a chat",
+        group="Display",
+        value_type="enum",
+        # Auto, because the line costs one row for each group of messages. A tall terminal
+        # has the rows, and the 14 rows of the Cardputer Zero do not: there a blank line is
+        # a message less on the screen. The test is the real height of the terminal, so a
+        # small window on a desktop drops the line too (JP, 2026-10-13).
+        default="auto",
+        choices=_SPACING_CHOICES,
+    ),
+    PrefSpec(
+        key="chat_author_spacing_min_rows",
+        label="Spacing from",
+        help="With auto: the smallest terminal that gets it",
+        group="Display",
+        value_type="int",
+        # A standard terminal (24 rows) and the PicoCalc (26) get the line. The Cardputer
+        # Zero (14) and a smaller window do not (JP, 2026-10-13).
+        default=24,
+        minimum=10,
+        maximum=100,
+        unit="rows",
     ),
     # --- Diagnostics ---------------------------------------------------------------
     PrefSpec(
