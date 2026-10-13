@@ -53,7 +53,7 @@ from .atomicwrite import write_atomically
 from .config import DeviceProfile, SpiWiring
 from .connection import DeviceCommandError, MeshCoreDevice
 from .discovery import TRANSPORT_SERIAL, DiscoveredDevice, spi_device
-from .privatekey import KEY_BYTES, SEED_BYTES
+from .privatekey import checked
 
 _log = logging.getLogger(__name__)
 
@@ -949,15 +949,19 @@ class SpiRadioDevice(MeshCoreDevice):
         menu announces a reconnect, which stops this node and starts a new one, and a run
         on the command line stops the node when it ends.
 
+        The file gets the key in the form that the user gave. An imported seed stays a seed,
+        because the radio library keeps keys in that form, and a seed is the more complete
+        form (JP, 2026-10-13). A 64-byte key from a firmware companion has no seed, and the
+        library reads it in that form too.
+
         The method does not restart the node itself. The services of the session subscribe
         to the events of this connection, and a new connection under them would leave them
         deaf. The reconnect of the session is the one path that rebuilds them.
         """
-        key = bytes.fromhex(key_hex)
-        if len(key) not in (KEY_BYTES, SEED_BYTES):
-            raise DeviceCommandError(
-                f"a private key has {KEY_BYTES} or {SEED_BYTES} bytes, not {len(key)}"
-            )
+        try:
+            key = checked(bytes.fromhex(key_hex))
+        except ValueError as exc:
+            raise DeviceCommandError(str(exc)) from None
         await asyncio.to_thread(
             write_atomically, self._state / "identity.key", key, owner_only=True
         )

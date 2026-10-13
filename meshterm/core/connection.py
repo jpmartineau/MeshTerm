@@ -52,6 +52,7 @@ from .models import (
     advert_time,
     utcnow,
 )
+from .privatekey import normalize as normalize_key
 from .region_sim import SimulatedRegionMap
 from .regions import WILDCARD as REGION_WILDCARD
 from .regions import normalize as normalize_region
@@ -2003,9 +2004,12 @@ class Device(ABC):
     async def import_private_key(self, key_hex: str) -> None:
         """Import a private key, and replace the identity of the device with it.
 
+        Each device takes the form that it keeps. A firmware companion accepts only the
+        64-byte key, so it expands a seed first (:func:`meshterm.core.privatekey.normalize`).
+        The node of an SPI radio keeps the form that it gets.
+
         Args:
-            key_hex: The 64-byte key in hex, as :func:`meshterm.core.privatekey.normalize`
-                makes it. A caller that has a seed expands it first.
+            key_hex: The key in hex: the 64-byte key, or a 32-byte seed.
         """
 
     @abstractmethod
@@ -4573,7 +4577,7 @@ class MeshCoreDevice(Device):
         # error, thus it waited for its full timeout and returned a refusal with no cause.
         # This call waits for the third answer too, and names it.
         event = await self._require().commands.send(
-            b"\x18" + bytes.fromhex(key_hex),
+            b"\x18" + normalize_key(bytes.fromhex(key_hex)),
             [EventType.OK, EventType.ERROR, EventType.DISABLED],
         )
         if getattr(event, "type", None) == EventType.DISABLED:
@@ -5418,7 +5422,8 @@ class MockDevice(Device):
         return self._private_key
 
     async def import_private_key(self, key_hex: str) -> None:  # noqa: D102
-        self._private_key = bytes.fromhex(key_hex).hex()  # checks the hex, and normalizes it
+        # As a firmware does: it keeps only the 64-byte key, so a seed is expanded.
+        self._private_key = normalize_key(bytes.fromhex(key_hex)).hex()
 
     async def factory_reset(self) -> None:  # noqa: D102 - inherited docstring
         self._custom_vars.clear()

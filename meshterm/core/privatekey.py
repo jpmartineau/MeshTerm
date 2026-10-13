@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The private key of our node: the forms that MeshTerm accepts, and the one form that it sends.
+"""The private key of our node: the two forms that MeshTerm accepts, and where each one goes.
 
 A MeshCore companion exports and imports its private key in one form only: 64 bytes, the
 expanded Ed25519 key of the orlp library that the firmware uses (a 32-byte scalar, then a
@@ -7,10 +7,16 @@ expanded Ed25519 key of the orlp library that the firmware uses (a 32-byte scala
 
 A key can also exist in a shorter form: the 32-byte Ed25519 seed from which the 64 bytes
 come. The node that MeshTerm runs on an SPI radio keeps such a seed in its ``identity.key``
-when it makes its own key. A seed is the same identity, but a firmware companion does not
-accept it. Thus MeshTerm expands a seed before it sends it (:func:`expand_seed`), in the
-same way that the firmware makes its own key. The user can give either form, and the
-device always gets the 64 bytes.
+when it makes its own key, because its radio library keeps keys in that form. A seed is
+the same identity, and it is the more complete form: a seed always gives the 64 bytes,
+and the 64 bytes never give back the seed.
+
+The user can give either form, and the parsers here return it as given
+(:func:`parse_private_key`, :func:`read_private_key_file`). Each device then takes the
+form that it keeps. A firmware companion accepts only the 64 bytes, so it gets a seed
+expanded (:func:`normalize`, in the same way that the firmware makes its own key). The
+node of an SPI radio keeps the form that it gets, so an imported seed stays a seed there
+(JP, 2026-10-13).
 """
 
 from __future__ import annotations
@@ -22,6 +28,7 @@ from pathlib import Path
 __all__ = [
     "KEY_BYTES",
     "SEED_BYTES",
+    "checked",
     "expand_seed",
     "normalize",
     "parse_private_key",
@@ -68,10 +75,18 @@ def normalize(raw: bytes) -> bytes:
     Raises:
         ValueError: If ``raw`` is neither a key nor a seed. The message is for the user.
     """
-    if len(raw) == KEY_BYTES:
+    raw = checked(raw)
+    return expand_seed(raw) if len(raw) == SEED_BYTES else raw
+
+
+def checked(raw: bytes) -> bytes:
+    """``raw`` itself, if it is a 64-byte key or a 32-byte seed.
+
+    Raises:
+        ValueError: If ``raw`` is neither a key nor a seed. The message is for the user.
+    """
+    if len(raw) in (KEY_BYTES, SEED_BYTES):
         return bytes(raw)
-    if len(raw) == SEED_BYTES:
-        return expand_seed(raw)
     raise ValueError(
         f"A private key has {KEY_BYTES} bytes ({KEY_BYTES * 2} hex digits), or "
         f"{SEED_BYTES} for a seed. This one has {len(raw)}."
@@ -79,7 +94,7 @@ def normalize(raw: bytes) -> bytes:
 
 
 def parse_private_key(text: str) -> bytes:
-    """The 64-byte key in ``text``, which the user typed or pasted as hex.
+    """The key in ``text``, which the user typed or pasted as hex: 64 bytes, or a 32-byte seed.
 
     The function ignores spaces and line breaks, because a key that the user copies from a
     terminal often has them where the terminal wrapped the line.
@@ -95,11 +110,11 @@ def parse_private_key(text: str) -> bytes:
         raise ValueError(
             f"A private key has an even number of hex digits. This one has {len(digits)}."
         )
-    return normalize(bytes.fromhex(digits))
+    return checked(bytes.fromhex(digits))
 
 
 def read_private_key_file(path: Path) -> bytes:
-    """The 64-byte key in the file at ``path``: hex text, or the raw bytes of a key or a seed.
+    """The key in the file at ``path``, in its own form: hex text, or the raw bytes of a key.
 
     ``config export-key --out`` writes hex text. The ``identity.key`` of a node keeps raw
     bytes. The function accepts the two forms. It reads the file as hex text first. A raw
@@ -121,7 +136,7 @@ def read_private_key_file(path: Path) -> bytes:
     if digits and _HEX.fullmatch(digits):
         return parse_private_key(digits)
     if len(data) in (KEY_BYTES, SEED_BYTES):
-        return normalize(data)
+        return checked(data)
     raise ValueError(
         f"{path.name} does not hold a private key. A key file holds the key as hex "
         f"text, or {KEY_BYTES} or {SEED_BYTES} raw bytes."

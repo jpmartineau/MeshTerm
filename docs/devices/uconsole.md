@@ -227,7 +227,8 @@ the mesh. On Device config, **Identity key…** shows the key, exports it, and i
 one, as for each companion. An export has the form that a firmware companion uses: 64
 bytes, or 128 hex digits. When the node makes its own key, it keeps a shorter form in
 `identity.key`: a 32-byte seed. The two forms are the same identity, and an import accepts
-each of them. The node reads its key only when it starts. Thus, after an import, MeshTerm
+each of them. MeshTerm saves an imported key in the form that you give, so an imported
+seed stays a seed. The node reads its key only when it starts. Thus, after an import, MeshTerm
 restarts the node, and the reconnect dialog shows until the node is ready again.
 
 **A profile, if you want a name for the connection:**

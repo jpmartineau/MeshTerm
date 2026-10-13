@@ -65,6 +65,11 @@ def test_a_key_passes_as_it_is_and_a_seed_is_expanded() -> None:
     assert normalize(key[:32]) == expand_seed(key[:32])
 
 
+def test_a_pasted_seed_stays_a_seed() -> None:
+    """The parser returns the form that the user gave. Each device takes the form it keeps."""
+    assert parse_private_key("ab" * 32) == bytes.fromhex("ab" * 32)
+
+
 def test_a_pasted_key_can_have_line_breaks_and_capitals() -> None:
     """A key that the user copies from a terminal has the breaks where the terminal wrapped it."""
     pasted = "CD" * 32 + "\n  " + "cd" * 32 + "\n"
@@ -92,8 +97,8 @@ def test_a_bad_key_says_why(text: str, problem: str) -> None:
     [
         (("cd" * 64 + "\n").encode(), bytes.fromhex("cd" * 64)),
         (bytes.fromhex("cd" * 64), bytes.fromhex("cd" * 64)),
-        (bytes(range(32)), expand_seed(bytes(range(32)))),
-        (("ab" * 32).encode(), expand_seed(bytes.fromhex("ab" * 32))),
+        (bytes(range(32)), bytes(range(32))),
+        (("ab" * 32).encode(), bytes.fromhex("ab" * 32)),
     ],
     ids=["hex-text", "raw-key", "raw-seed", "seed-as-hex-text"],
 )
@@ -101,6 +106,8 @@ def test_a_key_file_can_hold_hex_text_or_raw_bytes(
     tmp_path: Path, content: bytes, expected: bytes
 ) -> None:
     """``export-key --out`` writes hex text, and the ``identity.key`` of a node holds raw bytes.
+
+    The key comes back in its own form: a seed stays a seed, for the device to place.
 
     A seed that someone wrote into a file as hex text is 64 bytes on disk. As raw bytes, it
     would be a different key with no error, so the file is read as text first.
@@ -145,6 +152,13 @@ async def test_a_firmware_import_sends_the_key() -> None:
     assert sent == [b"\x18" + bytes.fromhex("cd" * 64)]
 
 
+async def test_a_firmware_import_expands_a_seed() -> None:
+    """A firmware companion accepts only 64 bytes, so it gets a seed expanded."""
+    device, sent = _device_that_answers(Event(EventType.OK, {}))
+    await device.import_private_key("ab" * 32)
+    assert sent == [b"\x18" + expand_seed(bytes.fromhex("ab" * 32))]
+
+
 async def test_a_firmware_with_the_import_off_says_so() -> None:
     """The firmware answers "disabled". Before, MeshTerm waited for its timeout and said nothing."""
     device, _sent = _device_that_answers(Event(EventType.DISABLED, {}))
@@ -166,6 +180,16 @@ async def test_an_spi_node_gets_its_imported_key_as_a_file(tmp_path: Path) -> No
     assert path.read_bytes() == key
     if os.name == "posix":
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+async def test_an_spi_node_keeps_an_imported_seed_as_a_seed(tmp_path: Path) -> None:
+    """The radio library keeps keys as seeds, and a seed is the more complete form.
+
+    Thus the node saves an imported seed as it is, and does not expand it (JP, 2026-10-13).
+    """
+    device = spiradio.SpiRadioDevice(SpiWiring(), tmp_path / "state")
+    await device.import_private_key("ab" * 32)
+    assert (tmp_path / "state" / "identity.key").read_bytes() == bytes.fromhex("ab" * 32)
 
 
 def test_a_firmware_companion_uses_its_new_key_at_once() -> None:

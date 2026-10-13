@@ -31,7 +31,7 @@ from ..core.device_config import (
     parse_value,
     settings_by_category,
 )
-from ..core.privatekey import normalize, parse_private_key, read_private_key_file
+from ..core.privatekey import checked, parse_private_key, read_private_key_file
 from ..services.clock_sync import set_clock
 from .base import Secret, Tool, ToolResult, register, reveal
 
@@ -320,9 +320,9 @@ async def apply_ops(
         elif kind == "export_key":
             report.append(await _export_key(ctx, device, op[1] if len(op) > 1 else None, artifacts))
         elif kind == "import_key":
-            # The callers check the key before they confirm. This expands a seed that a
-            # caller gives as it is, because a firmware companion accepts only 64 bytes.
-            await device.import_private_key(normalize(bytes.fromhex(reveal(op[1]))).hex())
+            # The callers check the key before they confirm. The key goes on in the form
+            # that the user gave: each device takes the form that it keeps.
+            await device.import_private_key(checked(bytes.fromhex(reveal(op[1]))).hex())
             if device.import_restarts:
                 ctx.ui.ack("[ok]✓[/ok] private key imported — the node uses it from its next start")
             else:

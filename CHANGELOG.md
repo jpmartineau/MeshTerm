@@ -18,6 +18,10 @@ can change how things behave. It does not only add new things.
   message has the same mark, so a message that names you is easy to see. On the PicoCalc,
   the console cannot draw a light fill, so there the `★` alone marks your messages. Before,
   your messages showed only the `★`.
+- **On the uConsole and the Cardputer Zero, an imported seed stays a seed.** MeshTerm saves
+  a 32-byte seed in the node's `identity.key` as you give it. This is the same form that
+  the node uses when it makes its own key. A firmware companion still gets the full 64-byte
+  key, because it accepts only that form.
 - **In a chat, a blank line comes after the messages of each author.** Thus the
   conversation is easier to follow when many people write. The Cardputer Zero has no
   blank line there, because its screen has only 14 rows and each row shows a message.
