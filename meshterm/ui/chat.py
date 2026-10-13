@@ -75,11 +75,26 @@ _URL_GUTTER = 2
 _URL_CODES = False
 
 
+#: Whether a blank line closes the messages of each author. It costs one row for each
+#: group. The PicoCalc (26 rows) and a terminal (24) have the rows for it. The 14 rows of
+#: the Cardputer Zero do not: there a blank line on each group is a message less on the
+#: screen (JP, 2026-10-13).
+_GROUP_GAP = True
+
+#: The fewest rows (``Platform.readable_rows``) for which a transcript has that blank line.
+_GROUP_GAP_MIN_ROWS = 20
+
+
 @on_platform
 def _bind(platform: Platform) -> None:
-    """Hang codes under URLs where the platform draws them (now and at each switch)."""
-    global _URL_CODES
+    """Bind the transcript to the platform (now and at each switch).
+
+    The platform says whether codes hang under URLs, and whether it has the rows for a
+    blank line after each author.
+    """
+    global _URL_CODES, _GROUP_GAP
     _URL_CODES = platform.url_codes
+    _GROUP_GAP = platform.readable_rows >= _GROUP_GAP_MIN_ROWS
 
 
 #: The maximum width of a footer hint, in cells (refer to the UX standards).
@@ -613,16 +628,21 @@ class ChatScreen(Screen):
                 and cached_ids[idx] == id(message)
                 and cached_acked[idx] == message.acked
             )
+            # A blank line closes the messages of an author, where the platform has the rows
+            # for it (:data:`_GROUP_GAP`). It is the first line of the slice of the message
+            # that starts the next group, so a cached slice brings it back with it.
+            gap = _GROUP_GAP and bool(lines) and (new_day or group != prev_group)
             if reusable:
                 start = cached_boundaries[idx - 1] if idx > 0 else 0
                 slice_lines = cached_lines[start : cached_boundaries[idx]]
                 if new_day:
-                    self._sticky_headers.append((len(lines), [slice_lines[0]]))
+                    at = int(gap)  # the divider comes after the gap
+                    self._sticky_headers.append((len(lines) + at, [slice_lines[at]]))
                 lines += slice_lines
             else:
+                if gap:
+                    lines.append("")
                 if new_day:
-                    if lines:
-                        lines += render_lines(Text(""), width)
                     # A day divider is the section heading of this transcript: it pins to the
                     # top row while its day scrolls under it, and ^PgUp/^PgDn step by it.
                     # Thus it has the heading style of the app (``── Label ──`` in the bold
@@ -634,8 +654,6 @@ class ChatScreen(Screen):
                     self._sticky_headers.append((len(lines), [divider[0]]))
                     lines += divider
                 if new_day or group != prev_group:
-                    if not new_day and lines:
-                        lines += render_lines(Text(""), width)  # gap between sender groups
                     header = self._group_header(sender, message)
                     lines += render_lines(header, width)
                 if selected:

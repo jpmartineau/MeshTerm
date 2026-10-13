@@ -1545,6 +1545,47 @@ def test_channel_own_messages_do_not_merge_with_remote_namesake() -> None:
     assert rendered.count("you") == 1 and rendered.count("★ Me") == 1
 
 
+def test_a_blank_line_closes_each_author_where_the_rows_allow() -> None:
+    """A terminal and the PicoCalc put a blank line after the messages of each author.
+
+    The blank line also comes before the divider of a new day, and never before the first
+    line. The 14 rows of the Cardputer Zero have no row to spare for it. A second paint
+    reads the cached lines, and the divider of the second day still pins at its own line,
+    not at the blank line before it.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from meshterm.platforms import CARDPUTER_ZERO, REGULAR, set_platform
+
+    base = datetime(2026, 7, 5, 14, 24, tzinfo=timezone.utc)
+
+    def at(minutes: int) -> datetime:
+        return base + timedelta(minutes=minutes)
+
+    def transcript() -> list[ChatMessage]:
+        return [
+            ChatMessage(text="Alice: hi", is_channel=True, channel_idx=0, created_at=at(0)),
+            ChatMessage(text="Alice: again", is_channel=True, channel_idx=0, created_at=at(1)),
+            ChatMessage(text="Bob: yo", is_channel=True, channel_idx=0, created_at=at(2)),
+            ChatMessage(text="Bob: later", is_channel=True, channel_idx=0, created_at=at(1440)),
+        ]
+
+    set_platform(REGULAR)
+    screen = _channel_screen(transcript())
+    lines = [_strip_ansi(line) for line in screen._render_grouped(53)]
+    assert lines[0].startswith("──") and lines[1] == "Alice"
+    assert lines[4] == "" and lines[5] == "Bob"  # after the two messages of Alice
+    assert lines[7] == "" and lines[8].startswith("── Mon")  # after Bob, before the new day
+    assert lines.count("") == 2
+    first = list(screen._sticky_headers)
+    screen._render_grouped(53)  # the cached lines
+    assert screen._sticky_headers == first and [at for at, _ in first] == [0, 8]
+
+    set_platform(CARDPUTER_ZERO)
+    screen = _channel_screen(transcript())
+    assert "" not in [_strip_ansi(line) for line in screen._render_grouped(53)]
+
+
 def test_a_mention_of_our_name_takes_our_chip() -> None:
     """A message that names us is easy to see. A mention of each other node is as before."""
     screen = _channel_screen([], self_name="Me", self_key=_OUR_KEY)
