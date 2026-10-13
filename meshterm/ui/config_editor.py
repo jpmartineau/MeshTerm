@@ -56,6 +56,7 @@ from ..core.device_config import (
     parse_value,
     settings_by_category,
 )
+from ..core.privatekey import parse_private_key, read_private_key_file
 from ..platforms import Platform, on_platform
 from .device_info_screen import REVEAL_KEY
 from .marks import MASK_MARK
@@ -212,7 +213,14 @@ async def edit_config(ctx: AppContext) -> dict[str, Any] | None:
                     snapshot, custom = await _reread(ctx, device)
                     _unstage_held(snapshot, custom, pending, custom_pending)
             elif choice == _IDENTITY_KEY:
-                if await _identity_key_menu(ctx, device, snapshot):
+                if await _identity_key_menu(ctx, device, snapshot, staged()):
+                    if device.import_restarts and ctx.active_transport is not None:
+                        # The node reads its new key only when it starts. The reconnect of
+                        # the session stops this node and starts a new one, as after a
+                        # reboot, and the visit ends with it (refer to _reboot).
+                        ctx.announce_reboot()
+                        await asyncio.sleep(_REBOOT_HANDOFF_TIMEOUT_S)
+                        return summary()
                     snapshot, custom = await _reread(ctx, device)
             elif choice == _REBOOT:
                 # A reboot ends the visit, and the staged values go with it. Thus ask first.
@@ -1352,12 +1360,27 @@ async def _restore_now(ctx: AppContext, device: Device, snapshot: dict) -> bool:
     return changed > 0
 
 
-async def _identity_key_menu(ctx: AppContext, device: Device, snapshot: dict) -> bool:
+async def _identity_key_menu(
+    ctx: AppContext, device: Device, snapshot: dict, staged: int = 0
+) -> bool:
     """Export or import the private identity key of the device.
+
+    An import takes a pasted key or a file. Both accept the 64-byte key that a companion
+    exports, and also the 32-byte seed that the node of an SPI radio keeps
+    (:mod:`meshterm.core.privatekey`). Each input is checked before the confirmation, so
+    a key that is not one never gets to the typed confirmation.
+
+    Args:
+        ctx: The shared application context.
+        device: The connected device.
+        snapshot: The current device snapshot.
+        staged: The number of staged changes on the page. An import that restarts the node
+            ends the visit, as a reboot does, so the user must agree to discard them first.
 
     Returns:
         ``True`` if the identity changed (a key was imported). Then the caller reads its
-        snapshot again.
+        snapshot again, or gives control to the reconnect if the node must restart
+        (:attr:`~meshterm.core.connection.Device.import_restarts`).
     """
     choice = await ctx.ui.select(
         "Identity key",
@@ -1366,7 +1389,8 @@ async def _identity_key_menu(ctx: AppContext, device: Device, snapshot: dict) ->
                 [
                     ("Show private key", "Display it on screen (sensitive)", "show"),
                     ("Export to a file…", "Write it to disk (keep it secret)", "file"),
-                    ("Import a key…", "Replace this device's identity", "import"),
+                    ("Import a key…", "Paste it (replaces the identity)", "import"),
+                    ("Import from a file…", "Read it from disk (replaces the identity)", "load"),
                 ]
             ),
         ],
@@ -1399,22 +1423,41 @@ async def _identity_key_menu(ctx: AppContext, device: Device, snapshot: dict) ->
         return False
 
     # Import: get the key, then ask for the typed confirmation.
-    key_hex = await ctx.ui.text(
-        "Import identity key",
-        prompt="Paste the private key as hex:",
-        validate=_is_hex,
-    )
-    if not key_hex:
+    if choice == "load":
+        raw = await ctx.ui.path(
+            "Import identity key", prompt="Read the private key from this file:"
+        )
+        if not raw:
+            return False
+        try:
+            key = read_private_key_file(Path(raw))
+        except (OSError, ValueError) as exc:
+            ctx.ui.note(f"[err]not imported:[/err] {escape(str(exc))}")
+            await ctx.ui.present(title="Import key")
+            return False
+    else:
+        key_hex = await ctx.ui.text(
+            "Import identity key",
+            prompt="Paste the private key as hex:",
+            validate=_is_private_key,
+        )
+        if not key_hex:
+            return False
+        key = parse_private_key(key_hex)
+
+    restarts = device.import_restarts and ctx.active_transport is not None
+    if restarts and staged and not await confirm_discard(ctx, staged, verb="applying"):
         return False
-    confirmed = await ctx.ui.typed_confirm(
+    warning = (
         "Importing a key permanently overwrites this device's identity. Contacts and "
-        "messages keyed to the old identity will no longer match it.",
-        "IMPORT",
-        title="Import private key",
+        "messages keyed to the old identity will no longer match it."
     )
+    if restarts:
+        warning += " The node restarts to use the new key."
+    confirmed = await ctx.ui.typed_confirm(warning, "IMPORT", title="Import private key")
     if not confirmed:
         return False
-    await _run_now(ctx, device, snapshot, [("import_key", key_hex.strip())], "Import key")
+    await _run_now(ctx, device, snapshot, [("import_key", key.hex())], "Import key")
     return True
 
 
@@ -1440,10 +1483,10 @@ async def _factory_reset(ctx: AppContext, device: Device, snapshot: dict) -> boo
 # --- validators --------------------------------------------------------------
 
 
-def _is_hex(text: str) -> bool | str:
-    """Check that ``text`` is a hex string."""
+def _is_private_key(text: str) -> bool | str:
+    """Check that ``text`` is a private key in hex: ``True``, or the problem for the prompt."""
     try:
-        bytes.fromhex(text)
+        parse_private_key(text)
         return True
-    except ValueError:
-        return "Enter hex characters only."
+    except ValueError as exc:
+        return str(exc)

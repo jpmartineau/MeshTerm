@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 import typer
 
 from ..context import AppContext
+from ..core.atomicwrite import write_atomically
 from ..core.channels import CHANNEL_SLOT_PROBE_CAP
 from ..core.config_io import backup_config, plan_restore, read_backup
 from ..core.connection import Device, DeviceCommandError
@@ -30,8 +31,9 @@ from ..core.device_config import (
     parse_value,
     settings_by_category,
 )
+from ..core.privatekey import normalize, parse_private_key, read_private_key_file
 from ..services.clock_sync import set_clock
-from .base import Tool, ToolResult, register
+from .base import Secret, Tool, ToolResult, register, reveal
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..ui.report import Block, Facts, Listing, Report
@@ -170,11 +172,17 @@ class ConfigTool(Tool):
 
         @config_app.command("import-key", help="Import a private key (overwrites identity)")
         def _import_key_cmd(
-            key_hex: str = typer.Argument(..., help="Private key as hex"),
+            key_hex: str | None = typer.Argument(
+                None, help="Private key as hex: 128 digits, or a 64-digit seed"
+            ),
+            from_file: Path | None = typer.Option(
+                None, "--from", help="Read the key from this file (hex text or raw bytes)"
+            ),
             yes: bool = typer.Option(False, "--yes", help="Confirm this destructive action"),
         ) -> None:
             _require_yes(yes, "import-key overwrites the device identity")
-            run_tool_command(self, {"ops": [("import_key", key_hex)]})
+            key = _private_key_argument(key_hex, from_file)
+            run_tool_command(self, {"ops": [("import_key", Secret(key.hex()))]})
 
         @config_app.command("sync-clock", help="Set the device clock from this computer")
         def _sync_clock_cmd() -> None:
@@ -312,8 +320,13 @@ async def apply_ops(
         elif kind == "export_key":
             report.append(await _export_key(ctx, device, op[1] if len(op) > 1 else None, artifacts))
         elif kind == "import_key":
-            await device.import_private_key(op[1])
-            ctx.ui.ack("[ok]✓[/ok] private key imported")
+            # The callers check the key before they confirm. This expands a seed that a
+            # caller gives as it is, because a firmware companion accepts only 64 bytes.
+            await device.import_private_key(normalize(bytes.fromhex(reveal(op[1]))).hex())
+            if device.import_restarts:
+                ctx.ui.ack("[ok]✓[/ok] private key imported — the node uses it from its next start")
+            else:
+                ctx.ui.ack("[ok]✓[/ok] private key imported")
             changes += 1
             report.append(_acted("imported", changes=1, imported=True))
         elif kind == "factory_reset":
@@ -635,20 +648,28 @@ async def _export_key(
 
     This document holds a private key when the caller asked for one. That is the purpose
     of the command, the same as on the plain face, and this function adds no more gate.
+
+    The menu has no renderer for the report. Thus there, the function also draws the key
+    itself, as :func:`_share_contact` draws its code. When the report replaced the line
+    that printed the key, "Show private key" drew its warning and no key at all.
+
+    The file is for the owner only (``0600``), as each other file that holds a credential.
     """
     from ..ui import fields
     from ..ui.report import BARE, Facts
+    from ..ui.surface import TuiUi
 
     key_hex = await device.export_private_key()
     written: Path | None = None
     if out is not None:
         written = Path(out)
-        written.parent.mkdir(parents=True, exist_ok=True)
-        written.write_text(key_hex, encoding="utf-8")
+        write_atomically(written, key_hex, owner_only=True)
         artifacts.append(str(written))
         ctx.ui.ack("[warn]private key written — keep this file secret.[/warn]")
     else:
         ctx.ui.ack("[warn]private key (keep secret):[/warn]")
+        if isinstance(ctx.ui, TuiUi):
+            ctx.ui.note(key_hex)
     return Facts(
         key="key",
         fields=(fields.hexid("private_key", "private_key"), fields.word("path", "path")),
@@ -692,6 +713,25 @@ def _require_yes(yes: bool, what: str) -> None:
     """
     if not yes:
         raise typer.BadParameter(f"{what}. Re-run with --yes to confirm.")
+
+
+def _private_key_argument(key_hex: str | None, from_file: Path | None) -> bytes:
+    """The 64-byte key that ``config import-key`` got, from its argument or from ``--from``.
+
+    The command reads and checks the key before it connects. Thus a bad key sends nothing
+    to the device, and it is a usage error (exit 2), as each other bad argument is.
+
+    Raises:
+        typer.BadParameter: If the command got no key, two keys, or a key that is not one.
+    """
+    if (key_hex is None) == (from_file is None):
+        raise typer.BadParameter("give the key as hex, or --from with a file, but not both.")
+    try:
+        if from_file is not None:
+            return read_private_key_file(from_file)
+        return parse_private_key(key_hex or "")
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from None
 
 
 def _setting_columns() -> tuple:

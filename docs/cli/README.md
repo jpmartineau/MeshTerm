@@ -768,8 +768,9 @@ Show and change each device setting. If you give no subcommand, it runs `show`.
 | `advert [--flood]` | Broadcast an advert. It is zero-hop unless you give `--flood`. |
 | `share` | Print this node's contact card as a `meshcore://` URI. |
 | `sync-clock` | Set the device clock from this computer. |
-| `export-key [--out PATH]` | Export the private key. **Sensitive.** |
-| `import-key KEY_HEX --yes` | Import a private key. It overwrites this node's identity. |
+| `export-key [--out PATH]` | Export the private key: 64 bytes, as 128 hex digits. **Sensitive.** Only you can read the file that `--out` writes. |
+| `import-key KEY_HEX --yes` | Import a private key. It overwrites this node's identity. Give 128 hex digits, or the 64 hex digits of a 32-byte seed. |
+| `import-key --from PATH --yes` | Import the key in a file: hex text, as `export-key --out` writes it, or the raw bytes of a node's `identity.key`. |
 | `reboot --yes` | Reboot the device. |
 | `factory-reset --yes` | Erase all data and reset the settings to the defaults. |
 

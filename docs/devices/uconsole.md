@@ -222,6 +222,14 @@ in `~/.meshterm/radio/spidev1.0/`. The files are `identity.key`, `prefs.json`,
 MeshTerm keeps the log of the previous run as `node.log.1`. All of these files stay after
 a restart.
 
+**The identity key.** `identity.key` holds the private key of the node: its identity on
+the mesh. On Device config, **Identity key…** shows the key, exports it, and imports a new
+one, as for each companion. An export has the form that a firmware companion uses: 64
+bytes, or 128 hex digits. When the node makes its own key, it keeps a shorter form in
+`identity.key`: a 32-byte seed. The two forms are the same identity, and an import accepts
+each of them. The node reads its key only when it starts. Thus, after an import, MeshTerm
+restarts the node, and the reconnect dialog shows until the node is ready again.
+
 **A profile, if you want a name for the connection:**
 
 ```toml

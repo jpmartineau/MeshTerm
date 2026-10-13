@@ -23,6 +23,40 @@ if TYPE_CHECKING:  # do not import typer or the context at module load, for a fa
     from ..ui.report import Report
 
 
+class Secret:
+    """A parameter of a run that the run log must not keep, for example a private key.
+
+    :meth:`Tool.execute` stores the parameters of each run in the ``runs`` table, and logs
+    them at debug level. A secret in the parameters was thus stored as plain text: the key
+    of ``config import-key`` stayed in the database. A secret goes into the parameters in
+    this wrapper. The JSON of the run log and the log line show ``<secret>``, and the tool
+    reads :attr:`value`.
+
+    The class does not derive from ``str``, because ``json.dumps`` writes the value of a
+    ``str`` subclass and never calls its ``default`` for it.
+
+    Attributes:
+        value: The secret itself.
+    """
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: str) -> None:
+        """Keep ``value`` out of each text form of this object."""
+        self.value = value
+
+    def __repr__(self) -> str:
+        """``<secret>``, never the value."""
+        return "<secret>"
+
+    __str__ = __repr__
+
+
+def reveal(value: Any) -> Any:
+    """The value inside a :class:`Secret`, or ``value`` itself if it is not a secret."""
+    return value.value if isinstance(value, Secret) else value
+
+
 @dataclass(slots=True)
 class ToolResult:
     """The result of a run of a tool.

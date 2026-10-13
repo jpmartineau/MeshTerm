@@ -9,6 +9,37 @@ can change how things behave. It does not only add new things.
 
 ## [Unreleased]
 
+### Added
+
+- **You can import an identity key from a file.** On Device config, **Identity key…** has
+  a new row, **Import from a file…**. On the command line, `config import-key --from PATH`
+  does the same. The file can hold the key as hex text, as `export-key --out` writes it, or
+  as raw bytes, as the `identity.key` of a node keeps it.
+- **An import accepts a 32-byte seed.** The node that MeshTerm runs on an SPI radio keeps
+  its key as a seed. A firmware companion accepts only the full 64-byte key. Thus MeshTerm
+  makes the full key from the seed, in the same way as the firmware, before it sends it.
+  A key of the wrong length now stops at the prompt, before you confirm the import.
+
+### Fixed
+
+- **Show private key shows the key again.** On Device config, **Identity key…** → **Show
+  private key** showed its warning and no key. This occurred on each device since 0.10.0.
+  On the command line, `meshterm config export-key` always printed the key.
+- **You can import a key on the uConsole and on the Cardputer Zero.** On these handhelds,
+  MeshTerm runs the node itself, and that node refused each import. Now MeshTerm writes
+  the key into the node's `identity.key`, and then restarts the node to use it.
+- **A firmware that does not accept an imported key says so.** Some firmware builds turn
+  the import off. MeshTerm waited until the command timed out, and then showed a refusal
+  with no cause.
+- **The private key no longer stays in MeshTerm's history.** MeshTerm stores the arguments
+  of each command that it runs. The key that you gave to `config import-key` was stored
+  there as plain text. Now MeshTerm stores `<secret>` in its place, and when this version
+  opens your database for the first time, it removes the keys that earlier versions
+  stored.
+- **Only you can read an exported key file.** `config export-key --out` and **Export to a
+  file…** now write the file with mode 0600, as MeshTerm writes each other file that holds
+  a secret. Before, the other users of the computer could read it.
+
 ## [0.11.0] - 2026-10-12
 
 **MeshTerm supports the Cardputer Zero, and from a message you can open its author on the

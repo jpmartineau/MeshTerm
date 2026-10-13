@@ -29,12 +29,13 @@ from pathlib import Path
 __all__ = ["write_atomically"]
 
 
-def write_atomically(path: Path, text: str, *, owner_only: bool = False) -> None:
+def write_atomically(path: Path, text: str | bytes, *, owner_only: bool = False) -> None:
     """Replace ``path`` with ``text`` in one step, and make parent directories if necessary.
 
     Args:
         path: The file to replace. Its directory is created if it does not exist.
-        text: The complete new contents, written as UTF-8.
+        text: The complete new contents. A ``str`` is written as UTF-8, and ``bytes`` are
+            written as they are.
         owner_only: Limit the file to the owner (``0600``) before it goes into position.
             Use it for each file that holds a credential. The function applies it to the
             temporary file, not to the destination. Thus the real file never exists with
@@ -44,7 +45,10 @@ def write_atomically(path: Path, text: str, *, owner_only: bool = False) -> None
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f"{path.suffix}.{os.getpid()}.tmp")
     try:
-        tmp.write_text(text, encoding="utf-8")
+        if isinstance(text, bytes):
+            tmp.write_bytes(text)
+        else:
+            tmp.write_text(text, encoding="utf-8")
         if owner_only:
             try:
                 os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)

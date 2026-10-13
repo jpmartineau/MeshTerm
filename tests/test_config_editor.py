@@ -22,10 +22,12 @@ from meshterm.context import AppContext
 from meshterm.core.admin_store import AdminStore
 from meshterm.core.config import Settings
 from meshterm.core.device_store import DeviceStore
+from meshterm.core.privatekey import expand_seed
 from meshterm.persistence.repository import Repository
 from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 from meshterm.ui.config_editor import (
     _ConfigMenu,
+    _is_private_key,
     _menu_items,
     config_table,
     contact_share_url,
@@ -1100,7 +1102,7 @@ async def test_actions_factory_reset_gates_on_typed_confirmation(ctx: AppContext
 async def test_actions_import_key_gates_on_typed_confirmation(ctx: AppContext) -> None:
     """An import of an identity key needs the typed IMPORT confirmation."""
     device = await ctx.device()
-    new_key = "ab" * 32
+    new_key = "ab" * 64
     _install(
         ctx,
         [
@@ -1113,6 +1115,131 @@ async def test_actions_import_key_gates_on_typed_confirmation(ctx: AppContext) -
     )
     await edit_config(ctx)
     assert await device.export_private_key() == new_key
+
+
+async def test_actions_show_key_draws_the_key(
+    ctx: AppContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Show private key draws the key itself. For a time, it drew its warning and no key."""
+    monkeypatch.setattr("meshterm.ui.surface.TuiUi", _ScriptedUi)
+    key = await (await ctx.device()).export_private_key()
+    ui = _install(
+        ctx,
+        [
+            ("select", "__identity_key__"),
+            ("select", "show"),
+            ("dialog", "show"),
+            ("select", None),
+        ],
+    )
+    await edit_config(ctx)
+    assert key in ui.notes
+    assert ui.presented == ["Private key"]
+
+
+async def test_actions_import_key_expands_a_seed(ctx: AppContext) -> None:
+    """A pasted 32-byte seed goes to the device as the 64-byte key that a firmware accepts."""
+    device = await ctx.device()
+    seed = "ab" * 32
+    _install(
+        ctx,
+        [
+            ("select", "__identity_key__"),
+            ("select", "import"),
+            ("text", seed),
+            ("typed_confirm", True),
+            ("select", None),
+        ],
+    )
+    await edit_config(ctx)
+    assert await device.export_private_key() == expand_seed(bytes.fromhex(seed)).hex()
+
+
+@pytest.mark.parametrize(
+    "content",
+    [("cd" * 64 + "\n").encode(), bytes.fromhex("cd" * 64)],
+    ids=["hex-text", "raw-bytes"],
+)
+async def test_actions_import_key_reads_a_file(
+    ctx: AppContext, tmp_path: Path, content: bytes
+) -> None:
+    """A file from ``export-key --out`` and a raw ``identity.key`` import the same key."""
+    device = await ctx.device()
+    path = tmp_path / "node.key"
+    path.write_bytes(content)
+    _install(
+        ctx,
+        [
+            ("select", "__identity_key__"),
+            ("select", "load"),
+            ("path", str(path)),
+            ("typed_confirm", True),
+            ("select", None),
+        ],
+    )
+    await edit_config(ctx)
+    assert await device.export_private_key() == "cd" * 64
+
+
+async def test_actions_import_key_stops_at_a_file_that_holds_no_key(
+    ctx: AppContext, tmp_path: Path
+) -> None:
+    """A file that holds no key says why, and never gets to the confirmation."""
+    device = await ctx.device()
+    before = await device.export_private_key()
+    path = tmp_path / "notes.txt"
+    path.write_bytes(b"\x00" * 10)
+    ui = _install(
+        ctx,
+        [
+            ("select", "__identity_key__"),
+            ("select", "load"),
+            ("path", str(path)),
+            ("select", None),  # no typed confirmation: the script would fail on one
+        ],
+    )
+    await edit_config(ctx)
+    assert await device.export_private_key() == before
+    assert any("not imported" in note for note in ui.notes)
+
+
+def test_a_pasted_key_of_the_wrong_length_says_why() -> None:
+    """The prompt refuses the key before the confirmation, and names the problem."""
+    assert _is_private_key("ab" * 64) is True
+    assert _is_private_key("AB" * 32 + "\n") is True
+    assert "This one has 40" in str(_is_private_key("ab" * 40))
+    assert "hex digits only" in str(_is_private_key("not a key"))
+
+
+async def test_actions_import_key_restarts_a_node_that_reads_its_key_at_start(
+    ctx: AppContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On the node of an SPI radio, the import ends the visit and gives control to the reconnect.
+
+    The staged change goes with the visit. Thus the user agrees to discard it first.
+    """
+    from meshterm.ui import config_editor
+
+    device = await ctx.device()
+    monkeypatch.setattr(type(device), "import_restarts", True)
+    monkeypatch.setattr(AppContext, "active_transport", property(lambda _self: "spi"))
+    monkeypatch.setattr(config_editor, "_REBOOT_HANDOFF_TIMEOUT_S", 0)
+    ui = _install(
+        ctx,
+        [
+            ("select", "name"),
+            ("text", "NewName"),
+            ("select", "__identity_key__"),
+            ("select", "import"),
+            ("text", "ab" * 64),
+            ("dialog", "discard"),
+            ("typed_confirm", True),
+        ],
+    )
+    assert await edit_config(ctx) is None
+    assert ctx.reboot_in_progress
+    assert not ui.script
+    assert await device.export_private_key() == "ab" * 64
 
 
 async def test_actions_reboot_on_simulator_stays_on_the_screen(ctx: AppContext) -> None:

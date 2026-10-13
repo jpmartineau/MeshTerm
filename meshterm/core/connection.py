@@ -28,7 +28,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcon
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from . import transmit_gate
 from .channels import CHANNEL_SLOT_PROBE_CAP
@@ -1216,6 +1216,12 @@ class Device(ABC):
     events into the domain models in :mod:`meshterm.core.models`.
     """
 
+    #: Whether an imported private key takes effect only when the node starts again. A
+    #: firmware companion uses the new key at once. The node that MeshTerm runs on an SPI
+    #: radio reads its key only when it starts (refer to
+    #: :meth:`meshterm.core.spiradio.SpiRadioDevice.import_private_key`).
+    import_restarts: ClassVar[bool] = False
+
     @abstractmethod
     async def connect(self) -> None:
         """Open the connection to the device. Idempotent."""
@@ -1995,7 +2001,12 @@ class Device(ABC):
 
     @abstractmethod
     async def import_private_key(self, key_hex: str) -> None:
-        """Import a private key from a hex string (this replaces the device identity)."""
+        """Import a private key, and replace the identity of the device with it.
+
+        Args:
+            key_hex: The 64-byte key in hex, as :func:`meshterm.core.privatekey.normalize`
+                makes it. A caller that has a seed expands it first.
+        """
 
     @abstractmethod
     async def factory_reset(self) -> None:
@@ -4555,7 +4566,19 @@ class MeshCoreDevice(Device):
         return key.hex() if isinstance(key, (bytes, bytearray)) else str(key)
 
     async def import_private_key(self, key_hex: str) -> None:  # noqa: D102
-        self._ok(await self._require().commands.import_private_key(bytes.fromhex(key_hex)))
+        from meshcore import EventType
+
+        # The firmware has a build flag that turns the import off. Then it answers "disabled",
+        # and not with an error. The import command of the library waits only for "ok" or an
+        # error, thus it waited for its full timeout and returned a refusal with no cause.
+        # This call waits for the third answer too, and names it.
+        event = await self._require().commands.send(
+            b"\x18" + bytes.fromhex(key_hex),
+            [EventType.OK, EventType.ERROR, EventType.DISABLED],
+        )
+        if getattr(event, "type", None) == EventType.DISABLED:
+            raise DeviceCommandError("this device's firmware does not accept an imported key")
+        self._ok(event)
 
     async def factory_reset(self) -> None:  # noqa: D102 - inherited docstring
         mc = self._require()

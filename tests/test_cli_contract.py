@@ -19,7 +19,9 @@ Each command here is read-only or uses the simulator, so nothing transmits.
 from __future__ import annotations
 
 import json
+import os
 import re
+import stat
 from pathlib import Path
 
 import pytest
@@ -577,6 +579,52 @@ def test_a_destructive_command_without_yes_is_a_silent_usage_error(run, args) ->
     assert result.exit_code == exitcodes.USAGE
     assert result.stdout == ""
     assert "--yes" in result.stderr
+
+
+def test_import_key_reads_a_file_and_keeps_the_key_out_of_the_run_log(run, tmp_path: Path) -> None:  # noqa: ANN001
+    """The run log stores the parameters of each run, and a private key is not one to keep.
+
+    The key of ``import-key`` was stored as plain text in the ``runs`` table. Now the table
+    holds ``<secret>`` where the key was.
+    """
+    import sqlite3
+
+    key = "cd" * 64
+    path = tmp_path / "node.key"
+    path.write_text(key + "\n", encoding="utf-8")
+    assert run("config", "import-key", "--from", str(path), "--yes").exit_code == exitcodes.OK
+    assert run("config", "import-key", key, "--yes").exit_code == exitcodes.OK
+    with sqlite3.connect(tmp_path / "test.db") as db:
+        stored = [row[0] for row in db.execute("SELECT args_json FROM runs")]
+    assert len(stored) == 2
+    assert all("<secret>" in args and key not in args for args in stored)
+
+
+@pytest.mark.parametrize(
+    "args,problem",
+    [
+        ((), "but not both"),
+        (("cd" * 64, "--from", "node.key"), "but not both"),
+        (("not-a-key",), "hex digits only"),
+        (("cd" * 40,), "This one has 40"),
+        (("--from", "no-such-file"), "no-such-file"),
+    ],
+    ids=["no-key", "two-keys", "not-hex", "wrong-length", "no-file"],
+)
+def test_import_key_refuses_a_key_that_is_not_one(run, args, problem) -> None:  # noqa: ANN001
+    """A bad key is a bad argument: a usage error, before anything goes to the device."""
+    result = run("config", "import-key", *args, "--yes")
+    assert result.exit_code == exitcodes.USAGE
+    assert result.stdout == ""
+    assert problem in " ".join(result.stderr.split())
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Windows has no owner-only mode bits")
+def test_export_key_writes_a_file_for_the_owner_only(run, tmp_path: Path) -> None:  # noqa: ANN001
+    """The file holds a private key, so nobody else on the machine can read it."""
+    path = tmp_path / "node.key"
+    assert run("config", "export-key", "--out", str(path)).exit_code == exitcodes.OK
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 @pytest.mark.parametrize(
