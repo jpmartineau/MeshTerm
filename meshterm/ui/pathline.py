@@ -17,8 +17,7 @@ surface that the survey found can in the end use it.
   look, and each seam uses one cell. The label of the chip of a node has the hue that
   comes from its hash (:func:`~meshterm.ui.theme.node_style`). This is the colour that its
   name has on each surface. The fill is that hue, but darker (:data:`CHIP_LIGHTNESS`). Our
-  node is the ``★`` of the map, in the hue of our key, on a neutral dark grey. A faded hop
-  is dark slate. A
+  node is the white ``★`` of the map on a neutral dark grey. A faded hop is dark slate. A
   keyless hop is light grey on grey. (On the 16-colour console of the PicoCalc, the fill
   is the dim twin of the hue. Refer to :func:`_slot_colours`.)
 
@@ -88,7 +87,7 @@ surface that the survey found can in the end use it.
   ``★`` of the app. The user already knows who both ends are, and the cells are for the
   hops that *are* news. These stars fade where the route is being *composed*, because our
   two ends are fixtures and not choices. A surface that only *shows* a walk passes
-  ``dim_self=False`` and keeps our stars in our hue.
+  ``dim_self=False`` and keeps our stars in the ``you`` white.
 
 The existing call sites still render through ``path_text``. A separate pass for each
 surface will move them here. The insertion cursor of the composer is a hop in its own
@@ -141,15 +140,8 @@ POWERLINE_ROUND_CLOSE = ""
 #: Our node, where a surface asks for it without its name and hash (``bare_self``): the
 #: ``★`` of the app. It is the map's own marker, taken from
 #: :data:`~meshterm.ui.marks.SELF_MARK`. Thus the star in a route and the star on the map
-#: can never be different, in glyph or in hue. The hue is a theme name, the hue of our key
-#: (refer to :func:`~meshterm.ui.theme.set_self_key`). A chip resolves it at each paint
-#: (:func:`_self_ink`).
-SELF_GLYPH, _SELF_STYLE = SELF_MARK
-
-
-def _self_ink() -> str:
-    """The colour of our ``★`` as ``#rrggbb``, for the ink of a chip (the hue of our key)."""
-    return _style_hex(_SELF_STYLE) or "#facc15"
+#: can never be different, in glyph or in colour: the white of ``you``.
+SELF_GLYPH = SELF_MARK[0]
 
 
 #: The insertion cursor of the composer. It stands in the route as a hop of its own: the
@@ -305,9 +297,9 @@ class PathHop:
             comes from the hash (its first byte, so each prefix gives the same hue).
             ``None`` renders muted and grey, because colour is only for identities that
             have a key.
-        you: Our node. Arrows draw our name in the pure-white ``you`` style, and our ``★``
-            in the hue of our key. Chips draw the star in that hue on the neutral dark grey
-            :data:`_YOU_BG`, with padding like each other chip.
+        you: Our node. Arrows draw it in the pure-white ``you`` style. Chips draw the white
+            ``★`` on the neutral dark grey :data:`_YOU_BG`, with padding like each other
+            chip.
         annotation: The hash note for traces. It is rendered ``" (3d)"`` after the label in
             both modes (pass the bare ``3d``, without parentheses).
         lit_bytes: For a hash label: the leading *bytes* that are drawn in the hue (the two
@@ -1039,9 +1031,7 @@ class PathLine:
         elif hop.style:
             text.append(hop.label, style=hop.style)
         elif hop.you:
-            # Our star has the hue of our key, as on the map. Our name stays the white of
-            # ``you``.
-            text.append(hop.label, style=_SELF_STYLE if hop.label == SELF_GLYPH else "you")
+            text.append(hop.label, style="you")
         elif hop.key and hop.lit_bytes > 0:
             split = hop.lit_bytes * 2  # the two tones of highlighted_hash, in hex digits
             text.append(hop.label[:split], style=node_style(hop.key))
@@ -1198,9 +1188,9 @@ class PathLine:
         Each chip has padding on both sides, also the ``★`` (JP, 2026-08-09). The pads are
         not there to make room for a long *word*. They are the chip's own shape. A star
         that is squeezed between two chevrons reads as a glyph that is wedged into the seam,
-        and not as a segment of the route. The ink of our chip is the colour of the star of
-        the map, the hue of our key, on the neutral dark grey :data:`_YOU_BG`. Thus the star
-        in the line and the star on the map read as one mark.
+        and not as a segment of the route. The ink of our chip is the white of the star of
+        the map, on the neutral dark grey :data:`_YOU_BG`. Thus the star in the line and the
+        star on the map read as one mark.
 
         The colours come from the palette of the platform (:func:`_colours_of`).
         """
@@ -1253,8 +1243,7 @@ def _spectrum_colours(hop: PathHop) -> _ChipColours:
     if hop.white_ink and hue:
         return _ChipColours(_chip_fill(hue), _WHITE, _WHITE)
     if hop.you:
-        ink = _self_ink()
-        return _ChipColours(_YOU_BG, ink, ink)
+        return _ChipColours(_YOU_BG, _WHITE, _WHITE)
     if hue:
         return _ChipColours(_chip_fill(hue), hue, hue)
     if hop.quiet:
@@ -1293,8 +1282,7 @@ def _slot_colours(hop: PathHop) -> _ChipColours:
     if hop.dim:
         return _ChipColours(_SLOT_PAGE, _SLOT_FAINT, _SLOT_FAINT)
     if hop.you:
-        ink = _self_ink()
-        return _ChipColours(_SLOT_PAGE, ink, ink)
+        return _ChipColours(_SLOT_PAGE, _SLOT_WHITE, _SLOT_WHITE)
     hue = _style_hex(node_style(hop.key)) if hop.key else None
     ink = hue if hue in DIM_TWIN else _SLOT_WHITE
     if hop.white_ink and hue:
@@ -1361,7 +1349,7 @@ def path_line(
     rules). Thus a call site changes builders and does not change what it says. A named hop
     reads ``Name`` (with ``show_hash`` it is ``Name (3d)``). An unnamed hop is its hash in
     the grey for an unknown node (colour marks an identified node, as in the path graph).
-    ``None`` is our device in white, or the lone ``★`` in our hue with ``bare_self``. ``dim_from``
+    ``None`` is our device in white, or the lone ``★`` with ``bare_self``. ``dim_from``
     fades a resolved tail. The plain rendering is identical to ``path_text`` in characters
     and in style. What the change gives is the shapes of :class:`PathLine` (ellipsized and
     wrapped) and the powerline mode.

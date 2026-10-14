@@ -775,14 +775,13 @@ class ChatScreen(Screen):
         is marked as the reply target (the same as the ``❯`` pointer and the highlight of
         the select screen).
 
-        A message that mentions our name has a mark at the left of its time: the ``★``,
-        in the hue of our key (refer to :func:`~meshterm.ui.widgets.mention_mark`, JP,
+        A message that mentions our name has a mark at the left of its time: the white
+        ``★`` of our node (refer to :func:`~meshterm.ui.widgets.mention_mark`, JP,
         2026-10-13). The chip of the mention in the body has our white label, but no star
-        (refer to
-        :func:`~meshterm.ui.widgets.mention_hop`). Thus the mark of a message that names us
-        is in one column, where the eye finds it when it goes down the transcript. Each time
-        has the two cells of that column in front of it, so that all the times stay in one
-        column too.
+        (refer to :func:`~meshterm.ui.widgets.mention_hop`). Thus the mark of a message that
+        names us is in one column, where the eye finds it when it goes down the transcript.
+        Each time has the two cells of that column in front of it, so that all the times stay
+        in one column too.
 
         A URL is never cut where the screen can hold it. A URL that is too long for the
         body lane moves out to the column after the ``❯``, on its own line (refer to
@@ -856,7 +855,7 @@ class ChatScreen(Screen):
         Thus the user sees that a mention belongs to the node that it names. The text
         around the mentions keeps the base style of the line (``cursor`` when the message
         is the selected reply target, or else no style). A mention of our own name has our
-        chip, in white, and the line has a ``★`` in our hue at the left of its time
+        chip, in white, and the line has our white ``★`` at the left of its time
         (refer to :meth:`_body_lines`). Thus a message that names us is easy to see.
 
         The chip opens on the notch, because the node that a mention names is the

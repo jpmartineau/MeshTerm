@@ -780,10 +780,10 @@ async def test_a_board_row_spends_its_cells_on_the_walk(tui_ctx) -> None:
         assert "2 nodes" in row  # the score, in the unit of the discipline
         assert row.count("★") == 2  # our two ends, bare: the row does not name us twice
         assert "Homestead" not in row  # …so the device name is not on the line
-        # Also, those ends are us, in the colour of our star. We compose nothing here, so
+        # Also, those ends are us, in the white of "you". We compose nothing here, so
         # there is no "not yours" fade to use.
         stars = [s for s in label.spans if row[s.start : s.end] == "★"]
-        assert [str(s.style) for s in stars] == ["you.mark", "you.mark"]
+        assert [str(s.style) for s in stars] == ["you", "you"]
         assert "3d" in row and "f2" in row  # the hops, at the hash width of the record
         # The lanes before the walk keep to what they must show: a score lane with the width
         # of the widest score of this board (no dead padding), and the day without the minute

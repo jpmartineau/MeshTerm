@@ -40,7 +40,6 @@ from meshterm.ui.pathline import (
     WRAP_OFFSET,
     PathHop,
     PathLine,
-    _self_ink,
     _style_hex,
     cut_mark,
     cut_to,
@@ -927,12 +926,12 @@ def test_bare_self_stands_us_on_a_star_and_fades_both_ends() -> None:
     assert all(line.cell_len <= 28 for line in lines)
 
 
-def test_bare_self_keeps_us_in_our_hue_where_nothing_is_composed() -> None:
+def test_bare_self_keeps_us_in_the_you_white_where_nothing_is_composed() -> None:
     """``dim_self=False`` makes the stars not muted: the fade means "not for you to compose".
 
     A surface that only *shows* a walk (the boards and the record card of the Trophy case)
-    composes nothing. Thus there is no "not yours" to say, and our star has the colour of
-    our star in other places (``you.mark``, the hue of our key). A
+    composes nothing. Thus there is no "not yours" to say, and our node reads in the ``you``
+    white of the app. This is the same colour that our star has in other places. A
     ``dim_from`` that reaches a star still fades it, so a mirrored return leg keeps its grey
     in both cases.
     """
@@ -941,15 +940,15 @@ def test_bare_self_keeps_us_in_our_hue_where_nothing_is_composed() -> None:
         hops, prefix_bytes=2, self_name="Me", bare_self=True, dim_self=False, mode="plain"
     ).text()
     stars = [s for s in text.spans if text.plain[s.start : s.end] == SELF_GLYPH]
-    assert [str(s.style) for s in stars] == ["you.mark", "you.mark"]
-    # In chips the same identity is the star of the map on the neutral dark grey. The fill
-    # is not a hue, because our end is a fixture and not a node that the user must tell
-    # from other nodes.
+    assert [str(s.style) for s in stars] == ["you", "you"]
+    # In chips the same identity is the white star of the map on the neutral dark grey. The
+    # fill is not a hue, because our end is a fixture and not a node that the user must
+    # tell from other nodes.
     chips = path_line(
         hops, prefix_bytes=2, self_name="Me", bare_self=True, dim_self=False, mode="powerline"
     ).text()
     fills = [str(s.style) for s in chips.spans if chips.plain[s.start : s.end] == SELF_GLYPH]
-    assert fills == [f"bold {_self_ink()} on {_YOU_BG}"] * 2
+    assert fills == [f"bold #ffffff on {_YOU_BG}"] * 2
 
     # The explicit fade still wins: a star inside a dimmed return leg stays grey.
     faded = path_line(
@@ -962,7 +961,7 @@ def test_bare_self_keeps_us_in_our_hue_where_nothing_is_composed() -> None:
         mode="plain",
     ).text()
     tail = [s for s in faded.spans if faded.plain[s.start : s.end] == SELF_GLYPH]
-    assert [str(s.style) for s in tail] == ["you.mark", "faint"]
+    assert [str(s.style) for s in tail] == ["you", "faint"]
 
 
 def test_action_mark_rides_outside_the_width_budget() -> None:

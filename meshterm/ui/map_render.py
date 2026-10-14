@@ -839,7 +839,7 @@ def _draw_nodes(
 
     # A node that the filter removes is context: a bare dim glyph with no label. Labels get
     # the name hue of the node, which comes from its key (the colour rule for all the app).
-    # The label of our node is the pure ``you`` white (the ★ glyph keeps our hue). An
+    # The label of our node is the pure ``you`` white, the same as the ★ glyph. An
     # active find filter still makes the label of each match full white, so that the node
     # that the user looks for is easy to see.
     from .widgets import name_rgb  # widgets imports this module, so bind late to avoid the cycle

@@ -716,8 +716,8 @@ def self_chip(name: str | None, key: str | None, *, role: str | None = None) -> 
     PicoCalc draws the same pair, white on the dim twin of our hue.
 
     A mention of our name is a different mark (refer to :func:`mention_chip`). The chip is
-    the same white on our fill, but it has no star. The message that names us has a ``★``
-    in our hue at the left of its time (refer to :func:`mention_mark`).
+    the same white on our fill, but it has no star. The message that names us has our
+    white ``★`` at the left of its time (refer to :func:`mention_mark`).
 
     Our node with no name or no key (the device did not report them) keeps the bare ``★``
     chip of a route.
@@ -736,15 +736,15 @@ def self_chip(name: str | None, key: str | None, *, role: str | None = None) -> 
 
 
 def mention_mark(key: str | None) -> Text:
-    """The mark of a message that names us: the ``★`` of the app, in the hue of our key.
+    """The mark of a message that names us: the white ``★`` of our node.
 
     The chat puts it at the left of the time of each message that mentions our name, and
     the Messages list puts it at the left of the age of a row whose last message does (JP,
-    2026-10-13). The hue is the colour of our name, the same colour as the chip that the
-    mention has in the body, so the eye joins the two. It is the same on each platform, and
-    with chips or without them. JP tried the yellow star of the map, the notch and the point
-    of our chip, and the point alone, and kept this one. It is the star of our node in the
-    rest of the app too (:data:`~meshterm.ui.marks.SELF_MARK`).
+    2026-10-13). It is the star of our node in the rest of the app
+    (:data:`~meshterm.ui.marks.SELF_MARK`), white, the same as the label of the chip that
+    the mention has in the body. It is the same on each platform, and with chips or
+    without them. JP tried the yellow star of the map, the notch and the point of our chip,
+    the point alone, and the star in our hue, and kept this one (2026-10-14).
 
     Args:
         key: Our public key. With ``None``, the star has the keyless grey, the same as the
@@ -1112,7 +1112,7 @@ def stats_panel(
 
 
 # The glyphs and colours of the node types. They are the same as the marker palette of the
-# map in the whole app (refer to ui.map_render). Our node is the ``★`` in our hue, plain nodes
+# map in the whole app (refer to ui.map_render). Our node is the white ``★``, plain nodes
 # are the loud pink ``●``, and repeaters are the calmer violet ``▲``. The other types have
 # hues that are safe on the map and different from those: a white square for rooms (the
 # house glyph was difficult to read) and an orange dot with a ring for sensors. All are
@@ -1145,7 +1145,7 @@ def node_marker(node_type: int | None) -> tuple[str, RGB]:
 
 
 def self_marker() -> tuple[str, RGB]:
-    """The map marker of our node, the ``★`` in our hue, as a ``(glyph, rgb)`` pair."""
+    """The map marker of our node, the white ``★``, as a ``(glyph, rgb)`` pair."""
     return SELF_MARK[0], mark_rgb(SELF_MARK[1])
 
 

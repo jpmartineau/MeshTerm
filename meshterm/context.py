@@ -51,18 +51,6 @@ if TYPE_CHECKING:
     from .ui.surface import Ui
 
 
-def _publish_self_key(info: dict) -> None:
-    """Give the theme our key from a new self-info, so that our star takes our hue.
-
-    The device-state cache calls this after each read (refer to
-    :attr:`~meshterm.services.device_state.DeviceState.on_self_info`). The context makes
-    the connection, because the services do not import the UI.
-    """
-    from .ui.theme import set_self_key
-
-    set_self_key(str(info.get("public_key") or "") or None)
-
-
 @dataclass(slots=True)
 class AppContext:
     """The shared services and the state of one run, which MeshTerm gives to tools.
@@ -517,7 +505,6 @@ class AppContext:
             from .services.device_state import DeviceState
 
             self._devstate = DeviceState(self)
-            self._devstate.on_self_info = _publish_self_key
         return self._devstate
 
     @property

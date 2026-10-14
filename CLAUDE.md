@@ -417,16 +417,13 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
 
 - Status marks (single-width, themed): `✓` ok · `✗` err · `⚠`/`?` warn · `●` unread/
   unacked (err) · `○` acked/empty (muted). Never `✔`, `✖`, `✅`, `❌` as status.
-- Node types (shared with the map): `★` you (our key's hue) · `●` companion · `▲`
-  repeater · `■` room server · `◉` sensor · `○` unknown.
-- **Our `★` is our key's hue, everywhere** (JP, 2026-10-13): map, routes, lists,
-  legends, chat. `marks.SELF_MARK` carries the theme name `you.mark`, never a hex, and
-  `theme.set_self_key` writes `node_style(our key)` into it when the device reports the
-  key (`DeviceState.on_self_info` → `context._publish_self_key`; the services never
-  import the UI). One call recolours every surface; the render cache keys on
-  `theme.style_generation()` so no stale bytes survive. Until the key is known (and with
-  no device, as in `specimen`) it is the map's old yellow. A star something *mutes* keeps
-  its grey — a faded hop, a dimmed return leg — and our name stays the `you` white.
+- Node types (shared with the map): `★` you (white) · `●` companion · `▲` repeater ·
+  `■` room server · `◉` sensor · `○` unknown.
+- **Our `★` is white, everywhere** (JP, 2026-10-14): map, routes, lists, legends, chat.
+  `marks.SELF_MARK` carries the theme name `you` — the white of our name — so the console
+  picks its own white, and a raster resolves it through `mark_rgb`. It was the map's
+  yellow, then briefly our key's hue (set from the self-info at run time), and both were
+  dropped. A star something *mutes* keeps its grey — a faded hop, a dimmed return leg.
 - Path cuts: a path line drawn as **chips** that gets cut — a lane that ran out, a row
   scrolled past its edge — breaks the chip off on a half block in that chip's own fill
   (`▐` ends a line, `▌` opens one; `pathline.cut_mark`/`cut_to`), so half the cell is
@@ -437,8 +434,8 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   origin and destination, never the first and last *relay*. Our own end is always the
   app-wide `★` (`pathline.SELF_GLYPH`, taken straight from `marks.SELF_MARK`), never our
   name: the one node the reader never has to be told, and the cells belong to the hops
-  that differ from row to row. As a chip it is the map's star, in our hue, on neutral
-  dark grey, padded like every other chip.
+  that differ from row to row. As a chip it is the map's white star on neutral dark
+  grey, padded like every other chip.
 - **A path chip is the node's name colour on a darker ground of itself.** The label is the
   hue `node_style` gives the name on every other surface, so a node is one colour in a
   list, in arrows and in a chip; the fill is that hue at `pathline.CHIP_LIGHTNESS` of its
@@ -496,11 +493,10 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   pair, white on the hue's dim twin. Our **sender** chip is `★ Name`
   (`widgets.self_chip`), the star in the white label; the star on the page right of the
   chip was tried and put back (JP, 2026-10-13). A **mention** of us is the same chip
-  with no star
-  (`mention_chip(you=True)`); the message carrying it gets **a `★` in our key's hue**
-  left of its time instead (`widgets.mention_mark`, the same on every platform and in
-  arrow mode). The map's yellow star, the chip's notch-and-point pair and its point alone
-  were all tried there and dropped (JP, 2026-10-13). Every time sits two cells right to
+  with no star (`mention_chip(you=True)`); the message carrying it gets **our white
+  `★`** left of its time instead (`widgets.mention_mark`, the same on every platform and
+  in arrow mode). The map's yellow star, the chip's notch-and-point pair, its point alone
+  and a star in our hue were all tried there and dropped (JP, 2026-10-13/14). Every time sits two cells right to
   keep the column (`❯`, a space, the star, a space, then `12:34  body`), and the Messages
   list puts the star left of the row's age. Arrow mode draws the chip as a padded block
   in the same pair. With no name or key from the device, the bare `★` chip stays. Path
