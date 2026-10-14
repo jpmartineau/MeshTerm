@@ -484,16 +484,15 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   but a chat is a conversation between names, so our sender chip and every mention of our
   name wear our name on the chip of *our key's hue, turned over* — dark ink on a light
   fill of the hue (`PathHop.inverse`, the same pair as any chip in the other order), the
-  one light chip among the senders. **The `★` never sits inside that chip** (a yellow star
-  measured under 3:1 on the light fill for 238 of 256 hues, and in the chip's dark ink it
-  read as part of the name; JP, 2026-10-13): our sender chip is `Name ★`, the map's
-  yellow star on the page one cell right of the chip (`widgets.self_chip`); a mention of
-  us is the turned-over chip alone (`mention_chip(you=True)`), and the message carrying
-  it gets the `★` in the two cells left of its time (`❯ ★ 12:34  body` — every time sits
-  two cells right to keep the column; the Messages list puts it left of the row's age).
-  Arrow mode draws the chip as a padded reverse-video block. The PicoCalc can't put a
-  bright slot behind text, so there the chip keeps the normal colours and the `★` alone
-  marks us. With no name or key from the device, the bare `★` chip stays. Path lines
+  one light chip among the senders. Our **sender** chip is `★ Name` (`widgets.self_chip`),
+  the star in the chip's dark ink: a yellow star measured under 3:1 on the light fill for
+  238 of 256 hues, and the star on the page right of the chip was tried and put back (JP,
+  2026-10-13). A **mention** of us is the turned-over chip with no star
+  (`mention_chip(you=True)`); the message carrying it gets the `★` in the two cells left
+  of its time instead (`❯ ★ 12:34  body` — every time sits two cells right to keep the
+  column; the Messages list puts it left of the row's age). Arrow mode draws the chip as
+  a padded reverse-video block. The PicoCalc can't put a bright slot behind text, so
+  there the chip keeps the normal colours and the `★` alone marks us. With no name or key from the device, the bare `★` chip stays. Path lines
   (delivery paths, the packet viewer, routes) keep `★`.
 - **The compose line draws a mention as its chip** (`ui/compose.py`, `MentionEditor`): the
   moment `]` completes an `@[Name]` token it renders as the same chip the transcript will

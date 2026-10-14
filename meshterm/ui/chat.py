@@ -729,10 +729,9 @@ class ChatScreen(Screen):
         chip of a path line (refer to :func:`~meshterm.ui.widgets.name_chip`). Thus a
         sender looks exactly like that node as a hop in a route.
 
-        Our messages are the exception. They go under our name, on a chip that is turned
-        over, with the ``★`` to the right of the chip (refer to
-        :func:`~meshterm.ui.widgets.self_chip`). A route shows our end as the bare ``★``,
-        but a chat is a conversation between names.
+        Our messages are the exception. They go under our name, as ``★ Name`` on a chip
+        that is turned over (refer to :func:`~meshterm.ui.widgets.self_chip`). A route
+        shows our end as the bare ``★``, but a chat is a conversation between names.
         Our chip comes from the direction of the message (``outbound``), not from the
         ``"you"`` label. Thus a remote sender with the name ``you`` still gets the hue of
         its key, and does not look like our node.

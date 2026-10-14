@@ -352,7 +352,7 @@ def test_name_chip_draws_us_as_the_star_never_as_our_name(powerline) -> None:
 
 
 def test_self_chip_is_the_chip_of_our_key_turned_over(powerline) -> None:
-    """In a chat, our messages go under our name, dark on a light fill of our hue.
+    """In a chat, our messages go under ``★ Name``, dark on a light fill of our hue.
 
     The two colours are those of the chip of our key, in the other order. Thus the contrast
     stays the same, and it is the one light chip among the senders (JP, 2026-10-13).
@@ -361,18 +361,9 @@ def test_self_chip_is_the_chip_of_our_key_turned_over(powerline) -> None:
     ours = self_chip("Me", "5e7f", role=ORIGIN)
     theirs = name_chip("Me", "5e7f", role=ORIGIN)
 
-    ink, normal = _span_style(ours, "Me"), _span_style(theirs, "Me")
+    assert "★ Me" in ours.plain  # the star in the chip, in its dark ink
+    ink, normal = _span_style(ours, "★ Me"), _span_style(theirs, "Me")
     assert (ink.color.name, ink.bgcolor.name) == (normal.bgcolor.name, normal.color.name)
-
-
-def test_self_chip_puts_the_star_on_the_page_after_the_chip(powerline) -> None:
-    """The ``★`` is to the right of our chip, in the yellow of the map (JP, 2026-10-13)."""
-    powerline(True)
-    ours = self_chip("Me", "5e7f", role=ORIGIN)
-
-    assert ours.plain == name_chip("Me", "5e7f", role=ORIGIN).plain + " ★"
-    star = next(s for s in ours.spans if ours.plain[s.start : s.end] == "★")
-    assert str(star.style) == "type.you"  # the yellow of the map, on the page
 
 
 def test_self_chip_is_a_block_in_reverse_video_without_powerline(powerline) -> None:
@@ -380,8 +371,8 @@ def test_self_chip_is_a_block_in_reverse_video_without_powerline(powerline) -> N
     powerline(False)
     chip = self_chip("Me", "5e7f")
 
-    assert chip.plain == " Me  ★"
-    style = _span_style(chip, " Me ")
+    assert chip.plain == " ★ Me "
+    style = _span_style(chip, " ★ Me ")
     assert style.reverse and style.color.name == node_style("5e7f").removeprefix("bold ")
 
 

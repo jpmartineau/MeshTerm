@@ -1055,10 +1055,10 @@ def _preview_text(
 
     It is the same as the live transcript:
 
-    - Our own messages start with our name on a chip that is turned over, with the ``★``
-      after it (refer to :func:`~meshterm.ui.widgets.self_chip`). A mention of our name
-      has the chip that is turned over, with no star. The star of a message that names us
-      is at the left of the age of the row (refer to :func:`_title`).
+    - Our own messages start with our chip, ``★ Name`` turned over (refer to
+      :func:`~meshterm.ui.widgets.self_chip`). A mention of our name has the chip that is
+      turned over, with no star. The star of a message that names us is at the left of the
+      age of the row (refer to :func:`_title`).
     - In a received channel message, the inline ``Name:`` sender is the author, in the hue
       that comes from its key (the node grey when no known node has the name).
     - A room post starts with its author, named by key in the same way as the room screen

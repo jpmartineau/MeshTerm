@@ -448,9 +448,8 @@ def test_preview_prefixes_own_messages_only() -> None:
     assert _preview_text(dm_in, _NO_KEYS).plain == "hey"
     mine = ChatMessage(text="yo", outbound=True, is_channel=True, channel_idx=0)
     assert _preview_text(mine, _NO_KEYS).plain == "you: yo"  # our node with no name
-    # With our name, the preview shows our chat chip (a padded block in reverse video),
-    # then the star.
-    assert _preview_text(mine, _NO_KEYS, us=("Me", _OUR_KEY)).plain == " Me  ★ yo"
+    # With our name, the preview shows our chat chip: a padded block in reverse video.
+    assert _preview_text(mine, _NO_KEYS, us=("Me", _OUR_KEY)).plain == " ★ Me  yo"
 
 
 def test_preview_colours_channel_sender_and_mentions() -> None:
@@ -475,9 +474,9 @@ def test_preview_draws_the_author_and_the_mentions_as_the_transcript_does(powerl
     """With chips, the author closes on the point and a mention opens on the notch.
 
     The point says what the colon said, so the chip has no colon, and a mention chip has
-    no ``@``. Our own author is our name and then the ``★``, as the sender chip of our
-    messages in the transcript. A mention of our name has no star. With no name for our
-    node, the bare ``★`` stays.
+    no ``@``. Our own author is ``★ Name``, as the sender chip of our messages in the
+    transcript. A mention of our name has no star. With no name for our node, the bare
+    ``★`` stays.
     """
     from meshterm.ui.pathline import POWERLINE_ROUND_CLOSE, POWERLINE_ROUND_OPEN, POWERLINE_SEP
 
@@ -489,7 +488,7 @@ def test_preview_draws_the_author_and_the_mentions_as_the_transcript_does(powerl
     mine = ChatMessage(text="yo", outbound=True, is_channel=True, channel_idx=0)
     assert _preview_text(mine, _NO_KEYS).plain == f"{POWERLINE_ROUND_OPEN} ★ {POWERLINE_SEP} yo"
     us = ("Me", _OUR_KEY)
-    ours = f"{POWERLINE_ROUND_OPEN} Me {POWERLINE_SEP} ★ yo"
+    ours = f"{POWERLINE_ROUND_OPEN} ★ Me {POWERLINE_SEP} yo"
     assert _preview_text(mine, _NO_KEYS, us=us).plain == ours
     named = ChatMessage(text="Bob: hi @[Me]", is_channel=True, channel_idx=0)
     me = POWERLINE_SEP + " Me " + POWERLINE_ROUND_CLOSE
@@ -1222,8 +1221,8 @@ def test_channel_transcript_groups_by_sender() -> None:
     rendered = _strip_ansi("\n".join(screen._render_grouped(80)))
 
     assert rendered.count("Alice") == 1  # the two Alice messages share one header
-    # The header of our group is our name, then the ★ (JP, 2026-10-13), not the bare ★.
-    assert "Bob" in rendered and " Me  ★" in rendered
+    # The header of our group is our name after the ★ (JP, 2026-10-13), not the bare ★.
+    assert "Bob" in rendered and "★ Me" in rendered
     assert "hi" in rendered and "again" in rendered  # the bodies are there, without the prefix
     assert "Alice: hi" not in rendered  # the raw name prefix moved into the header
     # Each message keeps its own timestamp on its line, also when grouped under one sender.
@@ -1529,7 +1528,7 @@ def test_channel_self_style_keyed_on_concept_not_label() -> None:
     theirs = ChatMessage(text="you: hi", is_channel=True, channel_idx=0)
     mine = _channel_screen([], self_name="Me", self_key=_OUR_KEY)
     turned = f"{node_style(_OUR_KEY)} reverse"
-    assert _ink(mine._group_header("you", ours), " Me ") == turned  # our name, turned over
+    assert _ink(mine._group_header("you", ours), " ★ Me ") == turned  # our name, turned over
     screen = _channel_screen([])
     assert _ink(screen._group_header("you", ours), "★") == "you"  # no name: the white star
     assert _ink(screen._group_header("you", theirs), "you") == "node.unknown"  # no key: grey
@@ -1550,8 +1549,8 @@ def test_channel_own_messages_do_not_merge_with_remote_namesake() -> None:
     screen = _channel_screen(messages, self_name="Me", self_key=_OUR_KEY)
     rendered = _strip_ansi("\n".join(screen._render_grouped(80)))
     # Two headers, and they are not only apart: theirs is the name that they sent, ours is
-    # our name, then the ★.
-    assert rendered.count("you") == 1 and rendered.count(" Me  ★") == 1
+    # our name after the ★.
+    assert rendered.count("you") == 1 and rendered.count("★ Me") == 1
 
 
 def test_a_blank_line_closes_each_author_where_the_rows_allow(

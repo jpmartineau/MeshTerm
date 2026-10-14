@@ -684,17 +684,17 @@ def name_chip(
 
 
 def self_chip(name: str | None, key: str | None, *, role: str | None = None) -> Text:
-    """Our node as the sender in a chat: ``Name ★``, a chip that is turned over, then the star.
+    """Our node as the sender in a chat: ``★ Name``, on the chip of our key, turned over.
 
     A chat (a channel, a direct chat, a room) names each sender, and our node too. A route
     shows our end as the bare ``★``, because the user never has to be told who that is. A
     chat is a conversation between names, so our messages go under our name (JP,
-    2026-10-13). Two things make it different from the name of each other node. The chip
-    is turned over: the other senders are a light hue on a dark fill, and ours is dark on a
-    light fill of our hue. Also, the ``★`` of the app is on the page to the right of the
-    chip, in the yellow of the map (JP, 2026-10-13). In the chip, the star had the dark
-    ink of the chip. The console of the PicoCalc cannot draw a light background, so there
-    the chip keeps the colours of each other chip and the star alone marks us (refer to
+    2026-10-13). Two things make it different from the name of each other node. The ``★``
+    of the app comes first, in the dark ink of the chip. Also, the chip is turned over: the
+    other senders are a light hue on a dark fill, and ours is dark on a light fill of our
+    hue. A star on the page to the right of the chip was tried, and JP put it back in the
+    chip (2026-10-13). The console of the PicoCalc cannot draw a light background, so
+    there the chip keeps the colours of each other chip and the ``★`` marks us (refer to
     :attr:`~meshterm.ui.pathline.PathHop.inverse`).
 
     A mention of our name is a different mark (refer to :func:`mention_chip`). The chip is
@@ -710,15 +710,11 @@ def self_chip(name: str | None, key: str | None, *, role: str | None = None) -> 
         role: :data:`ORIGIN`, :data:`DESTINATION`, or ``None``, as for :func:`name_chip`.
 
     Returns:
-        The chip and the star as a one-line :class:`Text`.
+        The chip as a one-line :class:`Text`.
     """
     if not name or not key:
         return name_chip("", you=True, role=role)
-    line = Text()
-    line.append_text(hop_chip(PathHop(name, key=key, inverse=True), role=role))
-    line.append(" ")
-    line.append(SELF_MARK[0], style="type.you")
-    return line
+    return hop_chip(PathHop(f"{SELF_GLYPH} {name}", key=key, inverse=True), role=role)
 
 
 def mention_hop(name: str, key: str | None, *, you: bool = False) -> PathHop:
