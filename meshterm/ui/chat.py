@@ -33,7 +33,6 @@ from ..core.models import ChatMessage, Contact, Conversation, Message, utcnow
 from ..core.regions import WILDCARD
 from ..platforms import Platform, on_platform
 from .compose import MentionEditor
-from .marks import SELF_MARK
 from .pathline import PATH_INK, PathHop
 from .qr import QrScreen, qr_strip
 from .theme import snr_style
@@ -45,7 +44,15 @@ from .tui.prompt import (
 from .tui.render import render_hanging, render_lines, right_aligned_tail
 from .tui.screen import CANCEL, Screen
 from .tui.spinner import Spinner, spinner_interval
-from .widgets import DESTINATION, ORIGIN, hop_chip, mention_hop, name_chip, self_chip
+from .widgets import (
+    DESTINATION,
+    ORIGIN,
+    hop_chip,
+    mention_hop,
+    mention_mark,
+    name_chip,
+    self_chip,
+)
 
 if TYPE_CHECKING:
     from ..context import AppContext
@@ -69,7 +76,7 @@ _WORD = re.compile(r"\S+")
 
 #: The column where a URL starts when it is too long to hang under its body: the column
 #: after the ``❯`` that is in front of the first line of the selected message. A message
-#: that names us has its ``★`` in this column, and the timestamp follows it.
+#: that names us has its mark in this column, and the timestamp follows it.
 _URL_GUTTER = 2
 
 #: Whether the URLs of a message are drawn as QR codes under it (``Platform.url_codes``,
@@ -768,12 +775,14 @@ class ChatScreen(Screen):
         is marked as the reply target (the same as the ``❯`` pointer and the highlight of
         the select screen).
 
-        A message that mentions our name has the ``★`` of the app at the left of its time
-        (JP, 2026-10-13). The chip of the mention in the body is turned over, but it has no
-        star (refer to :func:`~meshterm.ui.widgets.mention_hop`). Thus the star of a message
-        that names us is in one column, where the eye finds it when it goes down the
-        transcript. Each time has the two cells of that column in front of it, so that all
-        the times stay in one column too.
+        A message that mentions our name has a mark at the left of its time: the two ends
+        of our chip, in its colour, with no label (refer to
+        :func:`~meshterm.ui.widgets.mention_mark`, JP, 2026-10-13). The chip of the mention
+        in the body is turned over, but it has no star (refer to
+        :func:`~meshterm.ui.widgets.mention_hop`). Thus the mark of a message that names us
+        is in one column, where the eye finds it when it goes down the transcript. Each time
+        has the two cells of that column in front of it, so that all the times stay in one
+        column too.
 
         A URL is never cut where the screen can hold it. A URL that is too long for the
         body lane moves out to the column after the ``❯``, on its own line (refer to
@@ -789,8 +798,7 @@ class ChatScreen(Screen):
         prefix = Text()
         prefix.append("❯ " if selected else "  ", style="cursor" if selected else None)
         if self._names_us(body):
-            prefix.append(SELF_MARK[0], style="type.you")
-            prefix.append(" ")
+            prefix.append_text(mention_mark(self._self_key))
         else:
             prefix.append("  ")
         prefix.append(f"{stamp:%H:%M}  ", style="cursor" if selected else "muted")
@@ -847,8 +855,8 @@ class ChatScreen(Screen):
         Thus the user sees that a mention belongs to the node that it names. The text
         around the mentions keeps the base style of the line (``cursor`` when the message
         is the selected reply target, or else no style). A mention of our own name has our
-        chip, turned over, and the line has a ``★`` at the left of its time (refer to
-        :meth:`_body_lines`). Thus a message that names us is easy to see.
+        chip, turned over, and the line has the ends of our chip at the left of its time
+        (refer to :meth:`_body_lines`). Thus a message that names us is easy to see.
 
         The chip opens on the notch, because the node that a mention names is the
         destination of a route that came from the sender (refer to :meth:`_group_header`,
@@ -881,7 +889,7 @@ class ChatScreen(Screen):
         return mention_hop(name, self._sender_key(name, mention=True))
 
     def _names_us(self, body: str) -> bool:
-        """Whether ``body`` has a mention of our name (it gets a ``★`` before its time)."""
+        """Whether ``body`` has a mention of our name (it gets a mark before its time)."""
         if not self._self_name:
             return False
         return any(match.group(1) == self._self_name for match in MENTION.finditer(body))

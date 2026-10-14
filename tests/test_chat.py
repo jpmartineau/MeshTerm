@@ -1608,7 +1608,7 @@ def test_a_blank_line_closes_each_author_where_the_rows_allow(
 def test_a_mention_of_our_name_takes_our_chip_with_no_star(powerline) -> None:
     """The chip of a mention of us is turned over, as our sender chip, but it has no star.
 
-    The star of a message that names us is at the left of its time (refer to the next
+    The mark of a message that names us is at the left of its time (refer to the next
     test). With chips, no mention has its ``@``.
     """
     from meshterm.ui.theme import node_style
@@ -1621,8 +1621,12 @@ def test_a_mention_of_our_name_takes_our_chip_with_no_star(powerline) -> None:
     assert str(me.style).endswith(f"on {node_style(_OUR_KEY).split()[-1]}")  # a light fill
 
 
-def test_a_message_that_names_us_has_the_star_left_of_its_time() -> None:
-    """The ``★`` goes in the two cells before the time, and each time moves two cells right."""
+def test_a_message_that_names_us_has_the_mark_left_of_its_time() -> None:
+    """The mark goes in the two cells before the time, and each time moves two cells right.
+
+    The suite draws no chips, so the mark is ``>>`` in our hue (refer to the widget tests
+    for the two ends of the chip).
+    """
     from datetime import datetime, timezone
 
     at = datetime(2026, 7, 5, 14, 24, tzinfo=timezone.utc)
@@ -1633,12 +1637,12 @@ def test_a_message_that_names_us_has_the_star_left_of_its_time() -> None:
     ]
     screen = _channel_screen(messages, self_name="Me", self_key=_OUR_KEY)
     rows = _strip_ansi("\n".join(screen._render_grouped(72))).splitlines()
-    assert any(row.startswith(f"  ★ {stamp}  hi") for row in rows)
+    assert any(row.startswith(f"  >>{stamp}  hi") for row in rows)
     assert any(row.startswith(f"    {stamp}  hi") for row in rows)  # the other message
     screen.handle("up")
-    screen.handle("up")  # the first message: the pointer, then the star
+    screen.handle("up")  # the first message: the pointer, then the mark
     rows = _strip_ansi("\n".join(screen._render_grouped(72))).splitlines()
-    assert any(row.startswith(f"❯ ★ {stamp}  hi") for row in rows)
+    assert any(row.startswith(f"❯ >>{stamp}  hi") for row in rows)
 
 
 def _channel_screen(
@@ -1750,7 +1754,7 @@ def test_the_compose_line_keeps_a_chip_whole_when_it_wraps(powerline) -> None:
         assert sum(chip in line for line in lines) == 1, width
 
 
-def test_a_row_whose_last_message_names_us_has_the_star_left_of_its_age(
+def test_a_row_whose_last_message_names_us_has_the_mark_left_of_its_age(
     repo: Repository,
 ) -> None:
     """The Messages list marks the row as the transcript marks the message."""
@@ -1760,10 +1764,10 @@ def test_a_row_whose_last_message_names_us_has_the_star_left_of_its_age(
     named = ChatMessage(text="Bob: hi @[Me]", is_channel=True, channel_id="c0")
     other = ChatMessage(text="Bob: hi @[Zed]", is_channel=True, channel_id="c0")
     lanes = _lanes([conv])
-    starred = _title(ctx, conv, {"chan:c0": named}, _NO_KEYS, lanes, us=us).plain
+    marked = _title(ctx, conv, {"chan:c0": named}, _NO_KEYS, lanes, us=us).plain
     plain = _title(ctx, conv, {"chan:c0": other}, _NO_KEYS, lanes, us=us).plain
-    assert "★ now  " in starred and "★" not in plain
-    assert starred.index("now") == plain.index("now")  # the star takes a cell of the gap
+    assert ">>now  " in marked and ">>" not in plain
+    assert marked.index("now") == plain.index("now")  # the mark takes the cells of the gap
 
 
 def test_channel_typing_clears_selection() -> None:

@@ -57,7 +57,6 @@ from ..services.trace_runner import (
 )
 from ..ui import renderers
 from ..ui.fields import ChannelRef, NodeRef
-from ..ui.marks import SELF_MARK
 from ..ui.menus import Lane, column_header, fit_cells, section_heading
 from ..ui.pathline import PathHop
 from ..ui.termfont import powerline_enabled
@@ -71,6 +70,7 @@ from ..ui.widgets import (
     format_age,
     hop_chip,
     mention_chip,
+    mention_mark,
     self_chip,
 )
 from .base import Tool, ToolResult, register
@@ -986,15 +986,15 @@ def _title(
         text.append(" " * _BADGE_WIDTH)
     # The relative age lane (right-aligned) is between the badge and the message text. Thus
     # the ages are in one neat column, and all the previews start at the same position. A
-    # last message that names us has the ``★`` at the left of its age, the same as the
-    # transcript has it at the left of the time (refer to ChatScreen._body_lines).
+    # last message that names us has the ends of our chip at the left of its age, the same
+    # as the transcript has them at the left of the time (refer to ChatScreen._body_lines).
     age = _ago(last.created_at) if last is not None else ""
     lane = f"  {age:>{_AGE_WIDTH}}"
     if age and last is not None and _names_us(last, us):
-        star = len(lane) - len(age) - 2  # the star, a space, then the age
-        text.append(lane[:star])
-        text.append(SELF_MARK[0], style="type.you")
-        text.append(lane[star + 1 :], style="muted")
+        mark = len(lane) - len(age) - 2  # the two cells of the mark, then the age
+        text.append(lane[:mark])
+        text.append_text(mention_mark(us[1]))
+        text.append(age, style="muted")
     else:
         text.append(lane, style="muted")
     text.append("  ")
@@ -1057,8 +1057,8 @@ def _preview_text(
 
     - Our own messages start with our chip, ``★ Name`` turned over (refer to
       :func:`~meshterm.ui.widgets.self_chip`). A mention of our name has the chip that is
-      turned over, with no star. The star of a message that names us is at the left of the
-      age of the row (refer to :func:`_title`).
+      turned over, with no star. A message that names us has the ends of our chip at the
+      left of the age of the row (refer to :func:`_title`).
     - In a received channel message, the inline ``Name:`` sender is the author, in the hue
       that comes from its key (the node grey when no known node has the name).
     - A room post starts with its author, named by key in the same way as the room screen

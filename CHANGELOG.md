@@ -15,10 +15,10 @@ can change how things behave. It does not only add new things.
   your messages under `★` and your node's name, and the Messages list shows them in the
   same way. Your name has the colour of your key, but in reverse: dark text on a light
   fill, where each other sender has light text on a dark fill. A mention of your name has
-  the same reversed colours, and the message that has it gets a `★` at the left of its
-  time. Thus the messages that name you are easy to find down the left side of the chat.
-  On the PicoCalc, the console cannot draw a light fill, so there the `★` alone marks you.
-  Before, your messages showed only the `★`.
+  the same reversed colours, and the message that has it gets a small arrow mark in your
+  colour at the left of its time. Thus the messages that name you are easy to find down
+  the left side of the chat. On the PicoCalc, the console cannot draw a light fill, so
+  there the `★` marks your messages. Before, your messages showed only the `★`.
 - **A mention has no `@` in front of it.** The coloured box around the name already says
   that it is a mention. On a terminal that cannot draw the boxes, a mention keeps its `@`.
 - **The line where you write a message shows each mention as a box.** When you type the

@@ -173,10 +173,6 @@ MESH_THEME = Theme(
         "type.repeater": "#a78bfa",
         "type.room": "#ffffff",
         "type.sensor": "#fb923c",
-        # The ``★`` of our node where it stands alone on the page as a mark: after our name
-        # in a chat, and before the time of a message that names us. It is the yellow of
-        # the map (``marks.SELF_MARK``), with a name so that the console chooses its slot.
-        "type.you": "#facc15",
         # A region name (the scope of a flood). It is not a node, so it has no hue from the
         # node wheel. It is a light slate. Its slant makes it different from prose, as a
         # tag is different from a sentence.
@@ -416,7 +412,6 @@ MESH_THEME_16 = Theme(
         "type.repeater": "not bold color(5)",
         "type.room": "color(15)",
         "type.sensor": "not bold color(3)",
-        "type.you": "color(11)",
         # A region name: the VT has no italic, and each chromatic slot is a node hue. Thus
         # the style is the plain light grey. The word "scope" in front of it makes it
         # different from other text.

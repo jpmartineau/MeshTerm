@@ -57,7 +57,7 @@ from .marks import (
     LabelRgbOf,
     parse_hex,
 )
-from .pathline import SELF_GLYPH, PathHop, PathLine, path_line
+from .pathline import SELF_GLYPH, PathHop, PathLine, chip_ends, path_line
 from .termfont import powerline_enabled
 from .theme import glyph, mark_rgb, name_style, node_style, snr_style
 
@@ -698,8 +698,8 @@ def self_chip(name: str | None, key: str | None, *, role: str | None = None) -> 
     :attr:`~meshterm.ui.pathline.PathHop.inverse`).
 
     A mention of our name is a different mark (refer to :func:`mention_chip`). The chip is
-    turned over, but it has no star. The star of a message that names us is at the left of
-    the time of the message (refer to :meth:`~meshterm.ui.chat.ChatScreen._body_lines`).
+    turned over, but it has no star. The message that names us has the ends of our chip at
+    the left of its time (refer to :func:`mention_mark`).
 
     Our node with no name or no key (the device did not report them) keeps the bare ``★``
     chip of a route.
@@ -715,6 +715,29 @@ def self_chip(name: str | None, key: str | None, *, role: str | None = None) -> 
     if not name or not key:
         return name_chip("", you=True, role=role)
     return hop_chip(PathHop(f"{SELF_GLYPH} {name}", key=key, inverse=True), role=role)
+
+
+def mention_mark(key: str | None) -> Text:
+    """The mark of a message that names us: the two ends of our chip, with no label.
+
+    The notch, then the point, in the fill of our chip (refer to
+    :func:`~meshterm.ui.pathline.chip_ends`). The chat puts it in the two cells at the left
+    of the time of each message that mentions our name, and the Messages list puts it at
+    the left of the age of a row whose last message does (JP, 2026-10-13). It replaced a
+    ``★``. The mark has the colour of the chip that the mention has in the body, so the eye
+    joins the two. Where the terminal draws no chips, it is ``>>`` in our hue, the colour
+    that our chip has there.
+
+    Args:
+        key: Our public key, which gives the hue. With ``None``, the mark has the keyless
+            grey, the same as the chip of the mention.
+
+    Returns:
+        The mark, two cells wide.
+    """
+    if powerline_enabled():
+        return chip_ends(PathHop("", key=key or None, inverse=bool(key)))
+    return Text(">>", style=node_style(key) if key else "node.unknown")
 
 
 def mention_hop(name: str, key: str | None, *, you: bool = False) -> PathHop:
