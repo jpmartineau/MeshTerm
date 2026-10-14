@@ -1294,23 +1294,6 @@ def _bind_chips(platform: Platform) -> None:
         _colours_of, _WEIGHT, _FLAT = _slot_colours, "not bold ", "not bold "
 
 
-def chip_point(hop: PathHop) -> Text:
-    """The point of the chip of ``hop`` alone: one cell in the fill of the chip.
-
-    It is the same cell that closes a chip whose route goes on. A chat puts it at the left
-    of the time of a message that names us, in the fill of our chip (refer to
-    :func:`~meshterm.ui.widgets.mention_mark`). The colours come from the palette of the
-    platform, so the PicoCalc draws it in the fill that the chip has there.
-
-    Args:
-        hop: The hop whose chip gives the fill.
-
-    Returns:
-        The one styled cell.
-    """
-    return Text(POWERLINE_SEP, style=f"{_FLAT}{_colours_of(hop).fill}")
-
-
 def _shorten(value: str, hash_bytes: int | None) -> str:
     """Bare hex in lower case, truncated to ``hash_bytes`` bytes (whole when it is empty)."""
     raw = value.lower().removeprefix("0x")

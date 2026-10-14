@@ -57,7 +57,7 @@ from .marks import (
     LabelRgbOf,
     parse_hex,
 )
-from .pathline import SELF_GLYPH, PathHop, PathLine, chip_point, path_line
+from .pathline import SELF_GLYPH, PathHop, PathLine, path_line
 from .termfont import powerline_enabled
 from .theme import glyph, mark_rgb, name_style, node_style, snr_style
 
@@ -698,8 +698,8 @@ def self_chip(name: str | None, key: str | None, *, role: str | None = None) -> 
     :attr:`~meshterm.ui.pathline.PathHop.inverse`).
 
     A mention of our name is a different mark (refer to :func:`mention_chip`). The chip is
-    turned over, but it has no star. The message that names us has the point of our chip
-    at the left of its time (refer to :func:`mention_mark`).
+    turned over, but it has no star. The message that names us has a ``★`` in our hue at
+    the left of its time (refer to :func:`mention_mark`).
 
     Our node with no name or no key (the device did not report them) keeps the bare ``★``
     chip of a route.
@@ -718,26 +718,23 @@ def self_chip(name: str | None, key: str | None, *, role: str | None = None) -> 
 
 
 def mention_mark(key: str | None) -> Text:
-    """The mark of a message that names us: the point of our chip, alone.
+    """The mark of a message that names us: the ``★`` of the app, in the hue of our key.
 
-    One cell in the fill of our chip (refer to :func:`~meshterm.ui.pathline.chip_point`).
     The chat puts it at the left of the time of each message that mentions our name, and
     the Messages list puts it at the left of the age of a row whose last message does (JP,
-    2026-10-13). It replaced a ``★``, and then the notch and the point together, which JP
-    found too heavy. The mark has the colour of the chip that the mention has in the body,
-    so the eye joins the two. Where the terminal draws no chips, it is ``>`` in our hue,
-    the colour that our chip has there.
+    2026-10-13). The hue is the colour of our name, the same colour as the chip that the
+    mention has in the body, so the eye joins the two. It is the same on each platform, and
+    with chips or without them. JP tried the yellow star of the map, the notch and the point
+    of our chip, and the point alone, and kept this one.
 
     Args:
-        key: Our public key, which gives the hue. With ``None``, the mark has the keyless
+        key: Our public key, which gives the hue. With ``None``, the star has the keyless
             grey, the same as the chip of the mention.
 
     Returns:
         The mark, one cell wide. The caller puts a space after it.
     """
-    if powerline_enabled():
-        return chip_point(PathHop("", key=key or None, inverse=bool(key)))
-    return Text(">", style=node_style(key) if key else "node.unknown")
+    return Text(SELF_GLYPH, style=node_style(key) if key else "node.unknown")
 
 
 def mention_hop(name: str, key: str | None, *, you: bool = False) -> PathHop:

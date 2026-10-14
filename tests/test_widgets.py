@@ -8,6 +8,7 @@ time, each caller gets the correct output.
 
 from __future__ import annotations
 
+import pytest
 from rich.style import Style
 from rich.text import Text
 
@@ -399,23 +400,13 @@ def test_a_mention_of_us_is_turned_over_with_no_star(powerline) -> None:
     assert not mention_hop("Me", None, you=True).inverse  # no key: no hue to turn over
 
 
-def test_the_mark_of_a_message_that_names_us_is_the_point_of_our_chip(powerline) -> None:
-    """One cell: the point, in the fill of our chip."""
-    powerline(True)
+@pytest.mark.parametrize("chips", [True, False])
+def test_the_mark_of_a_message_that_names_us_is_a_star_in_our_hue(powerline, chips) -> None:
+    """The ``★`` in the hue of our key, with chips or without them."""
+    powerline(chips)
     mark = mention_mark("5e7f")
-    fill = _span_style(mention_chip("Me", "5e7f", you=True), "Me").bgcolor.name
-
-    assert mark.plain == POWERLINE_SEP
-    point = Style.parse(str(mark.style))
-    assert not point.reverse and point.color.name == fill
-
-
-def test_the_mark_without_chips_is_an_arrow_in_our_hue(powerline) -> None:
-    """With no chips, the mark is ``>``, in the hue that our chip has in arrow mode."""
-    powerline(False)
-    mark = mention_mark("5e7f")
-    assert mark.plain == ">" and str(mark.style) == node_style("5e7f")
-    assert str(mention_mark(None).style) == "node.unknown"
+    assert mark.plain == "★" and str(mark.style) == node_style("5e7f")
+    assert str(mention_mark(None).style) == "node.unknown"  # no key: the keyless grey
 
 
 def test_self_chip_keeps_the_bare_star_without_our_name_or_key(powerline) -> None:
