@@ -232,9 +232,12 @@ the server, in plain words (they use MeshTerm; they don't read the diff):
   the headline items only, not every line;
 - the release link, and one line on how to get it (the download page, or the README's
   install line for someone who installed that way);
+- right under the download link, a kind ask for a star on GitHub, opening on ⭐, with
+  the reason in a few words: stars give the project credibility and visibility, so more
+  MeshCore users find it;
 - Discord markdown only (`**bold**`, `- ` bullets, bare links); no headings, no tables,
-  no emoji beyond one at the start if it fits. Well under Discord's 2000 characters —
-  it should fit on a phone screen.
+  no emoji beyond one at the start if it fits and the star line's ⭐. Well under
+  Discord's 2000 characters — it should fit on a phone screen.
 
 ```
 **MeshTerm 0.10.1 is out**: three small command-line fixes.
@@ -244,6 +247,7 @@ the server, in plain words (they use MeshTerm; they don't read the diff):
 - `platform --help` and `specimen --help` read like the rest
 
 Download: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.10.1
+⭐ If you enjoy MeshTerm, please star it on GitHub: https://github.com/jpmartineau/MeshTerm. Every star gives the project more credibility and helps other MeshCore users find it. Thank you!
 ```
 
 Say who it was written for, then show it last in the reply, so it's the easiest thing to

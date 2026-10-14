@@ -208,7 +208,7 @@ jobs:
 
           ---
 
-          If MeshTerm is useful to you, please give [the repository](https://github.com/jpmartineau/MeshTerm) a ⭐. It helps other MeshCore users find it, because GitHub ranks projects by stars in its search and topic pages.
+          You ❤️ MeshTerm? Please give [the repository](https://github.com/jpmartineau/MeshTerm) a ⭐. It helps other MeshCore users find it, because GitHub ranks projects by stars in its search and topic pages. 🙏
           STAR_MD
           cat install.md notes.md star.md > body.md
           echo "--- body ---"; cat body.md
