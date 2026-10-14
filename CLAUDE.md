@@ -423,8 +423,7 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   `marks.SELF_MARK` carries the theme name `you` — the white of our name — so the console
   picks its own white, and a raster resolves it through `mark_rgb`. It was the map's
   yellow, then briefly our key's hue (set from the self-info at run time), and both were
-  dropped. In arrows, a star something *mutes* keeps its `faint` grey — a faded hop, a
-  dimmed return leg; a faded *chip* only loses chroma, and white has none to lose.
+  dropped. A star something *mutes* keeps its grey — a faded hop, a dimmed return leg.
 - Path cuts: a path line drawn as **chips** that gets cut — a lane that ran out, a row
   scrolled past its edge — breaks the chip off on a half block in that chip's own fill
   (`▐` ends a line, `▌` opens one; `pathline.cut_mark`/`cut_to`), so half the cell is
@@ -444,12 +443,8 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   merged neighbouring greens). The PicoCalc is the same rule at its resolution: the fill
   is the bright slot's dim twin (`theme.DIM_TWIN`). A hash label and an annotation are
   the label colour throughout, never a grey; on a truecolor terminal the lit bytes are
-  bold. A keyless chip is the same pair in grey; our `★` keeps its dark grey; a **faded
-  hop** (a mirrored return leg, the return home: what the user doesn't compose) is its own
-  chip at `pathline.FADE_CHROMA` of its chroma, same lightness, so it still says which node
-  it is (JP, 2026-10-14; it was one dark slate) — the PicoCalc, with no colour of less
-  chroma, keeps its label colour and drops its fill; arrows keep `faint`; the composer's
-  slot keeps the white chip (on the PicoCalc, a white `+` in a
+  bold. A keyless chip is the same pair in grey; our `★` and a faded hop keep their dark
+  greys; the composer's slot keeps the white chip (on the PicoCalc, a white `+` in a
   break of the ribbon).
 - Chip seams are **one** interlocked chevron (previous fill on next). Two chips of the
   same fill are the exception the interlock can't draw — and so are two fills the eye

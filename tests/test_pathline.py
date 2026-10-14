@@ -9,7 +9,6 @@ cells. Thus these tests assert rendered strings and span styles, and not impress
 
 from __future__ import annotations
 
-import math
 import random
 
 import pytest
@@ -22,6 +21,8 @@ from meshterm.platforms import CARDPUTER_ZERO, PICOCALC_LYRA, set_platform
 from meshterm.ui import oklab
 from meshterm.ui.fontset import FONT_CODEPOINTS
 from meshterm.ui.pathline import (
+    _DIM_BG,
+    _DIM_FG,
     _YOU_BG,
     CHIP_LIGHTNESS,
     CRACK_HEAD,
@@ -29,7 +30,6 @@ from meshterm.ui.pathline import (
     CURSOR_GLYPH,
     ELIDE_HEAD,
     ELIDE_TAIL,
-    FADE_CHROMA,
     PATH_INK,
     POWERLINE_ROUND_CLOSE,
     POWERLINE_ROUND_OPEN,
@@ -279,7 +279,7 @@ def test_the_picocalc_draws_chips_from_its_eight_backgrounds(picocalc: None) -> 
     assert at("(0a)").fg == _rgb(red)  # the annotation also has the colour of the label
     assert (at("3d").fg, at("3d").bg) == (_rgb(slot_hex(15)), _rgb(slot_hex(7)))
     assert at("Ridge").bg in (None, _rgb(slot_hex(0)))  # faded: on the page
-    assert at("Ridge").fg == _rgb(yellow)  # in the colour of its label, with no fill
+    assert at("Ridge").fg == _rgb(slot_hex(8))
     assert at(SELF_GLYPH).bg in (None, _rgb(slot_hex(0)))
 
 
@@ -856,33 +856,8 @@ def test_a_seam_between_two_of_one_colour_is_the_thin_chevron_in_its_label() -> 
         f"{_fill('aa')} on {_fill('77')}",
     )  # a blend, one cell
 
-    faded = pathline._spectrum_colours(PathHop("B", dim=True))
     glyph, style = _seams(PathHop("A", dim=True), PathHop("B", dim=True))[0]
-    assert (glyph, style) == (POWERLINE_THIN, f"{faded.ink} on {faded.fill}")
-
-
-def test_a_faded_chip_is_its_own_chip_with_less_chroma() -> None:
-    """A faded hop keeps the colours of its node, with less chroma and the same lightness.
-
-    The faded part of a route is the part that the user does not compose. Each node there
-    still has its hue, so the user can see which node it is (JP, 2026-10-14). Before, each
-    faded hop was the same dark slate chip.
-    """
-
-    def chroma(colour: str) -> float:
-        _lightness, a, b = oklab.from_hex(colour)
-        return math.hypot(a, b)
-
-    for key in ("00", "4c", "aa", None):
-        normal = pathline._spectrum_colours(PathHop("N", key=key))
-        faded = pathline._spectrum_colours(PathHop("N", key=key, dim=True))
-        for before, after in zip(normal, faded, strict=True):
-            assert after == oklab.desaturated(before, FADE_CHROMA)
-            assert abs(oklab.from_hex(after)[0] - oklab.from_hex(before)[0]) < 0.01
-            if key:
-                assert chroma(after) < chroma(before) * 0.5
-    star = pathline._spectrum_colours(PathHop(SELF_GLYPH, you=True, dim=True))
-    assert star.ink == "#ffffff"  # white has no chroma to lose
+    assert (glyph, style) == (POWERLINE_THIN, f"{_DIM_FG} on {_DIM_BG}")
 
 
 def test_a_seam_blurs_by_perceived_distance_not_by_hue_gap() -> None:
@@ -891,9 +866,9 @@ def test_a_seam_blurs_by_perceived_distance_not_by_hue_gap() -> None:
     The eye decides, and not the wheel. Sixteen steps of the first byte across the greens
     are one colour to a user. Sixteen steps across the reds are two colours. Thus the same
     gap of hue blurs on one side of the wheel and interlocks on the other. The test measures
-    the fills, because the solid point is a fill on a fill. A faded chip follows the same
-    metric with no exception. A hue and its faded chip are far apart, and they keep their
-    seam.
+    the fills, because the solid point is a fill on a fill. The greys follow the same metric
+    with no exception. The keyless grey and the faded slate are far apart, and they keep
+    their seam.
     """
     green = _seams(PathHop("A", key="4c"), PathHop("B", key="5c"))[0]
     red = _seams(PathHop("A", key="00"), PathHop("B", key="10"))[0]
@@ -905,16 +880,16 @@ def test_a_seam_blurs_by_perceived_distance_not_by_hue_gap() -> None:
     wrapped = _seams(PathHop("A", key="fc"), PathHop("B", key="02"))[0]
     assert wrapped[0] == POWERLINE_THIN  # neighbours across the seam of the wheel, also
 
-    glyph, style = _seams(PathHop("A", key="00"), PathHop("B", key="00", dim=True))[0]
-    assert glyph == POWERLINE_SEP and " on " in style  # a hue and its fade still interlock
+    glyph, style = _seams(PathHop("A"), PathHop("B", dim=True))[0]
+    assert glyph == POWERLINE_SEP and " on " in style  # two greys, which still interlock
 
 
 def test_bare_self_stands_us_on_a_star_and_fades_both_ends() -> None:
     """``bare_self`` puts a ★ for us at both ends, and fades both.
 
     To set out from us and to land back on us are fixtures of the route and not choices.
-    Thus they fade as a mirrored return leg does: ``faint`` in arrows. A faded chip only
-    loses chroma, and the white star has no chroma to lose, so its chip stays white.
+    Thus they have the same automatic grey as a mirrored return leg. In chips, they have the
+    same dark slate, and not the loud white of you.
     """
     hops = [None, *(f"{i:02x}aa" for i in range(6)), None]
     line = path_line(
@@ -934,7 +909,7 @@ def test_bare_self_stands_us_on_a_star_and_fades_both_ends() -> None:
     assert [str(s.style) for s in stars] == ["faint", "faint"]
     chips = PathLine(line.hops, mode="powerline").text()
     star_fills = [str(s.style) for s in chips.spans if chips.plain[s.start : s.end] == SELF_GLYPH]
-    assert star_fills and all(fill.startswith("#ffffff on ") for fill in star_fills)
+    assert all("#ffffff" not in fill for fill in star_fills)  # never the white of you
 
     wrapped = path_line(
         hops, prefix_bytes=2, self_name="Me", bare_self=True, mode="powerline"

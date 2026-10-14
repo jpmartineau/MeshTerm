@@ -17,10 +17,9 @@ surface that the survey found can in the end use it.
   look, and each seam uses one cell. The label of the chip of a node has the hue that
   comes from its hash (:func:`~meshterm.ui.theme.node_style`). This is the colour that its
   name has on each surface. The fill is that hue, but darker (:data:`CHIP_LIGHTNESS`). Our
-  node is the white ``★`` of the map on a neutral dark grey. A faded hop has the colours
-  of its own chip, with less chroma (:data:`FADE_CHROMA`). A keyless hop is light grey on
-  grey. (On the 16-colour console of the PicoCalc, the fill is the dim twin of the hue.
-  Refer to :func:`_slot_colours`.)
+  node is the white ``★`` of the map on a neutral dark grey. A faded hop is dark slate. A
+  keyless hop is light grey on grey. (On the 16-colour console of the PicoCalc, the fill
+  is the dim twin of the hue. Refer to :func:`_slot_colours`.)
 
   Sometimes two chips have the *same* fill (a mirrored return leg, or a stretch of
   keyless greys). Sometimes they have two fills that are too close to tell apart (less
@@ -88,8 +87,7 @@ surface that the survey found can in the end use it.
   ``★`` of the app. The user already knows who both ends are, and the cells are for the
   hops that *are* news. These stars fade where the route is being *composed*, because our
   two ends are fixtures and not choices. A surface that only *shows* a walk passes
-  ``dim_self=False`` and keeps our stars in the ``you`` white. (Only arrows show the
-  difference. A faded chip loses chroma, and the white star has no chroma to lose.)
+  ``dim_self=False`` and keeps our stars in the ``you`` white.
 
 The existing call sites still render through ``path_text``. A separate pass for each
 surface will move them here. The insertion cursor of the composer is a hop in its own
@@ -103,7 +101,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import NamedTuple
 
 from rich.cells import cell_len
@@ -217,19 +215,18 @@ _WHITE = "#ffffff"
 #: route is a fixture that the user already knows. It stays back and lets the hops that
 #: differ carry the colour.
 _YOU_BG = "#3f3f46"
-#: The part of its chroma (OKLab ``a`` and ``b``) that the chip of a faded hop keeps. A
-#: faded hop is a hop that the user does not compose: a mirrored return leg, or the
-#: automatic return home. Its chip has the colours that it has with no fade, with less
-#: chroma and the same lightness. Thus each faded hop still says which node it is, and the
-#: automatic part of the route recedes (JP, 2026-10-14). Before, each faded hop was the same
-#: dark slate chip.
-FADE_CHROMA = 0.35
+#: The chip of a dimmed hop: a dark slate fill with muted ink. It recedes like ``faint``
+#: text.
+_DIM_BG = "#334155"
+_DIM_FG = "#94a3b8"
 
 #: On the 16-colour console, the page: slot 0, black. It is the fill of a chip that the
 #: console cannot fill, because the VT has no dark grey background. That chip is our ``★``,
 #: a faded hop, or the slot of the composer. Its text then sits on the page, and the chips
 #: on each side close on a point and open on a notch.
 _SLOT_PAGE = slot_hex(0)
+#: On the console, the text of a faded hop: slot 8, the dark grey.
+_SLOT_FAINT = slot_hex(8)
 #: On the console, white: slot 15. It is the text of a keyless chip and of the slot of the
 #: composer.
 _SLOT_WHITE = slot_hex(15)
@@ -308,8 +305,7 @@ class PathHop:
         lit_bytes: For a hash label: the leading *bytes* that are drawn in the hue (the two
             tones of ``highlighted_hash``). The rest is muted or soft. ``0`` for names.
         dim: Fade the hop (and the arrow that leads into it). It is the resolved return leg
-            of a planned route, which the user does not compose. A chip keeps its colours,
-            with less chroma (:data:`FADE_CHROMA`). Arrows draw the hop ``faint``.
+            of a planned route, which the user does not compose.
         style: An explicit colour override. It is a hex style (``"#rrggbb"``, attributes are
             permitted) or a theme name. It is for colourings of a context that win over the
             identity. Plain mode uses it as the label style, and powerline uses it as the
@@ -1220,19 +1216,18 @@ def _spectrum_colours(hop: PathHop) -> _ChipColours:
     The label of a node is its hue. This is the colour that its name has in each list and
     in arrow mode. The fill is that hue, but darker (:data:`CHIP_LIGHTNESS`). The whole
     label is in the hue, also a hash label and an annotation. The lit bytes of a hash are
-    bold. A keyless chip is the same pair in grey. Our ``★`` keeps its dark grey, which
-    already carries a light label. The PicoCalc draws the same rules at the resolution of
-    its console (:func:`_slot_colours`).
+    bold. A keyless chip is the same pair in grey. Our ``★`` and a faded hop keep their dark
+    greys, which already carry a light label. The PicoCalc draws the same rules at the
+    resolution of its console (:func:`_slot_colours`).
 
     The insertion slot wins over all other rules. It is the one chip that is not a node, and
     it has the ``cursor`` white. Thus it reads as chrome among identities, and not as a hop
     with a hue that is unlucky. (White is outside the node spectrum, and its dark text stays
-    readable on it.) It is the only light chip on the ribbon. The fade is next. A dimmed
-    hop is a hop that nobody composed (an automatic return home, a mirrored return leg). It
-    has the colours that it has with no fade, with less chroma (:data:`FADE_CHROMA`). Thus
-    each faded hop still says which node it is, and that automatic half recedes (JP,
-    2026-10-14). Our white star has no chroma, so its chip does not change. Plain mode
-    draws the same hops ``faint``.
+    readable on it.) It is the only light chip on the ribbon. The fade is next, and it wins
+    over the identity, also our own. A dimmed hop is a hop that nobody composed (an
+    automatic return home, a mirrored return leg). Our end must recede with the rest of
+    that automatic half, and not keep its hue among the greys. Plain mode says the same
+    thing when it fades the name.
 
     Our chip in a chat (``white_ink``) has the fill of the chip of its key, and a white
     label. A quiet chip (a node with no key in a chat) is black on a grey fill.
@@ -1243,8 +1238,7 @@ def _spectrum_colours(hop: PathHop) -> _ChipColours:
     if resolved:
         return _ChipColours(_chip_fill(resolved), resolved, resolved)
     if hop.dim:
-        normal = _spectrum_colours(replace(hop, dim=False))
-        return _ChipColours(*(oklab.desaturated(c, FADE_CHROMA) for c in normal))
+        return _ChipColours(_DIM_BG, _DIM_FG, _DIM_FG)
     hue = _style_hex(node_style(hop.key)) if hop.key else None
     if hop.white_ink and hue:
         return _ChipColours(_chip_fill(hue), _WHITE, _WHITE)
@@ -1269,10 +1263,10 @@ def _slot_colours(hop: PathHop) -> _ChipColours:
 
     A keyless chip is white on light grey, the same pair one bank down. Our ``★``, a faded
     hop, and the slot of the composer have no fill of their own, because the console has no
-    dark grey background. They stand on the page (:data:`_SLOT_PAGE`): the white star, and
-    the slot as a white ``+`` in a break of the ribbon. The console also has no colour with
-    less chroma. Thus a faded hop keeps the colour of its label and loses its fill. The
-    order of the rules is the same as on a truecolor terminal (:func:`_spectrum_colours`).
+    dark grey background. They stand on the page (:data:`_SLOT_PAGE`): the star in our
+    hue, a faded hop in the dark grey, and the slot as a white ``+`` in a break of the
+    ribbon. The order of the rules is the same as on a truecolor terminal
+    (:func:`_spectrum_colours`).
 
     Our chip in a chat (``white_ink``) is white on the dim twin of its hue, the same rule as
     on a truecolor terminal. A quiet chip is black on the light grey of the keyless chip.
@@ -1286,7 +1280,7 @@ def _slot_colours(hop: PathHop) -> _ChipColours:
             ink = resolved if resolved in DIM_TWIN else _SLOT_WHITE
             return _ChipColours(fill, ink, ink)
     if hop.dim:
-        return _slot_colours(replace(hop, dim=False))._replace(fill=_SLOT_PAGE)
+        return _ChipColours(_SLOT_PAGE, _SLOT_FAINT, _SLOT_FAINT)
     if hop.you:
         return _ChipColours(_SLOT_PAGE, _SLOT_WHITE, _SLOT_WHITE)
     hue = _style_hex(node_style(hop.key)) if hop.key else None
@@ -1385,10 +1379,9 @@ def path_line(
             between them need.
         dim_self: Fade the bare stars (the default). On a surface where the user *composes*
             the route, to set out from us and to come home to us are fixtures. The user does
-            not choose or remove them, the same as for a mirrored return leg. Thus they fade
-            as that leg does. (Arrows draw them ``faint``. A faded chip loses chroma, and our
-            white star has no chroma to lose, so its chip does not change.) Pass ``False``
-            where nobody composes anything (a record of a
+            not choose or remove them, the same as for a mirrored return leg. Thus they have
+            the same automatic grey, and the colour on the line is for the nodes that the
+            user really picks. Pass ``False`` where nobody composes anything (a record of a
             walk that is already made). Then there is no "not yours" to say, and our node
             reads in the ``you`` white of the app, as in other places. A ``dim_from`` that
             reaches a star still fades it in both cases.
