@@ -490,22 +490,21 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
 - **In a chat, we go by our name** (channel, DM, room, and the Messages list's preview —
   nowhere else; JP, 2026-10-13). A route's bare `★` says "you already know who this is",
   but a chat is a conversation between names, so our sender chip and every mention of our
-  name wear our name on the chip of *our key's hue, turned over* — dark ink on a light
-  fill of the hue (`PathHop.inverse`, the same pair as any chip in the other order), the
-  one light chip among the senders. Our **sender** chip is `★ Name` (`widgets.self_chip`),
-  the star in the chip's dark ink: a yellow star measured under 3:1 on the light fill for
-  238 of 256 hues, and the star on the page right of the chip was tried and put back (JP,
-  2026-10-13). A **mention** of us is the turned-over chip with no star
+  name wear our name **in white on the normal fill of our key's hue** — the fill every
+  known sender gets, with white where they have their hue (`PathHop.white_ink`; JP,
+  2026-10-14, after a turned-over light chip read wrong). The PicoCalc draws the same
+  pair, white on the hue's dim twin. Our **sender** chip is `★ Name`
+  (`widgets.self_chip`), the star in the white label; the star on the page right of the
+  chip was tried and put back (JP, 2026-10-13). A **mention** of us is the same chip
+  with no star
   (`mention_chip(you=True)`); the message carrying it gets **a `★` in our key's hue**
   left of its time instead (`widgets.mention_mark`, the same on every platform and in
   arrow mode). The map's yellow star, the chip's notch-and-point pair and its point alone
   were all tried there and dropped (JP, 2026-10-13). Every time sits two cells right to
   keep the column (`❯`, a space, the star, a space, then `12:34  body`), and the Messages
-  list puts the star left of the row's age. Arrow mode draws the chip as a
-  padded reverse-video block. The PicoCalc can't put a bright slot behind text, so there
-  the chip keeps the normal colours and the `★` alone marks us. With no name or key from
-  the device, the bare `★` chip stays. Path lines (delivery paths, the packet viewer,
-  routes) keep `★`.
+  list puts the star left of the row's age. Arrow mode draws the chip as a padded block
+  in the same pair. With no name or key from the device, the bare `★` chip stays. Path
+  lines (delivery paths, the packet viewer, routes) keep `★`.
 - **The compose line draws a mention as its chip** (`ui/compose.py`, `MentionEditor`): the
   moment `]` completes an `@[Name]` token it renders as the same chip the transcript will
   show, and from then on it is an **atom** — ←/→ step over it, ^←/^→ never stop inside
@@ -539,10 +538,11 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   key routinely; JP, 2026-10-11), a bare hash standing in as a name, an `○` ring — takes
   `node.unknown`, THE light grey for an unidentified node, everywhere and on both
   platforms. One exception, a chat's **chips** (`PathHop.quiet`, via `widgets.author_chip`
-  and `mention_hop`): an unknown sender or mention there is the grey of plain text
-  (`#cccccc`) on that grey at `CHIP_LIGHTNESS`, so it stands back among the coloured
-  senders (JP, 2026-10-13); routes keep the keyless chip, arrow mode keeps `node.unknown`,
-  and the PicoCalc keeps the keyless pair (no grey background darker than its text).
+  and `mention_hop`): an unknown sender or mention there is **black** on a grey fill
+  (`#cccccc`, the grey of plain text, at `CHIP_LIGHTNESS`), so it stands back among the
+  coloured senders (JP, 2026-10-14; a plain-text grey label read as still lit); routes
+  keep the keyless chip, arrow mode keeps `node.unknown`, and the PicoCalc draws black on
+  its keyless light grey.
   Colour is reserved for keyed identities, never seeded from a name's
   characters. `node.unknown` is deliberately not `muted`: muted is chrome and may sit a
   step darker, while an unidentified node is content you can still act on. Our own node

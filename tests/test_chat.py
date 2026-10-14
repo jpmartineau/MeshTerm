@@ -1527,8 +1527,8 @@ def test_channel_self_style_keyed_on_concept_not_label() -> None:
     ours = ChatMessage(text="hi", is_channel=True, channel_idx=0, outbound=True)
     theirs = ChatMessage(text="you: hi", is_channel=True, channel_idx=0)
     mine = _channel_screen([], self_name="Me", self_key=_OUR_KEY)
-    turned = f"{node_style(_OUR_KEY)} reverse"
-    assert _ink(mine._group_header("you", ours), " ★ Me ") == turned  # our name, turned over
+    white = _ink(mine._group_header("you", ours), " ★ Me ")  # our name, in white
+    assert white.startswith("bold #ffffff on ")
     screen = _channel_screen([])
     assert _ink(screen._group_header("you", ours), "★") == "you.mark"  # no name: our star
     assert _ink(screen._group_header("you", theirs), "you") == "node.unknown"  # no key: grey
@@ -1606,19 +1606,17 @@ def test_a_blank_line_closes_each_author_where_the_rows_allow(
 
 
 def test_a_mention_of_our_name_takes_our_chip_with_no_star(powerline) -> None:
-    """The chip of a mention of us is turned over, as our sender chip, but it has no star.
+    """The chip of a mention of us is white, as our sender chip, but it has no star.
 
     The mark of a message that names us is at the left of its time (refer to the next
     test). With chips, no mention has its ``@``.
     """
-    from meshterm.ui.theme import node_style
-
     powerline(True)
     screen = _channel_screen([], self_name="Me", self_key=_OUR_KEY)
     text = screen._render_mentions("hi @[Me] and @[Bob]", selected=False)
     assert "★" not in text.plain and "@" not in text.plain
     me = next(s for s in text.spans if text.plain[s.start : s.end] == "Me")
-    assert str(me.style).endswith(f"on {node_style(_OUR_KEY).split()[-1]}")  # a light fill
+    assert str(me.style).startswith("bold #ffffff on ")  # the white label
 
 
 def test_a_message_that_names_us_has_the_mark_left_of_its_time() -> None:

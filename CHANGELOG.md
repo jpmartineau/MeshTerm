@@ -13,19 +13,18 @@ can change how things behave. It does not only add new things.
 
 - **In a chat, your messages show your name.** A channel, a direct chat, and a room put
   your messages under `★` and your node's name, and the Messages list shows them in the
-  same way. Your name has the colour of your key, but in reverse: dark text on a light
-  fill, where each other sender has light text on a dark fill. A mention of your name has
-  the same reversed colours, and the message that has it gets a `★` in your colour at the
-  left of its time. Thus the messages that name you are easy to find down
-  the left side of the chat. On the PicoCalc, the console cannot draw a light fill, so
-  there the `★` marks your messages. Before, your messages showed only the `★`.
+  same way. Your name is white, on the same colour of box that your key gives each chip,
+  where each other sender has the colour of its key as the text. A mention of your name
+  has the same white text, and the message that has it gets a `★` in your colour at the
+  left of its time. Thus the messages that name you are easy to find down the left side
+  of the chat. Before, your messages showed only the `★`.
 - **Your node's star has your colour.** The `★` that marks your node on the map, in
   routes, in lists, and in a chat has the colour of your key, the same colour as your name
   in a chat. Before, it was yellow. It is yellow only until the device gives MeshTerm your
   key. A star in a faded part of a route stays grey.
-- **In a chat, a name that MeshTerm cannot match to a node is grey.** The box around a
-  sender or a mention with no known node has the grey of plain text, on a darker grey. Thus
-  it does not stand out among the coloured names. Before, it was light blue on slate.
+- **In a chat, a name that MeshTerm cannot match to a node is black on grey.** The box
+  around a sender or a mention with no known node has black text on a grey box. Thus it
+  does not stand out among the coloured names. Before, it was light blue on slate.
 - **A mention has no `@` in front of it.** The coloured box around the name already says
   that it is a mention. On a terminal that cannot draw the boxes, a mention keeps its `@`.
 - **The line where you write a message shows each mention as a box.** When you type the

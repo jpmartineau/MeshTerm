@@ -207,12 +207,16 @@ _CHIP_FG = "#0f172a"
 _KEYLESS_BG = "#64748b"
 #: The label of a keyless chip: the same pair as the chip of a node, in grey.
 _KEYLESS_FG = _chip_label(_KEYLESS_BG)
-#: The label of a quiet chip (:attr:`PathHop.quiet`): the grey of plain text, the default
-#: foreground of the usual dark terminal (Windows Terminal, and the terminal of VS Code).
-_QUIET_FG = "#cccccc"
-#: The fill of a quiet chip: the grey of its label, darker, by the rule of the chip of a
-#: node (:data:`CHIP_LIGHTNESS`).
-_QUIET_BG = _chip_fill(_QUIET_FG)
+#: The fill of a quiet chip (:attr:`PathHop.quiet`): the grey of plain text (``#cccccc``,
+#: the default foreground of Windows Terminal and of the terminal of VS Code), darker by
+#: the rule of the chip of a node (:data:`CHIP_LIGHTNESS`).
+_QUIET_BG = _chip_fill("#cccccc")
+#: The label of a quiet chip: black. A grey label on the grey fill read as a name that the
+#: chip still lit, and black reads as a name that it does not (JP, 2026-10-14).
+_QUIET_FG = "#000000"
+#: The label of our chip in a chat (:attr:`PathHop.white_ink`): white, on the fill that
+#: our hue gives each chip.
+_WHITE = "#ffffff"
 #: The chip fill of our node: a neutral dark grey. Thus the ``★`` on it reads as the
 #: marker of the map and not as a chip of a node (JP, 2026-08-09). It is *not* a colour
 #: of the spectrum on purpose, and it is not the white that it was before. Our end of a
@@ -324,18 +328,17 @@ class PathHop:
             continues again". A chip says the opposite: that a node in the route has the
             name ``⋯``. Arrow mode does not need a special case, because a bare label
             between two arrows is already the same thing.
-        inverse: Draw the chip turned over: the hue of ``key`` is the fill, and the darker
-            fill of each other chip is the ink. It is our node in a chat (refer to
-            :func:`~meshterm.ui.widgets.self_chip`). Arrow mode draws the label in reverse
-            video, with the padding of a chip. The console of the PicoCalc has no light
-            background, so there the chip keeps the colours of each other chip.
+        white_ink: Draw the label in white, on the fill that the hue of ``key`` gives each
+            chip. It is our node in a chat (refer to :func:`~meshterm.ui.widgets.self_chip`):
+            the fill is the same as the fill of each known sender, and the white label
+            tells it from them (JP, 2026-10-14). Arrow mode draws the same pair, with the
+            padding of a chip. The PicoCalc draws it too, white on the dim twin of the hue.
         quiet: A node with no key in a chat: a sender or a mention that nobody can
-            identify. Its chip is the grey of plain text on a darker fill of that grey
-            (:data:`_QUIET_FG`), by the same rule as the chip of a node. Thus it does not
-            stand out among the senders that have a colour (JP, 2026-10-13). A hop with a
-            key keeps its hue, and a route keeps the keyless grey. Arrow mode keeps the
-            ``node.unknown`` grey. The console of the PicoCalc has no grey background darker
-            than its plain text, so there the chip keeps the keyless colours.
+            identify. Its chip is black on a grey fill (:data:`_QUIET_BG`), so it does not
+            stand out among the senders that have a colour (JP, 2026-10-14). A hop with a
+            key keeps its hue, and a route keeps the keyless chip. Arrow mode keeps the
+            ``node.unknown`` grey. The PicoCalc keeps the light grey fill of its keyless chip,
+            with the black label.
     """
 
     label: str
@@ -347,7 +350,7 @@ class PathHop:
     style: str | None = None
     cursor: bool = False
     gap: bool = False
-    inverse: bool = False
+    white_ink: bool = False
     quiet: bool = False
 
 
@@ -1030,8 +1033,9 @@ class PathLine:
             text.append(hop.label, style="selected")
         elif hop.dim:
             text.append(hop.label, style="faint")
-        elif hop.inverse and hop.key:
-            text.append(f" {hop.label} ", style=f"{node_style(hop.key)} reverse")
+        elif hop.white_ink and hop.key:
+            fill, ink, _soft = _colours_of(hop)
+            text.append(f" {hop.label} ", style=f"{_WEIGHT}{ink} on {fill}")
         elif hop.style:
             text.append(hop.label, style=hop.style)
         elif hop.you:
@@ -1235,9 +1239,8 @@ def _spectrum_colours(hop: PathHop) -> _ChipColours:
     that automatic half, and not keep its hue among the greys. Plain mode says the same
     thing when it fades the name.
 
-    A chip that is turned over (``inverse``, our node in a chat) has the same two colours
-    as the chip of its key, in the other order: the hue is the fill, and the dark fill is
-    the ink. It is the one light chip in a chat, and the contrast of the pair stays the same.
+    Our chip in a chat (``white_ink``) has the fill of the chip of its key, and a white
+    label. A quiet chip (a node with no key in a chat) is black on a grey fill.
     """
     if hop.cursor:
         return _ChipColours(_style_hex("cursor") or _KEYLESS_BG, _CHIP_FG, _CHIP_FG)
@@ -1247,8 +1250,8 @@ def _spectrum_colours(hop: PathHop) -> _ChipColours:
     if hop.dim:
         return _ChipColours(_DIM_BG, _DIM_FG, _DIM_FG)
     hue = _style_hex(node_style(hop.key)) if hop.key else None
-    if hop.inverse and hue:
-        return _ChipColours(hue, _chip_fill(hue), _chip_fill(hue))
+    if hop.white_ink and hue:
+        return _ChipColours(_chip_fill(hue), _WHITE, _WHITE)
     if hop.you:
         ink = _self_ink()
         return _ChipColours(_YOU_BG, ink, ink)
@@ -1276,9 +1279,8 @@ def _slot_colours(hop: PathHop) -> _ChipColours:
     ribbon. The order of the rules is the same as on a truecolor terminal
     (:func:`_spectrum_colours`).
 
-    A chip that is turned over (``inverse``) keeps the colours of each other chip here. Its
-    fill would be a bright slot, and the console cannot draw one as a background. In a chat,
-    the ``★`` in its label still tells our node from the others.
+    Our chip in a chat (``white_ink``) is white on the dim twin of its hue, the same rule as
+    on a truecolor terminal. A quiet chip is black on the light grey of the keyless chip.
     """
     if hop.cursor:
         return _ChipColours(_SLOT_PAGE, _SLOT_WHITE, _SLOT_WHITE)
@@ -1295,6 +1297,10 @@ def _slot_colours(hop: PathHop) -> _ChipColours:
         return _ChipColours(_SLOT_PAGE, ink, ink)
     hue = _style_hex(node_style(hop.key)) if hop.key else None
     ink = hue if hue in DIM_TWIN else _SLOT_WHITE
+    if hop.white_ink and hue:
+        return _ChipColours(DIM_TWIN[ink], _SLOT_WHITE, _SLOT_WHITE)
+    if hop.quiet and not hue:
+        return _ChipColours(DIM_TWIN[ink], _SLOT_PAGE, _SLOT_PAGE)
     return _ChipColours(DIM_TWIN[ink], ink, ink)
 
 

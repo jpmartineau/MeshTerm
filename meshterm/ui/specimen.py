@@ -146,10 +146,9 @@ def specimen_lines() -> list[RenderableType]:
     # because a message goes on from its author. The mention at the end opens on the
     # notch, because the node that it names is where the message goes, and it has no ``@``.
     # The path line's own segment draws them, so this row is also a one-hop sample of the
-    # route language: the hue in the fill and the keyless grey for a node that nobody can
-    # identify. Our own messages go under ``★ me``, on the one chip that is turned over
-    # (dark on a light fill of our hue). The console of the PicoCalc has no light
-    # background, so there only the star marks it.
+    # route language: the hue in the fill, and black on grey for a node that nobody can
+    # identify. Our own messages go under ``★ me``, the one chip with a white label, on
+    # the fill of our hue.
     chips = Text("chips   ")
     for name, key in _DEMO_NAMES[:2]:
         chips.append_text(name_chip(name, key, role=ORIGIN))

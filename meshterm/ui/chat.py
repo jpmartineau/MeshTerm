@@ -737,7 +737,7 @@ class ChatScreen(Screen):
         sender looks exactly like that node as a hop in a route.
 
         Our messages are the exception. They go under our name, as ``★ Name`` on a chip
-        that is turned over (refer to :func:`~meshterm.ui.widgets.self_chip`). A route
+        in white (refer to :func:`~meshterm.ui.widgets.self_chip`). A route
         shows our end as the bare ``★``, but a chat is a conversation between names.
         Our chip comes from the direction of the message (``outbound``), not from the
         ``"you"`` label. Thus a remote sender with the name ``you`` still gets the hue of
@@ -777,7 +777,7 @@ class ChatScreen(Screen):
 
         A message that mentions our name has a mark at the left of its time: the ``★``,
         in the hue of our key (refer to :func:`~meshterm.ui.widgets.mention_mark`, JP,
-        2026-10-13). The chip of the mention in the body is turned over, but it has no star
+        2026-10-13). The chip of the mention in the body has our white label, but no star
         (refer to
         :func:`~meshterm.ui.widgets.mention_hop`). Thus the mark of a message that names us
         is in one column, where the eye finds it when it goes down the transcript. Each time
@@ -856,7 +856,7 @@ class ChatScreen(Screen):
         Thus the user sees that a mention belongs to the node that it names. The text
         around the mentions keeps the base style of the line (``cursor`` when the message
         is the selected reply target, or else no style). A mention of our own name has our
-        chip, turned over, and the line has a ``★`` in our hue at the left of its time
+        chip, in white, and the line has a ``★`` in our hue at the left of its time
         (refer to :meth:`_body_lines`). Thus a message that names us is easy to see.
 
         The chip opens on the notch, because the node that a mention names is the
@@ -882,7 +882,7 @@ class ChatScreen(Screen):
 
         The two use this one method, so a chip in the compose line is the chip that the
         message will show after the send. A mention of our name has our key and the chip
-        that is turned over. Each other name has the key that the names of the senders
+        with the white label. Each other name has the key that the names of the senders
         give (refer to :meth:`_sender_key`).
         """
         if self._self_name and name == self._self_name:

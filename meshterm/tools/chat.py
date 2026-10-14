@@ -1054,9 +1054,9 @@ def _preview_text(
 
     It is the same as the live transcript:
 
-    - Our own messages start with our chip, ``★ Name`` turned over (refer to
+    - Our own messages start with our chip, ``★ Name`` in white (refer to
       :func:`~meshterm.ui.widgets.self_chip`). A mention of our name has the chip that is
-      turned over, with no star. A message that names us has a ``★`` in our hue at the
+      white label, with no star. A message that names us has a ``★`` in our hue at the
       left of the age of the row (refer to :func:`_title`).
     - In a received channel message, the inline ``Name:`` sender is the author, in the hue
       that comes from its key (the node grey when no known node has the name).
@@ -1078,8 +1078,8 @@ def _preview_text(
     if last.outbound:
         name, key = us
         chip = self_chip(name, key, role=ORIGIN)
-        # Where no chips are drawn, the chip is a block in reverse video. Our node with no
-        # name keeps the old byline.
+        # Where no chips are drawn, the chip is a padded block, white on our fill. Our node
+        # with no name keeps the old byline.
         byline = chip + Text(" ") if name and key else Text("you: ", style="accent")
         _append_author(text, chip, byline)
         _append_body(text, body_raw, key_of, us)
@@ -1141,7 +1141,7 @@ def _append_body(
     that opens on the notch where the terminal draws chips (the same as in the transcript,
     refer to :func:`~meshterm.ui.widgets.mention_chip`). It takes the node grey when the
     name resolves to no node that we know. A mention of our own name (``us``) has the chip
-    of our key, turned over, as in the transcript.
+    of our key with a white label, as in the transcript.
     """
     pos = 0
     for match in MENTION.finditer(body):

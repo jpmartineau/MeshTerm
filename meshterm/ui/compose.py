@@ -123,9 +123,9 @@ class MentionEditor(LineEditor):
             self._append_run(text, self.text, pos, start, overflow_at, "compose")
             hop = hop_of(name)
             if self.cursor == start:
-                hop = replace(hop, cursor=True, inverse=False)
+                hop = replace(hop, cursor=True, white_ink=False)
             elif overflow_at is not None and end > overflow_at:
-                hop = replace(hop, style="err", inverse=False)
+                hop = replace(hop, style="err", white_ink=False)
             text.append_text(hop_chip(hop, role=DESTINATION))
             pos = end
         self._append_run(text, self.text, pos, len(self.text), overflow_at, "compose")

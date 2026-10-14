@@ -353,29 +353,32 @@ def test_name_chip_draws_us_as_the_star_never_as_our_name(powerline) -> None:
     assert _span_style(chip, "★").bgcolor.name == "#3f3f46"  # a neutral grey, not a hue
 
 
-def test_self_chip_is_the_chip_of_our_key_turned_over(powerline) -> None:
-    """In a chat, our messages go under ``★ Name``, dark on a light fill of our hue.
+def test_self_chip_is_white_on_the_fill_of_our_key(powerline) -> None:
+    """In a chat, our messages go under ``★ Name``: white on the fill of each known sender.
 
-    The two colours are those of the chip of our key, in the other order. Thus the contrast
-    stays the same, and it is the one light chip among the senders (JP, 2026-10-13).
+    The fill is the fill that our hue gives each chip, and the white label tells our chip
+    from the other senders, whose label is their hue (JP, 2026-10-14).
     """
     powerline(True)
     ours = self_chip("Me", "5e7f", role=ORIGIN)
     theirs = name_chip("Me", "5e7f", role=ORIGIN)
 
-    assert "★ Me" in ours.plain  # the star in the chip, in its dark ink
+    assert "★ Me" in ours.plain  # the star in the chip, in the white of the label
     ink, normal = _span_style(ours, "★ Me"), _span_style(theirs, "Me")
-    assert (ink.color.name, ink.bgcolor.name) == (normal.bgcolor.name, normal.color.name)
+    assert ink.bgcolor.name == normal.bgcolor.name
+    assert ink.color.name == "#ffffff"
 
 
-def test_self_chip_is_a_block_in_reverse_video_without_powerline(powerline) -> None:
-    """With no chips, our name is still dark on the hue of our key, padded as a chip is."""
+def test_self_chip_is_a_padded_block_without_powerline(powerline) -> None:
+    """With no chips, our name is the same pair, padded as a chip is."""
+    powerline(True)
+    fill = _span_style(self_chip("Me", "5e7f"), "★ Me").bgcolor.name
     powerline(False)
     chip = self_chip("Me", "5e7f")
 
     assert chip.plain == " ★ Me "
     style = _span_style(chip, " ★ Me ")
-    assert style.reverse and style.color.name == node_style("5e7f").removeprefix("bold ")
+    assert (style.color.name, style.bgcolor.name) == ("#ffffff", fill)
 
 
 def test_a_mention_chip_has_no_at_and_arrow_mode_keeps_it(powerline) -> None:
@@ -388,16 +391,16 @@ def test_a_mention_chip_has_no_at_and_arrow_mode_keeps_it(powerline) -> None:
     assert mention_chip("Bob", "d4").plain == "@Bob"
 
 
-def test_a_mention_of_us_is_turned_over_with_no_star(powerline) -> None:
-    """A mention of our name has the chip of our key turned over, and no star in it."""
+def test_a_mention_of_us_is_white_with_no_star(powerline) -> None:
+    """A mention of our name has the white label on the fill of our key, and no star in it."""
     powerline(True)
     ours = mention_chip("Me", "5e7f", you=True)
     theirs = mention_chip("Me", "5e7f")
 
     assert "★" not in ours.plain
     ink, normal = _span_style(ours, "Me"), _span_style(theirs, "Me")
-    assert (ink.color.name, ink.bgcolor.name) == (normal.bgcolor.name, normal.color.name)
-    assert not mention_hop("Me", None, you=True).inverse  # no key: no hue to turn over
+    assert (ink.color.name, ink.bgcolor.name) == ("#ffffff", normal.bgcolor.name)
+    assert not mention_hop("Me", None, you=True).white_ink  # no key: no hue for the fill
 
 
 @pytest.mark.parametrize("chips", [True, False])
@@ -453,11 +456,11 @@ def test_name_chip_greys_a_node_it_cannot_place(powerline) -> None:
     assert _span_style(keyless, "·").bgcolor.name == "#64748b"  # the keyless grey
 
 
-def test_a_chat_chip_with_no_key_is_the_grey_of_plain_text(powerline) -> None:
-    """In a chat, an unknown sender or mention is plain-text grey on a darker fill of it.
+def test_a_chat_chip_with_no_key_is_black_on_grey(powerline) -> None:
+    """In a chat, an unknown sender or mention is black on a grey fill.
 
-    The fill comes from the label by the rule of the chip of a node. A node with a key keeps
-    its hue, and arrow mode keeps the ``node.unknown`` grey.
+    The fill is the grey of plain text, darker by the rule of the chip of a node. A node
+    with a key keeps its hue, and arrow mode keeps the ``node.unknown`` grey.
     """
     from meshterm.ui.pathline import _chip_fill
     from meshterm.ui.widgets import author_chip
@@ -465,16 +468,19 @@ def test_a_chat_chip_with_no_key_is_the_grey_of_plain_text(powerline) -> None:
     powerline(True)
     for chip, label in ((author_chip("Zed", None), "Zed"), (mention_chip("Zed", None), "Zed")):
         style = _span_style(chip, label)
-        assert (style.color.name, style.bgcolor.name) == ("#cccccc", _chip_fill("#cccccc"))
+        assert (style.color.name, style.bgcolor.name) == ("#000000", _chip_fill("#cccccc"))
     keyed = _span_style(author_chip("Bob", "d4"), "Bob")
     assert keyed.color.name == node_style("d4").split()[-1]  # a key keeps its hue
     powerline(False)
     assert str(author_chip("Zed", None).spans[0].style) == "node.unknown"
 
 
-def test_a_chat_chip_with_no_key_keeps_the_keyless_colours_on_the_picocalc(powerline) -> None:
-    """The console has no grey background darker than its plain text."""
+def test_a_chat_chip_with_no_key_is_black_on_the_keyless_fill_on_the_picocalc(
+    powerline,
+) -> None:
+    """The PicoCalc keeps the light grey fill of its keyless chip, with the black label."""
     from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
+    from meshterm.ui.theme import slot_hex
     from meshterm.ui.widgets import author_chip
 
     powerline(True)
@@ -482,7 +488,8 @@ def test_a_chat_chip_with_no_key_keeps_the_keyless_colours_on_the_picocalc(power
     try:
         quiet = _span_style(author_chip("Zed", None), "Zed")
         keyless = _span_style(name_chip("Zed"), "Zed")
-        assert (quiet.color, quiet.bgcolor) == (keyless.color, keyless.bgcolor)
+        assert quiet.bgcolor == keyless.bgcolor
+        assert quiet.color.name == slot_hex(0)  # black
     finally:
         set_platform(REGULAR)
 
