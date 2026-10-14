@@ -12,12 +12,20 @@ can change how things behave. It does not only add new things.
 ### Changed
 
 - **In a chat, your messages show your name.** A channel, a direct chat, and a room put
-  your messages under `★` and your node's name, and the Messages list shows them in the
-  same way. Your name has the colour of your key, but in reverse: dark text on a light
-  fill, where each other sender has light text on a dark fill. A mention of your name in a
-  message has the same mark, so a message that names you is easy to see. On the PicoCalc,
-  the console cannot draw a light fill, so there the `★` alone marks your messages. Before,
-  your messages showed only the `★`.
+  your messages under your node's name, with a `★` after it, and the Messages list shows
+  them in the same way. Your name has the colour of your key, but in reverse: dark text on
+  a light fill, where each other sender has light text on a dark fill. A mention of your
+  name has the same reversed colours, and the message that has it gets a `★` at the left
+  of its time. Thus the messages that name you are easy to find down the left side of the
+  chat. On the PicoCalc, the console cannot draw a light fill, so there the `★` alone
+  marks you. Before, your messages showed only the `★`.
+- **A mention has no `@` in front of it.** The coloured box around the name already says
+  that it is a mention. On a terminal that cannot draw the boxes, a mention keeps its `@`.
+- **The line where you write a message shows each mention as a box.** When you type the
+  `]` of `@[Name]`, or reply to a message, the mention changes into the same coloured box
+  that the chat shows after you send it. The arrow keys move over the box in one step, and
+  one Backspace removes all of it. A reply now puts its mention where the cursor is, so you
+  can name more than one person in one message. The text that you type is white.
 - **On the uConsole and the Cardputer Zero, an imported seed stays a seed.** MeshTerm saves
   a 32-byte seed in the node's `identity.key` as you give it. This is the same form that
   the node uses when it makes its own key. A firmware companion still gets the full 64-byte

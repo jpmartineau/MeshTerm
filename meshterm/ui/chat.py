@@ -32,19 +32,20 @@ from ..core.events import EventKind, MeshEvent
 from ..core.models import ChatMessage, Contact, Conversation, Message, utcnow
 from ..core.regions import WILDCARD
 from ..platforms import Platform, on_platform
-from .pathline import PATH_INK
+from .compose import MentionEditor
+from .marks import SELF_MARK
+from .pathline import PATH_INK, PathHop
 from .qr import QrScreen, qr_strip
 from .theme import snr_style
 from .tui.prompt import (
     CHANNEL_BYTE_LIMIT,
     DM_BYTE_LIMIT,
-    LineEditor,
     byte_counter,
 )
 from .tui.render import render_hanging, render_lines, right_aligned_tail
 from .tui.screen import CANCEL, Screen
 from .tui.spinner import Spinner, spinner_interval
-from .widgets import DESTINATION, ORIGIN, name_chip, self_chip
+from .widgets import DESTINATION, ORIGIN, hop_chip, mention_hop, name_chip, self_chip
 
 if TYPE_CHECKING:
     from ..context import AppContext
@@ -66,8 +67,9 @@ _FAILED = ("✗", "err")
 #: next to it.
 _WORD = re.compile(r"\S+")
 
-#: The column where a URL starts when it is too long to hang under its body: the column of
-#: the timestamp, after the ``❯`` that is in front of the first line of the selected message.
+#: The column where a URL starts when it is too long to hang under its body: the column
+#: after the ``❯`` that is in front of the first line of the selected message. A message
+#: that names us has its ``★`` in this column, and the timestamp follows it.
 _URL_GUTTER = 2
 
 #: Whether the URLs of a message are drawn as QR codes under it (``Platform.url_codes``,
@@ -307,7 +309,7 @@ class ChatScreen(Screen):
         self._pages = pages
         self._names = names
         self._session = session
-        self._editor = LineEditor()
+        self._editor = MentionEditor()
         self._sending = False
         # It turns while a direct message is in flight, so that the glyph at the end of the
         # message spins (instead of a static hourglass) until the ack resolves. All messages
@@ -499,10 +501,17 @@ class ChatScreen(Screen):
         when the text wraps onto a second line, the counter stays in the bottom-right
         corner and does not follow the cursor down the wrap. Only when the last line is
         already full to the edge does the counter go onto its own right-aligned line.
+
+        Each complete mention in the line shows as its chip, the same chip as in the
+        transcript (refer to :class:`~meshterm.ui.compose.MentionEditor`). A chip never
+        breaks across two lines.
         """
         limit = self._byte_limit()
-        input_line = self._editor.render(overflow_at=self._overflow_at(limit))
-        return right_aligned_tail(input_line, self._byte_counter(limit), width)
+        input_line = self._editor.render_line(
+            self._mention_hop, overflow_at=self._overflow_at(limit)
+        )
+        whole = [(s.start, s.end) for s in input_line.spans if str(s.style) == PATH_INK]
+        return right_aligned_tail(input_line, self._byte_counter(limit), width, whole=whole)
 
     # --- outgoing byte limit -------------------------------------------------
 
@@ -720,9 +729,10 @@ class ChatScreen(Screen):
         chip of a path line (refer to :func:`~meshterm.ui.widgets.name_chip`). Thus a
         sender looks exactly like that node as a hop in a route.
 
-        Our messages are the exception. They go under our name, as ``★ Name`` on a chip
-        that is turned over (refer to :func:`~meshterm.ui.widgets.self_chip`). A route
-        shows our end as the bare ``★``, but a chat is a conversation between names.
+        Our messages are the exception. They go under our name, on a chip that is turned
+        over, with the ``★`` to the right of the chip (refer to
+        :func:`~meshterm.ui.widgets.self_chip`). A route shows our end as the bare ``★``,
+        but a chat is a conversation between names.
         Our chip comes from the direction of the message (``outbound``), not from the
         ``"you"`` label. Thus a remote sender with the name ``you`` still gets the hue of
         its key, and does not look like our node.
@@ -759,8 +769,15 @@ class ChatScreen(Screen):
         is marked as the reply target (the same as the ``❯`` pointer and the highlight of
         the select screen).
 
+        A message that mentions our name has the ``★`` of the app at the left of its time
+        (JP, 2026-10-13). The chip of the mention in the body is turned over, but it has no
+        star (refer to :func:`~meshterm.ui.widgets.mention_hop`). Thus the star of a message
+        that names us is in one column, where the eye finds it when it goes down the
+        transcript. Each time has the two cells of that column in front of it, so that all
+        the times stay in one column too.
+
         A URL is never cut where the screen can hold it. A URL that is too long for the
-        body lane moves out to the column of the timestamp, on its own line (refer to
+        body lane moves out to the column after the ``❯``, on its own line (refer to
         :func:`~meshterm.ui.tui.render.render_hanging`). This is because a terminal opens
         a link, and a user copies one, only while it is on one line.
 
@@ -772,6 +789,11 @@ class ChatScreen(Screen):
         stamp = message.created_at.astimezone()
         prefix = Text()
         prefix.append("❯ " if selected else "  ", style="cursor" if selected else None)
+        if self._names_us(body):
+            prefix.append(SELF_MARK[0], style="type.you")
+            prefix.append(" ")
+        else:
+            prefix.append("  ")
         prefix.append(f"{stamp:%H:%M}  ", style="cursor" if selected else "muted")
         body_text = self._body_text(body, message, selected=selected)
         whole = [m.span() for m in _WORD.finditer(body_text.plain) if links.urls(m.group())]
@@ -819,21 +841,21 @@ class ChatScreen(Screen):
         return Text(f"  · scope {message.scope}", style="muted")
 
     def _render_mentions(self, body: str, *, selected: bool) -> Text:
-        """Render body text, and change each ``@[Name]`` token to a ``@Name`` chip.
+        """Render body text, and change each ``@[Name]`` token to the chip of that node.
 
         The reply flow puts an ``@[Name]`` token in the compose line (refer to
-        :meth:`_begin_reply`). Here it shows as ``@Name`` in a chip of the hue of that
-        node. Thus the user sees that a mention belongs to the node that it names. The text
+        :meth:`_begin_reply`). Here it shows as the name in a chip of the hue of that node.
+        Thus the user sees that a mention belongs to the node that it names. The text
         around the mentions keeps the base style of the line (``cursor`` when the message
-        is the selected reply target, or else no style). A mention of our own name takes
-        our chip (:func:`~meshterm.ui.widgets.self_chip`), so that a message that names us
-        is easy to see.
+        is the selected reply target, or else no style). A mention of our own name has our
+        chip, turned over, and the line has a ``★`` at the left of its time (refer to
+        :meth:`_body_lines`). Thus a message that names us is easy to see.
 
         The chip opens on the notch, because the node that a mention names is the
         destination of a route that came from the sender (refer to :meth:`_group_header`,
-        whose chip closes on the point). The ``@`` stays in the chip. A chip keeps the words
-        of the arrow mode, where a mention is ``@Name`` with no frame, as it was before the
-        chip (JP, 2026-10-10).
+        whose chip closes on the point). The chip has no ``@``, because the chip already
+        says that the name is a mention (JP, 2026-10-13). Arrow mode has no chip, so there a
+        mention keeps its ``@`` (refer to :func:`~meshterm.ui.widgets.mention_hop`).
         """
         base = "cursor" if selected else None
         text = Text()
@@ -841,16 +863,29 @@ class ChatScreen(Screen):
         for match in MENTION.finditer(body):
             if match.start() > pos:
                 text.append(body[pos : match.start()], style=base)
-            name = match.group(1)
-            if self._self_name and name == self._self_name:
-                chip = self_chip(name, self._self_key, mention=True, role=DESTINATION)
-            else:
-                chip = name_chip(f"@{name}", self._sender_key(name, mention=True), role=DESTINATION)
-            text.append_text(chip)
+            text.append_text(hop_chip(self._mention_hop(match.group(1)), role=DESTINATION))
             pos = match.end()
         if pos < len(body):
             text.append(body[pos:], style=base)
         return text
+
+    def _mention_hop(self, name: str) -> PathHop:
+        """The hop of a mention of ``name``: in the transcript, and in the compose line.
+
+        The two use this one method, so a chip in the compose line is the chip that the
+        message will show after the send. A mention of our name has our key and the chip
+        that is turned over. Each other name has the key that the names of the senders
+        give (refer to :meth:`_sender_key`).
+        """
+        if self._self_name and name == self._self_name:
+            return mention_hop(name, self._self_key, you=True)
+        return mention_hop(name, self._sender_key(name, mention=True))
+
+    def _names_us(self, body: str) -> bool:
+        """Whether ``body`` has a mention of our name (it gets a ``★`` before its time)."""
+        if not self._self_name:
+            return False
+        return any(match.group(1) == self._self_name for match in MENTION.finditer(body))
 
     def _delivery_glyph(self, acked: bool | None) -> Text:
         """Map the ``acked`` state of an outbound direct message to the mark at its end.
@@ -1223,12 +1258,28 @@ class ChatScreen(Screen):
         self._selected_line = None
 
     def _begin_reply(self) -> None:
-        """Start the compose line with an ``@mention`` of the sender of the selected message."""
+        """Put an ``@mention`` of the sender of the selected message at the cursor.
+
+        The mention goes in at the cursor of the compose line, and the text that the user
+        already typed stays. Thus a message can name more than one node: select a message,
+        press Enter, select another, and press Enter again. A space comes before the
+        mention when it would touch the word in front of it, and after it when nothing
+        follows or a word would touch it. The mention is a chip from that moment, and the
+        cursor goes after it (refer to :class:`~meshterm.ui.compose.MentionEditor`).
+
+        A message of ours, or one with no sender, gives no name to mention. There the
+        line gets a bare ``@``, and the user types the name.
+        """
         message = self._messages[self._selected]
         sender, _ = self._sender_and_body(message)
         named = not message.outbound and sender != "·"
-        mention = f"@[{sender}] " if named else "@"
-        self._editor = LineEditor(mention + self._editor.text)
+        text, cursor = self._editor.text, self._editor.cursor
+        before = " " if cursor > 0 and not text[cursor - 1].isspace() else ""
+        if named:
+            after = " " if cursor == len(text) or not text[cursor].isspace() else ""
+            self._editor.insert(f"{before}@[{sender}]{after}")
+        else:
+            self._editor.insert(f"{before}@")
         self._clear_selection()
         self._stick = True
         self._session.invalidate()
@@ -1249,7 +1300,7 @@ class ChatScreen(Screen):
             self._status = f"Too long by {over} byte{'s' if over != 1 else ''} — trim to send."
             self._session.invalidate()
             return
-        self._editor = LineEditor()
+        self._editor = MentionEditor()
         self._sending = True
         self._stick = True
         if self._is_channel:

@@ -466,7 +466,9 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
 - **A lone chip can stand at one end of a route it doesn't draw** (`widgets.hop_chip` /
   `name_chip(role=…)`). A message goes from its author toward the nodes it names, so a
   sender is an `ORIGIN` — square (or round) on the left, the point on the right — and an
-  `@mention` is a `DESTINATION` chip, `@` kept, opening on the notch and ending square. No
+  `@mention` is a `DESTINATION` chip (`widgets.mention_chip`), opening on the notch and
+  ending square, its `@` dropped because the chip already says "mention" (JP, 2026-10-13;
+  arrow mode, with no chip, keeps `@Name`). No
   role is a node alone, square at both ends. Where it applies: the chat's sender chip and
   mentions, the Messages list's preview (author chip, no colon; mentions), the packet
   viewer's `from` (origin) and `to` (destination) rows around the `via` chain, the live
@@ -479,16 +481,28 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   `whole` run together, spaces and all).
 - **In a chat, we go by our name** (channel, DM, room, and the Messages list's preview —
   nowhere else; JP, 2026-10-13). A route's bare `★` says "you already know who this is",
-  but a chat is a conversation between names, so our sender chip and every `@mention` of
-  our name are `widgets.self_chip`: `★ Name` (a mention: `★ @Name`, the star before the
-  `@`) on the chip of *our key's hue, turned over* — dark ink on a light fill of the hue
-  (`PathHop.inverse`, the same pair as any chip in the other order), the one light chip
-  among the senders. The `★` takes the chip's dark ink: a yellow star measured under 3:1
-  on the light fill for 238 of 256 hues, and outside the chip on the page it was tried
-  and put back (JP, 2026-10-13). Arrow mode draws it as a padded reverse-video block. The
-  PicoCalc can't put a bright slot behind text, so there it keeps the normal colours and
-  the `★` alone marks us. With no name or key from the device, the bare `★` chip stays.
-  Path lines (delivery paths, the packet viewer, routes) keep `★`.
+  but a chat is a conversation between names, so our sender chip and every mention of our
+  name wear our name on the chip of *our key's hue, turned over* — dark ink on a light
+  fill of the hue (`PathHop.inverse`, the same pair as any chip in the other order), the
+  one light chip among the senders. **The `★` never sits inside that chip** (a yellow star
+  measured under 3:1 on the light fill for 238 of 256 hues, and in the chip's dark ink it
+  read as part of the name; JP, 2026-10-13): our sender chip is `Name ★`, the map's
+  yellow star on the page one cell right of the chip (`widgets.self_chip`); a mention of
+  us is the turned-over chip alone (`mention_chip(you=True)`), and the message carrying
+  it gets the `★` in the two cells left of its time (`❯ ★ 12:34  body` — every time sits
+  two cells right to keep the column; the Messages list puts it left of the row's age).
+  Arrow mode draws the chip as a padded reverse-video block. The PicoCalc can't put a
+  bright slot behind text, so there the chip keeps the normal colours and the `★` alone
+  marks us. With no name or key from the device, the bare `★` chip stays. Path lines
+  (delivery paths, the packet viewer, routes) keep `★`.
+- **The compose line draws a mention as its chip** (`ui/compose.py`, `MentionEditor`): the
+  moment `]` completes an `@[Name]` token it renders as the same chip the transcript will
+  show, and from then on it is an **atom** — ←/→ step over it, ^←/^→ never stop inside
+  it, Backspace at its end and Delete at its start remove all of it. The cursor on a chip
+  turns it into the composer's white slot chip; a chip past the byte limit goes red. The
+  text underneath is unchanged (`@[Name]` is what is sent and counted). Enter on a picked
+  message inserts its mention **at the cursor**, so one message can name several nodes.
+  The `›` wears `cursor` white and the typed text the `compose` white (JP, 2026-10-13).
 - Concept icons: 📡 advert · 🕒 clock/sync · 🔄 reboot · 💾 backup · 📂 restore ·
   🔑 channel/credential key · 🔐 identity/auth secret ·
   🔒 lock (a locked contact, a private channel) · 🔓 unlock · 🗑 clear/delete · ✎ compose/edit ·

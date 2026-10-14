@@ -301,7 +301,9 @@ def query_text(query: str) -> Text:
     return Text(f"/{query}", style="warn", no_wrap=True)
 
 
-def right_aligned_tail(body: Text, tail: Text, width: int) -> Text:
+def right_aligned_tail(
+    body: Text, tail: Text, width: int, *, whole: Sequence[tuple[int, int]] = ()
+) -> Text:
     """Lay out ``body`` with ``tail`` pinned to the right edge of its last line.
 
     ``body`` wraps at ``width`` as usual. ``tail`` is a short status, for example the byte
@@ -315,13 +317,20 @@ def right_aligned_tail(body: Text, tail: Text, width: int) -> Text:
             cursor block).
         tail: The short run to pin to the right edge.
         width: The total render width, in cells.
+        whole: ``(start, end)`` offsets into ``body.plain`` of the runs that the wrap must
+            not break at a space inside them: the chip of a mention in the compose line.
+            A run moves to the next line as one word (refer to :func:`render_hanging`).
 
     Returns:
         A single :class:`Text` with embedded newlines, ready for :func:`render_lines`.
     """
     width = max(1, width)
     console = _console(width)
-    lines = list(body.wrap(console, width)) or [Text("")]
+    held, stand_in = _held(body, whole)
+    lines = list(held.wrap(console, width)) or [Text("")]
+    if stand_in:
+        for line in lines:
+            line.plain = line.plain.replace(stand_in, " ")
     combined = Text()
     for line in lines[:-1]:
         combined.append_text(line)

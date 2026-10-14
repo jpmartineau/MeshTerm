@@ -79,6 +79,11 @@ MESH_THEME = Theme(
         # of the node hues on purpose (refer to node_style). Thus the user can always find
         # "you" easily.
         "you": "bold #ffffff",
+        # The text that the user types in the compose line of a chat: pure white, not bold.
+        # It is more visible than the transcript above it (JP, 2026-10-13). The ``›`` in
+        # front of it has the ``cursor`` white, the same as the ``❯`` of a selected
+        # message.
+        "compose": "#ffffff",
         # The name of a confirmed companion on the picker for the startup device: pure
         # white. Thus the devices that we talked to before are more visible than the ports
         # that MeshTerm only detected.
@@ -168,6 +173,10 @@ MESH_THEME = Theme(
         "type.repeater": "#a78bfa",
         "type.room": "#ffffff",
         "type.sensor": "#fb923c",
+        # The ``★`` of our node where it stands alone on the page as a mark: after our name
+        # in a chat, and before the time of a message that names us. It is the yellow of
+        # the map (``marks.SELF_MARK``), with a name so that the console chooses its slot.
+        "type.you": "#facc15",
         # A region name (the scope of a flood). It is not a node, so it has no hue from the
         # node wheel. It is a light slate. Its slant makes it different from prose, as a
         # tag is different from a sentence.
@@ -360,6 +369,8 @@ MESH_THEME_16 = Theme(
         "pathline": "none",
         "err.reverse": "reverse bold color(9)",
         "you": "bold color(15)",
+        # Slot 15 is already bright, so it needs no bold to be white.
+        "compose": "color(15)",
         "device.known": "bold color(15)",
         "qr": "bold color(15) on color(0)",
         "bluetooth": "bold color(15) on color(4)",
@@ -405,6 +416,7 @@ MESH_THEME_16 = Theme(
         "type.repeater": "not bold color(5)",
         "type.room": "color(15)",
         "type.sensor": "not bold color(3)",
+        "type.you": "color(11)",
         # A region name: the VT has no italic, and each chromatic slot is a node hue. Thus
         # the style is the plain light grey. The word "scope" in front of it makes it
         # different from other text.

@@ -448,8 +448,9 @@ def test_preview_prefixes_own_messages_only() -> None:
     assert _preview_text(dm_in, _NO_KEYS).plain == "hey"
     mine = ChatMessage(text="yo", outbound=True, is_channel=True, channel_idx=0)
     assert _preview_text(mine, _NO_KEYS).plain == "you: yo"  # our node with no name
-    # With our name, the preview shows our chat chip: a padded block in reverse video.
-    assert _preview_text(mine, _NO_KEYS, us=("Me", _OUR_KEY)).plain == " ★ Me  yo"
+    # With our name, the preview shows our chat chip (a padded block in reverse video),
+    # then the star.
+    assert _preview_text(mine, _NO_KEYS, us=("Me", _OUR_KEY)).plain == " Me  ★ yo"
 
 
 def test_preview_colours_channel_sender_and_mentions() -> None:
@@ -473,24 +474,26 @@ def test_preview_colours_channel_sender_and_mentions() -> None:
 def test_preview_draws_the_author_and_the_mentions_as_the_transcript_does(powerline) -> None:
     """With chips, the author closes on the point and a mention opens on the notch.
 
-    The point says what the colon said, so the chip has no colon. Our own author is
-    ``★ Name``, as the sender chip of our messages in the transcript, and a mention of our
-    name takes the same chip. With no name for our node, the bare ``★`` stays.
+    The point says what the colon said, so the chip has no colon, and a mention chip has
+    no ``@``. Our own author is our name and then the ``★``, as the sender chip of our
+    messages in the transcript. A mention of our name has no star. With no name for our
+    node, the bare ``★`` stays.
     """
     from meshterm.ui.pathline import POWERLINE_ROUND_CLOSE, POWERLINE_ROUND_OPEN, POWERLINE_SEP
 
     powerline(True)
     theirs = ChatMessage(text="Bob: hi @[Alice]", is_channel=True, channel_idx=0)
     author = POWERLINE_ROUND_OPEN + " Bob " + POWERLINE_SEP
-    mention = POWERLINE_SEP + " @Alice " + POWERLINE_ROUND_CLOSE
+    mention = POWERLINE_SEP + " Alice " + POWERLINE_ROUND_CLOSE
     assert _preview_text(theirs, _NO_KEYS).plain == f"{author} hi {mention}"
     mine = ChatMessage(text="yo", outbound=True, is_channel=True, channel_idx=0)
     assert _preview_text(mine, _NO_KEYS).plain == f"{POWERLINE_ROUND_OPEN} ★ {POWERLINE_SEP} yo"
     us = ("Me", _OUR_KEY)
-    ours = f"{POWERLINE_ROUND_OPEN} ★ Me {POWERLINE_SEP} yo"
+    ours = f"{POWERLINE_ROUND_OPEN} Me {POWERLINE_SEP} ★ yo"
     assert _preview_text(mine, _NO_KEYS, us=us).plain == ours
     named = ChatMessage(text="Bob: hi @[Me]", is_channel=True, channel_idx=0)
-    assert "★ @Me" in _preview_text(named, _NO_KEYS, us=us).plain
+    me = POWERLINE_SEP + " Me " + POWERLINE_ROUND_CLOSE
+    assert _preview_text(named, _NO_KEYS, us=us).plain == f"{author} hi {me}"
 
 
 def test_preview_keeps_the_whole_message() -> None:
@@ -1219,8 +1222,8 @@ def test_channel_transcript_groups_by_sender() -> None:
     rendered = _strip_ansi("\n".join(screen._render_grouped(80)))
 
     assert rendered.count("Alice") == 1  # the two Alice messages share one header
-    # The header of our group is our name after the ★ (JP, 2026-10-13), not the bare ★.
-    assert "Bob" in rendered and "★ Me" in rendered
+    # The header of our group is our name, then the ★ (JP, 2026-10-13), not the bare ★.
+    assert "Bob" in rendered and " Me  ★" in rendered
     assert "hi" in rendered and "again" in rendered  # the bodies are there, without the prefix
     assert "Alice: hi" not in rendered  # the raw name prefix moved into the header
     # Each message keeps its own timestamp on its line, also when grouped under one sender.
@@ -1239,7 +1242,7 @@ def test_transcript_draws_the_sender_as_an_origin_and_a_mention_as_a_destination
     the two ends of one route that is not drawn (JP, 2026-10-10).
     """
     from meshterm.ui.pathline import POWERLINE_SEP
-    from meshterm.ui.widgets import DESTINATION, ORIGIN, name_chip
+    from meshterm.ui.widgets import ORIGIN, mention_chip, name_chip
 
     powerline(True)  # this test is about the chip, so ask for a terminal that draws one
     conv = Conversation(label="#public", is_channel=True, channel_idx=0)
@@ -1252,7 +1255,8 @@ def test_transcript_draws_the_sender_as_an_origin_and_a_mention_as_a_destination
     # The test builds the chips through the widget, not as literal text. The end caps are
     # the caps of the path line, and the test asserts the framing, not the glyph.
     sender = name_chip("Alice", role=ORIGIN).plain
-    mention = name_chip("@Bob", role=DESTINATION).plain
+    mention = mention_chip("Bob", None).plain
+    assert "@" not in mention  # the chip says that it is a mention
     assert sender.endswith(POWERLINE_SEP) and sender in rendered  # the header goes on
     assert mention.startswith(POWERLINE_SEP) and mention in rendered  # the mention is reached
     assert f"{mention} you around?" in rendered  # in its place in the sentence
@@ -1264,14 +1268,14 @@ def test_a_mention_chip_moves_to_the_next_line_whole(powerline) -> None:
     A chip has a pad at each side of its label, and a name can have spaces. Without the
     hold, the notch stays at the end of one line and the name starts the next line.
     """
-    from meshterm.ui.widgets import DESTINATION, name_chip
+    from meshterm.ui.widgets import mention_chip
 
     powerline(True)
     conv = Conversation(label="#public", is_channel=True, channel_idx=0)
     text = "Alice: the relay on the hill looks bad @[Bob Smith] you around?"
     messages = [ChatMessage(text=text, is_channel=True, channel_idx=0)]
     screen = ChatScreen(conv, messages, send=None, names={}, session=_StubSession())
-    mention = name_chip("@Bob Smith", role=DESTINATION).plain
+    mention = mention_chip("Bob Smith", None).plain
 
     for width in range(30, 60):
         lines = [_strip_ansi(line).rstrip() for line in screen._render_grouped(width)]
@@ -1525,7 +1529,7 @@ def test_channel_self_style_keyed_on_concept_not_label() -> None:
     theirs = ChatMessage(text="you: hi", is_channel=True, channel_idx=0)
     mine = _channel_screen([], self_name="Me", self_key=_OUR_KEY)
     turned = f"{node_style(_OUR_KEY)} reverse"
-    assert _ink(mine._group_header("you", ours), " ★ Me ") == turned  # our name, turned over
+    assert _ink(mine._group_header("you", ours), " Me ") == turned  # our name, turned over
     screen = _channel_screen([])
     assert _ink(screen._group_header("you", ours), "★") == "you"  # no name: the white star
     assert _ink(screen._group_header("you", theirs), "you") == "node.unknown"  # no key: grey
@@ -1546,8 +1550,8 @@ def test_channel_own_messages_do_not_merge_with_remote_namesake() -> None:
     screen = _channel_screen(messages, self_name="Me", self_key=_OUR_KEY)
     rendered = _strip_ansi("\n".join(screen._render_grouped(80)))
     # Two headers, and they are not only apart: theirs is the name that they sent, ours is
-    # our name after the ★.
-    assert rendered.count("you") == 1 and rendered.count("★ Me") == 1
+    # our name, then the ★.
+    assert rendered.count("you") == 1 and rendered.count(" Me  ★") == 1
 
 
 def test_a_blank_line_closes_each_author_where_the_rows_allow(
@@ -1602,12 +1606,40 @@ def test_a_blank_line_closes_each_author_where_the_rows_allow(
     assert "" in [_strip_ansi(line) for line in short._render_grouped(53)]
 
 
-def test_a_mention_of_our_name_takes_our_chip() -> None:
-    """A message that names us is easy to see. A mention of each other node is as before."""
+def test_a_mention_of_our_name_takes_our_chip_with_no_star(powerline) -> None:
+    """The chip of a mention of us is turned over, as our sender chip, but it has no star.
+
+    The star of a message that names us is at the left of its time (refer to the next
+    test). With chips, no mention has its ``@``.
+    """
+    from meshterm.ui.theme import node_style
+
+    powerline(True)
     screen = _channel_screen([], self_name="Me", self_key=_OUR_KEY)
     text = screen._render_mentions("hi @[Me] and @[Bob]", selected=False)
-    assert "★ @Me" in text.plain and "@Bob" in text.plain
-    assert "★ Bob" not in text.plain
+    assert "★" not in text.plain and "@" not in text.plain
+    me = next(s for s in text.spans if text.plain[s.start : s.end] == "Me")
+    assert str(me.style).endswith(f"on {node_style(_OUR_KEY).split()[-1]}")  # a light fill
+
+
+def test_a_message_that_names_us_has_the_star_left_of_its_time() -> None:
+    """The ``★`` goes in the two cells before the time, and each time moves two cells right."""
+    from datetime import datetime, timezone
+
+    at = datetime(2026, 7, 5, 14, 24, tzinfo=timezone.utc)
+    stamp = at.astimezone().strftime("%H:%M")
+    messages = [
+        ChatMessage(text="Bob: hi @[Me]", is_channel=True, channel_idx=0, created_at=at),
+        ChatMessage(text="Bob: hi @[Zed]", is_channel=True, channel_idx=0, created_at=at),
+    ]
+    screen = _channel_screen(messages, self_name="Me", self_key=_OUR_KEY)
+    rows = _strip_ansi("\n".join(screen._render_grouped(72))).splitlines()
+    assert any(row.startswith(f"  ★ {stamp}  hi") for row in rows)
+    assert any(row.startswith(f"    {stamp}  hi") for row in rows)  # the other message
+    screen.handle("up")
+    screen.handle("up")  # the first message: the pointer, then the star
+    rows = _strip_ansi("\n".join(screen._render_grouped(72))).splitlines()
+    assert any(row.startswith(f"❯ ★ {stamp}  hi") for row in rows)
 
 
 def _channel_screen(
@@ -1683,6 +1715,56 @@ def test_channel_enter_on_selection_primes_at_mention() -> None:
 
     assert screen._editor.text == "@[Alice] "
     assert screen._selected is None  # the focus returns to compose after the reply starts
+
+
+def test_each_reply_puts_its_mention_at_the_cursor() -> None:
+    """Two replies name two nodes in one message, each where the cursor was."""
+    screen = _channel_screen(_channel_messages())
+    for ch in "hi and":
+        screen.handle("text", ch)
+    screen.handle("ctrl_left")  # before "and"
+    screen.handle("up")  # Bob
+    screen.handle("enter")
+    assert screen._editor.text == "hi @[Bob] and"
+    screen.handle("end")
+    screen.handle("up")
+    screen.handle("up")  # Alice
+    screen.handle("enter")
+    assert screen._editor.text == "hi @[Bob] and @[Alice] "
+    assert screen._editor.cursor == len(screen._editor.text)
+    screen.handle("backspace")  # the space
+    screen.handle("backspace")  # all of the mention
+    assert screen._editor.text == "hi @[Bob] and "
+
+
+def test_the_compose_line_keeps_a_chip_whole_when_it_wraps(powerline) -> None:
+    """A chip in the compose line moves to the next line as one word, never split."""
+    from meshterm.ui.widgets import mention_chip
+
+    powerline(True)
+    screen = _channel_screen([])
+    for ch in "the relay on the hill looks bad @[Bob Smith] ok":
+        screen.handle("text", ch)
+    chip = mention_chip("Bob Smith", None).plain
+    for width in range(30, 60):
+        lines = _strip_ansi(screen.render_body(width)).splitlines()
+        assert sum(chip in line for line in lines) == 1, width
+
+
+def test_a_row_whose_last_message_names_us_has_the_star_left_of_its_age(
+    repo: Repository,
+) -> None:
+    """The Messages list marks the row as the transcript marks the message."""
+    conv = Conversation(label="General", is_channel=True, channel_idx=0, channel_id="c0")
+    ctx = _RowCtx(repo)
+    us = ("Me", _OUR_KEY)
+    named = ChatMessage(text="Bob: hi @[Me]", is_channel=True, channel_id="c0")
+    other = ChatMessage(text="Bob: hi @[Zed]", is_channel=True, channel_id="c0")
+    lanes = _lanes([conv])
+    starred = _title(ctx, conv, {"chan:c0": named}, _NO_KEYS, lanes, us=us).plain
+    plain = _title(ctx, conv, {"chan:c0": other}, _NO_KEYS, lanes, us=us).plain
+    assert "★ now  " in starred and "★" not in plain
+    assert starred.index("now") == plain.index("now")  # the star takes a cell of the gap
 
 
 def test_channel_typing_clears_selection() -> None:
@@ -2556,7 +2638,7 @@ def test_on_the_picocalc_each_url_hangs_a_code_under_its_message_side_by_side() 
     screen = ChatScreen(conv, [message], send=None, names={}, session=_StubSession())
     rows = _code_rows(_strip_ansi(screen._render_grouped(53)).splitlines())
 
-    indent = 9  # "  HH:MM  ", the hanging indent of the body
+    indent = 11  # "    HH:MM  ", the hanging indent of the body
     assert rows and all(len(row) <= 53 and row.startswith(" " * indent) for row in rows)
     cells = [row[indent:].ljust(53 - indent) for row in rows]
     left, tallest = 0, 0
@@ -2628,7 +2710,7 @@ def test_a_picked_message_keeps_its_codes_in_view() -> None:
 
 # -- URLs kept whole, and their codes on ^U --------------------------------------------
 
-#: A link that is longer than the regular body lane (72 minus the 9-cell gutter), but that
+#: A link that is longer than the regular body lane (72 minus the 11-cell gutter), but that
 #: the screen can hold.
 _LONG_URL = "https://github.com/jpmartineau/MeshTerm/blob/main/meshterm/ui/chat.py"
 
@@ -2642,7 +2724,7 @@ def _url_chat(text: str, session=None) -> ChatScreen:  # noqa: ANN001
 def test_a_url_too_long_to_hang_steps_out_to_the_gutter_whole() -> None:
     """A link that the body lane cannot hold, but the screen can, is drawn whole on one line.
 
-    It starts under the timestamp, away from the ``❯`` of the selected message. The body
+    It starts in the column after the ``❯`` of the selected message. The body
     continues at its own indent after the link, so only the link leaves the block.
     """
     screen = _url_chat(f"look at {_LONG_URL} and tell me what you think of it all")
@@ -2650,7 +2732,7 @@ def test_a_url_too_long_to_hang_steps_out_to_the_gutter_whole() -> None:
     link = next(row for row in rows if _LONG_URL[:20] in row)
     assert link == "  " + _LONG_URL  # whole, at the gutter
     after = rows[rows.index(link) + 1]
-    assert after.startswith(" " * 9 + "and tell me")  # back under the indent of the body
+    assert after.startswith(" " * 11 + "and tell me")  # back under the indent of the body
 
     screen.handle("up")  # selected: the ❯ is on the first line, not on the line of the link
     rows = _strip_ansi(screen._render_grouped(72)).splitlines()
@@ -2659,16 +2741,16 @@ def test_a_url_too_long_to_hang_steps_out_to_the_gutter_whole() -> None:
 
 def test_a_short_tail_finishes_the_links_line_and_a_too_wide_link_still_folds() -> None:
     """Text that fits after a link at the gutter stays on its line. A wider link folds."""
-    url = "https://meshterm.net/" + "a" * 46  # 67 cells: wider than the lane of 63 cells
+    url = "https://meshterm.net/" + "a" * 46  # 67 cells: wider than the lane of 61 cells
     rows = _strip_ansi(_url_chat(f"see {url} ok")._render_grouped(72)).splitlines()
     assert "  " + url + " ok" in rows  # 2 + 67 + 3: the width of the screen
     rows = _strip_ansi(_url_chat(f"see {url} ok!")._render_grouped(72)).splitlines()
-    assert "  " + url in rows and " " * 9 + "ok!" in rows  # one cell too many: below it
+    assert "  " + url in rows and " " * 11 + "ok!" in rows  # one cell too many: below it
 
     wide = "https://meshterm.net/" + "b" * 60  # 81 cells: wider than the screen
     rows = _strip_ansi(_url_chat(f"see {wide}")._render_grouped(72)).splitlines()
     assert not any(wide in row for row in rows)  # cut, as before
-    assert all(row.startswith(" " * 9) for row in rows if "bbb" in row)  # hanging, as before
+    assert all(row.startswith(" " * 11) for row in rows if "bbb" in row)  # hanging, as before
 
 
 def test_ctrl_u_opens_the_picked_messages_links_on_one_share_screen() -> None:

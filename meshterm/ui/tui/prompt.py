@@ -205,15 +205,31 @@ class LineEditor:
             return self._render_slots(slots)
         shown = MASK_MARK * len(self.text) if mask else self.text
         text = Text("› ", style="accent")
-        for i, ch in enumerate(shown):
-            over = overflow_at is not None and i >= overflow_at
-            if i == self.cursor:
-                text.append(ch, style="err.reverse" if over else "reverse")
-            else:
-                text.append(ch, style="err" if over else None)
+        self._append_run(text, shown, 0, len(shown), overflow_at)
         if self.cursor >= len(shown):  # cursor past the last character → trailing block
             text.append(" ", style="reverse")
         return text
+
+    def _append_run(
+        self,
+        text: Text,
+        shown: str,
+        start: int,
+        end: int,
+        overflow_at: int | None,
+        style: str | None = None,
+    ) -> None:
+        """Append the characters ``shown[start:end]`` to ``text``, one cell for each character.
+
+        The character at the cursor is in reverse video. Each character at or after
+        ``overflow_at`` is in the error style. Each other character has ``style``.
+        """
+        for i in range(start, end):
+            over = overflow_at is not None and i >= overflow_at
+            if i == self.cursor:
+                text.append(shown[i], style="err.reverse" if over else "reverse")
+            else:
+                text.append(shown[i], style="err" if over else style)
 
     def _render_slots(self, slots: int) -> Text:
         """Render a fixed-width masked field: filled bullets and centred dots for blanks.

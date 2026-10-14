@@ -683,20 +683,23 @@ def name_chip(
     return hop_chip(hop, role=role)
 
 
-def self_chip(
-    name: str | None, key: str | None, *, mention: bool = False, role: str | None = None
-) -> Text:
-    """Our node in a chat: ``★ Name``, in the hue of our key, on a chip that is turned over.
+def self_chip(name: str | None, key: str | None, *, role: str | None = None) -> Text:
+    """Our node as the sender in a chat: ``Name ★``, a chip that is turned over, then the star.
 
     A chat (a channel, a direct chat, a room) names each sender, and our node too. A route
     shows our end as the bare ``★``, because the user never has to be told who that is. A
     chat is a conversation between names, so our messages go under our name (JP,
-    2026-10-13). Two things make it different from the name of each other node. The ``★``
-    of the app comes first. Also, the chip is turned over: the other senders are a light
-    hue on a dark fill, and ours is dark on a light fill of our hue. The console of the
-    PicoCalc cannot draw a light background, so there only the ``★`` marks us (refer to
-    :attr:`~meshterm.ui.pathline.PathHop.inverse`). A mention of our name in a message
-    takes the same chip, so that a message that names us is easy to see.
+    2026-10-13). Two things make it different from the name of each other node. The chip
+    is turned over: the other senders are a light hue on a dark fill, and ours is dark on a
+    light fill of our hue. Also, the ``★`` of the app is on the page to the right of the
+    chip, in the yellow of the map (JP, 2026-10-13). In the chip, the star had the dark
+    ink of the chip. The console of the PicoCalc cannot draw a light background, so there
+    the chip keeps the colours of each other chip and the star alone marks us (refer to
+    :attr:`~meshterm.ui.pathline.PathHop.inverse`).
+
+    A mention of our name is a different mark (refer to :func:`mention_chip`). The chip is
+    turned over, but it has no star. The star of a message that names us is at the left of
+    the time of the message (refer to :meth:`~meshterm.ui.chat.ChatScreen._body_lines`).
 
     Our node with no name or no key (the device did not report them) keeps the bare ``★``
     chip of a route.
@@ -704,17 +707,53 @@ def self_chip(
     Args:
         name: The name of our node.
         key: Our public key, which gives the hue.
-        mention: ``True`` for an ``@mention`` of our name. The label is ``★ @Name``:
-            the star comes before the ``@`` (JP, 2026-10-13).
         role: :data:`ORIGIN`, :data:`DESTINATION`, or ``None``, as for :func:`name_chip`.
+
+    Returns:
+        The chip and the star as a one-line :class:`Text`.
+    """
+    if not name or not key:
+        return name_chip("", you=True, role=role)
+    line = Text()
+    line.append_text(hop_chip(PathHop(name, key=key, inverse=True), role=role))
+    line.append(" ")
+    line.append(SELF_MARK[0], style="type.you")
+    return line
+
+
+def mention_hop(name: str, key: str | None, *, you: bool = False) -> PathHop:
+    """The hop of a mention: the node that a message names, as its chip shows it.
+
+    Where the terminal draws chips, the label is the name alone. The chip already says
+    that the name is a mention, so the ``@`` is not necessary (JP, 2026-10-13). In arrow
+    mode there is no chip, and the label keeps its ``@``. Without it, a mention is only a
+    word in a colour.
+
+    Args:
+        name: The name that the mention gives.
+        key: Any known prefix of the key of the node, which selects the hue. ``None`` is a
+            node that MeshTerm cannot place, and it has the keyless grey.
+        you: ``True`` if the mention names our node. Its chip is turned over, the same as
+            the chip of our messages (refer to :func:`self_chip`), but it has no star.
+
+    Returns:
+        The hop. A caller can change it before it draws it (the compose line draws the
+        chip under the cursor in the white of the insertion slot).
+    """
+    label = name if powerline_enabled() else f"@{name}"
+    return PathHop(label, key=key or None, inverse=you and bool(key))
+
+
+def mention_chip(name: str, key: str | None, *, you: bool = False) -> Text:
+    """A mention in a message: the chip of the node that it names, which opens on the notch.
+
+    The node that a mention names is the destination of a route from the author of the
+    message (refer to :data:`DESTINATION`). The arguments are those of :func:`mention_hop`.
 
     Returns:
         The chip as a one-line :class:`Text`.
     """
-    if not name or not key:
-        return name_chip("", you=True, role=role)
-    label = f"{SELF_GLYPH} @{name}" if mention else f"{SELF_GLYPH} {name}"
-    return hop_chip(PathHop(label, key=key, inverse=True), role=role)
+    return hop_chip(mention_hop(name, key, you=you), role=DESTINATION)
 
 
 def _shorten_hash(value: str, hash_bytes: int | None) -> str:

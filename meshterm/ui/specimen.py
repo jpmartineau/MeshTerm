@@ -21,10 +21,10 @@ from .packet_viewer import KIND_ICONS, PAYLOAD_ICONS
 from .theme import _VT_SLOTS, fold_text, glyph, name_style, snr_style
 from .tui.fkeys import FPair, active_deck
 from .widgets import (
-    DESTINATION,
     ORIGIN,
     _recency_style,
     channel_glyph,
+    mention_chip,
     name_chip,
     self_chip,
 )
@@ -143,12 +143,12 @@ def specimen_lines() -> list[RenderableType]:
 
     # The same names as chips, as the chat draws them. A sender label closes on the point,
     # because a message goes on from its author. The mention at the end opens on the
-    # notch, because the node that it names is where the message goes. The path line's
-    # own segment draws them, so this row is also a one-hop sample of the route language:
-    # the hue in the fill and the keyless grey for a node that nobody can identify. Our own
-    # messages go under ``★ me``, on the one chip that is turned over (dark on a light fill
-    # of our hue). The console of the PicoCalc has no light background, so there only the
-    # star marks it.
+    # notch, because the node that it names is where the message goes, and it has no ``@``.
+    # The path line's own segment draws them, so this row is also a one-hop sample of the
+    # route language: the hue in the fill and the keyless grey for a node that nobody can
+    # identify. Our own messages go under ``me``, on the one chip that is turned over (dark
+    # on a light fill of our hue), with the ``★`` after it. The console of the PicoCalc has
+    # no light background, so there only the star marks it.
     chips = Text("chips   ")
     for name, key in _DEMO_NAMES[:2]:
         chips.append_text(name_chip(name, key, role=ORIGIN))
@@ -158,7 +158,7 @@ def specimen_lines() -> list[RenderableType]:
     chips.append_text(name_chip("·", role=ORIGIN))
     chips.append(" ")
     name, key = _DEMO_NAMES[2]
-    chips.append_text(name_chip(f"@{name}", key, role=DESTINATION))
+    chips.append_text(mention_chip(name, key))
     lines.append(chips)
 
     lines.append(Text("heard   ").append_text(_ages_row()))

@@ -57,20 +57,20 @@ from ..services.trace_runner import (
 )
 from ..ui import renderers
 from ..ui.fields import ChannelRef, NodeRef
+from ..ui.marks import SELF_MARK
 from ..ui.menus import Lane, column_header, fit_cells, section_heading
 from ..ui.pathline import PathHop
 from ..ui.termfont import powerline_enabled
 from ..ui.theme import name_style
 from ..ui.tui import Choice, DeleteRequest, Separator
 from ..ui.widgets import (
-    DESTINATION,
     NODE_GLYPHS,
     ORIGIN,
     age_seconds,
     channel_glyph,
     format_age,
     hop_chip,
-    name_chip,
+    mention_chip,
     self_chip,
 )
 from .base import Tool, ToolResult, register
@@ -985,10 +985,18 @@ def _title(
     else:
         text.append(" " * _BADGE_WIDTH)
     # The relative age lane (right-aligned) is between the badge and the message text. Thus
-    # the ages are in one neat column, and all the previews start at the same position.
+    # the ages are in one neat column, and all the previews start at the same position. A
+    # last message that names us has the ``★`` at the left of its age, the same as the
+    # transcript has it at the left of the time (refer to ChatScreen._body_lines).
     age = _ago(last.created_at) if last is not None else ""
-    text.append("  ")
-    text.append(f"{age:>{_AGE_WIDTH}}", style="muted")
+    lane = f"  {age:>{_AGE_WIDTH}}"
+    if age and last is not None and _names_us(last, us):
+        star = len(lane) - len(age) - 2  # the star, a space, then the age
+        text.append(lane[:star])
+        text.append(SELF_MARK[0], style="type.you")
+        text.append(lane[star + 1 :], style="muted")
+    else:
+        text.append(lane, style="muted")
     text.append("  ")
     if last is not None:
         text.append_text(_preview_text(last, key_of, name_of, us=us))
@@ -1047,14 +1055,16 @@ def _preview_text(
 
     It is the same as the live transcript:
 
-    - Our own messages start with our chip, ``★ Name`` turned over, and a mention of our
-      name takes the same chip (refer to :func:`~meshterm.ui.widgets.self_chip`).
+    - Our own messages start with our name on a chip that is turned over, with the ``★``
+      after it (refer to :func:`~meshterm.ui.widgets.self_chip`). A mention of our name
+      has the chip that is turned over, with no star. The star of a message that names us
+      is at the left of the age of the row (refer to :func:`_title`).
     - In a received channel message, the inline ``Name:`` sender is the author, in the hue
       that comes from its key (the node grey when no known node has the name).
     - A room post starts with its author, named by key in the same way as the room screen
       names authors (:func:`~meshterm.ui.room.author_label`).
-    - Each ``@[Name]`` mention shows as ``@Name``, in the same way (refer to
-      :func:`_append_body`).
+    - Each ``@[Name]`` mention shows as the chip of the node that it names, in the same
+      way (refer to :func:`_append_body`).
 
     Thus the list and the chat use the same colour language, and where the terminal draws
     chips, the same chips: the author closes on the point and a mention opens on the notch.
@@ -1081,7 +1091,7 @@ def _preview_text(
             _append_author(text, _origin(name, key), _byline(name, key))
             _append_body(text, body, key_of, us)
         else:
-            _append_body(text, body_raw, key_of)
+            _append_body(text, body_raw, key_of, us)
     elif last.author and name_of is not None:
         from ..ui.room import author_label
 
@@ -1129,9 +1139,10 @@ def _append_body(
     """Append ``body`` to ``text``, muted, and light the names that it mentions.
 
     Each ``@[Name]`` is drawn in the hue that comes from the key of that node, as a chip
-    that opens on the notch where the terminal draws chips (the same as in the transcript).
-    It takes the node grey when the name resolves to no node that we know. A mention of our
-    own name (``us``) takes our chip, as in the transcript.
+    that opens on the notch where the terminal draws chips (the same as in the transcript,
+    refer to :func:`~meshterm.ui.widgets.mention_chip`). It takes the node grey when the
+    name resolves to no node that we know. A mention of our own name (``us``) has the chip
+    of our key, turned over, as in the transcript.
     """
     pos = 0
     for match in MENTION.finditer(body):
@@ -1139,12 +1150,18 @@ def _append_body(
             text.append(body[pos : match.start()], style="muted")
         name = match.group(1)
         if us[0] and name == us[0]:
-            text.append_text(self_chip(name, us[1], mention=True, role=DESTINATION))
+            text.append_text(mention_chip(name, us[1], you=True))
         else:
-            text.append_text(name_chip(f"@{name}", key_of(name), role=DESTINATION))
+            text.append_text(mention_chip(name, key_of(name)))
         pos = match.end()
     if pos < len(body):
         text.append(body[pos:], style="muted")
+
+
+def _names_us(last: ChatMessage, us: tuple[str | None, str | None]) -> bool:
+    """Whether the message ``last`` has a mention of our name (``us``)."""
+    name = us[0]
+    return bool(name) and any(match.group(1) == name for match in MENTION.finditer(last.text))
 
 
 def _ago(when: Any) -> str:
