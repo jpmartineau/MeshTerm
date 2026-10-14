@@ -20,7 +20,12 @@ can change how things behave. It does not only add new things.
   chat. Before, your messages showed only the `★`.
 - **Your node's star is white.** The `★` that marks your node on the map, in routes, in
   lists, and in a chat is white, the same white as your name in the lists. Before, it was
-  yellow. A star in a faded part of a route stays grey.
+  yellow.
+- **The faded part of a route keeps the colours of its nodes.** The part of a route that
+  you do not choose, for example the mirrored way back of a trace, shows each node in the
+  colour of its key, but less vivid. Thus you can still see which node each one is.
+  Before, each of these nodes was the same grey box. When a route is drawn with arrows,
+  the faded part stays grey.
 - **In a chat, a name that MeshTerm cannot match to a node is black on grey.** The box
   around a sender or a mention with no known node has black text on a grey box. Thus it
   does not stand out among the coloured names. Before, it was light blue on slate.

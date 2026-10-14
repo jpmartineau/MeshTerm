@@ -121,6 +121,16 @@ def distance(first: str, second: str) -> float:
     return math.dist(from_hex(first), from_hex(second))
 
 
+def desaturated(colour: str, keep: float) -> str:
+    """``colour`` with its chroma multiplied by ``keep``. The lightness and the hue do not change.
+
+    ``1`` returns the colour, and ``0`` returns the grey of the same lightness. Less chroma
+    at the same lightness always stays in the sRGB gamut, because the grey is in it.
+    """
+    lightness, a, b = from_hex(colour)
+    return to_hex((lightness, a * keep, b * keep))
+
+
 def shaded(colour: str, by: float, *, floor: float | None = None) -> str:
     """``colour`` moved ``by`` in lightness, away from the end of the scale that is nearer.
 
