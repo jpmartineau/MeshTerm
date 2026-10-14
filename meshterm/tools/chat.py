@@ -986,15 +986,15 @@ def _title(
         text.append(" " * _BADGE_WIDTH)
     # The relative age lane (right-aligned) is between the badge and the message text. Thus
     # the ages are in one neat column, and all the previews start at the same position. A
-    # last message that names us has the ends of our chip at the left of its age, the same
-    # as the transcript has them at the left of the time (refer to ChatScreen._body_lines).
+    # last message that names us has the point of our chip at the left of its age, the same
+    # as the transcript has it at the left of the time (refer to ChatScreen._body_lines).
     age = _ago(last.created_at) if last is not None else ""
     lane = f"  {age:>{_AGE_WIDTH}}"
     if age and last is not None and _names_us(last, us):
-        mark = len(lane) - len(age) - 2  # the two cells of the mark, then the age
+        mark = len(lane) - len(age) - 2  # the mark, a space, then the age
         text.append(lane[:mark])
         text.append_text(mention_mark(us[1]))
-        text.append(age, style="muted")
+        text.append(lane[mark + 1 :], style="muted")
     else:
         text.append(lane, style="muted")
     text.append("  ")
@@ -1057,7 +1057,7 @@ def _preview_text(
 
     - Our own messages start with our chip, ``★ Name`` turned over (refer to
       :func:`~meshterm.ui.widgets.self_chip`). A mention of our name has the chip that is
-      turned over, with no star. A message that names us has the ends of our chip at the
+      turned over, with no star. A message that names us has the point of our chip at the
       left of the age of the row (refer to :func:`_title`).
     - In a received channel message, the inline ``Name:`` sender is the author, in the hue
       that comes from its key (the node grey when no known node has the name).

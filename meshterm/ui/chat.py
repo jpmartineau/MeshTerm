@@ -775,9 +775,9 @@ class ChatScreen(Screen):
         is marked as the reply target (the same as the ``❯`` pointer and the highlight of
         the select screen).
 
-        A message that mentions our name has a mark at the left of its time: the two ends
-        of our chip, in its colour, with no label (refer to
-        :func:`~meshterm.ui.widgets.mention_mark`, JP, 2026-10-13). The chip of the mention
+        A message that mentions our name has a mark at the left of its time: the point of
+        our chip, in its colour (refer to :func:`~meshterm.ui.widgets.mention_mark`, JP,
+        2026-10-13). The chip of the mention
         in the body is turned over, but it has no star (refer to
         :func:`~meshterm.ui.widgets.mention_hop`). Thus the mark of a message that names us
         is in one column, where the eye finds it when it goes down the transcript. Each time
@@ -799,6 +799,7 @@ class ChatScreen(Screen):
         prefix.append("❯ " if selected else "  ", style="cursor" if selected else None)
         if self._names_us(body):
             prefix.append_text(mention_mark(self._self_key))
+            prefix.append(" ")
         else:
             prefix.append("  ")
         prefix.append(f"{stamp:%H:%M}  ", style="cursor" if selected else "muted")
@@ -855,7 +856,7 @@ class ChatScreen(Screen):
         Thus the user sees that a mention belongs to the node that it names. The text
         around the mentions keeps the base style of the line (``cursor`` when the message
         is the selected reply target, or else no style). A mention of our own name has our
-        chip, turned over, and the line has the ends of our chip at the left of its time
+        chip, turned over, and the line has the point of our chip at the left of its time
         (refer to :meth:`_body_lines`). Thus a message that names us is easy to see.
 
         The chip opens on the notch, because the node that a mention names is the

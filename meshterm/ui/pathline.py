@@ -1294,12 +1294,11 @@ def _bind_chips(platform: Platform) -> None:
         _colours_of, _WEIGHT, _FLAT = _slot_colours, "not bold ", "not bold "
 
 
-def chip_ends(hop: PathHop) -> Text:
-    """The two ends of the chip of ``hop`` with no label between them: the notch, then the point.
+def chip_point(hop: PathHop) -> Text:
+    """The point of the chip of ``hop`` alone: one cell in the fill of the chip.
 
-    It is two cells in the fill of the chip, the same two cells that open and close a chip
-    of a destination (refer to :meth:`PathLine._notch`). A chat puts it at the left of the
-    time of a message that names us, in the fill of our chip (refer to
+    It is the same cell that closes a chip whose route goes on. A chat puts it at the left
+    of the time of a message that names us, in the fill of our chip (refer to
     :func:`~meshterm.ui.widgets.mention_mark`). The colours come from the palette of the
     platform, so the PicoCalc draws it in the fill that the chip has there.
 
@@ -1307,12 +1306,9 @@ def chip_ends(hop: PathHop) -> Text:
         hop: The hop whose chip gives the fill.
 
     Returns:
-        The two styled cells.
+        The one styled cell.
     """
-    fill = _colours_of(hop).fill
-    text = PathLine._notch(fill)
-    text.append(POWERLINE_SEP, style=f"{_FLAT}{fill}")
-    return text
+    return Text(POWERLINE_SEP, style=f"{_FLAT}{_colours_of(hop).fill}")
 
 
 def _shorten(value: str, hash_bytes: int | None) -> str:

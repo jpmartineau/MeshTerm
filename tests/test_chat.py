@@ -1624,7 +1624,7 @@ def test_a_mention_of_our_name_takes_our_chip_with_no_star(powerline) -> None:
 def test_a_message_that_names_us_has_the_mark_left_of_its_time() -> None:
     """The mark goes in the two cells before the time, and each time moves two cells right.
 
-    The suite draws no chips, so the mark is ``>>`` in our hue (refer to the widget tests
+    The suite draws no chips, so the mark is ``>`` in our hue (refer to the widget tests
     for the two ends of the chip).
     """
     from datetime import datetime, timezone
@@ -1637,12 +1637,12 @@ def test_a_message_that_names_us_has_the_mark_left_of_its_time() -> None:
     ]
     screen = _channel_screen(messages, self_name="Me", self_key=_OUR_KEY)
     rows = _strip_ansi("\n".join(screen._render_grouped(72))).splitlines()
-    assert any(row.startswith(f"  >>{stamp}  hi") for row in rows)
+    assert any(row.startswith(f"  > {stamp}  hi") for row in rows)
     assert any(row.startswith(f"    {stamp}  hi") for row in rows)  # the other message
     screen.handle("up")
     screen.handle("up")  # the first message: the pointer, then the mark
     rows = _strip_ansi("\n".join(screen._render_grouped(72))).splitlines()
-    assert any(row.startswith(f"❯ >>{stamp}  hi") for row in rows)
+    assert any(row.startswith(f"❯ > {stamp}  hi") for row in rows)
 
 
 def _channel_screen(
@@ -1766,7 +1766,7 @@ def test_a_row_whose_last_message_names_us_has_the_mark_left_of_its_age(
     lanes = _lanes([conv])
     marked = _title(ctx, conv, {"chan:c0": named}, _NO_KEYS, lanes, us=us).plain
     plain = _title(ctx, conv, {"chan:c0": other}, _NO_KEYS, lanes, us=us).plain
-    assert ">>now  " in marked and ">>" not in plain
+    assert "> now  " in marked and ">" not in plain
     assert marked.index("now") == plain.index("now")  # the mark takes the cells of the gap
 
 

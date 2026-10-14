@@ -488,15 +488,16 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   the star in the chip's dark ink: a yellow star measured under 3:1 on the light fill for
   238 of 256 hues, and the star on the page right of the chip was tried and put back (JP,
   2026-10-13). A **mention** of us is the turned-over chip with no star
-  (`mention_chip(you=True)`); the message carrying it gets **the two ends of our chip**
-  in the two cells left of its time instead — notch then point, no label, in our chip's
-  fill (`widgets.mention_mark` → `pathline.chip_ends`; `>>` in our hue in arrow mode;
-  it replaced a `★`, JP 2026-10-13). Every time sits two cells right to keep the column
-  (`❯`, a space, the mark, then `12:34  body`), and the Messages list puts the mark left
-  of the row's age. Arrow mode draws the chip as
-  a padded reverse-video block. The PicoCalc can't put a bright slot behind text, so
-  there the chip keeps the normal colours and the `★` alone marks us. With no name or key from the device, the bare `★` chip stays. Path lines
-  (delivery paths, the packet viewer, routes) keep `★`.
+  (`mention_chip(you=True)`); the message carrying it gets **the point of our chip**
+  alone, one cell in our chip's fill, left of its time instead (`widgets.mention_mark` →
+  `pathline.chip_point`; `>` in our hue in arrow mode). It replaced a `★`, and then the
+  notch-and-point pair, which read as ugly (JP, 2026-10-13). Every time sits two cells
+  right to keep the column (`❯`, a space, the mark, a space, then `12:34  body`), and the
+  Messages list puts the mark left of the row's age. Arrow mode draws the chip as a
+  padded reverse-video block. The PicoCalc can't put a bright slot behind text, so there
+  the chip keeps the normal colours and the `★` alone marks us. With no name or key from
+  the device, the bare `★` chip stays. Path lines (delivery paths, the packet viewer,
+  routes) keep `★`.
 - **The compose line draws a mention as its chip** (`ui/compose.py`, `MentionEditor`): the
   moment `]` completes an `@[Name]` token it renders as the same chip the transcript will
   show, and from then on it is an **atom** — ←/→ step over it, ^←/^→ never stop inside

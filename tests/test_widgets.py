@@ -399,23 +399,22 @@ def test_a_mention_of_us_is_turned_over_with_no_star(powerline) -> None:
     assert not mention_hop("Me", None, you=True).inverse  # no key: no hue to turn over
 
 
-def test_the_mark_of_a_message_that_names_us_is_the_ends_of_our_chip(powerline) -> None:
-    """The notch, then the point, in the fill of our chip, and no label between them."""
+def test_the_mark_of_a_message_that_names_us_is_the_point_of_our_chip(powerline) -> None:
+    """One cell: the point, in the fill of our chip."""
     powerline(True)
     mark = mention_mark("5e7f")
     fill = _span_style(mention_chip("Me", "5e7f", you=True), "Me").bgcolor.name
 
-    assert mark.plain == POWERLINE_SEP * 2
-    notch, point = (Style.parse(str(span.style)) for span in mark.spans)
-    assert notch.reverse and notch.color.name == fill  # cut out of the fill
-    assert not point.reverse and point.color.name == fill  # the point of the fill
+    assert mark.plain == POWERLINE_SEP
+    point = Style.parse(str(mark.style))
+    assert not point.reverse and point.color.name == fill
 
 
-def test_the_mark_without_chips_is_two_arrows_in_our_hue(powerline) -> None:
-    """With no chips, the mark is ``>>``, in the hue that our chip has in arrow mode."""
+def test_the_mark_without_chips_is_an_arrow_in_our_hue(powerline) -> None:
+    """With no chips, the mark is ``>``, in the hue that our chip has in arrow mode."""
     powerline(False)
     mark = mention_mark("5e7f")
-    assert mark.plain == ">>" and str(mark.style) == node_style("5e7f")
+    assert mark.plain == ">" and str(mark.style) == node_style("5e7f")
     assert str(mention_mark(None).style) == "node.unknown"
 
 
