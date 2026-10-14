@@ -107,6 +107,32 @@ def _devstate(
     return DeviceState(ctx)  # type: ignore[arg-type]
 
 
+def test_each_self_info_read_goes_to_the_hook() -> None:
+    """The context gives our key to the theme through this hook (our star takes our hue)."""
+    dev = FakeDevice()
+    ds = _devstate(dev)
+    seen: list[dict] = []
+    ds.on_self_info = seen.append
+
+    async def run() -> None:
+        await ds.self_info()
+        await ds.self_info()  # from the cache: no new read, so no new call
+
+    asyncio.run(run())
+    assert seen == [{"name": "node", "tx_power": 20}]
+
+
+def test_the_context_publishes_our_key_to_the_theme() -> None:
+    """A self-info with a key gives our star the hue of that key."""
+    from meshterm.context import _publish_self_key
+    from meshterm.ui.theme import active_theme, node_style
+
+    _publish_self_key({"public_key": "5e7f"})
+    assert active_theme().styles["you.mark"].color.name in node_style("5e7f")
+    _publish_self_key({})  # no key: the yellow of the map again
+    assert active_theme().styles["you.mark"].color.name == "#facc15"
+
+
 def test_stable_facts_are_fetched_once_and_served_from_cache() -> None:
     """MeshTerm reads self-info, the path hash mode, and channels from the radio one time.
 

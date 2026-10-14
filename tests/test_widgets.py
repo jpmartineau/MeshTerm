@@ -401,12 +401,40 @@ def test_a_mention_of_us_is_turned_over_with_no_star(powerline) -> None:
 
 
 @pytest.mark.parametrize("chips", [True, False])
-def test_the_mark_of_a_message_that_names_us_is_a_star_in_our_hue(powerline, chips) -> None:
-    """The ``★`` in the hue of our key, with chips or without them."""
+def test_the_mark_of_a_message_that_names_us_is_our_star(powerline, chips) -> None:
+    """The ``★`` of our node, with chips or without them: the theme name of our hue."""
     powerline(chips)
     mark = mention_mark("5e7f")
-    assert mark.plain == "★" and str(mark.style) == node_style("5e7f")
+    assert mark.plain == "★" and str(mark.style) == "you.mark"
     assert str(mention_mark(None).style) == "node.unknown"  # no key: the keyless grey
+
+
+def test_our_star_takes_the_hue_of_our_key_everywhere() -> None:
+    """One call gives the theme name of our star our hue, and the render cache forgets it.
+
+    Before the device reports our key, the star has the yellow of the map. ``None`` puts the
+    yellow back.
+    """
+    from rich.style import Style
+
+    from meshterm.ui.marks import SELF_MARK, parse_hex
+    from meshterm.ui.theme import active_theme, mark_rgb, set_self_key
+    from meshterm.ui.tui.render import render_to_ansi
+    from meshterm.ui.widgets import self_marker
+
+    star = Text(SELF_MARK[0], style=SELF_MARK[1])
+    yellow = render_to_ansi(star, 1)
+    assert self_marker() == ("★", (0xFA, 0xCC, 0x15))
+
+    set_self_key("5e7f")
+    hue = node_style("5e7f")
+    assert active_theme().styles["you.mark"] == Style.parse(hue)
+    assert render_to_ansi(star, 1) != yellow  # the cache did not keep the old bytes
+    assert mark_rgb("you.mark") == parse_hex(hue.split()[-1])  # the map draws the same hue
+    assert self_marker()[1] == parse_hex(hue.split()[-1])
+
+    set_self_key(None)
+    assert render_to_ansi(star, 1) == yellow
 
 
 def test_self_chip_keeps_the_bare_star_without_our_name_or_key(powerline) -> None:
@@ -423,6 +451,40 @@ def test_name_chip_greys_a_node_it_cannot_place(powerline) -> None:
     keyless = name_chip("·")
 
     assert _span_style(keyless, "·").bgcolor.name == "#64748b"  # the keyless grey
+
+
+def test_a_chat_chip_with_no_key_is_the_grey_of_plain_text(powerline) -> None:
+    """In a chat, an unknown sender or mention is plain-text grey on a darker fill of it.
+
+    The fill comes from the label by the rule of the chip of a node. A node with a key keeps
+    its hue, and arrow mode keeps the ``node.unknown`` grey.
+    """
+    from meshterm.ui.pathline import _chip_fill
+    from meshterm.ui.widgets import author_chip
+
+    powerline(True)
+    for chip, label in ((author_chip("Zed", None), "Zed"), (mention_chip("Zed", None), "Zed")):
+        style = _span_style(chip, label)
+        assert (style.color.name, style.bgcolor.name) == ("#cccccc", _chip_fill("#cccccc"))
+    keyed = _span_style(author_chip("Bob", "d4"), "Bob")
+    assert keyed.color.name == node_style("d4").split()[-1]  # a key keeps its hue
+    powerline(False)
+    assert str(author_chip("Zed", None).spans[0].style) == "node.unknown"
+
+
+def test_a_chat_chip_with_no_key_keeps_the_keyless_colours_on_the_picocalc(powerline) -> None:
+    """The console has no grey background darker than its plain text."""
+    from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
+    from meshterm.ui.widgets import author_chip
+
+    powerline(True)
+    set_platform(PICOCALC_LYRA)
+    try:
+        quiet = _span_style(author_chip("Zed", None), "Zed")
+        keyless = _span_style(name_chip("Zed"), "Zed")
+        assert (quiet.color, quiet.bgcolor) == (keyless.color, keyless.bgcolor)
+    finally:
+        set_platform(REGULAR)
 
 
 def test_name_chip_of_an_origin_closes_on_the_point(powerline) -> None:

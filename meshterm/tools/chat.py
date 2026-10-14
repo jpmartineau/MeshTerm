@@ -58,7 +58,6 @@ from ..services.trace_runner import (
 from ..ui import renderers
 from ..ui.fields import ChannelRef, NodeRef
 from ..ui.menus import Lane, column_header, fit_cells, section_heading
-from ..ui.pathline import PathHop
 from ..ui.termfont import powerline_enabled
 from ..ui.theme import name_style
 from ..ui.tui import Choice, DeleteRequest, Separator
@@ -66,9 +65,9 @@ from ..ui.widgets import (
     NODE_GLYPHS,
     ORIGIN,
     age_seconds,
+    author_chip,
     channel_glyph,
     format_age,
-    hop_chip,
     mention_chip,
     mention_mark,
     self_chip,
@@ -1105,7 +1104,7 @@ def _preview_text(
 
 def _origin(name: str, key: str | None) -> Text:
     """The chip of the author of a preview: it closes on the point, as in the transcript."""
-    return hop_chip(PathHop(name, key=key), role=ORIGIN)
+    return author_chip(name, key)
 
 
 def _append_author(text: Text, chip: Text, byline: Text) -> None:

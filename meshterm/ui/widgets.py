@@ -683,6 +683,24 @@ def name_chip(
     return hop_chip(hop, role=role)
 
 
+def author_chip(name: str, key: str | None) -> Text:
+    """The author of a message in a chat: the chip of the node, which closes on the point.
+
+    It is :func:`name_chip` with the role of an origin, and one difference: a node that no
+    key can place has the quiet chip of a chat, the grey of plain text on a darker grey
+    (refer to :attr:`~meshterm.ui.pathline.PathHop.quiet`). The transcript and the
+    Messages list draw each sender through this function.
+
+    Args:
+        name: The name as it must read.
+        key: Any known prefix of the key of the node, or ``None``.
+
+    Returns:
+        The chip as a one-line :class:`Text`.
+    """
+    return hop_chip(PathHop(name, key=key or None, quiet=True), role=ORIGIN)
+
+
 def self_chip(name: str | None, key: str | None, *, role: str | None = None) -> Text:
     """Our node as the sender in a chat: ``★ Name``, on the chip of our key, turned over.
 
@@ -725,16 +743,19 @@ def mention_mark(key: str | None) -> Text:
     2026-10-13). The hue is the colour of our name, the same colour as the chip that the
     mention has in the body, so the eye joins the two. It is the same on each platform, and
     with chips or without them. JP tried the yellow star of the map, the notch and the point
-    of our chip, and the point alone, and kept this one.
+    of our chip, and the point alone, and kept this one. It is the star of our node in the
+    rest of the app too (:data:`~meshterm.ui.marks.SELF_MARK`).
 
     Args:
-        key: Our public key, which gives the hue. With ``None``, the star has the keyless
-            grey, the same as the chip of the mention.
+        key: Our public key. With ``None``, the star has the keyless grey, the same as the
+            chip of the mention.
 
     Returns:
         The mark, one cell wide. The caller puts a space after it.
     """
-    return Text(SELF_GLYPH, style=node_style(key) if key else "node.unknown")
+    if not key:
+        return Text(SELF_GLYPH, style="node.unknown")
+    return Text(SELF_MARK[0], style=SELF_MARK[1])
 
 
 def mention_hop(name: str, key: str | None, *, you: bool = False) -> PathHop:
@@ -757,7 +778,7 @@ def mention_hop(name: str, key: str | None, *, you: bool = False) -> PathHop:
         chip under the cursor in the white of the insertion slot).
     """
     label = name if powerline_enabled() else f"@{name}"
-    return PathHop(label, key=key or None, inverse=you and bool(key))
+    return PathHop(label, key=key or None, inverse=you and bool(key), quiet=True)
 
 
 def mention_chip(name: str, key: str | None, *, you: bool = False) -> Text:
@@ -1091,7 +1112,7 @@ def stats_panel(
 
 
 # The glyphs and colours of the node types. They are the same as the marker palette of the
-# map in the whole app (refer to ui.map_render). Our node is the yellow ``★``, plain nodes
+# map in the whole app (refer to ui.map_render). Our node is the ``★`` in our hue, plain nodes
 # are the loud pink ``●``, and repeaters are the calmer violet ``▲``. The other types have
 # hues that are safe on the map and different from those: a white square for rooms (the
 # house glyph was difficult to read) and an orange dot with a ring for sensors. All are
@@ -1124,8 +1145,8 @@ def node_marker(node_type: int | None) -> tuple[str, RGB]:
 
 
 def self_marker() -> tuple[str, RGB]:
-    """The map marker of our node, the yellow ``★``, as a ``(glyph, rgb)`` pair."""
-    return SELF_MARK[0], parse_hex(SELF_MARK[1])
+    """The map marker of our node, the ``★`` in our hue, as a ``(glyph, rgb)`` pair."""
+    return SELF_MARK[0], mark_rgb(SELF_MARK[1])
 
 
 # A heat-map gradient for the heard age of a node, from the hottest (heard most recently) to

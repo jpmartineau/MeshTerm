@@ -47,10 +47,10 @@ from .tui.spinner import Spinner, spinner_interval
 from .widgets import (
     DESTINATION,
     ORIGIN,
+    author_chip,
     hop_chip,
     mention_hop,
     mention_mark,
-    name_chip,
     self_chip,
 )
 
@@ -751,7 +751,7 @@ class ChatScreen(Screen):
             return self_chip(self._self_name, self._self_key, role=ORIGIN)
         # ``·`` is a channel line that arrived with no sender prefix: there is no key to use.
         key = None if sender == "·" else self._header_key(sender, message)
-        return name_chip(sender, key, role=ORIGIN)
+        return author_chip(sender, key)
 
     def _header_key(self, sender: str, message: ChatMessage) -> str | None:
         """The key that gives the colour of the sender chip of a group: the key of the name.

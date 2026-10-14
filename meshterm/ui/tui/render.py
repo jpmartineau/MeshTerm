@@ -23,7 +23,7 @@ from rich.text import Span, Text
 
 from ...platforms import Platform, on_platform
 from ..pathline import PATH_INK
-from ..theme import active_theme, fold_text, is_identity_style
+from ..theme import active_theme, fold_text, is_identity_style, style_generation
 
 #: A cache of one headless render console for each width. Consoles are cheap, but a paint
 #: occurs at each key press and at each tick of the live-monitor timer. Thus the cache
@@ -84,7 +84,7 @@ def _cache_key(renderable: RenderableType, width: int, no_wrap: bool) -> tuple |
     necessary. Thus it reports ``None`` and renders without the cache.
     """
     if isinstance(renderable, str):
-        return ("s", renderable, width, no_wrap, _CACHE_GEN)
+        return ("s", renderable, width, no_wrap, _CACHE_GEN, style_generation())
     if isinstance(renderable, Text):
         return (
             "t",
@@ -98,6 +98,7 @@ def _cache_key(renderable: RenderableType, width: int, no_wrap: bool) -> tuple |
             width,
             no_wrap,
             _CACHE_GEN,
+            style_generation(),
         )
     return None
 

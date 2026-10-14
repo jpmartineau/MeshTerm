@@ -55,6 +55,8 @@ from typing import TYPE_CHECKING
 from ..core.channel_probe import ChannelSlot, probe_channel_slots
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from ..context import AppContext
     from ..core.models import Contact
 
@@ -130,6 +132,11 @@ class DeviceState:
         self._channels_lock = asyncio.Lock()
         self._capacity_lock = asyncio.Lock()
         self._tasks: set[asyncio.Task] = set()
+        #: Called with each self-info that the cache reads from the device. The context
+        #: connects it to the theme, so that our star takes the hue of our key (refer to
+        #: :meth:`AppContext.devstate <meshterm.context.AppContext.devstate>`). ``None``
+        #: calls nothing.
+        self.on_self_info: Callable[[dict], None] | None = None
 
     # -- contacts (stale-while-revalidate) --------------------------------------
 
@@ -317,6 +324,8 @@ class DeviceState:
             device = await self._ctx.device()
             self._self_info = dict(await device.get_self_info())
             self._self_info_at = time.monotonic()
+            if self.on_self_info is not None:
+                self.on_self_info(self._self_info)
             return self._self_info
 
     async def _refresh_self_info_quietly(self) -> None:

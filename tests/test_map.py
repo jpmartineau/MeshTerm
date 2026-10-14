@@ -2123,10 +2123,12 @@ def test_map_observation_round_trips_node_type(ctx) -> None:
 def test_render_map_labels_take_the_name_hue_ours_white() -> None:
     """A map label takes the hue of its node, and our label takes the white of you.
 
-    Our label is white, and the ★ glyph stays yellow. A label with no key gets the muted grey.
+    Our label is white, and the ★ glyph keeps the colour of our star. A label with no key gets
+    the muted grey.
     """
     from meshterm.ui.map_render import MapMarker, render_map
     from meshterm.ui.marks import SELF_MARK
+    from meshterm.ui.theme import mark_rgb
     from meshterm.ui.widgets import name_rgb
 
     vp = Viewport.fit([(45.5, -73.6), (45.4, -73.5)], 120, 80, max_zoom=14)
@@ -2136,7 +2138,7 @@ def test_render_map_labels_take_the_name_hue_ours_white() -> None:
         MapMarker("BARE", 45.45, -73.55),
     ]
     lines = render_map(vp, {}, markers)
-    assert _glyph_color(lines, "★") == parse_hex(SELF_MARK[1])  # the glyph keeps its yellow
+    assert _glyph_color(lines, "★") == mark_rgb(SELF_MARK[1])  # the colour of our star
     assert _glyph_color(lines, "US") == (255, 255, 255)  # ...the label is the white of you
     assert _glyph_color(lines, "KEYED") == name_rgb("KEYED", "d4" * 32)
     assert _glyph_color(lines, "BARE") == (148, 163, 184)  # no key: the muted grey

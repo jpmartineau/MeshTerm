@@ -23,6 +23,7 @@ from .tui.fkeys import FPair, active_deck
 from .widgets import (
     ORIGIN,
     _recency_style,
+    author_chip,
     channel_glyph,
     mention_chip,
     name_chip,
@@ -155,7 +156,7 @@ def specimen_lines() -> list[RenderableType]:
         chips.append(" ")
     chips.append_text(self_chip("me", _DEMO_SELF_KEY, role=ORIGIN))
     chips.append(" ")
-    chips.append_text(name_chip("·", role=ORIGIN))
+    chips.append_text(author_chip("·", None))
     chips.append(" ")
     name, key = _DEMO_NAMES[2]
     chips.append_text(mention_chip(name, key))

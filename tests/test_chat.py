@@ -1530,7 +1530,7 @@ def test_channel_self_style_keyed_on_concept_not_label() -> None:
     turned = f"{node_style(_OUR_KEY)} reverse"
     assert _ink(mine._group_header("you", ours), " ★ Me ") == turned  # our name, turned over
     screen = _channel_screen([])
-    assert _ink(screen._group_header("you", ours), "★") == "you"  # no name: the white star
+    assert _ink(screen._group_header("you", ours), "★") == "you.mark"  # no name: our star
     assert _ink(screen._group_header("you", theirs), "you") == "node.unknown"  # no key: grey
     keyed = _channel_screen([], key_of=_keys_of({"you": "d4" + "0" * 62}))
     remote = _ink(keyed._group_header("you", theirs), "you")

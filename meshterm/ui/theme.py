@@ -20,6 +20,7 @@ from functools import lru_cache
 
 from rich.cells import cell_len
 from rich.console import Console
+from rich.style import Style
 from rich.theme import Theme
 
 from ..platforms import Platform, on_platform
@@ -79,6 +80,11 @@ MESH_THEME = Theme(
         # of the node hues on purpose (refer to node_style). Thus the user can always find
         # "you" easily.
         "you": "bold #ffffff",
+        # The ``★`` of our node (``marks.SELF_MARK``): on the map, in a route, in a list. It
+        # has the hue of our key, the colour of our node everywhere else (JP, 2026-10-13).
+        # :func:`set_self_key` puts the hue here when the device reports our key. This
+        # yellow is the star of the map until then, and with no device.
+        "you.mark": "#facc15",
         # The text that the user types in the compose line of a chat: pure white, not bold.
         # It is more visible than the transcript above it (JP, 2026-10-13). The ``›`` in
         # front of it has the ``cursor`` white, the same as the ``❯`` of a selected
@@ -365,6 +371,7 @@ MESH_THEME_16 = Theme(
         "pathline": "none",
         "err.reverse": "reverse bold color(9)",
         "you": "bold color(15)",
+        "you.mark": "color(11)",
         # Slot 15 is already bright, so it needs no bold to be white.
         "compose": "color(15)",
         "device.known": "bold color(15)",
@@ -1113,6 +1120,73 @@ _fold_impl: Callable[[str], str] = _no_fold
 _STYLE_RGB: dict[str, tuple[int, int, int]] = {}
 
 
+#: The theme name of the colour of our ``★`` (refer to :func:`set_self_key`).
+SELF_MARK_STYLE = "you.mark"
+
+#: The colour of our ``★`` in each theme before our key is known: the yellow of the map.
+_SELF_MARK_DEFAULTS: dict[int, Style] = {
+    id(theme): theme.styles[SELF_MARK_STYLE] for theme in (MESH_THEME, MESH_THEME_16)
+}
+
+#: Our public key, which gives the hue of our ``★``. ``None`` before the device reports it.
+_SELF_KEY: str | None = None
+
+#: A count that goes up each time that the colour of a theme name changes after the
+#: platform was bound (refer to :func:`style_generation`).
+_STYLE_GEN = 0
+
+
+def set_self_key(key: str | None) -> None:
+    """Give our ``★`` the hue of our key, on each surface that draws it.
+
+    The star of our node is one theme name (:data:`SELF_MARK_STYLE`), which the map, the
+    routes, the lists, and the chat all draw. Thus this one call changes it everywhere,
+    and no surface must know our key. The hue is the one that :func:`node_style` gives our
+    key, on this platform: the colour of our node in the chips and in the names of the
+    chat (JP, 2026-10-13). A star that a surface fades (a dimmed hop, the grey of a muted
+    line) keeps its own grey, because it does not use this name.
+
+    The app calls this when the device reports our key (refer to
+    :class:`~meshterm.services.device_state.DeviceState`). A call with the same key does
+    nothing. ``None`` puts the yellow of the map back.
+
+    Args:
+        key: Our public key, or ``None``.
+    """
+    global _SELF_KEY
+    key = key or None
+    if key == _SELF_KEY:
+        return
+    _SELF_KEY = key
+    _apply_self_mark()
+
+
+def _apply_self_mark() -> None:
+    """Write the colour of our ``★`` into the active theme, and make the caches forget it.
+
+    The consoles of the render share the dict of styles of the theme. Thus the next render
+    reads the new colour. The ANSI cache of the render holds the old bytes, so the
+    generation changes (refer to :func:`style_generation`).
+    """
+    global _STYLE_GEN
+    theme = _ACTIVE_THEME
+    if _SELF_KEY:
+        theme.styles[SELF_MARK_STYLE] = Style.parse(node_style(_SELF_KEY))
+    else:
+        theme.styles[SELF_MARK_STYLE] = _SELF_MARK_DEFAULTS[id(theme)]
+    _STYLE_RGB.pop(SELF_MARK_STYLE, None)
+    _STYLE_GEN += 1
+
+
+def style_generation() -> int:
+    """The count of the changes to a theme colour at run time (the colour of our ``★``).
+
+    A cache of rendered bytes keeps it in its key, so that bytes from before a change are
+    never used again (refer to :func:`~meshterm.ui.tui.render.render_to_ansi`).
+    """
+    return _STYLE_GEN
+
+
 @on_platform
 def _bind(platform: Platform) -> None:
     """Bind the choices of the theme that depend on the platform (runs now and at each switch)."""
@@ -1134,3 +1208,5 @@ def _bind(platform: Platform) -> None:
     # cache, and does not trust old pads.
     _FOLD_TABLE = None
     _fold_to_font.cache_clear()
+    # The hue of our star is the hue of the platform: a quantized slot on the console.
+    _apply_self_mark()

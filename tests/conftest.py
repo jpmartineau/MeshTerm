@@ -120,6 +120,21 @@ def not_ignored(paths: Iterable[Path]) -> list[Path]:
 
 
 @pytest.fixture(autouse=True)
+def _no_self_key() -> Iterator[None]:
+    """Start and end each test with no key for our star (the yellow of the map).
+
+    The colour of our ``★`` is global: the device-state cache sets it from the self-info
+    that it reads. A test that opens a mock device sets it. Thus each test starts clean,
+    and no test sees the hue of an earlier test.
+    """
+    from meshterm.ui.theme import set_self_key
+
+    set_self_key(None)
+    yield
+    set_self_key(None)
+
+
+@pytest.fixture(autouse=True)
 def _plain_path_rendering(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("MESHTERM_POWERLINE", "0")
     # An inherited NO_COLOR makes Rich remove colour (and keep attributes). Then each

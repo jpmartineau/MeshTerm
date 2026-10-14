@@ -417,8 +417,16 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
 
 - Status marks (single-width, themed): `✓` ok · `✗` err · `⚠`/`?` warn · `●` unread/
   unacked (err) · `○` acked/empty (muted). Never `✔`, `✖`, `✅`, `❌` as status.
-- Node types (shared with the map): `★` you (yellow) · `●` companion · `▲` repeater ·
-  `■` room server · `◉` sensor · `○` unknown.
+- Node types (shared with the map): `★` you (our key's hue) · `●` companion · `▲`
+  repeater · `■` room server · `◉` sensor · `○` unknown.
+- **Our `★` is our key's hue, everywhere** (JP, 2026-10-13): map, routes, lists,
+  legends, chat. `marks.SELF_MARK` carries the theme name `you.mark`, never a hex, and
+  `theme.set_self_key` writes `node_style(our key)` into it when the device reports the
+  key (`DeviceState.on_self_info` → `context._publish_self_key`; the services never
+  import the UI). One call recolours every surface; the render cache keys on
+  `theme.style_generation()` so no stale bytes survive. Until the key is known (and with
+  no device, as in `specimen`) it is the map's old yellow. A star something *mutes* keeps
+  its grey — a faded hop, a dimmed return leg — and our name stays the `you` white.
 - Path cuts: a path line drawn as **chips** that gets cut — a lane that ran out, a row
   scrolled past its edge — breaks the chip off on a half block in that chip's own fill
   (`▐` ends a line, `▌` opens one; `pathline.cut_mark`/`cut_to`), so half the cell is
@@ -429,8 +437,8 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   origin and destination, never the first and last *relay*. Our own end is always the
   app-wide `★` (`pathline.SELF_GLYPH`, taken straight from `marks.SELF_MARK`), never our
   name: the one node the reader never has to be told, and the cells belong to the hops
-  that differ from row to row. As a chip it is the map's yellow star on neutral dark
-  grey, padded like every other chip.
+  that differ from row to row. As a chip it is the map's star, in our hue, on neutral
+  dark grey, padded like every other chip.
 - **A path chip is the node's name colour on a darker ground of itself.** The label is the
   hue `node_style` gives the name on every other surface, so a node is one colour in a
   list, in arrows and in a chip; the fill is that hue at `pathline.CHIP_LIGHTNESS` of its
@@ -530,7 +538,12 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   live claimants; outside that window the newest key wins, because a reflash makes a new
   key routinely; JP, 2026-10-11), a bare hash standing in as a name, an `○` ring — takes
   `node.unknown`, THE light grey for an unidentified node, everywhere and on both
-  platforms. Colour is reserved for keyed identities, never seeded from a name's
+  platforms. One exception, a chat's **chips** (`PathHop.quiet`, via `widgets.author_chip`
+  and `mention_hop`): an unknown sender or mention there is the grey of plain text
+  (`#cccccc`) on that grey at `CHIP_LIGHTNESS`, so it stands back among the coloured
+  senders (JP, 2026-10-13); routes keep the keyless chip, arrow mode keeps `node.unknown`,
+  and the PicoCalc keeps the keyless pair (no grey background darker than its text).
+  Colour is reserved for keyed identities, never seeded from a name's
   characters. `node.unknown` is deliberately not `muted`: muted is chrome and may sit a
   step darker, while an unidentified node is content you can still act on. Our own node
   is the pure-white `you` style; a context colouring (chart quality) may still win.

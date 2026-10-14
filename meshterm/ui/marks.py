@@ -30,15 +30,16 @@ def parse_hex(color: str) -> RGB:
 # The palette of markers, shared in the whole app. The basemap is blue (water), green
 # (parks), and warm amber (roads). Thus the markers use the hues that a map never has,
 # pink and violet, so that they are easy to see against it. Ordinary nodes are the
-# loudest (bright pink). Repeaters are less loud (a calmer violet). Our node is always the
-# yellow star. A node that was heard but never identified is a light grey ring. Each glyph
-# is in the PicoCalc console font.
+# loudest (bright pink). Repeaters are less loud (a calmer violet). Our node is the star,
+# in the hue of our key (yellow until the device reports the key). A node that was heard
+# but never identified is a light grey ring. Each glyph is in the PicoCalc console font.
 #
 # The colour of a mark is any value that :func:`~meshterm.ui.theme.mark_rgb` takes: a
 # literal hex, or the name of a theme style when the platform must choose the shade. The
 # unknown ring has a name (``node.unknown``), so that the ring and the grey label beside
-# it can never be different.
-SELF_MARK = ("★", "#facc15")
+# it can never be different. Our star has a name (``you.mark``), because its colour comes
+# from our key at run time (refer to :func:`~meshterm.ui.theme.set_self_key`).
+SELF_MARK = ("★", "you.mark")
 REPEATER_MARK = ("▲", "#a78bfa")
 NODE_MARK = ("●", "#f472b6")
 UNKNOWN_MARK = ("○", "node.unknown")

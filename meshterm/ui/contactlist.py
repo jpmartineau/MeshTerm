@@ -244,7 +244,7 @@ class ContactRow:
             a muted ``?``.
         node_type: The node type of the contact, for the leading glyph (``None`` = the
             plain node ``●``). The row of our node ignores it, and always starts with the
-            yellow ``★``.
+            ``★`` in our hue.
         last_seen: When MeshTerm last heard the contact (aware UTC). It fills the heard
             lane, in the colour of the recency heat. ``None`` shows ``never`` in the cold
             style.
@@ -361,7 +361,7 @@ def _you_lane(
     """The lane of our node, with the same layout as the usual rows of :func:`_lane`.
 
     It is drawn as the map and the static table draw our node: the ``★`` self marker
-    (yellow), the name in the pure-white ``you`` style with a muted ``(you)`` tag, and our
+    (in our hue), the name in the pure-white ``you`` style with a muted ``(you)`` tag, and our
     key with its hash lit at the routing width, in the flexible key lane. Our 64-hex key is
     longer than any lane, so it shows as many digits as fit, and then an ellipsis. **Each
     middle lane shows a faint ``—``**, whatever lanes the list declares. MeshTerm never

@@ -1416,7 +1416,7 @@ class WalkScreen(Screen):
         """The Rich style of the type glyph of a node in body text: the colour of its type.
 
         This is the text form of :meth:`_marker_rgb`: the same ``type.*`` entry (or the
-        yellow of the star). Thus the first glyph of the focus line, the glyphs of the list
+        hue of our star). Thus the first glyph of the focus line, the glyphs of the list
         rows, and the canvas markers are one mark, drawn in three ways.
         """
         return self._glyph(node)[1]
@@ -1443,7 +1443,7 @@ class WalkScreen(Screen):
         shared ``type.*`` colours for them. Thus a node shows here with exactly the glyph
         and colour that the map, the route graph, and the contact list use for it: ``▲``
         violet for a repeater, ``■`` for a room, ``◉`` for a sensor, ``●`` pink for a
-        plain node, the yellow ``★`` for our node, and the grey ``○`` for a node that we
+        plain node, the ``★`` in our hue for our node, and the grey ``○`` for a node that we
         heard of but never identified. The colour and the shape say the same thing. Thus
         the legend below the canvas is a real explanation, not a coincidence.
 

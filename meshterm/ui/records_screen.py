@@ -773,7 +773,7 @@ class RecordScreen(Screen):
         # a chip), instead of a hanging indent under a lane. Our two ends are the app-wide ★,
         # not our name and key again. The graph above already marks our node with the same
         # star at the two ends, and the legend under it says that the star is "you". The
-        # stars keep the ``you`` white, because nothing about a walk that is already done is
+        # stars keep our hue, because nothing about a walk that is already done is
         # ours to compose.
         route = path_line(
             [None, *record.route, None],
@@ -1043,7 +1043,7 @@ async def open_records(ctx: AppContext) -> dict:
         (:data:`~meshterm.ui.pathline.SELF_GLYPH`). A record is a boomerang by
         construction. To name our node two times in each row uses more cells than the full
         score lane, and tells the user what each other row already told. These stars keep
-        the ``you`` white (``dim_self=False``). The dim colour means "not yours to
+        our hue (``dim_self=False``). The dim colour means "not yours to
         compose", and nothing is composed on a board of walks that are already done.
 
         The line is composed at its **natural** length and is given whole. Thus each row is

@@ -34,7 +34,7 @@ from ..core.models import MapMarker
 from ..core.mvt import GEOM_LINE, GEOM_POLYGON, Layer
 from ..platforms import Platform, on_platform
 from .mapcanvas import MapCanvas, Raster
-from .marks import NODE_MARK, REPEATER_MARK, RGB, SELF_MARK, UNKNOWN_MARK, parse_hex
+from .marks import NODE_MARK, REPEATER_MARK, RGB, SELF_MARK, UNKNOWN_MARK
 from .theme import mark_rgb
 
 # The marker palette, shared across all the app. The canonical tuples are in ui.marks.
@@ -830,7 +830,7 @@ def _draw_nodes(
     # node that the user looks for is never hidden below a brighter neighbour.
     for marker, ix, iy, matched in sorted(placed, key=lambda p: (p[3], p[0]._rank())):
         glyph, color = _marker_style(marker)
-        rgb = parse_hex(color)
+        rgb = mark_rgb(color)
         if not matched:
             rgb = _dimmed(rgb, _FIND_DIM)
         else:
@@ -839,7 +839,7 @@ def _draw_nodes(
 
     # A node that the filter removes is context: a bare dim glyph with no label. Labels get
     # the name hue of the node, which comes from its key (the colour rule for all the app).
-    # The label of our node is the pure ``you`` white (the ★ glyph keeps its yellow). An
+    # The label of our node is the pure ``you`` white (the ★ glyph keeps our hue). An
     # active find filter still makes the label of each match full white, so that the node
     # that the user looks for is easy to see.
     from .widgets import name_rgb  # widgets imports this module, so bind late to avoid the cycle
