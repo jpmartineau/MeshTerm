@@ -274,13 +274,17 @@ PICOCALC_LYRA = Platform(
 
 #: The Cardputer Zero of M5Stack. Its display is 320×170 pixels, drawn in cells of 6×12
 #: (53×14). Under it is a keyboard of 46 keys, and the number keys 4 to 8 are right below
-#: the display. The hardware was not in hand on 2026-10-04. Thus only ``--platform
-#: cardputer-zero`` or ``MESHTERM_PLATFORM`` chooses this platform. There is no
-#: device-tree auto-detection until the device reports its own model string.
+#: the display. Both models are this platform: the Cardputer Zero and the Cardputer Zero
+#: Lite. They differ only in parts that MeshTerm does not use (a camera, motion sensors,
+#: and a microSD card in the box). Only ``--platform cardputer-zero`` or
+#: ``MESHTERM_PLATFORM`` chooses this platform. There is no device-tree auto-detection,
+#: because the model string of the handheld is the generic string of its compute module
+#: ("Raspberry Pi Compute Module 0 Rev 1.0", seen on the device on 2026-10-05). On the
+#: handheld, MeshTerm's own console (:mod:`meshterm.emulator`) supplies the platform.
 #:
 #: It has the same 53 columns as the PicoCalc, so most of the flavour of the PicoCalc
 #: applies. The new constraint is the number of rows. It has its own F-key lane deck (Fn+4…8,
-#: with the chips centred over their keys). For now, the deck deals the lanes of the PicoCalc
+#: with the chips placed as on the PicoCalc). For now, the deck deals the lanes of the PicoCalc
 #: (JP, 2026-09-30). MeshTerm draws the display itself in RGB565 (:mod:`meshterm.emulator`),
 #: so the 16-slot palette does not limit it (``truecolor``). These values are provisional
 #: until MeshTerm measures them on the device: the cadences, which come from the PicoCalc,

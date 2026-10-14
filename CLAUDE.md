@@ -743,9 +743,12 @@ derived sweep that runs **every** registered command twice, once plain and once 
 
 One codebase, three flavours: **regular** (desktop/ssh, 72 cols, truecolor, emoji),
 **picocalc-lyra** (the PicoCalc's 53×26/53×40 framebuffer console, 16 palette slots, a
-512-glyph font, no emoji), and **cardputer-zero** (M5Stack's Cardputer Zero, 53×14 in 6×12
-cells on a 320×170 panel MeshTerm paints itself, truecolor, no emoji — hardware not
-yet in hand, so it is chosen by flag only).
+512-glyph font, no emoji), and **cardputer-zero** (M5Stack's Cardputer Zero, both the
+standard model and the Lite, 53×14 in 6×12 cells on a 320×170 panel MeshTerm paints
+itself, truecolor, no emoji — chosen by flag only: its device-tree model is the CM0's
+generic string, so MeshTerm's own console passes the flag). Never hot-swap a Cap on it,
+the LoRa one included: M5Stack says it may make the device malfunction, so the docs say
+to power off first.
 A frozen `Platform` spec (`meshterm/platforms.py`) resolves
 once at boot; consumers bind at platform-switch time via `platforms.on_platform` — never
 branch on the platform per frame, and never `from meshterm.platforms import PLATFORM`.

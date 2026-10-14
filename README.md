@@ -42,7 +42,10 @@ https://github.com/user-attachments/assets/f91a6695-14d5-4ae0-8fdc-e65492d0955d
 <p align="center">
   <img src="docs/screenshots/picocalc.png" alt="MeshTerm on the PicoCalc, a console that is 53 columns wide, with a radio installed inside it" width="38%">
 </p>
-<p align="center"><sub>The dashboard, the map, a trace, the paths of a message, and the whole app on a PicoCalc.</sub></p>
+<p align="center">
+  <img src="docs/screenshots/cardputer-zero.png" alt="MeshTerm on the display of a Cardputer Zero: the wordmark, then the list of devices, with the Cap LoRa-1262 at the top" width="60%">
+</p>
+<p align="center"><sub>The dashboard, the map, a trace, the paths of a message, the whole app on a PicoCalc, and the start screen on a Cardputer Zero.</sub></p>
 
 ---
 
@@ -198,6 +201,7 @@ mesh. You can look at the app before you buy anything.
 ### On the Cardputer Zero
 
 Install MeshTerm from M5Stack's app store on the handheld. Its share code is `MTRM`.
+MeshTerm works on both models, the Cardputer Zero and the Cardputer Zero Lite.
 [MeshTerm on the Cardputer Zero](docs/devices/cardputer-zero.md) has the details.
 
 ### Coming
@@ -248,6 +252,10 @@ meshterm --mock
 # custom console font, and an F-key hint lane. Preview it anywhere, or inspect it:
 meshterm --mock --platform picocalc-lyra
 meshterm specimen
+
+# On a Cardputer Zero, MeshTerm draws its 53×14 display itself. See that display in a
+# window of its own (download its font once with `meshterm emulate --fetch-fonts`):
+meshterm emulate cardputer-zero --mock
 ```
 
 MeshTerm has its own manuals for handhelds. **[MeshTerm on the

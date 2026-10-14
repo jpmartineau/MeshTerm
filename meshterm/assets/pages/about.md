@@ -18,7 +18,7 @@ I wanted something I could run from my computer. I wanted it to run on Windows, 
 
 ## Platform-specific developments
 
-In addition to a generic terminal setup, I wanted it to run on two devices I had lying around in my nerdcave.
+In addition to a generic terminal setup, I wanted it to run on two devices I had lying around in my nerdcave. Then a third one showed up.
 
 ### ClockworkPi uConsole
 MeshTerm is compatible with the **HackerGadgets AIO board (v1 or v2)**. The **AIO** board has just a raw LoRa radio, meaning it can't run MeshCore firmware. MeshTerm can run the mesh node in software itself, straight over the board's SPI bus, for as long as MeshTerm is running — no separate service needed. If you'd rather the node stayed on the mesh while MeshTerm is closed, an optional bridge service can run it all the time instead.
@@ -35,6 +35,14 @@ Getting MeshTerm to run on the **PicoCalc** is a bit more involved, but totally 
 - In order to use the XIAO nRF52840 via GPIO, a modified firmware is needed. A **PR** *https://github.com/meshcore-dev/MeshCore/pull/3191* has been submitted to MeshCore, but it might take a while for it to go through.
 
 The UX is a bit different on the PicoCalc's 16-colour 53-column screen layout, but it's been tailored to make good use of the available space and the PicoCalc's F-keys. The result is, in my humble opinion, the best MeshCore experience you can get on a portable device. It runs on one 18650 battery, and a second one roughly doubles the runtime.
+
+### M5Stack Cardputer Zero
+The **Cardputer Zero** is the easiest of the three: MeshTerm is in **M5Stack**'s app store, so installing it takes a few keypresses. Both models work, the standard **Cardputer Zero** and the **Cardputer Zero Lite**.
+- Add the **Cap LoRa-1262**, and MeshTerm runs the mesh node itself, straight over SPI, just like on the uConsole. The Cap's GPS works too.
+- Power the Cardputer off before you plug in or remove a Cap — the LoRa one included. M5Stack doesn't support hot-swapping Caps, and says it may cause the device to malfunction.
+- Put the antenna on the Cap before you power it on. M5Stack warns that the radio can be permanently damaged without it.
+
+The screen is tiny — 53 columns by 14 rows — so MeshTerm draws every pixel itself, and every screen has been squeezed to fit. The F-key labels run along the bottom of the screen, right above the number keys that press them. It's a mesh terminal that fits in your pocket!
 
 ## What the future holds
 

@@ -138,7 +138,7 @@ the route that agrees with how you installed MeshTerm.
   (refer to [Step 3](#step-3-install-meshterm)):
 
   ```bash
-  pip install 'mesh-term[spi]'
+  pip install 'mesh-term[spi] @ git+https://github.com/jpmartineau/MeshTerm'
   ```
 
 - **Do you run the one-file Linux ARM64 build?** It is a single frozen binary, and it
@@ -181,7 +181,7 @@ pipx inject mesh-term 'openhop-core[hardware]'
 Or use `pip`, which adds the radio library as its own extra in one line:
 
 ```bash
-pip install 'mesh-term[spi]'
+pip install 'mesh-term[spi] @ git+https://github.com/jpmartineau/MeshTerm'
 ```
 
 ---

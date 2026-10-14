@@ -7,7 +7,8 @@ this page applies to them.
 
 MeshTerm is an app in M5Stack's app store for the Cardputer Zero. It starts from the
 launcher of the handheld and draws on its display. It can drive M5Stack's Cap LoRa-1262
-radio directly, or it can use a MeshCore companion.
+radio directly, or it can use a MeshCore companion. MeshTerm supports both models of the
+handheld: the Cardputer Zero and the Cardputer Zero Lite.
 
 - [The device](#the-device)
 - [What works](#what-works)
@@ -21,10 +22,17 @@ radio directly, or it can use a MeshCore companion.
 
 | | |
 | --- | --- |
+| Models | Cardputer Zero (C154) and Cardputer Zero Lite (C155). MeshTerm supports both |
 | Computer | Raspberry Pi Compute Module 0: four 1 GHz cores, 512 MB of memory |
 | Screen | 1.9 inches, 320×170 pixels |
 | Keyboard | 46 keys, with Shift, Fn and Sym layers |
 | System | Raspberry Pi OS "Trixie", with M5Stack's own app launcher |
+
+The two models have the same computer, display, keyboard, battery, and expansion header.
+The Cardputer Zero also has a camera, motion sensors, and a 32 GB microSD card. MeshTerm
+uses none of these three parts, thus it works in the same way on both models. The Lite
+comes without a microSD card. It needs a card with M5Stack's system on it before it can
+start (refer to [M5Stack's documentation](https://docs.m5stack.com/en/CardputerZero)).
 
 MeshTerm draws the display in 53 columns by 14 rows. The width is the same as on the
 PicoCalc, but the height is approximately half. Thus many screens have a more compact
@@ -177,8 +185,18 @@ The Cardputer Zero has no LoRa radio built in. You can add one in three ways:
 
 ### The Cap LoRa-1262
 
-1. Push the Cap onto the expansion header at the back.
-2. Start MeshTerm.
+**CAUTION:** Turn off the Cardputer Zero before you install or remove a Cap, also the Cap
+LoRa-1262. M5Stack does not support hot swapping of a Cap on the Cardputer Zero. In
+M5Stack's words, "hot-swapping may cause the device to malfunction" (refer to
+[M5Stack's documentation](https://docs.m5stack.com/en/CardputerZero)).
+
+**CAUTION:** Install the antenna on the Cap before you turn on the Cardputer Zero. M5Stack
+says that power without the antenna can permanently damage the radio.
+
+1. Turn off the Cardputer Zero.
+2. Install the antenna on the Cap.
+3. Push the Cap onto the expansion header at the back.
+4. Turn on the Cardputer Zero, and start MeshTerm.
 
 The device screen lists the Cap as **Cap LoRa-1262**. `meshterm --spi` also reaches it from the
 command line.
@@ -189,7 +207,7 @@ radio library. The package from the store has it. If you install MeshTerm with p
 install the library next to it:
 
 ```bash
-pip install 'mesh-term[spi]'
+pip install 'mesh-term[spi] @ git+https://github.com/jpmartineau/MeshTerm'
 ```
 
 When MeshTerm connects, it does three things that the Cardputer Zero needs before the
@@ -202,7 +220,8 @@ radio answers:
 - It switches on the antenna path of the Cap.
 
 When MeshTerm quits, it switches the power of the header off. Thus the Cap does not drain
-the battery while nothing uses it.
+the battery while nothing uses it. But this does not make it safe to remove the Cap. Turn
+off the Cardputer Zero first.
 
 A new node starts with the US/Canada settings of MeshCore (910.525 MHz). In other regions,
 change the settings on **Device config** before you send anything. MeshTerm keeps the key,
