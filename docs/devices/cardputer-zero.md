@@ -66,8 +66,9 @@ MeshTerm now has an icon in the launcher. The package has all that MeshTerm need
 Python libraries, the radio library for the Cap, and the font of the display. Each new
 version of MeshTerm also goes to the store.
 
-M5Stack examines a new app before the store shows it. If the store does not have MeshTerm
-yet, install the same package from GitHub.
+The store gets a new version a short time after its release, when the check of the store
+passes. If you want a new version before the store has it, install the same package from
+GitHub.
 
 ### From GitHub
 

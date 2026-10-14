@@ -174,12 +174,18 @@ it.
 
 `store` also runs after publishing, so its failure leaves the release fine too. It opens a
 pull request on `CardputerZero/packages` (from JP's fork), and the store merges an update
-by itself once its own check passes — no video after the first release. Confirm the PR
-exists and its check passed:
+by itself once its own check passes — no video after the first release. **The store is
+part of every release** (JP, 2026-10-14: "when we release, include the Cardputer Zero App
+Store"), so a release is not done until that PR is merged. Confirm the PR exists, its
+check passed, and it merged:
 
 ```
 gh pr list -R CardputerZero/packages --author jpmartineau --state all --limit 3
 ```
+
+If it is still open, wait for the store's check (`gh pr checks <n> -R
+CardputerZero/packages --watch`). A failed check is a release problem to fix, not a note
+to leave for later.
 
 If `store` failed, the usual causes are the `CARDPUTER_STORE_TOKEN` secret (missing, or the
 token revoked) or a change in czdev: the job pins AppBuilder to one commit because
@@ -232,6 +238,9 @@ the server, in plain words (they use MeshTerm; they don't read the diff):
   the headline items only, not every line;
 - the release link, and one line on how to get it (the download page, or the README's
   install line for someone who installed that way);
+- one line for Cardputer Zero owners: the update is in M5Stack's app store on the device.
+  Say so only once the store PR has merged; while it is open, say it reaches the store
+  soon;
 - right under the download link, a kind ask for a star on GitHub, opening on ⭐, with
   the reason in a few words: stars give the project credibility and visibility, so more
   MeshCore users find it;
@@ -247,6 +256,7 @@ the server, in plain words (they use MeshTerm; they don't read the diff):
 - `platform --help` and `specimen --help` read like the rest
 
 Download: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.10.1
+Cardputer Zero: update MeshTerm from the app store on the device.
 ⭐ If you enjoy MeshTerm, please star it on GitHub: https://github.com/jpmartineau/MeshTerm. Every star gives the project more credibility and helps other MeshCore users find it. Thank you!
 ```
 
