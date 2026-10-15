@@ -310,9 +310,9 @@ def _title_bar(
     showed, a blank cell stood in for the other.) Thus the pair is fixed at the left edge,
     where the eye starts, and **colour** gives the information. An arrow whose direction
     has more content is lit as the title is (``title.border``). An arrow with nothing in
-    its direction becomes ``faint``. The live arrow once had the grey of the border. That
-    grey is now almost the grey of ``faint`` (JP chose a darker border), and the two arrows
-    looked the same. This is the same
+    its direction becomes ``faint``. The live arrow once had the grey of the border. When
+    the border was #7c7c7c, that grey was almost the grey of ``faint``, and the two arrows
+    looked the same. A lit arrow is clear at each border grey. This is the same
     live/dim language that the F-key lane draws one row below (a dim chip keeps its label
     and loses its fill). The two are the only indicators of the platform.
 

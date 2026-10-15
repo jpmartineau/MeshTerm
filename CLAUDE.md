@@ -770,8 +770,8 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
 - The borderless title bar (`frame._title_bar`) is this platform's whole panel border:
   `↑↓ ──── Title ─────── Esc back`. The **clip arrows lead the row and are always both
   drawn** — colour reads the scroll (lit like the title, `title.border`, where that
-  direction has more, `faint` where it doesn't; the `border` grey sits too close to
-  `faint` to say it), the same live/dim language the lane draws one row below. A
+  direction has more, `faint` where it doesn't; a `border`-grey arrow once sat too close
+  to `faint` to say it), the same live/dim language the lane draws one row below. A
   pair that appeared and vanished, half of it a blank cell, asked the reader to compare
   the row against a memory of itself; fixed furniture means the bar never changes width
   as the body scrolls either.

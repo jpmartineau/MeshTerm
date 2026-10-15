@@ -34,9 +34,9 @@ MESH_THEME = Theme(
         # ``muted``, and not a hue. A border is chrome, and a blue border was one more colour
         # on each screen that had no meaning (JP, 2026-10-14). The two caution tiers keep
         # their colours, because there the colour is the meaning: ``warn`` (amber) and
-        # ``err`` (red). It is darker than ``muted`` (JP chose it on a ladder of greys), so the
-        # frame stays behind the text that it holds.
-        "border": "#7c7c7c",
+        # ``err`` (red). It is darker than ``muted``, so the frame stays behind the text that
+        # it holds. JP chose it between #a2a2a2 (too light) and #7c7c7c (too dark).
+        "border": "#8f8f8f",
         # The only reverse-video chip: the committing button of a dialog, the Abort of a
         # running action, and the insertion slot of the composer where no chip fill carries
         # it. It is a *grey* block, and the ink of the page shows through it. It was cyan
@@ -355,9 +355,9 @@ MESH_THEME_16 = Theme(
     {
         "brand": "bold color(14)",
         "accent": "bold color(12)",
-        # The border: the dark grey, which is the nearest slot to the grey of the regular
-        # theme. Slot 8 is already in the bright bank, so bold changes nothing.
-        "border": "color(8)",
+        # The border: the light grey, which is the nearest slot to the grey of the regular
+        # theme. It is ``not bold`` because 7 is a dim slot (refer to the bold rule).
+        "border": "not bold color(7)",
         # Slot 7 is the only grey that the VT can put *behind* a reverse. Backgrounds stop at
         # the dim bank, and the dark grey of slot 8 becomes black there. It is the same
         # light grey that the F-key lane already uses to fill its chips. This is the
