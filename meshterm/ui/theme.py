@@ -146,11 +146,11 @@ MESH_THEME = Theme(
         # age of a node). They must stay behind the real, muted values around them.
         "faint": "#737373",
         # The ``── Label ──`` of a section heading: in a grouped list, and the day divider
-        # of a chat. It is a dark grey, and never the accent of the frame. When the rule of
-        # a heading had the colour of the border, it looked like part of the frame that it
-        # is in (JP, 2026-10-02). It is bold, so the label is still a landmark at that
-        # shade.
-        "heading": "bold #737373",
+        # of a chat. It has the colour of the title of the frame (``title.border``, JP,
+        # 2026-10-15). It was a dark grey before. It is never the grey of the border itself:
+        # when the rule of a heading had the colour of the border, it looked like part of
+        # the frame that it is in (JP, 2026-10-02).
+        "heading": "bold #d4d4d4",
         # A further step darker than ``faint``, for the unlit track of a meter (the SNR
         # quality bars). It is dark enough to look like a background, and not like a
         # dimmer version of the reading.
@@ -261,10 +261,10 @@ MESH_THEME = Theme(
 #:   the span completely (a light-grey unknown hash becomes the white "you", and a brown
 #:   highway becomes yellow). Thus each style for a dim slot is explicitly ``not bold``
 #:   (the colour is necessary, so keep it) or explicitly ``bold`` (the promotion is the
-#:   intent, and only ``title.muted`` and ``title.border`` have it). A style is never
-#:   silent. Never use bold on 5 and 6, because *different* meanings use their partners
-#:   here (5 purple = the chip fill under a pink name, 13 pink = a node hue. 6 cyan =
-#:   hint.brand, 14 bright cyan = brand).
+#:   intent, and only ``title.muted``, ``title.border``, and ``heading`` have it). A
+#:   style is never silent. Never use bold on 5 and 6, because *different* meanings use
+#:   their partners here (5 purple = the chip fill under a pink name, 13 pink = a node
+#:   hue. 6 cyan = hint.brand, 14 bright cyan = brand).
 #: * Backgrounds can use only slots 0–7 (SGR 40–47).
 #: * The six *chromatic bright* slots (9-14) are the place where the spectrum of node
 #:   names lands. They are the console rendering of the hue wheel that comes from the key
@@ -387,8 +387,9 @@ MESH_THEME_16 = Theme(
         # Light grey, a step *above* the dark grey of muted. The console has only two greys,
         # and the hash of an unidentified node is content, not chrome.
         "node.unknown": "not bold color(7)",
-        # The two promotions on purpose: bold moves slot 7 to 15. These titles need a colour
-        # that is almost white (the regular theme writes it as #d4d4d4).
+        # Two of the promotions on purpose (``heading`` is the third): bold moves slot 7 to
+        # 15. These titles need a colour that is almost white (the regular theme writes it
+        # as #d4d4d4).
         "title.border": "bold color(7)",
         "title.muted": "bold color(7)",
         "title.warn": "bold color(11)",
@@ -402,9 +403,8 @@ MESH_THEME_16 = Theme(
         "hint.ok": "not bold color(2)",
         "hint.brand": "not bold color(6)",
         "faint": "color(8)",
-        # The one dark grey of the console. Slot 8 is already in the bright bank, so bold
-        # changes nothing.
-        "heading": "bold color(8)",
+        # The colour of the title of the frame (``title.border``): bold moves slot 7 to 15.
+        "heading": "bold color(7)",
         "track": "color(8)",
         "snr.good": "bold color(10)",
         "snr.ok": "bold color(11)",

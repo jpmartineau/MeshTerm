@@ -269,7 +269,8 @@ deliberately, one at a time, and say why in the code.
   screen's results were once windowed under its actions: the page came out exactly the
   screen's height, so ↓ on the last action did nothing while `↓ n more` sat under it.
 - Grouped-list section headings use `section_heading("Label")` → `── Label ──` in the
-  bold `heading` grey, never the `border` grey: a rule in the border's colour reads as
+  bold `heading` style — the frame title's colour, `title.border` (JP, 2026-10-15) —
+  never the `border` grey: a rule in the border's colour reads as
   part of the frame. A chat's day divider wears the same dress. That is also what makes a heading *sticky* (it pins to the top row while its section
   scrolls, and the ^PgUp/^PgDn jumps step by it), so build them through it — a hand-rolled
   `Separator` is no landmark. Prose written *directly under* a heading (a description of
