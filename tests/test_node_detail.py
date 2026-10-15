@@ -621,7 +621,7 @@ def test_located_accepts_real_fixes_and_rejects_junk() -> None:
 
 
 def _header() -> Text:
-    header = Text("▲ ", style="#a78bfa")
+    header = Text("▲ ", style="type.repeater")
     header.append("Hub", style="accent")
     header.append("   repeater", style="muted")
     return header

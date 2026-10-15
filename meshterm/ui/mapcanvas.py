@@ -522,7 +522,7 @@ class MapCanvas:
         :data:`_BOLD`). The kernel VT draws ``bold`` as brightness. If a bold run has a
         colour that was just quantized into the dim bank, the VT changes it to the bright
         partner of that slot. A light-grey unknown label then shows as the white "you", and a
-        purple repeater shows as pink. The colour that a marker has is the important part.
+        brown highway shows as yellow. The colour that a marker has is the important part.
         The bold is not.
         """
         from .theme import fold_text

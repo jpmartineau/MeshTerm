@@ -103,21 +103,21 @@ def test_the_clip_arrows_are_always_drawn_and_say_it_in_colour() -> None:
     The arrows once appeared and disappeared. A pair that was half shown left a blank cell
     for the missing arrow, and the user had to compare the row with a memory of the row
     (JP, 2026-08-31). Now the pair never moves and never changes width. An arrow for a
-    direction with more content has the grey of the border. An arrow for a direction with
-    no more content is ``faint``, a step darker. This is the live and dim language of the
-    F-key lane, one row up.
+    direction with more content is lit as the title is. An arrow for a direction with no
+    more content is ``faint``. This is the live and dim language of the F-key lane, one row
+    up.
     """
     hint = "↑↓ move · Esc back"
     assert _arrow_styles(_bar_text("Contacts", hint, above=True, below=True)) == (
-        "border",
-        "border",
+        "title.border",
+        "title.border",
     )
     assert _arrow_styles(_bar_text("Contacts", hint, above=False, below=True)) == (
         "faint",
-        "border",
+        "title.border",
     )
     assert _arrow_styles(_bar_text("Contacts", hint, above=True, below=False)) == (
-        "border",
+        "title.border",
         "faint",
     )
     # A body that fits keeps the pair, and both are dim. Nothing appears or disappears.

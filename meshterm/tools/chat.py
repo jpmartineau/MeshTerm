@@ -945,7 +945,7 @@ def _title(
 
     - The name of a direct contact gets the palette hue that comes from its key (a channel
       label keeps the base style).
-    - The first dot is the standard companion pink, and its shape shows the history.
+    - The first dot has the colour of the companion mark, and its shape shows the history.
     - The unread ``●`` badge is red, and the age is muted.
     - The preview mutes its body, and lights the sender names and the ``@mentions`` in the
       hues that come from their keys. These are the same colours as in the live transcript.
@@ -1002,9 +1002,9 @@ def _title(
     return text
 
 
-#: The standard companion pink (the shared colour of the plain node ``●``) is the hue of the
-#: contact dot. The shape (filled or hollow) shows the history, the colour shows "a
-#: companion", and the name next to it has the hue that comes from the key of the person.
+#: The colour of the companion mark (the shared colour of the plain node ``●``) is the
+#: colour of the contact dot. The shape (filled or hollow) shows the history, and the name
+#: next to it has the hue that comes from the key of the person.
 _COMPANION_DOT_STYLE = NODE_GLYPHS[NODE_TYPE_CHAT][1]
 
 #: The marker of a room: the ``■`` of the room server, in the colour of its type. The map
@@ -1020,7 +1020,7 @@ def _append_marker(
     """Add the first marker of the row (a channel glyph or a contact dot) in its own lane.
 
     A channel keeps its marker for open or private (＃ / 🌐 / 🔒). A contact gets a small
-    circle in the standard companion pink. It is filled (``●``) after we exchanged
+    circle in the colour of the companion mark. It is filled (``●``) after we exchanged
     messages, and a hollow ring (``○``) before that. Thus the shape (hollow or filled)
     shows whether there is history, and the name itself has the hue that comes from the
     key of the person.

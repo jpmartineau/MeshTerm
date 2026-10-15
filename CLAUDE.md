@@ -420,7 +420,11 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
 - Status marks (single-width, themed): `✓` ok · `✗` err · `⚠`/`?` warn · `●` unread/
   unacked (err) · `○` acked/empty (muted). Never `✔`, `✖`, `✅`, `❌` as status.
 - Node types (shared with the map): `★` you (white) · `●` companion · `▲` repeater ·
-  `■` room server · `◉` sensor · `○` unknown.
+  `■` room server · `◉` sensor · `○` unknown. **Every type mark is white** (JP,
+  2026-10-14; they were pink, violet, white, orange): the shape is the type. Each keeps its
+  own `type.*` style so one can regain a colour in one place. `○` keeps `node.unknown`
+  grey, which says "unidentified". On the map a crowd in one cell no longer glows — a white
+  marker has nowhere brighter to go, and JP chose to drop the signal.
 - **Our `★` is white, everywhere** (JP, 2026-10-14): map, routes, lists, legends, chat.
   `marks.SELF_MARK` carries the theme name `you` — the white of our name — so the console
   picks its own white, and a raster resolves it through `mark_rgb`. It was the map's
@@ -553,7 +557,8 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   step darker, while an unidentified node is content you can still act on. Our own node
   is the pure-white `you` style; a context colouring (chart quality) may still win.
 - **White is what "you picked this" looks like**, and nothing else in the app is allowed
-  to say it. The cursor row — the row `❯` points at, in a select list or in a screen
+  to say it — beside the `you` white and the white node-type marks, whose shape carries
+  their meaning. The cursor row — the row `❯` points at, in a select list or in a screen
   drawing its own rows — wears `cursor` (white), never `brand`: the wordmark's teal is the
   app's identity, not a selection, and teal/cyan is itself a node hue, so a cyan-keyed
   node used to vanish into its own highlight. White is outside the node spectrum, so it
@@ -764,8 +769,9 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
 
 - The borderless title bar (`frame._title_bar`) is this platform's whole panel border:
   `↑↓ ──── Title ─────── Esc back`. The **clip arrows lead the row and are always both
-  drawn** — colour reads the scroll (the `border` grey where that direction has more,
-  `faint` where it doesn't), the same live/dim language the lane draws one row below. A
+  drawn** — colour reads the scroll (lit like the title, `title.border`, where that
+  direction has more, `faint` where it doesn't; the `border` grey sits too close to
+  `faint` to say it), the same live/dim language the lane draws one row below. A
   pair that appeared and vanished, half of it a blank cell, asked the reader to compare
   the row against a memory of itself; fixed furniture means the bar never changes width
   as the body scrolls either.
@@ -804,7 +810,7 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   steps. Nothing loses its colour for being on the console. Marks whose hue is *fixed*
   rather than derived go through a theme name so the slot is chosen deliberately (the
   node types' `type.*`; a raster resolves the same entry via `theme.mark_rgb`) — a naive
-  downsample greys the repeater's violet. Footer hints are replaced by the **F-key lane**
+  downsample greys a dim violet. Footer hints are replaced by the **F-key lane**
   (`ui/tui/fkeys.py`): five `FPair` slots per screen, F1–F5 primary and F6–F10 each
   slot's *opposite number* (physical Shift+F1..F5), labels ≤6 cells. `DEFAULT_LANE` claims
   only **F4/F5 — the pager**, which has no physical key at all; **the jump to either end

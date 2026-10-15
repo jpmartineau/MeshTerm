@@ -59,8 +59,8 @@ def test_theme16_bold_never_jumps_a_dim_slot_to_an_unrelated_bright_one() -> Non
     """The VT draws bold as brightness: bold on slots 0-7 becomes slot N+8.
 
     Slots 5 and 6 have meanings, and their bright partners have different meanings here
-    (5 purple is the repeater mark, and 13 pink is the node mark. 6 cyan is hint.brand,
-    and 14 is brand). Thus no style can combine bold with them.
+    (5 purple is the chip fill under a pink name, and 13 pink is a node hue. 6 cyan is
+    hint.brand, and 14 is brand). Thus no style can combine bold with them.
     """
     for name, style in _our_styles(MESH_THEME_16).items():
         if style.bold and style.color is not None and style.color.number in (5, 6):
@@ -348,13 +348,16 @@ def test_route_graph_resolves_a_named_marker_colour_to_rgb() -> None:
         assert label_rgb_of("3d63") == theme.mark_rgb("type.repeater"), platform.name
 
 
-def test_node_type_marks_stay_distinct_on_the_console() -> None:
-    """Each type mark has its own slot. A naive downsample makes the repeater violet grey."""
-    set_platform(PICOCALC_LYRA)
+def test_node_type_marks_are_white_on_both_platforms() -> None:
+    """Each type mark is white, and the shape tells the type (JP, 2026-10-14).
+
+    The white is not the grey of a node that MeshTerm cannot identify.
+    """
     marks = ("type.node", "type.repeater", "type.room", "type.sensor")
-    rgbs = [theme.mark_rgb(name) for name in marks]
-    assert len(set(rgbs)) == len(marks)
-    assert theme.mark_rgb("type.repeater") != theme.mark_rgb("muted")
+    for platform in (REGULAR, PICOCALC_LYRA):
+        set_platform(platform)
+        assert {theme.mark_rgb(name) for name in marks} == {(255, 255, 255)}, platform.name
+        assert theme.mark_rgb("type.repeater") != theme.mark_rgb("node.unknown")
 
 
 def test_heat_ladder_walks_jps_seven_slots_in_order() -> None:

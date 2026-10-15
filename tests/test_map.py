@@ -715,22 +715,23 @@ def _glyph_color(lines: list[str], glyph: str) -> tuple[int, int, int]:
     return int(m.group(1)), int(m.group(2)), int(m.group(3))
 
 
-def test_render_map_brightens_piled_markers() -> None:
-    """A cell that many nodes share renders its glyph brighter than the glyph of one node."""
+def test_render_map_draws_a_crowd_as_one_white_marker() -> None:
+    """A marker is white, and a crowd in one cell draws the same as one node.
+
+    A crowd once made its glyph brighter. Each marker is white now, so JP removed that
+    signal (2026-10-14).
+    """
     from meshterm.ui.map_render import MapMarker, render_map
     from meshterm.ui.marks import NODE_MARK
+    from meshterm.ui.theme import mark_rgb
 
-    base = parse_hex(NODE_MARK[1])
     vp = Viewport(45.50, -73.57, 14, 60, 40)
 
     lone = render_map(vp, {}, [MapMarker("solo", 45.50, -73.57)])
-    assert _glyph_color(lone, "●") == base  # one node keeps its base colour
+    assert _glyph_color(lone, "●") == mark_rgb(NODE_MARK[1]) == (255, 255, 255)
 
     crowd = [MapMarker(f"n{i}", 45.50, -73.57) for i in range(8)]
-    piled = _glyph_color(render_map(vp, {}, crowd), "●")
-    # The colour goes toward white: each channel is brighter than the base cyan.
-    assert all(p > b for p, b in zip(piled, base, strict=True))
-    assert piled != base
+    assert _glyph_color(render_map(vp, {}, crowd), "●") == (255, 255, 255)
 
 
 def test_render_map_works_without_basemap() -> None:

@@ -1309,7 +1309,7 @@ def _cell_color(line: str, idx: int) -> tuple[int, int, int]:
     return (triplet.red, triplet.green, triplet.blue)
 
 
-_BORDER = (162, 162, 162)  # The border grey of the theme, #a2a2a2.
+_BORDER = (124, 124, 124)  # The border grey of the theme, #7c7c7c.
 
 
 def _find(plain: str, glyphs: frozenset[str]) -> int:

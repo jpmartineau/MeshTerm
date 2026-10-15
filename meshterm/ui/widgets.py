@@ -1112,14 +1112,12 @@ def stats_panel(
 
 
 # The glyphs and colours of the node types. They are the same as the marker palette of the
-# map in the whole app (refer to ui.map_render). Our node is the white ``★``, plain nodes
-# are the loud pink ``●``, and repeaters are the calmer violet ``▲``. The other types have
-# hues that are safe on the map and different from those: a white square for rooms (the
-# house glyph was difficult to read) and an orange dot with a ring for sensors. All are
-# single-width BMP glyphs, so the columns stay aligned. The colours are the ``type.*``
-# entries of the theme and not raw hex. Thus the 16-slot console chooses its slot on
-# purpose (otherwise the violet downsamples to grey, and a repeater looks like an unknown
-# node). On the regular platform, they *are* the hues of the map.
+# map in the whole app (refer to ui.map_render). Our node is the ``★``, plain nodes are a
+# ``●``, repeaters are a ``▲``, rooms are a square (the house glyph was difficult to read),
+# and sensors are a dot with a ring. All are white, and the shape tells the type (JP,
+# 2026-10-14). All are single-width BMP glyphs, so the columns stay aligned. The colours
+# are the ``type.*`` entries of the theme and not raw hex, so that the 16-slot console
+# chooses its own white, and so that one type can get a colour again in one place.
 NODE_GLYPHS: dict[int, tuple[str, str]] = {
     NODE_TYPE_REPEATER: (REPEATER_MARK[0], "type.repeater"),
     NODE_TYPE_ROOM: ("■", "type.room"),

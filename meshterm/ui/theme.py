@@ -34,8 +34,9 @@ MESH_THEME = Theme(
         # ``muted``, and not a hue. A border is chrome, and a blue border was one more colour
         # on each screen that had no meaning (JP, 2026-10-14). The two caution tiers keep
         # their colours, because there the colour is the meaning: ``warn`` (amber) and
-        # ``err`` (red).
-        "border": "#a2a2a2",
+        # ``err`` (red). It is darker than ``muted`` (JP chose it on a ladder of greys), so the
+        # frame stays behind the text that it holds.
+        "border": "#7c7c7c",
         # The only reverse-video chip: the committing button of a dialog, the Abort of a
         # running action, and the insertion slot of the composer where no chip fill carries
         # it. It is a *grey* block, and the ink of the page shows through it. It was cyan
@@ -170,16 +171,15 @@ MESH_THEME = Theme(
         "batt.low": "bold #f87171 on #991b1b",
         "batt.flash": "not bold #000000 on #dc2626",
         "batt.flash.off": "bold #f87171",
-        # The node-type *marks*: the only colours for ● ▲ ■ ◉ where a node with a type is
-        # drawn (refer to ui.widgets.NODE_GLYPHS). They are also the language of the markers
-        # of the map: clients are the loud pink, repeaters are the calmer violet, rooms are
-        # a white square, and sensors are an orange dot with a ring. They are named styles
-        # and not raw hex, so the 16-slot console chooses its slot *on purpose*. A naive
-        # downsample of the violet gives grey, and a repeater looks like an unknown node.
-        "type.node": "#f472b6",
-        "type.repeater": "#a78bfa",
+        # The node-type *marks*: the colours for ● ▲ ■ ◉ where a node with a type is drawn
+        # (refer to ui.widgets.NODE_GLYPHS), and the markers of the map. All four are white.
+        # The shape tells the type, so a hue for each type was a colour with no more
+        # information (JP, 2026-10-14). They were pink, violet, white, and orange. Each type
+        # keeps its own style name, so that one type can get a colour again in one place.
+        "type.node": "#ffffff",
+        "type.repeater": "#ffffff",
         "type.room": "#ffffff",
-        "type.sensor": "#fb923c",
+        "type.sensor": "#ffffff",
         # A region name (the scope of a flood). It is not a node, so it has no hue from the
         # node wheel. It is a light grey. Its slant makes it different from prose, as a
         # tag is different from a sentence.
@@ -258,13 +258,13 @@ MESH_THEME = Theme(
 #:   moves it to slot N+8. Thus a style for a dim slot must say what it means about
 #:   bold. It cannot leave the question open, because Rich merges a *base* style into
 #:   each span that it wraps. Then the ``bold`` of a selected row changes the colour of
-#:   the span completely (a light-grey unknown hash becomes the white "you", and a purple
-#:   repeater becomes pink). Thus each style for a dim slot is explicitly ``not bold``
+#:   the span completely (a light-grey unknown hash becomes the white "you", and a brown
+#:   highway becomes yellow). Thus each style for a dim slot is explicitly ``not bold``
 #:   (the colour is necessary, so keep it) or explicitly ``bold`` (the promotion is the
 #:   intent, and only ``title.muted`` and ``title.border`` have it). A style is never
 #:   silent. Never use bold on 5 and 6, because *different* meanings use their partners
-#:   here (5 purple = the repeater mark, 13 pink = the node mark. 6 cyan = hint.brand, 14
-#:   bright cyan = brand).
+#:   here (5 purple = the chip fill under a pink name, 13 pink = a node hue. 6 cyan =
+#:   hint.brand, 14 bright cyan = brand).
 #: * Backgrounds can use only slots 0–7 (SGR 40–47).
 #: * The six *chromatic bright* slots (9-14) are the place where the spectrum of node
 #:   names lands. They are the console rendering of the hue wheel that comes from the key
@@ -275,7 +275,7 @@ _VT_SLOTS: tuple[tuple[int, str, str], ...] = (
     (2, "green (hint.ok)", "#00aa00"),
     (3, "brown/orange (hint.warn, batt.mid, heat.cool, the sensor mark)", "#aa5500"),
     (4, "blue (bluetooth bg, map.water)", "#0000aa"),
-    (5, "purple (the repeater mark)", "#aa00aa"),
+    (5, "purple (the chip fill of node hue 300°)", "#aa00aa"),
     (6, "cyan (hint.brand)", "#00aaaa"),
     (7, "light grey (default text, heat.cold)", "#aaaaaa"),
     (8, "dark grey (muted, faint, track)", "#555555"),
@@ -283,9 +283,9 @@ _VT_SLOTS: tuple[tuple[int, str, str], ...] = (
     (10, "bright green (ok; node hue 120°)", "#55ff55"),
     (11, "bright yellow (warn, heat.warm; node hue 60°)", "#ffff55"),
     (12, "bright blue (accent; node hue 240°)", "#5555ff"),
-    (13, "bright pink (the node mark — the map's pink, for free; node hue 300°)", "#ff55ff"),
+    (13, "bright pink (node hue 300°)", "#ff55ff"),
     (14, "bright cyan (brand; node hue 180°)", "#55ffff"),
-    (15, "white (you, heat.hot, the room mark)", "#ffffff"),
+    (15, "white (you, heat.hot, the node-type marks)", "#ffffff"),
 )
 
 
@@ -349,19 +349,15 @@ def vtrgb_lines() -> str:
 #: palette. The theme is literal and not derived, so a reviewer can see each slot choice
 #: next to its meaning. The rules for bold-brightness and for backgrounds, which the
 #: theme must obey, are in the documentation of :data:`_VT_SLOTS`, and tests pin them.
-#: The stock palette gives two important results. Bright pink (13) is the colour of the
-#: clients on the map, at no cost. Dim purple (5) replaces the violet of the repeaters
-#: on the map. The cost is that the three greys (muted, faint, track) all become slot 8,
+#: The stock palette has a cost: the three greys (muted, faint, track) all become slot 8,
 #: because the stock palette has only one dark grey.
 MESH_THEME_16 = Theme(
     {
         "brand": "bold color(14)",
         "accent": "bold color(12)",
-        # The border: the light grey, which is the nearest slot to the grey of the regular
-        # theme. It is not the dark grey of ``muted``, because the title bar draws a clip
-        # arrow with nothing in its direction in ``faint``, and that is slot 8. It is
-        # ``not bold`` because 7 is a dim slot (refer to the bold rule).
-        "border": "not bold color(7)",
+        # The border: the dark grey, which is the nearest slot to the grey of the regular
+        # theme. Slot 8 is already in the bright bank, so bold changes nothing.
+        "border": "color(8)",
         # Slot 7 is the only grey that the VT can put *behind* a reverse. Backgrounds stop at
         # the dim bank, and the dark grey of slot 8 becomes black there. It is the same
         # light grey that the F-key lane already uses to fill its chips. This is the
@@ -421,10 +417,10 @@ MESH_THEME_16 = Theme(
         "batt.low": "bold color(9) on color(1)",
         "batt.flash": "not bold color(0) on color(1)",
         "batt.flash.off": "bold color(9)",
-        "type.node": "color(13)",
-        "type.repeater": "not bold color(5)",
+        "type.node": "color(15)",
+        "type.repeater": "color(15)",
         "type.room": "color(15)",
-        "type.sensor": "not bold color(3)",
+        "type.sensor": "color(15)",
         # A region name: the VT has no italic, and each chromatic slot is a node hue. Thus
         # the style is the plain light grey. The word "scope" in front of it makes it
         # different from other text.
@@ -496,9 +492,10 @@ def mark_rgb(colour: str) -> tuple[int, int, int]:
     A canvas paints in RGB and not in styles (refer to :mod:`~meshterm.ui.mapcanvas`). A
     marker that must agree with its twin that Rich draws gets the *same colour* through
     this function. The function accepts both encodings that the marker language uses. One
-    is a literal ``#rrggbb`` (the fixed map marks in :mod:`~meshterm.ui.marks`). The other
-    is a theme style name (the node-type marks, which have names so that each platform
-    chooses its own colour, refer to ``type.*`` of the theme).
+    is a literal ``#rrggbb`` (for example a grey of the basemap in
+    :mod:`~meshterm.ui.map_render`). The other is a theme style name (the marks in
+    :mod:`~meshterm.ui.marks` and the node-type marks, which have names so that each
+    platform chooses its own colour, refer to ``type.*`` of the theme).
 
     On the 16-slot theme, a ``color(N)`` entry gives the :data:`_VT_SLOTS` RGB of that
     slot, and not the stock triple of Rich. The palette of Rich is a shade different from

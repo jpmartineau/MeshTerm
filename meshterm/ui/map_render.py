@@ -25,7 +25,6 @@ platform.
 from __future__ import annotations
 
 import math
-from collections import Counter
 from dataclasses import dataclass, field
 from operator import itemgetter
 
@@ -759,30 +758,6 @@ def _marker_style(marker: MapMarker) -> tuple[str, str]:
     return _NODE
 
 
-#: The number of piled nodes at which the glyph of a marker gets full brightness.
-_PILE_FULL = 8
-
-
-def _pile_color(color: RGB, count: int, *, cap: int = _PILE_FULL) -> RGB:
-    """Make the colour of a marker brighter, by the number of nodes that share its cell.
-
-    One cell can show only one glyph. Thus, where many nodes are at the same position, the
-    map would hide the crowd behind one marker. Instead, we keep the glyph of the top node,
-    and move its colour toward white as the pile grows. Thus a bright marker shows a busy
-    cluster. The ramp is logarithmic (2 nodes → a clear increase, then saturation near
-    ``cap``). Thus it stays informative, and one extra node does not look like a crowd.
-    """
-    if count <= 1:
-        return color
-    t = min(1.0, math.log2(count) / math.log2(cap))
-    r, g, b = color
-    return (
-        round(r + (255 - r) * t),
-        round(g + (255 - g) * t),
-        round(b + (255 - b) * t),
-    )
-
-
 #: How much a node outside an active find filter dims (a multiplier for the glyph colour).
 _FIND_DIM = 0.35
 
@@ -801,9 +776,10 @@ def _draw_nodes(
     """Draw the mesh nodes on top: each glyph, then labels by importance until they collide.
 
     The glyphs are drawn lowest priority first, so that our node and the repeaters are on
-    top of the leaf nodes. Where several nodes share a cell, the glyph that stays is made
-    brighter by the pile size (:func:`_pile_color`). Thus crowded positions glow, and do
-    not silently hide the crowd. Then the labels are placed highest priority first (our
+    top of the leaf nodes. One cell shows one glyph, so where several nodes share a cell,
+    the glyph of the top node stays. (A crowd once made that glyph brighter. Each marker
+    is white now, and white cannot get brighter, so JP removed that signal on
+    2026-10-14.) Then the labels are placed highest priority first (our
     node, then repeaters, then leaf nodes), each only if it fits with no overlap. Thus, on
     a crowded map, the important labels get the available space, and the other nodes show
     as a bare marker (with no overlap).
@@ -823,9 +799,6 @@ def _draw_nodes(
         matched = not needle or needle in marker.label.casefold()
         placed.append((marker, ix, iy, matched))
 
-    # A cell is (dot_x >> 1, dot_y >> 2). Count how many nodes are in each cell.
-    pile = Counter((ix >> 1, iy >> 2) for _, ix, iy, _m in placed)
-
     # Matches draw after (over) the dimmed nodes that do not match, at any rank. Thus the
     # node that the user looks for is never hidden below a brighter neighbour.
     for marker, ix, iy, matched in sorted(placed, key=lambda p: (p[3], p[0]._rank())):
@@ -833,8 +806,6 @@ def _draw_nodes(
         rgb = mark_rgb(color)
         if not matched:
             rgb = _dimmed(rgb, _FIND_DIM)
-        else:
-            rgb = _pile_color(rgb, pile[(ix >> 1, iy >> 2)])
         canvas.marker(ix, iy, glyph, rgb)
 
     # A node that the filter removes is context: a bare dim glyph with no label. Labels get

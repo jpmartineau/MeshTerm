@@ -1387,9 +1387,8 @@ class WalkScreen(Screen):
         The walk once gave each marker the colour of its identity (the hue of the node,
         from its key), and only the glyph shape showed the type. Thus this canvas was
         different from each other place that shows a node with its type (the map, the
-        route graph, a contact row). There, the colour of the mark *is* the type, and the
-        ``type.*`` styles of the theme select it on purpose for each platform (a simple
-        downsample makes the violet of the repeater grey). The identity has its own lane
+        route graph, a contact row). There, the mark *is* the type, in the ``type.*`` styles
+        of the theme, which each platform resolves for itself. The identity has its own lane
         here, and always had it: the **name** next to the marker, in the hue of the key
         (:meth:`_label_rgb`). The shape and the colour now agree, and the legend under the
         canvas can explain both.
@@ -1441,11 +1440,11 @@ class WalkScreen(Screen):
 
         These are the shared marks (:data:`~meshterm.ui.widgets.NODE_GLYPHS`) and the
         shared ``type.*`` colours for them. Thus a node shows here with exactly the glyph
-        and colour that the map, the route graph, and the contact list use for it: ``▲``
-        violet for a repeater, ``■`` for a room, ``◉`` for a sensor, ``●`` pink for a
-        plain node, the white ``★`` for our node, and the grey ``○`` for a node that we
-        heard of but never identified. The colour and the shape say the same thing. Thus
-        the legend below the canvas is a real explanation, not a coincidence.
+        and colour that the map, the route graph, and the contact list use for it: a white
+        ``▲`` for a repeater, ``■`` for a room, ``◉`` for a sensor, ``●`` for a plain node,
+        ``★`` for our node, and the grey ``○`` for a node that we heard of but never
+        identified. Thus the legend below the canvas is a real explanation, not a
+        coincidence.
 
         Returns:
             ``(glyph, colour)``: the colour in the encoding that

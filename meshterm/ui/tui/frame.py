@@ -309,8 +309,10 @@ def _title_bar(
     memory of it, to learn something that the row can state directly. (When only one arrow
     showed, a blank cell stood in for the other.) Thus the pair is fixed at the left edge,
     where the eye starts, and **colour** gives the information. An arrow whose direction
-    has more content takes the grey of the border, so it looks like part of the frame. An
-    arrow with nothing in its direction becomes ``faint``, a step darker. This is the same
+    has more content is lit as the title is (``title.border``). An arrow with nothing in
+    its direction becomes ``faint``. The live arrow once had the grey of the border. That
+    grey is now almost the grey of ``faint`` (JP chose a darker border), and the two arrows
+    looked the same. This is the same
     live/dim language that the F-key lane draws one row below (a dim chip keeps its label
     and loses its fill). The two are the only indicators of the platform.
 
@@ -371,8 +373,9 @@ def _title_bar(
         label_w = heading.cell_len + 2
 
     bar = Text()
-    bar.append("↑", style=border if more_above else "faint")
-    bar.append("↓", style=border if more_below else "faint")
+    lit = title_style(border)
+    bar.append("↑", style=lit if more_above else "faint")
+    bar.append("↓", style=lit if more_below else "faint")
     bar.append(" ")
     if title:
         left = max(1, (rule_span - label_w) // 2)

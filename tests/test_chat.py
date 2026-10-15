@@ -570,7 +570,8 @@ def test_title_contact_dot_reflects_conversation_history(repo: Repository) -> No
     """The contact dot of the title shows if there is history with the contact.
 
     The dot is filled (●) after the user and the contact talked, and hollow (○) before. It
-    is companion pink in both cases. The name has the hue of the key of the contact.
+    has the colour of the companion mark in both cases. The name has the hue of the key of
+    the contact.
     """
     from meshterm.tools.chat import _COMPANION_DOT_STYLE
     from meshterm.ui.theme import node_style
@@ -580,23 +581,23 @@ def test_title_contact_dot_reflects_conversation_history(repo: Repository) -> No
         label="Alice", is_channel=False, contact=Contact(name="Alice", public_key="d4" + "0" * 62)
     )
 
-    def dot_is_pink(row) -> bool:
+    def dot_has_mark_colour(row) -> bool:
         return any(
             span.style == _COMPANION_DOT_STYLE and span.start == 0 and span.end == 1
             for span in row.spans
         )
 
-    # No history yet: a hollow ring in the standard companion pink.
+    # No history yet: a hollow ring in the colour of the companion mark.
     fresh = _title(ctx, contact, {}, _NO_KEYS, _lanes([contact]))
-    assert fresh.plain.startswith("○") and dot_is_pink(fresh)
+    assert fresh.plain.startswith("○") and dot_has_mark_colour(fresh)
     # The name lane has the hue of the key of Alice.
     name_at = fresh.plain.index("Alice")
     assert any(s.style == node_style("d4") and s.start <= name_at < s.end for s in fresh.spans)
 
-    # After the user and the contact exchange messages, the same pink dot is filled.
+    # After the user and the contact exchange messages, the same dot is filled.
     last = ChatMessage(text="hi", peer=contact.peer)
     talked = _title(ctx, contact, {contact.key: last}, _NO_KEYS, _lanes([contact]))
-    assert talked.plain.startswith("●") and dot_is_pink(talked)
+    assert talked.plain.startswith("●") and dot_has_mark_colour(talked)
 
 
 # -- chat service -------------------------------------------------------------
