@@ -269,7 +269,7 @@ deliberately, one at a time, and say why in the code.
   screen's results were once windowed under its actions: the page came out exactly the
   screen's height, so ↓ on the last action did nothing while `↓ n more` sat under it.
 - Grouped-list section headings use `section_heading("Label")` → `── Label ──` in the
-  bold `heading` grey, never the frame's accent: a rule in the border's colour reads as
+  bold `heading` grey, never the `border` grey: a rule in the border's colour reads as
   part of the frame. A chat's day divider wears the same dress. That is also what makes a heading *sticky* (it pins to the top row while its section
   scrolls, and the ^PgUp/^PgDn jumps step by it), so build them through it — a hand-rolled
   `Separator` is no landmark. Prose written *directly under* a heading (a description of
@@ -404,7 +404,9 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
 - Modal popups over the pushed backdrop (never full-screen replacements).
 - Buttons are reverse-video chips (`  Label  `, `selected` style): safe way out on the
   left, the committing verb on the right **and default**, so Enter commits and Esc backs
-  out. Two escalating caution tiers theme the frame: `danger=True` (amber) for a
+  out. A plain border is the `border` grey (`title.border`/`hint.border` its title and
+  hint) — never a hue: a border is chrome (JP, 2026-10-14; it was the indigo `accent`).
+  Two escalating caution tiers theme the frame: `danger=True` (amber) for a
   disruptive choice — discard edits, reboot, show private key — and `destructive=True`
   (the reserved red) for irreversible **data loss**, so a delete confirm reads red like
   its `typed_confirm` sibling. Bulk or irreversible deletions gate behind `typed_confirm`
@@ -762,8 +764,8 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
 
 - The borderless title bar (`frame._title_bar`) is this platform's whole panel border:
   `↑↓ ──── Title ─────── Esc back`. The **clip arrows lead the row and are always both
-  drawn** — colour reads the scroll (the border's `accent` where that direction has more,
-  `muted` where it doesn't), the same live/dim language the lane draws one row below. A
+  drawn** — colour reads the scroll (the `border` grey where that direction has more,
+  `faint` where it doesn't), the same live/dim language the lane draws one row below. A
   pair that appeared and vanished, half of it a blank cell, asked the reader to compare
   the row against a memory of itself; fixed furniture means the bar never changes width
   as the body scrolls either.

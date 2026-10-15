@@ -29,6 +29,13 @@ MESH_THEME = Theme(
     {
         "brand": "bold #5eead4",
         "accent": "bold #818cf8",
+        # The border of each panel and dialog that has no caution tier: the base frame, a
+        # floating dialog, the title bar of a handheld, and a tab strip. It is the grey of
+        # ``muted``, and not a hue. A border is chrome, and a blue border was one more colour
+        # on each screen that had no meaning (JP, 2026-10-14). The two caution tiers keep
+        # their colours, because there the colour is the meaning: ``warn`` (amber) and
+        # ``err`` (red).
+        "border": "#a2a2a2",
         # The only reverse-video chip: the committing button of a dialog, the Abort of a
         # running action, and the insertion slot of the composer where no chip fill carries
         # it. It is a *grey* block, and the ink of the page shows through it. It was cyan
@@ -118,7 +125,7 @@ MESH_THEME = Theme(
         # one shade brighter. Thus the title reads as part of its frame, and it is still
         # different from the frame. There is one entry for each border style that the frame
         # compositor receives (refer to theme.title_style).
-        "title.accent": "bold #a5b4fc",
+        "title.border": "bold #d4d4d4",
         "title.muted": "bold #d4d4d4",
         "title.warn": "bold #fcd34d",
         "title.err": "bold #fca5a5",
@@ -128,7 +135,7 @@ MESH_THEME = Theme(
         # (and not bold). This is the opposite of the brightening of the ``title.*`` styles.
         # The hint reads as part of the frame, and it stays behind the frame. There is one
         # entry for each border style (refer to theme.hint_style).
-        "hint.accent": "#6366f1",
+        "hint.border": "#737373",
         "hint.muted": "#737373",
         "hint.warn": "#f59e0b",
         "hint.err": "#ef4444",
@@ -254,9 +261,10 @@ MESH_THEME = Theme(
 #:   the span completely (a light-grey unknown hash becomes the white "you", and a purple
 #:   repeater becomes pink). Thus each style for a dim slot is explicitly ``not bold``
 #:   (the colour is necessary, so keep it) or explicitly ``bold`` (the promotion is the
-#:   intent, and only ``title.muted`` has it). A style is never silent. Never use bold on
-#:   5 and 6, because *different* meanings use their partners here (5 purple = the
-#:   repeater mark, 13 pink = the node mark. 6 cyan = hint.brand, 14 bright cyan = brand).
+#:   intent, and only ``title.muted`` and ``title.border`` have it). A style is never
+#:   silent. Never use bold on 5 and 6, because *different* meanings use their partners
+#:   here (5 purple = the repeater mark, 13 pink = the node mark. 6 cyan = hint.brand, 14
+#:   bright cyan = brand).
 #: * Backgrounds can use only slots 0–7 (SGR 40–47).
 #: * The six *chromatic bright* slots (9-14) are the place where the spectrum of node
 #:   names lands. They are the console rendering of the hue wheel that comes from the key
@@ -266,7 +274,7 @@ _VT_SLOTS: tuple[tuple[int, str, str], ...] = (
     (1, "red (hint.err)", "#aa0000"),
     (2, "green (hint.ok)", "#00aa00"),
     (3, "brown/orange (hint.warn, batt.mid, heat.cool, the sensor mark)", "#aa5500"),
-    (4, "blue (hint.accent, bluetooth bg)", "#0000aa"),
+    (4, "blue (bluetooth bg, map.water)", "#0000aa"),
     (5, "purple (the repeater mark)", "#aa00aa"),
     (6, "cyan (hint.brand)", "#00aaaa"),
     (7, "light grey (default text, heat.cold)", "#aaaaaa"),
@@ -349,6 +357,11 @@ MESH_THEME_16 = Theme(
     {
         "brand": "bold color(14)",
         "accent": "bold color(12)",
+        # The border: the light grey, which is the nearest slot to the grey of the regular
+        # theme. It is not the dark grey of ``muted``, because the title bar draws a clip
+        # arrow with nothing in its direction in ``faint``, and that is slot 8. It is
+        # ``not bold`` because 7 is a dim slot (refer to the bold rule).
+        "border": "not bold color(7)",
         # Slot 7 is the only grey that the VT can put *behind* a reverse. Backgrounds stop at
         # the dim bank, and the dark grey of slot 8 becomes black there. It is the same
         # light grey that the F-key lane already uses to fill its chips. This is the
@@ -378,15 +391,15 @@ MESH_THEME_16 = Theme(
         # Light grey, a step *above* the dark grey of muted. The console has only two greys,
         # and the hash of an unidentified node is content, not chrome.
         "node.unknown": "not bold color(7)",
-        "title.accent": "bold color(12)",
-        # The one promotion on purpose: bold moves slot 7 to 15. This title needs a colour
+        # The two promotions on purpose: bold moves slot 7 to 15. These titles need a colour
         # that is almost white (the regular theme writes it as #d4d4d4).
+        "title.border": "bold color(7)",
         "title.muted": "bold color(7)",
         "title.warn": "bold color(11)",
         "title.err": "bold color(9)",
         "title.ok": "bold color(10)",
         "title.brand": "bold color(14)",
-        "hint.accent": "not bold color(4)",
+        "hint.border": "color(8)",
         "hint.muted": "color(8)",
         "hint.warn": "not bold color(3)",
         "hint.err": "not bold color(1)",
@@ -545,7 +558,7 @@ def title_style(border_style: str) -> str:
 
     Args:
         border_style: The theme name in which the border of the panel is drawn
-            (``"accent"``, ``"warn"``, and other names).
+            (``"border"``, ``"warn"``, and other names).
 
     Returns:
         The matching ``title.*`` theme name. If no brighter variant is defined, it is
@@ -565,7 +578,7 @@ def hint_style(border_style: str) -> str:
 
     Args:
         border_style: The theme name in which the border of the panel is drawn
-            (``"accent"``, ``"warn"``, and other names).
+            (``"border"``, ``"warn"``, and other names).
 
     Returns:
         The matching ``hint.*`` theme name. If no variant is defined, it is ``"muted"``.

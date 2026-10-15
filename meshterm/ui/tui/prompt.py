@@ -539,7 +539,7 @@ class ButtonDialog(_KeylessDialog):
         prompt_style: str = "",
         button_style: str = "selected",
         button_idle_style: str = "muted",
-        border_style: str = "accent",
+        border_style: str = "border",
         lane: Sequence[FPair | None] | None = None,
     ) -> None:
         """Build a button dialog.

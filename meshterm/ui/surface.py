@@ -971,7 +971,7 @@ class TuiUi(Ui):
             default=default,
             keys=keys,
             prompt_style=tier,
-            border_style=tier or "accent",
+            border_style=tier or "border",
         )
 
     async def typed_confirm(self, warning: str, word: str, *, title: str = "Are you sure?") -> bool:

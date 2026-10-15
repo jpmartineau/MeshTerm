@@ -206,7 +206,7 @@ def _panel_box(
         visible: The ANSI lines of the viewport, already sliced and padded to height.
         more_above: Whether content continues above the slice.
         more_below: Whether content continues below the slice.
-        border: The name of the border style (``"accent"`` for the focused screen).
+        border: The name of the border style (``"border"`` for the focused screen).
         caption: A short muted credit for the right end of the bottom rule (empty for none).
         flush: Remove the one-cell padding inside each side border, for a body that fills
             the frame (refer to :attr:`~meshterm.ui.tui.screen.Screen.flush`).
@@ -309,15 +309,15 @@ def _title_bar(
     memory of it, to learn something that the row can state directly. (When only one arrow
     showed, a blank cell stood in for the other.) Thus the pair is fixed at the left edge,
     where the eye starts, and **colour** gives the information. An arrow whose direction
-    has more content takes the ``accent`` of the border, so it looks like part of the
-    frame. An arrow with nothing in its direction becomes ``muted``. This is the same
+    has more content takes the grey of the border, so it looks like part of the frame. An
+    arrow with nothing in its direction becomes ``faint``, a step darker. This is the same
     live/dim language that the F-key lane draws one row below (a dim chip keeps its label
     and loses its fill). The two are the only indicators of the platform.
 
     The title is centred in the rule between the arrows and the tail, exactly as the Rich
     ``Panel`` centres its own ``title``. (That panel is the frame with a border on the
     desktop, which this bar replaces.) The rule itself takes ``border_style``
-    (``"accent"``) directly: the same bold weight that a real border has. It does not take
+    (``"border"``) directly: the same style that a real border has. It does not take
     the muted variant of :func:`~meshterm.ui.theme.hint_style`, which is for secondary text
     next to a border (the Esc atom below, a footer hint on the other platform).
 
@@ -350,7 +350,7 @@ def _title_bar(
         status: The atoms of the header, for a platform without a header row. ``None`` (or
             empty: nothing unread, no pack) draws the bar exactly as it is with a header.
     """
-    border = "accent"
+    border = "border"
     head_span = 3  # the arrow pair, plus the space between it and the rule
     status = status if status is not None and status.cell_len else None
     stat_span = status.cell_len + 1 if status else 0  # the space before the status
@@ -371,8 +371,8 @@ def _title_bar(
         label_w = heading.cell_len + 2
 
     bar = Text()
-    bar.append("↑", style=border if more_above else "muted")
-    bar.append("↓", style=border if more_below else "muted")
+    bar.append("↑", style=border if more_above else "faint")
+    bar.append("↓", style=border if more_below else "faint")
     bar.append(" ")
     if title:
         left = max(1, (rule_span - label_w) // 2)
@@ -472,7 +472,7 @@ def compose_base(
         if footer_lane is None and _BASE_BOX_CACHE is not None and _BASE_BOX_CACHE[0] == key:
             body = _BASE_BOX_CACHE[1]
         else:
-            panel = _panel_box(title, visible, more_above, more_below, "accent", caption, flush)
+            panel = _panel_box(title, visible, more_above, more_below, "border", caption, flush)
             body = render_lines(Group(panel, footer_row()), cols)
             if footer_lane is None:
                 _BASE_BOX_CACHE = (key, body)
@@ -695,16 +695,16 @@ def compose_startup(screen: Screen, cols: int, rows: int) -> str:
     visible, more_above, more_below = _visible_slice(screen, body_lines, viewport)
 
     body = Text.from_ansi("\n".join(visible))
-    hint = hint_style("accent")
+    hint = hint_style("border")
     subtitle = f"[{hint}]{hint_text}[/]"
     if more_above or more_below:
         arrow = ("↑" if more_above else " ") + ("↓" if more_below else " ")
         subtitle = f"[{hint}]{arrow} · {fit_hint(hint_text, inner_w - 5)}[/]"
     panel = Panel(
         body,
-        title=f"[{title_style('accent')}]{screen.title}[/]" if screen.title else None,
+        title=f"[{title_style('border')}]{screen.title}[/]" if screen.title else None,
         subtitle=subtitle,
-        border_style="accent",
+        border_style="border",
         padding=(vpad, 1),
         width=inner_w + 4,
     )
@@ -865,7 +865,7 @@ def compose_dialog(screen: Screen, cols: int, rows: int) -> str:
     """
     max_w, vpad, viewport, body_lines = _dialog_layout(screen, cols, rows)
     visible, more_above, more_below = _visible_slice(screen, body_lines, viewport)
-    border = getattr(screen, "border_style", "accent")
+    border = getattr(screen, "border_style", "border")
     # The resolved hint, not the hint of the screen: it is what the border draws. It changes
     # with the lane below, and also with the hint of the screen (refer to _dialog_hint).
     hint = _dialog_hint(screen)

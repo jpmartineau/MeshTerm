@@ -488,8 +488,8 @@ def _message_border(message: Text | str) -> str:
     A note about a result has its severity as theme spans (``[err]``, ``[warn]``, ``[ok]``).
     Thus the border of the dialog can show the same severity. An error message gets the
     ``err`` border. A warning (for example "device rebooting") gets the caution border. All
-    the other messages, also the success messages, get the standard accent. A plain string
-    has no spans, and it is always neutral.
+    the other messages, also the success messages, get the grey of the standard border. A
+    plain string has no spans, and it is always neutral.
 
     Args:
         message: The message of the dialog, with styles or plain.
@@ -503,7 +503,7 @@ def _message_border(message: Text | str) -> str:
             return "err"
         if "warn" in styles:
             return "warn"
-    return "accent"
+    return "border"
 
 
 class Visit:
@@ -1565,7 +1565,7 @@ class TuiSession:
         prompt_style: str = "",
         button_style: str = "selected",
         button_idle_style: str = "muted",
-        border_style: str = "accent",
+        border_style: str = "border",
         lane: Sequence[fkeys.FPair | None] | None = None,
     ) -> Any:
         """Show a centred button dialog. Return the chosen value, or ``None`` if cancelled.
@@ -1654,7 +1654,7 @@ class TuiSession:
         ("✓ flood advertisement sent") is too small for a full result screen. Thus it floats
         as a small dialog over the screen below it. Enter (OK) or Esc closes it. The border
         takes the strongest tone of the message (refer to :func:`_message_border`). Thus an
-        error shows in red, and a success stays in the standard accent. The method calls
+        error shows in red, and a success stays in the grey of the standard border. The method calls
         :meth:`button_dialog`, which floats the dialog over a blank base when the stack is
         empty (a tool that runs directly from the menu, which is popped while the tool
         runs).

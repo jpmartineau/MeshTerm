@@ -190,7 +190,7 @@ async def _status_panel(device: Device, snapshot: dict) -> Panel:
         body.append_text(value)
     if not rows:
         body = Text("no status reported", style="muted")
-    return Panel(body, title="[accent]Status[/accent]", border_style="accent", expand=False)
+    return Panel(body, title="[title.border]Status[/]", border_style="border", expand=False)
 
 
 def _firmware(info: dict) -> str:

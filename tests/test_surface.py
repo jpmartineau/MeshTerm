@@ -211,9 +211,9 @@ def test_message_border_echoes_the_strongest_tone() -> None:
     both = Text.from_markup("[warn]careful[/warn] [err]broken[/err]")
     assert _message_border(err) == "err"
     assert _message_border(warn) == "warn"
-    assert _message_border(ok) == "accent"
+    assert _message_border(ok) == "border"
     assert _message_border(both) == "err"
-    assert _message_border("plain string") == "accent"
+    assert _message_border("plain string") == "border"
 
 
 # -- the caution tiers of the button dialog ----------------------------------------------
@@ -265,6 +265,6 @@ async def test_dialog_plain_is_neutral_and_destructive_outranks_danger() -> None
     With no flag, the frame has the neutral accent.
     """
     plain = await _dialog_styles()
-    assert plain["border_style"] == "accent" and plain["prompt_style"] == ""
+    assert plain["border_style"] == "border" and plain["prompt_style"] == ""
     both = await _dialog_styles(danger=True, destructive=True)
     assert both["border_style"] == "err" and both["prompt_style"] == "err"

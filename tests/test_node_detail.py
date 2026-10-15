@@ -153,9 +153,9 @@ def test_tab_strip_bottom_is_a_continuous_rule_notched_at_the_active_tab() -> No
     # (west and north, ╯) into "Routes". It is blank across the width of "Routes" (open into
     # the page). Then it goes down again (north and east, ╰) and continues.
     assert bot.plain == "────────╯          ╰"
-    # It is one continuous line: each cell has the accent, the colour of the active tab. The
-    # colours are not mixed.
-    assert {r.style for r in bot.spans} == {"accent"}
+    # It is one continuous line: each cell has the grey of the border, the colour of the
+    # active tab. The colours are not mixed.
+    assert {r.style for r in bot.spans} == {"border"}
 
     _, _, bot_first = tab_strip(["Map", "Routes"], 0, width=20).renderables
     assert bot_first.plain == "╯       ╰───────────"  # the notch is now under the first tab

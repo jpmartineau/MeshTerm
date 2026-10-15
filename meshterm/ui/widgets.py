@@ -172,7 +172,7 @@ def banner(
     body = Text.from_markup(
         f"[brand]MeshTerm[/brand] [muted]v{__version__}[/muted]\n[muted]device:[/muted] {target}"
     )
-    return Panel(body, border_style="accent", expand=False, title="[accent]Mesh[/accent]")
+    return Panel(body, border_style="border", expand=False, title="[title.border]Mesh[/]")
 
 
 def make_progress(console: Console) -> Progress:
@@ -1108,7 +1108,7 @@ def stats_panel(
             _hop_medians_table(stats.hop_snrs, device_label, resolve, hash_bytes, device_hash)
         )
     body: Text | Group = sections[0] if len(sections) == 1 else Group(*sections)
-    return Panel(body, title="[accent]Trace summary[/accent]", border_style="accent", expand=False)
+    return Panel(body, title="[title.border]Trace summary[/]", border_style="border", expand=False)
 
 
 # The glyphs and colours of the node types. They are the same as the marker palette of the
@@ -1514,8 +1514,9 @@ def tab_strip(labels: Sequence[str], active: int, width: int, *, compact: bool =
     This is the only navigation header for a screen that shows one view of the full height
     at a time, between a few named views (for example ``Info`` and ``Routes`` on the node
     detail page), and does not stack them. Each tab always has a box with a full top. The
-    box has a dim ``faint`` outline by default, and a lit ``accent`` outline when the tab
-    is active. It is not only the active tab that has a box. Thus the width of each tab is
+    box has a dim ``faint`` outline by default, and the grey ``border`` outline when the
+    tab is active. The label of the active tab is lit as the title of a panel is
+    (``title.border``). It is not only the active tab that has a box. Thus the width of each tab is
     fixed, in any selection, and a switch of tabs never shifts the labels that follow it.
     Neighbouring tabs share a vertical line (one glyph, not two). Each shared *top* corner
     is drawn as if the tab on the left sits on top of the tab on the right. It "opens"
@@ -1524,7 +1525,7 @@ def tab_strip(labels: Sequence[str], active: int, width: int, *, compact: bool =
     left) in all other places. Thus the active tab is the one exception. It always wins both
     of its top corners, and it looks lifted in front of its neighbours.
 
-    The *bottom* border is a single continuous rule with the accent colour. It is one line,
+    The *bottom* border is a single continuous rule in the colour of the border. It is one line,
     so it has one colour throughout, the colour of the active tab. The inactive tabs sit
     flush against it. They have no corners or seams of their own there. The rule only
     passes behind them. It is broken only under the active tab, and thus the tab looks
@@ -1532,7 +1533,7 @@ def tab_strip(labels: Sequence[str], active: int, width: int, *, compact: bool =
     from the west, and turns north into the wall of the tab). It leaves the width of the
     active tab open (no line, because that gap *is* the start of the page). Then it turns
     back down through ``╰`` (the wall meets the flat run that continues east) and goes on
-    flat. A lone tab becomes the plain accent heading (the ``── Label ──`` form of
+    flat. A lone tab becomes a plain heading in the border grey (the ``── Label ──`` form of
     :func:`~meshterm.ui.menus.section_heading`), because there is nothing to switch
     between or to layer. When ``width`` has more space than necessary, the tab boxes (the
     top row and the label row) are two columns from the left. The bottom rule is one
@@ -1560,18 +1561,20 @@ def tab_strip(labels: Sequence[str], active: int, width: int, *, compact: bool =
     if not labels:
         return Group(Text(""))
     if len(labels) == 1:
-        return Group(Text(f"── {labels[0]} ──", style="accent", no_wrap=True))
+        return Group(Text(f"── {labels[0]} ──", style="border", no_wrap=True))
     if compact:
-        row = Text("──", style="accent", no_wrap=True)
+        row = Text("──", style="border", no_wrap=True)
         for i, label in enumerate(labels):
             if i == active:
-                row.append(f"┤ {label} ├", style="accent")
+                row.append("┤ ", style="border")
+                row.append(label, style="title.border")
+                row.append(" ├", style="border")
             else:
-                row.append("─", style="accent")
+                row.append("─", style="border")
                 row.append(f" {label} ", style="faint")
-                row.append("─", style="accent")
-            row.append("─", style="accent")
-        row.append("─" * max(0, width - len(row.plain)), style="accent")
+                row.append("─", style="border")
+            row.append("─", style="border")
+        row.append("─" * max(0, width - len(row.plain)), style="border")
         return Group(row)
 
     n = len(labels)
@@ -1585,14 +1588,14 @@ def tab_strip(labels: Sequence[str], active: int, width: int, *, compact: bool =
         return junction if junction == 0 or junction == active else junction - 1
 
     def top_style(junction: int) -> str:
-        return "accent" if top_owner(junction) == active else "faint"
+        return "border" if top_owner(junction) == active else "faint"
 
     def bot_glyph(junction: int) -> str:
         """The glyph of the bottom rule at this junction.
 
         It is a corner that turns into or out of the wall of the active tab, or else a flat
-        pass-through. It always has the accent colour. Refer to the enclosing docstring for
-        the reason.
+        pass-through. It always has the colour of the border. Refer to the enclosing docstring
+        for the reason.
         """
         if junction == active:
             return "╯"
@@ -1602,20 +1605,19 @@ def tab_strip(labels: Sequence[str], active: int, width: int, *, compact: bool =
 
     top = Text(pad, no_wrap=True)
     mid = Text(pad, no_wrap=True)
-    bot = Text("─" * margin, style="accent", no_wrap=True)
+    bot = Text("─" * margin, style="border", no_wrap=True)
     for i, _label in enumerate(labels):
         opens = i == 0 or i == active
         top.append("╭" if opens else "╮", style=top_style(i))
         mid.append("│", style=top_style(i))
-        bot.append(bot_glyph(i), style="accent")
-        tab_style = "accent" if i == active else "faint"
-        top.append("─" * len(inner[i]), style=tab_style)
-        mid.append(inner[i], style=tab_style)
-        bot.append(" " * len(inner[i]) if i == active else "─" * len(inner[i]), style="accent")
+        bot.append(bot_glyph(i), style="border")
+        top.append("─" * len(inner[i]), style="border" if i == active else "faint")
+        mid.append(inner[i], style="title.border" if i == active else "faint")
+        bot.append(" " * len(inner[i]) if i == active else "─" * len(inner[i]), style="border")
     top.append("╮", style=top_style(n))
     mid.append("│", style=top_style(n))
-    bot.append(bot_glyph(n), style="accent")
-    bot.append("─" * max(0, width - len(bot.plain)), style="accent")
+    bot.append(bot_glyph(n), style="border")
+    bot.append("─" * max(0, width - len(bot.plain)), style="border")
     return Group(top, mid, bot)
 
 
@@ -1778,7 +1780,7 @@ def tx_opt_summary(result: TxOptResult) -> Panel:
         Text.from_markup(applied),
     )
     return Panel(
-        body, title="[accent]TX optimization[/accent]", border_style="accent", expand=False
+        body, title="[title.border]TX optimization[/]", border_style="border", expand=False
     )
 
 

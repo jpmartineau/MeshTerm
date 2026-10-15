@@ -315,7 +315,7 @@ def test_the_popup_carries_its_tone_as_spans_not_as_markup(ctx: AppContext, tmp_
     from meshterm.ui.diagnostics import SAVE_KEY
     from meshterm.ui.tui.session import _message_border
 
-    for target, expected in ((tmp_path / "ok.md", "accent"), (_blocked(tmp_path), "err")):
+    for target, expected in ((tmp_path / "ok.md", "border"), (_blocked(tmp_path), "err")):
         session = _Session(keep=True)
         page = _page(ctx, session=session, save_path=target)
         page.handle("text", SAVE_KEY)

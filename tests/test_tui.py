@@ -1309,7 +1309,7 @@ def _cell_color(line: str, idx: int) -> tuple[int, int, int]:
     return (triplet.red, triplet.green, triplet.blue)
 
 
-_ACCENT = (129, 140, 248)  # The accent border of the theme, #818cf8.
+_BORDER = (162, 162, 162)  # The border grey of the theme, #a2a2a2.
 
 
 def _find(plain: str, glyphs: frozenset[str]) -> int:
@@ -1369,13 +1369,13 @@ def test_a_frame_draws_in_one_colour() -> None:
     flat. The test checks the nested panels with the outer frame, because the pass also
     lit those.
     """
-    inner = Panel(Text("body"), border_style="accent", width=20)
+    inner = Panel(Text("body"), border_style="border", width=20)
     screen = ScrollScreen(Group(Text("above"), inner), title="outer")
     lines = frame.compose_base(Text("h"), screen, "hint", 60, 20).split("\n")
-    assert _border_colours(lines) == {_ACCENT}, "the base frame draws in more than one colour"
+    assert _border_colours(lines) == {_BORDER}, "the base frame draws in more than one colour"
 
     dialog = frame.compose_dialog(ScrollScreen(Text("body"), title="d"), 80, 20)
-    assert _border_colours(dialog.split("\n")) == {_ACCENT}, "so does a dialog's"
+    assert _border_colours(dialog.split("\n")) == {_BORDER}, "so does a dialog's"
 
 
 # --- prompts -----------------------------------------------------------------
