@@ -17,7 +17,7 @@ surface that the survey found can in the end use it.
   look, and each seam uses one cell. The label of the chip of a node has the hue that
   comes from its hash (:func:`~meshterm.ui.theme.node_style`). This is the colour that its
   name has on each surface. The fill is that hue, but darker (:data:`CHIP_LIGHTNESS`). Our
-  node is the white ``★`` of the map on a neutral dark grey. A faded hop is dark slate. A
+  node is the white ``★`` of the map on a neutral dark grey. A faded hop is dark grey. A
   keyless hop is light grey on grey. (On the 16-colour console of the PicoCalc, the fill
   is the dim twin of the hue. Refer to :func:`_slot_colours`.)
 
@@ -192,11 +192,11 @@ def _chip_label(fill: str) -> str:
     return oklab.to_hex(oklab.fitted((min(1.0, lightness / CHIP_LIGHTNESS), a, b)))
 
 
-#: The text of the composer's slot: near-black slate on the white chip.
-_CHIP_FG = "#0f172a"
+#: The text of the composer's slot: a grey that is almost black, on the white chip.
+_CHIP_FG = "#181818"
 #: The chip fill for a keyless hop: the ``faint`` grey. Colour is only for identities that
 #: have a key, in chips and in arrow mode.
-_KEYLESS_BG = "#64748b"
+_KEYLESS_BG = "#737373"
 #: The label of a keyless chip: the same pair as the chip of a node, in grey.
 _KEYLESS_FG = _chip_label(_KEYLESS_BG)
 #: The fill of a quiet chip (:attr:`PathHop.quiet`): the grey of plain text (``#cccccc``,
@@ -214,11 +214,11 @@ _WHITE = "#ffffff"
 #: of the spectrum on purpose, and it is not the white that it was before. Our end of a
 #: route is a fixture that the user already knows. It stays back and lets the hops that
 #: differ carry the colour.
-_YOU_BG = "#3f3f46"
-#: The chip of a dimmed hop: a dark slate fill with muted ink. It recedes like ``faint``
+_YOU_BG = "#404040"
+#: The chip of a dimmed hop: a dark grey fill with muted ink. It recedes like ``faint``
 #: text.
-_DIM_BG = "#334155"
-_DIM_FG = "#94a3b8"
+_DIM_BG = "#404040"
+_DIM_FG = "#a2a2a2"
 
 #: On the 16-colour console, the page: slot 0, black. It is the fill of a chip that the
 #: console cannot fill, because the VT has no dark grey background. That chip is our ``★``,

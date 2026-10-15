@@ -1159,10 +1159,10 @@ _HEAT_STOPS: tuple[tuple[float, tuple[int, int, int]], ...] = (
     (math.log10(3600), (250, 204, 21)),  # ~1h: yellow
     (math.log10(21600), (251, 146, 60)),  # ~6h: orange
     (math.log10(86400), (248, 113, 113)),  # ~1d: red
-    (math.log10(604800), (148, 163, 184)),  # ~1w: grey
-    (math.log10(2592000), (100, 116, 139)),  # ~30d+: cold slate
+    (math.log10(604800), (162, 162, 162)),  # ~1w: grey
+    (math.log10(2592000), (115, 115, 115)),  # ~30d+: cold grey
 )
-_RECENCY_NEVER = "#64748b"  # never heard: the coldest slate
+_RECENCY_NEVER = "#737373"  # never heard: the coldest grey
 
 
 def age_seconds(when: datetime | None) -> float | None:
@@ -1238,7 +1238,7 @@ def _recency_gradient(secs: float | None) -> str:
 
     The function interpolates the RGB channels between the two stops on each side of
     ``secs`` (in log-age space). Below the first stop, it gives white. Above the last stop,
-    it gives cold slate.
+    it gives cold grey.
     """
     if secs is None:
         return _RECENCY_NEVER

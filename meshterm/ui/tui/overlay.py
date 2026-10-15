@@ -40,7 +40,7 @@ _TITLE_COLOR = "bold #a5b4fc"
 _CHIP_COLOR = "bold #818cf8"
 
 #: The colour of the caption (the theme's ``muted``, in hex so that the fade can dim it).
-_CAPTION_COLOR = "#94a3b8"
+_CAPTION_COLOR = "#a2a2a2"
 
 
 class BusyOverlay:

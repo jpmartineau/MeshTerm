@@ -650,7 +650,7 @@ def test_line_label_anchors_on_the_visible_stretch() -> None:
     # A line across the whole tile at the latitude of the view. Its midpoint is far away, but
     # it crosses the canvas, so the clip must find it.
     _add_line_label(
-        frame, [[(0, cy), (4096, cy)]], 4096, 14, 4843, 5861, "Rue Long", ("#9aa0aa", False, 7)
+        frame, [[(0, cy), (4096, cy)]], 4096, 14, 4843, 5861, "Rue Long", ("#9f9f9f", False, 7)
     )
 
     assert len(frame.labels) == 1
@@ -667,7 +667,7 @@ def test_line_label_off_screen_is_not_queued() -> None:
     frame = _Frame(canvas=MapCanvas(60, 20), viewport=vp)
     # A short line in the far corner of the tile, far outside a window at zoom 16.
     _add_line_label(
-        frame, [[(0, 0), (8, 8)]], 4096, 14, 4843, 5861, "Nowhere", ("#9aa0aa", False, 7)
+        frame, [[(0, 0), (8, 8)]], 4096, 14, 4843, 5861, "Nowhere", ("#9f9f9f", False, 7)
     )
 
     assert frame.labels == []
@@ -683,7 +683,7 @@ def test_line_label_offers_alternates_along_the_visible_run() -> None:
     cx, cy = _tile_local_of_view_centre(vp, 14, 4843, 5861)
     # A zig-zag across the view gives several visible pieces to choose from.
     ring = [(cx - 120 + i * 40, cy - 40 + (i % 2) * 80) for i in range(8)]
-    _add_line_label(frame, [ring], 4096, 14, 4843, 5861, "Rue Zig", ("#9aa0aa", False, 7))
+    _add_line_label(frame, [ring], 4096, 14, 4843, 5861, "Rue Zig", ("#9f9f9f", False, 7))
 
     assert frame.labels and frame.labels[0].alts, "no fallback anchors offered"
     assert all(a != (frame.labels[0].x, frame.labels[0].y) for a in frame.labels[0].alts)
@@ -2141,7 +2141,7 @@ def test_render_map_labels_take_the_name_hue_ours_white() -> None:
     assert _glyph_color(lines, "★") == mark_rgb(SELF_MARK[1])  # the colour of our star
     assert _glyph_color(lines, "US") == (255, 255, 255)  # ...the label is the white of you
     assert _glyph_color(lines, "KEYED") == name_rgb("KEYED", "d4" * 32)
-    assert _glyph_color(lines, "BARE") == (148, 163, 184)  # no key: the muted grey
+    assert _glyph_color(lines, "BARE") == (162, 162, 162)  # no key: the muted grey
 
 
 def test_render_map_find_matches_still_label_white() -> None:

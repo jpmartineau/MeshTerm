@@ -88,11 +88,11 @@ _WALK_EDGE = (255, 255, 255)
 #: around a scored walk. A fan grows past this number by itself, but nothing here fans.
 _GRAPH_ROWS = 3
 
-#: The one body tone of the area drawing: a plain muted slate, for the enclosed region
+#: The one body tone of the area drawing: a plain muted grey, for the enclosed region
 #: and for its loop. It is one shade on purpose (no dimmer fill inside a brighter edge).
 #: An even-odd fill shades only the enclosed side, and the coloured node pins give the
 #: colour. Thus the shape shows as one flat silhouette, not as two brightnesses.
-_AREA_TONE: RGB = (148, 163, 184)
+_AREA_TONE: RGB = (162, 162, 162)
 
 #: The cell box of the area drawing, which is the full stage of the Area tab. Its width
 #: is the width of the page. (The proportions are kept, thus a wider page gives a bigger

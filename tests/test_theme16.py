@@ -245,9 +245,9 @@ def test_fold_keeps_ansi_sequences_intact() -> None:
 def test_fold_quantizes_embedded_truecolor_to_the_slots() -> None:
     """Truecolour from the canvas (the braille rasters) goes to the nearest palette slot."""
     set_platform(PICOCALC_LYRA)
-    folded = fold_text("\x1b[38;2;148;163;184m○\x1b[0m")
+    folded = fold_text("\x1b[38;2;162;162;162m○\x1b[0m")
     assert "38;2;" not in folded
-    # #94a3b8 → the nearest stock slot is 7 (#aaaaaa). A slot in the dim bank states its
+    # #a2a2a2 → the nearest stock slot is 7 (#aaaaaa). A slot in the dim bank states its
     # intensity.
     assert "\x1b[22;37m" in folded
     background = fold_text("\x1b[48;2;94;234;212mX\x1b[0m")
@@ -397,7 +397,7 @@ def test_canvas_drops_emphasis_where_bold_means_brightness() -> None:
     for platform, expect_bold in ((REGULAR, True), (PICOCALC_LYRA, False)):
         set_platform(platform)
         canvas = MapCanvas(6, 1)
-        canvas.marker(0, 0, "x", (148, 163, 184))  # markers always draw in bold
+        canvas.marker(0, 0, "x", (162, 162, 162))  # markers always draw in bold
         rendered = "".join(canvas.to_ansi_lines())
         assert ("\x1b[1m" in rendered) is expect_bold, (platform.name, repr(rendered))
     # The colour that the canvas received stays the same: a slot in the dim bank with its

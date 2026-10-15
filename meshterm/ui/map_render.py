@@ -59,20 +59,20 @@ _ROAD_STYLE: dict[str, tuple[str, int]] = {
     "trunk": ("map.highway", 26),
     "primary": ("#e8b24a", 25),
     "secondary": ("#d7c257", 24),
-    "tertiary": ("#a7adb8", 23),
-    "minor": ("#828894", 21),
-    "unclassified": ("#828894", 21),
-    "residential": ("#828894", 21),
-    "living_street": ("#767c88", 20),
-    "service": ("#5f646e", 19),
-    "pedestrian": ("#5a5f69", 15),
-    "path": ("#4b5560", 12),
-    "track": ("#4b5560", 12),
-    "footway": ("#454e58", 11),
-    "cycleway": ("#455864", 12),
+    "tertiary": ("#adadad", 23),
+    "minor": ("#888888", 21),
+    "unclassified": ("#888888", 21),
+    "residential": ("#888888", 21),
+    "living_street": ("#7c7c7c", 20),
+    "service": ("#646464", 19),
+    "pedestrian": ("#5f5f5f", 15),
+    "path": ("#545454", 12),
+    "track": ("#545454", 12),
+    "footway": ("#4d4d4d", 11),
+    "cycleway": ("#555555", 12),
 }
-_ROAD_DEFAULT = ("#5f646e", 18)
-_RAIL = ("#8a8f98", 22)
+_ROAD_DEFAULT = ("#646464", 18)
+_RAIL = ("#8f8f8f", 22)
 
 # Waterway class -> (colour, priority).
 _WATERWAY_STYLE: dict[str, tuple[str, int]] = {
@@ -90,16 +90,16 @@ _GREEN_CLASSES = {"wood", "forest", "grass", "park", "meadow", "scrub", "wetland
 # with a lower rank get screen space first. The minimum zoom hides the fine detail until
 # you zoom in.
 _PLACE_STYLE: dict[str, tuple[str, bool, int, int]] = {
-    "city": ("#f8fafc", True, 0, 0),
-    "town": ("#e6ebf2", True, 1, 9),
-    "village": ("#cdd6e2", False, 2, 12),
-    "suburb": ("#9fb0c4", False, 3, 12),
-    "quarter": ("#94a5ba", False, 4, 13),
-    "neighbourhood": ("#8496ab", False, 5, 13),
-    "hamlet": ("#8496ab", False, 6, 14),
+    "city": ("#fafafa", True, 0, 0),
+    "town": ("#eaeaea", True, 1, 9),
+    "village": ("#d5d5d5", False, 2, 12),
+    "suburb": ("#aeaeae", False, 3, 12),
+    "quarter": ("#a3a3a3", False, 4, 13),
+    "neighbourhood": ("#949494", False, 5, 13),
+    "hamlet": ("#949494", False, 6, 14),
 }
 _WATER_LABEL = ("#7dd3fc", False, 2)
-_STREET_LABEL = ("#9aa0aa", False, 7)
+_STREET_LABEL = ("#9f9f9f", False, 7)
 
 #: The zoom at which street names appear. Below it, a canvas 53 cells wide cannot hold one
 #: name for each street. The few names that fit label a grid that is too coarse to show
@@ -126,7 +126,7 @@ _FILL_LAYERS = ("water", "landcover", "landuse", "park")
 #: Below the zoom gate, a typical footprint is approximately two dots wide (less than half
 #: a cell). Thus the full layer becomes a haze that makes the streets hard to read, and it
 #: shows nothing that the street pattern does not already show.
-_BUILDING_FILL = ("#4a4f5a", 8)
+_BUILDING_FILL = ("#4f4f4f", 8)
 _BUILDING_STIPPLE = 2
 _BUILDING_MIN_ZOOM = 15
 

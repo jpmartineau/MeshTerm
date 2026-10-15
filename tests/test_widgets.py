@@ -271,8 +271,8 @@ def test_name_rgb_keyless_lands_on_the_muted_grey() -> None:
     """The raster twin: the RGB of a keyless name is the muted grey, and never a crash."""
     from meshterm.ui.widgets import name_rgb
 
-    assert name_rgb("Stranger") == (148, 163, 184)
-    assert name_rgb("Alice", "d4" + "0" * 62) != (148, 163, 184)
+    assert name_rgb("Stranger") == (162, 162, 162)
+    assert name_rgb("Alice", "d4" + "0" * 62) != (162, 162, 162)
 
 
 def test_route_graph_source_label_takes_its_resolved_keys_hue() -> None:
@@ -294,7 +294,7 @@ def test_route_graph_source_label_takes_its_resolved_keys_hue() -> None:
         self_name="us",
         source="Alice",
     )
-    assert rgb_unknown(SRC_NODE) == (148, 163, 184)  # an origin that cannot be resolved stays muted
+    assert rgb_unknown(SRC_NODE) == (162, 162, 162)  # an origin that cannot be resolved stays muted
 
 
 def test_revisit_note_names_the_repeats_and_refuses_to_guess_why() -> None:
@@ -350,7 +350,7 @@ def test_name_chip_draws_us_as_the_star_never_as_our_name(powerline) -> None:
     chip = name_chip("you", you=True)
 
     assert "★" in chip.plain and "you" not in chip.plain
-    assert _span_style(chip, "★").bgcolor.name == "#3f3f46"  # a neutral grey, not a hue
+    assert _span_style(chip, "★").bgcolor.name == "#404040"  # a neutral grey, not a hue
 
 
 def test_self_chip_is_white_on_the_fill_of_our_key(powerline) -> None:
@@ -432,7 +432,7 @@ def test_name_chip_greys_a_node_it_cannot_place(powerline) -> None:
     powerline(True)
     keyless = name_chip("·")
 
-    assert _span_style(keyless, "·").bgcolor.name == "#64748b"  # the keyless grey
+    assert _span_style(keyless, "·").bgcolor.name == "#737373"  # the keyless grey
 
 
 def test_a_chat_chip_with_no_key_is_black_on_grey(powerline) -> None:

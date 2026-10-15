@@ -81,8 +81,8 @@ _SHIFTS = ("Shift_L", "Shift_R")
 _REPEAT_GAP_MS = 30
 
 #: The cap of a drawn lane key, and the ink of the digit that is printed on it.
-_KEY_BODY = "#1d2025"
-_KEY_DIGIT = "#eef1f4"
+_KEY_BODY = "#202020"
+_KEY_DIGIT = "#f1f1f1"
 
 #: The modifier bits of Tk: Shift and Control on all platforms, Alt where the platform puts it.
 _SHIFT_BIT = 0x0001
@@ -231,12 +231,12 @@ class EmulatorWindow:
         keys_h = 26 * scale if self._device.lane_keys else 0
         root = tk.Tk()
         root.title(f"MeshTerm — {self._device.name} emulator")
-        root.configure(background="#2b2f36")
+        root.configure(background="#2f2f2f")
         root.resizable(False, False)
         width = panel_w * scale + 2 * margin
         height = panel_h * scale + 2 * margin + keys_h
         canvas = tk.Canvas(
-            root, width=width, height=height, background="#2b2f36", highlightthickness=0
+            root, width=width, height=height, background="#2f2f2f", highlightthickness=0
         )
         canvas.pack()
         base = tk.PhotoImage(width=panel_w, height=panel_h)

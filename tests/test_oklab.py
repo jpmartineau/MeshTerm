@@ -18,7 +18,7 @@ def test_every_node_fill_round_trips_through_oklab_exactly() -> None:
     for byte in range(256):
         colour = _fill(f"{byte:02x}")
         assert oklab.to_hex(oklab.from_hex(colour)) == colour
-    for grey in ("#000000", "#ffffff", "#64748b", "#334155", "#3f3f46"):
+    for grey in ("#000000", "#ffffff", "#a2a2a2", "#737373", "#404040"):
         assert oklab.to_hex(oklab.from_hex(grey)) == grey
 
 

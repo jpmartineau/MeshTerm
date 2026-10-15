@@ -110,7 +110,7 @@ def test_a_key_lane_s_lit_hash_folds_with_the_name_it_belongs_to() -> None:
     hues = _hues(render_to_ansi(row, 30))
 
     assert node_style(_KEY).removeprefix("bold ") not in hues
-    assert "#94a3b8" in hues, "the unlit tail of the key is muted and stays muted"
+    assert "#a2a2a2" in hues, "the unlit tail of the key is muted and stays muted"
 
 
 def test_the_highlight_does_not_claim_to_know_an_unidentified_node() -> None:
@@ -123,7 +123,7 @@ def test_the_highlight_does_not_claim_to_know_an_unidentified_node() -> None:
     row.append("3d", style="node.unknown")
     row.style = "cursor"
 
-    assert "#94a3b8" in _hues(render_to_ansi(row, 30))
+    assert "#a2a2a2" in _hues(render_to_ansi(row, 30))
 
 
 def test_the_highlight_leaves_every_other_lane_its_own_colour() -> None:
@@ -152,7 +152,7 @@ def test_a_path_line_s_chips_keep_their_fills_on_the_cursor_row() -> None:
     """
     fill = node_style(_KEY).removeprefix("bold ")
     row = Text("  ")
-    row.append(" Lakeside ", style=f"#0f172a on {fill}")
+    row.append(" Lakeside ", style=f"#181818 on {fill}")
     row.style = "cursor"
 
     assert f"48;2;{int(fill[1:3], 16)};" in render_to_ansi(row, 40)
@@ -306,7 +306,7 @@ def test_every_hue_a_key_can_mint_is_recognised_as_one(platform) -> None:  # noq
         "heat.now",
         "err",
         "bold #ffffff",
-        "#94a3b8",
+        "#a2a2a2",
         "",
         "none",
     ],

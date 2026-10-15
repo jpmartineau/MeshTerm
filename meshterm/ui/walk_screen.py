@@ -18,7 +18,7 @@ only its direct neighbours:
   **node-type mark** of the app, with its glyph and its colour: the same mark that the
   map and the route graph use for that node. The *identity* of the node is in the name
   next to the marker, in the hue of the node. Edges are braille lines. The median SNR of
-  the link sets the colour of an edge (green → amber → red, and slate for a link with no
+  the link sets the colour of an edge (green → amber → red, and grey for a link with no
   reading), and the age of the evidence makes it fainter. Each edge starts at the *right
   end of the focus name*, so that a line never crosses a label. The fan is on a grid of
   rows: one marker on each row, a blank row between two markers, and a blank row above
@@ -202,7 +202,7 @@ _SNR_STOPS: tuple[tuple[float, RGB], ...] = (
 
 #: The edge colour for a link with no SNR reading (for example, a link known only from a
 #: route).
-_NO_READING: RGB = (100, 116, 139)
+_NO_READING: RGB = (115, 115, 115)
 
 #: One-letter tags for the types of evidence for a link, the same as in the path composer:
 #: T(race), R(oute), P(acket log), N(eighbour table).
@@ -864,7 +864,7 @@ class WalkScreen(Screen):
         # The edge of the selected link is the brightest and is on top. It does not get
         # the age fade, so it shows as one lit line over the dimmer others. (The user can
         # still read the age in the age column of the row.) The edge of the collapsed
-        # marker is slate. But when the selection is one of its nodes, it becomes the
+        # marker is grey. But when the selection is one of its nodes, it becomes the
         # edge of that node.
         now = utcnow()
         for other, (x, y) in placed.items():

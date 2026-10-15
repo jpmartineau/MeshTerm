@@ -524,6 +524,13 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
 
 ### Colour
 
+- **A grey is neutral: r = g = b** (JP, 2026-10-14). Every grey MeshTerm defines — chrome,
+  a keyless chip, a minor road, the emulator's window — has no tint, warm or cold; the
+  Tailwind slates were each re-made at their own OKLab lightness (`#94a3b8` → `#a2a2a2`,
+  `#64748b` → `#737373`, `#334155` → `#404040`), so every contrast stayed put. A colour
+  that has a meaning gets real chroma instead. `tests/test_neutral_greys.py` fails any
+  `#rrggbb` literal under OKLab chroma 0.045 that isn't r=g=b. Part of a wider pass: a
+  colour that carries no meaning is on its way out.
 - Node names are always coloured: `name_style(name, key)` palette hue, derived from the
   node's key (its first byte — any known prefix agrees) so a rename keeps the colour.
   One rule on **every** platform; only the resolution changes (see **Platforms**).
@@ -565,7 +572,7 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   what makes the arrow form say what the chip form always said, its fills having never been
   in the fold's vocabulary. Reverse-video chips — a dialog's committing button,
   a running action's Abort, the arrow-mode composer slot, the editor cursor — are the
-  `selected` fill, a **grey** block (`muted`'s slate; light grey slot 7 on the VT, the one
+  `selected` fill, a **grey** block (`muted`'s grey; light grey slot 7 on the VT, the one
   grey a reverse can put behind text there, and the same fill the F-key lane uses). A chip
   marks where a press lands; it is chrome, and it does not get a hue.
   Recency heat colours heard/first-heard ages, never names — seven steps on plain human
