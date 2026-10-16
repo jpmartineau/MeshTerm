@@ -9,6 +9,23 @@ can change how things behave. It does not only add new things.
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-10-16
+
+**In a chat, your messages show your name, MeshTerm has a demo mesh, and the colours are
+calmer.** Your messages and each mention of you are now easy to find in a chat.
+`meshterm --demo` runs a whole mesh over Montréal with no radio. The greys have no blue in
+them, the borders are grey, and the node marks are white.
+
+### Added
+
+- **`meshterm --demo` runs MeshTerm in a demo mesh over Montréal.** No radio is
+  necessary. The demo has approximately forty invented nodes: repeaters on the high points
+  of the city, room servers, sensors, and the people of the mesh. It has a week of traffic,
+  conversations on the channels, in a room, and in direct messages, and traces with their
+  records in the trophy case. Each run starts from the same state, in a directory of its
+  own, so your history never gets a node of the demo. The screenshots in the README and on
+  the website come from it.
+
 ### Changed
 
 - **In a chat, your messages show your name.** A channel, a direct chat, and a room put
@@ -21,6 +38,13 @@ can change how things behave. It does not only add new things.
 - **Your node's star is white.** The `★` that marks your node on the map, in routes, in
   lists, and in a chat is white, the same white as your name in the lists. Before, it was
   yellow. A star in a faded part of a route stays grey.
+- **The greys are neutral, and the borders are grey.** Each grey of MeshTerm is now a
+  neutral grey, with no blue in it, at the same lightness as before. A plain border is
+  grey, where it was indigo. The amber and red borders of a caution keep their colours.
+- **Each node mark is white.** The marks of a companion, a repeater, a room server, and a
+  sensor (`●`, `▲`, `■`, `◉`) are white, because the shape already shows the type. Before,
+  they had four colours. The mark of an unknown node (`○`) stays grey.
+- A section heading has the colour of the title of its frame, and it has no icon.
 - **In a chat, a name that MeshTerm cannot match to a node is black on grey.** The box
   around a sender or a mention with no known node has black text on a grey box. Thus it
   does not stand out among the coloured names. Before, it was light blue on slate.
@@ -44,6 +68,8 @@ can change how things behave. It does not only add new things.
   keep each row for content. The new **Section spacing** preference in the Display group
   sets the smallest terminal that gets the line: any height, 20, 24, 30, or 40 rows, or
   never.
+- The About page has a section on the Cardputer Zero. It says that MeshTerm runs on the
+  Cardputer Zero and on the Cardputer Zero Lite.
 
 ## [0.11.1] - 2026-10-13
 
@@ -576,7 +602,8 @@ commands.
 MeshTerm is free and open source, under the Apache 2.0 licence. The licence does not cover
 the name and the logo (refer to `NOTICE`). A fork is welcome under its own name.
 
-[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.11.2...HEAD
+[0.11.2]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.2
 [0.11.1]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.1
 [0.11.0]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.0
 [0.10.3]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.10.3
