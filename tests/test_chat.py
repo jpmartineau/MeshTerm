@@ -2025,7 +2025,7 @@ async def test_picker_lists_companions_only(repo: Repository) -> None:
 async def test_picker_pins_its_column_header_over_the_group_heading(
     repo: Repository,
 ) -> None:
-    """On a page scrolled into Direct, the lane names stay at the top, over ``👤 Direct``."""
+    """On a page scrolled into Direct, the lane names stay at the top, over ``Direct``."""
     from types import SimpleNamespace
 
     from meshterm.tools.chat import ChatTool
@@ -2049,7 +2049,7 @@ async def test_picker_pins_its_column_header_over_the_group_heading(
     top = [ansi.sub("", row).strip() for row in visible[:2]]
     # Short words over a badge and an age, then the message.
     assert top[0].split() == ["CONVERSATION", "NEW", "LAST", "MESSAGE"]
-    assert top[1] == "── 👤 Direct ──"
+    assert top[1] == "── Direct ──"
     assert above is True
     # If the width is too small for the whole line, the last label gets shorter and does
     # not wrap. The lane has the size of these six-cell names, so this starts at a width

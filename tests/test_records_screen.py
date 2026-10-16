@@ -392,12 +392,10 @@ def test_record_header_names_the_discipline_the_standing_and_the_metric() -> Non
     """One line above the tabs: ``<mark> <discipline> — <nth> place: <score>``.
 
     This is the identity header of the node page, for a record. The line writes the
-    discipline in the same way as its board heading. The mark has padding to the measured
+    discipline in the same way as its row in the delete list. The mark has padding to the measured
     lane, so a ``🛣`` of one cell and a ``🎯`` of two cells start their titles in the same
     cell. The score lane that repeated the metric on Info does not exist now.
     """
-    from meshterm.ui.records_screen import discipline_label, discipline_lane
-
     screen = _dialog(_record(), shape=_loop_shape())
     lines = _plain(screen.render_body(58)).splitlines()
     grand_tour = CATEGORY_BY_ID["grand_tour"]
@@ -416,7 +414,7 @@ def test_record_header_names_the_discipline_the_standing_and_the_metric() -> Non
     head = _plain(_dialog(partial, rank=5).render_body(58)).splitlines()[0]
     assert head.endswith("Longest distance — 5th place: ≥ 8.4 km")  # the board spelling of a bound
 
-    # The mark lane is the lane of the board heading: the titles of the two marks start in one cell.
+    # The mark lane is the lane of the delete list: the titles of the two marks start in one cell.
     long_haul = CATEGORY_BY_ID["long_haul"]
     assert cell_len(discipline_label(long_haul, discipline_lane()).split("Longest")[0]) == cell_len(
         discipline_label(grand_tour, discipline_lane()).split("Most")[0]
@@ -828,14 +826,8 @@ async def test_the_board_pins_its_discipline_heading_and_description(tui_ctx) ->
         blocks = [
             [_plain([line]).strip() for line in rows] for _idx, rows in browser._sticky_headers
         ]
-        lane = discipline_lane()
-        assert [rows[0] for rows in blocks] == [
-            f"── {discipline_label(c, lane)} ──" for c in CATEGORIES
-        ]
-        # Also, each of them starts its title in the same column. The marks do not all have
-        # the same width (🛣 and 🕸 are one cell, and the others are two), so the lane pads.
-        starts = {cell_len(discipline_label(c, lane)) - cell_len(c.title) for c in CATEGORIES}
-        assert len(starts) == 1
+        # A heading is the title only. The mark of the discipline stays on its rows.
+        assert [rows[0] for rows in blocks] == [f"── {c.title} ──" for c in CATEGORIES]
         assert all(len(rows) >= 2 for rows in blocks)  # each carries its description too
         # A highlight deep in the one board that has records scrolls its heading off the top
         # of a short viewport. The heading is the first item that pins, and its description
@@ -844,7 +836,7 @@ async def test_the_board_pins_its_discipline_heading_and_description(tui_ctx) ->
             browser.handle("down")
         visible, above, _below = frame._visible_slice(browser, browser.render_body(72), 10)
         board = CATEGORY_BY_ID["grand_tour"]
-        assert _plain([visible[0]]).strip() == f"── {discipline_label(board, lane)} ──"
+        assert _plain([visible[0]]).strip() == f"── {board.title} ──"
         assert _plain([visible[1]]).strip().startswith(board.description[:20])
         assert above is True
         browser.resolve(None)  # the Esc key

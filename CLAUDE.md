@@ -271,7 +271,9 @@ deliberately, one at a time, and say why in the code.
 - Grouped-list section headings use `section_heading("Label")` → `── Label ──` in the
   bold `heading` style — the frame title's colour, `title.border` (JP, 2026-10-15) —
   never the `border` grey: a rule in the border's colour reads as
-  part of the frame. A chat's day divider wears the same dress. That is also what makes a heading *sticky* (it pins to the top row while its section
+  part of the frame. A heading is words only, never an icon — icons live in rows (JP,
+  2026-10-15: Chat's `📡 Channels` and the trophy case's marks came off for a cleaner
+  look). A chat's day divider wears the same dress. That is also what makes a heading *sticky* (it pins to the top row while its section
   scrolls, and the ^PgUp/^PgDn jumps step by it), so build them through it — a hand-rolled
   `Separator` is no landmark. Prose written *directly under* a heading (a description of
   what the section holds) is its preamble and pins with it, in order, as each row scrolls

@@ -650,10 +650,9 @@ def section_heading(label: str) -> Separator:
     to heading. A row built by hand does not get this behaviour. Thus always use this
     function.
 
-    A heading that starts with an icon (``📡 Channels``, the mark of a trophy discipline)
-    loses the icon on a platform that draws no icon lane, the same as a command row. A
-    heading is the same type of label. Also, a substitute glyph next to the rule, which
-    already draws ``──``, looks like noise (refer to :func:`command_label`).
+    A heading is words only, with no icon. Icons go on rows. The headings of Chat
+    (``📡 Channels``) and of the trophy case (the mark of each discipline) had icons. We
+    removed them for a cleaner look (JP, 2026-10-15).
 
     Grey, never the accent of the frame: a rule in the colour of the border looks like a
     part of the frame, not like a heading in it.
@@ -663,7 +662,7 @@ def section_heading(label: str) -> Separator:
     :attr:`~meshterm.ui.tui.select.Separator.spaced`). Thus a list does not put a blank
     separator before a heading for space.
     """
-    return Separator(f"── {command_label(label)} ──", style="heading", heading=True, spaced=True)
+    return Separator(f"── {label} ──", style="heading", heading=True, spaced=True)
 
 
 def fit_cells(text: str, width: int, *, align: str = "left") -> str:

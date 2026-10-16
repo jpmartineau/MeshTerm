@@ -252,7 +252,7 @@ class ChatTool(Tool):
         # Refer to Screen.sticky_rows.
         items: list = [
             Separator(lambda w: _picker_header(lanes, w), pinned=True),
-            section_heading("📡 Channels"),
+            section_heading("Channels"),
         ]
         for conversation in channels:
             items.append(
@@ -264,7 +264,7 @@ class ChatTool(Tool):
                 )
             )
 
-        items.append(section_heading("📌 Rooms"))
+        items.append(section_heading("Rooms"))
         for conversation in rooms:
             items.append(
                 Choice(
@@ -281,7 +281,7 @@ class ChatTool(Tool):
             # a room?", and an empty section tells them where to go.
             items.append(Separator("  no rooms joined — join one on the Rooms page"))
 
-        items.append(section_heading("👤 Direct"))
+        items.append(section_heading("Direct"))
         if companions:
             for conversation in direct:
                 items.append(

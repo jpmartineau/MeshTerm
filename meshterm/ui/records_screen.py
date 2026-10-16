@@ -127,9 +127,11 @@ _LABEL_W = 12
 def discipline_label(category: Category, lane: int) -> str:
     """The mark of one discipline, padded to ``lane`` cells, then its title.
 
-    This is the only way to write the name of a board. Thus the seven headings (and the
-    seven rows of the list that selects a discipline to delete) start their titles in one
-    column, not in two. The marks do not all have the same width. ``🛣`` and ``🕸`` are
+    This is the only way to write the name of a board with its mark: on the seven rows of
+    the list that selects a discipline to delete, and on the header of the record page.
+    Thus the seven rows start their titles in one column, not in two. A board heading has
+    no mark. It is only the title (refer to :func:`~meshterm.ui.menus.section_heading`).
+    The marks do not all have the same width. ``🛣`` and ``🕸`` are
     not in Emoji_Presentation, and they are one cell wide, while the other five are two
     cells wide. Because of this, ``🛣 Longest distance`` was one column away from
     ``🎯 Farthest node``. Its gap also looked closed on a terminal that paints the road
@@ -157,7 +159,7 @@ def discipline_lane() -> int:
 
     Refer to :func:`discipline_label`. The width is measured, never written as a constant.
     The marks change with the platform. If a substitution becomes narrower later, each
-    heading becomes one cell narrower, and nothing else moves.
+    label becomes one cell narrower, and nothing else moves.
     """
     return max(cell_len(glyph(category.icon)) for category in CATEGORIES)
 
@@ -448,7 +450,7 @@ class RecordScreen(Screen):
 
         The record page has this line where the node page has its identity header. It
         reads as one sentence: ``🛣 Longest distance — 5th place: 112.0 km``. The
-        discipline is written the same as its board heading writes it
+        discipline is written the same as its row in the delete list writes it
         (:func:`discipline_label`: the mark is padded to the measured lane, so that ``🛣``
         and ``🎯`` start their titles in the same cell). The standing is the rank of the
         record on that board. The metric is the score in the unit of the discipline
@@ -913,10 +915,6 @@ async def open_records(ctx: AppContext) -> dict:
     # node is matched against these keys.
     target_counts = ctx.repo.target_trace_counts()
 
-    # The mark column after which each board heading writes its title (refer to
-    # discipline_label).
-    mark_lane = discipline_lane()
-
     # The node positions and types for the area drawing of a record. They are collected
     # live, the same as the trace tools collect them to score a walk (refer to
     # node_geo_lookup). The entry list does not change while the screen is open.
@@ -1001,7 +999,7 @@ async def open_records(ctx: AppContext) -> dict:
 
     def describe(category: Category) -> list:
         """The heading and its wrapped description, as rows that the user cannot select."""
-        rows: list = [section_heading(discipline_label(category, mark_lane))]
+        rows: list = [section_heading(category.title)]
         desc = category.description
         if category.needs_positions and self_pos is None:
             desc += " — needs your location (set it in Config) to score"
