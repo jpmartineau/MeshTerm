@@ -6,7 +6,7 @@ These are tools for the repository. None of them is in the wheel.
 |---|---|
 | `basemap-doctor.py` | Finds why a user's map has no basemap: certificates, DNS, proxy, or colour depth |
 | `cardputer-zero/` | `build-deb.sh` builds the Debian package for M5Stack's app store. Run it on the Cardputer Zero or on another arm64 Debian 13 system. `store/` holds the listing for the store (`app-builder.json`, which `czdev publish` reads), its icon, and its screenshots. `screenshot.py` saves the display of a Cardputer as a 320×170 PNG over SSH, as the store wants a screenshot. `store-publish.py` sends a package to the store with M5Stack's `czdev`, with two corrections. The release workflow runs it after each release. `launcher-entry.sh` puts a source checkout in the Cardputer Zero's app launcher. `remove` takes it out. `meshterm.png` is the package's icon: the website's logo, at the launcher's 100×100 size. `meshterm-dev.png` is its negative, for the checkout's entry, so that the two entries look different. `type-text.py` types a pasted string (an API key, a Wi-Fi password) on the Cardputer's keyboard from another computer, over SSH |
-| `screenshots.py` | Makes the screenshots of the website from the demo mesh (`--demo`): the main menu, the chat, the paths of a message, and the map, for the terminal, the Cardputer Zero, and the PicoCalc. They are the same at each run. The result goes to `docs/screenshots/<set>/` |
+| `screenshots.py` | Makes the screenshots of the website from the demo mesh (`--demo`): the main menu, the chat, the paths of a message, and the map, for the terminal, the Cardputer Zero, and the PicoCalc. They are the same at each run. The result goes to `docs/screenshots/<set>/`. It also draws the two wordmarks of the splash into `docs/screenshots/splash/`, which the website uses as its splash |
 | `picocalc-lyra/` | Setup of the Calculinux device: console font, palette, Wi-Fi. `xiao-radio/` is the kit for the XIAO radio (firmware build, flashing, UART setup) |
 | `uconsole/` | The uConsole's always-on SPI bridge service. MeshTerm can also control that radio directly, with no script (refer to `docs/devices/uconsole.md`) |
 
@@ -67,5 +67,10 @@ Emoji, which Windows has. On another system, change `TEXT_FONTS` and `EMOJI_FONT
 top of the script. The first run downloads the tiles of the map. The later runs use the
 tile cache in the temporary directory.
 
-After a change to a screen, run the script again, then rebuild the website (refer to the
-README of the `meshterm.net` repository).
+The script also draws each wordmark of the startup splash (`meshterm/assets/splash/*.ans`)
+as `docs/screenshots/splash/logo.<width>.png`, one image pixel for each pixel of the font,
+in the Campbell colours. The website takes its splash from there: the wide mark on a wide
+screen, and the narrow mark on a phone. `--only splash` draws only these two images.
+
+After a change to a screen or to the art, run the script again, then rebuild the website
+(refer to the README of the `meshterm.net` repository).

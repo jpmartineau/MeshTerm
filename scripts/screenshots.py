@@ -9,6 +9,10 @@ an 80×24 terminal), ``cardputer-zero``, and ``picocalc-lyra``. Each run uses ``
 the paths of a message, and the map, and it saves each screen as a PNG. The result is
 ``DIR/<set>/<screen>.png`` (``DIR`` is ``docs/screenshots`` by default).
 
+The script also draws each wordmark of the startup splash (``meshterm/assets/splash``) as
+``DIR/splash/logo.<width>.png``, one image pixel for each pixel of the font: the website
+shows them as its splash, the wide mark on a wide screen and the narrow mark on a phone.
+
 The screens are the same at each run, for four reasons:
 
 * The demo writes the same history at each start.
@@ -53,6 +57,18 @@ ROOT = Path(__file__).resolve().parent.parent
 #: The sets, in the order on the website. The terminal set is the default there.
 SETS = ("terminal", "cardputer-zero", "picocalc-lyra")
 
+#: The name of the wordmarks in ``--only``. They need no run of MeshTerm.
+SPLASH = "splash"
+
+#: The 16 colours of the wordmarks: the Campbell scheme of Windows Terminal, which the
+#: art was drawn in and the website uses.
+CAMPBELL = (
+    (12, 12, 12), (197, 15, 31), (19, 161, 14), (193, 156, 0),
+    (0, 55, 218), (136, 23, 152), (58, 150, 221), (204, 204, 204),
+    (118, 118, 118), (231, 72, 86), (22, 198, 12), (249, 241, 165),
+    (59, 120, 255), (180, 0, 158), (97, 214, 214), (242, 242, 242),
+)  # fmt: skip
+
 #: The grid of the terminal set: a standard terminal.
 TERMINAL_GRID = (80, 24)
 
@@ -74,7 +90,7 @@ def main(argv: list[str]) -> int:
     """Run one child process for each set, then report what each one wrote."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=ROOT / "docs" / "screenshots")
-    parser.add_argument("--only", nargs="*", choices=SETS, default=list(SETS))
+    parser.add_argument("--only", nargs="*", choices=(*SETS, SPLASH), default=[*SETS, SPLASH])
     parser.add_argument("--child", choices=SETS, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.child:
@@ -85,7 +101,10 @@ def main(argv: list[str]) -> int:
     # directory of its own, so it gets the font directory of this machine by name.
     fonts = os.environ.get("MESHTERM_EMULATOR_FONTS") or str(font_dir())
     status = 0
-    for name in args.only:
+    if SPLASH in args.only:
+        for path in _draw_splash(args.out / SPLASH):
+            print(f"{SPLASH}: {path}", flush=True)
+    for name in (name for name in args.only if name in SETS):
         home = Path(tempfile.gettempdir()) / "meshterm-screenshots" / name
         env = {
             **os.environ,
@@ -268,6 +287,50 @@ def _tour(capture: Capture, type_text: Callable[[str], None], save: Callable[[st
 
 
 # --------------------------------------------------------------------------- drawing
+
+
+def _draw_splash(target: Path) -> list[Path]:
+    """Draw each wordmark of the splash in the emulator's font, one image pixel per pixel.
+
+    The marks are the ANSI art that the startup splash shows, read through the same loader
+    (:func:`meshterm.ui.logo.load_logo`, widest first). The emulator's raster draws them
+    in Terminus 6×12, the font of the handhelds. Its cell has the shape of the VGA cell
+    that the art was drawn in, so the art keeps its proportions.
+
+    Returns:
+        The paths of the images, widest mark first.
+    """
+    from PIL import Image
+
+    from meshterm.emulator.font import CELL_H, CELL_W, find_font
+    from meshterm.emulator.raster import Raster
+    from meshterm.emulator.vt import Terminal
+    from meshterm.ui.logo import load_logo, logo_width
+
+    target.mkdir(parents=True, exist_ok=True)
+    font = find_font()
+    written: list[Path] = []
+    limit: int | None = None
+    while rows := load_logo(limit):
+        width = logo_width(rows)
+        terminal = Terminal(width, len(rows), palette=CAMPBELL)
+        terminal.feed("\r\n".join(f"{row}\x1b[0m" for row in rows))
+        raster = Raster(
+            terminal,
+            font,
+            default_fg=CAMPBELL[7],
+            default_bg=CAMPBELL[0],
+            width=width * CELL_W,
+            height=len(rows) * CELL_H,
+            top_left=True,
+        )
+        raster.redraw()
+        size = (raster.width, raster.height)
+        path = target / f"logo.{width}.png"
+        Image.frombytes("RGB", size, bytes(raster.pixels)).save(path, optimize=True)
+        written.append(path)
+        limit = width - 1
+    return written
 
 
 def _draw(name: str, grid, palette):  # noqa: ANN001, ANN202 - cells, colours, an Image
