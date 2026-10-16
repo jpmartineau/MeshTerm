@@ -113,7 +113,7 @@ CHANNEL_LINES: dict[str, tuple[Line, ...]] = {
             "Jean-Seb",
             "And the repeater at the chalet hears everyone, even through the trees 😄",
         ),
-        Line(at(0, "07:48"), "Noor", "First test from Saint-Laurent, can anyone hear me?"),
+        Line(at(0, "07:48"), "Noor", "First test from Côte-des-Neiges, can anyone hear me?"),
         Line(at(0, "07:52"), "Marie-Ève", "@[Noor] got you through Mont-Royal, +6 dB. Welcome!"),
         Line(
             at(0, "10:05"), "Mathilde", "Hi everyone! First time on MeshCore, I'm in Saint-Henri 👋"
@@ -127,7 +127,7 @@ CHANNEL_LINES: dict[str, tuple[Line, ...]] = {
         Line(
             at(0, "10:15"),
             ME,
-            "Your advert reaches me in one hop through Mont-Royal, SNR +8. Trace path shows it all",
+            "Your advert reaches me through Mont-Royal, then Rosemont. Trace path shows it all",
         ),
         Line(
             at(0, "10:40"),
@@ -324,26 +324,59 @@ LIVE_CHANNEL: tuple[tuple[float, str, Line], ...] = (
 #: the link model, tries again a few times when the trace does not come back (as a person
 #: does), and stores each try.
 TRACES: tuple[tuple[float, str | None, tuple[str, ...]], ...] = (
-    (at(6, "21:30"), "Longueuil", ("Mont-Royal", "Longueuil", "Mont-Royal")),
-    (at(5, "20:10"), "Pointe-Claire", ("Mont-Royal", "Pointe-Claire", "Mont-Royal")),
+    (
+        at(6, "21:30"),
+        "Longueuil",
+        ("Rosemont", "Stade-Olympique", "Longueuil", "Stade-Olympique", "Rosemont"),
+    ),
+    (
+        at(5, "20:10"),
+        "Pointe-Claire",
+        ("Villeray", "Mont-Royal", "Pointe-Claire", "Mont-Royal", "Villeray"),
+    ),
     (
         at(5, "20:20"),
         None,
-        ("Mont-Royal", "Pointe-Claire", "Île-Bizard", "Pointe-Claire", "Mont-Royal"),
+        (
+            "Villeray",
+            "Mont-Royal",
+            "Pointe-Claire",
+            "Île-Bizard",
+            "Pointe-Claire",
+            "Mont-Royal",
+            "Villeray",
+        ),
     ),
-    (at(4, "21:00"), "Laval-Chomedey", ("Ahuntsic", "Laval-Chomedey", "Ahuntsic")),
-    (at(3, "22:15"), None, ("Mont-Royal", "Mont-St-Hilaire", "Mont-Royal")),
-    (at(2, "20:40"), None, ("Oratoire", "Lachine", "Oratoire")),
+    (
+        at(4, "21:00"),
+        "Laval-Chomedey",
+        ("Villeray", "Ahuntsic", "Laval-Chomedey", "Ahuntsic", "Villeray"),
+    ),
+    (at(3, "22:15"), None, ("Rosemont", "Mont-Royal", "Mont-St-Hilaire", "Mont-Royal", "Rosemont")),
+    (at(2, "20:40"), None, ("Villeray", "Oratoire", "Lachine", "Oratoire", "Villeray")),
     (
         at(2, "21:50"),
         None,
-        ("Mont-Royal", "Mont-St-Bruno", "Mont-St-Hilaire", "Mont-St-Bruno", "Mont-Royal"),
+        (
+            "Rosemont",
+            "Stade-Olympique",
+            "Mont-St-Bruno",
+            "Mont-St-Hilaire",
+            "Mont-St-Bruno",
+            "Stade-Olympique",
+            "Rosemont",
+        ),
     ),
-    (at(1, "20:30"), None, ("Mont-Royal", "Laval-Chomedey", "Ahuntsic", "Stade-Olympique")),
+    (
+        at(1, "20:30"),
+        None,
+        ("Villeray", "Mont-Royal", "Laval-Chomedey", "Ahuntsic", "Stade-Olympique", "Rosemont"),
+    ),
     (
         at(1, "21:10"),
         None,
         (
+            "Rosemont",
             "Centre-Ville",
             "Verdun-Quai",
             "Brossard",
@@ -359,12 +392,14 @@ TRACES: tuple[tuple[float, str | None, tuple[str, ...]], ...] = (
             "Lachine",
             "Pointe-Claire",
             "Mont-Royal",
+            "Villeray",
         ),
     ),
     (
         at(1, "21:40"),
         None,
         (
+            "Villeray",
             "Oratoire",
             "Lachine",
             "Pointe-Claire",
@@ -373,10 +408,11 @@ TRACES: tuple[tuple[float, str | None, tuple[str, ...]], ...] = (
             "Mont-St-Bruno",
             "Mont-St-Hilaire",
             "Stade-Olympique",
+            "Rosemont",
         ),
     ),
-    (at(0, "09:05"), "Brossard", ("Mont-Royal", "Brossard", "Mont-Royal")),
-    (at(0, "10:20"), None, ("Mont-Royal", "Longueuil", "Stade-Olympique")),
+    (at(0, "09:05"), "Brossard", ("Rosemont", "Mont-Royal", "Brossard", "Mont-Royal", "Rosemont")),
+    (at(0, "10:20"), None, ("Rosemont", "Longueuil", "Stade-Olympique", "Villeray")),
 )
 
 #: The Watchtower: the nodes that our node watches, and the alerts that it raised and the

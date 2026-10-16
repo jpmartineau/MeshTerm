@@ -110,7 +110,9 @@ class Node:
 _R, _C, _ROOM, _S = NODE_TYPE_REPEATER, NODE_TYPE_CHAT, NODE_TYPE_ROOM, NODE_TYPE_SENSOR
 
 #: Our node: the companion that the demo device is. It stands in La Petite-Patrie, near the
-#: Jean-Talon market, with an antenna on the roof of a triplex.
+#: Jean-Talon market, with an antenna on the roof of a triplex. The buildings around it
+#: hide the big repeaters (refer to :data:`_OBSTRUCTED`). It hears two small repeaters on
+#: the roofs nearby, Villeray and Rosemont, as a companion in the city usually does.
 SELF = Node("Alex Base", 0x91, _C, 45.5350, -73.6030, 2.0, first_heard_days=400.0)
 
 # fmt: off
@@ -132,6 +134,8 @@ NODES: tuple[Node, ...] = (
     Node("Brossard",        0x18, _R, 45.4570, -73.4660,  6.0, first_heard_days=70.0),
     Node("Mont-St-Bruno",   0xE1, _R, 45.5530, -73.3260, 13.0, first_heard_days=280.0),
     Node("Mont-St-Hilaire", 0x61, _R, 45.5490, -73.1570, 15.0, first_heard_days=45.0),
+    Node("Villeray",        0x70, _R, 45.5470, -73.6170,  4.0, first_heard_days=250.0),
+    Node("Rosemont",        0xD8, _R, 45.5420, -73.5850,  4.0, first_heard_days=170.0),
     # The room servers.
     Node("MTL BBS",         0x3B, _ROOM, 45.5225, -73.5840, 4.0, first_heard_days=330.0),
     Node("Café Mesh",       0x64, _ROOM, 45.5250, -73.5990, 3.0, first_heard_days=60.0,
@@ -154,7 +158,7 @@ NODES: tuple[Node, ...] = (
     Node("Kim-NDG",         0xBF, _C, 45.4735, -73.6145, 1.0, first_heard_days=260.0),
     Node("Nico R.",         0x94, _C, 45.5110, -73.5695, 0.0, shares_location=False,
          first_heard_days=90.0, talk=1.3),
-    Node("Noor",            0x50, _C, 45.5075, -73.6880, 1.0, first_heard_days=75.0),
+    Node("Noor",            0x50, _C, 45.4960, -73.6300, 1.0, first_heard_days=75.0),
     Node("Chloé L.",        0xC9, _C, 45.5170, -73.6060, 1.0, first_heard_days=220.0),
     Node("Sam Verdun",      0x68, _C, 45.4610, -73.5690, 1.0, first_heard_days=240.0),
     Node("Steve K.",        0x22, _C, 45.5340, -73.5050, 1.0, first_heard_days=40.0),
@@ -214,6 +218,35 @@ _DECADE_DB = 25.0
 _SOFT_CAP_DB = 10.0
 
 
+#: The extra loss (dB) of a link from or to a companion of the people of the mesh. Such a
+#: node is indoors, or in a pocket, at street level, so the buildings around it take more
+#: than the distance explains. A link between two companions takes it two times. Thus a
+#: companion reaches the repeaters near it, and another companion only when the two are
+#: close, as on a real mesh. Our node has its antenna on a roof, and the room servers and
+#: the sensors are outdoors, so they do not take it.
+_GROUND_DB = 7.0
+
+#: Links that the terrain blocks more than the model knows, by the names of their two
+#: ends, in dB of extra loss. The buildings around our node hide the big repeaters from
+#: it. Thus each flood reaches our node through the two small repeaters near it, usually
+#: one copy from each. This is what a real companion in Montréal hears: two copies of most
+#: messages, on paths that share their start and divide near the end.
+_OBSTRUCTED: dict[frozenset[str], float] = {
+    frozenset((SELF.name, name)): 14.0
+    for name in ("Mont-Royal", "Oratoire", "Centre-Ville", "Stade-Olympique", "Ahuntsic")
+}
+
+
+def _ground_loss(a: Node, b: Node) -> float:
+    """The loss that the street level adds to a link (refer to :data:`_GROUND_DB`)."""
+    return _GROUND_DB * (_indoors(a) + _indoors(b))
+
+
+def _indoors(node: Node) -> bool:
+    """Whether ``node`` is a companion at street level: each one except our node."""
+    return node.node_type == NODE_TYPE_CHAT and node is not SELF
+
+
 def _skew(a: Node, b: Node) -> float:
     """A fixed offset (dB) for the link from ``a`` to ``b``: the terrain that no model knows.
 
@@ -253,6 +286,7 @@ def link_snr(a: Node, b: Node) -> float | None:
         return None
     km = max(haversine_km(a.lat, a.lon, b.lat, b.lon), 0.05)
     snr = _ONE_KM_DB - _DECADE_DB * math.log10(km) + a.site_db + b.site_db + _skew(a, b)
+    snr -= _ground_loss(a, b) + _OBSTRUCTED.get(frozenset((a.name, b.name)), 0.0)
     if snr > _SOFT_CAP_DB:
         snr = _SOFT_CAP_DB + (snr - _SOFT_CAP_DB) * 0.25
     return round(snr, 2) if snr >= FLOOR_DB else None
@@ -334,6 +368,30 @@ def best_route(origin: Node, target: Node) -> tuple[Node, ...] | None:
 def _link_cost(snr: float) -> float:
     """The cost of one link for :func:`best_route`: one hop, more when the link is weak."""
     return 1.0 + 4.0 * loss_chance(snr)
+
+
+#: The nodes whose floods do not use three-byte hashes, and the width that they use. Our
+#: node keeps the default of its device, one byte.
+_NARROW_PATHS: dict[str, int] = {
+    SELF.name: 1,
+    "Steve K.": 2,
+    "Raphaël": 2,
+    "Olivier.T": 1,
+    "Tomás": 1,
+    "T1000-E": 1,
+    "Wio Tracker": 1,
+    "Mobile Node": 1,
+}
+
+
+def path_width(origin: Node) -> int:
+    """The bytes of each hash in the path of a flood from ``origin``.
+
+    The node that starts a flood sets the width, and each relay adds its hash at that
+    width. Most nodes of the mesh of Montréal use three bytes, a few use two, and some
+    older ones still use one (:data:`_NARROW_PATHS`).
+    """
+    return _NARROW_PATHS.get(origin.name, 3)
 
 
 @dataclass(frozen=True, slots=True)
@@ -506,7 +564,15 @@ REGION_TABLES: dict[str, list[tuple[str, str, bool]]] = {}
 _ISLAND = [("qc", "*", True), ("mtl", "qc", True), ("mtl-west", "mtl", True)]
 _NORTH = [("qc", "*", True), ("mtl", "qc", True), ("laval", "qc", True)]
 _SOUTH = [("qc", "*", True), ("mtl", "qc", False), ("south-shore", "qc", True)]
-for _name in ("Oratoire", "Centre-Ville", "Stade-Olympique", "Verdun-Quai", "Ahuntsic"):
+for _name in (
+    "Oratoire",
+    "Centre-Ville",
+    "Stade-Olympique",
+    "Verdun-Quai",
+    "Ahuntsic",
+    "Villeray",
+    "Rosemont",
+):
     REGION_TABLES[_name] = _ISLAND
 for _name in ("Lachine", "Pointe-Claire", "Île-Bizard"):
     REGION_TABLES[_name] = [*_ISLAND, ("west-island", "mtl-west", True)]

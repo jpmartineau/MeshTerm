@@ -62,7 +62,7 @@ def test_the_demo_device_traces_a_path() -> None:
     async def run():  # noqa: ANN202
         device = DemoDevice()
         await device.connect()
-        spec = ",".join(world.node(n).hash for n in ("Mont-Royal", "Oratoire", "Mont-Royal"))
+        spec = ",".join(world.node(n).hash for n in ("Rosemont", "Mont-Royal", "Rosemont"))
         for _ in range(10):
             result = await device.run_trace("(path)", path=spec)
             if result.success:
@@ -71,7 +71,7 @@ def test_the_demo_device_traces_a_path() -> None:
 
     result = asyncio.run(run())
     assert result.success
-    assert [h.node for h in result.hops] == ["2a", "4f", "2a", None]
+    assert [h.node for h in result.hops] == ["d8", "2a", "d8", None]
 
 
 def test_prepare_writes_a_home(tmp_path: Path) -> None:

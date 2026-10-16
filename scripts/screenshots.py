@@ -80,10 +80,13 @@ NOW = datetime(2026, 10, 15, 11, 42, tzinfo=timezone(timedelta(hours=-4)))
 #: system.
 TZ = "EST5EDT"
 
-#: How many times the capture presses ↑ in the chat to select the message whose paths it
-#: shows: the line of Gabriel in Beloeil, which arrives on five paths through
-#: Mont-St-Hilaire.
-PATHS_MESSAGE = 2
+#: The message whose paths the capture shows: the channel to type in the picker, how many
+#: times to press ↑ from the newest message, and a part of its text near the start, which
+#: the quote at the top of the dialog shows on each platform. The capture checks the quote,
+#: and presses ↑ again until it finds the message, because a key press can be lost while
+#: the transcript draws. In the dialog it then selects the second path: the first one is
+#: often a straight line.
+PATHS_MESSAGE = ("public", 2, "Hello from Beloeil")
 
 
 def main(argv: list[str]) -> int:
@@ -177,6 +180,15 @@ class Capture:
             screen = self.terminal.text()
         raise TimeoutError(f"{text!r} did not appear. The screen:\n{screen}")
 
+    def quote(self) -> str:
+        """The quote of the message in the paths dialog: the line above its "heard" line."""
+        with self.lock:
+            lines = self.terminal.text().splitlines()
+        for index, line in enumerate(lines):
+            if index and "heard" in line and "time" in line:
+                return lines[index - 1]
+        return ""
+
     def grid(self) -> list[list[tuple[str, object]]]:
         """A copy of the cells of the screen."""
         with self.lock:
@@ -269,10 +281,35 @@ def _tour(capture: Capture, type_text: Callable[[str], None], save: Callable[[st
     capture.settle()
     save("chat")
     # The paths of a message.
-    press("up", count=PATHS_MESSAGE)
+    channel, ups, snippet = PATHS_MESSAGE
+    if channel != "public":
+        press(text="w", ctrl=True)
+        capture.settle(quiet=0.8)
+        press("escape")
+        typed("chat")
+        press("enter")
+        capture.wait_for("Public")
+        capture.settle()
+        typed(channel)
+        press("enter")
+        capture.settle(quiet=1.5)
+    for _ in range(ups):
+        press("up")
+        time.sleep(0.15)
     capture.settle(quiet=0.6)
-    press(text="p", ctrl=True)
-    capture.settle(quiet=2.0)
+    for _ in range(8):
+        press(text="p", ctrl=True)
+        capture.settle(quiet=2.0)
+        if snippet in capture.quote():
+            break
+        press("escape")
+        capture.settle(quiet=0.6)
+        press("up")
+        capture.settle(quiet=0.6)
+    else:
+        raise TimeoutError(f"no message with {snippet!r} in {channel}")
+    press("down")
+    capture.settle(quiet=1.0)
     save("paths")
     # The map, from the main menu.
     press("escape")

@@ -51,6 +51,7 @@ from .world import (
     flood,
     link_snr,
     loss_chance,
+    path_width,
     reading,
 )
 
@@ -255,8 +256,16 @@ def heard_flood(
         if all(_relays_region(relay, region) for relay in copy.relays)
     ]
     route = "TC_FLOOD" if region else "FLOOD"
+    width = path_width(origin)
     out = [
-        _packet(origin if advert else None, start_s, copy, {"route_typename": route, **body}, rng)
+        _packet(
+            origin if advert else None,
+            start_s,
+            copy,
+            {"route_typename": route, **body},
+            rng,
+            width=width,
+        )
         for copy in copies
     ]
     if advert and copies:
@@ -266,11 +275,17 @@ def heard_flood(
 
 
 def _packet(
-    origin: Node | None, start_s: float, copy: Copy, body: dict, rng: random.Random
+    origin: Node | None,
+    start_s: float,
+    copy: Copy,
+    body: dict,
+    rng: random.Random,
+    *,
+    width: int = 1,
 ) -> Heard:
-    """One ``packet`` observation for one copy of a transmission."""
-    path = ",".join(relay.hash for relay in copy.relays)
-    raw = {**body, "path_len": len(copy.relays), "path_hash_size": 1}
+    """One ``packet`` observation for one copy of a transmission, with ``width``-byte hashes."""
+    path = ",".join(relay.public_key[: 2 * width] for relay in copy.relays)
+    raw = {**body, "path_len": len(copy.relays), "path_hash_size": width}
     share = origin is not None and origin.shares_location
     return Heard(
         start_s + copy.delay_s,
@@ -348,7 +363,8 @@ def heard_direct(
             continue
         remaining = route[index:]
         copy = Copy(remaining, reading(snr, rng), elapsed)
-        out.append(_packet(None, start_s, copy, {"route_typename": "DIRECT", **body}, rng))
+        direct = {"route_typename": "DIRECT", **body}
+        out.append(_packet(None, start_s, copy, direct, rng, width=path_width(src)))
     return out
 
 
