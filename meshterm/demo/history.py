@@ -46,7 +46,7 @@ HISTORY_DAYS = 300
 TX_POWER = 22
 
 #: The map viewport that the demo opens on: the island of Montréal, with the two shores.
-MAP_VIEW = (45.5200, -73.6200, 11)
+MAP_VIEW = (45.5150, -73.5900, 10)
 
 
 def seed(repo: Repository, now: datetime) -> None:

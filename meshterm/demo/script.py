@@ -145,6 +145,11 @@ CHANNEL_LINES: dict[str, tuple[Line, ...]] = {
             "Yes! https://www.openstreetmap.org/#map=11/45.5200/-73.6400 I'll bring a printout",
         ),
         Line(at(0, "11:30"), "Steve K.", "I'll bring a spare antenna for anyone who needs one"),
+        Line(
+            at(0, "11:33"),
+            "Gabriel",
+            "Hello from Beloeil! My messages get to Montréal through Mont-St-Hilaire",
+        ),
         Line(at(0, "11:39"), "Félix", "Longueuil ↔ Stade at +6 dB since the new antenna, finally!"),
     ),
     "#montreal": (

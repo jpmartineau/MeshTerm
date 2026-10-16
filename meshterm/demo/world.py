@@ -171,6 +171,7 @@ NODES: tuple[Node, ...] = (
     Node("Tomás",           0x77, _C, 45.4520, -73.8120, 1.0, first_heard_days=160.0,
          quiet_hours=62 * 24.0, talk=0.5),
     Node("Mathilde",        0xF7, _C, 45.4780, -73.5870, 0.0, first_heard_days=2 / 24),
+    Node("Gabriel",         0x7F, _C, 45.5650, -73.2050, 1.0, first_heard_days=20.0),
     Node("Sylvie-Gaspésie", 0x6C, _C, 48.8300, -64.4800, 0.0, shares_location=False,
          first_heard_days=0.0, quiet_hours=None),
     # Discovered nodes: heard, but nobody added them.

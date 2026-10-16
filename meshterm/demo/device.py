@@ -32,6 +32,12 @@ from .history import TX_POWER
 #: part at a time, each from its own seed, so a long session never waits for all of it.
 _PART_S = 3600.0
 
+#: Whether the device plays the background traffic of the world while the demo runs. The
+#: screenshots turn it off (``scripts/screenshots.py``): a packet that arrives during a
+#: capture changes the activity bars of the header, so two captures would not be the same.
+#: The lines of the script still arrive.
+PLAY_BACKGROUND = True
+
 
 class DemoDevice(MockDevice):
     """The simulator, in the demo world (refer to the module docstring)."""
@@ -305,7 +311,7 @@ def _ago(entry: NeighbourInfo) -> int:
 def _live_part(part: int) -> list[traffic.Heard]:
     """The live traffic of one part: the background, then the lines of the script in it."""
     start, end = part * _PART_S, (part + 1) * _PART_S
-    heard = traffic.traffic(start, end, f"live/{part}")
+    heard = traffic.traffic(start, end, f"live/{part}") if PLAY_BACKGROUND else []
     rng = random.Random(f"meshterm-demo/live-lines/{part}")
     for offset, line in script.LIVE_DIRECT:
         if start <= offset < end:
