@@ -5998,6 +5998,7 @@ def make_device(
     tcp_port: int | None = None,
     spi: SpiWiring | None = None,
     state: Path | None = None,
+    demo: bool = False,
 ) -> Device:
     """Make the correct :class:`Device` for the current run.
 
@@ -6023,6 +6024,8 @@ def make_device(
         state: The state directory of the SPI radio (refer to
             :func:`meshterm.core.spiradio.state_dir`). It is necessary when
             ``transport="spi"``.
+        demo: With ``mock``, return the simulator of the demo world
+            (:class:`~meshterm.demo.device.DemoDevice`) instead of the test world.
 
     Returns:
         A :class:`Device` instance that connects when you enter it.
@@ -6031,6 +6034,10 @@ def make_device(
         ValueError: If a real device is requested without an endpoint that its transport
             can use.
     """
+    if mock and demo:
+        from ..demo.device import DemoDevice  # deferred: the demo builds on this module
+
+        return DemoDevice()
     if mock:
         return MockDevice(optimal_tx=mock_optimal_tx)
     if transport == "ble":

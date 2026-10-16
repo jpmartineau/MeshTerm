@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: Apache-2.0
+"""The demo world: the same history at each run, and a device that agrees with it."""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import timedelta
+from pathlib import Path
+
+from meshterm.core.channels import channel_identity
+from meshterm.core.models import utcnow
+from meshterm.demo import history, world
+from meshterm.demo.device import DemoDevice
+from meshterm.demo.home import prepare
+from meshterm.persistence.repository import Repository
+
+
+def _seed(path: Path, now) -> Repository:  # noqa: ANN001 - a datetime
+    repo = Repository(path)
+    history.seed(repo, now)
+    return repo
+
+
+def test_each_node_has_its_own_hash() -> None:
+    """No two nodes of the world share a path hash, so each hop resolves to one node."""
+    hashes = [node.hash for node in (world.SELF, *world.NODES)]
+    assert len(hashes) == len(set(hashes))
+
+
+def test_the_history_is_the_same_at_each_run(tmp_path: Path) -> None:
+    """Two runs give the same rows, with the times moved by the gap between the two starts."""
+    now = utcnow()
+    first = _seed(tmp_path / "a.db", now)
+    second = _seed(tmp_path / "b.db", now + timedelta(hours=5))
+    assert first.table_counts() == second.table_counts()
+    assert first.kind_counts() == second.kind_counts()
+    public = world.CHANNELS[0]
+    identity = channel_identity(public.name, public.secret)
+
+    def lines(repo: Repository, start) -> list[tuple[str, int]]:  # noqa: ANN001 - a datetime
+        rows = repo.recent_chat_messages(is_channel=True, channel_id=identity, limit=500)
+        return [(m.text, round((start - m.created_at).total_seconds())) for m in rows]
+
+    assert lines(first, now) == lines(second, now + timedelta(hours=5))
+
+
+def test_a_channel_line_has_its_heard_copies(tmp_path: Path) -> None:
+    """The packets of a channel line decrypt to the line, so its paths can be found."""
+    from meshterm.services.message_paths import channel_arrivals
+
+    repo = _seed(tmp_path / "h.db", utcnow())
+    public = world.CHANNELS[0]
+    identity = channel_identity(public.name, public.secret)
+    last = repo.recent_chat_messages(is_channel=True, channel_id=identity, limit=1)[-1]
+    arrivals = channel_arrivals(repo, last, channel_name=public.name, secret=public.secret)
+    assert arrivals
+
+
+def test_the_demo_device_traces_a_path() -> None:
+    """A forced path through linked repeaters comes back with a reading for each link."""
+
+    async def run():  # noqa: ANN202
+        device = DemoDevice()
+        await device.connect()
+        spec = ",".join(world.node(n).hash for n in ("Mont-Royal", "Oratoire", "Mont-Royal"))
+        for _ in range(10):
+            result = await device.run_trace("(path)", path=spec)
+            if result.success:
+                return result
+        return result
+
+    result = asyncio.run(run())
+    assert result.success
+    assert [h.node for h in result.hops] == ["2a", "4f", "2a", None]
+
+
+def test_prepare_writes_a_home(tmp_path: Path) -> None:
+    """The demo home gets a database and the stores of the joined room and the alerts."""
+    home = tmp_path / "demo"
+    prepare(home, utcnow())
+    prepare(home, utcnow())  # a second start writes it again over the first
+    assert (home / "meshterm.db").exists()
+    assert (home / "rooms.json").exists()
+    assert (home / "watchtower.json").exists()

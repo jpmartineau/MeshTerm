@@ -57,6 +57,7 @@ If you give no command, MeshTerm starts the interactive menu.
 | `--tcp HOST[:PORT]` | The network address of a TCP companion. It selects the TCP transport. The default port is 5000. |
 | `--spi` | The LoRa radio on the SPI bus of this machine. It selects the SPI transport. MeshTerm runs the node for the length of the command. If one radio is attached, MeshTerm uses that radio, with a profile or without one. If no radio is attached, MeshTerm uses the one SPI profile, or else the wiring of the uConsole AIO. If two radios are attached, MeshTerm refuses (exit `3`) and lists them. Select one with `-p`. Refer to [Adding a radio on the SPI bus](../guide/configuration.md#adding-a-radio-on-the-spi-bus). Linux only. |
 | `--mock` | Use the built-in simulator instead of real hardware. Nothing transmits, and the run records to `meshterm-mock.db` instead of your real history. |
+| `--demo` | Use the simulator in a demo mesh over Montréal: about forty invented nodes, a week of traffic, conversations, traces, and records. The demo has its own directory (`demo/` in the MeshTerm directory), and MeshTerm writes it again at each start. Thus each run starts from the same state, and your history never gets a node of the demo. It cannot take `--db`. |
 | `--db PATH` | Use this SQLite database instead of `~/.meshterm/meshterm.db` (or `meshterm-mock.db`, with `--mock`). **It moves the database and nothing else.** Refer to [Where MeshTerm keeps its state](#where-meshterm-keeps-its-state). |
 | `--json` | Print the answer as JSON instead of aligned text. |
 | `--absolute` | For this run, print times as ISO-8601 instants instead of relative ages. |
@@ -99,6 +100,7 @@ radios from two directories in the same shell.
 | --- | --- |
 | `meshterm.db` | The history: each packet that MeshTerm heard, each trace that it walked, and each message. **This is the one file that `--db` moves.** |
 | `meshterm-mock.db` | The same history for the simulator. A `--mock` run records here when the run does not name a database. The file is absent until you do a `--mock` run. |
+| `demo/` | The directory of the demo (`--demo`). MeshTerm writes everything in it again at each start of the demo, except the tile cache of the map and the log. |
 | `config.toml` | The setup of the machine: device profiles, and where the database is. You write this file. MeshTerm only reads it. |
 | `preferences.toml` | Your overrides of the behaviour of MeshTerm. It lists only what you changed. |
 | `courier.json` | The outbox: queued messages, both waiting and finished. |

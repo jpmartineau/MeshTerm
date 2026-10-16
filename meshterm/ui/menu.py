@@ -348,7 +348,12 @@ def _header_segments(ctx: AppContext, cache: dict) -> list[Text]:
 
     if "device" in atoms:
         device = Text()
-        if ctx.mock:
+        if getattr(ctx, "demo", False):
+            # The demo shows the name of its node, as a real session does, and says that
+            # it is the demo where a real session says how the device is connected.
+            device.append(_demo_name())
+            device.append(" (demo)", style="muted")
+        elif ctx.mock:
             device.append("simulator", style="warn")
         else:
             name, where = _device_label(ctx, cache)
@@ -373,6 +378,13 @@ def _header_segments(ctx: AppContext, cache: dict) -> list[Text]:
             badge.append(f" {alerts}", style="warn")
             segments.append(badge)
     return segments
+
+
+def _demo_name() -> str:
+    """The name of our node in the demo world."""
+    from ..demo.world import SELF
+
+    return SELF.name
 
 
 def _device_label(ctx: AppContext, cache: dict) -> tuple[str, str]:

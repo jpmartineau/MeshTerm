@@ -102,6 +102,8 @@ class AppContext:
             room and the access that it granted (if the caller does not inject it, the
             default is ``<config_dir>/rooms.json``).
         mock: Whether the context uses the simulator device.
+        demo: Whether the simulator is the demo world of ``--demo``
+            (:mod:`meshterm.demo`), which implies ``mock``.
         port_override: An explicit serial port (from ``--port`` or the interactive picker),
             which overrides the profile.
         ble_override: An explicit Bluetooth address (from ``--ble`` or the interactive
@@ -145,6 +147,7 @@ class AppContext:
     room_store: RoomStore | None = None
     profile: DeviceProfile | None = None
     mock: bool = False
+    demo: bool = False
     port_override: str | None = None
     ble_override: str | None = None
     tcp_override: str | None = None
@@ -615,7 +618,7 @@ class AppContext:
             return self._device
 
         if self.mock:
-            self._device = make_device(mock=True, port=None)
+            self._device = make_device(mock=True, port=None, demo=self.demo)
             self._active_transport = None
             self._active_port = None
             self._active_address = None

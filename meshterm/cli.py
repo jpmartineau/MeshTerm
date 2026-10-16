@@ -23,11 +23,12 @@ from . import __version__
 from .context import AppContext
 from .core import exitcodes, win32dll
 from .core.admin_store import AdminStore
-from .core.config import MOCK_DB_FILENAME, Settings
+from .core.config import DB_FILENAME, MOCK_DB_FILENAME, Settings
 from .core.connection import DeviceCommandError, is_connection_lost
 from .core.device_config import DeviceConfigError
 from .core.device_store import DeviceStore
 from .core.instancelock import InstanceBusy, hold_instance_lock
+from .core.models import utcnow
 from .core.preferences import (
     PREFERENCES_FILENAME,
     PreferenceError,
@@ -189,6 +190,9 @@ def main_callback(
         help="Run a node on the LoRa radio on this machine's SPI bus (selects the SPI transport)",
     ),
     mock: bool = typer.Option(False, "--mock", help="Use the built-in simulator"),
+    demo: bool = typer.Option(
+        False, "--demo", help="Run the simulator in a demo mesh over Montréal, with its own data"
+    ),
     db_path: Path | None = typer.Option(
         None, "--db", help="SQLite database path (--mock records to meshterm-mock.db)"
     ),
@@ -218,6 +222,8 @@ def main_callback(
         tcp: An explicit network address ``host[:port]``, which selects the TCP transport.
         spi: Select the radio on the SPI bus of this machine. MeshTerm itself runs the node.
         mock: Whether to use the simulator instead of real hardware.
+        demo: Run the simulator in the demo world (:mod:`meshterm.demo`), with a data
+            directory of its own that MeshTerm writes again at each start.
         db_path: Override the location of the database. If it is not set, a ``--mock`` run
             stores to the simulator's own database and not to the real history.
         json_output: Print the answer as JSON instead of aligned text.
@@ -258,9 +264,30 @@ def main_callback(
         # contradict each other about the device to talk to are a bad command line. They are
         # not a question of precedence.
         raise typer.BadParameter(f"--mock and {named_radios[0]} name different devices; pass one")
+    if demo and named_radios:
+        raise typer.BadParameter(f"--demo and {named_radios[0]} name different devices; pass one")
+    if demo and db_path is not None:
+        # The demo writes its database again at each start. If it took --db, a typing error
+        # would put a demo history over the history of the user.
+        raise typer.BadParameter("--demo writes its own database; drop --db")
 
     settings = Settings.load()
-    if db_path is not None:
+    if demo:
+        # The demo is a whole MeshTerm of its own: its own directory, which it writes again
+        # at each start. The directory of the user never sees a node of the demo. The
+        # ``emulate`` command does not prepare it, because the MeshTerm in its window gets
+        # the same flag and prepares it there.
+        from .demo.home import demo_home, prepare
+
+        mock = True
+        settings.config_dir = demo_home(settings.config_dir)
+        settings.db_path = settings.config_dir / DB_FILENAME
+        if ctx.invoked_subcommand != "emulate":
+            try:
+                prepare(settings.config_dir, utcnow())
+            except InstanceBusy as exc:
+                raise typer.BadParameter(str(exc), param_hint="--demo") from None
+    elif db_path is not None:
         settings.db_path = db_path
     elif mock:
         # The simulator is a fake radio, but it is not a fake MeshTerm. MeshTerm stored all
@@ -327,6 +354,7 @@ def main_callback(
         admin_store=AdminStore(settings.config_dir / "admin.json"),
         profile=settings.resolve_profile(profile),
         mock=mock,
+        demo=demo,
         port_override=port,
         ble_override=ble,
         tcp_override=tcp,

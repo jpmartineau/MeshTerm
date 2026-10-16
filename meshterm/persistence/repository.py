@@ -75,6 +75,17 @@ ACTIVITY_DRAWN_BUCKETS = 24
 #: recent past gets several readings for a median.
 HOP_EVIDENCE_LIMIT = 20000
 
+#: The statement that stores one observation. :meth:`Repository.record_observation` and
+#: :meth:`Repository.record_observations` share it, with the values of
+#: :meth:`Repository._observation_row`.
+_INSERT_OBSERVATION = (
+    "INSERT INTO observations "
+    "(run_id, node, public_key, name, kind, node_type, snr, rssi, lat, lon, path, "
+    "observed_at, chan_hash, cipher_mac, crypted, payload_typename, dest, src, tag, "
+    "trace_snrs, route, transport_code, scope_body) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+)
+
 
 def _packet_raw(row: sqlite3.Row) -> dict | None:
     """Rebuild the minimum raw payload with which MeshTerm reads a stored ``packet`` row.
@@ -350,7 +361,14 @@ class Repository:
 
     # -- runs -------------------------------------------------------------------
 
-    def start_run(self, tool: str, args: dict[str, Any], profile: str | None = None) -> int:
+    def start_run(
+        self,
+        tool: str,
+        args: dict[str, Any],
+        profile: str | None = None,
+        *,
+        at: datetime | None = None,
+    ) -> int:
         """Store the start of a tool run.
 
         Args:
@@ -358,6 +376,8 @@ class Repository:
             args: The arguments with which the tool was called (they must be
                 JSON-serializable).
             profile: The name of the active device profile, if any.
+            at: When the run started. The default is now. Only the demo history gives
+                another time, because it writes the runs of past days.
 
         Returns:
             The primary key of the new run.
@@ -365,25 +385,33 @@ class Repository:
         cur = self._conn.execute(
             "INSERT INTO runs (tool, profile, args_json, status, started_at) "
             "VALUES (?, ?, ?, 'running', ?)",
-            (tool, profile, json.dumps(args, default=str), utcnow().isoformat()),
+            (tool, profile, json.dumps(args, default=str), (at or utcnow()).isoformat()),
         )
         self._conn.commit()
         return int(cur.lastrowid)
 
-    def finish_run(self, run_id: int, status: str, summary: dict | None = None) -> None:
+    def finish_run(
+        self,
+        run_id: int,
+        status: str,
+        summary: dict | None = None,
+        *,
+        at: datetime | None = None,
+    ) -> None:
         """Mark a run as finished.
 
         Args:
             run_id: The run to update.
             status: The final status (``ok`` or ``error``).
             summary: An optional JSON-serializable summary of the result.
+            at: When the run finished. The default is now (refer to :meth:`start_run`).
         """
         self._conn.execute(
             "UPDATE runs SET status = ?, summary_json = ?, finished_at = ? WHERE id = ?",
             (
                 status,
                 json.dumps(summary, default=str) if summary is not None else None,
-                utcnow().isoformat(),
+                (at or utcnow()).isoformat(),
                 run_id,
             ),
         )
@@ -683,7 +711,12 @@ class Repository:
         return paths
 
     def record_neighbours(
-        self, run_id: int, repeater: str, neighbours: list[NeighbourInfo]
+        self,
+        run_id: int,
+        repeater: str,
+        neighbours: list[NeighbourInfo],
+        *,
+        at: datetime | None = None,
     ) -> None:
         """Store one snapshot of the neighbour table that MeshTerm got from a remote repeater.
 
@@ -699,8 +732,10 @@ class Repository:
             repeater: The canonical id of the repeater that sent the table.
             neighbours: The entries that MeshTerm got (this list can be empty: then no
                 rows are stored).
+            at: When MeshTerm got the table. The default is now (refer to
+                :meth:`start_run`).
         """
-        fetched_at = utcnow().isoformat()
+        fetched_at = (at or utcnow()).isoformat()
         self._conn.executemany(
             "INSERT INTO neighbour_reports "
             "(run_id, repeater, neighbour, snr, heard_at, fetched_at) "
@@ -840,6 +875,7 @@ class Repository:
         app_version: str,
         keep: int = 5,
         ascending: bool = False,
+        at: datetime | None = None,
     ) -> int | None:
         """Offer one walk to a category leaderboard. Store it only if it gets a place.
 
@@ -862,11 +898,13 @@ class Repository:
             keep: The board size (the rows kept for each category and width).
             ascending: ``True`` for categories in which lower scores win
                 (Thin thread looks for the weakest link that survives).
+            at: When the walk was made. The default is now (refer to :meth:`start_run`).
 
         Returns:
             The id of the stored row when the walk got a place (a new row, or a better
             score on a known route), or ``None`` when the walk did not get on the board.
         """
+        when = (at or utcnow()).isoformat()
 
         def beats(challenger: float, standing: float) -> bool:
             return challenger < standing if ascending else challenger > standing
@@ -888,7 +926,7 @@ class Repository:
                     score,
                     json.dumps(stats),
                     app_version,
-                    utcnow().isoformat(),
+                    when,
                     existing["id"],
                 ),
             )
@@ -906,7 +944,7 @@ class Repository:
                 score,
                 json.dumps(stats),
                 app_version,
-                utcnow().isoformat(),
+                when,
             ),
         )
         new_id = int(cursor.lastrowid)
@@ -1043,6 +1081,32 @@ class Repository:
             run_id: The run that owns the observation.
             obs: The observation to store.
         """
+        self._conn.execute(_INSERT_OBSERVATION, self._observation_row(run_id, obs))
+        self._conn.commit()
+
+    def record_observations(self, run_id: int, observations: Iterable[Observation]) -> int:
+        """Store many overheard packets of one run in one transaction.
+
+        The rows are the same as the rows of :meth:`record_observation`. The difference is
+        the commit: one for all the rows, not one for each row. The demo history writes
+        tens of thousands of packets at each start, and a commit for each row costs more
+        than a second for each thousand rows on an SD card.
+
+        Args:
+            run_id: The run that owns the observations.
+            observations: The observations to store.
+
+        Returns:
+            The number of stored rows.
+        """
+        rows = [self._observation_row(run_id, obs) for obs in observations]
+        self._conn.executemany(_INSERT_OBSERVATION, rows)
+        self._conn.commit()
+        return len(rows)
+
+    @staticmethod
+    def _observation_row(run_id: int, obs: Observation) -> tuple:
+        """The values of one ``observations`` row, in the order of :data:`_INSERT_OBSERVATION`."""
         chan_hash = cipher_mac = crypted = None
         raw = obs.raw if isinstance(obs.raw, dict) else {}
         # The payload class identifies a relayed 'packet' that names no origin node. Keep
@@ -1082,39 +1146,31 @@ class Repository:
         transport_code = raw.get("transport_code") if route in SCOPED_ROUTES else None
         body = raw_scope_body(raw) if route == "TC_FLOOD" and transport_code else None
         scope_body = body.hex() if body is not None else None
-        self._conn.execute(
-            "INSERT INTO observations "
-            "(run_id, node, public_key, name, kind, node_type, snr, rssi, lat, lon, path, "
-            "observed_at, chan_hash, cipher_mac, crypted, payload_typename, dest, src, tag, "
-            "trace_snrs, route, transport_code, scope_body) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                run_id,
-                obs.node,
-                obs.public_key,
-                obs.name,
-                obs.kind,
-                obs.node_type,
-                obs.snr,
-                obs.rssi,
-                obs.lat,
-                obs.lon,
-                obs.path,
-                obs.observed_at.isoformat(),
-                chan_hash,
-                cipher_mac,
-                crypted,
-                typename,
-                dest,
-                src,
-                tag,
-                trace_snrs,
-                route,
-                transport_code,
-                scope_body,
-            ),
+        return (
+            run_id,
+            obs.node,
+            obs.public_key,
+            obs.name,
+            obs.kind,
+            obs.node_type,
+            obs.snr,
+            obs.rssi,
+            obs.lat,
+            obs.lon,
+            obs.path,
+            obs.observed_at.isoformat(),
+            chan_hash,
+            cipher_mac,
+            crypted,
+            typename,
+            dest,
+            src,
+            tag,
+            trace_snrs,
+            route,
+            transport_code,
+            scope_body,
         )
-        self._conn.commit()
 
     def observation_count(self) -> int:
         """Return the total number of overheard packets stored in all the runs.
