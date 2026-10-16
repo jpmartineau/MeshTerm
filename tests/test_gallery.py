@@ -147,9 +147,6 @@ class _GallerySession:
     def base_body_size(self) -> tuple[int, int]:
         return self._cols, self._rows
 
-    def terminal_rows(self) -> int:
-        return self._rows
-
     async def button_dialog(self, prompt, buttons, **kwargs):  # noqa: ANN001
         return None
 

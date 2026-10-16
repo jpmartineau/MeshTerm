@@ -63,7 +63,7 @@ from .scopering import ScopeKey, ring, scope_atom, scope_chip, scope_key, step
 from .theme import name_style, snr_style
 from .tui.render import render_lines
 from .tui.screen import CANCEL, Screen
-from .tui.select import Choice, Separator
+from .tui.select import Choice
 from .widgets import (
     ContactsSort,
     _recency_style,
@@ -1504,7 +1504,6 @@ class TimeMachinePickerScreen(ContactListScreen):
             prompt=prompt,
             lead=[
                 Choice(command_label("🌐 The whole mesh — days, arrivals, the ledger"), MESH),
-                Separator(" "),
                 section_heading("Nodes"),
             ],
         )

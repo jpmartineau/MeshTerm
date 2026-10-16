@@ -41,16 +41,11 @@ from tests.conftest import plain as _strip_ansi  # the only strip-and-join scree
 class _StubSession:
     """A session stand-in that counts the requests for a paint."""
 
-    def __init__(self, rows: int = 24) -> None:
+    def __init__(self) -> None:
         self.invalidations = 0
-        self.rows = rows
 
     def invalidate(self) -> None:
         self.invalidations += 1
-
-    def terminal_rows(self) -> int:
-        """The rows of the terminal, for the space between authors."""
-        return self.rows
 
     def run_detached(self, work):  # noqa: ANN001, ANN201
         """Start the flow of a key handler as a task, as ``TuiSession.run_detached`` does."""
@@ -1557,13 +1552,14 @@ def test_channel_own_messages_do_not_merge_with_remote_namesake() -> None:
 def test_a_blank_line_closes_each_author_where_the_rows_allow(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With ``auto``, a terminal of 24 rows or more puts a blank line after each author.
+    """By default, a terminal of 24 rows or more puts a blank line after each author.
 
     The blank line also comes before the divider of a new day, and never before the first
     line. A terminal of fewer rows (the 14 of the Cardputer Zero) has no row to spare for
     it. A second paint reads the cached lines, and the divider of the second day still pins
-    at its own line, not at the blank line before it. ``on`` and ``off`` ignore the rows,
-    and a change applies at the next paint.
+    at its own line, not at the blank line before it. The two ends of the
+    ``section_spacing_min_rows`` preference ignore the rows, and a change applies at the
+    next paint.
     """
     from datetime import datetime, timedelta, timezone
 
@@ -1584,7 +1580,8 @@ def test_a_blank_line_closes_each_author_where_the_rows_allow(
 
     prefs = preferences.Preferences()
     monkeypatch.setattr(preferences, "current", lambda: prefs)
-    screen = _channel_screen(transcript(), session=_StubSession(rows=24))
+    screen = _channel_screen(transcript())
+    screen.note_terminal_rows(24)
     lines = [_strip_ansi(line) for line in screen._render_grouped(53)]
     assert lines[0].startswith("──") and lines[1] == "Alice"
     assert lines[4] == "" and lines[5] == "Bob"  # after the two messages of Alice
@@ -1594,16 +1591,14 @@ def test_a_blank_line_closes_each_author_where_the_rows_allow(
     screen._render_grouped(53)  # the cached lines
     assert screen._sticky_headers == first and [at for at, _ in first] == [0, 8]
 
-    short = _channel_screen(transcript(), session=_StubSession(rows=14))
+    short = _channel_screen(transcript())
+    short.note_terminal_rows(14)
     assert "" not in [_strip_ansi(line) for line in short._render_grouped(53)]
 
-    prefs.set("chat_author_spacing", "on")  # always, also on 14 rows
+    prefs.set("section_spacing_min_rows", 0)  # any height, also 14 rows
     assert "" in [_strip_ansi(line) for line in short._render_grouped(53)]
-    prefs.set("chat_author_spacing", "off")  # never, and the cached lines change too
+    prefs.set("section_spacing_min_rows", 10_000)  # never, and the cached lines change too
     assert "" not in [_strip_ansi(line) for line in screen._render_grouped(53)]
-    prefs.set("chat_author_spacing", "auto")
-    prefs.set("chat_author_spacing_min_rows", 14)
-    assert "" in [_strip_ansi(line) for line in short._render_grouped(53)]
 
 
 def test_a_mention_of_our_name_takes_our_chip_with_no_star(powerline) -> None:

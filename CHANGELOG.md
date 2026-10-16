@@ -35,12 +35,15 @@ can change how things behave. It does not only add new things.
   a 32-byte seed in the node's `identity.key` as you give it. This is the same form that
   the node uses when it makes its own key. A firmware companion still gets the full 64-byte
   key, because it accepts only that form.
-- **In a chat, a blank line comes after the messages of each author.** Thus the
-  conversation is easier to follow when many people write. By default, the line shows on
-  a terminal of 24 rows or more. A smaller terminal, and the 14 rows of the Cardputer Zero,
-  keep each row for a message. Two new preferences in the Display group control the line:
-  **Author spacing** (`auto`, `on`, or `off`) and **Spacing from** (the smallest terminal,
-  in rows, that gets the line with `auto`).
+- **A blank line comes before each section.** In each list that has sections (the main
+  menu, the Messages list, the Preferences page, Device config, and the others), the line
+  comes before each section heading. In a chat, it comes after the messages of each author
+  and before each new day. Thus the parts of a screen are easier to find, and a
+  conversation is easier to follow when many people write. By default, the line shows on a
+  terminal of 24 rows or more. A smaller terminal, and the 14 rows of the Cardputer Zero,
+  keep each row for content. The new **Section spacing** preference in the Display group
+  sets the smallest terminal that gets the line: any height, 20, 24, 30, or 40 rows, or
+  never.
 
 ## [0.11.1] - 2026-10-13
 

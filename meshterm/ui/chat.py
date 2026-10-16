@@ -25,7 +25,7 @@ from rich.cells import cell_len
 from rich.console import Group, RenderableType
 from rich.text import Text
 
-from ..core import links, preferences
+from ..core import links
 from ..core.channels import MENTION, split_channel_sender
 from ..core.connection import ContactNotOnDeviceError
 from ..core.events import EventKind, MeshEvent
@@ -84,21 +84,14 @@ _URL_GUTTER = 2
 _URL_CODES = False
 
 
-#: The rows of the terminal when the session cannot say (a stand-in session with no
-#: ``terminal_rows``): the design minimum of the platform (``Platform.readable_rows``).
-_FALLBACK_ROWS = 24
-
-
 @on_platform
 def _bind(platform: Platform) -> None:
     """Bind the transcript to the platform (now and at each switch).
 
-    The platform says whether codes hang under URLs, and how many rows to assume when the
-    session cannot tell the height of the terminal.
+    The platform says whether codes hang under URLs.
     """
-    global _URL_CODES, _FALLBACK_ROWS
+    global _URL_CODES
     _URL_CODES = platform.url_codes
-    _FALLBACK_ROWS = platform.readable_rows
 
 
 #: The maximum width of a footer hint, in cells (refer to the UX standards).
@@ -594,7 +587,7 @@ class ChatScreen(Screen):
         messages = self._messages
         total = len(messages)
         cache = self._render_cache
-        spacing = self._author_spacing()
+        spacing = self.section_spacing()
         if cache is not None and cache["width"] == width and cache["spacing"] == spacing:
             cached_ids = cache["ids"]
             cached_acked = cache["acked"]
@@ -640,9 +633,11 @@ class ChatScreen(Screen):
                 and cached_ids[idx] == id(message)
                 and cached_acked[idx] == message.acked
             )
-            # A blank line closes the messages of an author, where the preferences ask for
-            # it (:meth:`_author_spacing`). It is the first line of the slice of the message
-            # that starts the next group, so a cached slice brings it back with it.
+            # A blank line closes the messages of an author and the messages of a day, where
+            # the preferences ask for it (:meth:`~meshterm.ui.tui.screen.Screen.section_spacing`,
+            # the same test as the section headings of a list). It is the first line of the
+            # slice of the message that starts the next group, so a cached slice brings it
+            # back with it.
             gap = spacing and bool(lines) and (new_day or group != prev_group)
             if reusable:
                 start = cached_boundaries[idx - 1] if idx > 0 else 0
@@ -695,24 +690,6 @@ class ChatScreen(Screen):
             "boundaries": boundaries,
         }
         return lines
-
-    def _author_spacing(self) -> bool:
-        """Whether a blank line closes the messages of each author, at this paint.
-
-        The ``chat_author_spacing`` preference decides: ``on`` and ``off`` are fixed, and
-        ``auto`` puts the line on a terminal of ``chat_author_spacing_min_rows`` rows or
-        more. The line costs one row for each group of messages, so a short terminal (the
-        Cardputer Zero, or a small window) keeps the transcript dense. The test reads the
-        rows of the terminal before the paint, and reads the preferences at each paint,
-        so a change on the Preferences page applies when the user comes back.
-        """
-        prefs = preferences.current()
-        mode = prefs.chat_author_spacing
-        if mode != "auto":
-            return mode == "on"
-        rows = getattr(self._session, "terminal_rows", None)
-        height = rows() if callable(rows) else _FALLBACK_ROWS
-        return height >= prefs.chat_author_spacing_min_rows
 
     def _sender_and_body(self, message: ChatMessage) -> tuple[str, str]:
         """Return the display sender and the clean body of a message.

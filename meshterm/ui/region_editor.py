@@ -237,7 +237,9 @@ def region_items(node: Contact, table: RegionTable, unsaved: int) -> tuple[str, 
     # A blank line between the table and the commands of the page, because they are two lists
     # and not one. The first row of the tree is the wildcard. Code that measures icon
     # columns reads its name ``*`` as a leading mark. But the name is data, and it does not
-    # belong to a column that the actions keep.
+    # belong to a column that the actions keep. This blank line is the seam between two
+    # lists, not the space of a section. It stays when the section spacing is off, and the
+    # list adds no second line after it (Separator.spaced).
     items.append(Separator(" "))
     items.append(section_heading("Actions"))
     items.extend(

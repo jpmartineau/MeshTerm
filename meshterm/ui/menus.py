@@ -657,8 +657,13 @@ def section_heading(label: str) -> Separator:
 
     Grey, never the accent of the frame: a rule in the colour of the border looks like a
     part of the frame, not like a heading in it.
+
+    The heading is also *spaced*: a blank line comes before it where the
+    ``section_spacing_min_rows`` preference asks for one (refer to
+    :attr:`~meshterm.ui.tui.select.Separator.spaced`). Thus a list does not put a blank
+    separator before a heading for space.
     """
-    return Separator(f"── {command_label(label)} ──", style="heading", heading=True)
+    return Separator(f"── {command_label(label)} ──", style="heading", heading=True, spaced=True)
 
 
 def fit_cells(text: str, width: int, *, align: str = "left") -> str:

@@ -281,7 +281,6 @@ def _menu_items(ctx: AppContext, entries: list[QueuedMessage]) -> list:
     items.append(Choice(marked_label("📨", "Queue a message…", "", lane=lane), _QUEUE))
 
     if done:
-        items.append(Separator(" "))
         items.append(section_heading("Finished"))
         for message in done[:15]:
             items.append(Choice(lambda m=message: _done_row(m, lane), ("msg", message.ident)))

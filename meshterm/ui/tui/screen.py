@@ -155,6 +155,9 @@ class Screen:
     #: first and the last row, and the page follows to its ends. It is off where these keys
     #: move a text caret instead: the compose line of the chat, the field of a prompt.
     home_end_jumps: bool = True
+    #: The rows of the terminal at the last paint, or ``None`` before the first paint. The
+    #: frame records it before it asks for the body (refer to :meth:`note_terminal_rows`).
+    _terminal_rows: int | None = None
 
     @property
     def fkey_lane(self):
@@ -536,6 +539,38 @@ class Screen:
     def note_viewport(self, viewport: int) -> None:
         """Record only the viewport height (for callers that do not know the body total)."""
         self._scroll_viewport = max(1, viewport)
+
+    def note_terminal_rows(self, rows: int) -> None:
+        """Record the rows of the terminal, before the body of this paint renders.
+
+        The frame calls this method, together with :meth:`note_viewport`, for each type of
+        frame. :meth:`section_spacing` reads it. The rows must come before the body: rows
+        recorded after a paint come one paint late, and the first paint of a screen then
+        comes out without its blank lines and then jumps.
+        """
+        self._terminal_rows = rows
+
+    def section_spacing(self) -> bool:
+        """Whether a blank line comes before each section of the page, at this paint.
+
+        The ``section_spacing_min_rows`` preference decides. A terminal of that many rows
+        or more gets the line. The line costs one row for each section, so a short
+        terminal (the Cardputer Zero, or a small window) keeps its rows for content. A
+        screen that the frame has not painted yet uses the design minimum of the platform
+        (:attr:`~meshterm.platforms.Platform.readable_rows`). The preference is read at
+        each paint, so a change on the Preferences page applies when the user comes back.
+
+        One rule for each place that has sections: the section headings of a select list
+        (refer to :attr:`~meshterm.ui.tui.select.Separator.spaced`), and the day dividers
+        and the authors of a chat.
+        """
+        from ...core.preferences import current as current_preferences
+        from ...platforms import get_platform
+
+        rows = self._terminal_rows
+        if rows is None:
+            rows = get_platform().readable_rows
+        return rows >= current_preferences().section_spacing_min_rows
 
     @property
     def _page_step(self) -> int:

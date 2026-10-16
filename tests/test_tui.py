@@ -3476,6 +3476,62 @@ def test_a_lazy_body_slices_frames_and_scrolls_exactly_as_a_list_did() -> None:
     assert "── Group ──" in plain, "the section heading pins once it scrolls off"
 
 
+def test_a_blank_line_comes_before_each_section_where_the_rows_allow(monkeypatch) -> None:  # noqa: ANN001
+    """A terminal of 24 rows or more puts a blank line before each section heading.
+
+    The line separates a section from a row or a note above it. It never comes at the top,
+    after a blank separator, or under another heading, because there it separates nothing.
+    The heading pins at its own line, not at the blank line. The frame records the rows
+    before the body renders, so the first paint is already correct, and a terminal of 14
+    rows (the Cardputer Zero) gets no line. The ``section_spacing_min_rows`` preference
+    moves the limit, and a change applies at the next paint.
+    """
+    from meshterm.core import preferences
+
+    prefs = preferences.Preferences()
+    monkeypatch.setattr(preferences, "current", lambda: prefs)
+    items = [
+        section_heading("A"),
+        Choice("alpha", 1),
+        Separator("  a note"),
+        section_heading("B"),
+        Separator(" "),
+        section_heading("C"),
+        Choice("gamma", 3),
+        section_heading("D"),
+        section_heading("E"),
+        Choice("epsilon", 5),
+    ]
+    screen = SelectScreen("Sections", items)
+    screen.floating = False
+
+    def body(rows: int) -> list[str]:
+        frame.compose_base(Text("hdr"), screen, "Esc back", 53, rows)
+        return [_plain(line).strip() for line in screen.render_body(53)]
+
+    assert body(26) == [
+        "── A ──",
+        "❯ alpha",
+        "a note",
+        "",
+        "── B ──",
+        "",
+        "── C ──",
+        "gamma",
+        "",
+        "── D ──",
+        "── E ──",
+        "epsilon",
+    ]
+    assert [at for at, _ in screen._sticky_headers] == [0, 4, 6, 9, 10]
+    assert body(14).count("") == 1  # only the blank separator of the list itself
+
+    prefs.set("section_spacing_min_rows", 0)  # any height
+    assert body(14).count("") == 3
+    prefs.set("section_spacing_min_rows", 10_000)  # never
+    assert body(26).count("") == 1
+
+
 def test_an_off_screen_rows_live_title_is_left_alone() -> None:
     """MeshTerm resolves a callable title of a row only while the row is on the screen."""
     calls: list[str] = []

@@ -173,9 +173,21 @@ _QUIET_CHOICES: dict[int, str] = {s: f"{s} s" for s in QUIET_CHOICES_S}
 #: column, and for the cost when MeshTerm reclaims a column that is not hidden.
 _WIDTH_CHOICES: dict[str, str] = {"auto": "auto", "yes": "yes", "no": "no"}
 
-#: When a chat puts a blank line after the messages of each author. ``auto`` puts it on a
-#: terminal that has at least ``chat_author_spacing_min_rows`` rows.
-_SPACING_CHOICES: dict[str, str] = {"auto": "auto", "on": "on", "off": "off"}
+#: The smallest terminal, in rows, that gets a blank line before each section. The two
+#: ends are numbers too, so that one comparison (``rows >= value``) gives each choice: 0 is
+#: lower than each terminal, and :data:`_SPACING_NEVER` is higher than each terminal. The
+#: steps between them fall between the heights that MeshTerm knows: the 14 rows of the
+#: Cardputer Zero, a standard terminal of 24, the 26 and 40 rows of the two console fonts of
+#: the PicoCalc, and a tall window on a desktop.
+_SPACING_NEVER = 10_000
+_SPACING_CHOICES: dict[int, str] = {
+    0: "any height",
+    20: "20+ rows",
+    24: "24+ rows",
+    30: "30+ rows",
+    40: "40+ rows",
+    _SPACING_NEVER: "never",
+}
 
 #: How many colours to send to the terminal. ``auto`` is the honest default, and it is the
 #: only value that is not a depth. It means "take prompt_toolkit's verdict unless we can
@@ -509,30 +521,19 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         unit="days",
     ),
     PrefSpec(
-        key="chat_author_spacing",
-        label="Author spacing",
-        help="A blank line after each author in a chat",
+        key="section_spacing_min_rows",
+        label="Section spacing",
+        help="A blank line between sections and between chat authors",
         group="Display",
         value_type="enum",
-        # Auto, because the line costs one row for each group of messages. A tall terminal
-        # has the rows, and the 14 rows of the Cardputer Zero do not: there a blank line is
-        # a message less on the screen. The test is the real height of the terminal, so a
-        # small window on a desktop drops the line too (JP, 2026-10-13).
-        default="auto",
-        choices=_SPACING_CHOICES,
-    ),
-    PrefSpec(
-        key="chat_author_spacing_min_rows",
-        label="Spacing from",
-        help="With auto: the smallest terminal that gets it",
-        group="Display",
-        value_type="int",
-        # A standard terminal (24 rows) and the PicoCalc (26) get the line. The Cardputer
-        # Zero (14) and a smaller window do not (JP, 2026-10-13).
+        # The line costs one row for each section. A standard terminal (24 rows) and the
+        # PicoCalc (26) have the rows. The 14 rows of the Cardputer Zero do not: there a
+        # blank line is a row less of the list. The test is the real height of the
+        # terminal, so a small window on a desktop drops the line too (JP, 2026-10-13). It
+        # applies to each section heading of a list, to the day dividers of a chat, and to
+        # the messages of each author in a chat (JP, 2026-10-15).
         default=24,
-        minimum=10,
-        maximum=100,
-        unit="rows",
+        choices=_SPACING_CHOICES,
     ),
     # --- Diagnostics ---------------------------------------------------------------
     PrefSpec(

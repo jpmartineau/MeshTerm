@@ -276,6 +276,14 @@ deliberately, one at a time, and say why in the code.
   `Separator` is no landmark. Prose written *directly under* a heading (a description of
   what the section holds) is its preamble and pins with it, in order, as each row scrolls
   off; prose after the section's first row labels nothing and never pins.
+  A heading is also *spaced*: a blank line goes before it wherever the terminal is at
+  least `section_spacing_min_rows` tall (one preference, read through
+  `Screen.section_spacing`, which the chat's author and day breaks read too) — never at
+  the top, after a blank line, or under another heading or a column header. So don't
+  hand-place a `Separator(" ")` before a heading for space: it would show where the
+  preference says no. A blank separator there is only ever the seam between two
+  *different* lists, each with its own icon column (the region editor's table and its
+  actions); the heading then adds no second line.
 - Label + description command rows go through `menu_rows` (two cell-aligned lanes,
   description muted). Editor rows (setting/value/description) go through `lane_row`.
 - A row that opens further prompts ends with `…`; a row that acts immediately doesn't.

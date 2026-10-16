@@ -220,7 +220,6 @@ def _menu_items(
     if acked:
         items.append(Choice(marked_label("🗑", "Clear acknowledged", "err", lane=lane), _CLEAR))
 
-    items.append(Separator(" "))
     items.append(section_heading("Watched nodes"))
     if not watched:
         items.append(Separator("  none starred yet — silence and SNR rules need one"))

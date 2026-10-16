@@ -255,6 +255,16 @@ class Separator:
             nothing, it takes a content line, and it hides the heading above it. It is set
             through :func:`~meshterm.ui.menus.section_heading`, or by
             hand on a column header that is the only landmark of its block.
+        spaced: Whether a blank line comes before this row, when the
+            ``section_spacing_min_rows`` preference asks for one at this paint (refer to
+            :meth:`~meshterm.ui.tui.screen.Screen.section_spacing`). It is set through
+            :func:`~meshterm.ui.menus.section_heading`, so that each section of each list
+            gets the same space. A list does not put a blank separator before a heading
+            for space, because then the space shows also where the preference says no. A
+            blank separator there is only the seam between two different lists, which
+            keep their own icon columns (the table and the actions of the region editor).
+            The line never comes at the top of the list, after a blank line, or under
+            another heading or a column header, because there it separates nothing.
         pans: The column header of a table that ←→ pan as one unit (refer to
             :attr:`Choice.pans`). It is drawn in its fullest form, and it slides with the
             rows under it. Thus each label stays above its lane. Its layout is the same as a
@@ -267,6 +277,7 @@ class Separator:
     style: str = "muted"
     pinned: bool = False
     heading: bool = False
+    spaced: bool = False
     pans: bool = False
 
     def text(self, width: int) -> str | Text:
@@ -286,6 +297,23 @@ _UNBOUNDED = 10_000
 #: also keeps this column still, so that its labels slide in step with the rows (refer to
 #: :attr:`Separator.pans`).
 _POINTER = 2
+
+
+def _spaces(previous: Choice | Separator | None) -> bool:
+    """Whether a blank line before a section separates it from ``previous``.
+
+    The line separates a section from the content above it: a row, or a note. At the top
+    of the list there is nothing to separate. After a blank line, the space is already
+    there. Under a heading or a column header, the heading belongs with the rows below it.
+    """
+    if previous is None:
+        return False
+    if isinstance(previous, Choice):
+        return True
+    if previous.heading or previous.pinned:
+        return False
+    title = previous.title
+    return callable(title) or bool(str(title).strip())
 
 
 def _pans(items: list) -> bool:
@@ -830,7 +858,15 @@ class SelectScreen(Screen):
         # Thus the code follows the line of the highlight while it draws the rows, and does
         # not calculate it from the row index.
         cursor_at: int | None = None
+        spacing = self.section_spacing()
+        previous: Choice | Separator | None = None  # the row drawn before this one, if any
         for item in rows:
+            if isinstance(item, Separator) and item.spaced and spacing and _spaces(previous):
+                # The blank line before a section. It is not an item, so it never joins
+                # the block of the heading above it, and the heading still pins at its
+                # own line.
+                lines.append("")
+            previous = item
             if isinstance(item, Separator):
                 # A Text title has its own spans (a column header with two colours). A plain
                 # string is drawn all in the style of the separator. A separator scrolls

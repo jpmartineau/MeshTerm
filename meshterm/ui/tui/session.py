@@ -2056,15 +2056,6 @@ class TuiSession:
         size = self._app.output.get_size()  # type: ignore[union-attr]
         return max(20, size.columns), max(6, size.rows)
 
-    def terminal_rows(self) -> int:
-        """The rows of the terminal now. A screen reads it before its paint, never after.
-
-        The chat uses it for the space between authors (``chat_author_spacing``). The rows
-        that the frame records after a paint come one paint late, so the first paint of a
-        chat would come out without the space and then jump.
-        """
-        return self._size()[1]
-
     def base_body_size(self) -> tuple[int, int]:
         """Return the ``(width, height)`` in cells that the body of the base screen can use.
 

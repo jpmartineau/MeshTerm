@@ -456,6 +456,7 @@ def compose_base(
         # (refer to :class:`~meshterm.ui.tui.screen.ListWindow`) can size its chrome to the
         # frame into which it will be sliced.
         base.note_viewport(viewport)
+        base.note_terminal_rows(rows)
         body_lines = base.render_body(cols - panel_inset(base.flush))
         visible, more_above, more_below = _visible_slice(base, body_lines, viewport)
         # The panel wrap is a pure function of what is between its borders. Thus cache it,
@@ -484,6 +485,7 @@ def compose_base(
         # the Panel. The body gets the full terminal width and one more row.
         viewport = max(1, rows - header_h - 1 - 1)  # minus footer(1) and title bar(1)
         base.note_viewport(viewport)
+        base.note_terminal_rows(rows)
         body_lines = base.render_body(cols)
         visible, more_above, more_below = _visible_slice(base, body_lines, viewport)
         status = None if platform.header_row else header
@@ -645,6 +647,7 @@ def compose_startup(screen: Screen, cols: int, rows: int) -> str:
     # measure). It is never wider than the terminal, and never narrower than the title or the
     # hint that it must show.
     probe = max(10, min(cols - 6, 100))
+    screen.note_terminal_rows(rows)
     probe_lines = screen.render_body(probe)
     measured = max((_ansi_width(line) for line in probe_lines), default=10)
     # Size to the widest footer possible, not to the footer of this frame. A screen whose
@@ -755,6 +758,7 @@ def compose_bare(screen: Screen, cols: int, rows: int) -> str:
     # share screen fits its code to the rows). Thus the height is recorded before the body
     # is requested, not after, as the composers with a frame also do.
     screen.note_viewport(rows)
+    screen.note_terminal_rows(rows)
     body_lines = screen.render_body(cols)
     while body_lines and not _ansi_width(body_lines[-1]):
         body_lines.pop()  # a trailing blank row pushes the block off its anchor
@@ -783,6 +787,7 @@ def _dialog_layout(screen: Screen, cols: int, rows: int) -> tuple[int, int, int,
     # with a list window (the path composer) can size to what it can use. After that, the
     # slice records the real viewport, sized to the body.
     screen.note_viewport(budget)
+    screen.note_terminal_rows(rows)
     body_lines = screen.render_body(max_w - 4)
     # A grow-only screen (the packet viewer, when it pages between packets) sizes to the
     # tallest body that it has shown, not to this body. Thus a shorter body keeps the larger
