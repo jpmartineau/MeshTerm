@@ -161,7 +161,7 @@ NODES: tuple[Node, ...] = (
     Node("Olivier.T",       0x33, _C, 45.5455, -73.5770, 1.0, first_heard_days=180.0,
          quiet_hours=50.0),
     Node("Raphaël",         0x0B, _C, 45.5810, -73.7480, 1.0, first_heard_days=130.0,
-         quiet_hours=5.0),
+         quiet_hours=3.0),
     Node("Ana Brossard",    0x3F, _C, 45.4550, -73.4710, 1.0, first_heard_days=65.0,
          quiet_hours=14.0),
     Node("Léa",             0xDD, _C, 45.5450, -73.6240, 1.0, shares_location=False,
@@ -170,7 +170,7 @@ NODES: tuple[Node, ...] = (
          first_heard_days=100.0, quiet_hours=4 * 24.0, talk=0.5),
     Node("Tomás",           0x77, _C, 45.4520, -73.8120, 1.0, first_heard_days=160.0,
          quiet_hours=62 * 24.0, talk=0.5),
-    Node("Mathilde",        0xF7, _C, 45.4780, -73.5870, 0.0, first_heard_days=0.05),
+    Node("Mathilde",        0xF7, _C, 45.4780, -73.5870, 0.0, first_heard_days=2 / 24),
     Node("Sylvie-Gaspésie", 0x6C, _C, 48.8300, -64.4800, 0.0, shares_location=False,
          first_heard_days=0.0, quiet_hours=None),
     # Discovered nodes: heard, but nobody added them.

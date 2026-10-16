@@ -3,10 +3,10 @@
 
 The conversations are in French and in English, as on the real mesh of Montréal. Each line
 has a time on a virtual clock (refer to :func:`at`). The virtual clock sets "now" at
-:data:`NOW_LOCAL`, an evening, when the mesh is busy. The history writes each line at its
-age before the real time of the run. Thus the ages on the screens ("12m ago") are the
-same at each run. When the clock of the run is also set to that evening (the screenshots
-do this), the times of day are correct too: the dinner is at dinner time.
+:data:`NOW_LOCAL`, a late morning on a weekday. The history writes each line at its age
+before the real time of the run. Thus the ages on the screens ("12m ago") are the same at
+each run. When the clock of the run is also set to that morning (the screenshots do
+this), the times of day are correct too: the plan for lunch is made before lunch.
 
 The script only holds text and times. :mod:`meshterm.demo.history` turns each line into
 the stored message and into the packets that our node heard when the line went over the
@@ -19,8 +19,8 @@ from dataclasses import dataclass
 
 from .world import SELF
 
-#: The local time of day that "now" stands for on the virtual clock (hours).
-NOW_LOCAL = 19.5
+#: The local time of day that "now" stands for on the virtual clock (hours): 11:42.
+NOW_LOCAL = 11 + 42 / 60
 
 
 def at(days_ago: int, clock: str) -> float:
@@ -110,36 +110,36 @@ CHANNEL_LINES: dict[str, tuple[Line, ...]] = {
             "Jean-Seb",
             "Et le répéteur du chalet entend tout le monde, même à travers les feuilles 😄",
         ),
-        Line(at(0, "13:20"), "Noor", "Premier test depuis Saint-Laurent, quelqu'un me reçoit?"),
-        Line(at(0, "13:24"), "Marie-Ève", "@[Noor] reçu via Mont-Royal, +6 dB. Bienvenue!"),
+        Line(at(0, "07:48"), "Noor", "Premier test depuis Saint-Laurent, quelqu'un me reçoit?"),
+        Line(at(0, "07:52"), "Marie-Ève", "@[Noor] reçu via Mont-Royal, +6 dB. Bienvenue!"),
         Line(
-            at(0, "17:55"),
+            at(0, "10:05"),
             "Mathilde",
-            "Bonsoir la gang! Première fois sur MeshCore, je suis à Saint-Henri 👋",
+            "Bonjour la gang! Première fois sur MeshCore, je suis à Saint-Henri 👋",
         ),
-        Line(at(0, "17:58"), "Marie-Ève", "Bienvenue @[Mathilde]! Tu passes par quel répéteur?"),
-        Line(at(0, "18:02"), "Mathilde", "Mont-Royal je pense, ou Oratoire. Comment je vérifie?"),
+        Line(at(0, "10:08"), "Marie-Ève", "Bienvenue @[Mathilde]! Tu passes par quel répéteur?"),
+        Line(at(0, "10:12"), "Mathilde", "Mont-Royal je pense, ou Oratoire. Comment je vérifie?"),
         Line(
-            at(0, "18:05"),
+            at(0, "10:15"),
             ME,
             "Ton advert m'arrive en un hop via Mont-Royal, SNR +8. Trace path te montre tout",
         ),
         Line(
-            at(0, "18:30"), "Jean-Seb", "Rappel: rencontre mesh samedi 14h au marché Jean-Talon ☕"
+            at(0, "10:40"), "Jean-Seb", "Rappel: rencontre mesh samedi 14h au marché Jean-Talon ☕"
         ),
         Line(
-            at(0, "18:49"),
+            at(0, "11:01"),
             "Noor",
             "@[Ruelle Verte] t'as encore la carte de couverture? On veut la voir samedi",
         ),
         Line(
-            at(0, "18:52"),
+            at(0, "11:04"),
             ME,
             "Oui! https://www.openstreetmap.org/#map=11/45.5200/-73.6400 je l'apporte imprimée",
         ),
-        Line(at(0, "19:18"), "Poutine Patrol", "J'apporte des poutines pour tout le monde 🍟"),
+        Line(at(0, "11:30"), "Poutine Patrol", "J'apporte des poutines pour tout le monde 🍟"),
         Line(
-            at(0, "19:27"), "Félix", "Longueuil ↔ Stade à +6 dB depuis la nouvelle antenne, enfin!"
+            at(0, "11:39"), "Félix", "Longueuil ↔ Stade à +6 dB depuis la nouvelle antenne, enfin!"
         ),
     ),
     "#montreal": (
@@ -154,6 +154,7 @@ CHANNEL_LINES: dict[str, tuple[Line, ...]] = {
             "Anyone know if the Jean-Talon market is open late on Thursday?",
         ),
         Line(at(4, "16:21"), "Marie-Ève", "Jusqu'à 18h je crois, 20h le vendredi"),
+        Line(at(3, "18:05"), "Olivier.T", "Bixi stations are all full downtown, good luck tonight"),
         Line(
             at(3, "20:05"),
             "Jean-Seb",
@@ -162,26 +163,25 @@ CHANNEL_LINES: dict[str, tuple[Line, ...]] = {
         Line(
             at(3, "20:13"), "Félix", "Même chose à Hochelaga, mais Stade-Olympique n'a rien senti"
         ),
-        Line(at(2, "11:40"), "Kim-NDG", "Smoked meat run at noon, who's in?"),
-        Line(at(2, "11:44"), "Poutine Patrol", "Toujours."),
-        Line(at(2, "11:47"), "Sam Verdun", "Moi! On se rejoint au métro?"),
         Line(
             at(1, "09:15"),
             "Chloé L.",
             "Neige annoncée la semaine prochaine. Rentrez vos antennes de balcon ⛄",
         ),
         Line(
-            at(0, "11:10"),
+            at(0, "07:40"),
             ME,
             "Quelqu'un a vu la grue sur Saint-Denis? Elle bloque mon lien vers Stade 😑",
         ),
-        Line(at(0, "11:18"), "Félix", "Haha, la grue a un meilleur SNR que nous autres"),
+        Line(at(0, "07:48"), "Félix", "Haha, la grue a un meilleur SNR que nous autres"),
         Line(
-            at(0, "17:10"),
+            at(0, "08:10"),
             "Raphaël",
             "La ligne orange roule au ralenti entre Henri-Bourassa et Montmorency",
         ),
-        Line(at(0, "19:05"), "Olivier.T", "Bixi stations are all full downtown, good luck tonight"),
+        Line(at(0, "11:20"), "Kim-NDG", "Smoked meat run at noon, who's in?"),
+        Line(at(0, "11:24"), "Poutine Patrol", "Toujours."),
+        Line(at(0, "11:27"), "Sam Verdun", "Moi! On se rejoint au métro?"),
     ),
     "#velo": (
         Line(
@@ -207,15 +207,17 @@ CHANNEL_LINES: dict[str, tuple[Line, ...]] = {
             "La piste du REV Saint-Denis est encore en travaux près de Jean-Talon",
         ),
         Line(
-            at(0, "18:20"), "Bixi Bandit", "Quelqu'un pour une montée du mont Royal demain matin?"
+            at(0, "09:30"), "Bixi Bandit", "Quelqu'un pour une montée du mont Royal demain matin?"
         ),
     ),
     "Famille": (
         Line(at(4, "19:02"), "Léa", "Souper chez grand-maman dimanche, 17h"),
         Line(at(4, "19:10"), ME, "Parfait, j'apporte le dessert"),
         Line(at(4, "19:12"), "Léa", "N'oublie pas la tourtière de tante Jo!"),
-        Line(at(0, "17:41"), "Léa", "T'es où? Le souper est prêt 😄"),
-        Line(at(0, "17:44"), ME, "J'arrive, je suis au coin de la rue"),
+        Line(at(1, "17:41"), "Léa", "T'es où? Le souper est prêt 😄"),
+        Line(at(1, "17:44"), ME, "J'arrive, je suis au coin de la rue"),
+        Line(at(0, "08:15"), "Léa", "Il fait 2 degrés ce matin, prends ta tuque!"),
+        Line(at(0, "08:18"), ME, "Trop tard, je suis déjà dehors 🥶"),
     ),
 }
 
@@ -248,19 +250,19 @@ DIRECT_LINES: dict[str, tuple[Line, ...]] = {
         Line(at(1, "18:40"), "Marie-Ève", "Super. Je réserve une table au café du marché"),
         Line(at(1, "18:44"), ME, "Parfait, à samedi 👍"),
         Line(
-            at(0, "18:40"), "Marie-Ève", "Mathilde est nouvelle, tu peux l'aider avec son Heltec?"
+            at(0, "10:50"), "Marie-Ève", "Mathilde est nouvelle, tu peux l'aider avec son Heltec?"
         ),
-        Line(at(0, "18:43"), ME, "Bien sûr, je lui écris"),
+        Line(at(0, "10:53"), ME, "Bien sûr, je lui écris"),
     ),
     "Mathilde": (
         Line(
-            at(0, "18:45"),
+            at(0, "10:55"),
             ME,
             "Salut! Marie-Ève m'a dit que tu commences. Besoin d'aide pour le Heltec?",
         ),
-        Line(at(0, "19:00"), "Mathilde", "Oui merci! Je ne sais pas quelle fréquence choisir"),
-        Line(at(0, "19:02"), ME, "910.525 MHz, BW 62.5, SF7. C'est le réglage de Montréal"),
-        Line(at(0, "19:10"), "Mathilde", "Ça marche! Je vois trois répéteurs maintenant 🎉"),
+        Line(at(0, "11:10"), "Mathilde", "Oui merci! Je ne sais pas quelle fréquence choisir"),
+        Line(at(0, "11:12"), ME, "910.525 MHz, BW 62.5, SF7. C'est le réglage de Montréal"),
+        Line(at(0, "11:20"), "Mathilde", "Ça marche! Je vois trois répéteurs maintenant 🎉"),
     ),
 }
 
@@ -275,23 +277,23 @@ ROOM_LINES: dict[str, tuple[Line, ...]] = {
         ),
         Line(at(2, "19:50"), "Marie-Ève", "J'y serai, avec des antennes à donner"),
         Line(
-            at(1, "22:50"),
-            "Le Babillard",
-            "Maintenance de Mont-Royal mardi de 22h à 23h. Prévoyez des détours.",
-        ),
-        Line(
             at(1, "12:50"),
             "Noor",
             "Perdu: un Heltec V3 dans un boîtier jaune, parc La Fontaine. Récompense: une poutine",
         ),
         Line(at(1, "13:00"), "Poutine Patrol", "J'offre la poutine si tu le retrouves 😄"),
+        Line(
+            at(1, "22:50"),
+            "Le Babillard",
+            "Maintenance de Mont-Royal mardi de 22h à 23h. Prévoyez des détours.",
+        ),
         Line(at(0, "07:50"), "5e1d9c07", "Quelqu'un a un connecteur SMA à prêter?"),
         Line(at(0, "08:40"), "Félix", "Moi, passe à Hochelaga quand tu veux"),
         Line(at(0, "08:50"), ME, "J'apporte le testeur d'antennes samedi"),
         Line(
-            at(0, "16:30"), "Kim-NDG", "Slides from the last meetup are on the board, ask Jean-Seb"
+            at(0, "10:30"), "Kim-NDG", "Slides from the last meetup are on the board, ask Jean-Seb"
         ),
-        Line(at(0, "19:15"), "Jean-Seb", "Il reste six places pour samedi"),
+        Line(at(0, "11:25"), "Jean-Seb", "Il reste six places pour samedi"),
     ),
 }
 
@@ -367,8 +369,8 @@ TRACES: tuple[tuple[float, str | None, tuple[str, ...]], ...] = (
             "Stade-Olympique",
         ),
     ),
-    (at(0, "16:05"), "Brossard", ("Mont-Royal", "Brossard", "Mont-Royal")),
-    (at(0, "18:12"), None, ("Mont-Royal", "Longueuil", "Stade-Olympique")),
+    (at(0, "09:05"), "Brossard", ("Mont-Royal", "Brossard", "Mont-Royal")),
+    (at(0, "10:20"), None, ("Mont-Royal", "Longueuil", "Stade-Olympique")),
 )
 
 #: The Watchtower: the nodes that our node watches, and the alerts that it raised and the
@@ -383,5 +385,5 @@ ALERTS: tuple[tuple[float, str, str, str], ...] = (
         "Verdun-Quai",
         "back on the air — heard again after a silence alarm",
     ),
-    (at(0, "17:55"), "new-node", "Mathilde", "first appearance — never heard on this mesh before"),
+    (at(0, "09:55"), "new-node", "Mathilde", "first appearance — never heard on this mesh before"),
 )

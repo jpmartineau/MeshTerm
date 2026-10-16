@@ -82,3 +82,19 @@ def test_prepare_writes_a_home(tmp_path: Path) -> None:
     assert (home / "meshterm.db").exists()
     assert (home / "rooms.json").exists()
     assert (home / "watchtower.json").exists()
+
+
+def test_each_line_is_sent_while_its_sender_transmits() -> None:
+    """No node speaks before our node first heard it, or after it went quiet."""
+    from meshterm.demo import script
+
+    groups = (script.CHANNEL_LINES, script.DIRECT_LINES, script.ROOM_LINES)
+    for group in groups:
+        for lines in group.values():
+            for line in lines:
+                node = world.BY_NAME.get(line.sender)
+                if node is None or node is world.SELF:
+                    continue  # an author that no contact names
+                age_h = line.age_min / 60.0
+                assert node.quiet_hours is not None, line
+                assert node.quiet_hours <= age_h <= node.first_heard_days * 24.0, line
