@@ -65,7 +65,9 @@ def _literal_colours() -> list[tuple[str, int, str]]:
                 and id(node) not in skipped
             ):
                 for match in _HEX.finditer(node.value):
-                    found.append((str(path.relative_to(PACKAGE.parent)), node.lineno, match.group(1)))
+                    found.append(
+                        (str(path.relative_to(PACKAGE.parent)), node.lineno, match.group(1))
+                    )
     return found
 
 
