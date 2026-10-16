@@ -135,10 +135,39 @@ alias to the gather step instead.
 What *does* still carry the number: `docs/cli/README.md` has a sample document with a `"version"`
 field, which is the live `{version}` placeholder and must show the new one.
 
-## 5. Commit, tag, push
+### The screenshots — made again, after the bump
+
+Every release refreshes the screenshots (JP, 2026-10-16: "make it so the images are
+automatically updated when we release"). They show the version in their header, so this
+runs **after** `__version__` changes and before the commit:
 
 ```
-git commit -a -m "MeshTerm X.Y.Z" -m "Co-Authored-By: <the model running this skill> <noreply@anthropic.com>"
+python scripts/screenshots.py
+git status --short docs/screenshots
+```
+
+It drives `--demo` headless and rewrites `docs/screenshots/{terminal,cardputer-zero,picocalc-lyra}/`
+(the README's four captures, and the website's three sets) and `docs/screenshots/splash/`
+(the website's splash), about a minute in all. The demo is deterministic, so the only
+changes should be the version in each header plus whatever the release changed on those
+screens. Open one image of each set and look at it before committing: a screen that
+changed in a way the changelog doesn't explain is a bug to understand, not a picture to
+ship. The images ride in the release commit, so the tag carries them and the `website`
+job builds meshterm.net from them.
+
+It needs the `dev` extras (Pillow, fontTools, time-machine), the emulator's Terminus font
+(`meshterm emulate --fetch-fonts`, once), Windows' Cascadia Mono and Segoe UI fonts, and
+the network for the map's tiles the first time. If it fails, stop and fix it, or ask JP
+whether to release with last release's images — don't commit a half-written set.
+
+## 5. Commit, tag, push
+
+Stage by name, not with `-a`: other sessions work in the same tree, and `-a` would sweep
+their unfinished edits into the release.
+
+```
+git add CHANGELOG.md meshterm/__init__.py docs/cli/README.md docs/screenshots
+git commit -m "MeshTerm X.Y.Z" -m "Co-Authored-By: <the model running this skill> <noreply@anthropic.com>"
 git tag -a vX.Y.Z -m "MeshTerm X.Y.Z"
 ```
 
@@ -167,7 +196,9 @@ gh release view vX.Y.Z
 ```
 
 Five platform builds, the release job, and `website` — which rebuilds meshterm.net from the
-tag so the site shows the new version — so it takes a few minutes. If only `website` fails,
+tag so the site shows the new version and the screenshots of step 4 — so it takes a few
+minutes. `website` runs the site repo's own `build.py`, so a change to the site's sources
+must be pushed to `meshterm.net` before the tag, or the job builds with the old ones. If only `website` fails,
 the release itself is fine (it runs after publishing); the usual cause is the
 `SITE_DEPLOY_KEY` secret, and once that is fixed `gh run rerun <run-id> --failed` finishes
 it.
