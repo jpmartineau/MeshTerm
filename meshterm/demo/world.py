@@ -111,7 +111,7 @@ _R, _C, _ROOM, _S = NODE_TYPE_REPEATER, NODE_TYPE_CHAT, NODE_TYPE_ROOM, NODE_TYP
 
 #: Our node: the companion that the demo device is. It stands in La Petite-Patrie, near the
 #: Jean-Talon market, with an antenna on the roof of a triplex.
-SELF = Node("Ruelle Verte", 0x91, _C, 45.5350, -73.6030, 2.0, first_heard_days=400.0)
+SELF = Node("Alex Base", 0x91, _C, 45.5350, -73.6030, 2.0, first_heard_days=400.0)
 
 # fmt: off
 #: The other nodes of the world. The repeaters stand on the high points. The companions are
@@ -133,15 +133,15 @@ NODES: tuple[Node, ...] = (
     Node("Mont-St-Bruno",   0xE1, _R, 45.5530, -73.3260, 13.0, first_heard_days=280.0),
     Node("Mont-St-Hilaire", 0x61, _R, 45.5490, -73.1570, 15.0, first_heard_days=45.0),
     # The room servers.
-    Node("Le Babillard",    0x3B, _ROOM, 45.5225, -73.5840, 4.0, first_heard_days=330.0),
+    Node("MTL BBS",         0x3B, _ROOM, 45.5225, -73.5840, 4.0, first_heard_days=330.0),
     Node("Café Mesh",       0x64, _ROOM, 45.5250, -73.5990, 3.0, first_heard_days=60.0,
          quiet_hours=9 * 24.0),
     # The sensors.
-    Node("Météo-Verdun",    0x58, _S, 45.4585, -73.5660, 3.0, first_heard_days=200.0,
+    Node("Verdun Weather",  0x58, _S, 45.4585, -73.5660, 3.0, first_heard_days=200.0,
          talk=0.6),
-    Node("Lac-aux-Castors", 0x9E, _S, 45.4985, -73.5970, 4.0, first_heard_days=150.0,
+    Node("Beaver Lake",     0x9E, _S, 45.4985, -73.5970, 4.0, first_heard_days=150.0,
          talk=0.6),
-    Node("Niveau-Fleuve",   0xCB, _S, 45.5110, -73.5470, 2.0, first_heard_days=110.0,
+    Node("River Gauge",     0xCB, _S, 45.5110, -73.5470, 2.0, first_heard_days=110.0,
          talk=0.6, quiet_hours=30.0),
     # The companions: the people of the mesh.
     Node("Marie-Ève",       0xE6, _C, 45.5255, -73.5790, 1.0, first_heard_days=320.0,
@@ -152,12 +152,12 @@ NODES: tuple[Node, ...] = (
          talk=1.2),
     Node("Dave-Lachine",    0x84, _C, 45.4385, -73.6710, 2.0, first_heard_days=150.0),
     Node("Kim-NDG",         0xBF, _C, 45.4735, -73.6145, 1.0, first_heard_days=260.0),
-    Node("Bixi Bandit",     0x94, _C, 45.5110, -73.5695, 0.0, shares_location=False,
+    Node("Nico R.",         0x94, _C, 45.5110, -73.5695, 0.0, shares_location=False,
          first_heard_days=90.0, talk=1.3),
     Node("Noor",            0x50, _C, 45.5075, -73.6880, 1.0, first_heard_days=75.0),
     Node("Chloé L.",        0xC9, _C, 45.5170, -73.6060, 1.0, first_heard_days=220.0),
     Node("Sam Verdun",      0x68, _C, 45.4610, -73.5690, 1.0, first_heard_days=240.0),
-    Node("Poutine Patrol",  0x22, _C, 45.5340, -73.5050, 1.0, first_heard_days=40.0),
+    Node("Steve K.",        0x22, _C, 45.5340, -73.5050, 1.0, first_heard_days=40.0),
     Node("Olivier.T",       0x33, _C, 45.5455, -73.5770, 1.0, first_heard_days=180.0,
          quiet_hours=50.0),
     Node("Raphaël",         0x0B, _C, 45.5810, -73.7480, 1.0, first_heard_days=130.0,
@@ -178,7 +178,7 @@ NODES: tuple[Node, ...] = (
          first_heard_days=3.0, talk=0.4),
     Node("Wio Tracker",     0xA0, _C, 45.4650, -73.5480, 0.0, added=False,
          first_heard_days=12.0, quiet_hours=20.0, talk=0.4),
-    Node("Station Mobile",  0xB2, _C, 45.5200, -73.5300, 0.0, shares_location=False,
+    Node("Mobile Node",     0xB2, _C, 45.5200, -73.5300, 0.0, shares_location=False,
          added=False, first_heard_days=1.5, talk=0.4),
 )
 # fmt: on
@@ -479,13 +479,13 @@ class Channel:
     scope: str | None = None
 
 
-#: The channels of the demo device. ``Famille`` is a private channel, with a fixed secret
+#: The channels of the demo device. ``Family`` is a private channel, with a fixed secret
 #: that is not derived from its name.
 CHANNELS: tuple[Channel, ...] = (
     Channel(0, "Public", DEFAULT_PUBLIC_SECRET),
     Channel(1, "#montreal", derive_secret("#montreal"), scope="mtl"),
-    Channel(2, "#velo", derive_secret("#velo")),
-    Channel(3, "Famille", hashlib.sha256(b"meshterm-demo/Famille").digest()[:16]),
+    Channel(2, "#cycling", derive_secret("#cycling")),
+    Channel(3, "Family", hashlib.sha256(b"meshterm-demo/Family").digest()[:16]),
 )
 
 #: Hashtag channels that other people of the mesh use and our device does not have. Our
@@ -498,33 +498,33 @@ FOREIGN_CHANNELS: tuple[bytes, ...] = tuple(
 
 #: The region table of each repeater, as ``(name, parent, allows floods)`` rows, in the
 #: form that :class:`~meshterm.core.region_sim.SimulatedRegionMap` takes. The island
-#: carries ``mtl``, the north shore ``laval``, and the south shore ``rive-sud``. Each
+#: carries ``mtl``, the north shore ``laval``, and the south shore ``south-shore``. Each
 #: repeater also carries the region of the whole province.
 REGION_TABLES: dict[str, list[tuple[str, str, bool]]] = {}
 
-_ISLAND = [("qc", "*", True), ("mtl", "qc", True), ("mtl-ouest", "mtl", True)]
+_ISLAND = [("qc", "*", True), ("mtl", "qc", True), ("mtl-west", "mtl", True)]
 _NORTH = [("qc", "*", True), ("mtl", "qc", True), ("laval", "qc", True)]
-_SOUTH = [("qc", "*", True), ("mtl", "qc", False), ("rive-sud", "qc", True)]
+_SOUTH = [("qc", "*", True), ("mtl", "qc", False), ("south-shore", "qc", True)]
 for _name in ("Oratoire", "Centre-Ville", "Stade-Olympique", "Verdun-Quai", "Ahuntsic"):
     REGION_TABLES[_name] = _ISLAND
 for _name in ("Lachine", "Pointe-Claire", "Île-Bizard"):
-    REGION_TABLES[_name] = [*_ISLAND, ("ouest-de-l-ile", "mtl-ouest", True)]
+    REGION_TABLES[_name] = [*_ISLAND, ("west-island", "mtl-west", True)]
 REGION_TABLES["Laval-Chomedey"] = _NORTH
 for _name in ("Longueuil", "Brossard", "Mont-St-Bruno"):
     REGION_TABLES[_name] = _SOUTH
-REGION_TABLES["Mont-St-Hilaire"] = [*_SOUTH, ("monteregie", "rive-sud", True)]
+REGION_TABLES["Mont-St-Hilaire"] = [*_SOUTH, ("monteregie", "south-shore", True)]
 # The hub of the island carries each region. Its table is too long for one reply, so the
 # region editor shows how it gets the rest.
 REGION_TABLES["Mont-Royal"] = [
     ("qc", "*", True),
     ("mtl", "qc", True),
-    ("mtl-ouest", "mtl", True),
-    ("mtl-est", "mtl", True),
-    ("ouest-de-l-ile", "mtl-ouest", True),
+    ("mtl-west", "mtl", True),
+    ("mtl-east", "mtl", True),
+    ("west-island", "mtl-west", True),
     ("laval", "qc", True),
-    ("rive-sud", "qc", True),
-    ("monteregie", "rive-sud", False),
-    ("rive-nord", "qc", False),
+    ("south-shore", "qc", True),
+    ("monteregie", "south-shore", False),
+    ("north-shore", "qc", False),
     ("plateau", "mtl", True),
 ]
 
@@ -534,11 +534,11 @@ REGION_TABLES["Mont-Royal"] = [
 ROUTED: tuple[str, ...] = (
     "Mont-Royal",
     "Stade-Olympique",
-    "Le Babillard",
+    "MTL BBS",
     "Marie-Ève",
     "Jean-Seb",
     "Dave-Lachine",
-    "Bixi Bandit",
+    "Nico R.",
     "Mathilde",
 )
 
@@ -563,5 +563,5 @@ ADMINISTERED: tuple[str, ...] = ("Mont-Royal", "Stade-Olympique")
 
 #: The room that our node joined, and its room password (the stock password of a room
 #: server, which the simulator accepts).
-JOINED_ROOM = "Le Babillard"
+JOINED_ROOM = "MTL BBS"
 ROOM_PASSWORD = "hello"
