@@ -63,4 +63,7 @@ the survey does not say which.
 
 `screenshots/` has the captures that the README shows. It also has the captures from which
 [meshterm.net](https://meshterm.net) builds its landing page. Thus more than one place
-refers to each file in this folder.
+refers to each file in this folder. The folders `terminal/`, `cardputer-zero/`, and
+`picocalc-lyra/` hold the same four screens on each platform. `scripts/screenshots.py`
+makes them from the demo mesh, and they are the same at each run (refer to
+`scripts/README.md`).
