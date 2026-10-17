@@ -48,6 +48,7 @@ import tempfile
 import threading
 import time
 import traceback
+import unicodedata
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -224,7 +225,9 @@ def _child(name: str, out: Path) -> int:
     return run_demo(name, tour, background=False)
 
 
-def run_demo(name: str, tour: Tour, *, background: bool) -> int:
+def run_demo(
+    name: str, tour: Tour, *, background: bool, grid: tuple[int, int] = TERMINAL_GRID
+) -> int:
     """Run MeshTerm with ``--demo`` in this process, as the set ``name``, and do ``tour``.
 
     The tour runs in a thread of its own while MeshTerm runs in the main thread. When the
@@ -236,6 +239,8 @@ def run_demo(name: str, tour: Tour, *, background: bool) -> int:
         tour: What to do with MeshTerm.
         background: Whether the demo device plays the background traffic of the world
             (:data:`meshterm.demo.device.PLAY_BACKGROUND`).
+        grid: The columns and the rows of the terminal set. A handheld set always has the
+            grid of its display.
 
     Returns:
         1, which comes only if MeshTerm stopped before the tour ended it.
@@ -261,7 +266,7 @@ def run_demo(name: str, tour: Tour, *, background: bool) -> int:
         cols, rows = handheld.platform.readable_cols, handheld.platform.readable_rows
         depth, platform = handheld.color_depth, handheld.id
     else:
-        cols, rows = TERMINAL_GRID
+        cols, rows = grid
         depth, platform = ColorDepth.TRUE_COLOR, "regular"
     lock = threading.Lock()
     with create_pipe_input() as pipe:
@@ -569,6 +574,14 @@ class TerminalPainter:
             return
         font = self.bold if bold and code in self.fonts[0][1] else None
         if font is None:
+            font = next((f for f, cmap in self.fonts if code in cmap), None)
+        if font is None:
+            # No font has the character. Draw its compatibility form, if a font has that: a
+            # full-width form (the "＃" of a hashtag channel) as its ASCII character, centred
+            # in its two cells. A terminal gets the same shape from a CJK font.
+            folded = unicodedata.normalize("NFKC", base)
+            if len(folded) == 1 and any(ord(folded) in cmap for _, cmap in self.fonts):
+                char, code = folded, ord(folded)
             font = next((f for f, cmap in self.fonts if code in cmap), self.fonts[0][0])
         span = self.cw * (2 if wide else 1)
         draw.text((x + span / 2, y + self.baseline), char, font=font, fill=fg, anchor="ms")
