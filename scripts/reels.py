@@ -1,12 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Make the videos of MeshTerm for Instagram from the demo mesh.
 
-    python scripts/reels.py NAME [--out DIR] [--recording FILE]
+    python scripts/reels.py NAME ... [--out DIR] [--recordings DIR]
+    python scripts/reels.py all [--out DIR] [--recordings DIR]
 
-Each video shows one feature of MeshTerm. ``NAME`` is one of :data:`REELS`. The video is
-a Reel: a vertical video of 1080×1920 pixels (9:16), at 30 video frames each second. It
-has subtitles in the picture and no sound. Many people watch Instagram with the sound
-off, and Instagram cannot show a subtitle file on a Reel.
+Each video shows one page of MeshTerm. ``NAME`` is a key of ``reel_tours.REELS``, where
+the tours are, and ``all`` makes each video, one after the other. The video is a Reel: a
+vertical video of 1080×1920 pixels (9:16), at 30 video frames each second. It has
+subtitles in the picture and no sound. Many people watch Instagram with the sound off,
+and Instagram cannot show a subtitle file on a Reel.
 
 The script runs MeshTerm with ``--demo`` in this process, as ``scripts/video.py`` does.
 The terminal has 72 columns, the narrowest terminal where each screen of the regular
@@ -16,11 +18,12 @@ under it are the subtitles. The bottom of the video stays empty, because Instagr
 the name of the account and the caption of the post there. The video ends on a card with
 the wordmark and the address of the website.
 
-The demo device plays no background traffic. Thus the screen does not change while the
-tour waits off camera for a live message, and the cut does not show.
+The demo device plays no background traffic, except for a page that shows the traffic
+(``Reel.background``). Thus the screen does not change while the tour waits off camera
+for a live message, and the cut does not show.
 
-The script writes three files into ``DIR`` (by default ``output/reels``, which git does
-not track):
+For each video, the script writes three files into ``DIR`` (by default ``output/reels``,
+which git does not track):
 
 * ``NAME.mp4``: the video, H.264 High in ``yuv420p``, with its ``moov`` box at the
   start. It has a silent AAC track: the track costs almost nothing, and some apps that
@@ -28,6 +31,10 @@ not track):
 * ``NAME-cover.png``: the cover of the Reel, 1080×1920. The grid of a profile shows its
   centre, at 3:4.
 * ``NAME.txt``: a caption for the post.
+
+With ``--recordings``, the script keeps the recording of each video in that folder
+(``NAME.pickle``). When the file exists, a later run paints and encodes it again, and does
+not run MeshTerm. Never keep a recording across a change to the app.
 
 What it needs: the needs of ``scripts/video.py``, but not the website checkout.
 """
@@ -42,11 +49,11 @@ import tempfile
 import time
 from collections.abc import Callable, Iterable
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import dataclass
 from pathlib import Path
 
 import screenshots
 import video
+from reel_tours import REELS, Reel
 from screenshots import ROOT, Capture
 
 FPS = video.FPS
@@ -94,57 +101,89 @@ Cue = tuple[int, str | None]
 
 
 def main(argv: list[str]) -> int:
-    """Record the tour of one video in a child process, then paint and encode it."""
+    """Make each video that ``argv`` names, one after the other.
+
+    Returns:
+        0 if each video was made, 1 if one or more failed. A failure does not stop the
+        videos after it.
+    """
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("name", choices=sorted(REELS))
+    parser.add_argument("names", nargs="+", metavar="NAME", help=f"all, or: {', '.join(REELS)}")
     parser.add_argument("--out", type=Path, default=ROOT / "output" / "reels")
     parser.add_argument(
-        "--recording",
+        "--recordings",
         type=Path,
-        help="keep the recording in this file. If the file exists, use it and do not run MeshTerm",
+        help="keep each recording in this folder. If it has one, use it and do not run MeshTerm",
     )
     parser.add_argument("--child", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
-    reel = REELS[args.name]
+    names = list(REELS) if args.names == ["all"] else args.names
+    unknown = [name for name in names if name not in REELS]
+    if unknown:
+        parser.error(f"no video named {', '.join(unknown)}")
     if args.child:
+        reel = REELS[names[0]]
         video._watch_live_start()
         return screenshots.run_demo(
             "terminal",
             lambda capture, keys: _record(capture, keys, reel, args.child),
-            background=False,
+            background=reel.background,
             grid=GRID,
         )
     args.out.mkdir(parents=True, exist_ok=True)
+    if args.recordings:
+        args.recordings.mkdir(parents=True, exist_ok=True)
+    failed = [name for name in names if not _make(name, args.out, args.recordings)]
+    if failed:
+        print(f"failed: {', '.join(failed)}", flush=True)
+    return 1 if failed else 0
+
+
+def _make(name: str, out: Path, recordings: Path | None) -> bool:
+    """Record the tour of one video in a child process, then paint and encode it.
+
+    Returns:
+        Whether the video was made.
+    """
+    reel = REELS[name]
     with tempfile.TemporaryDirectory(prefix="meshterm-reel-") as work:
-        recording = args.recording or Path(work) / "recording.pickle"
+        recording = (recordings or Path(work)) / f"{name}.pickle"
         if not recording.exists():
-            print(f"recording the tour of {args.name}...", flush=True)
+            print(f"{name}: recording the tour...", flush=True)
             home = Path(tempfile.gettempdir()) / "meshterm-reels"
             done = subprocess.run(
-                [sys.executable, __file__, args.name, "--child", str(recording)],
-                env=screenshots.child_env(home),
+                [sys.executable, __file__, name, "--child", str(recording)],
+                # The size of the terminal for what reads it from the environment, such as
+                # Diagnostics (shutil.get_terminal_size). The process has no terminal.
+                env={
+                    **screenshots.child_env(home),
+                    "COLUMNS": str(GRID[0]),
+                    "LINES": str(GRID[1]),
+                },
                 check=False,
             )
             if done.returncode or not recording.exists():
-                print(f"the recording failed ({done.returncode})", flush=True)
-                return 1
+                print(f"{name}: the recording failed ({done.returncode})", flush=True)
+                return False
         tape = pickle.loads(recording.read_bytes())
         states = _states(tape["frames"], tape["cues"])
-        print(f"painting {len(set(states))} images for {len(states) / FPS:.1f} s...", flush=True)
+        print(
+            f"{name}: painting {len(set(states))} images for {len(states) / FPS:.1f} s...",
+            flush=True,
+        )
         images = _paint(reel.title, tape["grids"], tape["cues"], states, Path(work))
-        target = args.out / f"{args.name}.mp4"
-        print("encoding...", flush=True)
+        target = out / f"{name}.mp4"
         _encode([images[state] for state in states], Path(work), target)
         frames = tape["frames"]
         mark = tape["marks"].get("poster", len(frames) // 2)
         poster = tape["grids"][frames[min(mark, len(frames) - 1)]]
-        cover = args.out / f"{args.name}-cover.png"
+        cover = out / f"{name}-cover.png"
         Composer(reel.title).frame(poster, (tape["cues"][0][1], 1.0, True)).save(cover)
-        caption = args.out / f"{args.name}.txt"
+        caption = out / f"{name}.txt"
         caption.write_text(reel.caption, encoding="utf-8")
     for path in (target, cover, caption):
         print(f"{path} ({path.stat().st_size // 1024} KB)", flush=True)
-    return 0
+    return True
 
 
 # --------------------------------------------------------------------------- the child
@@ -161,6 +200,49 @@ class Director(video.Presenter):
     def subtitle(self, text: str | None) -> None:
         """Show ``text`` from the next video frame (refer to :data:`Cue`)."""
         self.cues.append((len(self.camera.frames), text))
+
+    def open_page(
+        self, name: str, wait: str, *, settle: float = 0.8, timeout: float = 30.0
+    ) -> None:
+        """Open a page from the main menu, off camera: type ``name`` to filter, then Enter.
+
+        Args:
+            name: The start of the name of the page in the menu.
+            wait: A text that the page shows when it is open.
+            settle: How long the screen must stay the same before the tour goes on.
+            timeout: How long to wait for the page (the map loads its tiles).
+        """
+        self.capture.wait_for("Chat", timeout=60)
+        self.capture.settle(quiet=0.5)
+        self.type(name)
+        self.key("enter")
+        self.wait_for(wait, timeout=timeout)
+        self.capture.settle(quiet=settle, timeout=timeout)
+
+    def start(self, text: str) -> None:
+        """Show the first subtitle, and roll the camera."""
+        self.subtitle(text)
+        self.camera.roll()
+
+    def count(self, text: str) -> int:
+        """How many times ``text`` is on the screen now."""
+        with self.capture.lock:
+            return self.capture.terminal.text().count(text)
+
+    def wait_until_shows(self, test: Callable[[], bool], timeout: float = 30.0) -> None:
+        """Wait until ``test`` is true.
+
+        Raises:
+            TimeoutError: The test stayed false.
+        """
+        start = time.monotonic()
+        while time.monotonic() - start < timeout:
+            if test():
+                return
+            time.sleep(0.1)
+        with self.capture.lock:
+            screen = self.capture.terminal.text()
+        raise TimeoutError(f"the screen did not change as expected. The screen:\n{screen}")
 
     def walk_to(self, label: str, key: str = "up", tries: int = 16, pause: float = 0.22) -> None:
         """Press ``key`` at a steady pace until the highlight is on the line of ``label``.
@@ -191,82 +273,6 @@ def _record(capture: Capture, type_text: Callable[[str], None], reel: Reel, path
     }
     path.write_bytes(pickle.dumps(tape, protocol=pickle.HIGHEST_PROTOCOL))
     print(f"recorded {len(camera.frames) / FPS:.1f} s, {len(camera.grids)} screens", flush=True)
-
-
-def _chat(d: Director) -> None:
-    """The chat: the conversations, a live message, the paths, a mention, and a QR code."""
-    from meshterm.demo import script
-
-    capture = d.capture
-    capture.wait_for("Chat", timeout=60)
-    capture.settle(quiet=0.5)
-    # The video starts on the list of the conversations. The main menu is not in it.
-    d.type("chat")
-    d.key("enter")
-    d.wait_for("pick a conversation")
-    capture.settle(quiet=0.8)
-
-    print("the conversations", flush=True)
-    d.subtitle("Off-grid chat over *LoRa radio*,\nright in your terminal")
-    d.camera.roll()
-    d.hold(2.8)
-    d.type("pub")
-    d.hold(0.5)
-    d.key("enter", pause=0.0)
-    d.wait_for(screenshots.PATHS_MESSAGE[2])
-    d.subtitle("Everyone gets\ntheir own *colour*")
-    d.hold(2.6)
-
-    print("a live message", flush=True)
-    offset, _, line = next(item for item in script.LIVE_CHANNEL if item[1] == "Public")
-    with d.off_camera():
-        d.wait_until(video._start() + offset - 0.8)
-    d.wait_for(line.text, timeout=20)
-    d.subtitle("New messages arrive *live*,\nover the air")
-    d.hold(2.4)
-
-    print("the paths of a message", flush=True)
-    for _ in range(3):  # Chloé, Félix, then Gabriel
-        d.key("up", pause=0.45)
-    d.hold(0.5)
-    # A key press can be lost while the transcript draws. The camera does not show the
-    # tries: it shows the dialog of the right message as it opens.
-    with d.off_camera():
-        video._open_paths(d)
-    d.subtitle("See *every path* a message\ntook to reach you")
-    d.hold(2.2)
-    d.key("down", pause=1.4)
-    d.key("up", pause=1.4)
-    d.key("down", pause=0.5)
-    d.camera.mark("poster")
-    d.hold(1.6)
-    d.key("escape")
-    d.key("escape")  # the first Esc closes the dialog, the second clears the selection
-
-    print("a mention, and its answer", flush=True)
-    d.subtitle("*Mentions* turn into\nname tags as you type")
-    d.hold(0.6)
-    # The mention is typed in full: the ] makes it a chip.
-    d.type("Hey @[Dave-Lachine], are you coming Saturday?")
-    d.hold(0.8)
-    d.key("enter", pause=0.0)
-    sent = time.monotonic()
-    d.wait_for("0/130")  # the compose line is empty: the message went
-    d.hold(0.8)
-    # Dave answers after ``script.REPLY_DELAY_S``. The camera does not show most of the wait.
-    with d.off_camera():
-        d.wait_until(sent + script.REPLY_DELAY_S - 0.6)
-    d.wait_for("be there at 2", timeout=30)
-    d.subtitle("When someone *mentions you*,\nyou get a ★")
-    d.hold(2.8)
-
-    print("a link as a QR code", flush=True)
-    d.subtitle("Turn any link into a\n*QR code* for your phone")
-    d.hold(0.4)
-    d.walk_to("11:04")  # our message with the link to the map
-    d.hold(0.7)
-    d.key(text="u", ctrl=True, pause=0.0)
-    d.hold(3.4)
 
 
 # --------------------------------------------------------------------------- the video
@@ -540,44 +546,6 @@ def _encode(images: list[Path], work: Path, target: Path) -> None:
         "-movflags", "+faststart", str(target),
     ]  # fmt: skip
     subprocess.run(command, check=True)
-
-
-# --------------------------------------------------------------------------- the reels
-
-
-@dataclass(frozen=True)
-class Reel:
-    """One video of the series.
-
-    Attributes:
-        title: The name of the feature, in the series line above the terminal.
-        tour: The keys of the tour, and the subtitles.
-        caption: The text of the post on Instagram.
-    """
-
-    title: str
-    tour: Callable[[Director], None]
-    caption: str
-
-
-REELS: dict[str, Reel] = {
-    "chat": Reel(
-        "Chat",
-        _chat,
-        "Off-grid chat over LoRa radio, right in your terminal.\n"
-        "\n"
-        "MeshTerm is a free, open-source MeshCore client for Windows, macOS, and Linux. "
-        "Chat on channels, in direct messages, and in rooms. See every path a message took "
-        "across the mesh. Mention a friend, and their name turns into a tag. Turn any link "
-        "into a QR code for your phone.\n"
-        "\n"
-        "Filmed in MeshTerm's demo mesh over Montréal (meshterm --demo).\n"
-        "\n"
-        "meshterm.net\n"
-        "\n"
-        "#MeshCore #LoRa #OffGrid #MeshNetwork #Terminal #TUI #OpenSource\n",
-    ),
-}
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ These are tools for the repository. None of them is in the wheel.
 | `cardputer-zero/` | `build-deb.sh` builds the Debian package for M5Stack's app store. Run it on the Cardputer Zero or on another arm64 Debian 13 system. `store/` holds the listing for the store (`app-builder.json`, which `czdev publish` reads), its icon, and its screenshots. `screenshot.py` saves the display of a Cardputer as a 320×170 PNG over SSH, as the store wants a screenshot. `store-publish.py` sends a package to the store with M5Stack's `czdev`, with two corrections. The release workflow runs it after each release. `launcher-entry.sh` puts a source checkout in the Cardputer Zero's app launcher. `remove` takes it out. `meshterm.png` is the package's icon: the website's logo, at the launcher's 100×100 size. `meshterm-dev.png` is its negative, for the checkout's entry, so that the two entries look different. `type-text.py` types a pasted string (an API key, a Wi-Fi password) on the Cardputer's keyboard from another computer, over SSH |
 | `screenshots.py` | Makes the screenshots of the website from the demo mesh (`--demo`): the main menu, the chat, the paths of a message, and the map, for the terminal, the Cardputer Zero, and the PicoCalc. They are the same at each run. The result goes to `docs/screenshots/<set>/`. It also draws the two wordmarks of the splash into `docs/screenshots/splash/`, which the website uses as its splash |
 | `video.py` | Makes the demo video of the website from the demo mesh: a tour of less than two minutes in the terminal, with its poster and its play card. The result goes to `src/` of the `meshterm.net` checkout beside this one |
-| `reels.py` | Makes the videos for Instagram from the demo mesh: one vertical video for each feature, with subtitles in the picture and no sound, a cover, and a caption for the post. The result goes to `output/reels/` |
+| `reels.py` | Makes the videos for Instagram from the demo mesh: one vertical video for each page, with subtitles in the picture and no sound, a cover, and a caption for the post. The tours are in `reel_tours.py`. The result goes to `output/reels/` |
 | `picocalc-lyra/` | Setup of the Calculinux device: console font, palette, Wi-Fi. `xiao-radio/` is the kit for the XIAO radio (firmware build, flashing, UART setup) |
 | `uconsole/` | The uConsole's always-on SPI bridge service. MeshTerm can also control that radio directly, with no script (refer to `docs/devices/uconsole.md`) |
 
@@ -118,25 +118,30 @@ the `meshterm.net` repository).
 
 ## reels.py
 
-This script makes the videos for Instagram. Each video shows one feature of MeshTerm, in
-the demo mesh. It is a Reel: a vertical video of 1080×1920 pixels, at 30 video frames each
-second. The terminal has 72 columns, so that its text is as large as the width of a phone
-lets it be. Above the terminal is the name of the series (`MeshTerm for MeshCore · Chat`), and under it
-are the subtitles. The video has no sound, because many people watch Instagram with the
-sound off. It ends on a card with the wordmark and the address of the website.
+This script makes the videos for Instagram: one for each page of MeshTerm, in the demo mesh.
+The written pages (About MeshTerm, About the author, Join Discord, and Support MeshTerm)
+have no video. Each video is a Reel: a vertical video of 1080×1920 pixels, at 30 video
+frames each second. The terminal has 72 columns, so that its text is as large as the width
+of a phone lets it be. Above the terminal is the name of the series
+(`MeshTerm for MeshCore · Chat`), and under it are the subtitles. The video has no sound,
+because many people watch Instagram with the sound off. It ends on a card with the wordmark
+and the address of the website.
 
 ```bash
-python scripts/reels.py chat                            # into output/reels/
+python scripts/reels.py all                             # each video, into output/reels/
+python scripts/reels.py chat map                        # only these two
 python scripts/reels.py chat --out some/folder
-python scripts/reels.py chat --recording chat.pickle    # keep the recording
+python scripts/reels.py all --recordings some/folder    # keep the recordings
 ```
 
-`chat` is the only video now: the list of the conversations, a message that arrives, the
-paths of a message, a mention and its answer, and a link as a QR code. To add a video, write
-its tour and add it to `REELS`. A tour types the keys, as in `video.py`, and also writes the
-subtitles (`Director.subtitle`).
+The tours are in `reel_tours.py`, with the subtitles and the caption of each video, in the
+`REELS` table. To add a video, write its tour and add it to `REELS`. A tour types the keys,
+as in `video.py`, and also writes the subtitles (`Director.subtitle`). It opens its page
+off camera, so that the video starts on the page.
 
-The script writes three files: `<name>.mp4` (the video, with a silent audio track),
-`<name>-cover.png` (the cover of the Reel), and `<name>.txt` (a caption for the post). It
-needs the same things as `video.py`, but not the website checkout. A run takes
-approximately two minutes.
+For each video, the script writes three files: `<name>.mp4` (the video, with a silent audio
+track), `<name>-cover.png` (the cover of the Reel), and `<name>.txt` (a caption for the
+post). It needs the same things as `video.py`, but not the website checkout. One video
+takes approximately two minutes, and all of them approximately 45 minutes. With
+`--recordings`, the script keeps each recording in that folder, and a later run paints and
+encodes it again without MeshTerm.
