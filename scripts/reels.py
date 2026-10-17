@@ -55,15 +55,19 @@ FPS = video.FPS
 WIDTH, HEIGHT = 1080, 1920
 
 #: The terminal: 72 columns, the narrowest one where each screen stays readable. With the
-#: cell of :data:`FONT_SIZE`, it is the full width of the video.
-GRID = (72, 28)
+#: cell of :data:`FONT_SIZE`, it is the full width of the video. Its 38 rows fill the
+#: height of the video down to the subtitles (refer to :data:`TOP`).
+GRID = (72, 38)
 
 #: The size of the font of the terminal painter. It draws a cell of 14×29 pixels.
 FONT_SIZE = 12
 
-#: The part of the video that Instagram does not cover: its top bar is above, and the
-#: name of the account and the caption of the post are below.
-SAFE_TOP, SAFE_BOTTOM = 220, 1480
+#: The part of the video that the series line, the terminal, and the subtitles fill.
+#: Instagram's top bar is above it. The name of the account and the caption of the post
+#: are below it, in the bottom 20%. Some guides keep the bottom 35% free, but then the
+#: terminal fills less than half of the height. With this layout, a long caption can
+#: cover the subtitles, but not the terminal (JP chose this layout, 2026-10-17).
+TOP, BOTTOM = 150, 1530
 
 #: The colours. ``INK`` is the bright white of the website, ``MUTED`` the muted grey of
 #: the theme, and ``BORDER`` the dark grey of the theme.
@@ -326,10 +330,10 @@ class Composer:
         self.advance = self.sub_font.getlength("M")
         self.line_height = 64
 
-        # The block from the series line to the subtitles, in the middle of the safe part.
+        # The block from the series line to the subtitles, in the middle of its part.
         tw, th = self.term_size
         block = 44 + 36 + th + 44 + 2 * self.line_height
-        top = SAFE_TOP + (SAFE_BOTTOM - SAFE_TOP - block) // 2
+        top = TOP + (BOTTOM - TOP - block) // 2
         self.term_at = ((WIDTH - tw) // 2, top + 44 + 36)
         self.sub_top = self.term_at[1] + th + 44
 
@@ -422,7 +426,7 @@ class Composer:
             (self._bold(screenshots.TEXT_FONTS[0], 64), [("meshterm.net", BRAND)], 0),
         ]
         block = logo.height + 90 + sum(gap for *_, gap in lines) + 40
-        top = SAFE_TOP + (SAFE_BOTTOM - SAFE_TOP - block) // 2
+        top = TOP + (BOTTOM - TOP - block) // 2
         image = Image.new("RGB", (WIDTH, HEIGHT), BLACK)
         image.paste(logo, ((WIDTH - logo.width) // 2, top))
         draw = ImageDraw.Draw(image)
