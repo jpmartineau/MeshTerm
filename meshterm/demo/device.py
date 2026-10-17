@@ -42,6 +42,14 @@ _PART_S = 3600.0
 #: The lines of the script still arrive.
 PLAY_BACKGROUND = True
 
+#: The TX power of each repeater of the world, as a read of its settings shows it.
+REMOTE_TX = 22
+
+#: The TX power at which a repeater of the world is best heard. It is lower than
+#: :data:`REMOTE_TX`. Thus TX optimize finds a lower power for a repeater, with a better
+#: signal at its target (refer to :meth:`DemoDevice._tuned`).
+REMOTE_TX_BEST = 19
+
 
 class DemoDevice(MockDevice):
     """The simulator, in the demo world (refer to the module docstring)."""
@@ -51,10 +59,12 @@ class DemoDevice(MockDevice):
         super().__init__(
             seed=hash_seed("device"),
             optimal_tx=TX_POWER,
+            optimal_remote_tx=REMOTE_TX_BEST,
             admin_password=world.ADMIN_PASSWORD,
         )
         now = utcnow()
         self._tx_power = TX_POWER
+        self._default_remote_tx = REMOTE_TX
         self._contacts = [_contact(node) for node in world.NODES if node.added]
         room = world.node(world.JOINED_ROOM)
         # The room knows our node as a member. Its posts until now are in the history
@@ -229,15 +239,16 @@ class DemoDevice(MockDevice):
         if relays is None:
             return TraceResult(target=target, success=False, tx_power=self._tx_power)
         walked = world.walk(relays, self._rng)
-        if not walked.success:
+        snrs = self._tuned(relays, walked.snrs) if walked.success else None
+        if snrs is None:
             return TraceResult(
                 target=target, success=False, tx_power=self._tx_power, path_hash_bytes=width
             )
         hops = [
             Hop(index, relay.public_key[: 2 * width], snr)
-            for index, (relay, snr) in enumerate(zip(relays, walked.snrs, strict=False))
+            for index, (relay, snr) in enumerate(zip(relays, snrs, strict=False))
         ]
-        hops.append(Hop(len(relays), None, walked.snrs[-1]))
+        hops.append(Hop(len(relays), None, snrs[-1]))
         return TraceResult(
             target=target,
             success=True,
@@ -246,6 +257,37 @@ class DemoDevice(MockDevice):
             tx_power=self._tx_power,
             path_hash_bytes=width,
         )
+
+    def _tuned(self, relays: list[world.Node], snrs: list[float]) -> list[float] | None:
+        """The readings of a trace, with the TX power that TX optimize set on its relays.
+
+        The world gives each link its SNR at :data:`REMOTE_TX_BEST`. A relay that
+        transmits at another power is heard less well on the link that it transmits into.
+        The loss follows the curve of the simulator, which has its peak at the best power
+        (:meth:`~meshterm.core.connection.MockDevice._expected_remote_snr`). Thus the sweep
+        of TX optimize finds that peak, and a power far from it loses traces: a reading
+        under :data:`~meshterm.demo.world.FLOOR_DB` always does. A relay that nobody tuned
+        keeps the readings of the world.
+
+        Args:
+            relays: The forced path, as nodes.
+            snrs: The readings of the world: one for each link, the last one back to us.
+
+        Returns:
+            The readings, or ``None`` if a weaker link lost the trace.
+        """
+        best = self._expected_remote_snr(self.optimal_remote_tx)
+        readings = list(snrs)
+        for index, relay in enumerate(relays):
+            tx = self._remote_tx_for(relay.public_key)
+            if tx is None:
+                continue
+            snr = readings[index + 1] + self._expected_remote_snr(tx) - best
+            # Below the floor, the radio cannot decode the packet at all.
+            if snr < world.FLOOR_DB or self._rng.random() < world.loss_chance(snr):
+                return None
+            readings[index + 1] = round(snr * 4) / 4
+        return readings
 
     # -- the live traffic ---------------------------------------------------------------
 

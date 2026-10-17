@@ -74,6 +74,26 @@ def test_the_demo_device_traces_a_path() -> None:
     assert [h.node for h in result.hops] == ["d8", "2a", "d8", None]
 
 
+def test_a_tuned_repeater_is_heard_best_at_its_best_power() -> None:
+    """TX optimize finds a peak: far from its best power, a relay loses the target."""
+    from meshterm.demo.device import REMOTE_TX_BEST
+
+    async def heard(tx: int) -> list[float]:
+        device = DemoDevice()
+        await device.connect()
+        rosemont = next(c for c in await device.get_contacts() if c.name == "Rosemont")
+        await device.admin_login(rosemont, world.ADMIN_PASSWORD)
+        await device.set_remote_tx_power(rosemont, tx)
+        spec = ",".join(world.node(n).hash for n in ("Rosemont", "Mont-Royal", "Rosemont"))
+        results = [await device.run_trace("(path)", path=spec) for _ in range(5)]
+        return [result.hops[1].snr for result in results if result.success]
+
+    best = asyncio.run(heard(REMOTE_TX_BEST))
+    far = asyncio.run(heard(REMOTE_TX_BEST + 8))
+    assert best
+    assert not far or max(far) < min(best)
+
+
 def test_prepare_writes_a_home(tmp_path: Path) -> None:
     """The demo home gets a database and the stores of the joined room and the alerts."""
     home = tmp_path / "demo"
