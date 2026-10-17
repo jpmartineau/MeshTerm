@@ -88,6 +88,7 @@ the map, Repeater admin, and the live feed. A camera copies the screen 30 times 
 python scripts/video.py                             # into ../meshterm.net/src/
 python scripts/video.py --out some/folder
 python scripts/video.py --recording tour.pickle     # keep the recording
+python scripts/video.py --readme                    # the README's copy, after a check
 ```
 
 It needs ffmpeg with libx264 on the `PATH`, and the needs of `screenshots.py`. A run takes
@@ -101,6 +102,12 @@ which the website shows before the video plays), and `demo-play.png` (the poster
 play mark and the length of the video). The camera stops while the tour waits for
 something slow: the tiles of the map, and most of the read of the repeater's settings.
 Thus the video jumps over the wait.
+
+With `--readme`, the script makes no video. It uploads `demo.mp4` to GitHub as an
+attachment of the repository, because GitHub plays a video in a README only when it is one
+of its own attachments. Then it puts the new URL on the attachment line of `README.md`. It
+uses an endpoint that GitHub does not document, with the token of the GitHub CLI. Each
+upload stays on GitHub, so use it only on a video that you examined.
 
 Each run gives the same video to the eye, but not the same file, because the camera copies
 the screen on the real clock. Each release makes the video again, after the screenshots,

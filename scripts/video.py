@@ -2,6 +2,7 @@
 """Make the demo video of the website from the demo mesh.
 
     python scripts/video.py [--out DIR] [--recording FILE]
+    python scripts/video.py --readme [--out DIR]
 
 The script runs MeshTerm with ``--demo`` in an 80×24 terminal, as the terminal set of
 ``scripts/screenshots.py`` does, and types the keys of a tour of less than two minutes:
@@ -37,22 +38,31 @@ keys at the same pace, and the demo plays the same messages and packets at the s
 after its start. But the camera copies the screen on the real clock, so a change can come
 one video frame earlier or later than in another run.
 
+With ``--readme``, the script makes no video. It uploads ``DIR/demo.mp4`` to GitHub for
+the README of MeshTerm, and puts the URL of the upload in ``README.md`` (refer to
+:func:`_publish_readme`).
+
 What it needs, beside the needs of ``scripts/screenshots.py``: ffmpeg, with libx264, on the
-``PATH``.
+``PATH``. With ``--readme``, the GitHub CLI (``gh``), logged in to an account that can
+write to MeshTerm.
 """
 
 from __future__ import annotations
 
 import argparse
 import contextlib
+import json
 import pickle
 import random
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import urllib.parse
+import urllib.request
 from collections.abc import Callable, Iterator
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -74,6 +84,13 @@ BRAND_LIGHT = (0x99, 0xF6, 0xE4)
 #: One copy of the screen: the rows of ``(character, style)`` cells of the VT parser.
 Grid = tuple[tuple[tuple[str, object], ...], ...]
 
+#: The repository whose README plays the video.
+REPOSITORY = "jpmartineau/MeshTerm"
+
+#: The line of the README that GitHub shows as a video player: the URL of an attachment,
+#: alone on its line.
+ATTACHMENT_LINE = re.compile(r"^https://github\.com/user-attachments/assets/[0-9a-f-]+$", re.M)
+
 
 def main(argv: list[str]) -> int:
     """Record the tour in a child process, then paint and encode the video."""
@@ -84,6 +101,11 @@ def main(argv: list[str]) -> int:
         type=Path,
         help="keep the recording in this file. If the file exists, use it and do not run MeshTerm",
     )
+    parser.add_argument(
+        "--readme",
+        action="store_true",
+        help="make no video: upload DIR/demo.mp4 for the README, and put its URL in README.md",
+    )
     parser.add_argument("--child", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.child:
@@ -91,6 +113,9 @@ def main(argv: list[str]) -> int:
         return screenshots.run_demo(
             "terminal", lambda capture, keys: _record(capture, keys, args.child), background=True
         )
+    if args.readme:
+        print(_publish_readme(args.out / "demo.mp4"), flush=True)
+        return 0
     if not args.out.is_dir():
         raise SystemExit(f"video.py: {args.out} is not a folder. Pass --out.")
     if shutil.which("ffmpeg") is None:
@@ -665,6 +690,76 @@ def _card(image, seconds: float):  # noqa: ANN001, ANN202 - an Image, an Image
     layer = layer.resize((width, height), Image.Resampling.LANCZOS)
     base = ImageEnhance.Brightness(image.convert("RGB")).enhance(0.75).convert("RGBA")
     return Image.alpha_composite(base, layer).convert("RGB")
+
+
+# --------------------------------------------------------------------------- the README
+
+
+def _publish_readme(video: Path) -> str:
+    """Upload ``video`` to GitHub for the README, and put its URL in ``README.md``.
+
+    GitHub plays a video in a README only when the video is one of its own attachments.
+    In the web page, a file becomes an attachment when a person drops it into a comment.
+    This function does the same upload through an endpoint that GitHub does not document:
+    a POST of the file to ``uploads.github.com/user-attachments/assets``, with the token of
+    the GitHub CLI (https://island94.org/2026/08/programmatically-upload-attachments-to-github-issues-pull-requests-comments).
+    The attachment belongs to the repository, not to an issue or a comment. Thus no issue
+    is necessary, and nothing is left to delete. GitHub shows it to each visitor of the
+    README, also one who is not logged in. The previous attachment stays on GitHub, but
+    nothing links to it. GitHub has no way to delete an attachment.
+
+    The function replaces the one line of the README that holds the URL of an attachment
+    (:data:`ATTACHMENT_LINE`), and nothing else.
+
+    Returns:
+        The URL of the new attachment.
+
+    Raises:
+        SystemExit: The video, the GitHub CLI, or the line of the README is missing, or
+            GitHub refused the upload.
+    """
+    if not video.is_file():
+        raise SystemExit(f"video.py: {video} does not exist. Make the video first.")
+    readme = ROOT / "README.md"
+    text = readme.read_text(encoding="utf-8")
+    if len(ATTACHMENT_LINE.findall(text)) != 1:
+        raise SystemExit("video.py: README.md must have exactly one line with an attachment URL")
+    if shutil.which("gh") is None:
+        raise SystemExit("video.py: the GitHub CLI (gh) is not on the PATH")
+
+    def gh(*args: str) -> str:
+        done = subprocess.run(["gh", *args], capture_output=True, text=True, check=False)
+        if done.returncode:
+            raise SystemExit(f"video.py: gh {args[0]} failed: {done.stderr.strip()}")
+        return done.stdout.strip()
+
+    token = gh("auth", "token")
+    query = urllib.parse.urlencode(
+        {
+            "name": video.name,
+            "content_type": "video/mp4",
+            "repository_id": gh("api", f"repos/{REPOSITORY}", "--jq", ".id"),
+        }
+    )
+    request = urllib.request.Request(
+        f"https://uploads.github.com/user-attachments/assets?{query}",
+        data=video.read_bytes(),
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+            "Content-Type": "video/mp4",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=300) as reply:
+            url = json.load(reply)["url"]
+    except (OSError, KeyError, ValueError) as exc:
+        raise SystemExit(f"video.py: GitHub refused the upload: {exc}") from None
+    if not ATTACHMENT_LINE.fullmatch(url):
+        raise SystemExit(f"video.py: GitHub returned an unexpected URL: {url}")
+    readme.write_bytes(ATTACHMENT_LINE.sub(url, text).encode("utf-8"))
+    return url
 
 
 if __name__ == "__main__":

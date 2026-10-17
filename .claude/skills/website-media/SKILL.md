@@ -1,6 +1,6 @@
 ---
 name: website-media
-description: Make the website's demo video and screenshots again from the demo mesh — the terminal video on meshterm.net (scripts/video.py) and the twelve screenshots of the README and the website (scripts/screenshots.py) — check them, and commit them in both repositories. Use when JP asks to make, redo, refresh, or update the video, the demo recording, the screenshots, the website's images, or the website after a visible change; the release skill also runs it after each version bump.
+description: Make the website's demo video and screenshots again from the demo mesh — the terminal video on meshterm.net and in MeshTerm's README (scripts/video.py) and the twelve screenshots of the README and the website (scripts/screenshots.py) — check them, upload the video for the README, and commit them in both repositories. Use when JP asks to make, redo, refresh, or update the video, the demo recording, the screenshots, the website's images, or the website after a visible change; the release skill also runs it after each version bump.
 ---
 
 # Making the website's video and screenshots
@@ -14,6 +14,7 @@ made before a bump is already stale.
 |---|---|---|---|
 | 12 screenshots + 2 splash wordmarks | `scripts/screenshots.py` | MeshTerm `docs/screenshots/` | ~1 min |
 | The demo video, its poster, its play card | `scripts/video.py` | meshterm.net `src/demo.mp4`, `src/demo-poster.png`, `src/demo-play.png` | ~4 min |
+| The README's copy of the video | `scripts/video.py --readme` | a GitHub attachment, and its URL in MeshTerm `README.md` | ~10 s |
 
 **The video is terminal-only, on purpose** (JP, 2026-10-17: "it's marketing after all").
 Don't offer handheld videos again.
@@ -86,6 +87,28 @@ A green run is not a correct picture. Check both:
   Also open `src/demo-poster.png`: it must show the paths dialog with the **second** path
   selected.
 
+## 2b. Upload it for the README — only once the video is right
+
+MeshTerm's README plays its own copy of the video: GitHub plays a video in a README only
+when the file is one of its own attachments. Once the video passed step 2:
+
+```
+.venv/Scripts/python scripts/video.py --readme
+git diff README.md
+```
+
+It uploads `../meshterm.net/src/demo.mp4` through GitHub's undocumented attachment endpoint
+(`uploads.github.com/user-attachments/assets`, with the `gh` token: no issue, no browser),
+and replaces the one `https://github.com/user-attachments/assets/…` line of `README.md`.
+The diff must be that one line. Each upload is public and permanent (GitHub cannot delete
+an attachment, and the old ones stay, unlinked), so **never run it on a video you haven't
+checked**, and never in a loop.
+
+If GitHub refuses it (the endpoint is undocumented: it can change or go away), the README
+keeps the previous video, which is wrong but not broken. Tell JP. The fallback is the web
+page: he drops `src/demo.mp4` into a comment box on the repository and gives you the URL to
+put on that line.
+
 ## 3. When it fails
 
 `video.py` prints `the recording failed (1)` after a traceback. Read the traceback's last
@@ -112,7 +135,7 @@ half a set.
 MeshTerm, by name (other sessions share the tree):
 
 ```
-git add docs/screenshots
+git add docs/screenshots README.md
 ```
 
 The site, the three source files only:
@@ -126,7 +149,8 @@ Then one of the two modes.
 
 ### Manual mode — JP asked for the website now
 
-Commit the screenshots on their own in MeshTerm ("The screenshots show …", what changed).
+Commit the screenshots and the README's new video URL in MeshTerm ("The screenshots
+show …", what changed).
 Then rebuild the site so its `docs/` serves the new files:
 
 ```
@@ -149,20 +173,10 @@ working tree's, not a release's.
 
 Don't build the site locally: the release workflow's `website` job builds it from the tag
 and from the site's `main`. Commit the site's three source files as above, and the
-screenshots ride in the release commit (the release skill stages `docs/screenshots`).
+screenshots and the README ride in the release commit (the release skill stages
+`docs/screenshots` and `README.md`).
 
 **The site's commit must be pushed before the tag**, or the job builds with last
 release's video. The release skill's push step does it, in the same confirmed push. After
 the job has run, `git -C ../meshterm.net pull --ff-only` picks up its "MeshTerm X.Y.Z"
 commit.
-
-## The one step no script can do
-
-MeshTerm's README plays its own copy of the video: a `user-attachments` upload, because
-GitHub plays nothing else in a README. GitHub has no API for that upload. After a new
-video, say in one line that the README still plays the previous upload; never try to
-upload it yourself. If JP drops `../meshterm.net/src/demo.mp4` into a GitHub comment box
-and gives you the new URL, swap it in `README.md` (the bare `user-attachments` line near
-the top). Its caption on the next line must then say the video comes from the demo mesh:
-the one written for the first upload says "made on a real mesh", which is true only of
-that upload.

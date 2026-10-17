@@ -147,7 +147,8 @@ at before anything is committed.
 The two land in different repositories:
 
 - The screenshots (`docs/screenshots/`) ride in the release commit, so the tag carries
-  them and the `website` job builds meshterm.net from them.
+  them and the `website` job builds meshterm.net from them. So does `README.md`, whose
+  video line `scripts/video.py --readme` points at the new upload.
 - The video, its poster, and its play card go to the site checkout beside this one
   (`../meshterm.net/src/`) and get a commit there ("The demo video of MeshTerm X.Y.Z"). The
   `website` job builds from the site's `main`, so that commit is **pushed before the tag**
@@ -162,7 +163,7 @@ Stage by name, not with `-a`: other sessions work in the same tree, and `-a` wou
 their unfinished edits into the release.
 
 ```
-git add CHANGELOG.md meshterm/__init__.py docs/cli/README.md docs/screenshots
+git add CHANGELOG.md meshterm/__init__.py docs/cli/README.md docs/screenshots README.md
 git commit -m "MeshTerm X.Y.Z" -m "Co-Authored-By: <the model running this skill> <noreply@anthropic.com>"
 git tag -a vX.Y.Z -m "MeshTerm X.Y.Z"
 ```
