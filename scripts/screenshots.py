@@ -98,41 +98,49 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     if args.child:
         return _child(args.child, args.out)
-    from meshterm.emulator.font import font_dir
-
-    # The emulator finds its font under the config directory. Each run has a config
-    # directory of its own, so it gets the font directory of this machine by name.
-    fonts = os.environ.get("MESHTERM_EMULATOR_FONTS") or str(font_dir())
     status = 0
     if SPLASH in args.only:
         for path in _draw_splash(args.out / SPLASH):
             print(f"{SPLASH}: {path}", flush=True)
     for name in (name for name in args.only if name in SETS):
-        home = Path(tempfile.gettempdir()) / "meshterm-screenshots" / name
-        env = {
-            **os.environ,
-            "MESHTERM_HOME": str(home),
-            "MESHTERM_EMULATOR_FONTS": fonts,
-            "TZ": TZ,
-            "MESHTERM_POWERLINE": "full",
-            "MESHTERM_EMOJI": "1",
-            # The two wraps of a real terminal (column pins, and the last column of a
-            # Windows console) are for a terminal that measures glyphs in its own way.
-            # Here the VT parser measures them as MeshTerm does.
-            "MESHTERM_COLUMN_SNAP": "0",
-            "MESHTERM_FULL_WIDTH": "0",
-            "PYTHONIOENCODING": "utf-8",
-        }
         print(f"{name}: capturing...", flush=True)
         done = subprocess.run(
             [sys.executable, __file__, "--child", name, "--out", str(args.out)],
-            env=env,
+            env=child_env(Path(tempfile.gettempdir()) / "meshterm-screenshots" / name),
             check=False,
         )
         if done.returncode:
             print(f"{name}: failed ({done.returncode})", flush=True)
             status = 1
     return status
+
+
+def child_env(home: Path) -> dict[str, str]:
+    """The environment of a child process that runs MeshTerm for a capture.
+
+    Args:
+        home: The MeshTerm directory of the run (``MESHTERM_HOME``). The demo writes its
+            own directory under it again at each start, and keeps its tile cache there.
+    """
+    from meshterm.emulator.font import font_dir
+
+    # The emulator finds its font under the config directory. Each run has a config
+    # directory of its own, so it gets the font directory of this machine by name.
+    fonts = os.environ.get("MESHTERM_EMULATOR_FONTS") or str(font_dir())
+    return {
+        **os.environ,
+        "MESHTERM_HOME": str(home),
+        "MESHTERM_EMULATOR_FONTS": fonts,
+        "TZ": TZ,
+        "MESHTERM_POWERLINE": "full",
+        "MESHTERM_EMOJI": "1",
+        # The two wraps of a real terminal (column pins, and the last column of a
+        # Windows console) are for a terminal that measures glyphs in its own way.
+        # Here the VT parser measures them as MeshTerm does.
+        "MESHTERM_COLUMN_SNAP": "0",
+        "MESHTERM_FULL_WIDTH": "0",
+        "PYTHONIOENCODING": "utf-8",
+    }
 
 
 # --------------------------------------------------------------------------- the child
@@ -195,8 +203,43 @@ class Capture:
             return [list(row) for row in self.terminal.screen]
 
 
+#: A tour: it gets the capture and a function that types text into MeshTerm.
+Tour = Callable[[Capture, Callable[[str], None]], None]
+
+
 def _child(name: str, out: Path) -> int:
     """Capture one set in this process. The parent set the environment."""
+    target = out / name
+    target.mkdir(parents=True, exist_ok=True)
+
+    def tour(capture: Capture, type_text: Callable[[str], None]) -> None:
+        def save(screen: str) -> None:
+            path = target / f"{screen}.png"
+            image = _draw(name, capture.grid(), capture.terminal.palette)
+            image.save(path, optimize=True)
+            print(f"{name}: {path.relative_to(ROOT) if path.is_relative_to(ROOT) else path}")
+
+        _tour(capture, type_text, save)
+
+    return run_demo(name, tour, background=False)
+
+
+def run_demo(name: str, tour: Tour, *, background: bool) -> int:
+    """Run MeshTerm with ``--demo`` in this process, as the set ``name``, and do ``tour``.
+
+    The tour runs in a thread of its own while MeshTerm runs in the main thread. When the
+    tour ends, it stops the whole process: exit status 0 if it completed, 1 if it raised
+    an exception. The parent process set the environment (refer to :func:`child_env`).
+
+    Args:
+        name: One of :data:`SETS`.
+        tour: What to do with MeshTerm.
+        background: Whether the demo device plays the background traffic of the world
+            (:data:`meshterm.demo.device.PLAY_BACKGROUND`).
+
+    Returns:
+        1, which comes only if MeshTerm stopped before the tour ended it.
+    """
     import time_machine
 
     traveller = time_machine.travel(NOW, tick=True)
@@ -212,7 +255,7 @@ def _child(name: str, out: Path) -> int:
     from meshterm.emulator.run import _palette, panel_output
     from meshterm.emulator.vt import Terminal
 
-    demo_device.PLAY_BACKGROUND = False
+    demo_device.PLAY_BACKGROUND = background
     handheld = DEVICES.get(name)
     if handheld is not None:
         cols, rows = handheld.platform.readable_cols, handheld.platform.readable_rows
@@ -220,22 +263,14 @@ def _child(name: str, out: Path) -> int:
     else:
         cols, rows = TERMINAL_GRID
         depth, platform = ColorDepth.TRUE_COLOR, "regular"
-    target = out / name
-    target.mkdir(parents=True, exist_ok=True)
     lock = threading.Lock()
     with create_pipe_input() as pipe:
         terminal = Terminal(cols, rows, palette=_palette(), reply=pipe.send_text)
         capture = Capture(terminal, lock)
 
-        def save(screen: str) -> None:
-            path = target / f"{screen}.png"
-            image = _draw(name, capture.grid(), terminal.palette)
-            image.save(path, optimize=True)
-            print(f"{name}: {path.relative_to(ROOT) if path.is_relative_to(ROOT) else path}")
-
         def drive() -> None:
             try:
-                _tour(capture, pipe.send_text, save)
+                tour(capture, pipe.send_text)
             except BaseException:  # noqa: BLE001 - report it, then stop the whole child
                 traceback.print_exc()
                 os._exit(1)
@@ -457,7 +492,19 @@ class TerminalPainter:
         self.pad = self.cw
 
     def draw(self, grid):  # noqa: ANN001, ANN201 - cells, an Image
-        """The image of ``grid``."""
+        """The image of ``grid``, in a palette of 256 colours.
+
+        A palette of 256 colours, with no dither, looks the same as the full image and
+        makes the file four times smaller: a terminal has few colours, and the smooth
+        edges of the text need only a few steps of each.
+        """
+        from PIL import Image
+
+        image = self.render(grid)
+        return image.quantize(256, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE)
+
+    def render(self, grid):  # noqa: ANN001, ANN201 - cells, an Image
+        """The image of ``grid``, in full RGB colour."""
         from PIL import Image, ImageDraw
 
         cols, rows = len(grid[0]), len(grid)
@@ -488,11 +535,7 @@ class TerminalPainter:
                         [x, y + self.ch - self.ss * 2, x + self.cw - 1, y + self.ch - self.ss],
                         fill=fg,
                     )
-        # A palette of 256 colours, with no dither, looks the same as the full image and
-        # makes the file four times smaller: a terminal has few colours, and the smooth
-        # edges of the text need only a few steps of each.
-        image = image.resize((width // 2, height // 2), Image.Resampling.LANCZOS)
-        return image.quantize(256, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE)
+        return image.resize((width // 2, height // 2), Image.Resampling.LANCZOS)
 
     @staticmethod
     def _colours(style) -> tuple[tuple[int, int, int], tuple[int, int, int]]:  # noqa: ANN001

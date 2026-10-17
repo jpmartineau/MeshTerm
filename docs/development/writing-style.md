@@ -218,6 +218,7 @@ and in quoted text.
 | prompt | A dialog or a line that asks for typed text | |
 | page | All the content of a screen, which can be taller than the terminal. Also a written page | |
 | frame | The full image that MeshTerm composes for the terminal in one paint: the title bar, the panel, the body, and the footer | |
+| video frame | One image of a video, such as the demo video that `scripts/video.py` makes | frame (for this) |
 | paint | One full update of the terminal | redraw, repaint, refresh (for the terminal) |
 | animation step | One image of an animation (a spinner) | frame (for this) |
 | panel | The box with a border around the body of a screen | panel (for the hardware) |

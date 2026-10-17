@@ -7,6 +7,7 @@ These are tools for the repository. None of them is in the wheel.
 | `basemap-doctor.py` | Finds why a user's map has no basemap: certificates, DNS, proxy, or colour depth |
 | `cardputer-zero/` | `build-deb.sh` builds the Debian package for M5Stack's app store. Run it on the Cardputer Zero or on another arm64 Debian 13 system. `store/` holds the listing for the store (`app-builder.json`, which `czdev publish` reads), its icon, and its screenshots. `screenshot.py` saves the display of a Cardputer as a 320×170 PNG over SSH, as the store wants a screenshot. `store-publish.py` sends a package to the store with M5Stack's `czdev`, with two corrections. The release workflow runs it after each release. `launcher-entry.sh` puts a source checkout in the Cardputer Zero's app launcher. `remove` takes it out. `meshterm.png` is the package's icon: the website's logo, at the launcher's 100×100 size. `meshterm-dev.png` is its negative, for the checkout's entry, so that the two entries look different. `type-text.py` types a pasted string (an API key, a Wi-Fi password) on the Cardputer's keyboard from another computer, over SSH |
 | `screenshots.py` | Makes the screenshots of the website from the demo mesh (`--demo`): the main menu, the chat, the paths of a message, and the map, for the terminal, the Cardputer Zero, and the PicoCalc. They are the same at each run. The result goes to `docs/screenshots/<set>/`. It also draws the two wordmarks of the splash into `docs/screenshots/splash/`, which the website uses as its splash |
+| `video.py` | Makes the demo video of the website from the demo mesh: a tour of less than two minutes in the terminal, with its poster and its play card. The result goes to `src/` of the `meshterm.net` checkout beside this one |
 | `picocalc-lyra/` | Setup of the Calculinux device: console font, palette, Wi-Fi. `xiao-radio/` is the kit for the XIAO radio (firmware build, flashing, UART setup) |
 | `uconsole/` | The uConsole's always-on SPI bridge service. MeshTerm can also control that radio directly, with no script (refer to `docs/devices/uconsole.md`) |
 
@@ -74,3 +75,33 @@ screen, and the narrow mark on a phone. `--only splash` draws only these two ima
 
 After a change to a screen or to the art, run the script again, then rebuild the website
 (refer to the README of the `meshterm.net` repository).
+
+## video.py
+
+The website plays a video of MeshTerm under its buttons. This script makes it from the
+demo mesh, in the terminal set of `screenshots.py`: the same 80×24 terminal, the same
+clock, and the same painter. It types the keys of a tour of less than two minutes: the
+chat, the paths of a message, a reply to a message that arrives, a trace, the map,
+Repeater admin, and the live feed. A camera copies the screen 30 times each second.
+
+```bash
+python scripts/video.py                             # into ../meshterm.net/src/
+python scripts/video.py --out some/folder
+python scripts/video.py --recording tour.pickle     # keep the recording
+```
+
+It needs ffmpeg with libx264 on the `PATH`, and the needs of `screenshots.py`. A run takes
+approximately four minutes. The tour runs on the real clock, then the script paints each
+different screen in parallel and encodes the video. With `--recording`, the script keeps
+the recording in that file. When the file exists, a later run paints and encodes it again,
+and does not run MeshTerm.
+
+The script writes three files: `demo.mp4`, `demo-poster.png` (the paths of a message,
+which the website shows before the video plays), and `demo-play.png` (the poster with a
+play mark and the length of the video). The camera stops while the tour waits for
+something slow: the tiles of the map, and most of the read of the repeater's settings.
+Thus the video jumps over the wait.
+
+Each run gives the same video to the eye, but not the same file, because the camera copies
+the screen on the real clock. After a change to the screens, run the script, then rebuild
+the website (refer to the README of the `meshterm.net` repository).
