@@ -318,6 +318,19 @@ LIVE_CHANNEL: tuple[tuple[float, str, Line], ...] = (
     (160.0, "#montreal", Line(0.0, "Kim-NDG", "The 80 bus is late again on Parc 🙄")),
 )
 
+#: The answers of the people of the demo world to a channel message of our node that
+#: mentions them, by node name. The node answers on the same channel, a few seconds later
+#: (:data:`REPLY_DELAY_S`), and its answer mentions our node. A node that is not in this
+#: table does not answer. The demo video asks if Dave comes to the meetup
+#: (``scripts/video.py``).
+REPLIES: dict[str, str] = {
+    "Dave-Lachine": f"@[{ME}] Yes! I'll be there at 2, with the T-Deck",
+}
+
+#: The seconds from a message of our node to the answer of a node that it mentions (refer
+#: to :data:`REPLIES`).
+REPLY_DELAY_S = 4.0
+
 #: The traces that our node ran in the past days, as ``(age in minutes, target, path)``.
 #: The target is a repeater name for a target trace, or ``None`` for a composed path. A
 #: path names the relays, without our node at the two ends. The history runs each one in

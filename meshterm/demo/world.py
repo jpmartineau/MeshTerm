@@ -371,9 +371,8 @@ def _link_cost(snr: float) -> float:
 
 
 #: The nodes whose floods do not use three-byte hashes, and the width that they use. Our
-#: node keeps the default of its device, one byte.
+#: node uses three bytes, as most of the mesh does.
 _NARROW_PATHS: dict[str, int] = {
-    SELF.name: 1,
     "Steve K.": 2,
     "Raphaël": 2,
     "Olivier.T": 1,

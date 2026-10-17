@@ -8,9 +8,12 @@ from the link model, a repeater from the region tables and the neighbours of the
 and it plays the live traffic of the world while the demo runs: the adverts, the packets
 of the background, and the lines of the script that arrive after the start
 (:data:`~meshterm.demo.script.LIVE_DIRECT`, :data:`~meshterm.demo.script.LIVE_CHANNEL`).
+When a channel message of our node mentions a node that has an answer in the script
+(:data:`~meshterm.demo.script.REPLIES`), that node answers it.
 
-Everything that the device sends comes from a fixed seed and a time after the start. Thus
-two runs play the same traffic at the same moments.
+Everything that the device sends comes from a fixed seed and a time after the start (or
+after the message that it answers). Thus two runs play the same traffic at the same
+moments.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ import random
 from datetime import timedelta
 
 from ..core import transmit_gate
+from ..core.channels import MENTION
 from ..core.connection import EventCallback, MockDevice, Unsubscribe
 from ..core.events import MeshEvent
 from ..core.models import Contact, Hop, Message, NeighbourInfo, RoomAccess, TraceResult, utcnow
@@ -85,6 +89,10 @@ class DemoDevice(MockDevice):
             for channel in world.CHANNELS
         }
         self._clock_offset = 0
+        # Our node uses the path width of most of the mesh. A trace collapses it to the
+        # widest width that it can encode (three bytes become two).
+        self._path_hash_mode = world.path_width(world.SELF) - 1
+        self._answers = 0
 
     #: The route that a flood login teaches the device: one hop, through Mont-Royal.
     _LEARNED_ROUTE = (world.node("Mont-Royal").hash,)
@@ -170,6 +178,40 @@ class DemoDevice(MockDevice):
                 NeighbourInfo(other.public_key[:8], world.reading(snr, self._rng), heard_at)
             )
         return table
+
+    # -- the answers -------------------------------------------------------------------
+
+    async def send_channel_message(self, index: int, text: str) -> None:  # noqa: D102
+        await super().send_channel_message(index, text)
+        self._answer(index, text)
+
+    def _answer(self, index: int, text: str) -> None:
+        """Let a node that ``text`` mentions answer it, on the same channel.
+
+        The first mentioned node that has an answer in :data:`~meshterm.demo.script.REPLIES`
+        answers after :data:`~meshterm.demo.script.REPLY_DELAY_S`. The answer arrives as a
+        live line of the script does: the copies of its flood, then the message.
+        """
+        channel = next((c for c in world.CHANNELS if c.slot == index), None)
+        name = next((n for n in MENTION.findall(text) if n in script.REPLIES), None)
+        if channel is None or name is None:
+            return
+        self._answers += 1
+        rng = random.Random(f"meshterm-demo/answer/{self._answers}")
+        line = script.Line(0.0, name, script.REPLIES[name])
+        items = _live_channel(script.REPLY_DELAY_S, channel.name, line, rng)
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+
+        async def play() -> None:
+            for item in items:
+                await asyncio.sleep(max(0.0, item.offset_s - (loop.time() - start)))
+                for listener in list(self._listeners):
+                    _deliver(item, listener)
+
+        task = asyncio.create_task(play())
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
 
     # -- traces -----------------------------------------------------------------------
 

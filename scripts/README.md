@@ -81,8 +81,8 @@ After a change to a screen or to the art, run the script again, then rebuild the
 The website plays a video of MeshTerm under its buttons. This script makes it from the
 demo mesh, in the terminal set of `screenshots.py`: the same 80×24 terminal, the same
 clock, and the same painter. It types the keys of a tour of less than two minutes: the
-chat, the paths of a message, a reply to a message that arrives, a trace, the map,
-Repeater admin, and the live feed. A camera copies the screen 30 times each second.
+chat, the paths of a message, a question that mentions a node and its answer, a trace,
+the map, Repeater admin, and the live feed. A camera copies the screen 30 times each second.
 
 ```bash
 python scripts/video.py                             # into ../meshterm.net/src/

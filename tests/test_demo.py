@@ -98,3 +98,44 @@ def test_each_line_is_sent_while_its_sender_transmits() -> None:
                 age_h = line.age_min / 60.0
                 assert node.quiet_hours is not None, line
                 assert node.quiet_hours <= age_h <= node.first_heard_days * 24.0, line
+
+
+def test_our_node_uses_the_path_width_of_the_mesh() -> None:
+    """Our node uses three bytes for each hop, so a trace uses two (the widest it encodes)."""
+    from meshterm.ui.trace_screen import collapse_trace_width
+
+    mode = asyncio.run(DemoDevice().get_path_hash_mode())
+    assert mode + 1 == world.path_width(world.SELF) == 3
+    assert collapse_trace_width(mode) == 2
+
+
+def test_a_mentioned_node_answers(monkeypatch) -> None:  # noqa: ANN001 - the pytest fixture
+    """A channel message that mentions Dave gets his answer, which mentions our node."""
+    from meshterm.demo import script
+
+    monkeypatch.setattr(script, "REPLY_DELAY_S", 0.0)
+
+    async def run():  # noqa: ANN202
+        device = DemoDevice()
+        await device.connect()
+        messages = []
+
+        def on_event(event) -> None:  # noqa: ANN001 - a MeshEvent
+            if event.message is not None:
+                messages.append(event.message)
+
+        unsubscribe = await device.subscribe_events(on_event)
+        await device.send_channel_message(0, "Hey, is @[Dave-Lachine] coming?")
+        await device.send_channel_message(0, "Hello, @[Félix]")  # no answer in the script
+        for _ in range(100):
+            if messages:
+                break
+            await asyncio.sleep(0.05)
+        await asyncio.sleep(0.5)
+        unsubscribe()
+        return messages
+
+    messages = asyncio.run(run())
+    assert [m.text for m in messages] == [f"Dave-Lachine: {script.REPLIES['Dave-Lachine']}"]
+    assert messages[0].is_channel and messages[0].channel == 0
+    assert f"@[{world.SELF.name}]" in messages[0].text

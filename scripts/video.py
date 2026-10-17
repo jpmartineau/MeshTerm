@@ -7,10 +7,11 @@ The script runs MeshTerm with ``--demo`` in an 80×24 terminal, as the terminal 
 ``scripts/screenshots.py`` does, and types the keys of a tour of less than two minutes:
 
 1. The main menu.
-2. The chat on Public, and the two paths of a message from Beloeil.
-3. A message that arrives on Public, and a reply that mentions its sender.
+2. The chat on Public, and the two paths of a message from Beloeil, each selected in turn.
+3. A message that arrives on Public. Then a question that mentions Dave, typed so that the
+   mention becomes a chip, and his answer, which mentions our node.
 4. A trace to Brossard, across the river, and back.
-5. The map.
+5. The map, from the city down to the streets and the buildings around our node.
 6. Repeater admin on Mont-Royal: a read of its settings, then an advert.
 7. The live feed, and one packet from it.
 
@@ -329,46 +330,51 @@ def _tour(p: Presenter) -> None:
 
     print("the main menu", flush=True)
     p.camera.roll()
-    p.hold(4.0)
+    p.hold(3.0)
 
     print("the chat, and the paths of a message", flush=True)
     p.type("chat")
     p.hold(0.5)
     p.key("enter")
     p.wait_for("pick a conversation")
-    p.hold(2.0)
+    p.hold(1.2)
     p.type("pub")
     p.hold(0.4)
     p.key("enter")
     p.wait_for(screenshots.PATHS_MESSAGE[2])
-    p.hold(2.5)
+    p.hold(2.0)
     p.key("up", pause=0.6)
     p.key("up", pause=1.2)
     # A key press can be lost while the transcript draws. The camera does not show the
     # tries: it shows the dialog of the right message as it opens.
     with p.off_camera():
         _open_paths(p)
-    p.hold(2.5)
-    # The second path. The first one is often a straight line.
+    p.hold(2.0)
+    # The two paths in turn, two times, so that the graph shows which line is which. The
+    # video stops on the second path: the first one is often a straight line.
+    p.key("down", pause=1.6)
+    p.key("up", pause=1.6)
     p.key("down", pause=0.6)
     p.camera.mark("poster")
-    p.hold(3.4)
+    p.hold(2.6)
     p.key("escape")
     p.key("escape")  # the first Esc closes the dialog, the second unpicks the message
 
-    print("a message arrives, and a reply", flush=True)
+    print("a message arrives, a question, and its answer", flush=True)
     offset, _, line = next(item for item in script.LIVE_CHANNEL if item[1] == "Public")
     with p.off_camera():
-        p.wait_until(_start() + offset - 1.5)
+        p.wait_until(_start() + offset - 0.6)
     p.wait_for(line.text, timeout=20)
-    p.hold(2.5)
-    p.key("up", pause=0.8)  # select the new message
-    p.key("enter", pause=0.8)  # its mention goes into the compose line
-    p.type(" count me in! I'll bring coffee")
-    p.hold(0.7)
+    p.hold(1.5)
+    # The mention is typed in full: the ] makes it a chip, as the video shows.
+    p.type("Hey, I wonder if @[Dave-Lachine] is coming Saturday?")
+    p.hold(0.8)
     p.key("enter", pause=0.0)
     p.wait_for("0/130")  # the compose line is empty: the message went
-    p.hold(4.0)
+    # Dave answers a few seconds later (``meshterm.demo.script.REPLIES``). His answer
+    # mentions our node, so it has our star.
+    p.wait_for("be there at 2", timeout=30)
+    p.hold(3.5)
 
     print("a trace", flush=True)
     _menu(p, "trace t")
@@ -378,26 +384,39 @@ def _tour(p: Presenter) -> None:
     p.hold(0.4)
     p.key("enter")
     p.wait_for("Trace — Brossard")
-    p.hold(2.5)
+    p.hold(2.0)
     p.key("enter", pause=0.0)
     p.wait_for("Per-hop medians", timeout=30)
-    p.hold(3.0)
+    p.hold(1.0)
+    # The history stores walks of one byte for each hop. Thus this walk of two bytes is new,
+    # and its records go to the trophy case.
+    if p.shows("new record"):
+        p.hold(3.0)
+        p.key("enter", pause=0.0)  # Close
+        p.hold(1.5)
     p.key("pagedown", pause=0.0)
-    p.hold(4.0)
+    p.hold(3.0)
 
     print("the map", flush=True)
     _menu(p, "map", enter=False)
     with p.off_camera():
         p.key("enter", pause=0.0)
         capture.settle(quiet=3.0, timeout=120.0)
-    p.hold(3.5)
-    p.key("pageup", pause=0.0)
-    capture.settle(quiet=1.0, timeout=30.0)
-    p.hold(2.5)
+    p.hold(3.0)
     for _ in range(3):
-        p.key("right", pause=0.5)
-    capture.settle(quiet=1.0, timeout=30.0)
-    p.hold(2.5)
+        p.key("right", pause=0.4)
+    capture.settle(quiet=0.8, timeout=30.0)
+    p.hold(1.2)
+    p.key(text="l", ctrl=True, pause=0.0)  # back to our node
+    capture.settle(quiet=0.8, timeout=30.0)
+    p.hold(1.5)
+    # Zoom in to the streets around our node, one step at a time, down to zoom 16: the
+    # names of the streets and the buildings.
+    for _ in range(6):
+        p.key("pageup", pause=0.0)
+        capture.settle(quiet=0.6, timeout=30.0)
+        p.hold(0.9)
+    p.hold(3.0)
 
     print("a repeater administered over the air", flush=True)
     _menu(p, "repeater a")
@@ -407,13 +426,13 @@ def _tour(p: Presenter) -> None:
     p.hold(0.4)
     p.key("enter")
     p.wait_for("Repeater admin — Mont-Royal")
-    p.hold(2.0)
+    p.hold(1.5)
     p.key("end", pause=0.6)
     p.highlight("Read settings", "up")
     p.hold(0.8)
     p.key("enter", pause=0.0)
     p.wait_for("Reading — Mont-Royal")
-    p.hold(2.5)
+    p.hold(2.0)
     # The read is one round trip for each setting, with the transmit cooldown between two
     # reads: more than three minutes in all. The camera shows the first reads at the real
     # pace. Then, off camera, a short cooldown makes the run shorter, and the video
@@ -432,33 +451,31 @@ def _tour(p: Presenter) -> None:
         p.key("home", pause=0.0)
         capture.settle(quiet=0.5)
     p.hold(3.0)
-    p.key("pagedown")
-    p.hold(2.5)
     p.key("end", pause=0.6)
     p.highlight("Send advert", "up")
     p.hold(0.8)
     p.key("enter", pause=0.0)
     p.wait_for("announce itself")
-    p.hold(1.5)
+    p.hold(1.2)
     p.key("enter", pause=0.0)
     p.wait_for("Advert sent", timeout=30)
-    p.hold(2.0)
+    p.hold(1.5)
     p.key("enter", pause=0.8)
 
     print("the live feed, and one packet", flush=True)
     _menu(p, "live f")
     p.wait_for("Live feed")
-    p.hold(5.0)
+    p.hold(3.0)
     for _ in range(3):
         p.key("down", pause=0.5)
     p.hold(0.5)
     p.key("enter", pause=0.0)
-    p.hold(5.0)
+    p.hold(3.5)
     p.key("escape")
     p.hold(0.5)
     # The end: the main menu, as at the start, with no filter.
     _back_to_menu(p)
-    p.hold(3.0)
+    p.hold(2.0)
 
 
 def _start() -> float:
