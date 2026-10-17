@@ -11,10 +11,10 @@ off, and Instagram cannot show a subtitle file on a Reel.
 The script runs MeshTerm with ``--demo`` in this process, as ``scripts/video.py`` does.
 The terminal has 72 columns, the narrowest terminal where each screen of the regular
 platform stays readable. Thus the text is as large as the width of a phone lets it be.
-Above the terminal is the name of the series (``MeshTerm · Chat``), and under it are the
-subtitles. The bottom of the video stays empty, because Instagram puts the name of the
-account and the caption of the post there. The video ends on a card with the wordmark
-and the address of the website.
+Above the terminal is the name of the series (``MeshTerm for MeshCore · Chat``), and
+under it are the subtitles. The bottom of the video stays empty, because Instagram puts
+the name of the account and the caption of the post there. The video ends on a card with
+the wordmark and the address of the website.
 
 The demo device plays no background traffic. Thus the screen does not change while the
 tour waits off camera for a live message, and the cut does not show.
@@ -335,7 +335,8 @@ class Composer:
 
         self.base = Image.new("RGB", (WIDTH, HEIGHT), BLACK)
         draw = ImageDraw.Draw(self.base)
-        self._spans(draw, [("MeshTerm", BRAND), (f" · {title}", MUTED)], top + 36, self.title_font)
+        series = [("MeshTerm", BRAND), (" for MeshCore", SOFT), (f" · {title}", MUTED)]
+        self._spans(draw, series, top + 36, self.title_font)
         self.mask = Image.new("L", self.term_size, 0)
         ImageDraw.Draw(self.mask).rounded_rectangle([0, 0, tw - 1, th - 1], radius=18, fill=255)
 

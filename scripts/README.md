@@ -121,7 +121,7 @@ the `meshterm.net` repository).
 This script makes the videos for Instagram. Each video shows one feature of MeshTerm, in
 the demo mesh. It is a Reel: a vertical video of 1080×1920 pixels, at 30 video frames each
 second. The terminal has 72 columns, so that its text is as large as the width of a phone
-lets it be. Above the terminal is the name of the series (`MeshTerm · Chat`), and under it
+lets it be. Above the terminal is the name of the series (`MeshTerm for MeshCore · Chat`), and under it
 are the subtitles. The video has no sound, because many people watch Instagram with the
 sound off. It ends on a card with the wordmark and the address of the website.
 
