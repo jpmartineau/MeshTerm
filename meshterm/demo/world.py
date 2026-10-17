@@ -541,7 +541,7 @@ class Channel:
 #: that is not derived from its name.
 CHANNELS: tuple[Channel, ...] = (
     Channel(0, "Public", DEFAULT_PUBLIC_SECRET),
-    Channel(1, "#montreal", derive_secret("#montreal"), scope="mtl"),
+    Channel(1, "#montreal", derive_secret("#montreal"), scope="yul"),
     Channel(2, "#cycling", derive_secret("#cycling")),
     Channel(3, "Family", hashlib.sha256(b"meshterm-demo/Family").digest()[:16]),
 )
@@ -555,14 +555,21 @@ FOREIGN_CHANNELS: tuple[bytes, ...] = tuple(
 # --------------------------------------------------------------------------- regions
 
 #: The region table of each repeater, as ``(name, parent, allows floods)`` rows, in the
-#: form that :class:`~meshterm.core.region_sim.SimulatedRegionMap` takes. The island
-#: carries ``mtl``, the north shore ``laval``, and the south shore ``south-shore``. Each
-#: repeater also carries the region of the whole province.
+#: form that :class:`~meshterm.core.region_sim.SimulatedRegionMap` takes. The regions are
+#: the ones of the real mesh, each in the one before it: ``na`` (North America), ``can``
+#: (Canada), ``onqc`` (Ontario and Québec), ``qc`` (Québec), and ``yul`` (Montréal).
+#: Each repeater of Montréal, Laval, and the south shore carries all five.
+#: Mont-St-Hilaire is outside the city: it has ``yul`` in its table, but it does not
+#: relay its floods.
 REGION_TABLES: dict[str, list[tuple[str, str, bool]]] = {}
 
-_ISLAND = [("qc", "*", True), ("mtl", "qc", True), ("mtl-west", "mtl", True)]
-_NORTH = [("qc", "*", True), ("mtl", "qc", True), ("laval", "qc", True)]
-_SOUTH = [("qc", "*", True), ("mtl", "qc", False), ("south-shore", "qc", True)]
+_REGIONS = [
+    ("na", "*", True),
+    ("can", "na", True),
+    ("onqc", "can", True),
+    ("qc", "onqc", True),
+    ("yul", "qc", True),
+]
 for _name in (
     "Oratoire",
     "Centre-Ville",
@@ -571,28 +578,17 @@ for _name in (
     "Ahuntsic",
     "Villeray",
     "Rosemont",
+    "Mont-Royal",
+    "Lachine",
+    "Pointe-Claire",
+    "Île-Bizard",
+    "Laval-Chomedey",
+    "Longueuil",
+    "Brossard",
+    "Mont-St-Bruno",
 ):
-    REGION_TABLES[_name] = _ISLAND
-for _name in ("Lachine", "Pointe-Claire", "Île-Bizard"):
-    REGION_TABLES[_name] = [*_ISLAND, ("west-island", "mtl-west", True)]
-REGION_TABLES["Laval-Chomedey"] = _NORTH
-for _name in ("Longueuil", "Brossard", "Mont-St-Bruno"):
-    REGION_TABLES[_name] = _SOUTH
-REGION_TABLES["Mont-St-Hilaire"] = [*_SOUTH, ("monteregie", "south-shore", True)]
-# The hub of the island carries each region. Its table is too long for one reply, so the
-# region editor shows how it gets the rest.
-REGION_TABLES["Mont-Royal"] = [
-    ("qc", "*", True),
-    ("mtl", "qc", True),
-    ("mtl-west", "mtl", True),
-    ("mtl-east", "mtl", True),
-    ("west-island", "mtl-west", True),
-    ("laval", "qc", True),
-    ("south-shore", "qc", True),
-    ("monteregie", "south-shore", False),
-    ("north-shore", "qc", False),
-    ("plateau", "mtl", True),
-]
+    REGION_TABLES[_name] = _REGIONS
+REGION_TABLES["Mont-St-Hilaire"] = [*_REGIONS[:-1], ("yul", "qc", False)]
 
 #: The contacts to which the device learned a route. A real device learns few routes: it
 #: learns one only from a flood that it received from the node, and forgets it when a send

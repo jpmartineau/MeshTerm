@@ -148,7 +148,7 @@ def channels(d: Director) -> None:
     d.key("escape")
     d.wait_for("Channels · 4/8 slots")
     d.subtitle("Keep a channel's messages\nin *one region*")
-    d.key("down", pause=0.6)  # #montreal, which has the scope mtl
+    d.key("down", pause=0.6)  # #montreal, which has the scope yul
     d.key("enter", pause=0.0)
     d.wait_for("Channel — #montreal")
     d.hold(0.8)
