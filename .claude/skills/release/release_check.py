@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Preflight for a MeshTerm release, and the answer to "what's in the next one?".
 
-Reports the six things worth knowing before a version number is written down, and says
+Reports the seven things worth knowing before a version number is written down, and says
 nothing else: the current version and the tag it belongs to, the commits since, whether
-there is an `[Unreleased]` section to rename, which changelog link refs are missing, and
-whether the working tree is clean and level with `origin/main`.
+there is an `[Unreleased]` section to rename, which changelog link refs are missing,
+whether the working tree is clean and level with `origin/main`, and the same for the site
+checkout beside it, where the release's demo video goes (the `website-media` skill).
 
 It changes nothing. Every finding is a line a person acts on, not a gate that blocks.
 """
@@ -19,13 +20,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 INIT = ROOT / "meshterm" / "__init__.py"
 CHANGELOG = ROOT / "CHANGELOG.md"
+SITE = ROOT.parent / "meshterm.net"
 
 OK, WARN, INFO = "ok  ", "warn", "    "
 
 
-def git(*args: str) -> str:
-    """Run a git command in the repo, returning stripped stdout ('' on failure)."""
-    done = subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True)
+def git(*args: str, repo: Path = ROOT) -> str:
+    """Run a git command in ``repo``, returning stripped stdout ('' on failure)."""
+    done = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
     return done.stdout.strip() if done.returncode == 0 else ""
 
 
@@ -114,6 +116,24 @@ def main() -> int:
     if counts:
         behind, ahead = counts.split()
         say(OK if behind == "0" else WARN, f"{ahead} ahead / {behind} behind origin/main")
+
+    print(f"\nSite ({SITE.name}, where the demo video goes)")
+    if not (SITE / ".git").exists():
+        say(WARN, f"no checkout at {SITE}: the video cannot be made")
+    else:
+        dirty = git("status", "--porcelain", "--", "src", repo=SITE)
+        count = len(dirty.splitlines())
+        say(OK if not dirty else WARN, "src/ clean" if not dirty else f"src/: {count} change(s)")
+        git("fetch", "--quiet", "origin", repo=SITE)
+        counts = git("rev-list", "--left-right", "--count", "origin/main...HEAD", repo=SITE)
+        if counts:
+            behind, ahead = counts.split()
+            say(OK if behind == "0" else WARN, f"{ahead} ahead / {behind} behind origin/main")
+            if behind != "0":
+                say(INFO, "pull --ff-only before making the video")
+            # These go out with the release's site push, before the tag.
+            for subject in git("log", "--format=%s", "origin/main..HEAD", repo=SITE).splitlines():
+                say(INFO, f"ahead: {subject}")
 
     print("\nRun the gates before tagging:")
     print("      python -m pytest -q && ruff check . && ruff format --check .\n")

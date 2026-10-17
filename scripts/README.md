@@ -103,5 +103,7 @@ something slow: the tiles of the map, and most of the read of the repeater's set
 Thus the video jumps over the wait.
 
 Each run gives the same video to the eye, but not the same file, because the camera copies
-the screen on the real clock. After a change to the screens, run the script, then rebuild
-the website (refer to the README of the `meshterm.net` repository).
+the screen on the real clock. Each release makes the video again, after the screenshots,
+and pushes it to the website repository before the tag. After a change to the screens
+between two releases, run the two scripts, then rebuild the website (refer to the README of
+the `meshterm.net` repository).

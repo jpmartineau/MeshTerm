@@ -135,30 +135,26 @@ alias to the gather step instead.
 What *does* still carry the number: `docs/cli/README.md` has a sample document with a `"version"`
 field, which is the live `{version}` placeholder and must show the new one.
 
-### The screenshots — made again, after the bump
+### The screenshots and the video — made again, after the bump
 
 Every release refreshes the screenshots (JP, 2026-10-16: "make it so the images are
-automatically updated when we release"). They show the version in their header, so this
-runs **after** `__version__` changes and before the commit:
+automatically updated when we release") and the website's demo video (JP, 2026-10-17).
+Both show the version in their header, so they run **after** `__version__` changes and
+before the commit: follow the **`website-media` skill in release mode**. It runs
+`scripts/screenshots.py` (~1 min) then `scripts/video.py` (~4 min), and says what to look
+at before anything is committed.
 
-```
-python scripts/screenshots.py
-git status --short docs/screenshots
-```
+The two land in different repositories:
 
-It drives `--demo` headless and rewrites `docs/screenshots/{terminal,cardputer-zero,picocalc-lyra}/`
-(the README's four captures, and the website's three sets) and `docs/screenshots/splash/`
-(the website's splash), about a minute in all. The demo is deterministic, so the only
-changes should be the version in each header plus whatever the release changed on those
-screens. Open one image of each set and look at it before committing: a screen that
-changed in a way the changelog doesn't explain is a bug to understand, not a picture to
-ship. The images ride in the release commit, so the tag carries them and the `website`
-job builds meshterm.net from them.
+- The screenshots (`docs/screenshots/`) ride in the release commit, so the tag carries
+  them and the `website` job builds meshterm.net from them.
+- The video, its poster, and its play card go to the site checkout beside this one
+  (`../meshterm.net/src/`) and get a commit there ("The demo video of MeshTerm X.Y.Z"). The
+  `website` job builds from the site's `main`, so that commit is **pushed before the tag**
+  (step 5).
 
-It needs the `dev` extras (Pillow, fontTools, time-machine), the emulator's Terminus font
-(`meshterm emulate --fetch-fonts`, once), Windows' Cascadia Mono and Segoe UI fonts, and
-the network for the map's tiles the first time. If it fails, stop and fix it, or ask JP
-whether to release with last release's images — don't commit a half-written set.
+If either fails, stop and fix it, or ask JP whether to release with last release's
+images and video — don't commit a half-written set.
 
 ## 5. Commit, tag, push
 
@@ -178,11 +174,16 @@ hardcoded one. Seven release commits (0.3.1 through 0.10.0) went out without it 
 this line used to omit it.
 
 Commit on `main` — never a topic branch. Then **confirm with JP before pushing**, because
-the push is the act that builds and publishes the release:
+the push is the act that builds and publishes the release. The site goes first, so the
+`website` job finds the new video on its `main`:
 
 ```
+git -C ../meshterm.net push origin main
 git push origin main && git push origin vX.Y.Z
 ```
+
+The one confirmation covers both pushes: say that the site push carries the new video
+(and any other site commits that are ahead of origin, by subject) when you ask.
 
 This is the one workflow where pushing is expected. It is still asked for, once, in that
 moment — the standing rule against unasked pushes is not suspended by the skill, it is
@@ -196,8 +197,9 @@ gh release view vX.Y.Z
 ```
 
 Five platform builds, the release job, and `website` — which rebuilds meshterm.net from the
-tag so the site shows the new version and the screenshots of step 4 — so it takes a few
-minutes. `website` runs the site repo's own `build.py`, so a change to the site's sources
+tag so the site shows the new version, the screenshots, and the video of step 4 — so it
+takes a few minutes. Once `website` has pushed its "MeshTerm X.Y.Z" commit, bring the
+local site up to date: `git -C ../meshterm.net pull --ff-only`. `website` runs the site repo's own `build.py`, so a change to the site's sources
 must be pushed to `meshterm.net` before the tag, or the job builds with the old ones. If only `website` fails,
 the release itself is fine (it runs after publishing); the usual cause is the
 `SITE_DEPLOY_KEY` secret, and once that is fixed `gh run rerun <run-id> --failed` finishes
