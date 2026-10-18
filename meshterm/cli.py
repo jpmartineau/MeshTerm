@@ -35,6 +35,7 @@ from .core.preferences import (
     Preferences,
     report_dropped,
 )
+from .core.preferences import install as install_preferences
 from .core.selection import DeviceSelectionError
 from .persistence.logging import configure_logging, get_logger, level_from_name, log_path
 from .persistence.repository import Repository
@@ -319,6 +320,11 @@ def main_callback(
         # registry would be a behaviour that a user cannot find. MeshTerm sets it and never
         # saves it, because it is a claim about this run.
         prefs.set("cli_time_format", "absolute")
+    # The log file reads the ``anonymize`` preference at each record, through the
+    # process-wide set. The context installs the same set again later. If MeshTerm installs
+    # it only there, the records before the context (the dropped preferences below) are not
+    # masked when the user asked for it.
+    install_preferences(prefs)
     configure_logging(
         # The stdout of a scripted run carries its answer and nothing else. Thus the log
         # records go to stderr, and they do not mix with the data that a caller parses.

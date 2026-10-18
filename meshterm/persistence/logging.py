@@ -18,6 +18,12 @@ space on a handheld, and it is too large to attach to a bug report.
 A preference sets how much MeshTerm writes: ``log_level``, with the default ``WARNING``.
 Thus the file has the problems, not a full account of a session that works. When you
 look for the cause of a problem, set it lower, to ``INFO`` or ``DEBUG``.
+
+A second preference, ``anonymize``, masks the personal details of each line before it
+goes into the file: the account name in a home folder, the address of a radio, and the
+address of a host (refer to :mod:`meshterm.core.anonymize`). The mask applies as each line
+is written, so the file never holds what it masks. A line that was written before the
+preference was turned on stays as it is.
 """
 
 from __future__ import annotations
@@ -146,12 +152,32 @@ def configure_logging(
         encoding="utf-8",
     )
     file_handler.setLevel(file_level)
-    file_handler.setFormatter(logging.Formatter(_LINE_FORMAT, datefmt=_TIME_FORMAT))
+    file_handler.setFormatter(_FileFormatter(_LINE_FORMAT, datefmt=_TIME_FORMAT))
     logger.addHandler(file_handler)
 
     _quiet_library_console(file_handler)
 
     return logger
+
+
+class _FileFormatter(logging.Formatter):
+    """The line format of the file, with the personal details masked when the user asks.
+
+    The formatter masks the whole formatted text: the message, and the traceback under
+    it. A traceback holds the most home folders, because each frame names its file. The
+    formatter reads the ``anonymize`` preference at each record, so a change on the
+    Preferences page applies to the next line. The mask is a function of the text only,
+    so it does not change the record. The console handler gets the same record and shows
+    it as it is, because the console belongs to the user who reads it.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        """Format ``record`` as one line (and its traceback), masked if ``anonymize`` is on."""
+        from ..core.anonymize import anonymize
+        from ..core.preferences import current
+
+        text = super().format(record)
+        return anonymize(text) if current().anonymize else text
 
 
 #: Third-party loggers that must never write to the terminal, because their records print

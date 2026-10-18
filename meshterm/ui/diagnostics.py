@@ -25,6 +25,13 @@ page never shows it in its own body, because the body belongs to the report. The
 answers in a dialog, because the answer is a path that the user may have to read
 carefully, and because a write can fail. The page under the dialog does not change, and
 it is still there when the dialog closes.
+
+A second verb, **anonymize** (:data:`ANONYMIZE_KEY`), changes the page between the
+report as it is and the report with its personal details masked. It is the menu half of
+``meshterm diagnostics --anonymize``. The ``anonymize`` preference chooses the form in
+which the page opens, and the key changes only this visit. The save writes the form that
+is visible, so the user saves what the user reads. The title says ``anonymized`` while the
+masks are visible.
 """
 
 from __future__ import annotations
@@ -50,17 +57,34 @@ SAVE_KEY = "s"
 #: is not a second implementation of the keyboard key.
 SAVE_ACTION = "save"
 
+#: The keyboard key that changes the page between the report and the anonymized report. A
+#: bare letter, for the same reason as :data:`SAVE_KEY`.
+ANONYMIZE_KEY = "a"
+
+#: The action that :data:`ANONYMIZE_KEY` and its chip on the lane both dispatch.
+ANONYMIZE_ACTION = "anonymize"
+
+_TITLE = "Diagnostics"
+
 
 class DiagnosticsPage(AboutPage):
-    """The written diagnostics page, plus the one verb that writes it to a file.
+    """The written diagnostics page, plus the verbs that anonymize it and write it to a file.
 
     All of the behaviour for reading comes from :class:`~meshterm.ui.about.AboutPage`: the
     pager, the sticky ``##`` headings, the section jumps, and the lane that dims when there
-    is nothing to page. This class adds only the save, on the one slot that the About pages
-    leave free.
+    is nothing to page. This class adds the save, on the one slot that the About pages
+    leave free, and the anonymize key, on the Shift half of that slot.
     """
 
-    def __init__(self, source: str, *, session: TuiSession, save_path: Path) -> None:
+    def __init__(
+        self,
+        source: str,
+        *,
+        session: TuiSession,
+        save_path: Path,
+        anonymized_source: str | None = None,
+        anonymized: bool = False,
+    ) -> None:
         """Show ``source`` as the page, and save it to ``save_path`` when the user asks.
 
         Args:
@@ -68,24 +92,48 @@ class DiagnosticsPage(AboutPage):
                 :func:`~meshterm.tools.diagnostics.markdown_source`.
             session: The session, for the dialog in which the save answers.
             save_path: The file to which :data:`SAVE_KEY` writes.
+            anonymized_source: The same document with its personal details masked, from
+                :func:`~meshterm.tools.diagnostics.anonymized`. ``None`` gives a page with
+                no anonymize key.
+            anonymized: Whether the page opens on ``anonymized_source``.
         """
-        super().__init__("Diagnostics", render_markdown(source))
-        self._source = source
+        self._sources = {False: source, True: anonymized_source}
+        self._anonymized = anonymized and anonymized_source is not None
+        super().__init__(self._title(), render_markdown(self._source))
         self._session = session
         self._save_path = save_path
         self._saving = False
 
     @property
-    def footer_hint(self) -> str:  # type: ignore[override]
-        """The keys of the read-only page, with the save between the pager and Esc.
+    def _source(self) -> str:
+        """The document that the page shows now, and that the save writes."""
+        return self._sources[self._anonymized] or self._sources[False] or ""
 
-        The hint has the standard sentence shape: navigation first, then the action, then
+    @property
+    def _can_anonymize(self) -> bool:
+        """Whether the page has the second form of the document to change to."""
+        return self._sources[True] is not None
+
+    def _title(self) -> str:
+        """The title, with ``· anonymized`` while the masks are visible."""
+        return f"{_TITLE} · anonymized" if self._anonymized else _TITLE
+
+    @property
+    def footer_hint(self) -> str:  # type: ignore[override]
+        """The keys of the read-only page, with the verbs between the pager and Esc.
+
+        The hint has the standard sentence shape: navigation first, then the actions, then
         Esc. The pager atom is present only while :attr:`~Screen.content_overflows` is
         true, as on each read-only page. Thus the line never names a keyboard key that does
-        nothing.
+        nothing. The anonymize atom names what the key does next: ``anonymize`` on the
+        report as it is, and ``reveal`` on the masked report.
         """
         scroll = "↑↓ PgUp/PgDn scroll · " if self.content_overflows else ""
-        return f"{scroll}{SAVE_KEY} save · Esc back"
+        toggle = ""
+        if self._can_anonymize:
+            verb = "reveal" if self._anonymized else "anonymize"
+            toggle = f"{ANONYMIZE_KEY} {verb} · "
+        return f"{scroll}{toggle}{SAVE_KEY} save · Esc back"
 
     @property
     def picocalc_lyra_lane(self):
@@ -93,20 +141,40 @@ class DiagnosticsPage(AboutPage):
 
         F1/F2 are the section pair and F4/F5 are the pager. Thus F3 is the one free primary
         slot. On this platform, the lane is the only place that can show a bare-letter
-        keyboard key. Thus the chip is necessary, and not only a decoration.
+        keyboard key. Thus the chip is necessary, and not only a decoration. The anonymize
+        key goes on the Shift half of the same slot, because the two verbs are both about
+        what leaves the machine. Its label names what the chip does next.
         """
         from .tui.fkeys import FPair
 
         lane = list(super().picocalc_lyra_lane)
-        lane[2] = FPair("Save", SAVE_ACTION)
+        if self._can_anonymize:
+            label = "Reveal" if self._anonymized else "Anon"
+            lane[2] = FPair("Save", SAVE_ACTION, label, ANONYMIZE_ACTION)
+        else:
+            lane[2] = FPair("Save", SAVE_ACTION)
         return lane
 
     def handle(self, action: str, data: str = "") -> None:
-        """Save on the keyboard key or the chip. Scroll, jump, or leave on all other actions."""
-        if action == SAVE_ACTION or (action == "text" and data.lower() == SAVE_KEY):
+        """Save or anonymize on a keyboard key or a chip. Scroll, jump, or leave on all others."""
+        typed = data.lower() if action == "text" else ""
+        if action == SAVE_ACTION or typed == SAVE_KEY:
             self._begin_save()
             return
+        if self._can_anonymize and (action == ANONYMIZE_ACTION or typed == ANONYMIZE_KEY):
+            self._toggle_anonymized()
+            return
         super().handle(action, data)
+
+    def _toggle_anonymized(self) -> None:
+        """Show the other form of the document, at the same scroll position.
+
+        Both forms have the same lines in the same order, because a mask keeps the length
+        of each value. Thus the user stays at the same place in the page.
+        """
+        self._anonymized = not self._anonymized
+        self._doc = render_markdown(self._source)
+        self.title = self._title()
 
     def _begin_save(self) -> None:
         """Write the file and report the result in a dialog, outside the key handler.
@@ -159,13 +227,22 @@ class DiagnosticsPage(AboutPage):
         return message
 
 
-async def open_diagnostics_page(ctx: AppContext, source: str, *, save_path: Path) -> None:
+async def open_diagnostics_page(
+    ctx: AppContext,
+    source: str,
+    *,
+    save_path: Path,
+    anonymized_source: str | None = None,
+    anonymized: bool = False,
+) -> None:
     """Open the Diagnostics page full-screen, and keep it until the user leaves it.
 
     Args:
         ctx: The shared application context. The interactive TUI must be in use.
         source: The markdown document to show and to save.
         save_path: The file to which the save key of the page writes.
+        anonymized_source: The same document with its personal details masked.
+        anonymized: Whether the page opens on ``anonymized_source``.
 
     Raises:
         RuntimeError: If the call is outside the interactive menu (there is no
@@ -176,7 +253,21 @@ async def open_diagnostics_page(ctx: AppContext, source: str, *, save_path: Path
     if not isinstance(ctx.ui, TuiUi):  # pragma: no cover - the menu-only caller guards this
         raise RuntimeError("the Diagnostics page is only available in the menu")
     session = ctx.ui.session
-    await session.run_screen(DiagnosticsPage(source, session=session, save_path=save_path))
+    page = DiagnosticsPage(
+        source,
+        session=session,
+        save_path=save_path,
+        anonymized_source=anonymized_source,
+        anonymized=anonymized,
+    )
+    await session.run_screen(page)
 
 
-__all__ = ["SAVE_ACTION", "SAVE_KEY", "DiagnosticsPage", "open_diagnostics_page"]
+__all__ = [
+    "ANONYMIZE_ACTION",
+    "ANONYMIZE_KEY",
+    "SAVE_ACTION",
+    "SAVE_KEY",
+    "DiagnosticsPage",
+    "open_diagnostics_page",
+]

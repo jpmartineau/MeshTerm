@@ -2099,6 +2099,12 @@ class MeshCoreDevice(Device):
         self._ble_device = ble_device
         self._host = host
         self._tcp_port = tcp_port
+        if host:
+            # No pattern can find a host name in a log line. Thus each host that MeshTerm
+            # opens is registered here, and the ``anonymize`` preference can mask it.
+            from .anonymize import remember_host
+
+            remember_host(host)
         self._mc = None  # type: ignore[var-annotated]  # meshcore.MeshCore
         #: The ``bleak.BleakClient`` of a BLE link. MeshTerm keeps it because ``meshcore``
         #: releases its own reference at the moment the peripheral disappears. Refer to

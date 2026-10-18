@@ -1756,6 +1756,7 @@ console_font                 6x12                                  6x12         
 name_overlap_days            7                                     7                                     Grey a name two nodes used within this many days
 section_spacing_min_rows     24                                    24                                    A blank line between sections and between chat authors
 log_level                    WARNING                               WARNING                               How much MeshTerm writes to its log file (next launch)
+anonymize                    off                                   off                                   Mask the home folder and addresses in the log and diagnostics
 ```
 
 **`DESCRIPTION`** says what each preference does, because the name of a key does not give
@@ -1868,6 +1869,7 @@ tx_power_dbm    20
 error           -
 
 config_dir   C:\Users\you\.meshterm
+anonymized   no
 db_size_kb   41280
 log_level    DEBUG
 log_size_kb  96
@@ -1919,6 +1921,29 @@ public without reading it. `tests/test_diagnostics.py` plants real secrets in ea
 that holds one. It fails if one of them, or a field that is only *named* like one,
 reaches either face.
 
+**`--anonymize` masks the personal details, and keeps a tidbit of each one.** Some facts
+are not secrets, but they are about you and your machine: the home folder in
+`config_dir`, which has your account name, and the address of a radio or a host that an
+`error` can repeat. `--anonymize` masks them in the way that a card number prints as
+`51xx xxxx xxxx 4571`:
+
+| Detail | As it is | Masked |
+| --- | --- | --- |
+| The account name in a home folder | `C:\Users\jpmartineau` | `C:\Users\j*********u` |
+| A Bluetooth address | `DA:C5:21:6B:7C:7C` | `DA:xx:xx:xx:7C:7C` |
+| An IPv4 address | `192.168.0.180` | `192.xxx.x.180` |
+| The name of a network companion | `meshcore.local` | `m******e.local` |
+
+Each masked value keeps its first and its last characters, and its length. Thus two radios
+in one report stay two different radios, and a maintainer can match the address in the
+report with the address in the log. The `anonymized` fact says which form the report is.
+
+The **Anonymize** preference (`meshterm preferences set anonymize on`) makes the masked
+report the default, and `--no-anonymize` overrides it for one run. The preference also
+masks the log file, `meshterm.log`, as MeshTerm writes each line, so you can attach the
+log with the report. A line that MeshTerm wrote before you turned the preference on stays
+as it is. Node names, message text, and keys are not masked.
+
 With `--json`, the five blocks of facts merge into one flat object, and the two listings
 keep a key of their own:
 
@@ -1953,6 +1978,11 @@ slot of the lane names it. The body of the page never names it, because the body
 to the report. The save writes `meshterm-diagnostics.md` into the config directory beside
 the log, and it answers in a dialog that names the path. If the write fails, the same
 dialog says so, in red, and the page stays readable.
+
+`a` changes the page between the report as it is and the anonymized report, and the title
+says `Diagnostics · anonymized` while the masks are visible. The page opens in the form
+that the **Anonymize** preference gives, and `s` saves the form that you see. On the
+PicoCalc, the key is **Shift+F3**, behind `Save`.
 
 #### `meshterm platform`
 

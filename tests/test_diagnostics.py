@@ -465,6 +465,123 @@ def test_the_observation_span_is_absent_until_something_is_heard(tmp_path: Path)
     assert repo.failed_run_count() == 0
 
 
+# --- anonymized -------------------------------------------------------------------------
+
+#: A Bluetooth address, in the words of a radio that failed to connect.
+_RADIO = "DA:C5:21:6B:7C:7C"
+
+
+@pytest.fixture
+def home(ctx: AppContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Put the config directory in a home folder with an account name, on each OS.
+
+    The radio refuses with its Bluetooth address in the error, so that each type of
+    personal detail is in the report.
+    """
+    from meshterm.core import anonymize
+
+    folder = tmp_path / "jpmartineau"
+    monkeypatch.setattr(anonymize, "_home", lambda: str(folder))
+    ctx.settings.config_dir = folder / ".meshterm"
+
+    async def refuse(self):
+        raise RuntimeError(f"BLE link to {_RADIO} failed to open")
+
+    monkeypatch.setattr(AppContext, "device", refuse)
+    return folder
+
+
+def test_the_report_keeps_each_detail_by_default(ctx: AppContext, home: Path) -> None:
+    """With the preference off, the report is as it was: the owner's own facts, unmasked."""
+    values = _flat(_report(ctx))
+    assert values["anonymized"] is False
+    assert "jpmartineau" in str(values["config_dir"])
+    assert _RADIO in values["error"]
+
+
+def test_the_preference_masks_the_home_folder_and_the_radio(ctx: AppContext, home: Path) -> None:
+    """With the preference on, both faces mask each detail, and keep a tidbit of it."""
+    ctx.preferences.set("anonymize", True)
+    report = _report(ctx)
+    values = _flat(report)
+    assert values["anonymized"] is True
+    assert values["config_dir"].name == ".meshterm"
+    assert "j*********u" in str(values["config_dir"])
+    assert "DA:xx:xx:xx:7C:7C" in values["error"]
+    for face in (_plain(report), _machine(report), markdown_source(report)):
+        assert "jpmartineau" not in face
+        assert _RADIO not in face
+
+
+def test_an_override_wins_over_the_preference(ctx: AppContext, home: Path) -> None:
+    """``--anonymize`` and ``--no-anonymize`` decide for one run, in each direction."""
+    assert _flat(asyncio.run(build_report(ctx, anonymize=True)))["anonymized"] is True
+    ctx.preferences.set("anonymize", True)
+    assert _flat(asyncio.run(build_report(ctx, anonymize=False)))["anonymized"] is False
+
+
+def test_the_command_line_takes_the_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The flag pair is on the command, and the preference decides when neither is given."""
+    import json
+
+    from typer.testing import CliRunner
+
+    from meshterm.cli import app
+
+    monkeypatch.setenv("MESHTERM_HOME", str(tmp_path / "home"))
+
+    def anonymized(*args: str) -> bool:
+        result = CliRunner().invoke(app, ["--mock", "--json", "diagnostics", *args])
+        assert result.exit_code == 0, result.output
+        return json.loads(result.stdout)["anonymized"]
+
+    assert anonymized() is False
+    assert anonymized("--anonymize") is True
+    set_it = CliRunner().invoke(app, ["preferences", "set", "anonymize", "on"])
+    assert set_it.exit_code == 0, set_it.output
+    assert anonymized() is True
+    assert anonymized("--no-anonymize") is False
+
+
+def test_the_page_key_changes_the_form_and_the_save_writes_it(
+    ctx: AppContext, home: Path, tmp_path: Path
+) -> None:
+    """The key shows the other form, the title and the hint say which, and Save writes it."""
+    from meshterm.ui.diagnostics import ANONYMIZE_KEY, SAVE_KEY
+
+    path = tmp_path / "out.md"
+    page = _page(ctx, save_path=path, anonymizable=True)
+    assert page.title == "Diagnostics"
+    assert f"{ANONYMIZE_KEY} anonymize" in page.footer_hint
+
+    page.handle("text", ANONYMIZE_KEY)
+    assert page.title == "Diagnostics · anonymized"
+    assert f"{ANONYMIZE_KEY} reveal" in page.footer_hint
+    assert "jpmartineau" not in _body(page)
+    page.handle("text", SAVE_KEY)
+    saved = path.read_text(encoding="utf-8")
+    assert "j*********u" in saved and "jpmartineau" not in saved
+
+    page.handle("text", ANONYMIZE_KEY)
+    assert page.title == "Diagnostics"
+    # The document and not the drawn lines: a long temporary path can wrap in the name.
+    assert "jpmartineau" in page._source
+
+
+def test_the_page_opens_in_the_form_of_the_preference(ctx: AppContext, home: Path) -> None:
+    """The preference chooses the first form, and the chip on the lane names the other one."""
+    from meshterm.ui.diagnostics import ANONYMIZE_ACTION
+
+    page = _page(ctx, anonymizable=True, anonymized=True)
+    assert page.title == "Diagnostics · anonymized"
+    chip = page.picocalc_lyra_lane[2]
+    assert (chip.label, chip.opp_label, chip.opp_action) == ("Save", "Reveal", ANONYMIZE_ACTION)
+    page.handle(ANONYMIZE_ACTION)
+    assert page.picocalc_lyra_lane[2].opp_label == "Anon"
+
+
 # --- helpers ---------------------------------------------------------------------------
 
 
@@ -576,13 +693,29 @@ class _Session:
             self.shown.append(message)
 
 
-def _page(ctx: AppContext, *, session: _Session | None = None, save_path: Path | None = None):
-    """The page for the report of this context. It saves where the caller says."""
+def _page(
+    ctx: AppContext,
+    *,
+    session: _Session | None = None,
+    save_path: Path | None = None,
+    anonymizable: bool = False,
+    anonymized: bool = False,
+):
+    """The page for the report of this context. It saves where the caller says.
+
+    With ``anonymizable``, the page also gets the anonymized form, as the tool gives it.
+    """
+    from meshterm.tools.diagnostics import anonymized as masked
     from meshterm.ui.diagnostics import DiagnosticsPage
 
     target = save_path or (ctx.settings.config_dir / "meshterm-diagnostics.md")
+    report = asyncio.run(build_report(ctx, anonymize=False))
     return DiagnosticsPage(
-        markdown_source(_report(ctx)), session=session or _Session(), save_path=target
+        markdown_source(report),
+        session=session or _Session(),
+        save_path=target,
+        anonymized_source=markdown_source(masked(report)) if anonymizable else None,
+        anonymized=anonymized,
     )
 
 

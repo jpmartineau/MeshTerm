@@ -281,6 +281,9 @@ and in quoted text.
 | save | Do an explicit save: the user's Save, or the device's save command | |
 | record | One stored data item | |
 | delete | Remove stored data permanently | purge (except the Purge feature) |
+| personal detail | A value that identifies the user or the equipment of the user, but is not a secret: the account name in a home folder, the address of a radio, the address of a host | PII, private data |
+| mask | Replace most characters of a personal detail, and keep its first and last characters: `j*********u`, `DA:xx:xx:xx:7C:7C` | redact, scrub, obfuscate |
+| anonymize | Mask each personal detail in a text: the `anonymize` preference does it to the log and the diagnostics | |
 | remove | Take an item out of a collection or a text | drop, strip |
 | clear | Make empty | |
 | download | Get a file from the network | fetch |

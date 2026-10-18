@@ -28,10 +28,18 @@ The tool asks the device, but the device is not necessary. A report about a radi
 does not connect is the report that it is most necessary to file. Thus, when the tool
 cannot get to the device, that failure becomes a fact in the block (``connected`` and
 ``error``), and not an error that replaces the block.
+
+**Anonymized on request.** Some facts are about the machine of the user, and not about a
+secret: the home folder in ``config_dir``, and the address of a radio or a host that an
+``error`` can repeat. The ``anonymize`` preference masks them, and keeps a tidbit of each
+one (refer to :mod:`meshterm.core.anonymize`). ``--anonymize`` and ``--no-anonymize``
+override the preference for one run, and the page has a key that does the same. The
+``anonymized`` fact tells the person who reads the report which form it is.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -42,6 +50,9 @@ from .base import Tool, ToolResult, register
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..ui.report import Report
+
+#: The fact that tells whether the personal details of the report are masked.
+ANONYMIZED = "anonymized"
 
 #: The name of the saved file, in the config directory, next to the log that it goes with
 #: in a bug report. The name includes the app name, and is not only ``diagnostics.md``.
@@ -63,13 +74,17 @@ class DiagnosticsTool(Tool):
     order = 7  # after Preferences (the row that changes MeshTerm), and before the pages
 
     def register_cli(self, app: Any) -> None:
-        """Register the command, with the one option that changes the answer into a file.
+        """Register the command, with the option that writes a file and the mask override.
 
         ``--out`` has the same spelling as ``config export-key --out``. We did not make a
         second word to write an answer to a path. Plain redirection continues to work, and
         the option does not replace it. The option adds a file whose columns have the full
         width, and not the width that the terminal had at that time. That is the
         difference between an attachment that a person can read and a folded one.
+
+        ``--anonymize`` and ``--no-anonymize`` override the ``anonymize`` preference for
+        this run, in the way that ``--absolute`` overrides ``cli_time_format``. With
+        neither, the preference decides.
         """
         import typer
 
@@ -80,8 +95,13 @@ class DiagnosticsTool(Tool):
             out: Path | None = typer.Option(
                 None, "--out", help="Write the block to this file instead of printing it"
             ),
+            anonymize: bool | None = typer.Option(
+                None,
+                "--anonymize/--no-anonymize",
+                help="Mask the home folder and addresses (default: the anonymize preference)",
+            ),
         ) -> None:
-            run_tool_command(self, {"out": out})
+            run_tool_command(self, {"out": out, "anonymize": anonymize})
 
     async def prompt_params(self, ctx: AppContext) -> dict[str, Any] | None:
         """Open the page in the menu. The return value ``None`` ends with no run row.
@@ -91,6 +111,10 @@ class DiagnosticsTool(Tool):
         person looked at their own version number, the log gets a line for each look. A
         save from the page is also not a run.
 
+        The page gets both forms of the document, so that its key can change from one to
+        the other with no second read of the device. It opens in the form that the
+        ``anonymize`` preference gives.
+
         Args:
             ctx: The shared application context.
 
@@ -99,8 +123,15 @@ class DiagnosticsTool(Tool):
         """
         from ..ui.diagnostics import open_diagnostics_page
 
-        report = await build_report(ctx)
-        await open_diagnostics_page(ctx, markdown_source(report), save_path=default_path(ctx))
+        report = await build_report(ctx, anonymize=False)
+        when = datetime.now().astimezone()
+        await open_diagnostics_page(
+            ctx,
+            markdown_source(report, when=when),
+            save_path=default_path(ctx),
+            anonymized_source=markdown_source(anonymized(report), when=when),
+            anonymized=_anonymizes(ctx),
+        )
         return None
 
     async def run(self, ctx: AppContext, params: dict[str, Any]) -> ToolResult:
@@ -113,11 +144,13 @@ class DiagnosticsTool(Tool):
         Args:
             ctx: The shared application context.
             params: ``out``: a destination path, or ``None`` to print the block.
+                ``anonymize``: ``True`` or ``False`` to override the preference, or
+                ``None`` to obey it.
 
         Returns:
             A :class:`ToolResult` that holds the block, or the path of the written file.
         """
-        report = await build_report(ctx)
+        report = await build_report(ctx, anonymize=params.get("anonymize"))
         out = params.get("out")
         if out is None:
             return ToolResult(summary={"tool": self.name}, report=report)
@@ -131,7 +164,7 @@ class DiagnosticsTool(Tool):
         )
 
 
-async def build_report(ctx: AppContext) -> Report:
+async def build_report(ctx: AppContext, *, anonymize: bool | None = None) -> Report:
     """Collect all the diagnostic facts, as the report that the two faces render.
 
     Seven blocks, in the order that is most useful to the user: what this program is, the
@@ -147,11 +180,13 @@ async def build_report(ctx: AppContext) -> Report:
 
     Args:
         ctx: The shared application context.
+        anonymize: ``True`` to mask the personal details (refer to :func:`anonymized`),
+            ``False`` to keep them, or ``None`` to obey the ``anonymize`` preference.
 
     Returns:
         The report of seven blocks.
     """
-    return (
+    report = (
         _app_facts(),
         _host_facts(),
         _terminal_facts(),
@@ -160,6 +195,55 @@ async def build_report(ctx: AppContext) -> Report:
         _table_listing(ctx),
         _preference_listing(ctx),
     )
+    masks = _anonymizes(ctx) if anonymize is None else anonymize
+    return anonymized(report) if masks else report
+
+
+def anonymized(report: Report) -> Report:
+    """The same report, with each personal detail masked and the ``anonymized`` fact on.
+
+    The mask goes through each text value of each block, and does not choose fields. A
+    field that someone adds later is masked on the day that it arrives, and nobody must
+    remember to add it to a list. A value keeps its type: a path stays a
+    :class:`~pathlib.Path`, so its lane renders it as before. Each value that is not text
+    (a count, a flag, an instant) stays as it is.
+
+    Args:
+        report: A report from :func:`build_report`.
+
+    Returns:
+        The masked report. ``report`` itself does not change.
+    """
+    from ..core.anonymize import anonymize
+    from ..ui.report import Facts, Listing
+
+    def mask(value: Any) -> Any:
+        if isinstance(value, Path):
+            return Path(anonymize(str(value)))
+        if isinstance(value, str):
+            return anonymize(value)
+        return value
+
+    blocks: list[Any] = []
+    for block in report:
+        if isinstance(block, Facts):
+            values = {key: mask(value) for key, value in block.values.items()}
+            if ANONYMIZED in values:
+                values[ANONYMIZED] = True
+            blocks.append(replace(block, values=values))
+        elif isinstance(block, Listing):
+            rows = [{key: mask(value) for key, value in row.items()} for row in block.rows]
+            blocks.append(replace(block, rows=rows))
+        else:
+            blocks.append(block)
+    return tuple(blocks)
+
+
+def _anonymizes(ctx: AppContext) -> bool:
+    """Whether the ``anonymize`` preference asks for the masked report."""
+    from ..core.preferences import current
+
+    return bool((ctx.preferences or current()).anonymize)
 
 
 def markdown_source(report: Report, *, when: datetime | None = None) -> str:
@@ -443,6 +527,7 @@ def _mesh_facts(ctx: AppContext) -> Any:
         caption="Storage",
         fields=(
             fields.path("config_dir", "config_dir"),
+            fields.flag(ANONYMIZED, ANONYMIZED),
             fields.integer("db_size_kb", "db_size_kb"),
             fields.word("log_level", "log_level"),
             fields.integer("log_size_kb", "log_size_kb"),
@@ -452,6 +537,9 @@ def _mesh_facts(ctx: AppContext) -> Any:
         ),
         values={
             "config_dir": ctx.settings.config_dir,
+            # Next to the value that it changes most. :func:`anonymized` sets it, so that a
+            # maintainer who reads `j*********u` knows that it is a mask and not a fault.
+            ANONYMIZED: False,
             "db_size_kb": _size_kb(db_path),
             "log_level": preferences.log_level,
             # How much the log holds. Thus a maintainer who asks for it knows what to expect.

@@ -20,7 +20,9 @@ You see the same message wherever the connection fails:
 MeshTerm also writes each failure to the log file, `~/.meshterm/meshterm.log` (refer to
 [Where MeshTerm keeps its state](../cli/README.md#where-meshterm-keeps-its-state)). Attach
 the log file to a bug report. To get more detail, set the **Log detail** preference to
-`DEBUG` (`meshterm preferences set log_level DEBUG`), and run the command again.
+`DEBUG` (`meshterm preferences set log_level DEBUG`), and run the command again. The log
+can show your account name and the address of your radio. To mask them as MeshTerm writes
+each line, turn on the **Anonymize** preference (`meshterm preferences set anonymize on`).
 
 Sometimes MeshTerm meets a failure that it has no name for. Then the message is the error
 in its own words, and a second line tells where the log file is. The log has the full

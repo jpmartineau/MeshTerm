@@ -549,6 +549,18 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         choices=_LOG_LEVEL_CHOICES,
         relaunch=True,
     ),
+    PrefSpec(
+        key="anonymize",
+        label="Anonymize",
+        help="Mask the home folder and addresses in the log and diagnostics",
+        group="Diagnostics",
+        value_type="bool",
+        # Off: the person who reads the log is usually its owner, who needs each detail as
+        # it is. A user who posts the log and the diagnostics in public turns it on (refer
+        # to meshterm.core.anonymize). The log reads it at each record, so a change applies
+        # at once and not at the next start.
+        default=False,
+    ),
 )
 
 _BY_KEY: dict[str, PrefSpec] = {spec.key: spec for spec in PREFERENCES}

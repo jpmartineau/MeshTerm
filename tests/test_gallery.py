@@ -1621,20 +1621,35 @@ def _diagnostics(cols: int, rows: int) -> Screen:
     item hangs its wrapped text under itself at any width, and this must work in 53
     columns.
     """
+    return _diagnostics_page(cols, rows, anonymized=False)
+
+
+def _diagnostics_anonymized(cols: int, rows: int) -> Screen:
+    """The Diagnostics page with its masks visible: a longer title, and the other chip."""
+    return _diagnostics_page(cols, rows, anonymized=True)
+
+
+def _diagnostics_page(cols: int, rows: int, *, anonymized: bool) -> Screen:
+    """The Diagnostics page with both forms of the document, as the tool opens it."""
+    from datetime import datetime
+
+    from meshterm.tools.diagnostics import anonymized as masked
+    from meshterm.tools.diagnostics import markdown_source
     from meshterm.ui.diagnostics import DiagnosticsPage
 
+    report = _diagnostics_report()
+    when = datetime(2026, 9, 19, 17, 0)
     return DiagnosticsPage(
-        _diagnostics_source(),
+        markdown_source(report, when=when),
         session=_GallerySession(cols, rows),
         save_path=Path("C:/Users/somebody/.meshterm/meshterm-diagnostics.md"),
+        anonymized_source=markdown_source(masked(report), when=when),
+        anonymized=anonymized,
     )
 
 
-def _diagnostics_source() -> str:
-    """A typical diagnostics document, built in the way that the tool builds one."""
-    from datetime import datetime
-
-    from meshterm.tools.diagnostics import markdown_source
+def _diagnostics_report():
+    """A typical diagnostics report, with the widest values that a real report can have."""
     from meshterm.ui import fields
     from meshterm.ui.report import Column, Facts, Lane, Listing
 
@@ -1691,7 +1706,7 @@ def _diagnostics_source() -> str:
             rows=[{"preference": "log_level", "value": "DEBUG"}],
         ),
     )
-    return markdown_source(report, when=datetime(2026, 9, 19, 17, 0))
+    return report
 
 
 def _quit_hold(cols: int, rows: int) -> Screen:
@@ -1789,6 +1804,7 @@ _ENTRIES: list[_Entry] = [
     _Entry("share_qr", _share_qr),
     _Entry("links_qr", _links_qr),
     _Entry("diagnostics", _diagnostics),
+    _Entry("diagnostics-anonymized", _diagnostics_anonymized),
 ]
 
 #: The combinations of (platform, cols, rows) under which each entry above renders. The

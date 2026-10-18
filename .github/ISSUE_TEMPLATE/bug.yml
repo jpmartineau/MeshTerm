@@ -22,6 +22,13 @@ body:
         The **Diagnostics** page in the menu saves the same file next to the log. Press `s`,
         or F3 on the PicoCalc.
 
+        The file and the log can show your account name (in the path of your home folder)
+        and the address of your radio. To mask them, add `--anonymize` to the command, or
+        press `a` on the page. To mask them in the log too, turn on **Anonymize** on the
+        Preferences page (`meshterm preferences set anonymize on`) before you make the
+        problem occur. Each masked value keeps a few characters, so that I can still tell
+        two radios apart.
+
         The rest of this form asks only for the information that the file cannot know.
 
   - type: textarea
