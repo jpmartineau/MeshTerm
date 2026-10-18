@@ -281,6 +281,8 @@ and in quoted text.
 | save | Do an explicit save: the user's Save, or the device's save command | |
 | record | One stored data item | |
 | delete | Remove stored data permanently | purge (except the Purge feature) |
+| secret | A value that unlocks something: a password, a channel secret, a pairing PIN, a private key. No log keeps one: it is hidden as `<secret>` | credential (except in a name) |
+| hide (a secret) | Replace a secret with `<secret>` in a log or in the run log | redact, scrub |
 | personal detail | A value that identifies the user or the equipment of the user, but is not a secret: the account name in a home folder, the address of a radio, the address of a host | PII, private data |
 | mask | Replace most characters of a personal detail, and keep its first and last characters: `j*********u`, `DA:xx:xx:xx:7C:7C` | redact, scrub, obfuscate |
 | anonymize | Mask each personal detail in a text: the `anonymize` preference does it to the log and the diagnostics | |

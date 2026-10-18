@@ -12,7 +12,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -404,6 +404,37 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # that the run log writes as "<secret>" (refer to meshterm.tools.base.Secret).
         # This step removes the keys that the earlier versions stored, one time.
         _forget_imported_keys(conn)
+    if stored is not None and int(stored["value"]) < 20:
+        # v19 -> v20: no secret of any kind in the run log. The parameters and summaries
+        # of the runs held channel secrets (in each chat run, inside its Conversation),
+        # room passwords, admin passwords, and pairing PINs. The run log now stores each
+        # one as "<secret>" (refer to meshterm.core.secrets). This step hides the secrets
+        # that the earlier versions stored, one time.
+        _hide_stored_secrets(conn)
+
+
+def _hide_stored_secrets(conn: sqlite3.Connection) -> None:
+    """Hide each secret in the stored arguments and summaries of the runs.
+
+    The rules are the rules that the run log applies to a new run
+    (:func:`~meshterm.core.secrets.loggable`). The stored JSON has lost the types of the
+    objects: a ``Conversation`` is the text of its ``repr``. The text rules find the
+    secret in that text (``secret=b'...'``). A row that does not change is not written.
+    """
+    from ..core.secrets import loggable
+
+    rows = conn.execute("SELECT id, args_json, summary_json FROM runs").fetchall()
+    for row in rows:
+        for column in ("args_json", "summary_json"):
+            stored = row[column]
+            if not stored:
+                continue
+            try:
+                hidden = json.dumps(loggable(json.loads(stored)), default=str)
+            except ValueError:
+                continue
+            if hidden != json.dumps(json.loads(stored)):
+                conn.execute(f"UPDATE runs SET {column} = ? WHERE id = ?", (hidden, row["id"]))
 
 
 def _forget_imported_keys(conn: sqlite3.Connection) -> None:

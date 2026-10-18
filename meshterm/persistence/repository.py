@@ -30,6 +30,7 @@ from ..core.models import (
     utcnow,
 )
 from ..core.regions import SCOPED_ROUTES, raw_scope_body
+from ..core.secrets import loggable
 from . import db
 
 if TYPE_CHECKING:
@@ -371,6 +372,10 @@ class Repository:
     ) -> int:
         """Store the start of a tool run.
 
+        The run log never keeps a secret. The arguments go through
+        :func:`~meshterm.core.secrets.loggable`, so a password, a channel secret, or a PIN
+        is stored as ``<secret>``.
+
         Args:
             tool: The name of the tool.
             args: The arguments with which the tool was called (they must be
@@ -382,10 +387,11 @@ class Repository:
         Returns:
             The primary key of the new run.
         """
+        stored = json.dumps(loggable(args), default=str)
         cur = self._conn.execute(
             "INSERT INTO runs (tool, profile, args_json, status, started_at) "
             "VALUES (?, ?, ?, 'running', ?)",
-            (tool, profile, json.dumps(args, default=str), (at or utcnow()).isoformat()),
+            (tool, profile, stored, (at or utcnow()).isoformat()),
         )
         self._conn.commit()
         return int(cur.lastrowid)
@@ -400,6 +406,9 @@ class Repository:
     ) -> None:
         """Mark a run as finished.
 
+        The summary goes through :func:`~meshterm.core.secrets.loggable`, as the arguments
+        do in :meth:`start_run`. An error message that repeats a secret is hidden too.
+
         Args:
             run_id: The run to update.
             status: The final status (``ok`` or ``error``).
@@ -410,7 +419,7 @@ class Repository:
             "UPDATE runs SET status = ?, summary_json = ?, finished_at = ? WHERE id = ?",
             (
                 status,
-                json.dumps(summary, default=str) if summary is not None else None,
+                json.dumps(loggable(summary), default=str) if summary is not None else None,
                 (at or utcnow()).isoformat(),
                 run_id,
             ),

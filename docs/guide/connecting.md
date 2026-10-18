@@ -21,7 +21,8 @@ MeshTerm also writes each failure to the log file, `~/.meshterm/meshterm.log` (r
 [Where MeshTerm keeps its state](../cli/README.md#where-meshterm-keeps-its-state)). Attach
 the log file to a bug report. To get more detail, set the **Log detail** preference to
 `DEBUG` (`meshterm preferences set log_level DEBUG`), and run the command again. The log
-can show your account name and the address of your radio. To mask them as MeshTerm writes
+never holds a password or a secret, at any level. It can show your account name and the
+address of your radio. To mask them as MeshTerm writes
 each line, turn on the **Anonymize** preference (`meshterm preferences set anonymize on`).
 
 Sometimes MeshTerm meets a failure that it has no name for. Then the message is the error

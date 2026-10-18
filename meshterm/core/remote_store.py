@@ -28,6 +28,8 @@ from typing import ClassVar
 from .admin_store import admin_key
 from .atomicwrite import write_atomically
 from .models import Contact, utcnow
+from .secrets import names_secret, without_secret
+from .secrets import remember as remember_secret
 
 #: How many command-line entries the store keeps for each node (newest last).
 HISTORY_CAP = 100
@@ -121,7 +123,11 @@ class _RemoteNode:
                 if value is not None:
                     settings[str(key)] = value
         raw_history = record.get("history")
-        history = [str(c) for c in raw_history] if isinstance(raw_history, list) else []
+        # A history that an earlier version wrote can hold a password. The record keeps
+        # the command without it, so the next write removes it from the file.
+        history = (
+            [without_secret(str(c)) for c in raw_history] if isinstance(raw_history, list) else []
+        )
         return cls(settings=settings, history=history)
 
     @property
@@ -169,11 +175,20 @@ class RemoteStore:
         return dict(self._node(node).settings)
 
     def remember_setting(self, node: Contact, key: str, value: str) -> None:
-        """Cache the value of one setting for ``node``, with the time now."""
+        """Cache the value of one setting for ``node``, with the time now.
+
+        The value of a setting that is a secret (``guest.password``, ``bridge.secret``) is
+        also registered, so that no log can repeat it (refer to
+        :mod:`meshterm.core.secrets`).
+        """
+        if names_secret(key):
+            remember_secret(value)
         self._put(node, key, CachedValue(value=value, read_at=utcnow()))
 
     def remember_discovered(self, node: Contact, key: str, value: str) -> None:
         """Cache a setting that is not in the catalog, which ``node`` proved that it has."""
+        if names_secret(key):
+            remember_secret(value)
         self._put(node, key, CachedValue(value=value, read_at=utcnow(), discovered=True))
 
     def remember_unsupported(self, node: Contact, key: str) -> None:
@@ -209,10 +224,17 @@ class RemoteStore:
         return list(self._node(node).history)
 
     def append_history(self, node: Contact, command: str) -> None:
-        """Add one sent command to the history of the node (not a repeat of the last command)."""
+        """Add one sent command to the history of the node (not a repeat of the last command).
+
+        A command that sets a password or a secret is kept without its value
+        (:func:`~meshterm.core.secrets.without_secret`): ``password hunter2`` is kept as
+        ``password``, with the space after it. Thus ↑ recalls the start of the command, and
+        the file never holds the secret.
+        """
         command = command.strip()
         if not command:
             return
+        command = without_secret(command)
         records = self._load()
         record = records.setdefault(admin_key(node), _RemoteNode())
         if record.history and record.history[-1] == command:

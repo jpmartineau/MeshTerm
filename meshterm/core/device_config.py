@@ -145,7 +145,7 @@ def _parse_typed(spec: SettingSpec, raw: Any, snapshot: dict | None) -> Any:
             return True
         if low in _FALSE:
             return False
-        raise DeviceConfigError(f"{spec.key}: expected a boolean, got {raw!r}")
+        raise DeviceConfigError(f"{spec.key}: expected a boolean{_got(spec, repr(raw))}")
 
     # Numeric (int / enum / float): the try wraps only the conversion. Thus this handler
     # does not catch and wrap again a DeviceConfigError from the range and enum checks
@@ -158,7 +158,9 @@ def _parse_typed(spec: SettingSpec, raw: Any, snapshot: dict | None) -> Any:
         else:  # int or enum
             value = int(text, 0) if isinstance(raw, str) else int(raw)
     except (ValueError, TypeError) as exc:
-        raise DeviceConfigError(f"{spec.key}: invalid {spec.value_type} value {raw!r}") from exc
+        raise DeviceConfigError(
+            f"{spec.key}: invalid {spec.value_type} value{_got(spec, repr(raw), before=' ')}"
+        ) from exc
 
     if (
         spec.value_type == "enum"
@@ -167,13 +169,33 @@ def _parse_typed(spec: SettingSpec, raw: Any, snapshot: dict | None) -> Any:
         and value not in spec.choices
     ):
         allowed = ", ".join(str(k) for k in spec.choices)
-        raise DeviceConfigError(f"{spec.key}: must be one of {allowed}, got {value}")
+        raise DeviceConfigError(f"{spec.key}: must be one of {allowed}{_got(spec, value)}")
     if spec.minimum is not None and value < spec.minimum:
-        raise DeviceConfigError(f"{spec.key}: must be >= {spec.minimum}, got {value}")
+        raise DeviceConfigError(f"{spec.key}: must be >= {spec.minimum}{_got(spec, value)}")
     maximum = effective_maximum(spec, snapshot)
     if maximum is not None and value > maximum:
-        raise DeviceConfigError(f"{spec.key}: must be <= {maximum:g}, got {value}")
+        raise DeviceConfigError(f"{spec.key}: must be <= {maximum:g}{_got(spec, value)}")
     return value
+
+
+def _got(spec: SettingSpec, shown: Any, *, before: str = ", got ") -> str:
+    """The end of an error message that repeats the refused value, or nothing for a secret.
+
+    An error goes to the log and to the run log, and the value of a secret setting (the
+    pairing PIN) must not (refer to :mod:`meshterm.core.secrets`). Thus the message of a
+    secret setting states the rule and not the value.
+
+    Args:
+        spec: The setting that refused the value.
+        shown: The refused value, as the message writes it.
+        before: The text before the value: ``", got "``, or ``" "`` for "value X".
+
+    Returns:
+        ``", got 1234"``, ``" '12a'"``, or ``""`` for a secret setting.
+    """
+    from .secrets import names_secret
+
+    return "" if names_secret(spec.key) else f"{before}{shown}"
 
 
 def effective_maximum(spec: SettingSpec, snapshot: dict | None) -> float | None:
@@ -430,7 +452,8 @@ def _pin_rule(value: Any, snapshot: dict | None) -> str | None:
     """The firmware accepts only a pairing PIN of zero (no PIN) or of exactly six digits."""
     if value == 0 or 100000 <= value <= 999999:
         return None
-    return f"must be 0 (no PIN) or six digits, got {value}"
+    # No "got": the PIN is a secret, and the message goes to the log (refer to _got).
+    return "must be 0 (no PIN) or six digits"
 
 
 def _repeat_rule(value: Any, snapshot: dict | None) -> str | None:

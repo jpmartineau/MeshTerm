@@ -19,7 +19,11 @@ A preference sets how much MeshTerm writes: ``log_level``, with the default ``WA
 Thus the file has the problems, not a full account of a session that works. When you
 look for the cause of a problem, set it lower, to ``INFO`` or ``DEBUG``.
 
-A second preference, ``anonymize``, masks the personal details of each line before it
+No log ever holds a password or a secret. Both handlers hide each secret that
+:mod:`meshterm.core.secrets` finds in a record, and the file formatter does it again on
+the traceback. This does not depend on a preference.
+
+A preference, ``anonymize``, masks the personal details of each line before it
 goes into the file: the account name in a home folder, the address of a radio, and the
 address of a host (refer to :mod:`meshterm.core.anonymize`). The mask applies as each line
 is written, so the file never holds what it masks. A line that was written before the
@@ -142,6 +146,7 @@ def configure_logging(
             console=console, rich_tracebacks=True, show_path=False, markup=False
         )
         rich_handler.setLevel(level)
+        rich_handler.addFilter(_HIDE_SECRETS)
         logger.addHandler(rich_handler)
 
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -152,6 +157,7 @@ def configure_logging(
         encoding="utf-8",
     )
     file_handler.setLevel(file_level)
+    file_handler.addFilter(_HIDE_SECRETS)
     file_handler.setFormatter(_FileFormatter(_LINE_FORMAT, datefmt=_TIME_FORMAT))
     logger.addHandler(file_handler)
 
@@ -160,23 +166,65 @@ def configure_logging(
     return logger
 
 
-class _FileFormatter(logging.Formatter):
-    """The line format of the file, with the personal details masked when the user asks.
+class _HideSecrets(logging.Filter):
+    """Hide each password and secret in the message of a record, for every handler.
 
-    The formatter masks the whole formatted text: the message, and the traceback under
-    it. A traceback holds the most home folders, because each frame names its file. The
-    formatter reads the ``anonymize`` preference at each record, so a change on the
-    Preferences page applies to the next line. The mask is a function of the text only,
-    so it does not change the record. The console handler gets the same record and shows
-    it as it is, because the console belongs to the user who reads it.
+    A filter on a handler sees each record that the handler gets, also the records of a
+    child logger and of the libraries in :data:`_LIBRARY_LOGGERS`. A filter on a logger
+    sees only the records of that logger. The filter writes the hidden message back into
+    the record, so each handler after it gets the hidden form. A second pass finds nothing
+    more, so the order of the handlers does not matter.
+
+    The text of an exception can repeat a secret too. The console handler draws a
+    traceback from the exception itself, and not from text that a filter can change. Thus,
+    when the traceback of a record holds a secret, the filter adds the hidden traceback to
+    the message as text and removes the exception from the record. Only such a record
+    loses the drawn traceback of the console.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Replace the message of ``record`` with its hidden form, and keep the record."""
+        from ..core.secrets import hide
+
+        try:
+            message = record.getMessage()
+        except Exception:  # noqa: BLE001 - a bad format is the problem of the handler
+            return True
+        hidden = hide(message)
+        if record.exc_info and record.exc_info[0] is not None:
+            traceback = logging.Formatter().formatException(record.exc_info)
+            hidden_traceback = hide(traceback)
+            if hidden_traceback != traceback:
+                hidden = f"{hidden}\n{hidden_traceback}"
+                record.exc_info, record.exc_text = None, None
+        if hidden != message or record.args:
+            record.msg, record.args = hidden, None
+        return True
+
+
+_HIDE_SECRETS = _HideSecrets()
+
+
+class _FileFormatter(logging.Formatter):
+    """The line format of the file, with no secret, and anonymized when the user asks.
+
+    The formatter works on the whole formatted text: the message, and the traceback under
+    it. :class:`_HideSecrets` already hid the message. The text of an exception in a
+    traceback can repeat a secret too, so the formatter hides secrets again here, always.
+    Then it masks the personal details if the ``anonymize`` preference is on. A traceback
+    holds the most home folders, because each frame names its file. The formatter reads
+    the preference at each record, so a change on the Preferences page applies to the
+    next line. The mask does not change the record. The console handler gets the same
+    record and shows it unmasked, because the console belongs to the user who reads it.
     """
 
     def format(self, record: logging.LogRecord) -> str:
-        """Format ``record`` as one line (and its traceback), masked if ``anonymize`` is on."""
+        """Format ``record`` as one line (and its traceback), with no secret in it."""
         from ..core.anonymize import anonymize
         from ..core.preferences import current
+        from ..core.secrets import hide
 
-        text = super().format(record)
+        text = hide(super().format(record))
         return anonymize(text) if current().anonymize else text
 
 

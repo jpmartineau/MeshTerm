@@ -16,45 +16,18 @@ from typing import TYPE_CHECKING, Any
 
 from ..core import exitcodes
 
+# The wrapper for a secret parameter, and its reader. They live with the other rules that
+# keep secrets out of the logs (refer to meshterm.core.secrets). The tools import them
+# from here, next to Tool and ToolResult.
+from ..core.secrets import Secret as Secret
+from ..core.secrets import loggable
+from ..core.secrets import reveal as reveal
+
 if TYPE_CHECKING:  # do not import typer or the context at module load, for a fast start
     import typer
 
     from ..context import AppContext
     from ..ui.report import Report
-
-
-class Secret:
-    """A parameter of a run that the run log must not keep, for example a private key.
-
-    :meth:`Tool.execute` stores the parameters of each run in the ``runs`` table, and logs
-    them at debug level. A secret in the parameters was thus stored as plain text: the key
-    of ``config import-key`` stayed in the database. A secret goes into the parameters in
-    this wrapper. The JSON of the run log and the log line show ``<secret>``, and the tool
-    reads :attr:`value`.
-
-    The class does not derive from ``str``, because ``json.dumps`` writes the value of a
-    ``str`` subclass and never calls its ``default`` for it.
-
-    Attributes:
-        value: The secret itself.
-    """
-
-    __slots__ = ("value",)
-
-    def __init__(self, value: str) -> None:
-        """Keep ``value`` out of each text form of this object."""
-        self.value = value
-
-    def __repr__(self) -> str:
-        """``<secret>``, never the value."""
-        return "<secret>"
-
-    __str__ = __repr__
-
-
-def reveal(value: Any) -> Any:
-    """The value inside a :class:`Secret`, or ``value`` itself if it is not a secret."""
-    return value.value if isinstance(value, Secret) else value
 
 
 @dataclass(slots=True)
@@ -202,7 +175,9 @@ class Tool(ABC):
         from ..core.selection import DeviceSelectionError
 
         run_id = ctx.repo.start_run(self.name, params, ctx.profile_name)
-        ctx.log.debug("run %s start: tool=%s params=%s", run_id, self.name, params)
+        # The copy with each secret hidden: a password, a channel secret, or a PIN in the
+        # parameters must never reach the log (refer to meshterm.core.secrets).
+        ctx.log.debug("run %s start: tool=%s params=%s", run_id, self.name, loggable(params))
         try:
             result = await self.run(ctx, {**params, "_run_id": run_id})
         except (

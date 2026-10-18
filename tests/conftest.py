@@ -192,6 +192,23 @@ def _isolate_config_dir(tmp_path_factory: pytest.TempPathFactory) -> Iterator[No
 
 
 @pytest.fixture(autouse=True)
+def _empty_registries(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each test starts with no registered secret and no registered host.
+
+    The two registries are process-wide on purpose: a secret that MeshTerm read once must
+    stay hidden for the rest of the run. In a suite, that means that a password one test
+    used ("hello", the default room password) hides the same word in each later test that
+    looks for it. ``monkeypatch`` puts the shared objects back after the test.
+    """
+    from meshterm.core import anonymize, secrets
+
+    monkeypatch.setattr(secrets, "_known", set())
+    monkeypatch.setattr(secrets, "_known_pattern", None)
+    monkeypatch.setattr(anonymize, "_hosts", {})
+    monkeypatch.setattr(anonymize, "_host_pattern", None)
+
+
+@pytest.fixture(autouse=True)
 def _reset_platform() -> Iterator[None]:
     """Each test starts and ends on :data:`~meshterm.platforms.REGULAR`.
 

@@ -58,6 +58,7 @@ from .regions import WILDCARD as REGION_WILDCARD
 from .regions import normalize as normalize_region
 from .regions import parse_region_list, region_key
 from .regions import validate as validate_region
+from .secrets import remember as remember_secret
 from .tracing import path_hash_flags, trace_timeout
 from .transmit_lock import TransmitLock
 
@@ -2105,6 +2106,9 @@ class MeshCoreDevice(Device):
             from .anonymize import remember_host
 
             remember_host(host)
+        # The pairing PIN is a secret. No log may repeat it (refer to
+        # meshterm.core.secrets), so it is registered before the first connect.
+        remember_secret(pin)
         self._mc = None  # type: ignore[var-annotated]  # meshcore.MeshCore
         #: The ``bleak.BleakClient`` of a BLE link. MeshTerm keeps it because ``meshcore``
         #: releases its own reference at the moment the peripheral disappears. Refer to
@@ -3197,7 +3201,9 @@ class MeshCoreDevice(Device):
             result = await mc.commands.send_device_query()
         except Exception:  # noqa: BLE001 - older firmware has no query: unknown, not fatal
             return {}
-        return dict(getattr(result, "payload", {}) or {})
+        payload = dict(getattr(result, "payload", {}) or {})
+        remember_secret(payload.get("ble_pin"))  # the PIN with which a phone pairs
+        return payload
 
     #: The maximum silence of the contacts stream before MeshTerm considers a read as
     #: failed (seconds). The library's own ``get_contacts`` arms one future for the *full*
@@ -3467,6 +3473,9 @@ class MeshCoreDevice(Device):
         """
         from meshcore import EventType
 
+        # Each password that MeshTerm sends is a secret that no log may repeat (refer to
+        # meshterm.core.secrets): an admin password, a room password, or a guess.
+        remember_secret(password)
         mc = self._require()
         pub = self._node_pubkey(node)
         loop = asyncio.get_running_loop()
@@ -4384,6 +4393,7 @@ class MeshCoreDevice(Device):
             raise DeviceCommandError(f"channel read for slot {index} returned slot {got}")
         if not payload.get("channel_name"):
             return None
+        remember_secret(payload.get("channel_secret"))
         return payload
 
     async def _channel_event(self, index: int):  # noqa: ANN202 - a meshcore Event
@@ -4573,6 +4583,7 @@ class MeshCoreDevice(Device):
         key = payload.get("private_key")
         if key is None:
             raise RuntimeError("device did not return a private key (export may be disabled)")
+        remember_secret(key)
         return key.hex() if isinstance(key, (bytes, bytearray)) else str(key)
 
     async def import_private_key(self, key_hex: str) -> None:  # noqa: D102

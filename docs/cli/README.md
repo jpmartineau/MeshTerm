@@ -115,6 +115,14 @@ radios from two directories in the same shell.
 | `meshterm.log` | The log file. |
 | `.lock` | The lock for a single instance. |
 
+**No log keeps a password or a secret.** The log file, the run log in the database (the
+arguments and the result of each command), and the remote command history of
+`remote.json` write `<secret>` in the place of a password, a channel secret, a pairing
+PIN, or a private key. This is always true, at each log level and with or without the
+**Anonymize** preference. The history keeps `password ` without its value, so ↑ still
+recalls the start of the command. `admin.json` keeps the admin passwords that you asked
+MeshTerm to remember, because that is its purpose.
+
 **`--db` alone does not isolate a run.** It moves the database. The database is most of
 the data, but it does not hold the identity. The contact caches, the channel caches, the
 outbox, the stored admin passwords, and the remembered device are all in the config
