@@ -9,6 +9,58 @@ can change how things behave. It does not only add new things.
 
 ## [Unreleased]
 
+## [0.11.3] - 2026-10-18
+
+**No log keeps a password or a secret, and a bug report can hide your home folder and the
+address of your radio.** Passwords, channel secrets, and pairing PINs went into the log and
+the run log as plain text, and this release removes them, also from the old records. The new
+**Anonymize** preference masks your personal details in the log and in the diagnostics. The
+demo mesh now looks more like a real one.
+
+### Added
+
+- **The Anonymize preference masks your personal details in the log and in the
+  diagnostics.** It is in the Diagnostics group of the Preferences page, and it is off by
+  default. When it is on, MeshTerm masks the account name in your home folder, the
+  Bluetooth address of your radio, IP addresses, and the name of a network companion. Each
+  masked value keeps a few characters, in the way that a card number prints as
+  `51xx xxxx xxxx 4571`: `C:\Users\j*********u`, `DA:xx:xx:xx:7C:7C`, `192.xxx.x.180`, and
+  `m******e.local`. Thus a maintainer can still tell two radios apart. The log masks each
+  line as MeshTerm writes it, and a change applies at once. A line that MeshTerm wrote
+  before you turned the preference on stays as it is.
+- **The diagnostics can be anonymized for one report.** `meshterm diagnostics --anonymize`
+  masks the report, and `--no-anonymize` shows it in full when the preference is on. On the
+  Diagnostics page, press `a` (Shift+F3 on the PicoCalc) to change between the two forms,
+  and `s` saves the form that you see. A new fact, `anonymized`, says which form a report
+  is.
+
+### Changed
+
+- **The demo mesh uses the regions of the real mesh.** The regions are `na`, `can`,
+  `onqc`, `qc`, and `yul`, each one inside the one before it. The `#montreal` channel sends
+  in `yul`. The invented regions are gone.
+- **In the demo, messages arrive as they do on a real mesh.** Most messages arrive two
+  times, through the two repeaters that our node hears, and most paths use three bytes for
+  each hop. A node that our node mentions in a channel answers a few seconds later. TX
+  optimize now has something to find: the power of a repeater changes how well the next
+  node hears it.
+
+### Fixed
+
+- **The log and the run log no longer keep passwords or secrets.** At the DEBUG level, the
+  log file showed the parameters of each command as you typed them, and the run log in the
+  database kept them at each level. Thus they held room and admin passwords, channel
+  secrets, channel links, and the pairing PIN of `config set device_pin`. Each chat run also
+  stored the secret of its channel. Now MeshTerm writes `<secret>` in the place of each
+  one, in the log file, on the console, and in the run log, always. The rule finds a secret
+  by its name, by its form (a remote `password` command, or `secret=` in a link), and by
+  its value, when MeshTerm has read or sent that secret before. The first start of this
+  version removes the secrets that earlier versions stored in the run log.
+- **The remote command line no longer stores a new password in its history.** The history
+  keeps `password` and `set guest.password` without the value, so ↑ still recalls the
+  start of the command.
+- An error about the device PIN no longer repeats the PIN that you typed.
+
 ## [0.11.2] - 2026-10-16
 
 **In a chat, your messages show your name, MeshTerm has a demo mesh, and the colours are
@@ -602,7 +654,8 @@ commands.
 MeshTerm is free and open source, under the Apache 2.0 licence. The licence does not cover
 the name and the logo (refer to `NOTICE`). A fork is welcome under its own name.
 
-[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.11.2...HEAD
+[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.11.3...HEAD
+[0.11.3]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.3
 [0.11.2]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.2
 [0.11.1]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.1
 [0.11.0]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.0
