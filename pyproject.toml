@@ -58,7 +58,7 @@ dev = [
     # The version is pinned to one minor line. A formatter that is different on different
     # machines is not a gate. Ruff 0.16 formats Python inside Markdown and 0.15 does not.
     # With an unpinned `ruff>=0.4`, CI and a laptop disagreed about a tree with no errors.
-    "ruff>=0.16.6,<0.17",
+    "ruff>=0.16.6,<0.18",
     # The node of the SPI radio. tests/test_radionode_live.py runs it with a fake radio.
     # The library alone is pure Python on all systems. Only the `hardware` extra needs Linux.
     "openhop-core>=1.1.3",
