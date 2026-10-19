@@ -59,7 +59,8 @@ if TYPE_CHECKING:
 
 #: The time (seconds) between two battery reads. The charge of a pack changes slowly, thus a
 #: long interval is sufficient. The interval is also short enough that the charging trend
-#: (measured over :data:`_TREND_WINDOW_S`) has several samples to use.
+#: (measured over :data:`_TREND_WINDOW_S`) has several samples to use. After a failed read of
+#: the host pack, the next read comes sooner (refer to :data:`_HOST_RETRY_S`).
 POLL_S = 20.0
 
 #: The minimum level (millivolts) at which a reading counts as a real battery. A device with
@@ -96,26 +97,34 @@ _TREND_SAMPLES = int(_TREND_WINDOW_S / POLL_S) + 2
 #: ``bq27220-0``, both qualify by their type, not by a name in a list.
 _POWER_SUPPLIES = Path("/sys/class/power_supply")
 
-#: The number of times that a poll asks for the percent of the pack before it stops, and
-#: the pause between two requests. The BQ27220 of the Cardputer Zero shares I2C bus 1 with
-#: the keyboard and the clock. While the Cap on its header has power, that bus is noisy.
-#: Measurements on the handheld gave these results: one quarter to three quarters of the
-#: reads of the gauge fail with an I/O error (one in ten of the reads of the clock). With
-#: the header off, no read fails. Some reads that "succeed" are garbled, for example a
-#: ``capacity`` of 56414. The ``bq27xxx`` driver of the kernel caches what it read for five
-#: seconds, a failure or a garbled value the same. Thus a new request before that time gets
-#: the same answer, and the pause is a little longer than five seconds.
-_HOST_READ_ATTEMPTS = 3
+#: The pause (seconds) before the next read of the host pack, after a read that failed or
+#: that gave a change that a second read must confirm. The BQ27220 of the Cardputer Zero
+#: shares I2C bus 1 with the keyboard and the clock. While the Cap on its header has power,
+#: that bus is noisy. The first measurements on the handheld (2026-10-05) gave these
+#: results: one quarter to three quarters of the reads of the gauge fail with an I/O error
+#: (one in ten of the reads of the clock). With the header off, no read fails. Some reads
+#: that "succeed" are garbled, for example a ``capacity`` of 56414. The ``bq27xxx`` driver
+#: of the kernel caches what it read for five seconds, a failure or a garbled value the
+#: same. Thus a new read before that time gets the same answer, and the pause is a little
+#: longer than five seconds.
+#:
+#: A failed read does not wait for the full :data:`POLL_S`. On battery with the Cap on, 79%
+#: of 791 reads failed (2026-10-19). The failures came in groups of up to 110 s, with short
+#: good periods between them. A poll every 20 s missed most of these periods, and the gauge
+#: went away. A read every 5.5 s finds them.
 _HOST_RETRY_S = 5.5
 
-#: The number of consecutive polls that can fail to read a host pack before its gauge is
-#: removed. A pack does not change in two minutes. Thus the last reading stays, and the
-#: gauge does not blink out.
-_HOST_MISSES_KEPT = 6
+#: The time (seconds) that the last good reading of the host pack stays while the reads
+#: after it fail. After this time, the gauge goes away, because the pack is gone, not only
+#: difficult to read. On 2026-10-19, with the Cap on, the pack of the Cardputer Zero went
+#: from 96% to 83% in 26 minutes. Thus a reading from ten minutes before is still correct to
+#: approximately five points. The limit was once 7 failed polls (approximately 3.5 minutes).
+#: On battery with the Cap on, a group of failures was that long, and the gauge went away.
+_HOST_STALE_S = 600.0
 
-#: The maximum change of a percent between two polls that MeshTerm accepts immediately. A
+#: The maximum change of a percent between two reads that MeshTerm accepts immediately. A
 #: pack does not gain or lose this much in :data:`POLL_S`. MeshTerm holds a larger step
-#: until the next poll gives the same value. This catches a garbled read that is in the
+#: until the next read gives the same value. This catches a garbled read that is in the
 #: range 0–100 by chance.
 _HOST_STEP_PCT = 5
 
@@ -131,27 +140,22 @@ async def _sysfs(path: Path) -> str:
 
 
 async def _read_percent(path: Path) -> int:
-    """The percent of the pack from ``capacity``, asked again while it is not read or garbled.
+    """The percent of the pack from ``capacity``, read one time.
 
-    Here, an I/O error and a percent outside 0–100 have the same meaning: no reading. The
-    function asks again after :data:`_HOST_RETRY_S`. At that time, the driver reads the
-    gauge again.
+    Here, an I/O error, a value that is not a number, and a percent outside 0–100 have the
+    same meaning: no reading. The poll reads again after :data:`_HOST_RETRY_S`, when the
+    driver reads the gauge again.
 
     Raises:
-        OSError: When :data:`_HOST_READ_ATTEMPTS` tries gave no percent.
+        OSError: When the read gave no percent.
     """
-    for attempt in range(_HOST_READ_ATTEMPTS):
-        if attempt:
-            await asyncio.sleep(_HOST_RETRY_S)
-        try:
-            value = int(await _sysfs(path))
-        except FileNotFoundError:
-            raise  # the value does not exist: a new request cannot make it
-        except (OSError, ValueError):
-            continue
-        if 0 <= value <= 100:
-            return value
-    raise OSError(f"{path} gave no percent")
+    try:
+        value = int(await _sysfs(path))
+    except ValueError as exc:
+        raise OSError(f"{path} gave no number") from exc
+    if not 0 <= value <= 100:
+        raise OSError(f"{path} gave {value}, which is not a percent")
+    return value
 
 
 def host_supply(root: Path = _POWER_SUPPLIES) -> Path | None:
@@ -271,12 +275,15 @@ class BatteryService:
         self._reading: BatteryReading | None = None
         #: The recent ``(monotonic_time, millivolts)`` samples, for the charging trend.
         self._history: deque[tuple[float, int]] = deque(maxlen=_TREND_SAMPLES)
-        #: The number of consecutive reads of the host pack that failed (refer to
-        #: :data:`_HOST_MISSES_KEPT`).
-        self._host_misses = 0
+        #: The monotonic time of the last good read of the host pack (refer to
+        #: :data:`_HOST_STALE_S`).
+        self._host_read_at = 0.0
         #: A host percent that is too far from the shown percent to accept yet
         #: (:data:`_HOST_STEP_PCT`).
         self._host_unconfirmed: int | None = None
+        #: A host charging flag that is not the shown flag, and that the next read must
+        #: confirm before the gauge shows it.
+        self._host_status_unconfirmed: bool | None = None
 
     @property
     def active(self) -> bool:
@@ -310,17 +317,22 @@ class BatteryService:
         await self.stop()
 
     async def _run(self) -> None:
-        """Read one time immediately, then tick with no end: a best-effort pass, then a sleep."""
+        """Read one time immediately, then tick with no end: a best-effort pass, then a sleep.
+
+        Each pass returns the time until the next pass. A pass that raised an error waits
+        for the full :data:`POLL_S`.
+        """
         while True:
+            delay = POLL_S
             try:
-                await self._poll()
+                delay = await self._poll()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 - a bad read must not stop the loop
                 self._ctx.log.debug("battery poller: read failed: %s", exc)
-            await asyncio.sleep(POLL_S)
+            await asyncio.sleep(delay)
 
-    async def _poll(self) -> None:
+    async def _poll(self) -> float:
         """One pass: read the pack, estimate the charge, and calculate the charging trend again.
 
         The platform (``Platform.battery``) sets which pack the pass reads. The PicoCalc
@@ -328,13 +340,16 @@ class BatteryService:
         driver of the kernel. That driver gives a percent and a real charging flag, and no
         estimate is necessary. The regular platform polls the connected companion over the
         mesh link.
+
+        Returns:
+            The seconds until the next pass: :data:`POLL_S`, or a shorter time when the host
+            pack must be read again soon (refer to :meth:`_poll_host`).
         """
         if get_platform().battery == "host":
-            await self._poll_host()
-            return
+            return await self._poll_host()
         ctx = self._ctx
         if not ctx.is_connected:
-            return
+            return POLL_S
         device = await ctx.device()
         info = await device.get_battery()
         mv = int(info.get("level") or 0)
@@ -344,7 +359,7 @@ class BatteryService:
             # different device.
             self._reading = None
             self._history.clear()
-            return
+            return POLL_S
         now = time.monotonic()
         self._history.append((now, mv))
         # When the device gives a charging flag from its firmware (the standard BLE Battery
@@ -357,45 +372,65 @@ class BatteryService:
             percent=battery_percent(mv),
             charging=charging,
         )
+        return POLL_S
 
-    async def _poll_host(self) -> None:
+    async def _poll_host(self) -> float:
         """Read the pack of the host from sysfs (:func:`host_supply`).
 
         The driver is a standard ``power_supply``: ``capacity`` is a true percent, and
         ``status`` is a real charging flag (checked in P0). Thus the voltage curve and the
-        trend estimate of the companion path do not apply. A supply that cannot be read
-        (no driver, or no permission) reports *absent*, and the header draws no gauge. But
-        this occurs only after :data:`_HOST_MISSES_KEPT` consecutive polls failed. A failed
-        poll after a good poll keeps the good reading.
+        trend estimate of the companion path do not apply. When there is no such supply, the
+        reading is absent at once, and the header draws no gauge.
 
-        The method asks for the percent again while it cannot be read or is out of range
-        (:func:`_read_percent`). A step that is larger than :data:`_HOST_STEP_PCT` waits
-        for the next poll to confirm it. ``status`` is read from the same driver snapshot
-        as the percent. When ``status`` cannot be read, the charging verdict of the last
-        good reading stays. The percent is the important value, and the flag is only
-        extra information.
+        On a noisy bus (refer to :data:`_HOST_RETRY_S`), a read can fail or give a wrong
+        value. The method guards the reading in three ways:
+
+        * After a failed read, the next read comes after :data:`_HOST_RETRY_S`, not after
+          :data:`POLL_S`. The last good reading stays for :data:`_HOST_STALE_S`, then it
+          goes.
+        * A change of the percent that is larger than :data:`_HOST_STEP_PCT` waits for a
+          second read that gives the same value.
+        * A change of the charging flag waits for a second read that gives the same flag. A
+          garbled read can say ``Charging`` while the pack discharges (seen on 2026-10-19).
+          When ``status`` cannot be read, the flag of the last good reading stays. The
+          percent is the important value, and the flag is only extra information.
+
+        Returns:
+            The seconds until the next pass: :data:`_HOST_RETRY_S` after a failed read or
+            while a change waits for its second read, and :data:`POLL_S` in all other cases.
         """
         supply = host_supply(_POWER_SUPPLIES)
+        if supply is None:
+            self._reading = None
+            return POLL_S
+        now = time.monotonic()
+        shown = self._reading
         try:
-            if supply is None:
-                raise OSError("no battery power_supply")
             percent = await _read_percent(supply / "capacity")
         except OSError:
-            self._host_misses += 1
-            if self._host_misses > _HOST_MISSES_KEPT:
+            if shown is not None and now - self._host_read_at > _HOST_STALE_S:
                 self._reading = None
-            return
-        self._host_misses = 0
-        shown = self._reading
+            return _HOST_RETRY_S
         if shown is not None and abs(percent - shown.percent) > _HOST_STEP_PCT:
             if percent != self._host_unconfirmed:
-                self._host_unconfirmed = percent  # accepted when the next poll gives it too
-                return
+                self._host_unconfirmed = percent  # accepted when the next read gives it too
+                return _HOST_RETRY_S
         self._host_unconfirmed = None
+        self._host_read_at = now
+        delay = POLL_S
         try:
             charging = await _sysfs(supply / "status") == "Charging"
         except OSError:
             charging = shown.charging if shown is not None else False
+        else:
+            if shown is None or charging == shown.charging:
+                self._host_status_unconfirmed = None
+            elif charging == self._host_status_unconfirmed:
+                self._host_status_unconfirmed = None  # the second read agrees: accept it
+            else:
+                self._host_status_unconfirmed = charging  # accepted when the next read agrees
+                charging = shown.charging
+                delay = _HOST_RETRY_S
         try:  # only for information. The header draws the percent and the charging flag.
             mv = int(await _sysfs(supply / "voltage_now")) // 1000
         except (OSError, ValueError):
@@ -405,6 +440,7 @@ class BatteryService:
             percent=percent,
             charging=charging,
         )
+        return delay
 
     def _charging(self, now: float) -> bool:
         """Infer from the recent trend of the terminal voltage if the pack is charging.

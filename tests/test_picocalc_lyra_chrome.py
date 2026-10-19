@@ -421,13 +421,13 @@ def test_host_battery_reads_the_sysfs_supply(tmp_path, monkeypatch) -> None:
     assert (reading.percent, reading.charging, reading.millivolts) == (53, False, 4012)
 
     (supply / "status").write_text("Charging\n")
+    asyncio.run(service._poll_host())  # a changed flag shows when a second read agrees
     asyncio.run(service._poll_host())
     assert service.reading().charging is True
 
     monkeypatch.setattr(battery_service, "_POWER_SUPPLIES", tmp_path / "gone")
-    for _ in range(battery_service._HOST_MISSES_KEPT + 1):
-        asyncio.run(service._poll_host())
-    assert service.reading() is None  # an unreadable supply is absent, so the header draws nothing
+    asyncio.run(service._poll_host())
+    assert service.reading() is None  # a supply that is gone is absent, so the header draws nothing
 
 
 def test_dialog_wrap_shrinks_on_picocalc() -> None:
