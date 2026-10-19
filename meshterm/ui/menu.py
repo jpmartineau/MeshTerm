@@ -1304,9 +1304,11 @@ async def _wait_for_disconnect(ctx: AppContext) -> None:
     (:meth:`AppContext.link_alive`), and does not wait for a failed command. After a
     serial disconnect, the ``meshcore`` client continues to give cached data and never
     raises an error (this was confirmed on hardware). Thus an active liveness check is the
-    only reliable way to find a disconnected cable. The same check covers Bluetooth:
-    there, it reads the connection flag of the BLE client (which changes immediately when
-    the peripheral disconnects or goes out of range). The function never resolves for the
+    only reliable way to find a disconnected cable. The check also reads the connection
+    flag of the ``meshcore`` client, which changes immediately when the transport closes.
+    For Bluetooth, that flag is the only signal (the peripheral disconnects or goes out of
+    range). For serial, it finds a port that stays listed after its link is dead (a laptop
+    that wakes from sleep can hang up the port). The function never resolves for the
     simulator (it cannot be disconnected), or before a real device opens.
 
     Args:

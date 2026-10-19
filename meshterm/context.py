@@ -301,8 +301,8 @@ class AppContext:
 
         This is a best-effort check, and it does not disturb the link. The method calls
         :meth:`~meshterm.core.connection.Device.link_present` of the connected device. For
-        serial, this is the enumeration of OS ports. For Bluetooth, it is the connection flag
-        of the BLE client. Thus the liveness watcher of the session does not depend on the
+        serial, this is the connection flag of the client and the enumeration of OS ports.
+        For Bluetooth, it is the connection flag of the BLE client. Thus the liveness watcher of the session does not depend on the
         transport. The method returns ``False`` when nothing is connected, because there is no
         live link. If the check fails, it returns ``True``. Thus a temporary failure of the
         lookup never gives a false disconnect.

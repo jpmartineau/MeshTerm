@@ -1227,6 +1227,47 @@ async def test_serial_link_check_walks_the_ports_off_the_event_loop(monkeypatch)
     assert walked_on and walked_on[0] is not threading.main_thread()
 
 
+async def test_serial_link_is_gone_when_the_transport_closed_on_a_listed_port(
+    monkeypatch,
+) -> None:
+    """A serial link is lost when its transport closed, also if the OS still lists the port.
+
+    When a laptop wakes from sleep, the kernel can reset the USB device and hang up the
+    open port, but keep the same device file. The next write fails with EIO, and the
+    transport closes itself. The port list alone said that the link was up, so no
+    reconnect dialog opened, and each command failed (GitHub issue #32).
+    """
+    device = connection.MeshCoreDevice(port="/dev/ttyACM0")
+    device._mc = SimpleNamespace(is_connected=False)
+    monkeypatch.setattr(connection, "serial_port_present", lambda port: True)
+    assert not await device.link_present()
+
+
+async def test_meshcore_clears_its_flag_when_the_serial_transport_is_lost() -> None:
+    """The ``meshcore`` client sets ``is_connected`` to False when its serial port closes.
+
+    The serial liveness check depends on this behaviour of the library. The serial
+    transport calls ``connection_lost`` after a fatal read or write error (the EIO after a
+    laptop wakes from sleep), and the client then reports the link as lost.
+    """
+    pytest.importorskip("serial_asyncio_fast")
+    from meshcore import MeshCore
+    from meshcore.serial_cx import SerialConnection
+
+    cx = SerialConnection("/dev/ttyACM0", 115200)
+    mc = MeshCore(cx)
+    mc.connection_manager._is_connected = True  # as after a connect, with no port to open
+    assert mc.is_connected
+
+    protocol = SerialConnection.MCSerialClientProtocol(cx)
+    protocol.connection_lost(OSError(errno.EIO, "Input/output error"))
+    for _ in range(10):  # the client handles the loss in a background task
+        if not mc.is_connected:
+            break
+        await asyncio.sleep(0)
+    assert not mc.is_connected
+
+
 async def test_wait_for_disconnect_fires_when_port_vanishes(tmp_path: Path, monkeypatch) -> None:
     """The liveness watcher resolves when the port of the connected device leaves the list."""
     ctx = _make_ctx(tmp_path)

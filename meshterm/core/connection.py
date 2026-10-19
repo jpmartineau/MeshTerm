@@ -1239,8 +1239,8 @@ class Device(ABC):
         never opens a new handle. Thus the interactive session can poll it while the device
         is in use, to find a lost link during the session (a serial cable pulled, a
         companion powered off, a BLE peripheral out of range). Each transport uses the
-        signal that correctly shows its link state (the OS port list for serial, the
-        connection flag of the BLE client for Bluetooth). It returns ``True`` when it
+        signal that correctly shows its link state (the connection flag of the client, and
+        for serial also the OS port list). It returns ``True`` when it
         cannot find the presence, so a short lookup problem never gives a false disconnect.
 
         Returns:
@@ -3073,15 +3073,22 @@ class MeshCoreDevice(Device):
     async def link_present(self) -> bool:  # noqa: D102 - inherited docstring
         if self._mc is None:
             return True  # not connected yet, or torn down already: nothing to declare lost
+        # The meshcore client sets ``is_connected`` to False at the moment the transport is
+        # lost (bleak's disconnect callback for BLE, a broken socket for TCP, a fatal read
+        # or write error for serial). Thus it is a fast liveness read that does not transmit.
+        try:
+            connected = bool(self._mc.is_connected)
+        except Exception:  # noqa: BLE001 - a status hiccup must not fake a disconnect
+            connected = True
         if self._transport in ("ble", "tcp"):
-            # The meshcore client sets ``is_connected`` to False at the moment the transport
-            # is lost (bleak's disconnect callback for BLE, a broken socket for TCP). Thus
-            # this is the network and Bluetooth equivalent of the check of the serial port
-            # list: a fast liveness read that does not transmit.
-            try:
-                return bool(self._mc.is_connected)
-            except Exception:  # noqa: BLE001 - a status hiccup must not fake a disconnect
-                return True
+            return connected
+        # A serial port can stay listed after its link is dead. When a laptop wakes from
+        # sleep, the kernel can reset the USB device and hang up the open port, but it keeps
+        # the same device file. The next write fails with EIO, and the serial transport
+        # closes itself. Before we checked this flag, the port list alone said that the link
+        # was up, so no reconnect dialog opened, and each command failed (GitHub issue #32).
+        if not connected:
+            return False
         if not self._port:
             return True  # no port stored (it should not occur after a connect): cannot tell
         # Run this off the event loop, as all the other callers of the port walk do. On the
