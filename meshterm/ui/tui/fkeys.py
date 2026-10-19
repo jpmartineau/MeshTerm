@@ -364,6 +364,8 @@ _HINT_KEY_ACTIONS: dict[str, str] = {
     "^Home": "ctrl_home",
     "^End": "ctrl_end",
     "Tab": "tab",
+    "Del": "delete",
+    "⇧Del": "shift_delete",
 }
 
 #: Marks a word as a key notation of some type, also where this module cannot map it: a

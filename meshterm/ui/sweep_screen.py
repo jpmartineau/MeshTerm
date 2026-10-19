@@ -19,14 +19,19 @@ flow gets that free space back, in three steps over the pushed Contacts list:
    rungs show this list too. An age threshold cannot check itself, and to see what the
    contacts that it caught did is exactly that check. ``Delete`` removes a row from the
    list. Thus the user can spare one contact, and does not have to cancel the full sweep
-   and select a less aggressive rung. ``←→`` scroll a row that is too wide for the
-   terminal. Enter on a contact opens its detail page, only to examine the contact. The
-   page does not show its own verbs that manage contacts (refer to
+   and select a less aggressive rung. ``Shift+Delete`` also removes the row, and it stages
+   a lock on the contact. Apply writes the lock, and then no later sweep takes that
+   contact (refer to :meth:`~meshterm.core.contact_store.ContactStore.set_locked`). Back
+   and Esc discard the staged locks, after a confirm, as an editor discards its staged
+   values. ``←→`` scroll a row that is too wide for the terminal. Enter on a contact opens
+   its detail page, only to examine the contact. The page does not show its own verbs
+   that manage contacts (refer to
    :func:`~meshterm.ui.node_detail_screen.open_node_detail`). A screen where the user
    chooses what to archive must not also offer an archive or a delete of one contact from
-   inside its own list of candidates. The list ends with the Apply/Back pair that
-   :func:`~meshterm.ui.menus.exit_rows` draws for staged changes, because this list is
-   that type of choice: a choice with a cost on each side, not an exit.
+   inside its own list of candidates. A lock is not such a verb: it gives the same answer
+   as ``Delete``, for all the sweeps that follow. The list ends with the Apply/Back pair
+   that :func:`~meshterm.ui.menus.exit_rows` draws for staged changes, because this list
+   is that type of choice: a choice with a cost on each side, not an exit.
 3. **Confirm.** An amber Cancel/Archive dialog, not the red typed gate of a deletion,
    because this operation is reversible. Each contact keeps its key, its reception history,
    and its transcripts. The Archived list is one row away on the Contacts screen, and a
@@ -63,7 +68,7 @@ import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from rich.cells import cell_len
 from rich.text import Text
@@ -75,10 +80,11 @@ from ..core.contact_score import (
     sweep_candidates,
 )
 from ..core.models import Contact
-from .menus import Lane, column_header, fit_cells, section_heading
+from .menus import Lane, column_header, confirm_discard, fit_cells, section_heading
 from .theme import name_style
-from .tui import Choice, Separator
+from .tui import Choice, SelectScreen, Separator
 from .tui.screen import CANCEL
+from .tui.select import DeleteRequest, KeyRequest, splice_hint
 from .widgets import DEFAULT_GLYPH, NODE_GLYPHS, _recency_style, format_age
 
 if TYPE_CHECKING:
@@ -97,6 +103,18 @@ KEEP_RUNGS: tuple[int, ...] = (90, 75, 60, 50, 25)
 #: equal to them.
 _APPLY = ("apply",)
 _BACK = ("back",)
+
+#: The token of the lock key, in the :class:`~meshterm.ui.tui.select.KeyRequest` that the
+#: preview resolves with (refer to :class:`_PreviewScreen`).
+_LOCK = "lock"
+
+#: The footer atom of the lock key. The preview shows it only when the full hint stays in
+#: :data:`_HINT_CELLS` with it (JP, 2026-10-19: "If footer too long, don't put it in the
+#: footer. If there's room, put it.").
+_LOCK_HINT = "⇧Del lock"
+
+#: The maximum width of a footer hint, in cells (refer to the UX standards).
+_HINT_CELLS = 72
 
 #: One day in seconds, for the age rungs.
 _DAY = 86400
@@ -416,6 +434,7 @@ async def archive_contacts(ctx: AppContext, self_key: str) -> int:
 
     Returns:
         How many contacts were archived (``0`` if the user cancelled or no contact matched).
+        A sweep that only locked contacts also returns ``0``.
     """
     from .surface import TuiUi
 
@@ -430,6 +449,9 @@ async def archive_contacts(ctx: AppContext, self_key: str) -> int:
     if not sweepable:
         ctx.ui.note("[muted]every contact is protected — nothing to sweep[/muted]")
         return 0
+    # The store keeps a lock under the key of the device. Without the two, the preview has
+    # no lock key.
+    can_lock = getattr(ctx, "contact_store", None) is not None and bool(self_key)
 
     while True:
         picked = await session.run_screen(_target_screen(ranked, sweepable))
@@ -439,8 +461,9 @@ async def archive_contacts(ctx: AppContext, self_key: str) -> int:
         if not victims:
             ctx.ui.note("[muted]nothing matches that — no contacts to archive[/muted]")
             continue
-        if await _preview(ctx, victims):
-            return await _sweep(ctx, self_key, victims)
+        locks: list[ScoredContact] | None = [] if can_lock else None
+        if await _preview(ctx, victims, locks):
+            return await _sweep(ctx, self_key, victims, locks or [])
 
 
 def age_seconds(scored: ScoredContact) -> float | None:
@@ -495,8 +518,6 @@ def _target_screen(ranked: list[ScoredContact], sweepable: list[ScoredContact]):
     one heading to the next. Also, the two types of rung look like two ways to answer one
     question, not like two separate features that share a screen by chance.
     """
-    from .tui import SelectScreen
-
     protected = len(ranked) - len(sweepable)
     sections: list[tuple[str, list[tuple[str, tuple]]]] = [
         (
@@ -539,7 +560,7 @@ def _target_screen(ranked: list[ScoredContact], sweepable: list[ScoredContact]):
     )
 
 
-def _preview_items(victims: list[ScoredContact]) -> list:
+def _preview_items(victims: list[ScoredContact], locks: list[ScoredContact] | None = None) -> list:
     """The preview's rows: a pinned column header, one line for each victim, then Apply/Back.
 
     Each contact row is ``deletable``, so ``Delete`` removes it from the sweep. Each row also
@@ -550,39 +571,148 @@ def _preview_items(victims: list[ScoredContact]) -> list:
     This function measures the lanes across all the victims. That is also why a spared row
     makes this function build all the rows again, instead of a removal of one row: the
     value that left may have set a width.
+
+    A locked contact has no row: its row left the list when the user locked it, the same
+    as a spared row. The Apply row counts the staged locks, and the Back row tells that
+    they go too. When the user removed each victim and some locks are staged, an empty
+    state stands in place of the rows, and Apply writes only the locks.
     """
-    widths = _lane_widths(victims)
+    staged = len(locks or ())
+    if victims:
+        widths = _lane_widths(victims)
+        rows: list = [
+            Separator(lambda w: _preview_header(widths, w), pinned=True),
+            *(
+                Choice(
+                    title=_victim_row(v, widths),
+                    value=v,
+                    deletable=True,
+                    hscroll_from=_MARK_W + _NAME_W,
+                )
+                for v in victims
+            ),
+        ]
+    else:
+        rows = [Separator("no contacts left to archive", style="muted")]
+    if not staged:
+        apply = f"Archive {_count_desc(len(victims))}"
+    elif victims:
+        apply = f"Archive {_count_desc(len(victims))} and lock {staged}"
+    else:
+        apply = f"Lock {_count_desc(staged)}"
     return [
-        Separator(lambda w: _preview_header(widths, w), pinned=True),
-        *(
-            Choice(
-                title=_victim_row(v, widths),
-                value=v,
-                deletable=True,
-                hscroll_from=_MARK_W + _NAME_W,
-            )
-            for v in victims
-        ),
+        *rows,
         # The same shape that ``exit_rows`` draws, in the words of this flow. Apply has no
         # keyboard key of its own, so it must have a visible partner row that tells the cost
         # of the other way out. This is not ``exit_rows`` itself, because these rows are not
         # staged changes to a set of values, and the pair must say what it archives.
         Separator(" "),
+        Choice(title=Text.assemble(("✓ ", "ok"), apply), value=_APPLY),
         Choice(
-            title=Text.assemble(("✓ ", "ok"), f"Archive {_count_desc(len(victims))}"),
-            value=_APPLY,
+            title=Text.assemble(
+                ("✗ ", "err"), "Back — change nothing" if staged else "Back — keep them all"
+            ),
+            value=_BACK,
         ),
-        Choice(title=Text.assemble(("✗ ", "err"), "Back — keep them all"), value=_BACK),
     ]
 
 
-def _preview_screen(victims: list[ScoredContact]):
-    """The preview screen for a victim list, with a size and words that agree with its rows."""
-    from .tui import SelectScreen
+def _has_full_key(value: object) -> bool:
+    """Whether a preview row holds a contact with its full key, which a lock must have.
 
-    return SelectScreen(
-        f"Archive contacts — {_count_desc(len(victims))} to archive",
-        _preview_items(victims),
+    The store attaches a lock to the full key (refer to
+    :meth:`~meshterm.core.contact_store.ContactStore.set_locked`). The node page has the
+    same rule for its ``Lock contact`` row.
+    """
+    if not isinstance(value, ScoredContact):
+        return False
+    return len((value.contact.public_key or "").lower().removeprefix("0x")) == 64
+
+
+class _PreviewScreen(SelectScreen):
+    """The preview list, with a lock key beside the spare key.
+
+    ``Shift+Delete`` on a contact row resolves the list with a
+    :class:`~meshterm.ui.tui.select.KeyRequest` for :data:`_LOCK`. The caller then stages the
+    lock and removes the row (refer to :func:`_preview`). The key acts only when the caller
+    can store a lock (``can_lock``), and only on a contact with a full key.
+
+    Two surfaces show the key. On a handheld, the ``Delete`` chip on F3 gets ``Lock`` as its
+    Shift half. On the desktop, the footer gets the ``⇧Del lock`` atom after ``Del keep``,
+    but only when the full hint stays in :data:`_HINT_CELLS`. No other atom leaves the hint
+    to make space for it.
+
+    A contact row also says ``Enter open`` instead of ``Enter select``, because Enter on it
+    opens the node page. The Apply and Back rows keep ``Enter select``.
+    """
+
+    def __init__(self, *args: Any, can_lock: bool, **kwargs: Any) -> None:
+        self._can_lock = can_lock
+        super().__init__(*args, **kwargs)
+
+    def _locks_here(self) -> bool:
+        """Whether the lock key acts on the highlighted row now."""
+        current = self._current_choice()
+        return (
+            self._can_lock
+            and current is not None
+            and current.deletable
+            and _has_full_key(current.value)
+        )
+
+    def handle(self, action: str, data: str = "") -> None:
+        """Resolve ``Shift+Delete`` as a lock request. The list handles all other actions."""
+        if action == "shift_delete":
+            current = self._current_choice()
+            if current is not None and self._locks_here():
+                self.resolve(KeyRequest(_LOCK, current.value))
+            return
+        super().handle(action, data)
+
+    @property
+    def footer_hint(self) -> str:
+        """The hint of the list, with ``Enter open`` and, if it fits, ``⇧Del lock`` on a contact."""
+        hint = super().footer_hint
+        current = self._current_choice()
+        if current is None or not current.deletable:
+            return hint
+        hint = hint.replace("Enter select", "Enter open")
+        if self._locks_here():
+            longer = splice_hint(hint, _LOCK_HINT)
+            if cell_len(longer) <= _HINT_CELLS:
+                hint = longer
+        return hint
+
+    @property
+    def picocalc_lyra_lane(self):
+        """The lane of the list, with ``Lock`` behind the ``Delete`` chip on F3."""
+        lane = list(super().picocalc_lyra_lane)
+        if self._can_lock and lane[2] is not None:
+            lane[2] = replace(
+                lane[2],
+                opp_label="Lock",
+                opp_action="shift_delete",
+                opp_enabled=self._locks_here(),
+            )
+        return lane
+
+
+def _preview_title(victims: list[ScoredContact]) -> str:
+    """The title of the preview. It counts the victims, so it changes with them."""
+    return f"Archive contacts — {_count_desc(len(victims))} to archive"
+
+
+def _preview_screen(
+    victims: list[ScoredContact], locks: list[ScoredContact] | None = None
+) -> _PreviewScreen:
+    """The preview screen for a victim list, with a size and words that agree with its rows.
+
+    ``locks`` is the list of staged locks, or ``None`` when the caller cannot store a lock.
+    Then the screen has no lock key.
+    """
+    return _PreviewScreen(
+        _preview_title(victims),
+        _preview_items(victims, locks),
         prompt="Archived contacts leave the device but stay here, with their history.",
         # The base hint does not include the scroll atom or the keep atom. The select list
         # adds each atom only when its keyboard key can act: ``←→`` only while the
@@ -594,10 +724,13 @@ def _preview_screen(victims: list[ScoredContact]):
         default=_APPLY,
         hscroll=True,
         hscroll_hint="←→ scroll",
+        can_lock=locks is not None,
     )
 
 
-async def _preview(ctx: AppContext, victims: list[ScoredContact]) -> bool:
+async def _preview(
+    ctx: AppContext, victims: list[ScoredContact], locks: list[ScoredContact] | None = None
+) -> bool:
     """Show exactly which contacts will go, weakest first. Return whether the user agreed.
 
     This is the audit step, and the reason why it is safe to offer the sweep. If MeshTerm
@@ -613,18 +746,27 @@ async def _preview(ctx: AppContext, victims: list[ScoredContact]) -> bool:
     value, and the typed filter stays. The screen is not built again, because that would put
     the user back at the top of a list that they were halfway down.
 
+    ``Shift+Delete`` removes a contact in the same way, and it also stages a lock on it. The
+    lock is staged, not written, because the user decides on Apply (JP, 2026-10-19). Thus
+    Esc and the Back row discard the locks, and they ask first, as an editor with staged
+    values does (:func:`~meshterm.ui.menus.confirm_discard`). A spared row is not a staged
+    change: Esc discarded it before the lock existed, and it does so now.
+
     Args:
         ctx: The shared application context.
         victims: The candidates, weakest first. This function **changes** the list when the
             user removes rows, so the list of the caller is the list that the sweep archives.
+        locks: The staged locks. This function adds to the list of the caller in the same
+            way. ``None`` when the caller cannot store a lock: then the preview has no lock
+            key.
 
     Returns:
-        Whether the user selected the archive of the contacts that remain after the edits.
+        Whether the user selected Apply for the contacts and the locks that remain after the
+        edits.
     """
     from .node_detail_screen import open_node_detail
-    from .tui.select import DeleteRequest
 
-    screen = _preview_screen(victims)
+    screen = _preview_screen(victims, locks)
     # A hub: it owns a loop, so it is pushed one time and stays for the full visit. That is
     # why a spared row can refresh the rows below the user's highlight. It is also why a
     # detail page can nest above this screen, and this screen keeps its place.
@@ -632,24 +774,23 @@ async def _preview(ctx: AppContext, victims: list[ScoredContact]) -> bool:
         while True:
             chosen = await visit.result()
             if chosen is CANCEL or chosen is None or chosen == _BACK:
+                if locks and not await confirm_discard(ctx, len(locks), verb="applying"):
+                    continue  # continue to edit: the same list, at the same place in it
                 return False
             if chosen == _APPLY:
-                return bool(victims)
-            if isinstance(chosen, DeleteRequest):
-                spared = chosen.value
-                if spared in victims:
-                    victims.remove(spared)
-                if not victims:
+                return bool(victims or locks)
+            if isinstance(chosen, DeleteRequest | KeyRequest):
+                removed = chosen.value
+                if removed in victims:
+                    victims.remove(removed)
+                if isinstance(chosen, KeyRequest) and locks is not None and removed not in locks:
+                    locks.append(removed)
+                if not victims and not locks:
                     # The user spared all the candidates. Thus there is no sweep left to
                     # preview. An empty list with an "Archive no contacts" row would be a
                     # screen that asks the user to confirm nothing.
                     return False
-                # The title shows the count of victims, so it is content too, and it
-                # changes with them.
-                screen.replace_items(
-                    _preview_items(victims),
-                    title=f"Archive contacts — {_count_desc(len(victims))} to archive",
-                )
+                screen.replace_items(_preview_items(victims, locks), title=_preview_title(victims))
                 continue
             # Each other row is a contact. Enter opens its node detail page, so a user who
             # does not recognize a name can examine the node before MeshTerm archives it. The
@@ -668,7 +809,12 @@ def _count_desc(n: int) -> str:
     return f"{n} contact{'' if n == 1 else 's'}"
 
 
-async def _sweep(ctx: AppContext, self_key: str, victims: list[ScoredContact]) -> int:
+async def _sweep(
+    ctx: AppContext,
+    self_key: str,
+    victims: list[ScoredContact],
+    locks: list[ScoredContact] | None = None,
+) -> int:
     """Confirm, then remove each victim from the device and archive it here. Return the count.
 
     The confirm is **amber, and the user types nothing**. A bulk deletion has a red typed
@@ -682,52 +828,77 @@ async def _sweep(ctx: AppContext, self_key: str, victims: list[ScoredContact]) -
     The store write comes after each successful removal, not in one batch at the end. Thus,
     if the sweep is interrupted, the state stays consistent: each contact that is off the
     device is stored as archived.
-    """
-    if not await ctx.ui.dialog(
-        f"Archive {_count_desc(len(victims))}? They come off this device's contact list, "
-        "freeing space for new ones. MeshTerm keeps them — with their keys, reception "
-        "history, and messages — under Archived contacts, and any of them can be restored.",
-        [("Cancel", False), ("Archive", True)],
-        title="Archive contacts",
-        default=1,
-        danger=True,
-    ):
-        return 0
 
-    device = await ctx.device()
+    The staged ``locks`` are written after the confirm and before the removals. A lock is a
+    mark of MeshTerm, in the contact store, and nothing on the device. Thus it cannot fail
+    as a removal can, and it does not wait for one. When only locks are staged, there is
+    no confirm: a lock archives nothing, and the node page reverses it.
+    """
+    locks = locks or []
+    if victims:
+        also = (
+            f" MeshTerm also locks {_count_desc(len(locks))}, so that no sweep takes them."
+            if locks
+            else ""
+        )
+        if not await ctx.ui.dialog(
+            f"Archive {_count_desc(len(victims))}? They come off this device's contact list, "
+            "freeing space for new ones. MeshTerm keeps them — with their keys, reception "
+            "history, and messages — under Archived contacts, and any of them can be "
+            f"restored.{also}",
+            [("Cancel", False), ("Archive", True)],
+            title="Archive contacts",
+            default=1,
+            danger=True,
+        ):
+            return 0
+
     dev_pub = (self_key or "").lower().removeprefix("0x")
     store = ctx.contact_store
-    stamp = int(time.time())
-    archived = failed = 0
-    with ctx.ui.progress("Archive contacts") as progress:
-        task = progress.add_task("Archiving", total=len(victims))
-        for scored in victims:
-            contact = scored.contact
-            try:
-                await device.remove_contact(contact)
-            except ContactNotOnDeviceError:
-                # The contact is already absent from the device. Thus the work of the sweep
-                # on the device is done, and the archive here is what removes the row. This
-                # is not a failure.
-                ctx.log.debug("archive: %s was not on the device; archiving ours", contact.name)
-            except Exception as exc:  # noqa: BLE001 - one bad removal must not stop the sweep
-                failed += 1
-                ctx.log.debug("archive: could not remove %s: %s", contact.name, exc)
-                continue
-            finally:
-                progress.advance(task)
-            if store is not None and dev_pub:
-                store.archive(dev_pub, contact, when=stamp)
-            archived += 1
-    ctx.devstate.invalidate_contacts()
+    locked = 0
+    if store is not None and dev_pub:
+        for scored in locks:
+            store.set_locked(dev_pub, scored.contact, True)
+            locked += 1
 
-    if archived and not failed:
-        outcome = Text(f"✓ archived {_count_desc(archived)}", style="ok")
+    archived = failed = 0
+    if victims:
+        device = await ctx.device()
+        stamp = int(time.time())
+        with ctx.ui.progress("Archive contacts") as progress:
+            task = progress.add_task("Archiving", total=len(victims))
+            for scored in victims:
+                contact = scored.contact
+                try:
+                    await device.remove_contact(contact)
+                except ContactNotOnDeviceError:
+                    # The contact is already absent from the device. Thus the work of the
+                    # sweep on the device is done, and the archive here is what removes the
+                    # row. This is not a failure.
+                    ctx.log.debug("archive: %s was not on the device; archiving ours", contact.name)
+                except Exception as exc:  # noqa: BLE001 - one bad removal must not stop the sweep
+                    failed += 1
+                    ctx.log.debug("archive: could not remove %s: %s", contact.name, exc)
+                    continue
+                finally:
+                    progress.advance(task)
+                if store is not None and dev_pub:
+                    store.archive(dev_pub, contact, when=stamp)
+                archived += 1
+        ctx.devstate.invalidate_contacts()
+
+    and_locked = f" and locked {locked}" if locked else ""
+    if not victims:
+        outcome = Text(f"✓ locked {_count_desc(locked)}", style="ok")
+    elif archived and not failed:
+        outcome = Text(f"✓ archived {_count_desc(archived)}{and_locked}", style="ok")
     elif archived:
         outcome = Text(
-            f"archived {_count_desc(archived)}; {failed} could not be removed", style="warn"
+            f"archived {_count_desc(archived)}{and_locked}; {failed} could not be removed",
+            style="warn",
         )
     else:
-        outcome = Text("no contacts could be archived", style="err")
+        locked_note = f"; locked {_count_desc(locked)}" if locked else ""
+        outcome = Text(f"no contacts could be archived{locked_note}", style="err")
     await ctx.ui.session.message_dialog(outcome, title="Archive contacts")
     return archived

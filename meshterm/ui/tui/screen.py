@@ -43,7 +43,7 @@ POP_ALL = object()
 #: anything.
 _EDGE_STEPS = {"up": -1, "down": 1}
 _EDGE_ENDS = {"home": -1, "ctrl_home": -1, "end": 1, "ctrl_end": 1}
-_SNAP_BACK_ACTIONS = frozenset({"enter", "delete"})
+_SNAP_BACK_ACTIONS = frozenset({"enter", "delete", "shift_delete"})
 
 
 class PopToMenu(BaseException):

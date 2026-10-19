@@ -157,6 +157,7 @@ _KEY_ACTIONS: dict[Any, str] = {
     Keys.Escape: "escape",
     Keys.Backspace: "backspace",
     Keys.Delete: "delete",
+    Keys.ShiftDelete: "shift_delete",
     Keys.Tab: "tab",
     Keys.BackTab: "shift_tab",
     # The function keys, for the F-key lane of a handheld. This table binds all of them,

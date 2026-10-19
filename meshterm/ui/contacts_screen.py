@@ -327,6 +327,9 @@ async def open_contacts(
                     if await archive_contacts(ctx, self_key):
                         rebuild = True
                         break
+                    # A sweep can lock contacts and archive none. Then the rows stay, and
+                    # only their padlocks are drawn again.
+                    screen.refresh_locks(_locked_keys(ctx, self_key))
                     continue
                 if chosen == _ARCHIVED:
                     # The archived list is a screen and not a section. It nests above this

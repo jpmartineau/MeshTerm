@@ -311,6 +311,21 @@ def _archive_preview(cols: int, rows: int) -> Screen:
     return _preview_screen(_archive_victims())
 
 
+def _archive_preview_locking(cols: int, rows: int) -> Screen:
+    """The preview with one staged lock, and the highlight on a contact row.
+
+    The Apply and Back rows then name the lock, the hint has the lock key where it has room,
+    and the lane has ``Lock`` behind ``Delete``.
+    """
+    from meshterm.ui.sweep_screen import _preview_screen
+
+    victims = _archive_victims()
+    locks = [victims.pop()]
+    screen = _preview_screen(victims, locks)
+    screen.handle("home")
+    return screen
+
+
 def _archived(cols: int, rows: int) -> Screen:
     from meshterm.core.contact_store import RememberedContact
     from meshterm.ui.archived_screen import ArchivedScreen, archived_rows
@@ -1743,6 +1758,7 @@ _ENTRIES: list[_Entry] = [
     _Entry("contacts", _contacts),
     _Entry("archive_ladder", _archive_ladder),
     _Entry("archive_preview", _archive_preview),
+    _Entry("archive_preview_locking", _archive_preview_locking),
     _Entry("archived", _archived),
     _Entry("node_detail", _node_detail),
     _Entry("node_detail_map", _node_detail_map),

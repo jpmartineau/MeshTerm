@@ -691,6 +691,309 @@ async def test_sparing_every_row_leaves_the_sweep_with_nothing_to_do() -> None:
     assert victims == []
 
 
+def _victim(name: str, pct: int = 1):  # noqa: ANN202
+    """A scored contact for the preview, with a full key made from its last letter."""
+    from meshterm.core.contact_score import ContactSignals, ScoredContact
+    from meshterm.core.models import Contact
+
+    key = f"{ord(name[-1]):02x}" * 32
+    return ScoredContact(
+        contact=Contact(name=name, public_key=key, key_prefix=key[:12]),
+        signals=ContactSignals(node=key[:12]),
+        score=float(pct),
+        percentile=pct,
+    )
+
+
+async def test_shift_delete_stages_a_lock_and_apply_returns_it() -> None:
+    """Shift+Delete removes the row, as Delete does, and it also stages a lock on the contact.
+
+    The lock is staged, not written (JP, 2026-10-19: "on apply"). The preview adds the
+    contact to the list of locks of the caller, and the caller writes the locks on Apply.
+    The Apply row counts the locks, and the Back row tells that Back discards them too.
+    """
+    import asyncio
+    from types import SimpleNamespace
+
+    from meshterm.ui.surface import TuiUi
+    from meshterm.ui.sweep_screen import _preview
+    from meshterm.ui.tui.session import TuiSession
+
+    victims = [_victim("Weak", 3), _victim("Middling", 9), _victim("Keeper", 14)]
+    locks: list = []
+    session = TuiSession()
+    task = asyncio.ensure_future(_preview(SimpleNamespace(ui=TuiUi(session)), victims, locks))
+    screen = await _step_until_screen(session, lambda s: "to archive" in getattr(s, "title", ""))
+
+    screen.handle("home")
+    screen.handle("down")
+    screen.handle("down")
+    assert screen._current_choice().value.contact.name == "Keeper"
+    screen.handle("shift_delete")
+    same = await _step_until_screen(
+        session, lambda s: "2 contacts to archive" in getattr(s, "title", "")
+    )
+    assert same is screen, "the preview refreshed in place rather than being rebuilt"
+    assert [v.contact.name for v in victims] == ["Weak", "Middling"]
+    assert [v.contact.name for v in locks] == ["Keeper"]
+    body = _screen_text(screen)
+    assert "Keeper" not in body
+    assert "Archive 2 contacts and lock 1" in body
+    assert "Back — change nothing" in body
+
+    # Delete on a row still spares it only: it stages no lock.
+    screen.handle("home")
+    screen.handle("delete")
+    await _step_until_screen(session, lambda s: "1 contact to archive" in getattr(s, "title", ""))
+    assert [v.contact.name for v in locks] == ["Keeper"]
+
+    screen.handle("end")
+    screen.handle("up")
+    assert screen._current_choice().value == ("apply",)
+    screen.handle("enter")
+    assert await task is True
+    assert [v.contact.name for v in victims] == ["Middling"]
+
+
+async def test_locking_every_row_leaves_a_preview_that_only_locks() -> None:
+    """When the user locks the last victim, the preview stays, because Apply still has work.
+
+    A preview with no victims and no locks goes back (refer to the test above). A preview
+    with no victims but with staged locks has a real choice left: it shows an empty state
+    in place of the rows, and its Apply row writes only the locks.
+    """
+    import asyncio
+    from types import SimpleNamespace
+
+    from meshterm.ui.surface import TuiUi
+    from meshterm.ui.sweep_screen import _preview
+    from meshterm.ui.tui.session import TuiSession
+
+    victims = [_victim("Solo")]
+    locks: list = []
+    session = TuiSession()
+    task = asyncio.ensure_future(_preview(SimpleNamespace(ui=TuiUi(session)), victims, locks))
+    screen = await _step_until_screen(session, lambda s: "to archive" in getattr(s, "title", ""))
+    screen.handle("home")
+    screen.handle("shift_delete")
+    await _step_until_screen(session, lambda s: "no contacts to archive" in getattr(s, "title", ""))
+    body = _screen_text(screen)
+    assert "no contacts left to archive" in body
+    assert "Lock 1 contact" in body
+
+    screen.handle("end")
+    screen.handle("up")
+    screen.handle("enter")
+    assert await task is True
+    assert victims == [] and [v.contact.name for v in locks] == ["Solo"]
+
+
+async def test_esc_with_staged_locks_asks_before_it_discards_them() -> None:
+    """Esc with staged locks asks first, as an editor with staged values does.
+
+    "Keep editing" stays on the same list. "Discard" leaves, and the caller writes nothing.
+    Esc with only spared rows does not ask, because a spared row is not a staged change.
+    """
+    import asyncio
+    from types import SimpleNamespace
+
+    from meshterm.ui.surface import TuiUi
+    from meshterm.ui.sweep_screen import _preview
+    from meshterm.ui.tui.session import TuiSession
+
+    victims = [_victim("Weak"), _victim("Keeper")]
+    locks: list = []
+    session = TuiSession()
+    ui = TuiUi(session)
+    answers = iter(["keep", "discard"])
+    asked: list[str] = []
+
+    async def _dialog(prompt, buttons, **kw):  # noqa: ANN001
+        asked.append(prompt)
+        return next(answers)
+
+    ui.dialog = _dialog  # type: ignore[method-assign]
+    task = asyncio.ensure_future(_preview(SimpleNamespace(ui=ui), victims, locks))
+    screen = await _step_until_screen(session, lambda s: "to archive" in getattr(s, "title", ""))
+    screen.handle("home")
+    screen.handle("shift_delete")
+    await _step_until_screen(session, lambda s: "1 contact to archive" in getattr(s, "title", ""))
+
+    screen.handle("escape")
+    await _step_until_screen(session, lambda s: len(asked) == 1 and s is screen)
+    assert "Discard 1 staged change" in asked[0]
+    assert not task.done(), "Keep editing stays on the preview"
+
+    screen.handle("escape")
+    assert await task is False
+    assert len(asked) == 2
+
+
+def test_the_preview_names_the_lock_key_only_where_the_hint_has_room() -> None:
+    """The ``⇧Del lock`` atom shows on a contact row only when the hint stays in 72 cells.
+
+    JP, 2026-10-19: "If footer too long, don't put it in the footer. If there's room, put
+    it." No other atom leaves the hint to make room for it. A contact row also says
+    ``Enter open``, because Enter opens the node page there.
+    """
+    from rich.cells import cell_len
+
+    from meshterm.ui.sweep_screen import _preview_screen
+
+    victims = [_victim("Weak"), _victim("Keeper")]
+    screen = _preview_screen(victims, [])
+    screen.render_body(72)
+    assert "⇧Del lock" not in screen.footer_hint  # the highlight starts on Apply
+    assert "Enter select" in screen.footer_hint
+
+    screen.handle("home")
+    hint = screen.footer_hint
+    assert "Enter open" in hint
+    assert hint.index("Del keep") < hint.index("⇧Del lock") < hint.index("Esc back")
+    assert cell_len(hint) <= 72
+
+    # A typed filter changes the Esc verb, and the hint still has room.
+    screen.handle("text", "w")
+    assert "⇧Del lock" in screen.footer_hint and "Esc clear" in screen.footer_hint
+
+    # At a width where the row overflows, ←→ scroll takes the room, and the lock atom goes.
+    screen.handle("escape")
+    screen.render_body(30)
+    hint = screen.footer_hint
+    assert "←→ scroll" in hint and "Del keep" in hint
+    assert "⇧Del lock" not in hint
+
+    # A caller that cannot store a lock gives no lock key at all.
+    plain = _preview_screen(victims)
+    plain.handle("home")
+    assert "⇧Del lock" not in plain.footer_hint
+    resolved: list = []
+    plain.resolve = resolved.append  # type: ignore[method-assign]
+    plain.handle("shift_delete")
+    assert resolved == []
+
+
+def test_the_preview_lane_puts_lock_behind_the_delete_chip() -> None:
+    """On a handheld, Shift+F3 is ``Lock``, behind the ``Delete`` chip on F3.
+
+    The chip is dim where the key does nothing (the Apply and Back rows). The border of the
+    floating preview does not repeat ``Del keep`` or ``⇧Del lock``, because the lane already
+    shows both keys.
+    """
+    from meshterm.ui.sweep_screen import _preview_screen
+    from meshterm.ui.tui.fkeys import strip_lane_atoms
+
+    screen = _preview_screen([_victim("Weak"), _victim("Keeper")], [])
+    slot = screen.picocalc_lyra_lane[2]
+    assert (slot.label, slot.opp_label, slot.opp_action) == ("Delete", "Lock", "shift_delete")
+    assert slot.opp_enabled is False  # the highlight starts on Apply
+
+    screen.handle("home")
+    lane = screen.picocalc_lyra_lane
+    assert lane[2].opp_enabled is True
+    border = strip_lane_atoms(screen.footer_hint, lane)
+    assert "Del keep" not in border and "⇧Del lock" not in border
+
+    # Without a lock store, the slot has no Shift half.
+    assert _preview_screen([_victim("Weak")]).picocalc_lyra_lane[2].opp_label == ""
+
+
+def test_shift_delete_reaches_the_screens_from_each_front_end() -> None:
+    """The terminal, the Windows console, and the emulator all deliver ``shift_delete``.
+
+    xterm spells Shift+Delete as ``CSI 3;2 ~``, and the emulator types the same bytes.
+    prompt_toolkit reads them as ``ShiftDelete``, and the session maps it to the action.
+    """
+    from prompt_toolkit.input.vt100_parser import Vt100Parser
+    from prompt_toolkit.keys import Keys
+
+    from meshterm.emulator.keys import Key, encode
+    from meshterm.ui.tui.session import _KEY_ACTIONS
+
+    spelled = encode(Key(name="delete", shift=True))
+    assert spelled == "\x1b[3;2~"
+    parsed: list = []
+    parser = Vt100Parser(parsed.append)
+    parser.feed_and_flush(spelled)
+    assert [press.key for press in parsed] == [Keys.ShiftDelete]
+    assert _KEY_ACTIONS[Keys.ShiftDelete] == "shift_delete"
+
+
+async def test_the_sweep_writes_staged_locks_after_the_confirm() -> None:
+    """Apply writes each staged lock, and the confirm and the outcome both say so.
+
+    With victims, the amber confirm also names the locks, and Cancel writes nothing. With
+    only locks, there is no confirm and no device work: a lock archives nothing.
+    """
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    from meshterm.ui.sweep_screen import _sweep
+
+    locked: list[str] = []
+    archived: list[str] = []
+    removed: list[str] = []
+    outcomes: list[str] = []
+    answers: list[bool] = []
+    prompts: list[str] = []
+
+    class _Progress:
+        def add_task(self, *args, **kwargs) -> int:  # noqa: ANN002, ANN003
+            return 0
+
+        def advance(self, *args) -> None:  # noqa: ANN002
+            pass
+
+    @contextmanager
+    def _progress(title):  # noqa: ANN001, ANN202
+        yield _Progress()
+
+    async def _dialog(prompt, buttons, **kw):  # noqa: ANN001
+        prompts.append(prompt)
+        return answers.pop(0)
+
+    async def _message(outcome, **kw):  # noqa: ANN001
+        outcomes.append(outcome.plain)
+
+    class _Device:
+        async def remove_contact(self, contact) -> None:  # noqa: ANN001
+            removed.append(contact.name)
+
+    ctx = SimpleNamespace(
+        ui=SimpleNamespace(
+            dialog=_dialog,
+            progress=_progress,
+            session=SimpleNamespace(message_dialog=_message),
+        ),
+        log=SimpleNamespace(debug=lambda *a: None),
+        contact_store=SimpleNamespace(
+            set_locked=lambda dev, contact, flag: locked.append(contact.name),
+            archive=lambda dev, contact, when: archived.append(contact.name),
+        ),
+        devstate=SimpleNamespace(invalidate_contacts=lambda: None),
+        device=lambda: _device(_Device()),
+    )
+
+    # Cancel on the confirm writes nothing, the locks included.
+    answers.append(False)
+    assert await _sweep(ctx, "cc" * 32, [_victim("Weak")], [_victim("Keeper")]) == 0
+    assert "also locks 1 contact" in prompts[-1]
+    assert locked == [] and removed == []
+
+    # Archive writes the lock and archives the victim.
+    answers.append(True)
+    assert await _sweep(ctx, "cc" * 32, [_victim("Weak")], [_victim("Keeper")]) == 1
+    assert locked == ["Keeper"] and removed == ["Weak"] and archived == ["Weak"]
+    assert outcomes[-1] == "✓ archived 1 contact and locked 1"
+
+    # Only locks: no confirm, no device.
+    asked = len(prompts)
+    assert await _sweep(ctx, "cc" * 32, [], [_victim("Solo")]) == 0
+    assert len(prompts) == asked
+    assert locked == ["Keeper", "Solo"] and removed == ["Weak"]
+    assert outcomes[-1] == "✓ locked 1 contact"
+
+
 @pytest.mark.parametrize("platform_name", ["regular", "picocalc-lyra"])
 def test_the_archive_preview_keeps_its_cursor_in_its_box_walking_both_ways(
     platform_name: str,
