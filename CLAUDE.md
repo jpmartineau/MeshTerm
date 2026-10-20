@@ -592,7 +592,10 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   what a route graph's one-byte labels are matched by — so `pathline` stamps its own extent
   (`PATH_INK`, a style that draws nothing) and the fold skips what lies inside it. That is
   what makes the arrow form say what the chip form always said, its fills having never been
-  in the fold's vocabulary. Reverse-video chips — a dialog's committing button,
+  in the fold's vocabulary. The one exception is a chat's **selected message**: its mention
+  chips go white with its text (JP, 2026-10-19) — the label only, the fill kept, keyed hues
+  only (`widgets.picked_hop`: `white_ink` on a chip, `cursor` in arrow mode). A mention is
+  a name in prose, not a hop of a route. Reverse-video chips — a dialog's committing button,
   a running action's Abort, the arrow-mode composer slot, the editor cursor — are the
   `selected` fill, a **grey** block (`muted`'s grey; light grey slot 7 on the VT, the one
   grey a reverse can put behind text there, and the same fill the F-key lane uses). A chip

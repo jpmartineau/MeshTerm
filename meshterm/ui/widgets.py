@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from itertools import pairwise
 from typing import TYPE_CHECKING
@@ -787,6 +787,27 @@ def mention_hop(name: str, key: str | None, *, you: bool = False) -> PathHop:
     """
     label = name if powerline_enabled() else f"@{name}"
     return PathHop(label, key=key or None, white_ink=you and bool(key), quiet=True)
+
+
+def picked_hop(hop: PathHop) -> PathHop:
+    """``hop`` on the selected message of a chat: its label in the white of the selection.
+
+    The text of the selected message is white (``cursor``), and its chips follow it (JP,
+    2026-10-19). A chip keeps its fill, so it still tells one node from the next, and only
+    its label turns white: the white label of our own chip
+    (:attr:`~meshterm.ui.pathline.PathHop.white_ink`). Arrow mode has no fill, so there the
+    label takes the ``cursor`` white, as each other name on a selected row does.
+
+    The rule is the rule of the white fold of a selected row (refer to
+    :func:`~meshterm.ui.tui.render._whiten_identities`): only the hue of a key turns white.
+    A node that no key can place keeps its grey, because the selection must not claim to
+    know that node. A hop that already has a white label stays as it is.
+    """
+    if not hop.key or hop.white_ink:
+        return hop
+    if powerline_enabled():
+        return replace(hop, white_ink=True)
+    return replace(hop, style="cursor")
 
 
 def mention_chip(name: str, key: str | None, *, you: bool = False) -> Text:

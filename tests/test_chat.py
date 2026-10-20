@@ -3254,6 +3254,40 @@ def test_a_locked_author_has_the_padlock_on_its_sender_chip(
     assert "\U0001f512" not in shown and "Alice" in shown
 
 
+@pytest.mark.parametrize("chips", [True, False])
+def test_the_chips_of_the_selected_message_turn_white_with_its_text(
+    powerline,  # noqa: ANN001
+    chips: bool,
+) -> None:
+    """On the selected message, a mention chip has a white label, as the text around it does.
+
+    JP, 2026-10-19. A chip keeps its fill, so it still tells one node from the next. In
+    arrow mode, the label takes the ``cursor`` white. A node that no key can place keeps its
+    grey, as on each selected row: the selection must not claim to know that node.
+    """
+    powerline(chips)
+    keys = {"alice": "a1" * 32, "bob": "b2" * 32}
+    body = "hi @[Bob] and @[Zed]"
+    screen = ChatScreen(
+        Conversation(label="#public", is_channel=True, channel_idx=0),
+        [ChatMessage(text=f"Alice: {body}", is_channel=True, channel_idx=0)],
+        send=None,
+        names={},
+        session=_StubSession(),
+        key_of=lambda name: keys.get(name.casefold()),
+    )
+
+    def styles(label: str, *, selected: bool) -> str:
+        text = screen._render_mentions(body, selected=selected)
+        at = text.plain.index(label)
+        return " ".join(str(s.style) for s in text.spans if s.start <= at < s.end)
+
+    white = "#ffffff" if chips else "cursor"
+    assert white in styles("Bob", selected=True)
+    assert white not in styles("Bob", selected=False)
+    assert white not in styles("Zed", selected=True)
+
+
 def test_the_lock_atom_never_pushes_another_key_out_of_the_hint(tmp_path: Path) -> None:
     """With a link and a location, the hint has no room for ^K, so the atom stays out.
 

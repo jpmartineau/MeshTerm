@@ -51,6 +51,7 @@ from .widgets import (
     hop_chip,
     mention_hop,
     mention_mark,
+    picked_hop,
     self_chip,
 )
 
@@ -910,6 +911,9 @@ class ChatScreen(Screen):
         whose chip closes on the point). The chip has no ``@``, because the chip already
         says that the name is a mention (JP, 2026-10-13). Arrow mode has no chip, so there a
         mention keeps its ``@`` (refer to :func:`~meshterm.ui.widgets.mention_hop`).
+
+        On the selected message, the label of each chip is white, as the text around it is
+        (refer to :func:`~meshterm.ui.widgets.picked_hop`, JP, 2026-10-19).
         """
         base = "cursor" if selected else None
         text = Text()
@@ -917,7 +921,10 @@ class ChatScreen(Screen):
         for match in MENTION.finditer(body):
             if match.start() > pos:
                 text.append(body[pos : match.start()], style=base)
-            text.append_text(hop_chip(self._mention_hop(match.group(1)), role=DESTINATION))
+            hop = self._mention_hop(match.group(1))
+            if selected:
+                hop = picked_hop(hop)  # the chips turn white with the text around them
+            text.append_text(hop_chip(hop, role=DESTINATION))
             pos = match.end()
         if pos < len(body):
             text.append(body[pos:], style=base)
