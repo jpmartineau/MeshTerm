@@ -228,7 +228,8 @@ def _contacts(cols: int, rows: int) -> Screen:
     # The archived count is not zero, so the end of the list draws both maintenance rows.
     # This is its populated state, and the widest that the end of the list gets. There is also
     # a locked contact, so that its padlock must follow the glyph contract of both platforms.
-    return ContactsScreen(
+    # The highlight is on that contact, so the lane has ``Unlock`` on the Shift half of F2.
+    screen = ContactsScreen(
         "Homestead",
         "cc" * 32,
         contacts,
@@ -237,7 +238,10 @@ def _contacts(cols: int, rows: int) -> Screen:
         sort,
         archived=12,
         locked=frozenset({"aa" * 32}),
+        can_lock=True,
     )
+    screen.handle("down")
+    return screen
 
 
 def _archive_ranked():  # noqa: ANN201

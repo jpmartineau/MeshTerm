@@ -2029,3 +2029,121 @@ async def test_contacts_screen_l_opens_the_map_on_the_highlighted_node() -> None
 
     screen.handle("down")  # Bob, with no location
     assert "^L" not in screen.footer_hint
+
+
+def test_k_on_the_contacts_list_asks_to_toggle_the_lock_of_the_highlighted_contact() -> None:
+    """^K on a contact resolves a lock request, and Shift+F2 is ``Lock`` or ``Unlock``.
+
+    It is the key of the chat (JP, 2026-10-19). Our node and the tail rows have nothing to
+    lock. The hint names ^K only where it has room: a contact with a location already has
+    ``^L map``, and then the hint is too full for it.
+    """
+    from rich.cells import cell_len
+
+    from meshterm.core.models import Contact, MapMarker
+    from meshterm.ui.contacts_screen import ContactsScreen
+    from meshterm.ui.tui import KeyRequest, fkeys
+    from tests.conftest import recording_locator
+
+    contacts = [
+        Contact(name="Alice", public_key="aa" * 32),
+        Contact(name="Bob", public_key="bb" * 32),
+        Contact(name="Carol", public_key="dd" * 32),
+    ]
+    alice = MapMarker(label="Alice", lat=45.5, lon=-73.6, key="aa" * 32)
+    screen = ContactsScreen(
+        "Us",
+        "cc" * 32,
+        contacts,
+        1,
+        {},
+        _contacts_sort(),
+        locked=frozenset({"bb" * 32}),
+        locator=recording_locator([alice]),
+        can_lock=True,
+    )
+    resolved: list = []
+    screen.resolve = lambda value: resolved.append(value)  # type: ignore[method-assign]
+
+    # Our node: nothing to lock, and the chip is dim.
+    lane = screen.picocalc_lyra_lane
+    assert (lane[1].opp_label, lane[1].opp_action, lane[1].opp_enabled) == ("Lock", "lock", False)
+    assert "^K" not in screen.footer_hint
+    screen.handle("lock")
+    assert resolved == []
+
+    # Alice has a location, so the hint has no room for ^K. The chip and the key still act.
+    screen.handle("down")
+    assert "^L map" in screen.footer_hint and "^K" not in screen.footer_hint
+    lane = screen.picocalc_lyra_lane
+    assert lane[1].opp_enabled is True
+    assert fkeys.PICOCALC_LYRA_DECK.action_for(lane, 7) == "lock"
+    screen.handle("lock")
+    assert resolved == [KeyRequest("lock", contacts[0])]
+
+    # Bob is locked: the chip says Unlock.
+    screen.handle("down")
+    assert screen.picocalc_lyra_lane[1].opp_label == "Unlock"
+
+    # Carol has no location and no lock: the hint has room for ^K.
+    screen.handle("down")
+    assert "^K lock" in screen.footer_hint
+    assert cell_len(screen.footer_hint) <= 72
+
+    # A lock that the list learns of changes the chip in place.
+    screen.refresh_locks(frozenset({"dd" * 32}))
+    assert screen.picocalc_lyra_lane[1].opp_label == "Unlock"
+
+    # Where MeshTerm cannot store a lock, the Shift half of F2 is empty, and ^K does nothing.
+    plain = ContactsScreen("Us", "cc" * 32, contacts, 1, {}, _contacts_sort())
+    plain.handle("down")
+    slot = plain.picocalc_lyra_lane[1]
+    assert slot is None or slot.opp_label == ""
+    assert "^K" not in plain.footer_hint
+
+
+async def test_k_on_the_contacts_list_toggles_the_lock_in_place(tmp_path) -> None:  # noqa: ANN001
+    """^K writes the lock to the store, and the row gains its padlock on the same screen.
+
+    No confirm and no notice, as on the node page: the padlock is the acknowledgement, and
+    the next ^K reverses it.
+    """
+    import asyncio
+    import logging
+    from types import SimpleNamespace
+
+    from meshterm.core.contact_store import ContactStore
+    from meshterm.core.models import Contact
+    from meshterm.ui.contacts_screen import ContactsScreen, open_contacts
+    from meshterm.ui.surface import TuiUi
+    from meshterm.ui.tui.session import TuiSession
+
+    dev = "cc" * 32
+    store = ContactStore(tmp_path / "contacts.json")
+    alice = Contact(name="Alice", public_key="aa" * 32)
+    session = TuiSession()
+    ctx = SimpleNamespace(
+        ui=TuiUi(session),
+        log=logging.getLogger("test.contacts"),
+        contact_store=store,
+        devstate=SimpleNamespace(contacts=lambda: _contacts([alice])),
+    )
+    task = asyncio.ensure_future(open_contacts(ctx, "Us", dev, [alice], 1, {}, _contacts_sort()))
+    listed = await _step_until_screen(session, lambda s: isinstance(s, ContactsScreen))
+    listed.handle("down")  # off our own node, onto Alice
+
+    def alice_row() -> str:
+        listed.render_body(72)
+        return next(c for c in listed._choices() if c.value == alice).title.plain
+
+    listed.handle("lock")
+    await _step_until_screen(session, lambda s: store.is_locked(dev, "aa" * 32))
+    await _step_until_screen(session, lambda s: alice_row().startswith("\U0001f512"))
+    assert session.top is listed
+
+    listed.handle("lock")
+    await _step_until_screen(session, lambda s: not store.is_locked(dev, "aa" * 32))
+    await _step_until_screen(session, lambda s: not alice_row().startswith("\U0001f512"))
+
+    listed.handle("escape")
+    await task

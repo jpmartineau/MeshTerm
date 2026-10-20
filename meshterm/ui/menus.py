@@ -56,6 +56,7 @@ from ..platforms import get_platform
 from .theme import glyph
 from .tui import Choice, Separator
 from .tui.emoji_width import cut_cells, drawable
+from .tui.select import splice_hint
 
 if TYPE_CHECKING:
     from ..context import AppContext
@@ -475,6 +476,22 @@ def lane_header(label_w: int, value_w: int, width: int) -> str:
 #: coordinates. It opens the map picker and stages the latitude and the longitude together.
 PICK_LOCATION_LABEL = "Pick location on map…"
 PICK_LOCATION_HELP = "Point at the map to set both coordinates"
+
+
+#: The maximum width of a footer hint, in cells (refer to the UX standards).
+HINT_CELLS = 72
+
+
+def splice_if_room(hint: str, atom: str) -> str:
+    """``hint`` with ``atom`` before its ``Esc`` atom, but only when the result fits.
+
+    This is for an atom that is good to show but that the hint can do without: the lock
+    key (JP, 2026-10-19: "If footer too long, don't put it in the footer. If there's room,
+    put it."). The result must stay in :data:`HINT_CELLS`. No other atom leaves the hint to
+    make space for it, so a hint that is too full stays as it was.
+    """
+    longer = splice_hint(hint, atom)
+    return longer if cell_len(longer) <= HINT_CELLS else hint
 
 
 def changes_phrase(count: int) -> str:

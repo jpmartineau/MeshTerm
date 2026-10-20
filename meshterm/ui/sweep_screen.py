@@ -80,11 +80,18 @@ from ..core.contact_score import (
     sweep_candidates,
 )
 from ..core.models import Contact
-from .menus import Lane, column_header, confirm_discard, fit_cells, section_heading
+from .menus import (
+    Lane,
+    column_header,
+    confirm_discard,
+    fit_cells,
+    section_heading,
+    splice_if_room,
+)
 from .theme import name_style
 from .tui import Choice, SelectScreen, Separator
 from .tui.screen import CANCEL
-from .tui.select import DeleteRequest, KeyRequest, splice_hint
+from .tui.select import DeleteRequest, KeyRequest
 from .widgets import DEFAULT_GLYPH, NODE_GLYPHS, _recency_style, format_age
 
 if TYPE_CHECKING:
@@ -108,13 +115,9 @@ _BACK = ("back",)
 #: preview resolves with (refer to :class:`_PreviewScreen`).
 _LOCK = "lock"
 
-#: The footer atom of the lock key. The preview shows it only when the full hint stays in
-#: :data:`_HINT_CELLS` with it (JP, 2026-10-19: "If footer too long, don't put it in the
-#: footer. If there's room, put it.").
+#: The footer atom of the lock key. The preview shows it only where the hint has room for it
+#: (refer to :func:`~meshterm.ui.menus.splice_if_room`).
 _LOCK_HINT = "⇧Del lock"
-
-#: The maximum width of a footer hint, in cells (refer to the UX standards).
-_HINT_CELLS = 72
 
 #: One day in seconds, for the age rungs.
 _DAY = 86400
@@ -639,7 +642,7 @@ class _PreviewScreen(SelectScreen):
 
     Two surfaces show the key. On a handheld, the ``Delete`` chip on F3 gets ``Lock`` as its
     Shift half. On the desktop, the footer gets the ``⇧Del lock`` atom after ``Del keep``,
-    but only when the full hint stays in :data:`_HINT_CELLS`. No other atom leaves the hint
+    but only when the full hint stays in 72 cells. No other atom leaves the hint
     to make space for it.
 
     A contact row also says ``Enter open`` instead of ``Enter select``, because Enter on it
@@ -678,9 +681,7 @@ class _PreviewScreen(SelectScreen):
             return hint
         hint = hint.replace("Enter select", "Enter open")
         if self._locks_here():
-            longer = splice_hint(hint, _LOCK_HINT)
-            if cell_len(longer) <= _HINT_CELLS:
-                hint = longer
+            hint = splice_if_room(hint, _LOCK_HINT)
         return hint
 
     @property

@@ -292,7 +292,8 @@ deliberately, one at a time, and say why in the code.
 - **A bare-letter shortcut only where nothing is typed.** A screen that filters, finds or
   composes as you type has no free letters, so its verbs are Ctrl chords — one table,
   `session._CTRL_LETTER_CHORDS`, each letter the mnemonic of its action where it can be
-  (`^P` paths, `^U` URL, `^L` locate, `^O` open the author's page, `^K` lock the author —
+  (`^P` paths, `^U` URL, `^L` locate, `^O` open the author's page, `^K` toggle the lock of
+  the author or of the Contacts list's highlighted contact, `Lock` on Shift+F2 in both —
   JP, 2026-10-19; `^G` logs in to a room,
   JP's pick, 2026-10-11). One verb per letter across screens is the preference, not the
   rule (JP, 2026-10-10): a screen that has no use for a letter's verb may give the
