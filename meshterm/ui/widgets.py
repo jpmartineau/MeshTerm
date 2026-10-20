@@ -684,7 +684,7 @@ def name_chip(
     return hop_chip(hop, role=role)
 
 
-def author_chip(name: str, key: str | None, *, locked: bool = False) -> Text:
+def author_chip(name: str, key: str | None, *, locked: bool = False, picked: bool = False) -> Text:
     """The author of a message in a chat: the chip of the node, which closes on the point.
 
     It is :func:`name_chip` with the role of an origin, and one difference: a node that no
@@ -701,12 +701,15 @@ def author_chip(name: str, key: str | None, *, locked: bool = False) -> Text:
         name: The name as it must read.
         key: Any known prefix of the key of the node, or ``None``.
         locked: Whether the author is a contact that is locked against the archive sweep.
+        picked: Whether the selected message of the chat is in the group of this chip.
+            Then the label is white (refer to :func:`picked_hop`).
 
     Returns:
         The chip as a one-line :class:`Text`.
     """
     label = f"{glyph(LOCK_ICON)} {name}" if locked else name
-    return hop_chip(PathHop(label, key=key or None, quiet=True), role=ORIGIN)
+    hop = PathHop(label, key=key or None, quiet=True)
+    return hop_chip(picked_hop(hop) if picked else hop, role=ORIGIN)
 
 
 def self_chip(name: str | None, key: str | None, *, role: str | None = None) -> Text:
@@ -792,18 +795,20 @@ def mention_hop(name: str, key: str | None, *, you: bool = False) -> PathHop:
 def picked_hop(hop: PathHop) -> PathHop:
     """``hop`` on the selected message of a chat: its label in the white of the selection.
 
-    The text of the selected message is white (``cursor``), and its chips follow it (JP,
-    2026-10-19). A chip keeps its fill, so it still tells one node from the next, and only
-    its label turns white: the white label of our own chip
-    (:attr:`~meshterm.ui.pathline.PathHop.white_ink`). Arrow mode has no fill, so there the
-    label takes the ``cursor`` white, as each other name on a selected row does.
+    The text of the selected message is white (``cursor``), and its chips follow it: the
+    mentions in its body, and the author chip of its group (JP, 2026-10-19). A chip keeps
+    its fill, so it still tells one node from the next, and only its label turns white: the
+    white label of our own chip (:attr:`~meshterm.ui.pathline.PathHop.white_ink`). Arrow
+    mode has no fill, so there the label takes the ``cursor`` white, as each other name on a
+    selected row does.
 
-    The rule is the rule of the white fold of a selected row (refer to
-    :func:`~meshterm.ui.tui.render._whiten_identities`): only the hue of a key turns white.
-    A node that no key can place keeps its grey, because the selection must not claim to
-    know that node. A hop that already has a white label stays as it is.
+    A node that no key can place turns white too. Its grey fill already says that the node
+    is unknown (JP, 2026-10-19), and white on that fill reads better than its black label.
+    This is different from the white fold of a list row (refer to
+    :func:`~meshterm.ui.tui.render._whiten_identities`), where a grey name has no fill to
+    keep the grey. A hop that already has a white label stays as it is.
     """
-    if not hop.key or hop.white_ink:
+    if hop.white_ink:
         return hop
     if powerline_enabled():
         return replace(hop, white_ink=True)

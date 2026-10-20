@@ -677,6 +677,9 @@ class ChatScreen(Screen):
         boundaries: list[int] = []
         prev_group: tuple[bool, str] | None = None
         prev_day = None
+        # The first message of the group of the selected message. Its slice has the author
+        # chip of the group, which is white while the selection is in the group.
+        picked_head = self._picked_head()
 
         for idx in range(total):
             message = messages[idx]
@@ -688,9 +691,12 @@ class ChatScreen(Screen):
             group = (message.outbound, sender)
             new_day = day != prev_day
             selected = idx == self._selected
+            # A slice that the selection changes renders again, now and on the next paint
+            # after the selection leaves it: the selected message, and the head of its group.
+            marked = selected or idx == picked_head
             pending = message.acked is None and message.outbound and not message.is_channel
             reusable = (
-                not selected
+                not marked
                 and not pending
                 and idx < cache_count
                 and not cached_selected[idx]
@@ -725,7 +731,7 @@ class ChatScreen(Screen):
                     self._sticky_headers.append((len(lines), [divider[0]]))
                     lines += divider
                 if new_day or group != prev_group:
-                    header = self._group_header(sender, message)
+                    header = self._group_header(sender, message, picked=idx == picked_head)
                     lines += render_lines(header, width)
                 if selected:
                     # The first message has the head of the transcript: nothing comes before
@@ -741,7 +747,7 @@ class ChatScreen(Screen):
             prev_group, prev_day = group, day
             ids.append(id(message))
             ackeds.append(message.acked)
-            selecteds.append(selected)
+            selecteds.append(marked)
             boundaries.append(len(lines))
 
         self._render_cache = {
@@ -770,7 +776,28 @@ class ChatScreen(Screen):
             return (name or "·"), body
         return (self._name(message.peer) or message.peer or "?"), message.text
 
-    def _group_header(self, sender: str, message: ChatMessage) -> Text:
+    def _picked_head(self) -> int | None:
+        """The index of the first message of the group of the selected message, or ``None``.
+
+        A group is a run of messages from one sender on one day, under one author chip
+        (refer to :meth:`_render_grouped`). The chip is drawn with the first message of the
+        run, so that message is the one to draw again when the selection is in the run.
+        """
+        selected, messages = self._selected, self._messages
+        if selected is None or not 0 <= selected < len(messages):
+            return None
+
+        def group_of(message: ChatMessage) -> tuple:
+            day = message.created_at.astimezone().date()
+            return (day, message.outbound, self._sender_and_body(message)[0])
+
+        group = group_of(messages[selected])
+        head = selected
+        while head > 0 and group_of(messages[head - 1]) == group:
+            head -= 1
+        return head
+
+    def _group_header(self, sender: str, message: ChatMessage, *, picked: bool = False) -> Text:
         """Build the sender header that starts a group: the name, drawn as a chip.
 
         The chip makes a *label* different from the prose under it. A name alone above its
@@ -792,6 +819,11 @@ class ChatScreen(Screen):
         A sender that is a locked contact has the padlock before its name, in the place of
         the ``★`` of our chip (JP, 2026-10-19). Thus the chip shows the state that ^K
         toggles.
+
+        With ``picked``, the selected message is in this group, and the label of the chip
+        is white, as the text of that message is (refer to
+        :func:`~meshterm.ui.widgets.picked_hop`, JP, 2026-10-19). Our chip already has a
+        white label.
         """
         if message.outbound:
             return self_chip(self._self_name, self._self_key, role=ORIGIN)
@@ -799,7 +831,7 @@ class ChatScreen(Screen):
         key = None if sender == "·" else self._header_key(sender, message)
         pages = self._pages
         locked = key is not None and pages is not None and pages.lock_state(pages.find(key)) is True
-        return author_chip(sender, key, locked=locked)
+        return author_chip(sender, key, locked=locked, picked=picked)
 
     def _header_key(self, sender: str, message: ChatMessage) -> str | None:
         """The key that gives the colour of the sender chip of a group: the key of the name.

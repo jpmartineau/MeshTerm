@@ -325,6 +325,8 @@ class PathHop:
             the fill is the same as the fill of each known sender, and the white label
             tells it from them (JP, 2026-10-14). Arrow mode draws the same pair, with the
             padding of a chip. The PicoCalc draws it too, white on the dim twin of the hue.
+            On a quiet chip, it is a white label on the grey fill: a node with no key on the
+            selected message of a chat (refer to :func:`~meshterm.ui.widgets.picked_hop`).
         quiet: A node with no key in a chat: a sender or a mention that nobody can
             identify. Its chip is black on a grey fill (:data:`_QUIET_BG`), so it does not
             stand out among the senders that have a colour (JP, 2026-10-14). A hop with a
@@ -1230,7 +1232,8 @@ def _spectrum_colours(hop: PathHop) -> _ChipColours:
     thing when it fades the name.
 
     Our chip in a chat (``white_ink``) has the fill of the chip of its key, and a white
-    label. A quiet chip (a node with no key in a chat) is black on a grey fill.
+    label. A quiet chip (a node with no key in a chat) is black on a grey fill, or white on
+    it with ``white_ink``.
     """
     if hop.cursor:
         return _ChipColours(_style_hex("cursor") or _KEYLESS_BG, _CHIP_FG, _CHIP_FG)
@@ -1247,7 +1250,8 @@ def _spectrum_colours(hop: PathHop) -> _ChipColours:
     if hue:
         return _ChipColours(_chip_fill(hue), hue, hue)
     if hop.quiet:
-        return _ChipColours(_QUIET_BG, _QUIET_FG, _QUIET_FG)
+        ink = _WHITE if hop.white_ink else _QUIET_FG
+        return _ChipColours(_QUIET_BG, ink, ink)
     return _ChipColours(_KEYLESS_BG, _KEYLESS_FG, _KEYLESS_FG)
 
 
@@ -1269,7 +1273,8 @@ def _slot_colours(hop: PathHop) -> _ChipColours:
     (:func:`_spectrum_colours`).
 
     Our chip in a chat (``white_ink``) is white on the dim twin of its hue, the same rule as
-    on a truecolor terminal. A quiet chip is black on the light grey of the keyless chip.
+    on a truecolor terminal. A quiet chip is black on the light grey of the keyless chip, or
+    white on it with ``white_ink``.
     """
     if hop.cursor:
         return _ChipColours(_SLOT_PAGE, _SLOT_WHITE, _SLOT_WHITE)
@@ -1288,7 +1293,8 @@ def _slot_colours(hop: PathHop) -> _ChipColours:
     if hop.white_ink and hue:
         return _ChipColours(DIM_TWIN[ink], _SLOT_WHITE, _SLOT_WHITE)
     if hop.quiet and not hue:
-        return _ChipColours(DIM_TWIN[ink], _SLOT_PAGE, _SLOT_PAGE)
+        label = _SLOT_WHITE if hop.white_ink else _SLOT_PAGE
+        return _ChipColours(DIM_TWIN[ink], label, label)
     return _ChipColours(DIM_TWIN[ink], ink, ink)
 
 

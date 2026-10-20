@@ -3262,8 +3262,8 @@ def test_the_chips_of_the_selected_message_turn_white_with_its_text(
     """On the selected message, a mention chip has a white label, as the text around it does.
 
     JP, 2026-10-19. A chip keeps its fill, so it still tells one node from the next. In
-    arrow mode, the label takes the ``cursor`` white. A node that no key can place keeps its
-    grey, as on each selected row: the selection must not claim to know that node.
+    arrow mode, the label takes the ``cursor`` white. A node that no key can place turns
+    white too: its grey fill already says that the node is unknown.
     """
     powerline(chips)
     keys = {"alice": "a1" * 32, "bob": "b2" * 32}
@@ -3285,7 +3285,63 @@ def test_the_chips_of_the_selected_message_turn_white_with_its_text(
     white = "#ffffff" if chips else "cursor"
     assert white in styles("Bob", selected=True)
     assert white not in styles("Bob", selected=False)
-    assert white not in styles("Zed", selected=True)
+    assert white in styles("Zed", selected=True)
+    assert white not in styles("Zed", selected=False)
+
+
+@pytest.mark.parametrize("chips", [True, False])
+def test_the_author_chip_of_the_selected_message_turns_white(
+    powerline,  # noqa: ANN001
+    chips: bool,
+) -> None:
+    """The author chip of the group of the selected message has a white label (JP, 2026-10-19).
+
+    The chip is drawn with the first message of the group. Thus that message draws again
+    when the selection is lower in the group, and again when the selection leaves the group,
+    although the transcript keeps each message in a cache.
+    """
+    powerline(chips)
+    keys = {"alice": "a1" * 32}
+    screen = ChatScreen(
+        Conversation(label="#public", is_channel=True, channel_idx=0),
+        [
+            ChatMessage(text="Alice: one", is_channel=True, channel_idx=0),
+            ChatMessage(text="Alice: two", is_channel=True, channel_idx=0),
+            ChatMessage(text="Zed: three", is_channel=True, channel_idx=0),
+        ],
+        send=None,
+        names={},
+        session=_StubSession(),
+        key_of=lambda name: keys.get(name.casefold()),
+    )
+    white = "#ffffff" if chips else "cursor"
+    for sender, message in (("Alice", screen._messages[0]), ("Zed", screen._messages[2])):
+        picked = screen._group_header(sender, message, picked=True)
+        plain = screen._group_header(sender, message)
+        assert white in " ".join(str(s.style) for s in picked.spans)
+        assert white not in " ".join(str(s.style) for s in plain.spans)
+
+    calls: list[tuple[str, bool]] = []
+    header = screen._group_header
+
+    def spy(sender, message, *, picked=False):  # noqa: ANN001, ANN202
+        calls.append((sender, picked))
+        return header(sender, message, picked=picked)
+
+    screen._group_header = spy  # type: ignore[method-assign]
+    screen.render_body(60)
+    assert calls == [("Alice", False), ("Zed", False)]
+
+    calls.clear()
+    screen.handle("up")
+    screen.handle("up")  # the second message of Alice: its group is the first one
+    screen.render_body(60)
+    assert calls == [("Alice", True)]
+
+    calls.clear()
+    screen.handle("down")  # Zed: the chip of Alice goes back, and the chip of Zed is white
+    screen.render_body(60)
+    assert calls == [("Alice", False), ("Zed", True)]
 
 
 def test_the_lock_atom_never_pushes_another_key_out_of_the_hint(tmp_path: Path) -> None:
