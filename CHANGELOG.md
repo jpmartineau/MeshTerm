@@ -9,6 +9,57 @@ can change how things behave. It does not only add new things.
 
 ## [Unreleased]
 
+## [0.11.4] - 2026-10-20
+
+**You can lock a contact from more places, and a serial radio that stops when your laptop
+wakes from sleep opens the reconnect dialog.** In the archive preview, ⇧Del keeps a contact
+out of each sweep that follows. In a conversation and on the Contacts list, ^K locks a
+contact or unlocks it, and a locked sender has a padlock on its chip. The battery gauge of
+the Cardputer Zero stays on with the Cap.
+
+### Added
+
+- **In the archive preview, Shift+Delete keeps a contact out of the sweep and locks it.**
+  Delete keeps a contact out of this sweep only. ⇧Del also locks the contact, so that no
+  sweep that follows can take it. MeshTerm writes the lock when you select Apply, with the
+  archive. Esc and Back ask before they discard a lock that is not written yet. If you lock
+  each contact in the preview, Apply only writes the locks. On the PicoCalc and the
+  Cardputer Zero, `Lock` is on Shift+F3, behind `Delete`.
+- **^K locks the author of a message in a channel, a direct chat, and a room.** Select a
+  message and press ^K. Press it again to unlock the author. The status line tells you what
+  the key did. On the PicoCalc and the Cardputer Zero, `Lock` is on Shift+F2 in a channel
+  and in a direct chat. In a room, Shift+F2 is `Log in`, so there the page of the author
+  (Shift+F3) has `Lock contact` or `Unlock contact`.
+- **^K on the Contacts list locks the highlighted contact or unlocks it.** The padlock of
+  the row changes at once. On the handhelds, `Lock` is on Shift+F2.
+- **A locked sender has a padlock on its chip in a chat.** The chip reads `🔒 Name`
+  (`⚿ Name` on the PicoCalc), in the place where our own chip has its `★`.
+
+### Changed
+
+- **The selected message of a chat makes its chips white.** The text of the selected
+  message was already white. Now the mention chips in it, and the chip of its author, have
+  a white label too. Each chip keeps its fill, so you can still tell the nodes apart. A
+  mention of an unknown node is white on its grey fill.
+- In the archive preview, the footer says `Enter open` on a contact, because Enter opens
+  its node page.
+
+### Fixed
+
+- **A serial radio that stops when your laptop wakes from sleep opens the reconnect
+  dialog.** When a laptop wakes, the kernel can reset the USB device and close the open
+  port, but keep the same device file. MeshTerm still saw the port in the list of ports, so
+  it thought that the link was up. No reconnect dialog opened, and each command failed with
+  `no_event_received` (issue #32). Now the check also reads the connection flag of the
+  client, as the Bluetooth and TCP checks already did.
+- **The battery gauge of the Cardputer Zero stays on with the Cap.** On battery with the
+  Cap, most reads of the gauge failed, sometimes for almost two minutes. The gauge read
+  three times in 11 seconds and then waited 20 seconds, so it missed the good periods.
+  After seven failed reads, the gauge went away. Now MeshTerm tries again 5.5 seconds after
+  a failed read, and the last good reading stays for 10 minutes. A change between charging
+  and discharging must be read two times, because a bad read said "Charging" while the
+  battery discharged.
+
 ## [0.11.3] - 2026-10-18
 
 **No log keeps a password or a secret, and a bug report can hide your home folder and the
@@ -654,7 +705,8 @@ commands.
 MeshTerm is free and open source, under the Apache 2.0 licence. The licence does not cover
 the name and the logo (refer to `NOTICE`). A fork is welcome under its own name.
 
-[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.11.3...HEAD
+[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.11.4...HEAD
+[0.11.4]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.4
 [0.11.3]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.3
 [0.11.2]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.2
 [0.11.1]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.1
