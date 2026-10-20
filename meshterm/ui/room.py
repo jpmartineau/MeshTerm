@@ -454,7 +454,7 @@ async def open_room(ctx: AppContext, conversation: Conversation) -> int:
         paths=await _make_paths_presenter(ctx, conversation, device),
         key_of=trace_runner.make_name_key_resolver(contacts, stored_names, heard=named_at),
         locator=await Locator.gather(ctx),
-        pages=ContactPages(ctx, list(contacts)),
+        pages=ContactPages(ctx, list(contacts), self_key=self_key or ""),
         self_name=self_name,
         self_key=self_key,
     )

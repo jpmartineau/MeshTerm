@@ -69,19 +69,23 @@ def recording_locator(markers: list) -> object:
     return locator
 
 
-def recording_pages(contacts: list) -> object:
+def recording_pages(contacts: list, *, store: object = None, self_key: str = "") -> object:
     """A real :class:`~meshterm.ui.node_detail_screen.ContactPages` whose pages are a list.
 
     It finds contacts with the rule of the app. Instead of a node page, :meth:`show` appends
-    the contact that the page would open on to ``shown`` (``None`` is our node).
+    the contact that the page would open on to ``shown`` (``None`` is our node). With a
+    contact ``store`` and the key of the device, ^K can lock the contacts too.
     """
+    from types import SimpleNamespace
+
     from meshterm.ui.node_detail_screen import ContactPages
 
     class _Recording(ContactPages):
         async def show(self, contact) -> None:  # noqa: ANN001 - a Contact, or None for us
             self.shown.append(contact)
 
-    pages = _Recording(None, contacts)  # type: ignore[arg-type]
+    ctx = None if store is None else SimpleNamespace(contact_store=store)
+    pages = _Recording(ctx, contacts, self_key=self_key)  # type: ignore[arg-type]
     pages.shown = []  # type: ignore[attr-defined]
     return pages
 

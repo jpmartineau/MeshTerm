@@ -292,7 +292,8 @@ deliberately, one at a time, and say why in the code.
 - **A bare-letter shortcut only where nothing is typed.** A screen that filters, finds or
   composes as you type has no free letters, so its verbs are Ctrl chords — one table,
   `session._CTRL_LETTER_CHORDS`, each letter the mnemonic of its action where it can be
-  (`^P` paths, `^U` URL, `^L` locate, `^O` open the author's page; `^G` logs in to a room,
+  (`^P` paths, `^U` URL, `^L` locate, `^O` open the author's page, `^K` lock the author —
+  JP, 2026-10-19; `^G` logs in to a room,
   JP's pick, 2026-10-11). One verb per letter across screens is the preference, not the
   rule (JP, 2026-10-10): a screen that has no use for a letter's verb may give the
   letter a verb of its own, so long as nothing between the keyboard and the app takes it —
@@ -853,7 +854,12 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   on Shift+F2. F4/F5 stay the pager, with `Latest`/`Oldest` behind Shift. A verb new to
   one of them goes on the Shift bank; one all three gain goes on the plain bank — and once
   that is full, on Shift+F3: `Author` (^O, the author's node page, `ContactPages`) rides
-  there behind `Map`, its twin about the same author.
+  there behind `Map`, its twin about the same author. `Lock` (^K, a toggle that reads
+  `Unlock` on a locked author) is the one exception, by JP's choice (2026-10-19): it sits on
+  Shift+F2 where that is free (channel, DM), and in a room, where `Log in` holds it, the
+  `Author` page carries it — a conversation opens that page with its lock row and no other
+  management verb. Its hint atom goes in only where the hint has room without dropping
+  another atom.
 - **Each handheld deals its own lane.** Everything about the lane that belongs to one
   keyboard is a `LaneDeck` (`fkeys.PICOCALC_LYRA_DECK`, `fkeys.CARDPUTER_ZERO_DECK`), named by
   `Platform.lane_deck`: which keycodes drive the slots, where the chips sit on the row, how

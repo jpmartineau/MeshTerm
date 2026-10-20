@@ -113,6 +113,17 @@ def _fit_hint(atoms: list[str], spare: tuple[str, ...] = ()) -> str:
     return " · ".join(kept)
 
 
+#: The long words of a hint atom, and the short words that the same atom has when the hint
+#: needs the room. The two forms count as one atom. The short form leaves out a note or a
+#: second key, as the hint already does for ^U, ^L, and ^O.
+_SHORT_ATOMS = {"Enter reply (@mention)": "Enter reply", "^End/Esc cancel": "Esc cancel"}
+
+
+def _atom_set(hint: str) -> set[str]:
+    """The atoms of a hint, each in its short form, to compare two hints by their atoms."""
+    return {_SHORT_ATOMS.get(atom, atom) for atom in hint.split(" · ")}
+
+
 class ChatScreen(Screen):
     """A live conversation: a transcript that scrolls, above a pinned input line.
 
@@ -125,8 +136,8 @@ class ChatScreen(Screen):
     of the selected message. A path belongs to one message, so when no message is
     selected, there is nothing to show. ^U shows the links of the selected message as QR
     codes, on the share screen. ^L opens the map on the node of the author of the selected
-    message, when that node has a location. When no message is selected, Esc leaves the
-    chat.
+    message, when that node has a location. ^K locks that author against the archive
+    sweep, or unlocks it. When no message is selected, Esc leaves the chat.
 
     A channel with a send scope shows its region in the title (``#ops · yul``). There, ^R
     sends a message again *unscoped*: the selected message, or the newest when no message is
@@ -165,6 +176,13 @@ class ChatScreen(Screen):
         behind ``Map``, the other verb about the author. It is lit while the author has a
         page (refer to :meth:`_author_page`). Each of the two halves of F3 is empty when
         the screen has nothing to find that node with.
+
+        ``Lock`` (^K) is the fifth verb about the author, and it is on the Shift half of F2.
+        It toggles the lock of the author, so it reads ``Unlock`` on a locked author, and
+        it is lit while the author can have a lock (refer to :meth:`_lock_target`). That
+        slot is free in a channel and in a DM. In a room, ``Log in`` has it, so there the
+        user locks from the ``Author`` page, which a conversation opens with its lock row
+        (JP, 2026-10-19). The slot is empty where MeshTerm cannot store a lock.
 
         The Shift half of F1 follows the two rules of the lane. In a channel with no
         resend connected, it is empty, because a channel message is never acknowledged and
@@ -205,7 +223,18 @@ class ChatScreen(Screen):
             enabled=self._selected is not None and self._paths is not None,
             opp_enabled=self._retry_target() is not None,
         )
-        lane[1] = FPair("URL→QR", "url_code", enabled=bool(self._picked_urls()))
+        lock = self._lock_target()
+        if self._pages is not None and self._pages.can_lock:
+            toggle = ("Unlock" if lock is not None and lock[1] else "Lock", "lock")
+        else:
+            toggle = ("", "")
+        lane[1] = FPair(
+            "URL→QR",
+            "url_code",
+            *toggle,
+            enabled=bool(self._picked_urls()),
+            opp_enabled=lock is not None,
+        )
         if self._locator is not None or self._pages is not None:
             where = ("Map", "locate") if self._locator is not None else ("", "")
             who = ("Author", "author_page") if self._pages is not None else ("", "")
@@ -362,7 +391,29 @@ class ChatScreen(Screen):
         selected message whose author has a node page (refer to :meth:`_author_page`).
         ``^R retry failed`` must have something to retry (refer to :meth:`_retry_target`).
         The F-key lane uses the same rules to dim its slots.
+
+        ``^K lock`` (or ``^K unlock``) must have a selected message whose author can have a
+        lock (refer to :meth:`_lock_target`). It goes in only when there is room for it
+        (JP, 2026-10-19: "If there's room, put it."): the hint with it must stay in 72 cells
+        and keep each atom of the hint without it. It can make the words of an atom shorter
+        (:data:`_SHORT_ATOMS`), as ^U, ^L, and ^O already do. When it does not go in, the
+        status line still tells what the key did.
         """
+        hint = self._hint_with("")
+        lock = self._lock_target()
+        if lock is not None:
+            atom = "^K unlock" if lock[1] else "^K lock"
+            longer = self._hint_with(atom)
+            if (
+                cell_len(longer) <= _HINT_CELLS
+                and atom in longer.split(" · ")
+                and _atom_set(hint) <= _atom_set(longer)
+            ):
+                return longer
+        return hint
+
+    def _hint_with(self, lock: str) -> str:
+        """The key hint, with the ``lock`` atom after ``^O author`` (or no atom for ``""``)."""
         if self._selected is not None:
             code = "^U QR" if self._picked_urls() else ""
             where = "^L map" if self._locate_target() is not None else ""
@@ -381,6 +432,7 @@ class ChatScreen(Screen):
                         code,
                         where,
                         who,
+                        lock,
                         "^R resend unscoped",
                         "↑↓ pick",
                         "Esc cancel",
@@ -397,6 +449,7 @@ class ChatScreen(Screen):
                         code,
                         where,
                         who,
+                        lock,
                         "↑↓ pick",
                         "^End/Esc cancel",
                     ],
@@ -405,11 +458,11 @@ class ChatScreen(Screen):
                 if cell_len(hint) <= _HINT_CELLS:
                     return hint
                 return _fit_hint(
-                    ["Enter reply", "^P paths", code, where, who, "↑↓ pick", "Esc cancel"],
+                    ["Enter reply", "^P paths", code, where, who, lock, "↑↓ pick", "Esc cancel"],
                     spare=("↑↓ pick",),
                 )
             return _fit_hint(
-                ["Enter paths", code, where, who, "↑↓ pick", "^End/Esc cancel"],
+                ["Enter paths", code, where, who, lock, "↑↓ pick", "^End/Esc cancel"],
                 spare=("↑↓ pick",),
             )
         if self._retry_target() is not None:
@@ -938,10 +991,10 @@ class ChatScreen(Screen):
         Ctrl+PgUp/PgDn (day dividers), and the viewport moves with it. Enter on a selected
         message starts a reply with an ``@mention`` in a channel, and opens the delivery
         paths in a direct chat. In the two types of chat, ^P opens the paths of the
-        selected message, ^U the QR codes of its links, and ^L the map on its author. The
-        three do nothing when no message is selected. ^End (or a move past the newest
-        message) goes back to the compose line. The first Esc clears the selection, and the
-        second Esc leaves the screen.
+        selected message, ^U the QR codes of its links, and ^L the map on its author. ^K
+        locks or unlocks its author. These keys do nothing when no message is selected.
+        ^End (or a move past the newest message) goes back to the compose line. The first
+        Esc clears the selection, and the second Esc leaves the screen.
         """
         if action == "enter":
             if self._selected is not None:
@@ -961,6 +1014,8 @@ class ChatScreen(Screen):
             self._open_map()
         elif action == "author_page":
             self._open_author_page()
+        elif action == "lock":
+            self._toggle_lock()
         elif action == "retry":
             if self._is_channel:
                 self._begin_resend_unscoped()
@@ -1073,11 +1128,56 @@ class ChatScreen(Screen):
         message = self._messages[max(0, min(self._selected, len(self._messages) - 1))]
         if message.outbound:
             return lambda: pages.show(None)
+        contact = self._author_contact()
+        return None if contact is None else (lambda: pages.show(contact))
+
+    def _author_contact(self) -> Contact | None:
+        """The contact that wrote the selected message, or ``None``.
+
+        The key of the author finds it (refer to :meth:`_header_key`, the same key that
+        gives the colour of the sender chip). A message of ours, a message with no sender,
+        and an author that is not a contact have none.
+        """
+        pages = self._pages
+        if pages is None or self._selected is None or not self._messages:
+            return None
+        message = self._messages[max(0, min(self._selected, len(self._messages) - 1))]
+        if message.outbound:
+            return None
         sender, _body = self._sender_and_body(message)
         if sender == "·":
             return None
-        contact = pages.find(self._header_key(sender, message))
-        return None if contact is None else (lambda: pages.show(contact))
+        return pages.find(self._header_key(sender, message))
+
+    def _lock_target(self) -> tuple[Contact, bool] | None:
+        """The author that ^K locks or unlocks, and whether it is locked now.
+
+        ``None`` when ^K does nothing: no selected message, a message of ours, an author
+        that is not a contact, or a contact that cannot have a lock (refer to
+        :meth:`~meshterm.ui.node_detail_screen.ContactPages.lock_state`). The hint and the
+        F-key lane ask at each paint, and the store answers from memory.
+        """
+        contact = self._author_contact()
+        if contact is None or self._pages is None:
+            return None
+        locked = self._pages.lock_state(contact)
+        return None if locked is None else (contact, locked)
+
+    def _toggle_lock(self) -> None:
+        """Lock the author of the selected message, or unlock it when it is locked (^K).
+
+        There is no confirm, because the next ^K reverses it, as the row on the node page
+        does. The hint atom and the lane chip change to their opposite. The status line also
+        tells what the key did, because the hint has no room for the atom on each message.
+        """
+        target = self._lock_target()
+        if target is None or self._pages is None:
+            return
+        contact, locked = target
+        self._pages.set_locked(contact, not locked)
+        name = contact.name or contact.key_prefix
+        self._status = f"Unlocked {name}" if locked else f"Locked {name} — no sweep archives it"
+        self._session.invalidate()
 
     def _open_author_page(self) -> None:
         """Open the node page of the author of the selected message (^O). One page at a time.
@@ -1617,7 +1717,7 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
         scope=scope,
         resend_unscoped=resend_unscoped,
         locator=await Locator.gather(ctx),
-        pages=await ContactPages.gather(ctx),
+        pages=await ContactPages.gather(ctx, self_key=self_key or ""),
         self_name=self_name,
         self_key=self_key,
     )

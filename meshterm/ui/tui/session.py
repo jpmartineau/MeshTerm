@@ -105,6 +105,10 @@ _CTRL_LETTER_CHORDS: dict[str, str] = {
     # ^G logs in to the room that a room screen shows. In the input, ^G is not a special key:
     # it is the bell only in output, and no terminal or multiplexer takes it.
     "g": "login",
+    # ^K locks or unlocks the author of the selected message in a conversation (JP,
+    # 2026-10-19). No terminal or multiplexer takes it, and the raw mode of prompt_toolkit
+    # has no binding for it.
+    "k": "lock",
     "l": "locate",
     # ^O opens the node page of the author of the selected message. The raw mode of
     # prompt_toolkit clears IEXTEN, so a terminal on macOS or BSD does not take ^O to

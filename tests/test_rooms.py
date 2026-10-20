@@ -924,6 +924,28 @@ async def test_o_opens_the_node_page_of_the_author_of_a_post() -> None:
     assert screen.picocalc_lyra_lane[2].opp_label == "Author"
 
 
+def test_k_locks_the_author_of_a_post_and_the_lane_keeps_log_in(tmp_path) -> None:  # noqa: ANN001
+    """^K locks the contact that signed the selected post, as in a channel and a DM.
+
+    In a room, Shift+F2 is ``Log in``, so the lane has no ``Lock`` chip there. On a
+    handheld, the user locks from the ``Author`` page, which a conversation opens with its
+    lock row (JP, 2026-10-19).
+    """
+    from meshterm.core.contact_store import ContactStore
+    from tests.conftest import recording_pages
+
+    store = ContactStore(tmp_path / "contacts.json")
+    dev = "cc" * 32
+    alice = Contact(name="Alice", public_key=ALICE_KEY + "0" * 56, key_prefix=ALICE_KEY + "0000")
+    screen, _ = _view(_board(), pages=recording_pages([alice], store=store, self_key=dev))
+    for _ in range(4):
+        screen.handle("up")  # the oldest post, by Alice
+    screen.handle("lock")
+    assert store.is_locked(dev, alice.public_key)
+    lane = screen.picocalc_lyra_lane
+    assert (lane[1].opp_label, lane[1].opp_action) == ("Log in", "login")
+
+
 def test_the_login_key_is_g_and_o_opens_the_author_page() -> None:
     """^G logs in to a room, and ^O opens the page of the author of a message (JP, 2026-10-11)."""
     from meshterm.ui.tui.session import _CTRL_LETTER_CHORDS

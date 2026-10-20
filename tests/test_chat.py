@@ -3147,6 +3147,124 @@ def test_a_direct_chat_finds_the_page_of_its_peer() -> None:
     assert cell_len(screen.footer_hint) <= 72
 
 
+def test_k_locks_and_unlocks_the_author_of_the_selected_message(tmp_path: Path) -> None:
+    """^K toggles the lock of the author of the selected message (JP, 2026-10-19).
+
+    It is the third verb about the author, with ^L and ^O, and it finds the same contact.
+    The hint and the Shift half of F2 say ``lock`` or ``unlock``, so they also show the
+    state. The status line tells what the key did. Our own message, and an author that is
+    not a contact, have nothing to lock.
+    """
+    from meshterm.core.contact_store import ContactStore
+    from meshterm.ui.tui.session import _CTRL_LETTER_CHORDS
+    from tests.conftest import recording_pages
+
+    assert _CTRL_LETTER_CHORDS["k"] == "lock"
+    store = ContactStore(tmp_path / "contacts.json")
+    dev = "cc" * 32
+    alice = Contact(name="Alice", public_key="a1" * 32, key_prefix="a1" * 6)
+    keys = {"alice": "a1" * 32, "bob": "b2" * 32}
+    screen = ChatScreen(
+        Conversation(label="#public", is_channel=True, channel_idx=0),
+        [
+            ChatMessage(text="Alice: hi", is_channel=True, channel_idx=0),
+            ChatMessage(text="Bob: yo", is_channel=True, channel_idx=0),
+            ChatMessage(text="hello", outbound=True, is_channel=True, channel_idx=0),
+        ],
+        send=None,
+        names={},
+        session=_StubSession(),
+        key_of=lambda name: keys.get(name.casefold()),
+        pages=recording_pages([alice], store=store, self_key=dev),  # type: ignore[arg-type]
+    )
+    # With no selected message, ^K does nothing, and its chip is dim.
+    lane = screen.picocalc_lyra_lane
+    assert (lane[1].opp_label, lane[1].opp_action, lane[1].opp_enabled) == ("Lock", "lock", False)
+    screen.handle("lock")
+    assert store.locked_keys(dev) == frozenset()
+
+    # Our own message, then Bob, who is not a contact: nothing to lock.
+    for _ in range(2):
+        screen.handle("up")
+        assert "^K" not in screen.footer_hint
+        assert screen.picocalc_lyra_lane[1].opp_enabled is False
+
+    # Alice is a contact. Shift+F2 sends the same action as ^K.
+    screen.handle("up")
+    hint = screen.footer_hint
+    assert "^K lock" in hint and "^O author" in hint and "↑↓ pick" in hint
+    assert cell_len(hint) <= 72
+    lane = screen.picocalc_lyra_lane
+    assert lane[1].opp_enabled is True
+    assert fkeys.PICOCALC_LYRA_DECK.action_for(lane, 7) == "lock"
+    screen.handle("lock")
+    assert store.is_locked(dev, "a1" * 32)
+    assert "Locked Alice" in screen._status
+    assert "^K unlock" in screen.footer_hint
+    assert screen.picocalc_lyra_lane[1].opp_label == "Unlock"
+
+    # The same key reverses it.
+    screen.handle("lock")
+    assert not store.is_locked(dev, "a1" * 32)
+    assert screen._status == "Unlocked Alice"
+    assert "^K lock" in screen.footer_hint
+
+
+def test_the_lock_atom_never_pushes_another_key_out_of_the_hint(tmp_path: Path) -> None:
+    """With a link and a location, the hint has no room for ^K, so the atom stays out.
+
+    The other keys stay as they are without it (JP, 2026-10-19: "If there's room, put
+    it."). The chip on the lane and the key itself still work.
+    """
+    from meshterm.core.contact_store import ContactStore
+    from tests.conftest import recording_locator, recording_pages
+
+    store = ContactStore(tmp_path / "contacts.json")
+    dev = "cc" * 32
+    alice = Contact(name="Alice", public_key="a1" * 32, key_prefix="a1" * 6)
+
+    def build(pages: object) -> ChatScreen:
+        screen = ChatScreen(
+            Conversation(label="#public", is_channel=True, channel_idx=0),
+            [ChatMessage(text="Alice: see https://meshterm.net", is_channel=True, channel_idx=0)],
+            send=None,
+            names={},
+            session=_StubSession(),
+            key_of=lambda name: "a1" * 32 if name == "Alice" else None,
+            locator=recording_locator([_ALICE_AT]),  # type: ignore[arg-type]
+            pages=pages,  # type: ignore[arg-type]
+        )
+        screen.handle("up")
+        return screen
+
+    without = build(recording_pages([alice])).footer_hint
+    screen = build(recording_pages([alice], store=store, self_key=dev))
+    assert "^K" not in screen.footer_hint
+    assert screen.footer_hint == without
+    assert screen.picocalc_lyra_lane[1].opp_enabled is True
+    screen.handle("lock")
+    assert store.is_locked(dev, "a1" * 32)
+
+
+def test_a_chat_without_a_lock_store_has_no_lock_chip() -> None:
+    """Where MeshTerm cannot store a lock, the Shift half of F2 is empty, not dim."""
+    from tests.conftest import recording_pages
+
+    alice = Contact(name="Alice", public_key="a1" * 32, key_prefix="a1" * 6)
+    screen = ChatScreen(
+        Conversation(label="#public", is_channel=True, channel_idx=0),
+        [ChatMessage(text="Alice: hi", is_channel=True, channel_idx=0)],
+        send=None,
+        names={},
+        session=_StubSession(),
+        key_of=lambda name: "a1" * 32,
+        pages=recording_pages([alice]),  # type: ignore[arg-type]
+    )
+    screen.handle("up")
+    assert screen.picocalc_lyra_lane[1].opp_label == ""
+    assert "^K" not in screen.footer_hint
+
+
 def test_chat_hint_with_all_its_keys_fits_in_72_cells() -> None:
     """The longest hint (a scoped message of ours, with a link, on the map) fits in 72 cells.
 
