@@ -630,6 +630,10 @@ class ChatScreen(Screen):
         * its identity or ``acked`` is different from the cache (it was appended, it was
           replaced in place when a pending bubble resolved, or it was removed).
 
+        A change of the locks draws all of the transcript again, because the sender chip of
+        a locked contact has a padlock (refer to :meth:`_group_header`). The locks change
+        rarely: ^K here, or the lock row of the node page of an author.
+
         Most importantly, this works for each message. It is not a cached prefix that
         stops at the first such row. Thus a message stays cheap to draw again, however far
         back it is in a long transcript. With a prefix that stops, a page up through the
@@ -641,7 +645,13 @@ class ChatScreen(Screen):
         total = len(messages)
         cache = self._render_cache
         spacing = self.section_spacing()
-        if cache is not None and cache["width"] == width and cache["spacing"] == spacing:
+        locks = self._pages.locked_keys() if self._pages is not None else frozenset()
+        if (
+            cache is not None
+            and cache["width"] == width
+            and cache["spacing"] == spacing
+            and cache["locks"] == locks
+        ):
             cached_ids = cache["ids"]
             cached_acked = cache["acked"]
             cached_selected = cache["selected"]
@@ -736,6 +746,7 @@ class ChatScreen(Screen):
         self._render_cache = {
             "width": width,
             "spacing": spacing,
+            "locks": locks,
             "ids": ids,
             "acked": ackeds,
             "selected": selecteds,
@@ -776,12 +787,18 @@ class ChatScreen(Screen):
         The sender is the origin of the route of each message under it. Thus the chip
         closes on the point, the mark of a route that goes on. An ``@mention`` in a body is
         the other end, and it opens on the notch (refer to :meth:`_render_mentions`).
+
+        A sender that is a locked contact has the padlock before its name, in the place of
+        the ``★`` of our chip (JP, 2026-10-19). Thus the chip shows the state that ^K
+        toggles.
         """
         if message.outbound:
             return self_chip(self._self_name, self._self_key, role=ORIGIN)
         # ``·`` is a channel line that arrived with no sender prefix: there is no key to use.
         key = None if sender == "·" else self._header_key(sender, message)
-        return author_chip(sender, key)
+        pages = self._pages
+        locked = key is not None and pages is not None and pages.lock_state(pages.find(key)) is True
+        return author_chip(sender, key, locked=locked)
 
     def _header_key(self, sender: str, message: ChatMessage) -> str | None:
         """The key that gives the colour of the sender chip of a group: the key of the name.

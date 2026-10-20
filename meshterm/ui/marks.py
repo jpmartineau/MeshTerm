@@ -52,6 +52,15 @@ UNKNOWN_MARK = ("○", "node.unknown")
 #: purpose. Those marks have a meaning, and this one means "not shown".
 MASK_MARK = "•"
 
+#: The padlock of a locked contact: at the start of its row in the Contacts list, and before
+#: its name on its sender chip in a chat. It is the private-channel ``🔒`` of the icon
+#: lexicon, because it means the same thing (this item is closed to something). It goes
+#: through :func:`~meshterm.ui.theme.glyph`, which gives the hand-drawn padlock ``⚿`` of the
+#: font on the PicoCalc. An unlocked contact draws nothing. The mark is an exception that
+#: the user must notice, and a lane of open padlocks makes the few closed padlocks hard to
+#: see.
+LOCK_ICON = "🔒"
+
 #: Sentinels that name the endpoints of a path on the route graph. ``\x00`` never occurs
 #: in a node hash, so the sentinels can share the namespace of node ids and not collide
 #: with an id.

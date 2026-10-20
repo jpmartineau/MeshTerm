@@ -3210,6 +3210,50 @@ def test_k_locks_and_unlocks_the_author_of_the_selected_message(tmp_path: Path) 
     assert "^K lock" in screen.footer_hint
 
 
+@pytest.mark.parametrize("chips", [True, False])
+def test_a_locked_author_has_the_padlock_on_its_sender_chip(
+    tmp_path: Path,
+    powerline,  # noqa: ANN001
+    chips: bool,
+) -> None:
+    """A locked contact reads ``🔒 Name`` on its sender chip, as our chip reads ``★ Name``.
+
+    JP, 2026-10-19. The padlock is in the label, so arrow mode has it too. The transcript
+    keeps the lines of each message in a cache, but a change of the locks draws the chips
+    again: here the lock goes away as the node page would remove it, with no key press in
+    the chat.
+    """
+    from meshterm.core.contact_store import ContactStore
+    from tests.conftest import recording_pages
+
+    powerline(chips)
+    store = ContactStore(tmp_path / "contacts.json")
+    dev = "cc" * 32
+    alice = Contact(name="Alice", public_key="a1" * 32, key_prefix="a1" * 6)
+    store.set_locked(dev, alice, True)
+    pages = recording_pages([alice], store=store, self_key=dev)
+    keys = {"alice": "a1" * 32, "bob": "b2" * 32}
+    screen = ChatScreen(
+        Conversation(label="#public", is_channel=True, channel_idx=0),
+        [
+            ChatMessage(text="Alice: hi", is_channel=True, channel_idx=0),
+            ChatMessage(text="Bob: yo", is_channel=True, channel_idx=0),
+        ],
+        send=None,
+        names={},
+        session=_StubSession(),
+        key_of=lambda name: keys.get(name.casefold()),
+        pages=pages,  # type: ignore[arg-type]
+    )
+    shown = _strip_ansi(screen.render_body(60))
+    assert "\U0001f512 Alice" in shown
+    assert "\U0001f512 Bob" not in shown  # Bob is not a contact, so he has no lock
+
+    pages.set_locked(alice, False)  # type: ignore[attr-defined]
+    shown = _strip_ansi(screen.render_body(60))
+    assert "\U0001f512" not in shown and "Alice" in shown
+
+
 def test_the_lock_atom_never_pushes_another_key_out_of_the_hint(tmp_path: Path) -> None:
     """With a link and a location, the hint has no room for ^K, so the atom stays out.
 

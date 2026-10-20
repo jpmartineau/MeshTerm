@@ -511,7 +511,9 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   2026-10-14, after a turned-over light chip read wrong). The PicoCalc draws the same
   pair, white on the hue's dim twin. Our **sender** chip is `★ Name`
   (`widgets.self_chip`), the star in the white label; the star on the page right of the
-  chip was tried and put back (JP, 2026-10-13). A **mention** of us is the same chip
+  chip was tried and put back (JP, 2026-10-13). A **locked** sender's chip carries the
+  padlock in the same place, `🔒 Name` (`author_chip(locked=…)`, `marks.LOCK_ICON`, `⚿` on
+  the PicoCalc; JP, 2026-10-19). A **mention** of us is the same chip
   with no star (`mention_chip(you=True)`); the message carrying it gets **our white
   `★`** left of its time instead (`widgets.mention_mark`, the same on every platform and
   in arrow mode). The map's yellow star, the chip's notch-and-point pair, its point alone

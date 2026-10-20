@@ -1323,6 +1323,16 @@ class ContactPages:
             return None
         return self._ctx.contact_store.is_locked(self._dev_pub, key)
 
+    def locked_keys(self) -> frozenset[str]:
+        """The full keys of the contacts locked on this device, or none where no lock is stored.
+
+        A conversation compares it at each paint, to draw again the sender chips that gained
+        or lost their padlock (refer to :class:`~meshterm.ui.chat.ChatScreen`).
+        """
+        if not self.can_lock:
+            return frozenset()
+        return self._ctx.contact_store.locked_keys(self._dev_pub)
+
     def set_locked(self, contact: Contact, locked: bool) -> None:
         """Lock or unlock ``contact``. The caller asked :meth:`lock_state` first."""
         if self.can_lock:

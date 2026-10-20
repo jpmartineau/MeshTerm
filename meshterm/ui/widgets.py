@@ -46,6 +46,7 @@ from ..core.models import (
 from ..platforms import Platform, on_platform
 from .marks import (
     DST_NODE,
+    LOCK_ICON,
     NODE_MARK,
     REPEATER_MARK,
     RGB,
@@ -683,7 +684,7 @@ def name_chip(
     return hop_chip(hop, role=role)
 
 
-def author_chip(name: str, key: str | None) -> Text:
+def author_chip(name: str, key: str | None, *, locked: bool = False) -> Text:
     """The author of a message in a chat: the chip of the node, which closes on the point.
 
     It is :func:`name_chip` with the role of an origin, and one difference: a node that no
@@ -691,14 +692,21 @@ def author_chip(name: str, key: str | None) -> Text:
     (refer to :attr:`~meshterm.ui.pathline.PathHop.quiet`). The transcript and the
     Messages list draw each sender through this function.
 
+    A locked contact has the padlock before its name, in the chip: ``🔒 Name`` (JP,
+    2026-10-19). It is the same place as the ``★`` of our own chip (refer to
+    :func:`self_chip`), and the same padlock as the row of the contact in the Contacts list
+    (:data:`~meshterm.ui.marks.LOCK_ICON`, ``⚿`` on the PicoCalc).
+
     Args:
         name: The name as it must read.
         key: Any known prefix of the key of the node, or ``None``.
+        locked: Whether the author is a contact that is locked against the archive sweep.
 
     Returns:
         The chip as a one-line :class:`Text`.
     """
-    return hop_chip(PathHop(name, key=key or None, quiet=True), role=ORIGIN)
+    label = f"{glyph(LOCK_ICON)} {name}" if locked else name
+    return hop_chip(PathHop(label, key=key or None, quiet=True), role=ORIGIN)
 
 
 def self_chip(name: str | None, key: str | None, *, role: str | None = None) -> Text:

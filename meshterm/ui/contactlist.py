@@ -38,7 +38,7 @@ from typing import Any
 from rich.cells import cell_len
 from rich.text import Text
 
-from .marks import SELF_MARK
+from .marks import LOCK_ICON, SELF_MARK
 from .menus import fit_cells
 from .theme import glyph, name_style
 from .tui.select import Choice, SelectScreen, Separator
@@ -134,14 +134,6 @@ TRACE_LANES: tuple[ContactLane, ...] = (TRACED_LANE, HEARD_LANE, PKTS_LANE)
 #: what the contact still transmits. It is about when the contact left.
 ARCHIVED_LANES: tuple[ContactLane, ...] = (ARCHIVED_LANE,)
 
-#: The padlock at the start of the row of a locked contact (refer to
-#: :attr:`ContactRow.locked`). It is the private-channel ``🔒`` of the icon lexicon, because
-#: it means the same thing (this item is closed to something). On the PicoCalc,
-#: :func:`~meshterm.ui.theme.glyph` gives the hand-drawn padlock ``⚿`` of the font. An
-#: unlocked contact draws nothing. The mark is an exception that the user must notice, and a
-#: lane of open padlocks makes the few closed padlocks hard to see.
-_LOCK_ICON = "🔒"
-
 
 def _lock_lane_width(rows: list[ContactRow]) -> int:
     """The width of the lock column in cells: the platform padlock and its gap, or ``0``.
@@ -152,7 +144,7 @@ def _lock_lane_width(rows: list[ContactRow]) -> int:
     """
     if not any(row.locked for row in rows):
         return 0
-    return cell_len(glyph(_LOCK_ICON)) + 1
+    return cell_len(glyph(LOCK_ICON)) + 1
 
 
 def _lock_cell(row: ContactRow, lock_w: int) -> str:
@@ -161,7 +153,7 @@ def _lock_cell(row: ContactRow, lock_w: int) -> str:
         return ""
     if not row.locked:
         return " " * lock_w
-    mark = glyph(_LOCK_ICON)
+    mark = glyph(LOCK_ICON)
     return mark + " " * (lock_w - cell_len(mark))
 
 

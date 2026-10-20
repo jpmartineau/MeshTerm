@@ -534,10 +534,17 @@ def _region_editor(cols: int, rows: int) -> Screen:
 
 
 def _chat(cols: int, rows: int) -> Screen:
-    conv = Conversation(
-        label="Alice",
-        is_channel=False,
-        contact=Contact(name="Alice", public_key="d4" + "0" * 62, key_prefix="d4e5f6a7"),
+    """A direct chat with a locked peer, so that its sender chip has the padlock of the font."""
+    from types import SimpleNamespace
+
+    from tests.conftest import recording_pages
+
+    alice = Contact(name="Alice", public_key="d4" + "0" * 62, key_prefix="d4e5f6a7")
+    conv = Conversation(label="Alice", is_channel=False, contact=alice)
+    store = SimpleNamespace(
+        is_locked=lambda dev, key: True,
+        locked_keys=lambda dev: frozenset({alice.public_key}),
+        archived=lambda dev: [],
     )
     messages = [
         ChatMessage(text="on my way, should be there soon", outbound=False, peer="d4e5f6a7"),
@@ -551,6 +558,7 @@ def _chat(cols: int, rows: int) -> Screen:
         send=None,
         names={"d4e5f6a7": "Alice"},
         session=_GallerySession(cols, rows),
+        pages=recording_pages([alice], store=store, self_key="cc" * 32),  # type: ignore[arg-type]
     )
 
 
