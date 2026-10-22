@@ -811,7 +811,9 @@ def test_outbox_keys_act_only_on_the_rows_they_name(tmp_path: Path) -> None:
         return screen
 
     screen = on(("msg", waiting.ident))
-    assert screen.footer_hint == ("↑↓ move · Enter open · ^R send · Del delete · Esc back")
+    assert screen.footer_hint == (
+        "↑↓ move · type to filter · Enter open · ^R send · Del delete · Esc back"
+    )
     assert cell_len(screen.footer_hint) <= 72
     slot = screen.picocalc_lyra_lane[2]
     assert (slot.label, slot.opp_label, slot.enabled, slot.opp_enabled) == (
@@ -832,7 +834,7 @@ def test_outbox_keys_act_only_on_the_rows_they_name(tmp_path: Path) -> None:
     assert resolved.pop() == DeleteRequest(("msg", landed.ident))
 
     screen = on(_QUEUE)
-    assert screen.footer_hint == "↑↓ move · Enter open · Esc back"
+    assert screen.footer_hint == "↑↓ move · type to filter · Enter open · Esc back"
     screen.handle("delete")
     screen.handle("retry")
     assert resolved == []
@@ -987,3 +989,33 @@ def test_a_panned_column_header_pins_with_its_section_heading(tmp_path: Path) ->
     _line, block = screen._sticky_headers[0]
     plain = [re.sub(r"\x1b\[[0-9;]*m", "", line) for line in block]
     assert "Outbox" in plain[0] and "TARGET" in plain[1]
+
+
+def test_the_wide_outbox_footer_drops_delete_first_and_keeps_esc(tmp_path: Path) -> None:
+    """On an entry row that pans, the full footer is wider than 72 cells. The line drops Del.
+
+    JP chose the filter over a footer that fits (2026-10-22). The hint line removes atoms
+    instead of a cut at the edge, so Esc stays. ``Del delete`` goes first, because the user
+    finds the Delete key without a hint. The typed filter narrows the list again.
+    """
+    from meshterm.ui.courier_screen import CourierOutboxScreen
+    from meshterm.ui.tui import frame
+
+    ctx = _outbox_ctx(tmp_path)
+    name = "A Rather Long Contact Name For Width"
+    ctx.courier_store.queue(NODE, name, "a message that is long enough to pan")
+    screen = CourierOutboxScreen(ctx)
+    screen.render_body(72)
+    assert cell_len(screen.footer_hint) > 72
+    assert frame.fitted_footer(screen, 72) == (
+        "↑↓ move · ←→ scroll · type to filter · Enter open · ^R send · Esc back"
+    )
+
+    for ch in "zzz":
+        screen.handle("text", ch)
+    assert name not in _outbox_plain(screen)
+    for _ in range(3):
+        screen.handle("backspace")
+    for ch in "Rather":
+        screen.handle("text", ch)
+    assert "Rather" in _outbox_plain(screen)

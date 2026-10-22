@@ -100,7 +100,7 @@ _DONE_SHOWN = 15
 #: The footer of the outbox. :meth:`CourierOutboxScreen._key_atoms` adds the atoms of the
 #: keys that act on an entry, only while the highlight is on such an entry. The select
 #: list adds ``←→ scroll`` while the table is wider than the screen.
-_OUTBOX_HINT = "↑↓ move · Enter open · Esc back"
+_OUTBOX_HINT = "↑↓ move · type to filter · Enter open · Esc back"
 _SEND_HINT = "^R send"
 _DELETE_HINT = "Del delete"
 
@@ -240,12 +240,18 @@ class CourierOutboxScreen(SelectScreen):
     Three keys act on the highlighted entry. Enter opens its message (refer to
     :func:`_open_entry`), Delete asks to remove it, and ``^R`` sends a waiting entry now.
     The footer and the F-key lane name ``^R`` and Delete only on the rows on which they act.
-    ``^R`` is the chord that the app uses for "send again" in each conversation.
+    ``^R`` is the chord that the app uses for "send again" in each conversation, and a
+    chord, because this list filters as the user types.
 
-    The list does not filter as the user types. The footer of a table that pans must also
-    name ←→, and with the filter atom too, the footer was wider than the 72 cells of a
-    terminal. An outbox holds a few entries, so a filter has little to find in it.
+    On an entry row that pans, the full footer is wider than the 72 cells of a terminal.
+    That is a known exception to the limit (JP, 2026-10-22: "bring the filter back, tough
+    luck if it doesn't fit in the footer"). The hint line then removes ``Del delete``
+    first (:attr:`spare_hint_atoms`, refer to :func:`~meshterm.ui.tui.frame.fitted_footer`),
+    because the user finds the Delete key without a hint, and keeps Esc.
     """
+
+    #: The atoms that the hint line removes first when the footer is too wide.
+    spare_hint_atoms = (_DELETE_HINT,)
 
     def __init__(self, ctx: AppContext, *, default: Any = None) -> None:
         """Open the outbox on the current entries of the store, and keep their shape.
@@ -260,7 +266,6 @@ class CourierOutboxScreen(SelectScreen):
             _menu_items(ctx, ctx.courier_store.entries()),
             default=default,
             footer_hint=_OUTBOX_HINT,
-            filterable=False,
             key_hint=self._key_atoms,
         )
 

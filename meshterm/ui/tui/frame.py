@@ -617,6 +617,27 @@ def fit_hint(hint: str, width: int, *, shed_first: Sequence[str] = ()) -> str:
     return crop_cells(Text(fitted), 0, max(1, width - 1)).plain + "…"
 
 
+def fitted_footer(screen: Screen, width: int) -> str:
+    """The footer hint of ``screen`` as the hint line draws it: fitted to ``width`` cells.
+
+    A hint that fits is returned as it is. A wider hint loses atoms through
+    :func:`fit_hint`, and keeps its Esc atom. Before, the hint line cut a wide hint at the
+    edge, and the cut took the Esc atom first. The width is measured on the plain text,
+    because a hint can carry markup (the ``[warn]offline[/warn]`` of the map).
+
+    Args:
+        screen: The screen whose hint the footer draws: the top screen, also when it floats.
+        width: The cells of the hint line.
+
+    Returns:
+        The hint to draw.
+    """
+    hint = screen.footer_hint
+    if cell_len(Text.from_markup(hint).plain) <= width:
+        return hint
+    return fit_hint(hint, width, shed_first=getattr(screen, "spare_hint_atoms", ()))
+
+
 def compose_startup(screen: Screen, cols: int, rows: int) -> str:
     """Compose a chromeless splash: a centred wordmark above a panel of content size.
 

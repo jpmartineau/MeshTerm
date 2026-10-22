@@ -2219,7 +2219,7 @@ class TuiSession:
         # centred below its banner, instead of stretched across the terminal.
         if not base.chrome:
             return self._emit(frame.compose_startup(base, cols, rows))
-        footer = self.top.footer_hint if self.top else base.footer_hint
+        footer = frame.fitted_footer(self.top or base, cols)
         lane = self._fkey_lane(self.top or base)
         return self._emit(
             frame.compose_base(self._header(cols), base, footer, cols, rows, footer_lane=lane)

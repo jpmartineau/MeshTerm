@@ -1867,6 +1867,13 @@ _KNOWN_WIDE: set[str] = set()
 #: again around its new view-jump keys, and the hint came back inside the budget.
 _PREEXISTING_REGULAR_OVERFLOW: set[str] = set()
 
+#: Entries whose full footer is wider than the 72 cells, by a decision, and not by a fault.
+#: The hint line removes atoms to fit (``frame.fitted_footer``), so the test measures the
+#: hint that the footer draws, and checks that it keeps its way out. Each entry names its
+#: decision. ``courier_outbox``: JP, 2026-10-22, "bring the filter back, tough luck if it
+#: doesn't fit in the footer".
+_SHEDS_ITS_HINT: set[str] = {"courier_outbox"}
+
 
 #: The specimens by name, for a test that needs one entry and not the whole sweep.
 _ENTRY_BY_NAME = {entry.name: entry for entry in _ENTRIES}
@@ -1935,6 +1942,10 @@ def test_gallery_screen_fits_its_platform(
         assert cell_len(shifted.plain) <= cols, (
             f"shifted F-lane {cell_len(shifted.plain)} cells: {shifted.plain!r}"
         )
+    elif entry.name in _SHEDS_ITS_HINT:
+        drawn = Text.from_markup(frame.fitted_footer(screen, cols)).plain
+        assert cell_len(drawn) <= cols, f"the fitted footer is {cell_len(drawn)} cells: {drawn!r}"
+        assert drawn.endswith(screen.footer_hint.rsplit(" · ", 1)[-1]), "the way out was lost"
     else:
         footer_plain = Text.from_markup(screen.footer_hint).plain
         assert cell_len(footer_plain) <= cols, (
