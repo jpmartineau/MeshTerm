@@ -458,6 +458,31 @@ def test_cut_mark_falls_back_to_the_ellipsis_off_a_chip() -> None:
         assert str(mark.style) == "muted"
 
 
+def test_cut_mark_cracks_only_inside_the_path_of_a_row() -> None:
+    """A cut in the text beside a chip ends in the ellipsis. A cut in a chip still cracks.
+
+    A row can be a chip, then text: the recipient of a Courier entry, then its trigger. The
+    scan for a fill once went across the text into the chip. Then the row ended in a half
+    block in the fill of the chip, at the right edge and far from the chip. The scan now
+    stays inside the path that the row stamps (``PATH_INK``).
+    """
+    row = Text()
+    row.append_text(_chips().text())
+    end = len(row.plain)
+    row.append("  when heard", style="muted")
+    after = cut_mark(row, end + 4, ELIDE_TAIL)
+    assert (after.plain, str(after.style)) == ("…", "muted")
+    inside = cut_mark(row, row.plain.index("BBBB"), ELIDE_TAIL)
+    assert inside.plain == CRACK_TAIL and str(inside.style) == _fill("22bb")
+
+    # The mirror: text before the chips, and a head cut in that text.
+    lead = Text("via ", style="muted")
+    lead.append_text(_chips().text())
+    before = cut_mark(lead, 1, ELIDE_HEAD)
+    assert (before.plain, str(before.style)) == ("…", "muted")
+    assert cut_mark(lead, lead.plain.index("AAAA"), ELIDE_HEAD).plain == CRACK_HEAD
+
+
 def test_the_elision_sits_between_chips_rather_than_being_one() -> None:
     """Hops that MeshTerm removed from a path are a break *in* the ribbon, not a node ``⋯``.
 

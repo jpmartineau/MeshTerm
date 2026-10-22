@@ -420,6 +420,31 @@ def _fills(line: Text) -> list[str | None]:
     return fills
 
 
+def _path_extent(line: Text, index: int) -> range | None:
+    """The characters of the path line in ``line`` that holds character ``index``.
+
+    Each path line stamps its own extent with :data:`PATH_INK` (refer to
+    :meth:`PathLine._render`). A row that appends a path carries the stamp as a span, and
+    the cells after it (a status, an age) are not path. A line whose base style is the
+    stamp is all path. So is a line with no stamp at all, because then nothing can say
+    where its path stops.
+
+    Returns:
+        The range of the characters of that path, or ``None`` when ``index`` is outside
+        each path of a stamped row.
+    """
+    whole = range(len(line.plain))
+    if str(line.style) == PATH_INK:
+        return whole
+    stamps = [span for span in line.spans if str(span.style) == PATH_INK]
+    if not stamps:
+        return whole
+    for span in stamps:
+        if span.start <= index < span.end:
+            return range(max(0, span.start), min(len(line.plain), span.end))
+    return None
+
+
 def _char_of_cell(plain: str, cell: int) -> int:
     """The index of the character in which a display cell falls, limited to the string."""
     if cell <= 0:
@@ -446,6 +471,12 @@ def cut_mark(line: Text, at: int, side: str) -> Text:
     seam or on the closing edge still cracks in the colour of the chip that the user can
     see, and not in nothing.
 
+    The scan stays inside the path that holds the cut (refer to :func:`_path_extent`). A
+    row can be a chip, then text: the recipient of a Courier entry, then what the entry
+    waits for. A cut in that text once found the chip far to its left, and drew a half
+    block in the fill of the chip at the right edge of the row, away from each chip. A cut
+    outside a path is a cut of text, so it gets the ellipsis.
+
     Args:
         line: The rendered line that MeshTerm cuts (whole, not shifted, with absolute cells).
         at: The index of the nearest *visible* cell on the side of the mark. For
@@ -461,7 +492,13 @@ def cut_mark(line: Text, at: int, side: str) -> Text:
     if not fills:  # there is nothing drawn to shear: a caller cut an empty line
         return Text(_ELLIPSIS, style="muted")
     index = _char_of_cell(line.plain, at)
-    steps = range(index, len(fills)) if side == ELIDE_HEAD else range(index, -1, -1)
+    extent = _path_extent(line, index)
+    if extent is None:  # the cut is in text after (or between) the paths of the row
+        return Text(_ELLIPSIS, style="muted")
+    if side == ELIDE_HEAD:
+        steps = range(index, extent.stop)
+    else:
+        steps = range(index, extent.start - 1, -1)
     fill = next((fills[i] for i in steps if fills[i]), None)
     if fill is None:
         return Text(_ELLIPSIS, style="muted")
