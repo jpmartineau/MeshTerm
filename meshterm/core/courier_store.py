@@ -235,6 +235,40 @@ class CourierStore:
         self._save()
         return True
 
+    def edit(self, ident: int, text: str) -> bool:
+        """Replace the body of a waiting entry. Its schedule and its attempts stay.
+
+        A finished entry is history: its body is what went out (or what MeshTerm stopped
+        trying to send), so it does not change.
+
+        Returns:
+            Whether a waiting entry got the new body.
+        """
+        message = self.get(ident)
+        if message is None or message.status != QUEUED:
+            return False
+        if message.text != text:
+            message.text = text
+            self._save()
+        return True
+
+    def delete(self, ident: int) -> bool:
+        """Remove one entry, waiting or finished.
+
+        For a waiting entry, this is the same as :meth:`cancel`. The outbox screen deletes
+        one row of either section with the Delete key.
+
+        Returns:
+            Whether an entry was removed.
+        """
+        messages = self._load()
+        kept = [m for m in messages if m.ident != ident]
+        if len(kept) == len(messages):
+            return False
+        self._messages = kept
+        self._save()
+        return True
+
     def clear_done(self) -> None:
         """Remove all the finished entries, and do not change the waiting queue."""
         messages = self._load()

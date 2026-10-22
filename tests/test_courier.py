@@ -25,7 +25,6 @@ from meshterm.services.courier import FRESH_S, MAX_ATTEMPTS, CourierService
 from meshterm.ui.courier_screen import (
     CANCEL_SCHEDULE,
     WHEN_HEARD,
-    _entry_actions,
     _pick_schedule,
     parse_clock,
 )
@@ -119,6 +118,32 @@ def test_store_caps_the_finished_history(tmp_path: Path) -> None:
     done = [m for m in store.entries() if m.status != QUEUED]
     assert len(done) == DONE_CAP
     assert store.get(keeper.ident) is not None
+
+
+def test_store_edits_a_waiting_body_and_deletes_any_entry(tmp_path: Path) -> None:
+    """An edit changes only a waiting body. A delete removes an entry of either section.
+
+    A finished body is what went out, so it never changes. The edit keeps the schedule and
+    the attempts, because the backoff counts tries to reach the contact, not versions of
+    the text.
+    """
+    path = tmp_path / "courier.json"
+    store = CourierStore(path)
+    when = utcnow() + timedelta(hours=1)
+    waiting = store.queue(NODE, "Hub", "first draft", not_before=when)
+    store.note_attempt(waiting.ident)
+    done = store.queue(NODE, "Hub", "sent text")
+    store.mark_delivered(done.ident)
+
+    assert store.edit(waiting.ident, "second draft") is True
+    again = CourierStore(path).get(waiting.ident)
+    assert again.text == "second draft" and again.not_before == when and again.attempts == 1
+    assert store.edit(done.ident, "rewritten") is False
+    assert store.get(done.ident).text == "sent text"
+
+    assert store.delete(done.ident) is True and store.get(done.ident) is None
+    assert store.delete(waiting.ident) is True and store.entries() == []
+    assert store.delete(waiting.ident) is False
 
 
 # --- eligibility -------------------------------------------------------------------------
@@ -249,6 +274,40 @@ async def test_attempt_now_forces_a_send(tmp_path: Path) -> None:
     entry = ctx.courier_store.queue(NODE, "Hub", "hello", not_before=utcnow() + timedelta(hours=8))
     assert await service.attempt_now(entry.ident) == "delivered"
     assert await service.attempt_now(entry.ident) == "gone"  # the entry is already settled
+
+
+async def test_a_held_entry_waits_while_the_user_edits_it(tmp_path: Path) -> None:
+    """A pass does not try an entry that the user edits, and tries it after the edit.
+
+    Without the hold, a pass could send the old text while the edit prompt is open.
+    """
+    service = _service(tmp_path, [True])
+    ctx = service._ctx
+    entry = ctx.courier_store.queue(NODE, "Hub", "hello")
+    service._heard[NODE] = utcnow()
+    with service.holding(entry.ident):
+        await service._pass()
+        assert ctx.chat.sent == []
+    await service._pass()
+    assert ctx.chat.sent == [("Hub", "hello")]
+
+
+async def test_in_flight_names_the_entry_that_a_try_sends(tmp_path: Path) -> None:
+    """While a try runs, ``in_flight`` is true for its entry only. After the try, it is false."""
+    service = _service(tmp_path, [True])
+    ctx = service._ctx
+    entry = ctx.courier_store.queue(NODE, "Hub", "hello")
+    seen: list[tuple[bool, bool]] = []
+    send = ctx.chat.send_direct
+
+    async def spy(contact, text, **kwargs):  # noqa: ANN001, ANN202
+        seen.append((service.in_flight(entry.ident), service.in_flight(entry.ident + 1)))
+        return await send(contact, text, **kwargs)
+
+    ctx.chat.send_direct = spy
+    await service.attempt_now(entry.ident)
+    assert seen == [(True, False)]
+    assert not service.in_flight(entry.ident)
 
 
 # --- the scripted CLI actions -------------------------------------------------------------
@@ -534,7 +593,7 @@ def test_outbox_rows_recompute_live_state_per_repaint(tmp_path: Path) -> None:
     ctx = _outbox_ctx(tmp_path)
     entry = ctx.courier_store.queue(NODE, "Hub", "patience")
     screen = CourierOutboxScreen(ctx)
-    assert "waiting to hear the contact" in _outbox_plain(screen)
+    assert "when heard" in _outbox_plain(screen)
 
     # An attempt just happened. The same row now shows the countdown to the next attempt.
     # ``refresh()`` is not necessary, because the callable title reads the entry again at
@@ -561,9 +620,9 @@ def test_outbox_draws_each_recipient_as_a_destination_chip(tmp_path: Path, power
 def _title_plain(choice) -> str:
     """The label of a row as plain text.
 
-    It resolves a live (callable) title in the same way as a paint.
+    It resolves a live (callable) title at each read, in the same way as a paint.
     """
-    title = choice.title() if callable(choice.title) else choice.title
+    title = choice.label
     return title.plain if isinstance(title, Text) else title
 
 
@@ -583,22 +642,6 @@ def _outbox_titles(tmp_path: Path) -> list[str]:
     return [_title_plain(choice) for choice in CourierOutboxScreen(ctx)._choices()]
 
 
-async def _entry_action_titles(tmp_path: Path) -> list[str]:
-    """The labels in the action menu of a waiting entry (the menu closes with no answer)."""
-    offered: list = []
-
-    class _Session:
-        async def select(self, title, items, **kwargs):
-            offered.extend(items)
-            return None
-
-    store = CourierStore(tmp_path / "courier.json")
-    entry = store.queue(NODE, "Hub", "hello")
-    ctx = SimpleNamespace(ui=SimpleNamespace(session=_Session()), courier_store=store)
-    await _entry_actions(ctx, entry.ident)
-    return [_title_plain(choice) for choice in offered]
-
-
 def _word_starts(rows: list[str], leads: dict[str, str]) -> set[int]:
     """The display cell where the first word of each row starts.
 
@@ -612,33 +655,29 @@ def _word_starts(rows: list[str], leads: dict[str, str]) -> set[int]:
     return starts
 
 
-async def test_courier_rows_start_every_label_in_the_same_cell(tmp_path: Path) -> None:
-    """The two lists of the courier have one icon column, with no regard for the width of each mark.
+def test_courier_rows_start_every_label_in_the_same_cell(tmp_path: Path) -> None:
+    """The outbox has one icon column, with no regard for the width of each mark.
 
     The outbox has marks of two cells (⏳ a waiting entry, 📨 the queue row) and marks of one
     cell (✓ ✗ a finished entry, 🗑 the clear row). It wrote each as ``mark + " "``. Thus a
     finished recipient was one column to the left of a waiting recipient, and *Clear
-    finished* was one column to the left of *Queue a message…*. The actions of an entry
-    had the same fault with 📤 over ✗. The measure is cells, not characters, because the
-    terminal aligns cells.
+    finished* was one column to the left of *Queue a message…*. The measure is cells, not
+    characters, because the terminal aligns cells.
     """
     outbox = {"Waiting": "⏳", "Queue": "📨", "Landed": "✓", "Lost": "✗", "Clear": "🗑"}
-    actions = {"Send": "📤", "Cancel": "✗"}
     assert {cell_len(mark) for mark in outbox.values()} == {1, 2}, "a mixed list, or no proof"
-    assert {cell_len(mark) for mark in actions.values()} == {1, 2}
 
     assert len(_word_starts(_outbox_titles(tmp_path), outbox)) == 1
-    assert len(_word_starts(await _entry_action_titles(tmp_path), actions)) == 1
 
 
-async def test_courier_command_rows_go_bare_where_the_platform_draws_no_icons(
+def test_courier_command_rows_go_bare_where_the_platform_draws_no_icons(
     tmp_path: Path,
 ) -> None:
     """If there is no icon lane, the command icons go with no padding. The entry marks stay.
 
     The ✓, ✗, or ⏳ of an entry is its outcome, not decoration. Thus the PicoCalc keeps it,
-    and it keeps those rows in line with each other. The queue, clear, send, and cancel rows
-    lose their icons in the same way as each other command row there.
+    and it keeps those rows in line with each other. The queue and clear rows lose their
+    icons in the same way as each other command row there.
     """
     from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
 
@@ -648,12 +687,226 @@ async def test_courier_command_rows_go_bare_where_the_platform_draws_no_icons(
         assert "Queue a message…" in rows and "Clear finished" in rows
         marks = {"Waiting": "⏳", "Landed": "✓", "Lost": "✗"}
         assert len(_word_starts(rows, marks)) == 1
-        assert await _entry_action_titles(tmp_path / "actions") == [
-            "Send now — one forced attempt",
-            "Cancel this message",
-        ]
     finally:
         set_platform(REGULAR)
+
+
+def _cell(line: str, word: str) -> int:
+    """The display cell where ``word`` starts in ``line``."""
+    return cell_len(line[: line.index(word)])
+
+
+def test_outbox_rows_are_target_and_trigger_under_column_headers(tmp_path: Path) -> None:
+    """Each section is a table: TARGET and TRIGGER in the outbox, TARGET and OUTCOME after it.
+
+    A row does not show its message, because Enter opens it. Each section has its own
+    header, so the lane after TARGET has one meaning in each section. That lane starts in
+    the same cell in both sections, and each label is over its lane.
+    """
+    from meshterm.ui.courier_screen import CourierOutboxScreen
+
+    ctx = _outbox_ctx(tmp_path)
+    ctx.courier_store.queue(NODE, "Waiting", "hold this text")
+    landed = ctx.courier_store.queue(NODE, "Landed Longer Name", "got it")
+    ctx.courier_store.mark_delivered(landed.ident)
+    lines = _outbox_plain(CourierOutboxScreen(ctx)).splitlines()
+
+    assert not any("hold this" in line or "got it" in line for line in lines)
+    trigger = next(line for line in lines if "TRIGGER" in line)
+    outcome = next(line for line in lines if "OUTCOME" in line)
+    waiting = next(line for line in lines if "Waiting" in line)
+    done = next(line for line in lines if "Landed" in line)
+    assert _cell(trigger, "TARGET") == _cell(waiting, "Waiting") == _cell(done, "Landed")
+    assert _cell(outcome, "TARGET") == _cell(trigger, "TARGET")
+    assert _cell(trigger, "TRIGGER") == _cell(waiting, "when heard")
+    assert _cell(outcome, "OUTCOME") == _cell(done, "delivered") == _cell(trigger, "TRIGGER")
+
+
+def test_outbox_triggers_name_what_each_entry_waits_for(tmp_path: Path) -> None:
+    """The TRIGGER lane says what sends the entry: a time, the end of a backoff, or a contact."""
+    from meshterm.ui.courier_screen import _trigger
+
+    ctx = _outbox_ctx(tmp_path)
+    store = ctx.courier_store
+    later = store.queue(NODE, "Hub", "x", not_before=utcnow() + timedelta(hours=2))
+    assert _trigger(ctx, later).plain.startswith("at ")
+    plain = store.queue(NODE, "Hub", "y")
+    assert _trigger(ctx, plain).plain == "when heard"
+    ctx.courier._heard[NODE] = utcnow()
+    assert _trigger(ctx, plain).plain == "next pass — contact is fresh"
+    store.note_attempt(plain.ident)
+    assert _trigger(ctx, store.get(plain.ident)).plain == "retry in ~5 m · try 1"
+
+
+def test_outbox_cut_ends_on_an_ellipsis_not_on_a_stray_crack(tmp_path: Path, powerline) -> None:
+    """A row that is wider than the screen ends in ``…``, not in a half block of the chip fill.
+
+    The cut lands in the TRIGGER text, after the chip. The crack is for a cut inside a
+    chip. Here it once drew a half block in the fill of the TARGET chip at the right edge of
+    the row, far from the chip.
+    """
+    from meshterm.ui.courier_screen import CourierOutboxScreen
+    from meshterm.ui.pathline import CRACK_TAIL
+
+    powerline(True)
+    ctx = _outbox_ctx(tmp_path)
+    ctx.courier_store.queue(NODE, "Hub", "hello")
+    ctx.courier._heard[NODE] = utcnow()  # the longest trigger: "next pass — contact is fresh"
+    body = _outbox_plain(CourierOutboxScreen(ctx), 40).splitlines()
+    row = next(line for line in body if "⏳" in line)
+    assert cell_len(row) == 40
+    assert row.endswith("…") and CRACK_TAIL not in row
+
+
+def test_a_long_target_gives_cells_to_the_trigger(tmp_path: Path, powerline) -> None:
+    """On a narrow screen, a long name breaks off on its crack, and the trigger stays readable.
+
+    The TARGET lane is as wide as the widest chip only while the TRIGGER lane keeps its
+    minimum. The header follows the same lane, so TRIGGER stays over the triggers.
+    """
+    from meshterm.ui.courier_screen import _LAST_MIN, CourierOutboxScreen
+    from meshterm.ui.pathline import CRACK_TAIL
+
+    powerline(True)
+    ctx = _outbox_ctx(tmp_path)
+    ctx.courier_store.queue(NODE, "A Rather Long Contact Name For Width", "hello")
+    lines = _outbox_plain(CourierOutboxScreen(ctx), 53).splitlines()
+    header = next(line for line in lines if "TARGET" in line)
+    row = next(line for line in lines if "⏳" in line)
+    assert row.rstrip().endswith("when heard")
+    assert CRACK_TAIL in row  # the chip continues past its lane
+    assert _cell(header, "TRIGGER") == _cell(row, "when heard") <= 53 - _LAST_MIN
+
+
+def test_outbox_keys_act_only_on_the_rows_they_name(tmp_path: Path) -> None:
+    """``^R`` sends a waiting entry, Delete asks to remove an entry, and neither acts elsewhere.
+
+    The footer and the F-key lane name each key only on the rows on which it acts.
+    """
+    from meshterm.ui.courier_screen import _QUEUE, CourierOutboxScreen
+    from meshterm.ui.tui import DeleteRequest
+
+    ctx = _outbox_ctx(tmp_path)
+    waiting = ctx.courier_store.queue(NODE, "Waiting", "hold this")
+    landed = ctx.courier_store.queue(NODE, "Landed", "got it")
+    ctx.courier_store.mark_delivered(landed.ident)
+    resolved: list = []
+
+    def on(value) -> CourierOutboxScreen:  # noqa: ANN001
+        screen = CourierOutboxScreen(ctx, default=value)
+        screen.resolve = resolved.append  # type: ignore[method-assign]
+        return screen
+
+    screen = on(("msg", waiting.ident))
+    assert screen.footer_hint == (
+        "↑↓ move · type to filter · Enter open · ^R send · Del delete · Esc back"
+    )
+    assert cell_len(screen.footer_hint) <= 72
+    slot = screen.picocalc_lyra_lane[2]
+    assert (slot.label, slot.opp_label, slot.enabled, slot.opp_enabled) == (
+        "Send",
+        "Delete",
+        True,
+        True,
+    )
+    screen.handle("retry")
+    assert resolved.pop() == ("send", waiting.ident)
+
+    screen = on(("msg", landed.ident))
+    assert "^R" not in screen.footer_hint and "Del delete" in screen.footer_hint
+    assert not screen.picocalc_lyra_lane[2].enabled
+    screen.handle("retry")
+    assert resolved == []  # a finished entry left the outbox, so there is nothing to send
+    screen.handle("delete")
+    assert resolved.pop() == DeleteRequest(("msg", landed.ident))
+
+    screen = on(_QUEUE)
+    assert screen.footer_hint == "↑↓ move · type to filter · Enter open · Esc back"
+    screen.handle("delete")
+    screen.handle("retry")
+    assert resolved == []
+
+
+class _EntrySession:
+    """A script for the dialogs of one entry. It records what MeshTerm asked and showed."""
+
+    def __init__(self, answer: str | None = None, on_text=None) -> None:  # noqa: ANN001
+        self.answer = answer
+        self.on_text = on_text
+        self.asked: list[dict] = []
+        self.shown: list[tuple[str, str]] = []
+
+    async def text(self, title, **kwargs):  # noqa: ANN001, ANN201
+        self.asked.append({"title": title, **kwargs})
+        if self.on_text is not None:
+            await self.on_text()
+        return self.answer
+
+    async def message_dialog(self, body, *, title=""):  # noqa: ANN001, ANN201
+        self.shown.append((title, body.plain if isinstance(body, Text) else str(body)))
+
+
+async def test_enter_on_a_waiting_entry_edits_its_message(tmp_path: Path) -> None:
+    """Enter opens the message of a waiting entry in a compose field, and Enter there saves it.
+
+    The entry is held while the prompt is open. Thus a pass in that time sends nothing,
+    and the message that goes out later is the edited one.
+    """
+    from meshterm.ui.courier_screen import _open_entry
+
+    ctx = _outbox_ctx(tmp_path)
+    entry = ctx.courier_store.queue(NODE, "Hub", "old text")
+    ctx.courier._heard[NODE] = utcnow()
+    session = _EntrySession("new text", on_text=ctx.courier._pass)
+    ctx.ui = SimpleNamespace(session=session)
+
+    await _open_entry(ctx, entry.ident)
+    asked = session.asked[0]
+    assert asked["title"] == "Message for Hub"
+    assert asked["default"] == "old text" and asked["compose"] is True
+    assert ctx.chat.sent == []  # the pass during the prompt left the held entry alone
+    assert ctx.courier_store.get(entry.ident).text == "new text"
+    await ctx.courier._pass()
+    assert ctx.chat.sent == [("Hub", "new text")]
+
+
+async def test_enter_on_a_finished_entry_shows_its_message(tmp_path: Path) -> None:
+    """A finished message is history. Enter shows it with its outcome, and asks nothing."""
+    from meshterm.ui.courier_screen import _open_entry
+
+    ctx = _outbox_ctx(tmp_path)
+    entry = ctx.courier_store.queue(NODE, "Hub", "what went out")
+    ctx.courier_store.mark_delivered(entry.ident)
+    session = _EntrySession()
+    ctx.ui = SimpleNamespace(session=session)
+
+    await _open_entry(ctx, entry.ident)
+    assert session.asked == []
+    title, body = session.shown[0]
+    assert title == "Message for Hub"
+    assert body.startswith("what went out") and "delivered" in body
+
+
+async def test_delete_asks_in_red_and_removes_the_entry(tmp_path: Path) -> None:
+    """Delete is a red Cancel/Delete confirm. Cancel keeps the entry, and Delete removes it."""
+    from meshterm.ui.courier_screen import _delete_entry
+
+    ctx = _outbox_ctx(tmp_path)
+    entry = ctx.courier_store.queue(NODE, "Hub", "nope")
+    asked: list[dict] = []
+    answers = [False, True]
+
+    async def dialog(prompt, buttons, **kwargs):  # noqa: ANN001, ANN202
+        asked.append({"prompt": prompt, "buttons": buttons, **kwargs})
+        return answers.pop(0)
+
+    ctx.ui = SimpleNamespace(dialog=dialog)
+    await _delete_entry(ctx, entry.ident)
+    assert ctx.courier_store.get(entry.ident) is not None
+    await _delete_entry(ctx, entry.ident)
+    assert ctx.courier_store.get(entry.ident) is None
+    assert asked[0]["destructive"] is True and asked[0]["default"] == 1
+    assert [label for label, _value in asked[0]["buttons"]] == ["Cancel", "Delete"]
 
 
 # --- the recipient picker ----------------------------------------------------------------

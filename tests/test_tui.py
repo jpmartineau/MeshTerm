@@ -1418,6 +1418,28 @@ def test_text_screen_byte_limit_gauges_and_blocks_an_oversize_entry() -> None:
     assert _run(screen, "enter") == "hello wor"
 
 
+def test_text_screen_compose_field_has_the_colours_of_the_chat_compose_line() -> None:
+    """A message field draws its ``›`` in the cursor white and its text in the compose white.
+
+    These are the colours of the compose line of a chat. A plain field keeps the accent
+    ``›`` and the default colour of the text.
+    """
+    from meshterm.ui.tui.prompt import LineEditor
+
+    editor = LineEditor("hi")
+    line = editor.render(compose=True)
+    assert not str(line.style)  # a base style also colours the typed text
+    prompt = {str(span.style) for span in line.spans if span.start == 0}
+    typed = {str(span.style) for span in line.spans if (span.start, span.end) == (2, 3)}
+    assert (prompt, typed) == ({"cursor"}, {"compose"})
+    plain = editor.render()
+    assert str(plain.style) == "accent"
+    assert "compose" not in {str(span.style) for span in plain.spans}
+
+    screen = TextScreen("Message for Hub", byte_limit=10, compose=True)
+    assert screen._compose is True
+
+
 def test_line_editor_word_motion() -> None:
     """Ctrl+Left and Ctrl+Right move by word.
 

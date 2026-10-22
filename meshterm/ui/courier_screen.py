@@ -4,13 +4,16 @@
 The interactive face of the ``courier`` tool. One select-list screen holds the whole
 feature (the persistent-backdrop pattern). It has these parts:
 
-- The waiting outbox. Each entry shows its live state: it waits to hear the contact, it is
-  scheduled for a time, or it backs off between retries.
-- The finished history (delivered or given up).
+- The waiting outbox. Each row shows its target (the recipient) and its trigger: what the
+  entry waits for before it goes out. It waits to hear the contact, it is scheduled for a
+  time, or it backs off between retries.
+- The finished history (delivered or given up), with the outcome of each entry.
 - The queueing flow: select a contact, write the message, choose when to send it.
 
-Enter on a waiting entry offers *Send now* (one forced attempt, and the outcome is in a
-dialog) and *Cancel*.
+A row does not show its message. Enter on a waiting entry opens the message to edit, and
+Enter on a finished entry opens it to read. ``^R`` on a waiting entry is *Send now* (one
+forced attempt, and the outcome is in a dialog). Delete removes an entry of either section,
+after a confirm.
 
 The outbox is **live** while it is open. Each row is a callable title that the code
 computes again at each paint, so "retry in ~N m" counts down in real time. A ticker
@@ -37,9 +40,16 @@ from rich.text import Text
 from ..core.courier_store import DELIVERED, QUEUED, QueuedMessage
 from ..core.models import Contact, is_direct_messageable, utcnow
 from .contactlist import SORT_COLUMNS, SORT_OPENS_ASCENDING, ContactListScreen, ContactRow
-from .menus import icon_lane, marked_label, run_steps, section_heading
-from .pathline import PathHop
-from .tui import CANCEL, DM_BYTE_LIMIT, Choice, SelectScreen, Separator
+from .menus import (
+    Lane,
+    column_header,
+    icon_lane,
+    marked_label,
+    run_steps,
+    section_heading,
+)
+from .pathline import PathHop, cut_to
+from .tui import CANCEL, DM_BYTE_LIMIT, Choice, DeleteRequest, SelectScreen, Separator
 from .watchtower_screen import contact_watch_key
 from .widgets import (
     DESTINATION,
@@ -58,6 +68,9 @@ if TYPE_CHECKING:
 _QUEUE = ("queue",)
 _CLEAR = ("clear",)
 
+#: The first item of the value with which ``^R`` resolves the outbox: ``("send", ident)``.
+_SEND = "send"
+
 #: The status marks that an outbox entry starts with: waiting, delivered, gave up. They are
 #: the outcome of the row and not decoration. Thus, unlike the icon of a command row, they
 #: are drawn on each platform. The code measures them raw, because the render fold of the
@@ -75,14 +88,23 @@ _COMMAND_ICONS = ("📨", "🗑")
 #: The seconds between the refresh ticks of the open outbox (shape check and paint).
 _REFRESH_S = 1.0
 
-#: The maximum width at which a message body renders in a row, before the row gets an
-#: ellipsis.
-_TEXT_W = 36
+#: The cells between the TARGET lane and the lane after it.
+_GAP = 2
 
+#: The fewest cells that the last lane (TRIGGER or OUTCOME) keeps on a narrow screen. A
+#: long name gives cells back first, because the first letters of a chip already show who
+#: it is, and the trigger is what the user opens the outbox to read.
+_LAST_MIN = 20
 
-def _shorten(text: str, width: int = _TEXT_W) -> str:
-    """The message body, shortened for the display in a row."""
-    return text if len(text) <= width else text[: width - 1] + "…"
+#: How many finished entries the history section shows. The store keeps more (refer to the
+#: ``courier_history_kept`` preference).
+_DONE_SHOWN = 15
+
+#: The footer of the outbox. :meth:`CourierOutboxScreen._key_atoms` adds the atoms of the
+#: keys that act on an entry, only while the highlight is on such an entry.
+_OUTBOX_HINT = "↑↓ move · type to filter · Enter open · Esc back"
+_SEND_HINT = "^R send"
+_DELETE_HINT = "Del delete"
 
 
 def _local_stamp(when: datetime) -> str:
@@ -150,7 +172,7 @@ async def open_courier(ctx: AppContext) -> dict[str, Any] | None:
     # how to compose its sections again around the highlight
     # (:meth:`CourierOutboxScreen.refresh`). The ticker calls this method once each second
     # while the list is open. The code runs the screen through a visit. Thus each sub-flow
-    # (queue a message, the actions of an entry, the clear confirm) floats over the list and
+    # (queue a message, the message of an entry, a send, a confirm) floats over the list and
     # returns to the row from which it opened. Also, the code starts the ticker one time,
     # and not for each round.
     menu = CourierOutboxScreen(ctx)
@@ -182,8 +204,12 @@ async def open_courier(ctx: AppContext) -> dict[str, Any] | None:
                         destructive=True,
                     ):
                         store.clear_done()
+                elif isinstance(choice, DeleteRequest):
+                    await _delete_entry(ctx, int(choice.value[1]))
+                elif isinstance(choice, tuple) and choice[0] == _SEND:
+                    await _send_now(ctx, int(choice[1]))
                 elif isinstance(choice, tuple) and choice[0] == "msg":
-                    await _entry_actions(ctx, int(choice[1]))
+                    await _open_entry(ctx, int(choice[1]))
                 # Take in the effect of the flow at once, and do not wait for a tick. Thus
                 # the list to which the user returns already shows what the user did.
                 menu.refresh()
@@ -212,6 +238,11 @@ class CourierOutboxScreen(SelectScreen):
     store. It composes the sections again in place only when the fingerprint changed, and
     the highlight stays on its entry (the rebuild idiom of
     :class:`~meshterm.ui.contactlist.ContactListScreen`).
+
+    Three keys act on the highlighted entry. Enter opens its message (refer to
+    :func:`_open_entry`), Delete asks to remove it, and ``^R`` sends a waiting entry now.
+    The footer and the F-key lane name ``^R`` and Delete only on the rows on which they act.
+    ``^R`` is a chord, because this list filters as the user types.
     """
 
     def __init__(self, ctx: AppContext, *, default: Any = None) -> None:
@@ -226,8 +257,68 @@ class CourierOutboxScreen(SelectScreen):
             "Courier — store-and-forward outbox",
             _menu_items(ctx, ctx.courier_store.entries()),
             default=default,
-            footer_hint="↑↓ move · Enter select · Esc back",
+            footer_hint=_OUTBOX_HINT,
+            key_hint=self._key_atoms,
         )
+
+    def _waiting(self, value: Any) -> int | None:
+        """The id of the entry that ``value`` names, if that entry waits in the outbox."""
+        ident = _entry_ident(value)
+        if ident is None:
+            return None
+        message = self._ctx.courier_store.get(ident)
+        return ident if message is not None and message.status == QUEUED else None
+
+    def _highlighted_waiting(self) -> int | None:
+        """The id of the highlighted entry, if it waits in the outbox."""
+        current = self._current_choice()
+        return self._waiting(current.value) if current is not None else None
+
+    def _key_atoms(self, value: Any) -> str:
+        """The footer atoms of the keys that act on the row of ``value``.
+
+        ``^R`` acts only on a waiting entry, because a finished entry has left the outbox.
+        Delete acts on each entry, and on no command row.
+        """
+        atoms = []
+        if self._waiting(value) is not None:
+            atoms.append(_SEND_HINT)
+        if _entry_ident(value) is not None:
+            atoms.append(_DELETE_HINT)
+        return " · ".join(atoms)
+
+    @property
+    def picocalc_lyra_lane(self):
+        """The lane of the list, with ``Send`` on F3 and ``Delete`` behind it.
+
+        F1/F2 are the section jumps, and F4/F5 are the pager. F3 is the slot that a select
+        list uses for its own verb. Send and Delete have the same subject (the highlighted
+        entry). Thus they are the two halves of that slot, as Read and Remove are in the
+        region editor. Each is dim where it does not act. On a command row, both are dim,
+        not empty: the two actions exist on this screen, but not for that row.
+        """
+        from .tui.fkeys import FPair
+
+        lane = list(super().picocalc_lyra_lane)
+        current = self._current_choice()
+        lane[2] = FPair(
+            "Send",
+            "retry",
+            opp_label="Delete",
+            opp_action="delete",
+            enabled=self._highlighted_waiting() is not None,
+            opp_enabled=current is not None and current.deletable,
+        )
+        return lane
+
+    def handle(self, action: str, data: str = "") -> None:
+        """Send the highlighted waiting entry now on ``^R``. Other keys act as in each list."""
+        if action == "retry":
+            ident = self._highlighted_waiting()
+            if ident is not None:
+                self.resolve((_SEND, ident))
+            return
+        super().handle(action, data)
 
     def _fingerprint(self) -> tuple:
         """The shape of the store: which entries exist and the status of each."""
@@ -254,14 +345,27 @@ class CourierOutboxScreen(SelectScreen):
         self._index = max(0, min(self._index, len(choices) - 1)) if choices else 0
 
 
+def _entry_ident(value: Any) -> int | None:
+    """The id of the entry that a row value names (``("msg", ident)``), or ``None``."""
+    if isinstance(value, tuple) and len(value) == 2 and value[0] == "msg":
+        return int(value[1])
+    return None
+
+
 def _menu_items(ctx: AppContext, entries: list[QueuedMessage]) -> list:
     """Build the rows of the screen: the waiting outbox, then the finished history.
 
-    The entry rows are callables with no argument, so that their live state renders again at
-    each paint. The fixed action rows stay plain strings.
+    Each section is a table under its own column header: the status mark, the TARGET (the
+    recipient), and one more lane. In the outbox, that lane is the TRIGGER: what the entry
+    waits for before it goes out. In the history, it is the OUTCOME. A row does not show
+    the message, because Enter opens it (refer to :func:`_open_entry`).
+
+    The entry rows are callables of the render width. Thus their live state renders again
+    at each paint, and their TARGET lane fits the screen (refer to :func:`_target_lane`).
+    The fixed action rows stay plain strings.
     """
     waiting = [m for m in entries if m.status == QUEUED]
-    done = [m for m in entries if m.status != QUEUED]
+    done = [m for m in entries if m.status != QUEUED][:_DONE_SHOWN]
 
     # One icon column for the whole list, across both sections. The terminal draws ⏳ and
     # 📨 in two cells, but ✓ ✗ 🗑 in one cell. Thus rows that were written as
@@ -271,22 +375,79 @@ def _menu_items(ctx: AppContext, entries: list[QueuedMessage]) -> list:
     # command icons go where the platform draws no icon lane, and marked_label leaves those
     # two labels bare. It does not pad them for a mark that is not there.
     lane = max(icon_lane(_COMMAND_ICONS), _MARK_LANE)
+    # One TARGET lane for both sections, so that the lane after it starts in the same cell
+    # in each. It is never narrower than its label, so the label never runs into the next.
+    target_w = max([cell_len("TARGET")] + [_target_chip(m).cell_len for m in waiting + done])
 
     items: list = [section_heading("Outbox")]
-    if not waiting:
+    if waiting:
+        items.append(_column_header("TRIGGER", lane, target_w))
+    else:
         items.append(Separator("  empty — queued messages wait here for their moment"))
     for message in waiting:
-        items.append(Choice(lambda m=message: _waiting_row(ctx, m, lane), ("msg", message.ident)))
+        items.append(
+            Choice(
+                lambda width, m=message: _waiting_row(
+                    ctx, m, lane, _target_lane(lane, target_w, width)
+                ),
+                ("msg", message.ident),
+                deletable=True,
+            )
+        )
     items.append(Separator(" "))  # put space between the action and the outbox rows above it
     items.append(Choice(marked_label("📨", "Queue a message…", "", lane=lane), _QUEUE))
 
     if done:
         items.append(section_heading("Finished"))
-        for message in done[:15]:
-            items.append(Choice(lambda m=message: _done_row(m, lane), ("msg", message.ident)))
+        items.append(_column_header("OUTCOME", lane, target_w))
+        for message in done:
+            items.append(
+                Choice(
+                    lambda width, m=message: _done_row(
+                        m, lane, _target_lane(lane, target_w, width)
+                    ),
+                    ("msg", message.ident),
+                    deletable=True,
+                )
+            )
         items.append(Choice(marked_label("🗑", "Clear finished", "", lane=lane), _CLEAR))
 
     return items
+
+
+def _column_header(label: str, lane: int, target_w: int) -> Separator:
+    """The column header of one section: ``TARGET`` over the chips, then ``label``.
+
+    It comes immediately after the heading of its section. Thus it pins with the heading
+    while the rows of the section scroll. It starts after the pointer, the mark, and the
+    space after the mark, so that ``TARGET`` is over the first cell of each chip.
+
+    Args:
+        label: The name of the last lane: ``TRIGGER`` in the outbox, ``OUTCOME`` in the
+            history.
+        lane: The icon column of the list in cells (refer to :func:`_menu_items`).
+        target_w: The width of the widest chip in cells, without the gap after it.
+    """
+
+    def header(width: int) -> str:
+        # The rows get the width less the 2 cells of the pointer, so the header asks for
+        # the TARGET lane at that width too. Thus each label stays over its lane.
+        target = _target_lane(lane, target_w, width - 2)
+        lanes = [Lane("TARGET", target + _GAP), Lane(label)]
+        return column_header(lanes, width, indent=2 + lane + 1)
+
+    return Separator(header)
+
+
+def _target_lane(lane: int, target_w: int, avail: int) -> int:
+    """The width of the TARGET lane in a row that has ``avail`` cells after the pointer.
+
+    The lane is as wide as the widest chip. Where the last lane then gets fewer than
+    :data:`_LAST_MIN` cells, the TARGET lane gives cells back, and a chip that is too wide
+    breaks off on its crack. It is never narrower than its label.
+    """
+    room = avail - (lane + 1) - _GAP - _LAST_MIN
+    return max(cell_len("TARGET"), min(target_w, room))
 
 
 def _entry_mark(mark: str, style: str, lane: int) -> Text:
@@ -302,62 +463,82 @@ def _entry_mark(mark: str, style: str, lane: int) -> Text:
         lane: The icon column of the list in cells (refer to :func:`_menu_items`).
 
     Returns:
-        The mark, followed by enough spaces to start the words in the column after it.
+        The mark, followed by enough spaces to start the words in the column after it. The
+        style is a span on the mark only. As the base style of the row, it made each lane
+        after the mark bold.
     """
-    text = Text(mark, style=style)
+    text = Text()
+    text.append(mark, style=style)
     text.append(" " * (lane - cell_len(mark) + 1))
     return text
 
 
-def _waiting_row(ctx: AppContext, message: QueuedMessage, lane: int = _MARK_LANE) -> Text:
-    """One waiting entry: the recipient, the body, and what the entry waits for.
+def _target_chip(message: QueuedMessage) -> Text:
+    """The TARGET of an entry: its recipient, as a destination chip.
 
-    The recipient is the destination of the message, so it is a chip that opens on the
-    notch (refer to :func:`~meshterm.ui.widgets.hop_chip`), in the hue of its key.
+    The recipient is the destination of the message, so the chip opens on the notch (refer
+    to :func:`~meshterm.ui.widgets.hop_chip`). A waiting recipient has the hue of its key. A
+    finished entry is history, and all of its row is muted. Thus its chip is muted too.
     """
-    row = _entry_mark("⏳", "warn", lane)
-    row.append_text(name_chip(message.node_name, message.node_key, role=DESTINATION))
-    row.append(f"  “{_shorten(message.text)}”", style="muted")
-    row.append("  ·  ", style="muted")
+    if message.status == QUEUED:
+        return name_chip(message.node_name, message.node_key, role=DESTINATION)
+    return hop_chip(PathHop(message.node_name, style="muted"), role=DESTINATION)
+
+
+def _row(mark: Text, chip: Text, target_w: int, last: Text) -> Text:
+    """One entry row: the mark, the chip fitted to the TARGET lane, then the last lane."""
+    if chip.cell_len > target_w:
+        chip = cut_to(chip, target_w)  # the chip continues past its lane, so it cracks
+    mark.append_text(chip)
+    mark.append(" " * (max(0, target_w - chip.cell_len) + _GAP))
+    mark.append_text(last)
+    return mark
+
+
+def _trigger(ctx: AppContext, message: QueuedMessage) -> Text:
+    """The TRIGGER of a waiting entry: what it waits for before it goes out.
+
+    The rules are those of :meth:`~meshterm.services.courier.CourierService.eligible`, in
+    the same order: a schedule, then the backoff after a failed try, then a sign of life.
+    """
     now = utcnow()
     if message.not_before is not None and now < message.not_before:
-        row.append(f"scheduled {_local_stamp(message.not_before)}", style="brand")
-    else:
-        retry = ctx.courier.next_retry_s(message, now)
-        if retry is not None:
-            row.append(
-                f"try {message.attempts} · retry in ~{max(1, round(retry / 60))} m",
-                style="warn",
-            )
-        elif message.attempts > 0:
-            row.append(f"try {message.attempts} · waiting to hear it again", style="muted")
-        elif ctx.courier.heard_recently(message.node_key, now):
-            row.append("contact is fresh — next pass", style="ok")
-        else:
-            row.append("waiting to hear the contact", style="muted")
-    return row
+        return Text(f"at {_local_stamp(message.not_before)}", style="brand")
+    retry = ctx.courier.next_retry_s(message, now)
+    if retry is not None:
+        minutes = max(1, round(retry / 60))
+        return Text(f"retry in ~{minutes} m · try {message.attempts}", style="warn")
+    if message.attempts > 0:
+        return Text(f"when heard again · try {message.attempts}", style="muted")
+    if ctx.courier.heard_recently(message.node_key, now):
+        return Text("next pass — contact is fresh", style="ok")
+    return Text("when heard", style="muted")
 
 
-def _done_row(message: QueuedMessage, lane: int = _MARK_LANE) -> Text:
-    """One finished entry: the outcome mark, the recipient, the body, and when it ended.
-
-    The recipient is a destination chip, the same as in the outbox. But a finished entry is
-    history, and all of its row is muted. Thus the chip is muted too.
-    """
-    if message.status == DELIVERED:
-        row = _entry_mark("✓", "ok", lane)
-    else:
-        row = _entry_mark("✗", "err", lane)
-    row.append_text(hop_chip(PathHop(message.node_name, style="muted"), role=DESTINATION))
-    row.append(f"  “{_shorten(message.text)}”", style="muted")
+def _outcome(message: QueuedMessage) -> str:
+    """The OUTCOME of a finished entry: how it ended, when, and after how many tries."""
     when = message.finished or message.created
     verb = "delivered" if message.status == DELIVERED else "gave up"
-    row.append(
-        f"  ·  {verb} {format_ago(age_seconds(when))}"
-        f" · {message.attempts} attempt{'s' if message.attempts != 1 else ''}",
-        style="muted",
+    tries = f"{message.attempts} attempt{'s' if message.attempts != 1 else ''}"
+    return f"{verb} {format_ago(age_seconds(when))} · {tries}"
+
+
+def _waiting_row(
+    ctx: AppContext, message: QueuedMessage, lane: int = _MARK_LANE, target_w: int = 0
+) -> Text:
+    """One waiting entry: the mark, the TARGET, and the TRIGGER."""
+    return _row(
+        _entry_mark("⏳", "warn", lane), _target_chip(message), target_w, _trigger(ctx, message)
     )
-    return row
+
+
+def _done_row(message: QueuedMessage, lane: int = _MARK_LANE, target_w: int = 0) -> Text:
+    """One finished entry: the outcome mark, the TARGET, and the OUTCOME."""
+    if message.status == DELIVERED:
+        mark = _entry_mark("✓", "ok", lane)
+    else:
+        mark = _entry_mark("✗", "err", lane)
+    return _row(mark, _target_chip(message), target_w, Text(_outcome(message), style="muted"))
 
 
 # --- the flows --------------------------------------------------------------------------
@@ -366,6 +547,10 @@ def _done_row(message: QueuedMessage, lane: int = _MARK_LANE) -> Text:
 #: The footer of the recipient picker. It uses the grammar of the shared contact list, with
 #: an Enter that commits. Esc cancels the queueing step in which the picker is.
 _PICK_HINT = "↑↓ move · ^←→↑↓ sort · type to filter · Enter select · Esc cancel"
+
+#: The instruction above the message field: the same when the user writes the message and
+#: when the user edits it.
+_MESSAGE_PROMPT = "Delivered as a normal direct message when its moment comes."
 
 
 class CourierRecipientScreen(ContactListScreen):
@@ -467,8 +652,9 @@ async def _queue_flow(ctx: AppContext, contacts: list[Contact]) -> None:
                 lambda vals: _next_recipient(visit),
                 lambda vals: session.text(
                     f"Message for {vals[0].name}",
-                    prompt="Delivered as a normal direct message when its moment comes.",
+                    prompt=_MESSAGE_PROMPT,
                     byte_limit=DM_BYTE_LIMIT,
+                    compose=True,
                     default=vals[1] or "",
                 ),
                 lambda vals: _schedule_step(ctx, vals[0].name),
@@ -569,60 +755,97 @@ async def _pick_schedule(ctx: AppContext, name: str):
                 return when
 
 
-async def _entry_actions(ctx: AppContext, ident: int) -> None:
-    """Float the action menu of one entry: send now, cancel, or only look at it."""
+def _not_blank(text: str) -> bool | str:
+    """The validator of an edited message: an empty message is refused, not sent."""
+    return True if text.strip() else "The message is empty — Esc keeps it as it was."
+
+
+async def _open_entry(ctx: AppContext, ident: int) -> None:
+    """Open the message of one entry: to edit while it waits, to read after it finished.
+
+    The edit holds the entry (refer to
+    :meth:`~meshterm.services.courier.CourierService.holding`). Without the hold, a pass
+    can send the old text while the prompt is open. A try that is already in progress
+    cannot be stopped, so the message then opens to read, with a note.
+    """
     session = ctx.ui.session
     store = ctx.courier_store
     message = store.get(ident)
     if message is None:
         return
-    if message.status != QUEUED:
-        # A finished entry has no actions. Show its full text instead.
+    title = f"Message for {message.node_name}"
+    if message.status != QUEUED or ctx.courier.in_flight(ident):
         body = Text(message.text)
-        body.append(
-            f"\n\n{message.status} · {message.attempts} attempt"
-            f"{'s' if message.attempts != 1 else ''}",
-            style="muted",
-        )
-        await session.message_dialog(body, title=message.node_name)
+        if message.status != QUEUED:
+            body.append(f"\n\n{_outcome(message)}", style="muted")
+        else:
+            body.append("\n\nsending now — edit it after this attempt", style="muted")
+        await session.message_dialog(body, title=title)
         return
-    # One measured column for both rows. 📤 draws two cells and ✗ draws one cell. The Cancel
-    # row measured only its own mark, so its words started one column to the left of the
-    # words of Send now. Where the platform draws no icon lane, both rows have no icon, and
-    # the err tint of Cancel moves onto its words.
-    lane = icon_lane(("📤", "✗"))
-    items = [
-        Choice(marked_label("📤", "Send now — one forced attempt", "", lane=lane), "send"),
-        Choice(marked_label("✗", "Cancel this message", "err", lane=lane), "cancel"),
-    ]
-    picked = await session.select(
-        f"{message.node_name} — “{_shorten(message.text, 28)}”",
-        items,
-        filterable=False,
-        footer_hint="↑↓ move · Enter select · Esc back",
-    )
-    if picked == "cancel":
-        store.cancel(ident)
-    elif picked == "send":
-        try:
-            async with ctx.ui.busy_overlay(f"sending to {message.node_name}…"):
-                outcome = await ctx.courier.attempt_now(ident)
-        except Exception as exc:  # noqa: BLE001 - show the failure, and keep the queue
-            await session.message_dialog(Text(f"send failed: {exc}", style="err"), title="Courier")
-            return
-        notes = {
-            "delivered": Text("✓ delivered — acknowledged by the contact", style="ok"),
-            "no ack": Text(
-                "sent, but no acknowledgement — it stays queued and the courier "
-                "will retry with backoff",
-                style="warn",
-            ),
-            "gave up": Text("no acknowledgement — the retry budget is spent", style="err"),
-            "unknown contact": Text(
-                "the device's contact list doesn't know this contact yet; it stays queued",
-                style="warn",
-            ),
-            "busy": Text("another delivery is in flight — try again in a moment", style="muted"),
-            "gone": Text("this entry is no longer queued", style="muted"),
-        }
-        await session.message_dialog(notes.get(outcome, Text(outcome)), title="Courier")
+    with ctx.courier.holding(ident):
+        text = await session.text(
+            title,
+            prompt=_MESSAGE_PROMPT,
+            default=message.text,
+            validate=_not_blank,
+            byte_limit=DM_BYTE_LIMIT,
+            compose=True,
+        )
+    if text is None or text == message.text:
+        return
+    if not store.edit(ident, text):
+        # A late acknowledgement can finish the entry while the prompt is open.
+        await session.message_dialog(
+            Text("this message left the outbox during the edit — it was not changed", style="warn"),
+            title="Courier",
+        )
+
+
+async def _delete_entry(ctx: AppContext, ident: int) -> None:
+    """Ask to delete one entry (waiting or finished), with the red confirm of a delete."""
+    store = ctx.courier_store
+    message = store.get(ident)
+    if message is None:
+        return
+    if message.status == QUEUED:
+        prompt = f"Delete the message for {message.node_name}? It will not be sent."
+    else:
+        prompt = f"Delete the message for {message.node_name} from the history?"
+    if await ctx.ui.dialog(
+        prompt,
+        [("Cancel", False), ("Delete", True)],
+        title="Delete message",
+        default=1,
+        destructive=True,
+    ):
+        store.delete(ident)
+
+
+async def _send_now(ctx: AppContext, ident: int) -> None:
+    """Force one delivery try of a waiting entry, and show the outcome in a dialog."""
+    session = ctx.ui.session
+    message = ctx.courier_store.get(ident)
+    if message is None or message.status != QUEUED:
+        return
+    try:
+        async with ctx.ui.busy_overlay(f"sending to {message.node_name}…"):
+            outcome = await ctx.courier.attempt_now(ident)
+    except Exception as exc:  # noqa: BLE001 - show the failure, and keep the queue
+        await session.message_dialog(Text(f"send failed: {exc}", style="err"), title="Courier")
+        return
+    notes = {
+        "delivered": Text("✓ delivered — acknowledged by the contact", style="ok"),
+        "no ack": Text(
+            "sent, but no acknowledgement — it stays queued and the courier "
+            "will retry with backoff",
+            style="warn",
+        ),
+        "gave up": Text("no acknowledgement — the retry budget is spent", style="err"),
+        "unknown contact": Text(
+            "the device's contact list doesn't know this contact yet; it stays queued",
+            style="warn",
+        ),
+        "busy": Text("another delivery is in flight — try again in a moment", style="muted"),
+        "gone": Text("this entry is no longer queued", style="muted"),
+    }
+    await session.message_dialog(notes.get(outcome, Text(outcome)), title="Courier")

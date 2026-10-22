@@ -1526,6 +1526,7 @@ class TuiSession:
         help_text: str = "",
         password: bool = False,
         byte_limit: int | None = None,
+        compose: bool = False,
         floating: bool = False,
     ) -> str | None:
         """Show a text prompt. Return the string, or ``None`` if the user cancelled.
@@ -1539,6 +1540,9 @@ class TuiSession:
         ``byte_limit`` puts the shared UTF-8 byte gauge on the field, and blocks a submission
         that is longer than the limit. Use it for a field that goes into a packet with a
         maximum size (refer to :class:`TextScreen`).
+
+        ``compose`` gives the field the colours of the compose line of a chat. Use it for a
+        field that holds a message.
         """
         screen = TextScreen(
             title,
@@ -1548,6 +1552,7 @@ class TuiSession:
             help_text=help_text,
             password=password,
             byte_limit=byte_limit,
+            compose=compose,
         )
         runner = self.run_dialog if floating else self.run_screen
         result = await runner(screen)

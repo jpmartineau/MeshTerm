@@ -17,8 +17,8 @@ On the CLI, subcommands give script access to the same outbox:
 - ``send`` forces one delivery try now.
 - ``list``, ``cancel``, and ``clear`` examine the outbox and remove entries from it.
 
-These subcommands are the script form of the Send-now, Cancel, and Clear-finished actions
-of the outbox screen.
+These subcommands are the script form of the actions of the outbox screen: Send now
+(``^R``), Delete (``cancel`` deletes only a waiting entry), and Clear finished.
 """
 
 from __future__ import annotations

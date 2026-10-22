@@ -29,6 +29,8 @@ the header comes on when a delivery during the night is at last complete.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -81,8 +83,11 @@ class CourierService:
         #: The time when MeshTerm last heard each node id in this session (the freshness
         #: map).
         self._heard: dict[str, datetime] = {}
-        #: Re-entry guard: only one try at a time is in progress, from a pass or forced.
-        self._sending = False
+        #: Re-entry guard: only one try at a time is in progress, from a pass or forced. It
+        #: is the id of the entry that the try sends, or ``None`` when no try runs.
+        self._in_flight: int | None = None
+        #: The ids of the entries that the user edits now. A pass does not try them.
+        self._held: set[int] = set()
 
     @property
     def active(self) -> bool:
@@ -92,6 +97,24 @@ class CourierService:
     def pending_count(self) -> int:
         """How many messages wait in the outbox."""
         return self._ctx.courier_store.pending_count()
+
+    def in_flight(self, ident: int) -> bool:
+        """Whether a delivery try of the entry ``ident`` is in progress now."""
+        return self._in_flight == ident
+
+    @contextmanager
+    def holding(self, ident: int) -> Iterator[None]:
+        """Keep the passes off one entry while the user edits its body.
+
+        Without the hold, a pass can send the old body while the edit prompt is open. Then
+        the edit changes the text of a message that already went out. A forced try
+        (:meth:`attempt_now`) does not read the hold, because the user asks for it.
+        """
+        self._held.add(ident)
+        try:
+            yield
+        finally:
+            self._held.discard(ident)
 
     # --- lifecycle ---------------------------------------------------------------------
 
@@ -191,11 +214,11 @@ class CourierService:
 
     async def _pass(self) -> None:
         """One pass: try the oldest eligible entry, if there is one (one for each pass)."""
-        if not self._ctx.is_connected or self._sending:
+        if not self._ctx.is_connected or self._in_flight is not None:
             return
         now = utcnow()
         for message in self._ctx.courier_store.pending():
-            if self.eligible(message, now):
+            if message.ident not in self._held and self.eligible(message, now):
                 await self._attempt(message)
                 return
 
@@ -212,14 +235,14 @@ class CourierService:
         message = self._ctx.courier_store.get(ident)
         if message is None or message.status != QUEUED:
             return "gone"
-        if self._sending:
+        if self._in_flight is not None:
             return "busy"
         return await self._attempt(message)
 
     async def _attempt(self, message: QueuedMessage) -> str:
         """Run one delivery try, and set the new state of the entry."""
         store = self._ctx.courier_store
-        self._sending = True
+        self._in_flight = message.ident
         try:
             contact = await self._resolve(message)
             if contact is None:
@@ -258,7 +281,7 @@ class CourierService:
             )
             return "no ack"
         finally:
-            self._sending = False
+            self._in_flight = None
 
     def _delivered_late(self, ident: int) -> None:
         """The ack of a try arrived after the try stopped its wait: the message was delivered.
