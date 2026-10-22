@@ -885,6 +885,10 @@ class SelectScreen(Screen):
                     elif item.heading:
                         block = list(drawn)
                         self._sticky_headers.append((len(lines), block))
+                    elif block is not None:
+                        # The column header of a section, under its heading: it pins
+                        # with the heading, as the preamble below does.
+                        block.extend(drawn)
                 elif item.pinned:
                     # A pinned header is drawn outside the body slice and is exactly one
                     # line tall. Thus it crops like a row and does not wrap. A column header

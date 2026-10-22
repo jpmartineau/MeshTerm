@@ -696,12 +696,14 @@ def _cell(line: str, word: str) -> int:
     return cell_len(line[: line.index(word)])
 
 
-def test_outbox_rows_are_target_and_trigger_under_column_headers(tmp_path: Path) -> None:
-    """Each section is a table: TARGET and TRIGGER in the outbox, TARGET and OUTCOME after it.
+def test_outbox_rows_are_target_trigger_and_message_under_column_headers(
+    tmp_path: Path,
+) -> None:
+    """Each section is a table: TARGET, TRIGGER, and MESSAGE, or TARGET, OUTCOME, and MESSAGE.
 
-    A row does not show its message, because Enter opens it. Each section has its own
-    header, so the lane after TARGET has one meaning in each section. That lane starts in
-    the same cell in both sections, and each label is over its lane.
+    Each section has its own header, so the lane after TARGET has one meaning in each
+    section. Each lane starts in the same cell in both sections, and each label is over its
+    lane.
     """
     from meshterm.ui.courier_screen import CourierOutboxScreen
 
@@ -711,7 +713,6 @@ def test_outbox_rows_are_target_and_trigger_under_column_headers(tmp_path: Path)
     ctx.courier_store.mark_delivered(landed.ident)
     lines = _outbox_plain(CourierOutboxScreen(ctx)).splitlines()
 
-    assert not any("hold this" in line or "got it" in line for line in lines)
     trigger = next(line for line in lines if "TRIGGER" in line)
     outcome = next(line for line in lines if "OUTCOME" in line)
     waiting = next(line for line in lines if "Waiting" in line)
@@ -720,6 +721,8 @@ def test_outbox_rows_are_target_and_trigger_under_column_headers(tmp_path: Path)
     assert _cell(outcome, "TARGET") == _cell(trigger, "TARGET")
     assert _cell(trigger, "TRIGGER") == _cell(waiting, "when heard")
     assert _cell(outcome, "OUTCOME") == _cell(done, "delivered") == _cell(trigger, "TRIGGER")
+    assert _cell(trigger, "MESSAGE") == _cell(waiting, "hold this text")
+    assert _cell(outcome, "MESSAGE") == _cell(done, "got it") == _cell(trigger, "MESSAGE")
 
 
 def test_outbox_triggers_name_what_each_entry_waits_for(tmp_path: Path) -> None:
@@ -758,24 +761,34 @@ def test_outbox_cut_ends_on_an_ellipsis_not_on_a_stray_crack(tmp_path: Path, pow
     assert row.endswith("…") and CRACK_TAIL not in row
 
 
-def test_a_long_target_gives_cells_to_the_trigger(tmp_path: Path, powerline) -> None:
-    """On a narrow screen, a long name breaks off on its crack, and the trigger stays readable.
+def test_the_outbox_pans_and_shortens_nothing(tmp_path: Path, powerline) -> None:
+    """A narrow screen shows the full name, and ←→ pan the table to the full message.
 
-    The TARGET lane is as wide as the widest chip only while the TRIGGER lane keeps its
-    minimum. The header follows the same lane, so TRIGGER stays over the triggers.
+    No lane gets shorter to fit. The header pans with the rows, so MESSAGE stays over the
+    messages. The command rows do not pan, and the footer names ←→ while there is more.
     """
-    from meshterm.ui.courier_screen import _LAST_MIN, CourierOutboxScreen
+    from meshterm.ui.courier_screen import CourierOutboxScreen
     from meshterm.ui.pathline import CRACK_TAIL
 
     powerline(True)
     ctx = _outbox_ctx(tmp_path)
-    ctx.courier_store.queue(NODE, "A Rather Long Contact Name For Width", "hello")
-    lines = _outbox_plain(CourierOutboxScreen(ctx), 53).splitlines()
-    header = next(line for line in lines if "TARGET" in line)
+    name = "A Rather Long Contact Name For Width"
+    ctx.courier_store.queue(NODE, name, "the whole message must be there to read")
+    screen = CourierOutboxScreen(ctx)
+    lines = _outbox_plain(screen, 53).splitlines()
     row = next(line for line in lines if "⏳" in line)
-    assert row.rstrip().endswith("when heard")
-    assert CRACK_TAIL in row  # the chip continues past its lane
-    assert _cell(header, "TRIGGER") == _cell(row, "when heard") <= 53 - _LAST_MIN
+    assert name in row and CRACK_TAIL not in row
+    assert row.endswith("…")  # the row goes on past the edge
+    assert "←→ scroll" in screen.footer_hint
+
+    for _ in range(20):
+        screen.handle("right")
+    lines = _outbox_plain(screen, 53).splitlines()
+    header = next(line for line in lines if "MESSAGE" in line)
+    row = next(line for line in lines if "message must" in line)
+    assert row.endswith("the whole message must be there to read")
+    assert _cell(header, "MESSAGE") == _cell(row, "the whole message")
+    assert any(line.startswith("  📨 Queue a message…") for line in lines)
 
 
 def test_outbox_keys_act_only_on_the_rows_they_name(tmp_path: Path) -> None:
@@ -798,9 +811,7 @@ def test_outbox_keys_act_only_on_the_rows_they_name(tmp_path: Path) -> None:
         return screen
 
     screen = on(("msg", waiting.ident))
-    assert screen.footer_hint == (
-        "↑↓ move · type to filter · Enter open · ^R send · Del delete · Esc back"
-    )
+    assert screen.footer_hint == ("↑↓ move · Enter open · ^R send · Del delete · Esc back")
     assert cell_len(screen.footer_hint) <= 72
     slot = screen.picocalc_lyra_lane[2]
     assert (slot.label, slot.opp_label, slot.enabled, slot.opp_enabled) == (
@@ -821,7 +832,7 @@ def test_outbox_keys_act_only_on_the_rows_they_name(tmp_path: Path) -> None:
     assert resolved.pop() == DeleteRequest(("msg", landed.ident))
 
     screen = on(_QUEUE)
-    assert screen.footer_hint == "↑↓ move · type to filter · Enter open · Esc back"
+    assert screen.footer_hint == "↑↓ move · Enter open · Esc back"
     screen.handle("delete")
     screen.handle("retry")
     assert resolved == []
@@ -959,3 +970,20 @@ def test_recipient_picker_sort_keys_walk_the_ring(tmp_path: Path) -> None:
     assert sort.column == "name" and sort.ascending
     values = [c.value for c in screen._choices()]
     assert values == [a, z]
+
+
+def test_a_panned_column_header_pins_with_its_section_heading(tmp_path: Path) -> None:
+    """The header under a section heading pans, and it also pins with the heading.
+
+    A header that does not pan was already the preamble of its heading. The pan branch of
+    the select list once left it out, so the labels scrolled away above their rows.
+    """
+    from meshterm.ui.courier_screen import CourierOutboxScreen
+
+    ctx = _outbox_ctx(tmp_path)
+    ctx.courier_store.queue(NODE, "Hub", "hello")
+    screen = CourierOutboxScreen(ctx)
+    screen.render_body(72)
+    _line, block = screen._sticky_headers[0]
+    plain = [re.sub(r"\x1b\[[0-9;]*m", "", line) for line in block]
+    assert "Outbox" in plain[0] and "TARGET" in plain[1]

@@ -4,16 +4,17 @@
 The interactive face of the ``courier`` tool. One select-list screen holds the whole
 feature (the persistent-backdrop pattern). It has these parts:
 
-- The waiting outbox. Each row shows its target (the recipient) and its trigger: what the
-  entry waits for before it goes out. It waits to hear the contact, it is scheduled for a
-  time, or it backs off between retries.
+- The waiting outbox. Each row shows its target (the recipient), its trigger (what the
+  entry waits for before it goes out), and its message. It waits to hear the contact, it
+  is scheduled for a time, or it backs off between retries.
 - The finished history (delivered or given up), with the outcome of each entry.
 - The queueing flow: select a contact, write the message, choose when to send it.
 
-A row does not show its message. Enter on a waiting entry opens the message to edit, and
-Enter on a finished entry opens it to read. ``^R`` on a waiting entry is *Send now* (one
-forced attempt, and the outcome is in a dialog). Delete removes an entry of either section,
-after a confirm.
+The entries are a table that ←→ pan as one unit, under the column headers. Nothing in a
+row is shortened: a long name or a long message is all there, and the pan brings it into
+view. Enter on a waiting entry opens the message to edit, and Enter on a finished entry
+opens it to read. ``^R`` on a waiting entry is *Send now* (one forced attempt, and the
+outcome is in a dialog). Delete removes an entry of either section, after a confirm.
 
 The outbox is **live** while it is open. Each row is a callable title that the code
 computes again at each paint, so "retry in ~N m" counts down in real time. A ticker
@@ -31,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -48,7 +50,7 @@ from .menus import (
     run_steps,
     section_heading,
 )
-from .pathline import PathHop, cut_to
+from .pathline import PathHop
 from .tui import CANCEL, DM_BYTE_LIMIT, Choice, DeleteRequest, SelectScreen, Separator
 from .watchtower_screen import contact_watch_key
 from .widgets import (
@@ -88,21 +90,17 @@ _COMMAND_ICONS = ("📨", "🗑")
 #: The seconds between the refresh ticks of the open outbox (shape check and paint).
 _REFRESH_S = 1.0
 
-#: The cells between the TARGET lane and the lane after it.
+#: The cells between two lanes of the table.
 _GAP = 2
-
-#: The fewest cells that the last lane (TRIGGER or OUTCOME) keeps on a narrow screen. A
-#: long name gives cells back first, because the first letters of a chip already show who
-#: it is, and the trigger is what the user opens the outbox to read.
-_LAST_MIN = 20
 
 #: How many finished entries the history section shows. The store keeps more (refer to the
 #: ``courier_history_kept`` preference).
 _DONE_SHOWN = 15
 
 #: The footer of the outbox. :meth:`CourierOutboxScreen._key_atoms` adds the atoms of the
-#: keys that act on an entry, only while the highlight is on such an entry.
-_OUTBOX_HINT = "↑↓ move · type to filter · Enter open · Esc back"
+#: keys that act on an entry, only while the highlight is on such an entry. The select
+#: list adds ``←→ scroll`` while the table is wider than the screen.
+_OUTBOX_HINT = "↑↓ move · Enter open · Esc back"
 _SEND_HINT = "^R send"
 _DELETE_HINT = "Del delete"
 
@@ -242,7 +240,11 @@ class CourierOutboxScreen(SelectScreen):
     Three keys act on the highlighted entry. Enter opens its message (refer to
     :func:`_open_entry`), Delete asks to remove it, and ``^R`` sends a waiting entry now.
     The footer and the F-key lane name ``^R`` and Delete only on the rows on which they act.
-    ``^R`` is a chord, because this list filters as the user types.
+    ``^R`` is the chord that the app uses for "send again" in each conversation.
+
+    The list does not filter as the user types. The footer of a table that pans must also
+    name ←→, and with the filter atom too, the footer was wider than the 72 cells of a
+    terminal. An outbox holds a few entries, so a filter has little to find in it.
     """
 
     def __init__(self, ctx: AppContext, *, default: Any = None) -> None:
@@ -258,6 +260,7 @@ class CourierOutboxScreen(SelectScreen):
             _menu_items(ctx, ctx.courier_store.entries()),
             default=default,
             footer_hint=_OUTBOX_HINT,
+            filterable=False,
             key_hint=self._key_atoms,
         )
 
@@ -356,13 +359,15 @@ def _menu_items(ctx: AppContext, entries: list[QueuedMessage]) -> list:
     """Build the rows of the screen: the waiting outbox, then the finished history.
 
     Each section is a table under its own column header: the status mark, the TARGET (the
-    recipient), and one more lane. In the outbox, that lane is the TRIGGER: what the entry
-    waits for before it goes out. In the history, it is the OUTCOME. A row does not show
-    the message, because Enter opens it (refer to :func:`_open_entry`).
+    recipient), a second lane, and the MESSAGE. In the outbox, the second lane is the
+    TRIGGER: what the entry waits for before it goes out. In the history, it is the
+    OUTCOME. The rows and the headers pan as one unit (:attr:`Choice.pans`), so each lane
+    is at its full width and nothing is shortened. The two command rows do not pan.
 
-    The entry rows are callables of the render width. Thus their live state renders again
-    at each paint, and their TARGET lane fits the screen (refer to :func:`_target_lane`).
-    The fixed action rows stay plain strings.
+    The entry rows are callables with no argument, so that their live state renders again
+    at each paint. The second lane is as wide as its widest text at that paint (refer to
+    ``second_w`` below), in both sections. Thus MESSAGE starts in the same cell in each
+    section, and it moves when a countdown changes its number of digits.
     """
     waiting = [m for m in entries if m.status == QUEUED]
     done = [m for m in entries if m.status != QUEUED][:_DONE_SHOWN]
@@ -379,19 +384,29 @@ def _menu_items(ctx: AppContext, entries: list[QueuedMessage]) -> list:
     # in each. It is never narrower than its label, so the label never runs into the next.
     target_w = max([cell_len("TARGET")] + [_target_chip(m).cell_len for m in waiting + done])
 
+    def second_w() -> int:
+        """The width of the second lane at this paint: its widest label, trigger, or outcome.
+
+        The rows hold the live records of the store, so a trigger that changes (a
+        countdown, a contact that was heard) gives its new width at the next paint.
+        """
+        cells = [cell_len("TRIGGER"), cell_len("OUTCOME")]
+        cells += [_trigger(ctx, m).cell_len for m in waiting]
+        cells += [cell_len(_outcome(m)) for m in done]
+        return max(cells)
+
     items: list = [section_heading("Outbox")]
     if waiting:
-        items.append(_column_header("TRIGGER", lane, target_w))
+        items.append(_column_header("TRIGGER", lane, target_w, second_w))
     else:
         items.append(Separator("  empty — queued messages wait here for their moment"))
     for message in waiting:
         items.append(
             Choice(
-                lambda width, m=message: _waiting_row(
-                    ctx, m, lane, _target_lane(lane, target_w, width)
-                ),
+                lambda m=message: _waiting_row(ctx, m, lane, target_w, second_w()),
                 ("msg", message.ident),
                 deletable=True,
+                pans=True,
             )
         )
     items.append(Separator(" "))  # put space between the action and the outbox rows above it
@@ -399,15 +414,14 @@ def _menu_items(ctx: AppContext, entries: list[QueuedMessage]) -> list:
 
     if done:
         items.append(section_heading("Finished"))
-        items.append(_column_header("OUTCOME", lane, target_w))
+        items.append(_column_header("OUTCOME", lane, target_w, second_w))
         for message in done:
             items.append(
                 Choice(
-                    lambda width, m=message: _done_row(
-                        m, lane, _target_lane(lane, target_w, width)
-                    ),
+                    lambda m=message: _done_row(m, lane, target_w, second_w()),
                     ("msg", message.ident),
                     deletable=True,
+                    pans=True,
                 )
             )
         items.append(Choice(marked_label("🗑", "Clear finished", "", lane=lane), _CLEAR))
@@ -415,39 +429,31 @@ def _menu_items(ctx: AppContext, entries: list[QueuedMessage]) -> list:
     return items
 
 
-def _column_header(label: str, lane: int, target_w: int) -> Separator:
-    """The column header of one section: ``TARGET`` over the chips, then ``label``.
+def _column_header(label: str, lane: int, target_w: int, second_w: Callable[[], int]) -> Separator:
+    """The column header of one section: ``TARGET``, then ``label``, then ``MESSAGE``.
 
     It comes immediately after the heading of its section. Thus it pins with the heading
     while the rows of the section scroll. It starts after the pointer, the mark, and the
-    space after the mark, so that ``TARGET`` is over the first cell of each chip.
+    space after the mark, so that ``TARGET`` is over the first cell of each chip. It pans
+    with the rows, so each label stays over its lane.
 
     Args:
-        label: The name of the last lane: ``TRIGGER`` in the outbox, ``OUTCOME`` in the
+        label: The name of the second lane: ``TRIGGER`` in the outbox, ``OUTCOME`` in the
             history.
         lane: The icon column of the list in cells (refer to :func:`_menu_items`).
         target_w: The width of the widest chip in cells, without the gap after it.
+        second_w: Gives the width of the second lane at this paint, without the gap.
     """
 
     def header(width: int) -> str:
-        # The rows get the width less the 2 cells of the pointer, so the header asks for
-        # the TARGET lane at that width too. Thus each label stays over its lane.
-        target = _target_lane(lane, target_w, width - 2)
-        lanes = [Lane("TARGET", target + _GAP), Lane(label)]
+        lanes = [
+            Lane("TARGET", target_w + _GAP),
+            Lane(label, second_w() + _GAP),
+            Lane("MESSAGE"),
+        ]
         return column_header(lanes, width, indent=2 + lane + 1)
 
-    return Separator(header)
-
-
-def _target_lane(lane: int, target_w: int, avail: int) -> int:
-    """The width of the TARGET lane in a row that has ``avail`` cells after the pointer.
-
-    The lane is as wide as the widest chip. Where the last lane then gets fewer than
-    :data:`_LAST_MIN` cells, the TARGET lane gives cells back, and a chip that is too wide
-    breaks off on its crack. It is never narrower than its label.
-    """
-    room = avail - (lane + 1) - _GAP - _LAST_MIN
-    return max(cell_len("TARGET"), min(target_w, room))
+    return Separator(header, pans=True)
 
 
 def _entry_mark(mark: str, style: str, lane: int) -> Text:
@@ -485,13 +491,26 @@ def _target_chip(message: QueuedMessage) -> Text:
     return hop_chip(PathHop(message.node_name, style="muted"), role=DESTINATION)
 
 
-def _row(mark: Text, chip: Text, target_w: int, last: Text) -> Text:
-    """One entry row: the mark, the chip fitted to the TARGET lane, then the last lane."""
-    if chip.cell_len > target_w:
-        chip = cut_to(chip, target_w)  # the chip continues past its lane, so it cracks
+def _row(
+    mark: Text,
+    chip: Text,
+    target_w: int,
+    second: Text,
+    second_w: int,
+    message: QueuedMessage,
+    style: str,
+) -> Text:
+    """One entry row: the mark, the chip, the second lane, and the full message.
+
+    Each lane is padded to its width, and nothing is shortened. The pan of the list brings
+    a part that is past the edge into view. A line break in the message becomes a space,
+    because a row is one line.
+    """
     mark.append_text(chip)
     mark.append(" " * (max(0, target_w - chip.cell_len) + _GAP))
-    mark.append_text(last)
+    mark.append_text(second)
+    mark.append(" " * (max(0, second_w - second.cell_len) + _GAP))
+    mark.append(" ".join(message.text.splitlines()), style=style)
     return mark
 
 
@@ -524,21 +543,34 @@ def _outcome(message: QueuedMessage) -> str:
 
 
 def _waiting_row(
-    ctx: AppContext, message: QueuedMessage, lane: int = _MARK_LANE, target_w: int = 0
+    ctx: AppContext,
+    message: QueuedMessage,
+    lane: int = _MARK_LANE,
+    target_w: int = 0,
+    second_w: int = 0,
 ) -> Text:
-    """One waiting entry: the mark, the TARGET, and the TRIGGER."""
-    return _row(
-        _entry_mark("⏳", "warn", lane), _target_chip(message), target_w, _trigger(ctx, message)
-    )
+    """One waiting entry: the mark, the TARGET, the TRIGGER, and the MESSAGE.
+
+    The message has the colour of plain text, because it is the content of the row.
+    """
+    mark = _entry_mark("⏳", "warn", lane)
+    trigger = _trigger(ctx, message)
+    return _row(mark, _target_chip(message), target_w, trigger, second_w, message, "")
 
 
-def _done_row(message: QueuedMessage, lane: int = _MARK_LANE, target_w: int = 0) -> Text:
-    """One finished entry: the outcome mark, the TARGET, and the OUTCOME."""
+def _done_row(
+    message: QueuedMessage, lane: int = _MARK_LANE, target_w: int = 0, second_w: int = 0
+) -> Text:
+    """One finished entry: the outcome mark, the TARGET, the OUTCOME, and the MESSAGE.
+
+    A finished entry is history, so each lane after the mark is muted.
+    """
     if message.status == DELIVERED:
         mark = _entry_mark("✓", "ok", lane)
     else:
         mark = _entry_mark("✗", "err", lane)
-    return _row(mark, _target_chip(message), target_w, Text(_outcome(message), style="muted"))
+    outcome = Text(_outcome(message), style="muted")
+    return _row(mark, _target_chip(message), target_w, outcome, second_w, message, "muted")
 
 
 # --- the flows --------------------------------------------------------------------------
