@@ -9,6 +9,39 @@ can change how things behave. It does not only add new things.
 
 ## [Unreleased]
 
+## [0.11.5] - 2026-10-22
+
+**The Courier outbox is a table, and Enter opens the message of an entry.** Each section of
+the outbox has column headers, and each row shows its full message. A table that is wider
+than the screen pans with ←→, and does not cut its rows. A footer hint that is too wide
+keeps its Esc.
+
+### Changed
+
+- **The Courier outbox is a table with column headers.** A waiting entry shows TARGET,
+  TRIGGER, and MESSAGE. A finished entry shows TARGET, OUTCOME, and MESSAGE. Nothing is
+  shortened to fit. When the table is wider than the screen, ←→ pan the rows and their
+  headers together, and the footer says so. The column headers stay at the top with their
+  section heading while the section scrolls. Typing still narrows the outbox.
+- **Enter on a Courier entry opens its message.** On a waiting entry, Enter opens the
+  message so that you can edit it. The courier holds the entry while the prompt is open, so
+  the old text cannot go out while you edit. On a finished entry, Enter shows the message.
+  The menu of an entry is gone: ^R sends a waiting entry now, and Del deletes an entry after
+  a red confirm. On the PicoCalc and the Cardputer Zero, `Send` is on F3, with `Delete`
+  behind it on Shift+F3.
+- The message field of the Courier has the colours of the chat's compose line: a white
+  prompt mark and white text.
+
+### Fixed
+
+- **A footer hint that is too wide keeps its Esc.** The footer line cut a hint that was too
+  wide at the right edge, and Esc, the last atom of each hint, went with the cut. Now the
+  footer removes atoms in front of Esc, as the splash already did.
+- **A cut in the text next to a chip ends on an ellipsis.** When a row had a chip and then
+  text, and the text ran past the screen, the cut drew a half block in the colour of the
+  chip at the right edge. Now the half block is only for a cut inside a path, and a cut in
+  plain text ends on `…`.
+
 ## [0.11.4] - 2026-10-20
 
 **You can lock a contact from more places, and a serial radio that stops when your laptop
@@ -705,7 +738,8 @@ commands.
 MeshTerm is free and open source, under the Apache 2.0 licence. The licence does not cover
 the name and the logo (refer to `NOTICE`). A fork is welcome under its own name.
 
-[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.11.4...HEAD
+[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.11.5...HEAD
+[0.11.5]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.5
 [0.11.4]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.4
 [0.11.3]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.3
 [0.11.2]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.2
