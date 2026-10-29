@@ -121,6 +121,18 @@ def distance(first: str, second: str) -> float:
     return math.dist(from_hex(first), from_hex(second))
 
 
+def midpoint(first: str, second: str) -> str:
+    """The ``#rrggbb`` colour halfway between two ``#rrggbb`` colours, as the eye sees them.
+
+    The function finds the average of the two colours in OKLab. Thus the result is halfway
+    in lightness and halfway in chroma to the eye. The average of two colours in the sRGB
+    gamut can be a little outside it, because the transform is not linear. :func:`fitted`
+    then lowers its chroma.
+    """
+    (l1, a1, b1), (l2, a2, b2) = from_hex(first), from_hex(second)
+    return to_hex(fitted(((l1 + l2) / 2, (a1 + a2) / 2, (b1 + b2) / 2)))
+
+
 def shaded(colour: str, by: float, *, floor: float | None = None) -> str:
     """``colour`` moved ``by`` in lightness, away from the end of the scale that is nearer.
 

@@ -470,9 +470,11 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   can't tell apart: under `pathline.SEAM_BLUR` apart in OKLab (`ui/oklab.py`, THE
   perceptual colour distance — never a hue gap, never sRGB, both of which mis-size the
   greens against the cyans). There the seam is the **thin** chevron (`POWERLINE_THIN`)
-  in the previous chip's label colour, drawn on the next, so the ribbon runs on unbroken
-  and the join is a line the chip draws
-  on itself, never a wedge of page cut out of the route and never a third colour. An
+  halfway between the previous chip's label and fill (OKLab, `oklab.midpoint`; JP,
+  2026-10-29 — it was the label itself), drawn on the next, so the ribbon runs on
+  unbroken and the join is a line the chip draws on itself out of its own pair, never a
+  wedge of page cut out of the route. The PicoCalc keeps the label: it has no slot
+  between a bright hue and its dim twin (`pathline._slot_seam`). An
   elision breaks the ribbon rather than joining it — bare `⋯`
   on the page between a closing point and the next chip's notch, no fill, no padding.
 - The ribbon's **outer ends**: the chevron means *the route continues*, so an end that is

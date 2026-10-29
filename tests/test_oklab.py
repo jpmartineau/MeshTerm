@@ -80,6 +80,21 @@ def test_fitted_lowers_chroma_alone_and_keeps_near_hues_apart() -> None:
         assert abs(after[1]) < abs(before[1])  # less chroma
 
 
+def test_midpoint_is_halfway_to_the_eye() -> None:
+    """The midpoint is equally far from the two colours, and half as far as they are apart.
+
+    The midpoint of black and white has ``L`` 0.5. The midpoint of a colour with itself is
+    the same colour.
+    """
+    assert oklab.from_hex(oklab.midpoint("#000000", "#ffffff"))[0] == pytest.approx(0.5, abs=0.01)
+    assert oklab.midpoint("#f25555", "#f25555") == "#f25555"
+    label, fill = "#55f255", _fill("4c")
+    middle = oklab.midpoint(label, fill)
+    half = oklab.distance(label, fill) / 2
+    assert oklab.distance(middle, label) == pytest.approx(half, rel=0.05)
+    assert oklab.distance(middle, fill) == pytest.approx(half, rel=0.05)
+
+
 def test_from_hex_rejects_anything_but_six_digits() -> None:
     """Six hex digits are accepted, and the ``#`` and the case are optional.
 

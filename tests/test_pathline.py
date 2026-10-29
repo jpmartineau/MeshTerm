@@ -301,8 +301,9 @@ def test_picocalc_seams_on_one_colour_and_the_composer_slot(picocalc: None) -> N
     """Two chips of one colour join on a thin chevron in the hue. The slot is a break.
 
     The thin chevron is the bright twin of the fill: the colour of the label on the chip.
-    The slot of the composer has no white background on the console. Thus it is a white
-    ``+`` on the page, and the chips on each side close on a point and open on a notch.
+    The console has no colour halfway between the two. The slot of the composer has no
+    white background on the console. Thus it is a white ``+`` on the page, and the chips
+    on each side close on a point and open on a notch.
     """
     same = PathLine([PathHop("Mill", key="1a"), PathHop("Tower", key="20")]).text()
     seam = same.plain.index(POWERLINE_THIN)
@@ -858,14 +859,14 @@ def _seams(*hops: PathHop) -> list[tuple[str, str]]:
 
 
 def test_a_seam_between_two_of_one_colour_is_the_thin_chevron_in_its_label() -> None:
-    """Where two chips have the same fill, the seam is the thin chevron in the label colour.
+    """Where two chips have the same fill, the seam is the thin chevron, softer than the label.
 
     The interlock cannot draw a solid point in its own background. Thus MeshTerm draws the
     join *on* the shared fill instead (powerline's own mark for a join inside one
-    colour), and the ribbon continues without a break. Its colour is the label of the
-    previous chip. It is the light half of the chip's own pair, so it is visible on the
-    fill, and nothing on the line has a colour that is not a colour of a chip. The faded
-    slate draws it in its muted text.
+    colour), and the ribbon continues without a break. Its colour is halfway between the
+    label and the fill of the previous chip (JP, 2026-10-29). Thus it comes from the
+    chip's own pair, and it is softer than the label. The faded slate draws it halfway
+    between its muted text and its fill.
 
     This is not a rare accident. A mirrored return leg is a run of hops that are identically
     faded, by construction, and a stretch of keyless hops has one grey. In both cases the
@@ -874,7 +875,10 @@ def test_a_seam_between_two_of_one_colour_is_the_thin_chevron_in_its_label() -> 
     """
     hue = _style_hex(node_style("aa"))
     glyph, style = _seams(PathHop("A", key="aa"), PathHop("B", key="aa"))[0]
-    assert (glyph, style) == (POWERLINE_THIN, f"{hue} on {_fill('aa')}")
+    line = oklab.midpoint(hue, _fill("aa"))
+    assert (glyph, style) == (POWERLINE_THIN, f"{line} on {_fill('aa')}")
+    to_label, to_fill = oklab.distance(line, hue), oklab.distance(line, _fill("aa"))
+    assert to_label == pytest.approx(to_fill, rel=0.05) and to_fill > SEAM_BLUR
 
     assert _seams(PathHop("A", key="aa"), PathHop("B", key="77"))[0] == (
         POWERLINE_SEP,
@@ -882,7 +886,7 @@ def test_a_seam_between_two_of_one_colour_is_the_thin_chevron_in_its_label() -> 
     )  # a blend, one cell
 
     glyph, style = _seams(PathHop("A", dim=True), PathHop("B", dim=True))[0]
-    assert (glyph, style) == (POWERLINE_THIN, f"{_DIM_FG} on {_DIM_BG}")
+    assert (glyph, style) == (POWERLINE_THIN, f"{oklab.midpoint(_DIM_FG, _DIM_BG)} on {_DIM_BG}")
 
 
 def test_a_seam_blurs_by_perceived_distance_not_by_hue_gap() -> None:
@@ -900,7 +904,8 @@ def test_a_seam_blurs_by_perceived_distance_not_by_hue_gap() -> None:
     assert green[0] == POWERLINE_THIN and red[0] == POWERLINE_SEP
     assert oklab.distance(_fill("4c"), _fill("5c")) < SEAM_BLUR
     assert oklab.distance(_fill("00"), _fill("10")) > SEAM_BLUR
-    assert green[1] == f"{_style_hex(node_style('4c'))} on {_fill('5c')}"
+    line = oklab.midpoint(_style_hex(node_style("4c")), _fill("4c"))
+    assert green[1] == f"{line} on {_fill('5c')}"
 
     wrapped = _seams(PathHop("A", key="fc"), PathHop("B", key="02"))[0]
     assert wrapped[0] == POWERLINE_THIN  # neighbours across the seam of the wheel, also

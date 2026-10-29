@@ -25,9 +25,10 @@ surface that the survey found can in the end use it.
   keyless greys). Sometimes they have two fills that are too close to tell apart (less
   than :data:`SEAM_BLUR` apart in OKLab, the perceptual distance that
   :mod:`~meshterm.ui.oklab` measures). Then the interlock cannot draw the seam, and the
-  seam is the *thin* chevron instead. It has the colour of the label of the previous chip,
-  and it is drawn on the next chip. Thus the ribbon continues without a break, and the
-  join is a line that the chip draws on itself (:meth:`PathLine._seam`).
+  seam is the *thin* chevron instead. Its colour is halfway between the label and the fill
+  of the previous chip (on the 16-colour console, the label itself), and it is drawn on
+  the next chip. Thus the ribbon continues without a break, and the join is a line that
+  the chip draws on itself (:meth:`PathLine._seam`).
 
   Hops that are elided from the middle break the ribbon and do not join it. The mark is
   bare on the page, between a closing point and the notch of the next chip
@@ -126,8 +127,8 @@ POWERLINE_SEP = "\ue0b0"
 #: The thin right-pointing chevron (U+E0B1). It is the outline sibling of the solid point,
 #: in the same core set. It is powerline's own mark for a join *inside* one colour. It
 #: draws the seam between two chips whose fills the eye cannot tell apart
-#: (:meth:`PathLine._seam`). It is the previous fill, shaded, and drawn on the next chip,
-#: where a solid point disappears.
+#: (:meth:`PathLine._seam`). It is drawn on the next chip, where a solid point disappears,
+#: in a colour halfway between the label and the fill of the previous chip.
 POWERLINE_THIN = "\ue0b1"
 
 #: The rounded caps (U+E0B6 opening, U+E0B4 closing) that finish the two outer ends of a
@@ -1179,16 +1180,17 @@ class PathLine:
         equality, and it is not a gap of hue.
 
         There the seam is the **thin** chevron, :data:`POWERLINE_THIN`. It is drawn on the
-        fill ahead, in the colour of the label of the previous chip. It is powerline's
-        own mark for a join inside one colour, and the chip to which it belongs draws a line
-        on itself. Thus the ribbon continues without a break, and nothing on it is a colour
-        that is not a colour of a chip. Before, the solid point that was drawn bare cut a
-        wedge of page out of the route here. (A run of near hues read as dashes, and on a
-        light terminal the wedge was a hole.) Then the thin chevron was the previous fill,
-        one step darker in lightness (JP, 2026-09-16). When the label became the hue of the
-        node on a darker fill of itself (2026-10-06), the label colour became the line. It is
-        the light half of the same pair, so it is visible on each fill, and it is still the
-        own colour of the chip. In both cases the seam is one cell.
+        fill ahead. It is powerline's own mark for a join inside one colour, and the chip to
+        which it belongs draws a line on itself. Thus the ribbon continues without a break,
+        and the line comes from the two colours of the chip behind it. Before, the solid
+        point that was drawn bare cut a wedge of page out of the route here. (A run of near
+        hues read as dashes, and on a light terminal the wedge was a hole.) Then the thin
+        chevron was the previous fill, one step darker in lightness (JP, 2026-09-16). When
+        the label became the hue of the node on a darker fill of itself (2026-10-06), the
+        label colour became the line. Now the line is halfway between the label and the
+        fill of the previous chip (JP, 2026-10-29), so it is softer than the label and
+        still visible on the fill. On the 16-colour console, it is still the label
+        (:func:`_slot_seam`). In all cases the seam is one cell.
 
         Args:
             before: The colours of the previous chip. The point is drawn in its fill.
@@ -1198,7 +1200,7 @@ class PathLine:
             The single styled cell of the seam.
         """
         if _fills_blur(before.fill, after.fill):
-            return Text(POWERLINE_THIN, style=f"{_FLAT}{before.ink} on {after.fill}")
+            return Text(POWERLINE_THIN, style=f"{_FLAT}{_seam_line(before)} on {after.fill}")
         return Text(POWERLINE_SEP, style=f"{_FLAT}{before.fill} on {after.fill}")
 
     @staticmethod
@@ -1335,9 +1337,30 @@ def _slot_colours(hop: PathHop) -> _ChipColours:
     return _ChipColours(DIM_TWIN[ink], ink, ink)
 
 
-#: The colours of a chip, and the two prefixes of the chip styles. MeshTerm binds them when
-#: the platform switches (:func:`_bind_chips`).
+def _spectrum_seam(colours: _ChipColours) -> str:
+    """The line of a thin seam on a truecolor terminal: halfway between label and fill.
+
+    The halfway point is in OKLab (:func:`~meshterm.ui.oklab.midpoint`), so the line is
+    halfway to the eye. Refer to :meth:`PathLine._seam`.
+    """
+    return oklab.midpoint(colours.ink, colours.fill)
+
+
+def _slot_seam(colours: _ChipColours) -> str:
+    """The line of a thin seam on the 16-colour console: the label.
+
+    The console has no colour between a bright slot and its dim twin. The nearest slot to
+    the halfway point is the label for most hues, but not for all of them. For yellow on
+    brown, it is bright red. For white on light grey (a keyless chip), it is the light grey
+    of the fill, on which the line disappears. The label is correct for each chip.
+    """
+    return colours.ink
+
+
+#: The colours of a chip, the line of a thin seam, and the two prefixes of the chip styles.
+#: MeshTerm binds them when the platform switches (:func:`_bind_chips`).
 _colours_of: Callable[[PathHop], _ChipColours] = _spectrum_colours
+_seam_line: Callable[[_ChipColours], str] = _spectrum_seam
 #: The weight of a chip label: ``bold`` on a truecolor terminal.
 _WEIGHT = "bold "
 #: The prefix of each other chip style: empty on a truecolor terminal.
@@ -1353,11 +1376,12 @@ def _bind_chips(platform: Platform) -> None:
     to its bright twin. For this reason each chip style there says ``not bold``, and a label
     gets no weight. Its bright slot is its emphasis.
     """
-    global _colours_of, _WEIGHT, _FLAT
+    global _colours_of, _seam_line, _WEIGHT, _FLAT
     if platform.truecolor:
-        _colours_of, _WEIGHT, _FLAT = _spectrum_colours, "bold ", ""
+        _colours_of, _seam_line, _WEIGHT, _FLAT = _spectrum_colours, _spectrum_seam, "bold ", ""
     else:
-        _colours_of, _WEIGHT, _FLAT = _slot_colours, "not bold ", "not bold "
+        _colours_of, _seam_line = _slot_colours, _slot_seam
+        _WEIGHT, _FLAT = "not bold ", "not bold "
 
 
 def _shorten(value: str, hash_bytes: int | None) -> str:
