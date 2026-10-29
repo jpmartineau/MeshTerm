@@ -556,6 +556,11 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   colour that carries no meaning is on its way out.
 - Node names are always coloured: `name_style(name, key)` palette hue, derived from the
   node's key (its first byte — any known prefix agrees) so a rename keeps the colour.
+  The truecolor wheel keeps the old HSV wheel's hue angles at **one OKLab lightness**
+  (`theme._NODE_LIGHTNESS` 0.72, JP on a ladder, 2026-10-29): HSV ran blue names at L 0.55
+  and yellow at 0.93, so chip contrast ran APCA 19–64; now every name reads equally light
+  and every chip ~34–41. `_NODE_SPECTRUM` is the written-out table (import cost on the
+  handhelds); `tests/test_node_spectrum.py` holds it to `_spectrum_hex`.
   One rule on **every** platform; only the resolution changes (see **Platforms**).
   A surface holding only a name resolves it first (`make_name_key_resolver`); a node no
   key can place — an unresolved sender, a name two keys used within `name_overlap_days`

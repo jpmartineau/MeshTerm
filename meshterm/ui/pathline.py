@@ -178,6 +178,10 @@ PATH_INK = "pathline"
 #: the darker colour leaves the sRGB gamut, because the chroma comes down (refer to
 #: :func:`~meshterm.ui.oklab.fitted`). A clip there made the greens near ``0x50`` one
 #: colour.
+#:
+#: Since 2026-10-29, each hue of the spectrum has the same lightness
+#: (:data:`~meshterm.ui.theme._NODE_LIGHTNESS`, ``0.72``). Thus each fill of a node has the
+#: same lightness too (``0.43``), and each chip has approximately the same contrast.
 CHIP_LIGHTNESS = 0.60
 
 
@@ -390,8 +394,10 @@ def _style_hex(style: str) -> str | None:
 #: only visible at one cell, but the user *finds* it without a search: ``0.06``, which is
 #: three differences that the user can see. A tighter value (``0.035``) left wedges that
 #: the user must search for. A looser value (``0.10``) blurred pairs whose point still read
-#: clearly. ``0.05`` was a little too tight. ``0x10`` of green is ``0.026`` and blurs.
-#: ``0x10`` of red is ``0.124`` and does not blur. The two greys, which are ``0.18`` apart,
+#: clearly. ``0.05`` was a little too tight. On the HSV wheel of that time, ``0x10`` of
+#: green was ``0.026`` and blurred, and ``0x10`` of red was ``0.124`` and did not blur. On
+#: the spectrum of one lightness (2026-10-29), they are ``0.016`` and ``0.088``, with the
+#: same result. JP set the value on the HSV wheel. The two greys, which are ``0.18`` apart,
 #: keep their interlock by the metric alone.
 SEAM_BLUR = 0.06
 

@@ -23,6 +23,7 @@ from rich.console import Console
 from rich.theme import Theme
 
 from ..platforms import Platform, on_platform
+from . import oklab
 from .fontset import FONT_CODEPOINTS, FONTS
 
 MESH_THEME = Theme(
@@ -585,11 +586,10 @@ def hint_style(border_style: str) -> str:
     return name if name in MESH_THEME.styles else "muted"
 
 
-#: The per-node hue *spectrum*. The first key byte of a node maps directly onto the HSV
-#: colour wheel. ``0x00`` is red, and the full spectrum goes round to ``0xff``. The
-#: saturation and the value are fixed, and they are tuned to stay vivid and readable on
-#: the dark theme in all hues. Thus the 256 values of the first byte give 256 different
-#: hues on a truecolor terminal. The rule of the whole app is the same on each platform:
+#: The per-node hue *spectrum*. The first key byte of a node maps directly onto a colour
+#: wheel. ``0x00`` is red, and the full spectrum goes round to ``0xff``. Thus the 256
+#: values of the first byte give 256 different hues on a truecolor terminal (refer to
+#: :data:`_NODE_SPECTRUM`). The rule of the whole app is the same on each platform:
 #: the *name* of a node always has a colour. The colour comes from this wheel, and the key
 #: of the node selects it (refer to :func:`node_style`). Thus the colour is the identity
 #: of the node. It stays the same after a rename, and it is the same on each surface that
@@ -597,8 +597,77 @@ def hint_style(border_style: str) -> str:
 #: so "us" never merges into the crowd. The node lists, the chat transcript, the feed of
 #: the dashboard, and the packet viewer share this wheel. Thus one node has one colour
 #: everywhere.
+#:
+#: The hue angle and the chroma of each byte come from the HSV wheel at this saturation
+#: and value. Before 2026-10-29, the spectrum was this HSV wheel itself.
 _NODE_HUE_SAT = 0.65
 _NODE_HUE_VAL = 0.95
+
+#: The lightness of each hue of the spectrum, in OKLab ``L`` (JP, 2026-10-29). The HSV
+#: wheel has one saturation and one value, but not one lightness to the eye. Its labels went
+#: from ``L`` 0.55 (blue) to 0.93 (yellow). The fill of a path chip is the label at
+#: :data:`~meshterm.ui.pathline.CHIP_LIGHTNESS` of its lightness. Thus the contrast of a chip
+#: followed the lightness of its label: APCA ``Lc`` 19 for blue and 64 for yellow. With one
+#: lightness, each name has the same lightness to the eye, and each chip has approximately
+#: the same contrast (``Lc`` 34 to 41). JP chose the value on a ladder of wheels at 0.70 to
+#: 0.85 (``scripts/ladders/hue_ladder.py``).
+_NODE_LIGHTNESS = 0.72
+
+
+def _spectrum_hex(byte: int) -> str:
+    """Calculate the hue of one first key byte. :data:`_NODE_SPECTRUM` holds the results.
+
+    The hue angle and the chroma come from the HSV wheel (:data:`_NODE_HUE_SAT`,
+    :data:`_NODE_HUE_VAL`). Thus a node keeps the hue that it had on that wheel. The
+    lightness is :data:`_NODE_LIGHTNESS`. Where the sRGB gamut cannot hold that chroma at
+    that lightness, :func:`~meshterm.ui.oklab.fitted` lowers the chroma and keeps the hue.
+    """
+    r, g, b = colorsys.hsv_to_rgb(byte / 256, _NODE_HUE_SAT, _NODE_HUE_VAL)
+    _, a, b_ = oklab.from_hex(f"#{round(r * 255):02x}{round(g * 255):02x}{round(b * 255):02x}")
+    return oklab.to_hex(oklab.fitted((_NODE_LIGHTNESS, a, b_)))
+
+
+#: The spectrum: :func:`_spectrum_hex` for each first key byte, written out. The
+#: calculation takes approximately 14 ms on a desktop, and much more on a handheld, and
+#: :data:`_IDENTITY_STYLES` needs all 256 hues at import. Thus the values are fixed here,
+#: and ``tests/test_node_spectrum.py`` makes sure that they agree with the calculation. If
+#: you change a constant of the spectrum, write the table again from :func:`_spectrum_hex`.
+# fmt: off
+_NODE_SPECTRUM: tuple[str, ...] = (
+    "#ff716d", "#ff716b", "#ff7269", "#ff7266", "#ff7263", "#ff7360", "#fd755e", "#fb775d",  # 00
+    "#fa795b", "#f77b5a", "#f57d58", "#f47f57", "#f28155", "#ef8353", "#ee8451", "#eb864f",  # 08
+    "#e9884d", "#e78a4b", "#e58b49", "#e38d46", "#e08f44", "#df9042", "#dc923f", "#da933c",  # 10
+    "#d8953a", "#d69637", "#d39834", "#d29931", "#cf9b2d", "#cd9c29", "#ca9d25", "#c89f21",  # 18
+    "#c6a01b", "#c3a114", "#c2a20d", "#bfa400", "#bca500", "#baa600", "#b7a700", "#b5a800",  # 20
+    "#b3a900", "#b0aa00", "#aeab00", "#acac00", "#a9ad00", "#a8ad00", "#a5ae00", "#a2af00",  # 28
+    "#a1b000", "#9eb100", "#9bb200", "#98b300", "#96b300", "#93b400", "#90b500", "#8eb600",  # 30
+    "#8bb700", "#88b700", "#86b800", "#82b900", "#7fba00", "#7cba00", "#79bb00", "#76bc00",  # 38
+    "#73bc00", "#6fbd00", "#6bbe00", "#68bf00", "#65bf01", "#61c004", "#5dc007", "#5ac10a",  # 40
+    "#56c10c", "#52c20f", "#4fc210", "#4bc312", "#46c314", "#43c415", "#3ec416", "#39c518",  # 48
+    "#33c519", "#2fc51a", "#28c61b", "#21c61c", "#1bc61c", "#0fc71d", "#0bc721", "#0ac728",  # 50
+    "#09c72e", "#08c732", "#07c638", "#06c63d", "#05c640", "#03c645", "#02c64a", "#01c64d",  # 58
+    "#00c651", "#00c556", "#00c55a", "#00c55d", "#00c561", "#00c565", "#00c468", "#00c46c",  # 60
+    "#00c470", "#00c473", "#00c377", "#00c37b", "#00c37d", "#00c381", "#00c285", "#00c288",  # 68
+    "#00c28b", "#00c18e", "#00c192", "#00c195", "#00c098", "#00c09c", "#00c09e", "#00bfa1",  # 70
+    "#00bfa5", "#00bfa7", "#00beab", "#00beae", "#00beb0", "#00bdb4", "#00bdb7", "#00bcba",  # 78
+    "#00bcbc", "#00bcbf", "#00bbc2", "#00bbc6", "#0fbac9", "#18b9cb", "#21b8ce", "#28b7d1",  # 80
+    "#2db7d3", "#32b6d6", "#37b5d9", "#3ab4db", "#3fb3de", "#43b2e1", "#45b1e4", "#49b0e7",  # 88
+    "#4cafea", "#4faeec", "#52adef", "#55acf2", "#58abf5", "#5aaaf7", "#5ca9fa", "#5fa7fd",  # 90
+    "#61a6ff", "#66a5ff", "#6ba4ff", "#6ea4ff", "#71a3ff", "#75a2ff", "#77a1ff", "#7aa1ff",  # 98
+    "#7ca0ff", "#7e9fff", "#809fff", "#829eff", "#849eff", "#859dff", "#879dff", "#889cff",  # a0
+    "#899cff", "#8a9bff", "#8c9bff", "#8d9bff", "#8f9aff", "#9099ff", "#9398ff", "#9598ff",  # a8
+    "#9797ff", "#9996ff", "#9b95ff", "#9e94ff", "#9f93ff", "#a292ff", "#a491ff", "#a690ff",  # b0
+    "#a98fff", "#ab8eff", "#ad8dff", "#b08bff", "#b38aff", "#b589ff", "#b787ff", "#ba86ff",  # b8
+    "#bd84ff", "#bf83ff", "#c281ff", "#c57fff", "#c77dff", "#ca7bff", "#cd79ff", "#cf77ff",  # c0
+    "#d275ff", "#d572ff", "#d770ff", "#db6dff", "#de6aff", "#e167ff", "#e464ff", "#e761fe",  # c8
+    "#e95ffc", "#eb5efb", "#ed5cf9", "#ef5af7", "#f159f6", "#f357f4", "#f457f2", "#f558ee",  # d0
+    "#f558eb", "#f659e9", "#f75ae5", "#f75ae2", "#f85bdf", "#f85bdc", "#f95cd9", "#fa5cd6",  # d8
+    "#fa5dd3", "#fb5ecf", "#fb5ecc", "#fc5fc9", "#fd5fc5", "#fd60c2", "#fe60bf", "#fe60bc",  # e0
+    "#ff61b8", "#ff61b5", "#ff62b2", "#ff64ae", "#ff64ab", "#ff65a8", "#ff66a4", "#ff67a1",  # e8
+    "#ff689e", "#ff699a", "#ff6a97", "#ff6a94", "#ff6b91", "#ff6c8e", "#ff6c8b", "#ff6d88",  # f0
+    "#ff6d84", "#ff6e82", "#ff6e7f", "#ff6f7b", "#ff6f79", "#ff7076", "#ff7073", "#ff716f",  # f8
+)
+# fmt: on
 
 #: The same wheel at the resolution of the PicoCalc console: the six *chromatic bright*
 #: palette slots. They are in hue order, from red. Thus the index ``round(byte / 256 * 6)
@@ -623,8 +692,8 @@ _NODE_SLOT_HEXES: tuple[str, ...] = (
 def node_style(key: str) -> str:
     """The stable spectrum hue that the *key* of a node selects: the node colour from its hash.
 
-    The first key byte of the node maps directly onto the HSV colour wheel (``0x00`` is
-    red, and the wheel goes round to ``0xff``). Thus the colour is the identity of the
+    The first key byte of the node maps directly onto a colour wheel (``0x00`` is red, and
+    the wheel goes round to ``0xff``). Thus the colour is the identity of the
     node. It stays the same after a rename. Only the first byte selects it, so each prefix
     that a surface has gives the same hue. A prefix can be a 2-hex path hop, the stored
     12-hex id, or the full 64-hex public key. One node has one colour, in whatever way
@@ -632,7 +701,7 @@ def node_style(key: str) -> str:
 
     The *rule* is the only constant of the platform here, but the resolution is not. The
     regular platform uses the full spectrum (:func:`_node_style_spectrum`, 256 different
-    hues at a fixed saturation and value). The PicoCalc snaps the same hue to the nearest
+    hues at one lightness). The PicoCalc snaps the same hue to the nearest
     of the six chromatic slots of the console (:func:`_node_style_quantized`). The heat
     scale of the heard age quantizes its gradient in the same way there. MeshTerm binds
     this function when the platform switches.
@@ -657,9 +726,8 @@ def _key_byte(key: str) -> int:
 
 
 def _node_style_spectrum(key: str) -> str:
-    """The regular platform: the full 256-hue wheel at :data:`_NODE_HUE_SAT`/``_VAL``."""
-    r, g, b = colorsys.hsv_to_rgb(_key_byte(key) / 256, _NODE_HUE_SAT, _NODE_HUE_VAL)
-    return f"bold #{round(r * 255):02x}{round(g * 255):02x}{round(b * 255):02x}"
+    """The regular platform: the full 256-hue wheel at one lightness (:data:`_NODE_SPECTRUM`)."""
+    return f"bold {_NODE_SPECTRUM[_key_byte(key)]}"
 
 
 def _node_style_quantized(key: str) -> str:
@@ -679,9 +747,9 @@ def _node_style_quantized(key: str) -> str:
 #: spectrum and the six chromatic slots of the console. A surface that must *recognize*
 #: identity ink, and does not make it, matches against this set. Today this is the cursor
 #: row, where a name gives way to the white of the highlight. Both vocabularies are in the
-#: one set. Thus the answer does not depend on the platform that is bound, and the two
-#: vocabularies cannot collide: the channels of the spectrum have a maximum of ``0xf2``
-#: (value 0.95), and each console slot has ``0xff``.
+#: one set. Thus the answer does not depend on the platform that is bound. The two
+#: vocabularies do not collide: no hue of the spectrum is a console slot
+#: (``tests/test_node_spectrum.py`` makes sure of it).
 _IDENTITY_STYLES: frozenset[str] = frozenset(
     [_node_style_spectrum(f"{byte:02x}") for byte in range(256)]
     + [f"bold {hex_}" for hex_ in _NODE_SLOT_HEXES]
