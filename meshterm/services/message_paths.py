@@ -191,9 +191,10 @@ def channel_arrivals(
         The matching arrivals, oldest first. Resends of the same message are included,
         and each carries its ``resend`` counter.
     """
-    frames = repo.packet_frames_between(
-        message.created_at - _CHANNEL_WINDOW, message.created_at + _CHANNEL_WINDOW
-    )
+    # Around the arrival time, not the sender time: a sender with a wrong clock put the
+    # window hours or years away from its packets.
+    at = message.arrived_at
+    frames = repo.packet_frames_between(at - _CHANNEL_WINDOW, at + _CHANNEL_WINDOW)
     arrivals: list[Arrival] = []
     for frame in frames:
         raw = frame.raw if isinstance(frame.raw, dict) else {}
@@ -244,9 +245,12 @@ def direct_window(repo: Repository, message: ChatMessage) -> tuple[datetime, dat
       send can come before it. The window opens at the message (minus a short time for
       jitter) and goes to the next send. Retries come after the send, so all the span
       goes forward.
-    * **A received message** has the time of the sender's clock, which can be before or
-      after the time when we heard it. Its window stays centred, and it goes halfway to
-      the messages before and after it.
+    * **A received message** has its arrival time on our clock
+      (:attr:`~meshterm.core.models.ChatMessage.arrived_at`). Its packets arrived a moment
+      before it, and their copies from other relays a moment after. A row from before
+      MeshTerm kept the arrival time has only the sender time, which can be before or
+      after the packets. Thus its window stays centred, and it goes halfway to the
+      messages before and after it.
 
     The window is never narrower than :data:`_MIN_HALF_WINDOW` on each side. Thus two
     messages one second apart still each have a span to search.
@@ -259,7 +263,7 @@ def direct_window(repo: Repository, message: ChatMessage) -> tuple[datetime, dat
         ``(start, end)`` for :meth:`~meshterm.persistence.repository.Repository
         .packet_frames_between`.
     """
-    at = message.created_at
+    at = message.arrived_at
     start, end = at - _DIRECT_WINDOW, at + _DIRECT_WINDOW
     previous, following = repo.direct_message_bounds(message.peer, at, outbound=message.outbound)
     if message.outbound:
@@ -291,17 +295,28 @@ def _pick_group(groups: dict[str, list[Arrival]], message: ChatMessage) -> list[
     body. The log cannot tell which group is this message. Thus the clock decides, and it
     decides well. The packets of a send start at the time when it was composed, and they
     continue through the retries. Thus the correct group is the earliest one that did not
-    start before the message. The fallback to the nearest group covers an inbound message,
-    whose time comes from the sender's clock and can be a little after the packet that we
-    heard.
+    start before the message.
+
+    A received message with an arrival time is the opposite case. The companion gives
+    MeshTerm the message after it received the packet. Thus the correct group is the
+    latest one that started before the arrival (with :data:`_MIN_HALF_WINDOW` of slack).
+
+    The fallback to the nearest group covers a received message from before MeshTerm kept
+    the arrival time, and one that waited in the companion. Its time comes from the
+    sender's clock, and it can be a little before or after the packet that we heard.
     """
     if not groups:
         return []
-    at = message.created_at
+    at = message.arrived_at
     started = {mac: min(a.when for a in arrivals) for mac, arrivals in groups.items()}
-    after = [mac for mac, first in started.items() if first >= at]
-    if after:
-        return groups[min(after, key=lambda mac: started[mac])]
+    if not message.outbound and message.received_at is not None and not message.waited:
+        before = [mac for mac, first in started.items() if first <= at + _MIN_HALF_WINDOW]
+        if before:
+            return groups[max(before, key=lambda mac: started[mac])]
+    else:
+        after = [mac for mac, first in started.items() if first >= at]
+        if after:
+            return groups[min(after, key=lambda mac: started[mac])]
     return groups[min(started, key=lambda mac: abs(started[mac] - at))]
 
 

@@ -194,6 +194,10 @@ and in quoted text.
 | packet | One radio transmission | frame (for radio data) |
 | protocol frame | One unit of the companion protocol on USB, Bluetooth, or TCP: a command, a reply, or a push from the companion. In code that handles only this protocol, "frame" alone is permitted | packet (for this) |
 | message | A text message, direct or on a channel | |
+| sender time | The time that a message or an advert carries, from the clock of the node that sent it. It is a claim, and a node with a wrong clock makes it false | timestamp (alone) |
+| arrival time | Our clock when MeshTerm got a received message from the companion (`received_at`) | receive time |
+| clock offset | The sender time minus the arrival time. A positive offset is a clock ahead of ours | skew, drift (for this) |
+| corrected time | The arrival time that the screen shows in place of a wrong sender time, with the `?` mark | |
 | send | MeshTerm gives a message, a packet, or a command to the device | emit |
 | transmit | A radio puts a packet on the air | |
 | broadcast | Transmit to all nodes, with no destination | |

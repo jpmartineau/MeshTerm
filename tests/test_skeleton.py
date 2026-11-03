@@ -34,13 +34,13 @@ def test_advert_time_refuses_a_future_sender_clock() -> None:
     tolerance) stays: its age clamps to "now" for a short time and corrects itself. The
     usual never-heard forms (zero, absent, or garbage) still become None.
     """
-    from meshterm.core.models import ADVERT_FUTURE_SKEW_S, advert_time, utcnow
+    from meshterm.core.models import CLOCK_TOLERANCE_S, advert_time, utcnow
 
     past = int(utcnow().timestamp()) - 3600
     when = advert_time(past)
     assert when is not None and int(when.timestamp()) == past
     assert advert_time(int(utcnow().timestamp()) + 60) is not None  # normal skew
-    assert advert_time(int(utcnow().timestamp()) + ADVERT_FUTURE_SKEW_S + 60) is None
+    assert advert_time(int(utcnow().timestamp()) + CLOCK_TOLERANCE_S + 60) is None
     assert advert_time(0) is None
     assert advert_time(None) is None
     assert advert_time("garbage") is None

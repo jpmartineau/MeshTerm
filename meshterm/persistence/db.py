@@ -12,7 +12,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -165,7 +165,11 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at  TEXT    NOT NULL,
     scope       TEXT,             -- outbound floods: the region it was sent under, '*' for
                                   --   unscoped, NULL where it was never known
-    author      TEXT              -- a room post: its author's key prefix (peer is the room)
+    author      TEXT,             -- a room post: its author's key prefix (peer is the room)
+    received_at TEXT,             -- inbound: our clock when we got it from the companion
+                                  --   (created_at is the sender's clock); NULL outbound/old
+    waited      INTEGER NOT NULL DEFAULT 0  -- inbound: it came out of the companion's queue
+                                  --   at connect, so it arrived some time before received_at
 );
 
 CREATE INDEX IF NOT EXISTS idx_traces_run ON traces(run_id);
@@ -396,6 +400,17 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # Rows from before this column are NULL too: when MeshTerm stored such a post, the
         # author was lost on the way in, and nothing on disk can bring it back.
         conn.execute("ALTER TABLE messages ADD COLUMN author TEXT")
+    if "received_at" not in message_cols:
+        # v20 -> v21: the arrival time of a received message. ``created_at`` holds the time
+        # that the sender put on the message, from its own clock, and a node with a wrong
+        # clock makes that time false by hours or by years. ``received_at`` is our clock
+        # when MeshTerm got the message from the companion. ``waited`` is 1 when the message
+        # came out of the queue of the companion at connect, so that it arrived at an
+        # unknown time before that. Old rows keep NULL and 0: MeshTerm did not keep the
+        # time, and nothing can bring it back. Each query uses ``created_at`` for them, as
+        # before (refer to Repository._ARRIVED_AT).
+        conn.execute("ALTER TABLE messages ADD COLUMN received_at TEXT")
+        conn.execute("ALTER TABLE messages ADD COLUMN waited INTEGER NOT NULL DEFAULT 0")
 
     stored = conn.execute("SELECT value FROM schema_meta WHERE key = 'version'").fetchone()
     if stored is not None and int(stored["value"]) < 19:

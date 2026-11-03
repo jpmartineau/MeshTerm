@@ -49,10 +49,11 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from ..core.channel_probe import ChannelSlot, probe_channel_slots
+from ..core.models import clock_tolerance_s, utcnow
 
 if TYPE_CHECKING:
     from ..context import AppContext
@@ -246,6 +247,11 @@ class DeviceState:
         later reception. A contact that we never heard stays ``None`` and shows ``never``.
         This step is best effort: if a history read fails, the method returns the list
         without the merge. It never blocks the read.
+
+        A time more than the clock tolerance in the future is not evidence, and the merge
+        ignores it. The messages stored before MeshTerm kept the arrival time have only the
+        sender time, and a sender with a clock that is ahead wrote a time in the future
+        there. If the merge took it, it pinned the contact at "heard now".
         """
         try:
             heard = self._ctx.repo.last_heard_by_node()
@@ -253,6 +259,7 @@ class DeviceState:
         except Exception as exc:  # noqa: BLE001 - the history must never block a contacts read
             self._ctx.log.debug("devstate: last-heard merge skipped: %s", exc)
             return contacts
+        limit = utcnow() + timedelta(seconds=clock_tolerance_s())
         merged: list[Contact] = []
         for contact in contacts:
             ident = (contact.public_key or contact.key_prefix or "").lower()
@@ -267,7 +274,7 @@ class DeviceState:
                 for peer, when in messaged.items()
                 if ident and peer and (ident.startswith(peer) or peer.startswith(ident))
             ]
-            known = [a for a in (_aware(s) for s in stamps) if a is not None]
+            known = [a for a in (_aware(s) for s in stamps) if a is not None and a <= limit]
             latest = max(known) if known else None
             if latest is not None and latest != contact.last_seen:
                 contact = replace(contact, last_seen=latest)

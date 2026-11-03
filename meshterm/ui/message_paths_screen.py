@@ -58,7 +58,7 @@ from typing import TYPE_CHECKING
 
 from rich.text import Text
 
-from ..core.models import ChatMessage
+from ..core.models import ChatMessage, clock_tolerance_s
 from ..services.message_paths import Arrival
 from .pathgraph import PathLayer, render_path_graph, revisited_hops
 from .pathline import (
@@ -308,7 +308,13 @@ class MessagePathsScreen(Screen):
         quoted = self._message.text.replace("\n", " ")
         if len(quoted) > 64:
             quoted = quoted[:63] + "…"
-        stamp = Text(self._message.created_at.astimezone().strftime("%b %d %H:%M"), style="muted")
+        # The time that the transcript shows, with the same ? mark when the clock of the
+        # sender was wrong (refer to ChatMessage.corrected).
+        tolerance = clock_tolerance_s()
+        shown = self._message.shown_at(tolerance).astimezone()
+        stamp = Text(shown.strftime("%b %d %H:%M"), style="muted")
+        if self._message.corrected(tolerance):
+            stamp.append("?", style="warn")
         stamp.append("  ·  ", style="muted")
         stamp.append(self._summary, style="muted" if self._matched else "warn")
 

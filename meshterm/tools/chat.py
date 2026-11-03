@@ -47,6 +47,7 @@ from ..core.models import (
     Contact,
     Conversation,
     NodeResolver,
+    clock_tolerance_s,
     is_direct_messageable,
     is_room,
 )
@@ -75,6 +76,8 @@ from ..ui.widgets import (
 from .base import Tool, ToolResult, register
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from ..core.channel_probe import ChannelSlot
     from ..ui.report import Facts, Listing
 
@@ -745,7 +748,9 @@ def _recency_key(conversation: Conversation, lasts: dict) -> tuple:
     """
     last: ChatMessage | None = lasts.get(conversation.key)
     if last is not None:
-        return (0, -last.created_at.timestamp())
+        # The arrival time, not the sender time. A sender with a clock that was behind put
+        # its conversation under old ones, where a new message was easy to miss.
+        return (0, -last.arrived_at.timestamp())
     return (1, conversation.label.casefold())
 
 
@@ -986,8 +991,9 @@ def _title(
     # The relative age lane (right-aligned) is between the badge and the message text. Thus
     # the ages are in one neat column, and all the previews start at the same position. A
     # last message that names us has our white ``★`` at the left of its age, the same as
-    # the transcript has it at the left of the time (refer to ChatScreen._body_lines).
-    age = _ago(last.created_at) if last is not None else ""
+    # the transcript has it at the left of the time (refer to ChatScreen._body_lines). The
+    # age is from the arrival time, as the order of the list is (refer to _recency_key).
+    age = _ago(last.arrived_at) if last is not None else ""
     lane = f"  {age:>{_AGE_WIDTH}}"
     if age and last is not None and _names_us(last, us):
         mark = len(lane) - len(age) - 2  # the mark, a space, then the age
@@ -1208,14 +1214,32 @@ def _message_columns(*, author_lane: bool = False) -> tuple:
     conversation is not a room), so that one command answers in one shape. For the
     transcript of a room, ``author_lane`` also draws it as ``AUTHOR``, because there it is
     the column that the user wants to see.
+
+    ``TIME`` is the time that the transcript of the menu shows: the sender time, or the
+    arrival time with a ``?`` after it when the clock of the sender was wrong (refer to
+    :meth:`~meshterm.core.models.ChatMessage.corrected`). The document gives the facts
+    instead: ``created_at`` (the time that the message carries), ``received_at`` (our
+    clock when MeshTerm got it, ``null`` for our own messages and old rows), and
+    ``clock_corrected``.
     """
     from dataclasses import replace
 
     from ..ui import fields
 
     peer = fields.plain_only(fields.name("conversation", "PEER"))
+    when = fields.plain_only(fields.when("shown_at", "TIME"))
+    age = when.lanes[0]
+
+    def shown(value: tuple[datetime, bool]) -> str:
+        # A space where there is no mark, so that the right-aligned times stay in a column.
+        at, corrected = value
+        return age.render(at) + ("?" if corrected else " ")
+
     return (
-        fields.when("created_at", "TIME"),
+        fields.hidden("created_at"),
+        fields.hidden("received_at"),
+        fields.hidden("clock_corrected"),
+        replace(when, lanes=(replace(age, render=shown),)),
         fields.word("direction", "DIR"),
         # One column for the other end of the conversation, whichever type it is. The
         # document keeps the two types apart, because a parser cannot tell a channel from a
@@ -1292,6 +1316,7 @@ def _transcript(
     """
     from ..ui.report import Listing
 
+    tolerance = clock_tolerance_s()
     rows = []
     for message in messages:
         channel = (
@@ -1299,9 +1324,13 @@ def _transcript(
             if message.is_channel
             else None
         )
+        corrected = message.corrected(tolerance)
         rows.append(
             {
                 "created_at": message.created_at,
+                "received_at": message.received_at,
+                "clock_corrected": corrected,
+                "shown_at": (message.shown_at(tolerance), corrected),
                 "direction": "out" if message.outbound else "in",
                 "conversation": message.peer_name or message.peer or None,
                 "node": None

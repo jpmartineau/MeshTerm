@@ -87,6 +87,19 @@ _INSERT_OBSERVATION = (
     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 
+#: The SQL form of :attr:`~meshterm.core.models.ChatMessage.arrived_at`: the best time on
+#: our clock for when a ``messages`` row came to us. The arrival time, if it is known. For a
+#: message that waited in the companion, the earlier of the sender time and the arrival
+#: time. For our own messages and the rows from before MeshTerm kept the arrival time,
+#: ``created_at``. Each query about our side (heard times, the order of conversations,
+#: channel activity) uses this, never ``created_at`` alone, because a node with a wrong
+#: clock writes a false ``created_at``. The two columns hold UTC ISO-8601 text, so the
+#: comparison of the text is a comparison of the times (to the second).
+_ARRIVED_AT = (
+    "COALESCE(CASE WHEN waited = 1 AND created_at < received_at "
+    "THEN created_at ELSE received_at END, created_at)"
+)
+
 
 def _packet_raw(row: sqlite3.Row) -> dict | None:
     """Rebuild the minimum raw payload with which MeshTerm reads a stored ``packet`` row.
@@ -2037,7 +2050,7 @@ class Repository:
         # -- direct messages: totals, our share, and the latest, matched by prefix ----
         dm_rows = self._conn.execute(
             "SELECT peer, COUNT(*) AS total, SUM(outbound) AS sent, "
-            "MAX(created_at) AS last FROM messages "
+            f"MAX({_ARRIVED_AT}) AS last FROM messages "
             "WHERE is_channel = 0 AND peer IS NOT NULL GROUP BY peer"
         ).fetchall()
 
@@ -2116,8 +2129,8 @@ class Repository:
         cur = self._conn.execute(
             "INSERT INTO messages "
             "(run_id, outbound, is_channel, channel_id, channel_idx, peer, peer_name, text, "
-            "snr, acked, created_at, scope, author) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "snr, acked, created_at, scope, author, received_at, waited) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run_id,
                 int(msg.outbound),
@@ -2132,6 +2145,8 @@ class Repository:
                 msg.created_at.isoformat(),
                 msg.scope,
                 msg.author.lower() if msg.author else None,
+                msg.received_at.isoformat() if msg.received_at else None,
+                int(msg.waited),
             ),
         )
         self._conn.commit()
@@ -2287,6 +2302,10 @@ class Repository:
 
         Outbound messages are not included: to send to a node is not to hear from it.
 
+        The time is the arrival time (:data:`_ARRIVED_AT`), not the sender time. The sender
+        time comes from the clock of the sender. When this method read it, one message from
+        a node whose clock was a year ahead showed that node as "heard now" for a year.
+
         Returns:
             The latest time of an inbound message, keyed by the stored peer prefix (in
             lowercase, as :meth:`record_chat_message` writes it), in aware UTC. The prefix
@@ -2294,7 +2313,7 @@ class Repository:
             match it as a prefix, not by equality.
         """
         rows = self._conn.execute(
-            "SELECT peer, MAX(created_at) AS last FROM messages "
+            f"SELECT peer, MAX({_ARRIVED_AT}) AS last FROM messages "
             "WHERE is_channel = 0 AND outbound = 0 AND peer IS NOT NULL GROUP BY peer"
         ).fetchall()
         return {row["peer"]: datetime.fromisoformat(row["last"]) for row in rows}
@@ -2325,9 +2344,14 @@ class Repository:
         version of this clamp gave a received message an empty window. In one direction,
         the stamps are consistent, so the neighbours mean what they say.
 
+        The times are arrival times (:data:`_ARRIVED_AT`). For a received message that has
+        one, our clock stamps it, as it stamps a send. The direction rule stays, because
+        each row from before MeshTerm kept the arrival time still has only the sender time.
+
         Args:
             peer: The key prefix of the contact, as :meth:`record_chat_message` stores it.
-            when: The time of the message.
+            when: The arrival time of the message
+                (:attr:`~meshterm.core.models.ChatMessage.arrived_at`).
             outbound: The direction in which to look: the direction of the message.
 
         Returns:
@@ -2338,14 +2362,14 @@ class Repository:
         key = (peer or "").lower()
         args = (key, int(outbound), when.isoformat())
         row = self._conn.execute(
-            "SELECT MAX(created_at) AS edge FROM messages "
-            "WHERE is_channel = 0 AND peer = ? AND outbound = ? AND created_at < ?",
+            f"SELECT MAX({_ARRIVED_AT}) AS edge FROM messages "
+            f"WHERE is_channel = 0 AND peer = ? AND outbound = ? AND {_ARRIVED_AT} < ?",
             args,
         ).fetchone()
         prev = _as_when(row["edge"] if row else None)
         row = self._conn.execute(
-            "SELECT MIN(created_at) AS edge FROM messages "
-            "WHERE is_channel = 0 AND peer = ? AND outbound = ? AND created_at > ?",
+            f"SELECT MIN({_ARRIVED_AT}) AS edge FROM messages "
+            f"WHERE is_channel = 0 AND peer = ? AND outbound = ? AND {_ARRIVED_AT} > ?",
             args,
         ).fetchone()
         return prev, _as_when(row["edge"] if row else None)
@@ -2364,9 +2388,9 @@ class Repository:
         timestamps of the window, and Python puts them in buckets (a few hours of
         messages, so the row set stays small).
 
-        The timestamps are compared as strings. ``utcnow().isoformat()`` writes each
-        ``created_at`` (a fixed-width UTC ISO-8601 form). Thus the lexicographic order is
-        the chronological order, and the window cutoff does not have to parse each row.
+        The timestamps are the arrival times (:data:`_ARRIVED_AT`), compared as strings.
+        Each is a UTC ISO-8601 form. Thus the lexicographic order is the chronological
+        order, and the window cutoff does not have to parse each row.
         Messages from before the history had identity keys (a ``NULL`` ``channel_id``:
         refer to :meth:`backfill_channel_ids`) have no channel to count under, and the
         method skips them.
@@ -2378,25 +2402,27 @@ class Repository:
         now = utcnow()
         cutoff = now - ACTIVITY_WINDOW
         bucket_span = ACTIVITY_WINDOW / ACTIVITY_BUCKETS
+        # The arrival times (_ARRIVED_AT), not the sender times. A sender with a wrong
+        # clock put its messages outside the window, or in the bucket of "now" for months.
         rows = self._conn.execute(
-            "SELECT channel_id, COUNT(*) AS total, MAX(created_at) AS last_at "
+            f"SELECT channel_id, COUNT(*) AS total, MAX({_ARRIVED_AT}) AS last_at "
             "FROM messages WHERE is_channel = 1 AND channel_id IS NOT NULL "
             "GROUP BY channel_id"
         ).fetchall()
 
         histograms: dict[str, list[int]] = {}
         recent_rows = self._conn.execute(
-            "SELECT channel_id, created_at FROM messages "
-            "WHERE is_channel = 1 AND channel_id IS NOT NULL AND created_at >= ?",
+            f"SELECT channel_id, {_ARRIVED_AT} AS arrived_at FROM messages "
+            f"WHERE is_channel = 1 AND channel_id IS NOT NULL AND {_ARRIVED_AT} >= ?",
             (cutoff.isoformat(),),
         ).fetchall()
         for row in recent_rows:
             try:
-                created_at = datetime.fromisoformat(row["created_at"])
+                arrived_at = datetime.fromisoformat(row["arrived_at"])
                 # Bucket by age, so that the histogram comes out newest first (bucket 0 has
                 # the current five minutes). This is the order that the sparkline widget
                 # expects.
-                idx = min(ACTIVITY_BUCKETS - 1, int((now - created_at) / bucket_span))
+                idx = min(ACTIVITY_BUCKETS - 1, int((now - arrived_at) / bucket_span))
             except (TypeError, ValueError):
                 continue  # a malformed or naive timestamp does not go in a bucket
             histogram = histograms.setdefault(row["channel_id"], [0] * ACTIVITY_BUCKETS)
@@ -2525,6 +2551,8 @@ class Repository:
             snr=row["snr"],
             acked=None if row["acked"] is None else bool(row["acked"]),
             created_at=datetime.fromisoformat(row["created_at"]),
+            received_at=_as_when(row["received_at"]) if "received_at" in row.keys() else None,
+            waited=bool(row["waited"]) if "waited" in row.keys() else False,
             row_id=row["id"],
             scope=row["scope"] if "scope" in row.keys() else None,
             author=row["author"] if "author" in row.keys() else None,

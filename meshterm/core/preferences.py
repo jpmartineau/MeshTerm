@@ -54,7 +54,7 @@ from .advert_store import DEFAULT_QUIET_S, QUIET_CHOICES_S
 from .atomicwrite import write_atomically
 from .courier_store import DONE_CAP
 from .geo import DEFAULT_VIEW_FRACTION
-from .models import NAME_OVERLAP_DAYS
+from .models import CLOCK_TOLERANCE_S, NAME_OVERLAP_DAYS
 from .watch_store import ALERT_CAP, DEFAULT_SILENCE_HOURS, OFF, SILENCE_CHOICES_H
 
 if sys.version_info >= (3, 11):
@@ -519,6 +519,21 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         minimum=0,
         maximum=3650,
         unit="days",
+    ),
+    PrefSpec(
+        key="clock_tolerance_s",
+        label="Clock tolerance",
+        help="How far a node's clock can be off before its times are wrong",
+        group="Display",
+        value_type="int",
+        # A message whose sender time is farther than this from its arrival shows the
+        # arrival time, with a ? mark. An advert time farther than this in the future is
+        # refused. Five minutes: a node with no time source drifts by seconds each day, and
+        # a larger error is a clock that nobody set.
+        default=CLOCK_TOLERANCE_S,
+        minimum=30,
+        maximum=86400,
+        unit="s",
     ),
     PrefSpec(
         key="section_spacing_min_rows",

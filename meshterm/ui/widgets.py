@@ -1219,6 +1219,43 @@ def format_age(secs: float | None) -> str:
     return f"{int(secs // 604800)}w"
 
 
+#: The units of :func:`format_offset`, largest first: (suffix, seconds).
+_OFFSET_UNITS: tuple[tuple[str, int], ...] = (
+    ("y", 365 * 86400),
+    ("w", 604800),
+    ("d", 86400),
+    ("h", 3600),
+    ("m", 60),
+    ("s", 1),
+)
+
+
+def format_offset(secs: float) -> str:
+    """How far a clock is off, in words: ``3h 12m behind``, ``45s ahead``, ``1y 44w behind``.
+
+    The largest unit, and the next unit when it is not zero, because one unit alone hides
+    too much: a clock that is 1 h 59 m behind is not "1h" behind. A positive value is a
+    clock ahead of ours.
+
+    Args:
+        secs: The sender time minus our time, in seconds.
+
+    Returns:
+        The size and the direction, or ``in sync`` for less than one second.
+    """
+    left = int(abs(secs))
+    if left == 0:
+        return "in sync"
+    parts: list[str] = []
+    for suffix, size in _OFFSET_UNITS:
+        count, left = divmod(left, size)
+        if count:
+            parts.append(f"{count}{suffix}")
+        if len(parts) == 2 or (parts and not count):
+            break
+    return f"{' '.join(parts)} {'ahead' if secs > 0 else 'behind'}"
+
+
 def body_heading(title: str, note: str = "") -> Text:
     """A section heading in a screen body: an accent title, and an optional muted ``  ·  note``.
 

@@ -3996,8 +3996,13 @@ class MeshCoreDevice(Device):
 
             return handler
 
+        # True while the pump empties the queue that the companion kept before we connected
+        # (refer to ``_message_pump``). A message from that queue arrived at an unknown time,
+        # so it is marked ``waited``.
+        backlog = [True]
+
         def message_handler(event) -> None:  # noqa: ANN001
-            msg = message_from_event(event)
+            msg = message_from_event(event, waited=backlog[0])
             if msg is not None:
                 on_event(MeshEvent.message_event(msg))
 
@@ -4057,7 +4062,9 @@ class MeshCoreDevice(Device):
         # Do the pull of received messages ourselves (refer to ``_message_pump``). MeshCore
         # never pushes message bodies, so without this pull, a send works but nothing is
         # received.
-        stop_pump = self._message_pump(mc, subs, subscribe)
+        stop_pump = self._message_pump(
+            mc, subs, subscribe, on_backlog_done=lambda: backlog.__setitem__(0, False)
+        )
 
         def unsubscribe() -> None:
             stop_pump()
@@ -4071,7 +4078,9 @@ class MeshCoreDevice(Device):
 
         return unsubscribe
 
-    def _message_pump(self, mc, subs: list, subscribe) -> Unsubscribe:  # type: ignore[no-untyped-def]
+    def _message_pump(  # type: ignore[no-untyped-def]
+        self, mc, subs: list, subscribe, *, on_backlog_done: Callable[[], None] | None = None
+    ) -> Unsubscribe:
         """Pull the received messages from the companion continuously (the RX pull model).
 
         MeshCore does not push message bodies unsolicited. The device sends a
@@ -4091,11 +4100,20 @@ class MeshCoreDevice(Device):
         A lock serializes the drains, so the triggers that overlap never send concurrent
         ``get_msg`` commands.
 
+        The first drain is the **backlog**: the messages that the companion kept while no
+        app was connected. The companion gives no time of arrival with them, so their
+        arrival time is unknown. When the first drain ends, the pump calls
+        ``on_backlog_done``. Thus the handler marks only the messages of the backlog as
+        ``waited``. A message that arrives on the air during the first drain is also
+        marked. The cost is small: for such a message, only a sender time in the future
+        counts as a wrong clock.
+
         Args:
             mc: The connected ``MeshCore`` client.
             subs: The subscription list to which this method adds the ``MESSAGES_WAITING``
                 subscription (so it is torn down with the others).
             subscribe: The ``subscribe`` callable of the client.
+            on_backlog_done: Called one time, when the first drain ends.
 
         Returns:
             A callable with no arguments that stops the pump (its poll task and drains).
@@ -4123,6 +4141,13 @@ class MeshCoreDevice(Device):
         def schedule_drain(_event=None) -> None:  # noqa: ANN001 - MESSAGES_WAITING callback
             asyncio.ensure_future(drain())
 
+        async def drain_backlog() -> None:
+            try:
+                await drain()
+            finally:
+                if on_backlog_done is not None:
+                    on_backlog_done()
+
         async def poll_loop() -> None:
             while not stop.is_set():
                 try:
@@ -4133,7 +4158,8 @@ class MeshCoreDevice(Device):
         waiting = getattr(EventType, "MESSAGES_WAITING", None)
         if waiting is not None:
             subs.append(subscribe(waiting, schedule_drain))
-        schedule_drain()  # a first, immediate drain of all that is already in the queue
+        # A first, immediate drain of all that is already in the queue: the backlog.
+        asyncio.ensure_future(drain_backlog())
         poll_task = asyncio.ensure_future(poll_loop())
 
         def stop_pump() -> None:
@@ -5838,7 +5864,7 @@ def packet_observation_from_event(event) -> Observation | None:  # noqa: ANN001
     )
 
 
-def message_from_event(event) -> Message | None:  # noqa: ANN001
+def message_from_event(event, *, waited: bool = False) -> Message | None:  # noqa: ANN001
     """Map a meshcore ``CONTACT_MSG_RECV`` or ``CHANNEL_MSG_RECV`` event into a message.
 
     Direct messages have a ``pubkey_prefix`` sender. Channel messages have a
@@ -5853,6 +5879,8 @@ def message_from_event(event) -> Message | None:  # noqa: ANN001
 
     Args:
         event: A meshcore message event (anything that has a ``payload`` mapping).
+        waited: Whether the message came out of the queue of the companion at connect
+            (refer to :attr:`~meshterm.core.models.Message.waited`).
 
     Returns:
         The parsed :class:`Message`, or ``None`` if the payload had no text body.
@@ -5876,6 +5904,7 @@ def message_from_event(event) -> Message | None:  # noqa: ANN001
         is_channel=is_channel,
         sender_timestamp=sender_ts,
         snr=_as_float(payload.get("SNR", payload.get("snr"))),
+        waited=waited,
         author=author,
         raw=payload,
     )

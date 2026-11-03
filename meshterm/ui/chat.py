@@ -29,7 +29,14 @@ from ..core import links
 from ..core.channels import MENTION, split_channel_sender
 from ..core.connection import ContactNotOnDeviceError
 from ..core.events import EventKind, MeshEvent
-from ..core.models import ChatMessage, Contact, Conversation, Message, utcnow
+from ..core.models import (
+    ChatMessage,
+    Contact,
+    Conversation,
+    Message,
+    clock_tolerance_s,
+    utcnow,
+)
 from ..core.regions import WILDCARD
 from ..platforms import Platform, on_platform
 from .compose import MentionEditor
@@ -48,6 +55,7 @@ from .widgets import (
     DESTINATION,
     ORIGIN,
     author_chip,
+    format_offset,
     hop_chip,
     mention_hop,
     mention_mark,
@@ -61,6 +69,11 @@ if TYPE_CHECKING:
     from .map_screen import Locator
     from .node_detail_screen import ContactPages
 
+
+#: The mark after a corrected time: the clock of the sender was wrong, so the line shows
+#: the arrival time instead (JP, 2026-11-02). It is the ``?`` warn mark of the app, and it
+#: takes the first of the two cells after the time, so the bodies stay in one column.
+_CORRECTED = ("?", "warn")
 
 #: The delivery marks for a *resolved* outbound direct message, at the end of its line:
 #: acknowledged, or transmitted but not acknowledged (^R can retry it). These are the
@@ -367,6 +380,8 @@ class ChatScreen(Screen):
         # animation step of a spinner) renders again only the rows that changed. Refer to
         # _render_grouped.
         self._render_cache: dict | None = None
+        # The clock tolerance of the last render: which times show as corrected.
+        self._tolerance_s = clock_tolerance_s()
         # Strong references to the sends, resends, and spinner tickers that a key handler
         # starts. The event loop holds only a *weak* reference. Thus the garbage collector
         # can remove a task that nothing else names while it runs: the result is a message
@@ -633,7 +648,8 @@ class ChatScreen(Screen):
 
         A change of the locks draws all of the transcript again, because the sender chip of
         a locked contact has a padlock (refer to :meth:`_group_header`). The locks change
-        rarely: ^K here, or the lock row of the node page of an author.
+        rarely: ^K here, or the lock row of the node page of an author. A change of the
+        clock tolerance does the same, because it decides which times are corrected.
 
         Most importantly, this works for each message. It is not a cached prefix that
         stops at the first such row. Thus a message stays cheap to draw again, however far
@@ -647,11 +663,14 @@ class ChatScreen(Screen):
         cache = self._render_cache
         spacing = self.section_spacing()
         locks = self._pages.locked_keys() if self._pages is not None else frozenset()
+        tolerance = clock_tolerance_s()
+        self._tolerance_s = tolerance
         if (
             cache is not None
             and cache["width"] == width
             and cache["spacing"] == spacing
             and cache["locks"] == locks
+            and cache["tolerance"] == tolerance
         ):
             cached_ids = cache["ids"]
             cached_acked = cache["acked"]
@@ -683,7 +702,10 @@ class ChatScreen(Screen):
 
         for idx in range(total):
             message = messages[idx]
-            stamp = message.created_at.astimezone()
+            # The time that the message shows: its sender time, or its arrival time when
+            # the clock of the sender is wrong. The day divider follows the same time, so
+            # a sender with a wrong clock never puts a day from another year in the middle.
+            stamp = message.shown_at(tolerance).astimezone()
             day = stamp.date()
             sender, body = self._sender_and_body(message)
             # Group by (are-we-the-sender, display name), not by the name alone. Thus our
@@ -754,6 +776,7 @@ class ChatScreen(Screen):
             "width": width,
             "spacing": spacing,
             "locks": locks,
+            "tolerance": tolerance,
             "ids": ids,
             "acked": ackeds,
             "selected": selecteds,
@@ -788,7 +811,7 @@ class ChatScreen(Screen):
             return None
 
         def group_of(message: ChatMessage) -> tuple:
-            day = message.created_at.astimezone().date()
+            day = message.shown_at(self._tolerance_s).astimezone().date()
             return (day, message.outbound, self._sender_and_body(message)[0])
 
         group = group_of(messages[selected])
@@ -872,8 +895,15 @@ class ChatScreen(Screen):
         body gets a QR code under it. The codes are side by side, at the indent of the
         body. Thus the user can open a link from the handheld on a phone, and does not
         have to type it.
+
+        When the clock of the sender is wrong (:meth:`~meshterm.core.models.ChatMessage.corrected`),
+        the line shows the arrival time, with the ``?`` mark after it. On the selected
+        message, a line under the body then gives the time that the sender's clock wrote,
+        and how far that clock is off (JP, 2026-11-02).
         """
-        stamp = message.created_at.astimezone()
+        tolerance = self._tolerance_s
+        corrected = message.corrected(tolerance)
+        stamp = message.shown_at(tolerance).astimezone()
         prefix = Text()
         prefix.append("❯ " if selected else "  ", style="cursor" if selected else None)
         if self._names_us(body):
@@ -881,7 +911,12 @@ class ChatScreen(Screen):
             prefix.append(" ")
         else:
             prefix.append("  ")
-        prefix.append(f"{stamp:%H:%M}  ", style="cursor" if selected else "muted")
+        prefix.append(f"{stamp:%H:%M}", style="cursor" if selected else "muted")
+        if corrected:
+            prefix.append(*_CORRECTED)
+        else:
+            prefix.append(" ")
+        prefix.append(" ")
         body_text = self._body_text(body, message, selected=selected)
         whole = [m.span() for m in _WORD.finditer(body_text.plain) if links.urls(m.group())]
         # A mention is a chip, and a chip never breaks across two lines.
@@ -889,6 +924,16 @@ class ChatScreen(Screen):
         lines = render_hanging(
             prefix, body_text, width, indent=prefix.cell_len, whole=whole, gutter=_URL_GUTTER
         )
+        if selected and corrected and message.clock_offset_s is not None:
+            sent = message.created_at.astimezone()
+            note = Text()
+            note.append(f"{_CORRECTED[0]} ", style=_CORRECTED[1])
+            note.append(
+                f"its clock: {sent:%Y-%m-%d %H:%M} · {format_offset(message.clock_offset_s)}",
+                style="muted",
+            )
+            indent = prefix.cell_len
+            lines += render_hanging(Text(" " * indent), note, width, indent=indent)
         urls = links.urls(body) if _URL_CODES else []
         if urls:
             lines += render_lines(qr_strip(urls, width, indent=prefix.cell_len), width)
@@ -1386,7 +1431,7 @@ class ChatScreen(Screen):
         starts: list[int] = []
         prev_day = None
         for i, message in enumerate(self._messages):
-            day = message.created_at.astimezone().date()
+            day = message.shown_at(self._tolerance_s).astimezone().date()
             if day != prev_day:
                 starts.append(i)
                 prev_day = day

@@ -432,6 +432,18 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
 
 - Status marks (single-width, themed): `✓` ok · `✗` err · `⚠`/`?` warn · `●` unread/
   unacked (err) · `○` acked/empty (muted). Never `✔`, `✖`, `✅`, `❌` as status.
+- **A corrected time wears `?`** (warn), in the cell after it (JP, 2026-11-02). A
+  received message keeps two times: the *sender time* (the sender's clock, a claim) and
+  the *arrival time* (ours, `received_at`). Past `clock_tolerance_s` apart the sender
+  time is wrong, and the line shows the arrival time instead, `12:31?` — never a guess at
+  the real send. A room post or a message from the companion's queue (`waited`) arrived
+  at an unknown time, so only a sender time in the future convicts it. On the picked
+  message a line under the body says what the sender's clock wrote and how far off it is
+  (`? its clock: 2024-01-01 03:12 · 1y 44w behind`). Everything about *our* side —
+  heard times, list order, activity, the packet-log search — reads the arrival time
+  (`ChatMessage.arrived_at`, SQL `_ARRIVED_AT`), never `created_at` alone. The CLI's
+  plain `TIME` carries the same `?`; its JSON gives `created_at`, `received_at`, and
+  `clock_corrected`.
 - Node types (shared with the map): `★` you (white) · `●` companion · `▲` repeater ·
   `■` room server · `◉` sensor · `○` unknown. **Every type mark is white** (JP,
   2026-10-14; they were pink, violet, white, orange): the shape is the type. Each keeps its

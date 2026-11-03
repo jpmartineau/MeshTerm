@@ -239,14 +239,30 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-#: The maximum time (in seconds) that an advert timestamp can be in the future. After this
-#: limit, MeshTerm refuses the timestamp as false. The clock of the sender writes the
-#: timestamp of an advert, and a mesh node with no time source can be wrong by minutes, or
-#: by months. A skew of a few minutes is usual and causes no problem (the age clamps to
-#: "now" until the real time catches up). But if MeshTerm accepts a larger skew, that skew
-#: pins the contact at the top of each list sorted by heard time. The contact then shows
-#: "now" for as long as the false timestamp stays ahead of the wall clock.
-ADVERT_FUTURE_SKEW_S = 300
+#: The default of the ``clock_tolerance_s`` preference: how far (in seconds) the clock of a
+#: node can be from our clock before MeshTerm calls its time wrong. The clock of the sender
+#: writes the time in an advert and in a message, and a mesh node with no time source can be
+#: wrong by minutes, or by months. A difference of a few minutes is usual and causes no
+#: problem (an age clamps to "now" until the real time catches up). A larger difference is
+#: a fault. An advert time past this limit in the future pins the contact at the top of each
+#: list sorted by heard time, and a message time past it puts the message on the wrong day.
+#: Read the value through :func:`clock_tolerance_s`, never this constant.
+CLOCK_TOLERANCE_S = 300
+
+
+def clock_tolerance_s() -> int:
+    """The ``clock_tolerance_s`` preference: how far a clock can be off and still be correct.
+
+    The import is here and not at the top, because :mod:`~meshterm.core.preferences`
+    imports this module for its defaults.
+
+    Returns:
+        The tolerance in seconds.
+    """
+    from . import preferences
+
+    return int(preferences.current().clock_tolerance_s)
+
 
 #: How close together (in days) two keys must use one name before MeshTerm calls the name
 #: unsure. A name is a label that the owner of a key chooses, and a new key for the same
@@ -267,7 +283,7 @@ def advert_time(last_advert: object) -> datetime | None:
     both go through it. Thus the plausibility rule is in one place. The clock of the node
     that advertised writes the value, so the value is hearsay. A value that is zero, absent,
     or garbage means "never heard". A timestamp that is more than
-    :data:`ADVERT_FUTURE_SKEW_S` ahead of our clock comes from a sender clock that is set
+    :func:`clock_tolerance_s` ahead of our clock comes from a sender clock that is set
     incorrectly, and the function refuses it in the same way. Callers that have their own
     evidence of reception (stored observations) use that evidence to fill the ``None``
     result. A true "when we heard it" is better than a false "heard in the future".
@@ -287,7 +303,7 @@ def advert_time(last_advert: object) -> datetime | None:
     if seconds <= 0:
         return None
     when = datetime.fromtimestamp(seconds, tz=timezone.utc)
-    if when > utcnow() + timedelta(seconds=ADVERT_FUTURE_SKEW_S):
+    if when > utcnow() + timedelta(seconds=clock_tolerance_s()):
         return None
     return when
 
@@ -473,6 +489,11 @@ class Message:
             room. A post from the backlog comes long after that time.
         snr: The signal-to-noise ratio (dB) of the reception, if reported.
         received_at: When the companion delivered the message to us.
+        waited: Whether the message came out of the queue of the companion when MeshTerm
+            connected. The companion keeps each message that arrives while no app is
+            connected, and it gives no time of arrival with it. Thus the message arrived at
+            an unknown time before :attr:`received_at`, and only a sender time in the
+            future is proof of a wrong clock.
         author: For a room post: the key prefix of the author, in lowercase hex. A room
             post is a direct message from a room server, signed with the first four bytes
             of the key of its writer. The room is the :attr:`sender` (it is the node that
@@ -488,6 +509,7 @@ class Message:
     sender_timestamp: datetime | None = None
     snr: float | None = None
     received_at: datetime = field(default_factory=utcnow)
+    waited: bool = False
     author: str | None = None
     raw: dict | None = None
 
@@ -600,7 +622,16 @@ class ChatMessage:
             ``False``: sent but not acknowledged (the user can try again). ``None``: the
             ack is still expected, or the state does not apply (a channel broadcast or an
             inbound message).
-        created_at: When the message was sent or received.
+        created_at: The time that the message carries. For our own messages, it is our
+            clock when we sent the message. For a received message, it is the sender time:
+            the clock of the sender when it composed the message. That clock can be wrong
+            (refer to :meth:`corrected`).
+        received_at: The arrival time of a received message: our clock when MeshTerm got
+            it from the companion. ``None`` for our own messages, and for each message
+            stored before MeshTerm kept this time.
+        waited: Whether a received message came out of the queue of the companion when
+            MeshTerm connected (refer to :attr:`Message.waited`). It then arrived at an
+            unknown time before :attr:`received_at`.
         row_id: The primary key in the ``messages`` table, after MeshTerm stores the
             message. MeshTerm uses it to update the delivery state of an outbound message
             in place, when the user tries again. ``None`` until the message is stored.
@@ -625,6 +656,8 @@ class ChatMessage:
     snr: float | None = None
     acked: bool | None = None
     created_at: datetime = field(default_factory=utcnow)
+    received_at: datetime | None = None
+    waited: bool = False
     row_id: int | None = None
     scope: str | None = None
     author: str | None = None
@@ -633,6 +666,79 @@ class ChatMessage:
     def is_post(self) -> bool:
         """Whether this is an inbound room post, by the member that :attr:`author` names."""
         return self.author is not None
+
+    @property
+    def arrived_at(self) -> datetime:
+        """The best time on our clock for when this message came to us.
+
+        Use this time for everything that is about our side: when we heard the sender, the
+        order of the conversations, and the search of the packet log. A sender time is only
+        a claim, and a node with a wrong clock makes it false. The rules:
+
+        * Our own message: :attr:`created_at`, which our clock wrote.
+        * A received message with an arrival time: :attr:`received_at`.
+        * A message that waited in the companion: the earlier of the sender time and the
+          arrival time. It arrived before MeshTerm got it, but MeshTerm does not know how
+          long before.
+        * A message stored before MeshTerm kept the arrival time: :attr:`created_at`.
+
+        The SQL form of these rules is ``_ARRIVED_AT`` in
+        :mod:`~meshterm.persistence.repository`. The two must agree.
+        """
+        if self.received_at is None:
+            return self.created_at
+        if self.waited and self.created_at < self.received_at:
+            return self.created_at
+        return self.received_at
+
+    @property
+    def clock_offset_s(self) -> float | None:
+        """The sender time minus the arrival time, in seconds, or ``None`` if not known.
+
+        A positive value means that the clock of the sender is ahead of ours. The value is
+        ``None`` for our own messages and for a message with no arrival time. A packet
+        takes only seconds to arrive, so the value is the error of the sender's clock.
+        """
+        if self.outbound or self.received_at is None:
+            return None
+        return (self.created_at - self.received_at).total_seconds()
+
+    def corrected(self, tolerance_s: float) -> bool:
+        """Whether the sender time is wrong, so that the screen shows the arrival time.
+
+        A sender time is wrong when it is more than ``tolerance_s`` from the arrival time.
+        For two kinds of message, only a time in the future is proof of a fault:
+
+        * A room post. A room sends its backlog with the times when the members posted,
+          so an old time is correct.
+        * A message that waited in the companion (:attr:`waited`). It arrived at an
+          unknown time before :attr:`received_at`.
+
+        Args:
+            tolerance_s: The ``clock_tolerance_s`` preference.
+
+        Returns:
+            ``True`` when the screen must show the arrival time with the corrected mark.
+        """
+        offset = self.clock_offset_s
+        if offset is None:
+            return False
+        if self.waited or self.is_post:
+            return offset > tolerance_s
+        return abs(offset) > tolerance_s
+
+    def shown_at(self, tolerance_s: float) -> datetime:
+        """The time to show for this message: the sender time, or the arrival time if it is wrong.
+
+        Args:
+            tolerance_s: The ``clock_tolerance_s`` preference.
+
+        Returns:
+            :attr:`received_at` when :meth:`corrected` is true, else :attr:`created_at`.
+        """
+        if self.received_at is not None and self.corrected(tolerance_s):
+            return self.received_at
+        return self.created_at
 
     @property
     def key(self) -> str:
@@ -668,11 +774,13 @@ class ChatMessage:
             peer=None if message.is_channel else (message.sender or None),
             peer_name=peer_name,
             snr=message.snr,
-            # Use the timestamp of the sender (the moment when the message was composed)
-            # instead of ``received_at`` (when MeshTerm read it from the device). Thus the
-            # transcript shows the time of the message, not the time of the read. If the
-            # sender gave no timestamp, use the receive time.
+            # Keep the two times. The sender time (when the message was composed) is the
+            # time that the transcript shows, if the clock of the sender is correct. The
+            # arrival time is what MeshTerm knows for sure (refer to ``arrived_at``). If the
+            # sender gave no time, use the arrival time for both.
             created_at=message.sender_timestamp or message.received_at,
+            received_at=message.received_at,
+            waited=message.waited,
             author=None if message.is_channel else message.author,
         )
 
