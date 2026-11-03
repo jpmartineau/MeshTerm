@@ -443,7 +443,9 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   heard times, list order, activity, the packet-log search — reads the arrival time
   (`ChatMessage.arrived_at`, SQL `_ARRIVED_AT`), never `created_at` alone. The CLI's
   plain `TIME` carries the same `?`; its JSON gives `created_at`, `received_at`, and
-  `clock_corrected`.
+  `clock_corrected`. Channel rows from before schema 21 get their arrival once from the
+  packet log (`services/arrival_backfill.py`: a stored GRP_TXT with the same text *and*
+  sender time is the message, its first copy the arrival); a DM has no such proof.
 - Node types (shared with the map): `★` you (white) · `●` companion · `▲` repeater ·
   `■` room server · `◉` sensor · `○` unknown. **Every type mark is white** (JP,
   2026-10-14; they were pink, violet, white, orange): the shape is the type. Each keeps its

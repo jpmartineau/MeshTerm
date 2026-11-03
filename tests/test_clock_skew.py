@@ -247,6 +247,72 @@ def test_the_paths_of_a_received_message_are_found_by_its_arrival(tmp_path: Path
     repo.close()
 
 
+# -- the backfill from the packet log -------------------------------------------------------
+
+
+def _old_channel_row(repo: Repository, channel_id: str, text: str, sent) -> int:  # noqa: ANN001
+    """A received channel message stored before the arrival time: only the sender time."""
+    message = ChatMessage(text=text, is_channel=True, channel_idx=0, channel_id=channel_id)
+    message.created_at = sent
+    return repo.record_chat_message(message)
+
+
+def _heard(repo: Repository, run: int, body: dict, when) -> None:  # noqa: ANN001
+    from meshterm.core.models import Observation
+
+    repo.record_observation(
+        run, Observation(node=None, kind="packet", path="3d", snr=1.0, observed_at=when, raw=body)
+    )
+
+
+def test_the_backfill_finds_the_arrival_in_the_packet_log(tmp_path: Path) -> None:
+    """A stored packet with the same text and sender time is the message. Its first copy wins.
+
+    A packet with the same text but another sender time is another message, and a message
+    with no packet keeps no arrival time.
+    """
+    import asyncio
+
+    from meshterm.core.channels import DEFAULT_PUBLIC_SECRET, channel_identity
+    from meshterm.demo.traffic import grp_txt_body
+    from meshterm.services.arrival_backfill import backfill_arrivals
+
+    repo = Repository(tmp_path / "chat.db")
+    run = repo.start_run("monitor", {}, None)
+    cid = channel_identity("Public", DEFAULT_PUBLIC_SECRET)
+    now = utcnow().replace(microsecond=0)
+    behind = now - timedelta(days=4)  # the clock of the sender
+
+    late = _old_channel_row(repo, cid, "klkdeck: hi", behind)
+    lost = _old_channel_row(repo, cid, "klkdeck: nobody heard this", behind)
+    for when, attempt in (
+        (now, 0),
+        (now + timedelta(seconds=1), 0),
+        (now + timedelta(seconds=9), 1),
+    ):
+        _heard(repo, run, grp_txt_body(DEFAULT_PUBLIC_SECRET, "klkdeck: hi", behind, attempt), when)
+    # The same text at another sender time: another message, which matches nothing.
+    other = behind + timedelta(hours=1)
+    _heard(
+        repo,
+        run,
+        grp_txt_body(DEFAULT_PUBLIC_SECRET, "klkdeck: hi", other),
+        now - timedelta(days=1),
+    )
+
+    channels = {cid: ("Public", DEFAULT_PUBLIC_SECRET)}
+    assert asyncio.run(backfill_arrivals(repo, channels)) == 1
+    rows = {m.row_id: m for m in repo.recent_chat_messages(is_channel=True, channel_id=cid)}
+    assert rows[late].received_at == now
+    assert rows[late].corrected(TOLERANCE)
+    assert rows[lost].received_at is None
+
+    # The channel is done: a second start does not decrypt the log again.
+    assert repo.arrival_backfill_done() == {cid}
+    assert asyncio.run(backfill_arrivals(repo, channels)) == 0
+    repo.close()
+
+
 # -- the screens ----------------------------------------------------------------------------
 
 
@@ -280,9 +346,7 @@ def test_a_picked_corrected_message_gives_the_sender_time() -> None:
     assert "behind" in text
 
     screen._selected = None
-    assert "its clock:" not in "\n".join(
-        _strip_ansi(line) for line in screen._render_grouped(72)
-    )
+    assert "its clock:" not in "\n".join(_strip_ansi(line) for line in screen._render_grouped(72))
 
 
 def test_the_cli_history_marks_a_corrected_time_and_gives_both_times() -> None:

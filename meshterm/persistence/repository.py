@@ -2467,6 +2467,80 @@ class Repository:
             for r in rows
         ]
 
+    def channel_messages_without_arrival(
+        self, channel_ids: Iterable[str]
+    ) -> list[tuple[int, str, str, str]]:
+        """Each received channel message from before MeshTerm kept the arrival time.
+
+        These rows have only the sender time. :mod:`~meshterm.services.arrival_backfill`
+        finds their arrival time in the packet log.
+
+        Args:
+            channel_ids: The identities of the channels to read.
+
+        Returns:
+            ``(row id, channel id, created_at, text)`` for each row, with the time as the
+            stored ISO 8601 text.
+        """
+        ids = sorted(set(channel_ids))
+        if not ids:
+            return []
+        marks = ", ".join("?" * len(ids))
+        rows = self._conn.execute(
+            "SELECT id, channel_id, created_at, text FROM messages "
+            "WHERE outbound = 0 AND is_channel = 1 AND received_at IS NULL "
+            f"AND channel_id IN ({marks})",
+            ids,
+        ).fetchall()
+        return [(r["id"], r["channel_id"], r["created_at"], r["text"]) for r in rows]
+
+    def set_arrival_times(self, arrivals: Iterable[tuple[int, str]]) -> int:
+        """Give old rows the arrival time that the packet log proves.
+
+        Only a row with no arrival time changes. Thus a second run, or a run at the same
+        time as a new message, changes nothing that it must not change.
+
+        Args:
+            arrivals: ``(row id, arrival time as ISO 8601 text)`` pairs.
+
+        Returns:
+            The number of rows that changed.
+        """
+        cur = self._conn.executemany(
+            "UPDATE messages SET received_at = ? WHERE id = ? AND received_at IS NULL",
+            [(when, row_id) for row_id, when in arrivals],
+        )
+        self._conn.commit()
+        return cur.rowcount
+
+    def arrival_backfill_done(self) -> set[str]:
+        """The channels whose old messages :mod:`~meshterm.services.arrival_backfill` searched.
+
+        Returns:
+            The channel identities. The backfill does not search these again.
+        """
+        row = self._conn.execute(
+            "SELECT value FROM app_state WHERE key = 'arrival_backfill'"
+        ).fetchone()
+        if row is None:
+            return set()
+        try:
+            return {str(cid) for cid in json.loads(row["value"])}
+        except (ValueError, TypeError):
+            return set()
+
+    def mark_arrival_backfill_done(self, channel_ids: Iterable[str]) -> None:
+        """Record the channels that the backfill searched (refer to :meth:`arrival_backfill_done`).
+
+        Args:
+            channel_ids: All the searched channels, the earlier ones included.
+        """
+        self._conn.execute(
+            "INSERT OR REPLACE INTO app_state(key, value) VALUES ('arrival_backfill', ?)",
+            (json.dumps(sorted(set(channel_ids))),),
+        )
+        self._conn.commit()
+
     def message_texts(self) -> list[str]:
         """The text of each stored chat message, for the names that the channel guide tests.
 

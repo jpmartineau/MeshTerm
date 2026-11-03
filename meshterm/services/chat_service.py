@@ -35,6 +35,7 @@ from ..core.models import (
     utcnow,
 )
 from ..core.regions import WILDCARD, normalize
+from .arrival_backfill import backfill_arrivals
 
 if TYPE_CHECKING:
     from ..context import AppContext
@@ -92,6 +93,9 @@ class ChatService:
         # (synchronous) hub callback to that worker.
         self._queue: asyncio.Queue[Message] | None = None
         self._worker: asyncio.Task[None] | None = None
+        # The search of the packet log for the arrival time of old channel messages (refer
+        # to :meth:`_prime_channels`). The reference keeps the task alive while it runs.
+        self._backfill: asyncio.Task[None] | None = None
         # The last known channel slot index -> the intrinsic identity. The resolution of an
         # inbound message reads the slot again each time (refer to :meth:`channel_id_for`).
         # Thus this map is not the source of truth. It is only a warm map for the priming
@@ -279,13 +283,30 @@ class ChatService:
         message from before the identities, with the channels that are now in each slot.
         This is best-effort, because MeshTerm did not store the old map from slot to
         channel.
+
+        Then it starts the search of the packet log for the arrival time of the old channel
+        messages (refer to :mod:`~meshterm.services.arrival_backfill`). That search runs in
+        the background, because a large log takes time to decrypt.
         """
         try:
             await self.refresh_channels()
             if self._channel_ids:
                 self._ctx.repo.backfill_channel_ids(dict(self._channel_ids))
+            slots = await self._ctx.devstate.channel_slots()
+            channels = {channel_identity(s.name, s.secret): (s.name, s.secret) for s in slots}
+            if channels:
+                self._backfill = asyncio.ensure_future(self._backfill_arrivals(channels))
         except Exception as exc:  # noqa: BLE001 - the priming is best-effort, and never fatal
             self._ctx.log.debug("chat: channel priming failed: %s", exc)
+
+    async def _backfill_arrivals(self, channels: dict[str, tuple[str, bytes]]) -> None:
+        """Run the arrival backfill. A failure is logged and never stops the chat service."""
+        try:
+            changed = await backfill_arrivals(self._ctx.repo, channels)
+            if changed:
+                self._ctx.log.info("chat: %d old channel messages got their arrival time", changed)
+        except Exception as exc:  # noqa: BLE001 - the backfill is best-effort, and never fatal
+            self._ctx.log.warning("chat: arrival backfill failed: %s", exc)
 
     async def stop(self) -> None:
         """Stop the storage of messages, and close the run record. Idempotent.
@@ -311,6 +332,15 @@ class ChatService:
             except asyncio.CancelledError:
                 pass
             self._worker = None
+        if self._backfill is not None:
+            # It yields after each small part, so a cancel stops it at once. A backfill that
+            # did not end searches again at the next start.
+            self._backfill.cancel()
+            try:
+                await self._backfill
+            except asyncio.CancelledError:
+                pass
+            self._backfill = None
         self._queue = None
         if self._run_id is not None:
             self._ctx.repo.finish_run(self._run_id, "ok", {"messages": self._session_count})
