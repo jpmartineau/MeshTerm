@@ -19,7 +19,7 @@ starts with the name and ends with the key. These two lanes are what a contact *
 flexible widths are built around them. Each list declares the middle lanes that it wants as
 a tuple of :class:`ContactLane` (:data:`DEFAULT_LANES` for ``NAME · HEARD · PKTS · KEY``,
 :data:`TRACE_LANES` for the extra ``TRACED`` of the Trace picker, :data:`ARCHIVED_LANES` for
-the single ``ARCHIVED`` of the Archived list).
+the ``ARCHIVED`` and ``PLACE`` of the Archived list).
 
 A lane has its own sort ring id, header label, width, and the way to read its value from a
 row. Thus to add a lane is a declaration, not a branch: the header, the row builder, the
@@ -27,12 +27,18 @@ sort metric, and the calculation of the lane widths all read the same tuple. The
 replaces a ``show_traced`` flag. That flag had already caused three of those four places to
 say "and if it's the trace picker…".
 
-**A list can show every value in full.** The Contacts list passes ``pan=True``. Its lanes then
-have the width of their content: the longest name, the longest place, and the full key. No
-value is cut to fit the terminal. A row that is wider than the terminal pans: ←→ slide the
-column header and all the rows by one shared shift, with the mark column and the name held
-still (refer to :attr:`~meshterm.ui.tui.select.Choice.pans`). The other lists can be floating
-dialogs (the Trace picker), so they keep the lanes that fit the terminal.
+**A list can show every value in full.** The Contacts list and the Archived list pass
+``pan=True``. Their lanes then have the width of their content: the longest name, the
+longest place, and the full key. No value is cut to fit the terminal. A row that is wider
+than the terminal pans: ←→ slide the column header and all the rows by one shared shift,
+with the mark column and the name held still (refer to
+:attr:`~meshterm.ui.tui.select.Choice.pans`). The other lists can be floating dialogs (the
+Trace picker), so they keep the lanes that fit the terminal.
+
+**A list with the** ``PLACE`` **lane reads its places from the place service.** The caller
+gives the service (``places``), and the list fills the place of each row from the key of
+the row. The service counts its changes. When a place arrives while the list is open, the
+next paint fills the rows again, and the highlight, the sort, the filter, and the pan stay.
 """
 
 from __future__ import annotations
@@ -41,7 +47,7 @@ import dataclasses
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from rich.cells import cell_len
 from rich.text import Text
@@ -59,6 +65,9 @@ from .widgets import (
     format_age,
     highlighted_hash,
 )
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from ..services.places import PlaceService
 
 #: The minimum width of the name lane (on a very narrow terminal), so that the ``NAME``
 #: label of the header and its sort triangle always have space.
@@ -127,7 +136,7 @@ PKTS_LANE = ContactLane("packets", "PKTS", 5, "count", kind="count")
 #: How long ago the node was last traced: the extra lane of the Trace-target picker.
 TRACED_LANE = ContactLane("traced", "TRACED", 6, "last_traced")
 
-#: How long ago the contact was archived and removed from the device: the only lane of the
+#: How long ago the contact was archived and removed from the device: the first lane of the
 #: Archived list. It is drawn exactly as ``HEARD`` is, with the recency heat. It is the same
 #: question (how long ago did this occur) about a different event. A visual language of its
 #: own is a second grammar that the user must learn, with no benefit.
@@ -147,10 +156,11 @@ CONTACTS_LANES: tuple[ContactLane, ...] = (HEARD_LANE, PKTS_LANE, PLACE_LANE)
 #: The middle lanes of the Trace-target picker, which puts ``TRACED`` before the usual two.
 TRACE_LANES: tuple[ContactLane, ...] = (TRACED_LANE, HEARD_LANE, PKTS_LANE)
 
-#: The middle lanes of the Archived list: ``NAME · ARCHIVED · KEY``. There is no ``HEARD``
-#: and no ``PKTS``. An archived contact is not on the device, so this screen is not about
-#: what the contact still transmits. It is about when the contact left.
-ARCHIVED_LANES: tuple[ContactLane, ...] = (ARCHIVED_LANE,)
+#: The middle lanes of the Archived list: ``NAME · ARCHIVED · PLACE · KEY``. There is no
+#: ``HEARD`` and no ``PKTS``. An archived contact is not on the device, so this screen is not
+#: about what the contact still transmits. It is about when the contact left, and where it
+#: is. The ``PLACE`` lane is the same as on the Contacts screen, immediately before the key.
+ARCHIVED_LANES: tuple[ContactLane, ...] = (ARCHIVED_LANE, PLACE_LANE)
 
 
 def _row_marks(row: ContactRow) -> str:
@@ -197,19 +207,6 @@ SORT_OPENS_ASCENDING: dict[str, bool] = {
     "hash": True,
 }
 
-#: The sort ring of the Contacts screen. It adds a ``place`` column between ``packets`` and
-#: ``hash``, the same order as the lanes. It opens *ascending* (A→Z). A node with no place
-#: collects at the end when ascending, and at the start when descending, like a node that
-#: was never heard in an age column (refer to :func:`_ordered`).
-CONTACTS_SORT_COLUMNS: tuple[str, ...] = ("name", "heard", "packets", "place", "hash")
-CONTACTS_SORT_OPENS_ASCENDING: dict[str, bool] = {
-    "name": True,
-    "heard": True,
-    "packets": False,
-    "place": True,
-    "hash": True,
-}
-
 #: The wider sort ring of the Trace-target picker. It adds a ``traced`` column (how long ago
 #: the node was last traced) between name and heard. It opens on that column *ascending*,
 #: which is the natural first direction of each age lane. The metric is an **age**, so
@@ -231,14 +228,17 @@ TRACE_SORT_OPENS_ASCENDING: dict[str, bool] = {
     "hash": True,
 }
 
-#: The sort ring of the Archived list: ``NAME · ARCHIVED · KEY``, the same as
+#: The sort ring of the Archived list: ``NAME · ARCHIVED · PLACE · KEY``, the same as
 #: :data:`ARCHIVED_LANES`. ``archived`` opens *ascending* on the age of the lane, so the
 #: most recently archived contacts come first. This screen answers the question "what did
-#: that sweep just take?", and the answer must be at the top of the screen.
-ARCHIVED_SORT_COLUMNS: tuple[str, ...] = ("name", "archived", "hash")
+#: that sweep just take?", and the answer must be at the top of the screen. ``place`` sorts
+#: as on the Contacts screen (refer to
+#: :data:`~meshterm.ui.widgets.CONTACTS_SORT_OPENS_ASCENDING`).
+ARCHIVED_SORT_COLUMNS: tuple[str, ...] = ("name", "archived", "place", "hash")
 ARCHIVED_SORT_OPENS_ASCENDING: dict[str, bool] = {
     "name": True,
     "archived": True,
+    "place": True,
     "hash": True,
 }
 
@@ -607,6 +607,12 @@ class ContactListScreen(SelectScreen):
 
     floating = False
 
+    #: The hint sheds this atom first when it is too wide (refer to
+    #: :func:`~meshterm.ui.tui.frame.fit_hint`). The ``Left`` and ``Right`` keys are the
+    #: first thing that a user tries on a row that runs past the edge, and the other atoms
+    #: name keys that nothing else shows. Only a list that pans has the atom.
+    spare_hint_atoms = ("←→ scroll",)
+
     @property
     def picocalc_lyra_lane(self):
         """The F-key lane of the select list, with the full sort added on F3/F8.
@@ -652,6 +658,7 @@ class ContactListScreen(SelectScreen):
         lanes: tuple[ContactLane, ...] = DEFAULT_LANES,
         key_hint: Callable[[Any], str] | None = None,
         pan: bool = False,
+        places: PlaceService | None = None,
     ) -> None:
         """Build the list over rows that are already resolved.
 
@@ -687,7 +694,14 @@ class ContactListScreen(SelectScreen):
                 of their content, and ←→ pan the table when it is wider than the terminal
                 (refer to the module docstring). It is off for a list that can float as a
                 dialog, because the width of a dialog comes from the width of its rows.
+            places: The places of the nodes, for a list whose ``lanes`` have the ``PLACE``
+                lane. The list fills the place of each row from its key, and fills them
+                again when the service counts a change (refer to :meth:`render_body`).
+                With ``None``, each row keeps the place that the caller gave it.
         """
+        self._places = places if PLACE_LANE in lanes else None
+        self._place_rev = self._places.revision if self._places is not None else 0
+        rows = self._with_places(rows)
         self._contact_rows = rows
         self._prefix_bytes = prefix_bytes
         self._sort = sort
@@ -780,8 +794,25 @@ class ContactListScreen(SelectScreen):
         Args:
             rows: The lane data of each contact, as :meth:`__init__` accepts it.
         """
-        self._contact_rows = rows
+        self._contact_rows = self._with_places(rows)
         self._rebuild()
+
+    def _with_places(self, rows: list[ContactRow]) -> list[ContactRow]:
+        """The rows with the place of each node from the place service, if the list has one.
+
+        The key of the row finds the place. A row without a full key uses the key prefix of
+        its contact. A node with no known place gets ``None``, and its lane shows a faint
+        ``—``.
+        """
+        if self._places is None:
+            return rows
+        filled = []
+        for row in rows:
+            key = row.key or getattr(row.value, "key_prefix", None)
+            place = self._places.get(key) if key else None
+            label = (place.label or None) if place is not None else None
+            filled.append(dataclasses.replace(row, place=label))
+        return filled
 
     def _rebuild(self) -> None:
         """Rebuild the rows for the current sort and width, with the highlight on its contact."""
@@ -861,7 +892,16 @@ class ContactListScreen(SelectScreen):
         return min(head, max(0, (width - 2) // 2))
 
     def render_body(self, width: int) -> list[str]:
-        """Size the name lane to its content and adjust the key lane, then render the list."""
+        """Size the name lane to its content and adjust the key lane, then render the list.
+
+        First, read the places again if the finder or the user changed one. The finder
+        works in the background, and a place can arrive while this screen is open. The
+        service counts its changes, so the list reads again only after a change. The
+        highlight, the sort, the filter, and the pan stay (refer to :meth:`update_rows`).
+        """
+        if self._places is not None and self._places.revision != self._place_rev:
+            self._place_rev = self._places.revision
+            self.update_rows(self._contact_rows)
         name_w, hash_w = self._lane_widths(width)
         anchor = self._pinned_head(name_w, width)
         if (name_w, hash_w, anchor) != (self._name_w, self._hash_w, self._anchor):

@@ -1381,6 +1381,22 @@ def contact_packets(contact: Contact, counts: dict[str, int]) -> int | None:
 _SORT_COLUMNS: tuple[str, ...] = ("name", "heard", "packets")
 _SORT_OPENS_ASCENDING: dict[str, bool] = {"name": True, "heard": True, "packets": False}
 
+#: The sort ring of the Contacts list, on the screen and on the CLI (``contacts --sort``).
+#: It adds a ``place`` column between ``packets`` and ``hash``, the same order as the lanes
+#: of the screen. ``place`` opens *ascending* (A→Z). A node with no place collects at the
+#: end when ascending, and at the start when descending, like a node that was never heard
+#: in an age column. ``hash`` sorts on the key of the contact (ascending = ``0`` → ``f``).
+#: The ring is here and not in :mod:`~meshterm.ui.contactlist`, so that the CLI can read it
+#: and not load the TUI.
+CONTACTS_SORT_COLUMNS: tuple[str, ...] = ("name", "heard", "packets", "place", "hash")
+CONTACTS_SORT_OPENS_ASCENDING: dict[str, bool] = {
+    "name": True,
+    "heard": True,
+    "packets": False,
+    "place": True,
+    "hash": True,
+}
+
 
 @dataclass
 class ContactsSort:
@@ -1438,7 +1454,10 @@ class ContactsSort:
 
 
 def ordered_contacts(
-    contacts: list[Contact], counts: dict[str, int], sort: ContactsSort
+    contacts: list[Contact],
+    counts: dict[str, int],
+    sort: ContactsSort,
+    place_of: Callable[[Contact], str | None] | None = None,
 ) -> list[Contact]:
     """The contacts, sorted as ``sort`` says (our node is pinned separately, above these).
 
@@ -1446,7 +1465,16 @@ def ordered_contacts(
     always breaks by the case-folded name, *ascending*. Thus two contacts with the same
     metric (for example the same ``heard`` age) keep a stable A→Z order, and the order does
     not flip with the primary direction. The rows that were never heard or never overheard
-    have an extreme metric, so they gather at the ascending end.
+    have an extreme metric, so they gather at the ascending end. A contact with no place
+    does the same in a sort by ``place``.
+
+    Args:
+        contacts: The contacts to sort.
+        counts: The counts of overheard packets, keyed by node id.
+        sort: The column and the direction.
+        place_of: Gives the place label of a contact (``Villeray, Montréal``), or ``None``.
+            Without it, no contact has a place, and a sort by ``place`` keeps the A→Z order
+            of the names.
     """
     if sort.column == "heard":
         # Use one clock snapshot for the whole sort. If each row calls utcnow(), two
@@ -1462,6 +1490,17 @@ def ordered_contacts(
 
         def metric(c: Contact) -> float:
             return contact_packets(c, counts) or 0
+    elif sort.column == "place":
+
+        def metric(c: Contact) -> object:
+            # A blank place sorts after each text (its first key is larger), the same as
+            # the place lane of the Contacts screen.
+            label = place_of(c) if place_of is not None else None
+            return (0, label.casefold()) if label else (1, "")
+    elif sort.column == "hash":
+
+        def metric(c: Contact) -> object:
+            return (c.public_key or c.key_prefix).lower()
     else:
 
         def metric(c: Contact) -> object:

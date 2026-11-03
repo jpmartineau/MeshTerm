@@ -250,9 +250,9 @@ async def test_contacts_tool_opens_sorted_by_heard(monkeypatch: pytest.MonkeyPat
     captured: dict = {}
     real_order = widgets.ordered_contacts
 
-    def fake_order(contacts, counts, sort):  # noqa: ANN001, ANN202
+    def fake_order(contacts, counts, sort, place_of=None):  # noqa: ANN001, ANN202
         captured["sort"] = sort
-        return real_order(contacts, counts, sort)
+        return real_order(contacts, counts, sort, place_of)
 
     monkeypatch.setattr(widgets, "ordered_contacts", fake_order)
 

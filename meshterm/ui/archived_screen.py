@@ -4,9 +4,11 @@
 An archive sweep (refer to :mod:`~meshterm.ui.sweep_screen`) removes a contact from the
 *device*, which is the scarce resource, and keeps the contact here in full. This screen is
 where those contacts are. It has the same sortable and filterable lane layout as the
-Contacts list, with its own lane set (``NAME · ARCHIVED · KEY``,
+Contacts list, with its own lane set (``NAME · ARCHIVED · PLACE · KEY``,
 :data:`~meshterm.ui.contactlist.ARCHIVED_LANES`) and its own sort ring over exactly those
-three columns.
+four columns. The rest is the same as on the Contacts list: the ``PLACE`` lane comes from
+the place service and fills in while the list is open, the filter matches a place, and no
+value is cut. A row that is wider than the terminal pans with ←→.
 
 The ``ARCHIVED`` lane is drawn in the same way as ``HEARD`` on the main list: a relative
 age in the recency heat colours. It answers the same type of question about a different
@@ -41,6 +43,7 @@ from .widgets import ContactsSort
 if TYPE_CHECKING:
     from ..context import AppContext
     from ..core.contact_store import RememberedContact
+    from ..services.places import PlaceService
 
 #: The footer of the list: navigation, the sort, the filter, then Esc last. The hint has
 #: ``Enter open`` because a row pushes the detail page of the node. The Contacts list uses
@@ -91,7 +94,13 @@ def archived_rows(archived: list[RememberedContact]) -> list[ContactRow]:
 class ArchivedScreen(ContactListScreen):
     """A full-screen, sortable list of the contacts that a sweep took off this device."""
 
-    def __init__(self, rows: list[ContactRow], prefix_bytes: int, sort: ContactsSort) -> None:
+    def __init__(
+        self,
+        rows: list[ContactRow],
+        prefix_bytes: int,
+        sort: ContactsSort,
+        places: PlaceService | None = None,
+    ) -> None:
         """Build the list over rows that MeshTerm already resolved.
 
         Args:
@@ -99,6 +108,8 @@ class ArchivedScreen(ContactListScreen):
             prefix_bytes: The path hash width in bytes to highlight in each key.
             sort: The sort. The Ctrl+arrows change it in place. Its ring should span
                 :data:`~meshterm.ui.contactlist.ARCHIVED_SORT_COLUMNS`.
+            places: The places of the nodes, for the ``PLACE`` lane and for the filter. With
+                ``None``, the lane shows a faint ``—`` in each row.
         """
         super().__init__(
             f"Archived contacts · {len(rows)} kept",
@@ -108,6 +119,8 @@ class ArchivedScreen(ContactListScreen):
             prompt=("Off the device, kept here with their history. Open one to restore it."),
             footer_hint=_HINT,
             lanes=ARCHIVED_LANES,
+            pan=True,
+            places=places,
         )
 
 
@@ -150,7 +163,7 @@ async def open_archived(ctx: AppContext, self_key: str, prefix_bytes: int) -> bo
             # note that MeshTerm shows when the user goes back.
             ctx.ui.note("[muted]no archived contacts[/muted]")
             return changed
-        screen = ArchivedScreen(rows, prefix_bytes, sort)
+        screen = ArchivedScreen(rows, prefix_bytes, sort, getattr(ctx, "places", None))
         rebuild = False
         async with session.stay(screen) as visit:
             while True:

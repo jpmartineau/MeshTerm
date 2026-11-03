@@ -563,7 +563,7 @@ $ meshterm contacts --sort bogus
 Usage: meshterm contacts [OPTIONS]
 Try 'meshterm contacts --help' for help.
 
-Error: Invalid value: --sort must be one of: name, heard, packets (got 'bogus')
+Error: Invalid value: --sort must be one of: name, heard, packets, place, hash (got 'bogus')
 ```
 
 **A confirmation that you did not give** is in the same class, because nothing has
@@ -624,7 +624,7 @@ $ meshterm contacts --sort bogus --json
 Usage: meshterm contacts [OPTIONS]
 Try 'meshterm contacts --help' for help.
 
-Error: Invalid value: --sort must be one of: name, heard, packets (got 'bogus')
+Error: Invalid value: --sort must be one of: name, heard, packets, place, hash (got 'bogus')
 $ echo $?
 2
 ```
@@ -894,7 +894,7 @@ The contacts that your device knows.
 
 | Option | What it does |
 | --- | --- |
-| `-s`, `--sort ORDER` | `heard` (default), `name`, or `packets`. |
+| `-s`, `--sort ORDER` | `heard` (default), `name`, `packets`, `place`, or `hash` (the key). |
 
 ```console
 $ meshterm contacts --sort name

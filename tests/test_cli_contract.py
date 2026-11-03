@@ -342,6 +342,13 @@ def test_a_global_option_taking_a_value_moves_with_its_value(run) -> None:  # no
     assert run("contacts", "--sort", "name", "--json").exit_code == exitcodes.OK
 
 
+@pytest.mark.parametrize("order", ["place", "hash"])
+def test_contacts_sorts_by_each_column_of_the_screen(run, order) -> None:  # noqa: ANN001
+    """``--sort`` accepts each sort column of the Contacts screen, the place and the hash too."""
+    result = run("contacts", "--sort", order, "--json")
+    assert result.exit_code == exitcodes.OK, result.output
+
+
 def test_lifting_a_global_never_steals_a_subcommands_own_help(run) -> None:  # noqa: ANN001
     """``contacts --help`` must stay the help of ``contacts``, not the help of the app.
 

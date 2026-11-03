@@ -88,12 +88,6 @@ class ContactsScreen(ContactListScreen):
     lock. The shared list handles the sort, the filter, and the navigation.
     """
 
-    #: The hint sheds this atom first when it is too wide (refer to
-    #: :func:`~meshterm.ui.tui.frame.fit_hint`). The ``Left`` and ``Right`` keys are the
-    #: first thing that a user tries on a row that runs past the edge, and the other atoms
-    #: name keys that nothing else shows.
-    spare_hint_atoms = ("←→ scroll",)
-
     @property
     def picocalc_lyra_lane(self):
         """The lane of the contact list, with ``Map`` (^L) and ``Lock`` (^K) on the Shift bank.
@@ -160,12 +154,11 @@ class ContactsScreen(ContactListScreen):
                 admin password MeshTerm stores. Each of those rows has the ``🔑`` in its
                 mark column (refer to :data:`~meshterm.ui.marks.MANAGED_ICON`).
             places: The places of the nodes, for the ``PLACE`` lane and for the filter. With
-                ``None``, the lane shows a faint ``—`` in each row. The screen draws the
-                rows again when a place changes (refer to :meth:`render_body`).
+                ``None``, the lane shows a faint ``—`` in each row. The list draws the
+                rows again when a place changes (refer to
+                :meth:`~meshterm.ui.contactlist.ContactListScreen.render_body`).
         """
         self._self_name, self._self_key = self_name, self_key
-        self._places = places
-        self._place_rev = places.revision if places is not None else 0
         self._locator = locator
         self._can_lock = can_lock
         self._locked = locked
@@ -214,21 +207,14 @@ class ContactsScreen(ContactListScreen):
             key_hint=lambda value: "^L map" if self._marker_of(value) is not None else "",
             lanes=CONTACTS_LANES,
             pan=True,
+            places=places,
         )
         if archived:
             self.short_title = f"Contacts · {known} + {archived}"
 
     def _contact_rows_for(self, locked: frozenset[str]) -> list[ContactRow]:
         """Our node, then each contact. ``locked`` shows which contacts are locked."""
-        rows = [
-            ContactRow(
-                value=YOU,
-                name=self._self_name,
-                key=self._self_key,
-                you=True,
-                place=self._place_of(self._self_key),
-            )
-        ]
+        rows = [ContactRow(value=YOU, name=self._self_name, key=self._self_key, you=True)]
         for c in self._contacts:
             rows.append(
                 ContactRow(
@@ -240,32 +226,11 @@ class ContactsScreen(ContactListScreen):
                     node_type=c.node_type,
                     last_seen=c.last_seen,
                     count=contact_packets(c, self._counts),
-                    place=self._place_of(c.public_key or c.key_prefix),
                     locked=(c.public_key or "").lower().removeprefix("0x") in locked,
                     managed=(c.public_key or "").lower().removeprefix("0x") in self._managed,
                 )
             )
         return rows
-
-    def _place_of(self, key: str | None) -> str | None:
-        """The full label of the place of a node, or ``None`` when MeshTerm knows none."""
-        if self._places is None or not key:
-            return None
-        place = self._places.get(key)
-        return (place.label or None) if place is not None else None
-
-    def render_body(self, width: int) -> list[str]:
-        """Draw the list. First read the places again if the finder or the user changed one.
-
-        The finder works in the background, and a place can arrive while this screen is open.
-        The service counts its changes, so the screen reads again only after a change. The
-        highlight, the sort, the filter, and the pan stay (refer to
-        :meth:`~meshterm.ui.contactlist.ContactListScreen.update_rows`).
-        """
-        if self._places is not None and self._places.revision != self._place_rev:
-            self._place_rev = self._places.revision
-            self.update_rows(self._contact_rows_for(self._locked))
-        return super().render_body(width)
 
     def _marker_of(self, value: object) -> MapMarker | None:
         """The marker of the node of a row value, or ``None`` (a tail row, or no location)."""

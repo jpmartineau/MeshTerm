@@ -1946,8 +1946,9 @@ _PREEXISTING_REGULAR_OVERFLOW: set[str] = set()
 #: decision. ``courier_outbox``: JP, 2026-10-22, "bring the filter back, tough luck if it
 #: doesn't fit in the footer". ``contacts``: the list cuts no value, so its hint gains
 #: ``←→ scroll`` while the highlighted row runs past the edge, and the atom is the first to
-#: go when the footer is full (``ContactsScreen.spare_hint_atoms``).
-_SHEDS_ITS_HINT: set[str] = {"courier_outbox", "contacts"}
+#: go when the footer is full (``ContactListScreen.spare_hint_atoms``). ``archived``: the
+#: same list and the same hint (JP, 2026-11-03: "same behavior as contacts list").
+_SHEDS_ITS_HINT: set[str] = {"courier_outbox", "contacts", "archived"}
 
 
 #: The specimens by name, for a test that needs one entry and not the whole sweep.

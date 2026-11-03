@@ -14,15 +14,13 @@ from rich.cells import cell_len
 
 from meshterm.core.models import Contact
 from meshterm.core.places import SOURCE_TILES, Place
-from meshterm.ui.contactlist import (
+from meshterm.ui.contactlist import PLACE_LANE, ContactListScreen, ContactRow
+from meshterm.ui.contacts_screen import ContactsScreen
+from meshterm.ui.widgets import (
     CONTACTS_SORT_COLUMNS,
     CONTACTS_SORT_OPENS_ASCENDING,
-    PLACE_LANE,
-    ContactListScreen,
-    ContactRow,
+    ContactsSort,
 )
-from meshterm.ui.contacts_screen import ContactsScreen
-from meshterm.ui.widgets import ContactsSort
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -215,6 +213,71 @@ def test_lists_without_the_lane_are_unchanged() -> None:
     assert "Villeray" not in _row(screen, 100, "Alice")
 
 
+# -- part 1b: the Archived list ------------------------------------------------------
+
+
+def _archived(places: _Places | None = None, sort: str = "name") -> ContactListScreen:
+    """The Archived list over Alice, Bob, and Carl, with the place service of the test."""
+    from meshterm.core.contact_store import RememberedContact
+    from meshterm.ui.archived_screen import ArchivedScreen, archived_rows
+    from meshterm.ui.contactlist import ARCHIVED_SORT_COLUMNS, ARCHIVED_SORT_OPENS_ASCENDING
+
+    remembered = [
+        RememberedContact(public_key=_ALICE, name="Alice", archived_at=1_700_000_000),
+        RememberedContact(public_key=_BOB, name="Bob", archived_at=1_700_000_000),
+        RememberedContact(public_key=_CARL, name="Carl", archived_at=1_700_000_000),
+    ]
+    order = ContactsSort.from_name(sort, ARCHIVED_SORT_COLUMNS, ARCHIVED_SORT_OPENS_ASCENDING)
+    return ArchivedScreen(archived_rows(remembered), 1, order, places or _places())
+
+
+def _archived_names(screen: ContactListScreen) -> list[str]:
+    """The names in the order that the Archived list draws them."""
+    drawn = _lines(screen, 200)
+    order = ["Alice", "Bob", "Carl"]
+    return sorted(order, key=lambda n: next(i for i, line in enumerate(drawn) if n in line))
+
+
+def test_archived_list_has_the_place_column_before_the_key() -> None:
+    """The Archived list reads NAME, ARCHIVED, PLACE, KEY, and shows each full label."""
+    screen = _archived()
+    header = next(line for line in _lines(screen, 200) if "NAME" in line)
+    labels = [header.index(label) for label in ("NAME", "ARCHIVED", "PLACE", "KEY")]
+    assert labels == sorted(labels)
+    alice = _row(screen, 200, "Alice")
+    assert "Villeray, Montréal" in alice
+    assert alice.index("Villeray") < alice.index("aaaa")
+
+
+def test_archived_list_sorts_by_place() -> None:
+    """Ctrl+→ reaches the place column. Places run A to Z, and a node with none runs last."""
+    screen = _archived(sort="archived")
+    screen.handle("ctrl_right")
+    assert screen._sort.column == "place"  # noqa: SLF001
+    assert _archived_names(screen) == ["Bob", "Alice", "Carl"]
+    screen.handle("ctrl_down")
+    assert _archived_names(screen) == ["Carl", "Alice", "Bob"]
+
+
+def test_archived_list_fills_a_found_place_and_filters_by_place() -> None:
+    """A place that arrives while the list is open draws, and the filter matches it."""
+    places = _places()
+    screen = _archived(places)
+    places.found[_CARL[:12]] = Place("Verdun", "Montréal", SOURCE_TILES)
+    places.revision += 1
+    assert "Verdun, Montréal" in _row(screen, 200, "Carl")
+    _type(screen, "verdun")
+    shown = "\n".join(_lines(screen, 200))
+    assert "Carl" in shown
+    assert "Alice" not in shown and "Bob" not in shown
+
+
+def test_archived_list_cuts_no_value() -> None:
+    """The Archived list pans as the Contacts list does, so a narrow terminal cuts no key."""
+    screen = _archived()
+    assert all(choice.pans for choice in screen._choices())  # noqa: SLF001
+
+
 # -- part 2: the filter ---------------------------------------------------------------
 
 
@@ -247,14 +310,45 @@ def test_filter_matches_the_coarse_part_of_the_place() -> None:
 # -- part 3: the CLI and the machine object -------------------------------------------
 
 
-def _cli_contacts(place_of):  # noqa: ANN001, ANN202 - a lookup function or None
-    from meshterm.tools.contacts import _listing
+def _cli_contacts(get):  # noqa: ANN001, ANN202 - a lookup by key, or None
+    from meshterm.tools.contacts import _listing, _place_lookup
 
     contacts = [
         Contact(name="Alice", public_key=_ALICE, key_prefix=_ALICE[:12]),
         Contact(name="Carl", public_key=_CARL, key_prefix=_CARL[:12]),
     ]
-    return _listing(contacts, {}, 1, place_of)
+    return _listing(contacts, {}, 1, _place_lookup(get) if get else None)
+
+
+def _cli_order(sort: str, ascending: bool | None = None) -> list[str]:
+    """The names in the order that the CLI lists them for ``sort``."""
+    from meshterm.tools.contacts import _place_label, _place_lookup
+    from meshterm.ui.widgets import ordered_contacts
+
+    contacts = [
+        Contact(name="Alice", public_key=_ALICE, key_prefix=_ALICE[:12]),
+        Contact(name="Bob", public_key=_BOB, key_prefix=_BOB[:12]),
+        Contact(name="Carl", public_key=_CARL, key_prefix=_CARL[:12]),
+    ]
+    order = _sort(sort)
+    if ascending is not None:
+        order.ascending = ascending
+    place_of = _place_lookup(_places().get)
+    ordered = ordered_contacts(contacts, {}, order, lambda c: _place_label(place_of(c)))
+    return [c.name for c in ordered]
+
+
+def test_cli_sorts_by_place() -> None:
+    """``--sort place`` runs A to Z on the label, and a contact with no place runs last."""
+    assert _cli_order("place") == ["Bob", "Alice", "Carl"]
+    # Descending turns the order over, and the contact with no place comes first.
+    assert _cli_order("place", ascending=False) == ["Carl", "Alice", "Bob"]
+
+
+def test_cli_sorts_by_hash() -> None:
+    """``--sort hash`` runs on the key, from ``0`` to ``f``."""
+    assert _cli_order("hash") == ["Alice", "Bob", "Carl"]
+    assert _cli_order("hash", ascending=False) == ["Carl", "Bob", "Alice"]
 
 
 def _render(face, listing):  # noqa: ANN001, ANN202 - the renderer class
