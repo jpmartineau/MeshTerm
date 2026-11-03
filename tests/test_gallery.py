@@ -1802,9 +1802,28 @@ def _clock_drift(cols: int, rows: int) -> Screen:
     return clock_drift_screen(rows_, tolerance_s=300)
 
 
+def _clock_sync(cols: int, rows: int) -> Screen:
+    """The dialog of a bulk clock sync in its fullest form: each state, the longest notes."""
+    from meshterm.ui.clock_sync_dialog import ACTIVE, FAILED, OK, ClockSyncDialog
+    from meshterm.ui.tui.spinner import Spinner
+
+    nodes = [
+        Contact(name="Hilltop-Repeater", public_key=_HUB_KEY),
+        Contact(name="A Rather Long Repeater Name For Width", public_key="ab" * 32),
+        Contact(name="MTL BBS", public_key="cd" * 32),
+        Contact(name="Valley", public_key="ef" * 32),
+    ]
+    dialog = ClockSyncDialog(nodes, spinner=Spinner())
+    dialog.update(0, OK, "OK - clock set: 14:02 - 3/11/2026 UTC")
+    dialog.update(1, FAILED, "login refused; the saved password was cleared")
+    dialog.update(2, ACTIVE, "next in 5s")
+    return dialog
+
+
 _ENTRIES: list[_Entry] = [
     _Entry("dashboard", _dashboard),
     _Entry("clock_drift", _clock_drift),
+    _Entry("clock_sync", _clock_sync),
     _Entry("dashboard-scoped", _dashboard_scoped),
     _Entry("contacts", _contacts),
     _Entry("archive_ladder", _archive_ladder),

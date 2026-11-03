@@ -231,28 +231,27 @@ def test_the_bulk_row_ends_the_managed_section_for_each_repeater_and_room() -> N
 
 
 class _Ui:
-    """The UI of the bulk sync: the confirm, the busy overlay, and the summary."""
+    """The UI of the bulk sync: the confirm, then the dialog of the run.
+
+    ``run_screen`` waits until the run is done, as a user who reads the dialog does, keeps
+    what the dialog shows, then closes it.
+    """
 
     def __init__(self) -> None:
-        self.summary = None
+        self.shown = ""
         self.session = self
 
     async def dialog(self, prompt, buttons, **kw):  # noqa: ANN001, ANN003, ANN201
         return "go"
 
-    def busy_overlay(self):  # noqa: ANN201
-        return _AsyncNull()
+    def invalidate(self) -> None:
+        pass
 
-    async def message_dialog(self, body, **kw):  # noqa: ANN001, ANN003, ANN201
-        self.summary = body.plain
-
-
-class _AsyncNull:
-    async def __aenter__(self) -> None:
-        return None
-
-    async def __aexit__(self, *exc) -> None:  # noqa: ANN002
-        return None
+    async def run_screen(self, dialog):  # noqa: ANN001, ANN201
+        while not dialog.done:
+            await asyncio.sleep(0)
+        self.shown = plain("\n".join(dialog.render_body(72)))
+        dialog.handle("enter")
 
 
 class _Device:
@@ -271,8 +270,8 @@ class _Device:
         return "OK - clock set"
 
 
-def test_the_bulk_sync_sets_each_clock_and_sums_up(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
-    """One confirm, then each node in turn. The summary names each result."""
+def test_the_bulk_sync_sets_each_clock_and_shows_each_result(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    """One confirm, then each node in turn. The dialog shows the result of each line."""
     from meshterm.core import transmit_gate
     from meshterm.ui.repeater_admin import sync_clocks
 
@@ -290,6 +289,35 @@ def test_the_bulk_sync_sets_each_clock_and_sums_up(tmp_path: Path, monkeypatch) 
     ctx = type("Ctx", (), {"ui": ui, "admin_store": admin, "device": staticmethod(get_device)})
     asyncio.run(sync_clocks(ctx, [behind, silent]))
     assert device.commands == ["Behind: clock sync"]  # no command after a silent login
-    assert "✓ Behind" in ui.summary and "OK - clock set" in ui.summary
-    assert "✗ Silent" in ui.summary and "no reply to the login" in ui.summary
+    assert "✓ Behind  ·  OK - clock set" in ui.shown
+    assert "✗ Silent  ·  no reply to the login" in ui.shown
+    assert "OK" in ui.shown.splitlines()[-1]  # the run is done: the chip closes it
     assert admin.get(silent) == "secret"  # a silence keeps the password
+
+
+def test_the_dialog_lists_each_node_and_closes_only_when_done() -> None:
+    """Each node waits, then works, then ends. Esc stops a run, and only a done run closes."""
+    from meshterm.ui.clock_sync_dialog import ACTIVE, FAILED, OK, ClockSyncDialog
+    from meshterm.ui.tui.spinner import Spinner
+
+    nodes = [_managed(name, None).contact for name in ("One", "Two", "Three")]
+    dialog = ClockSyncDialog(nodes, spinner=Spinner())
+    stops: list[int] = []
+    dialog.on_stop = lambda: stops.append(1)
+    text = plain("\n".join(dialog.render_body(72)))
+    assert text.count("○") == 3 and "waiting" in text and "Stop" in text
+    assert dialog.footer_hint == "Esc stop"
+
+    dialog.update(0, OK, "clock set")
+    dialog.update(1, FAILED, "no reply to the login")
+    dialog.update(2, ACTIVE, "next in 4s")
+    text = plain("\n".join(dialog.render_body(72)))
+    assert "✓ One  ·  clock set" in text and "✗ Two  ·  no reply to the login" in text
+    assert "Three  ·  next in 4s" in text
+
+    dialog.handle("escape")
+    assert stops == [1] and not dialog.done  # a stop asks the owner, and does not close
+    dialog.finish()
+    text = plain("\n".join(dialog.render_body(72)))
+    assert "Three  ·  not done" in text and "OK" in text.splitlines()[-1]
+    assert dialog.footer_hint == "Enter OK · Esc close"
