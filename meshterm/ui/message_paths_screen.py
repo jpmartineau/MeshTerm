@@ -72,6 +72,8 @@ from .pathline import (
     hops_atom,
     path_line,
 )
+from .placemode import ACTION as PLACES_ACTION
+from .placemode import PlaceToggle, node_of, placed, places_of_session
 from .theme import snr_style
 from .tui.render import crop_cells, render_lines, render_to_ansi
 from .tui.screen import ListWindow, Screen
@@ -179,6 +181,8 @@ class MessagePathsScreen(Screen):
         self._arrivals = arrivals
         self._matched = matched
         self._resolve = resolve
+        #: ^N: the path lines show the node names, or the places of the nodes.
+        self._places = PlaceToggle()
         self._prefix_bytes = prefix_bytes
         self._self_name = self_name
         self._summary = summary
@@ -234,7 +238,7 @@ class MessagePathsScreen(Screen):
         parts = ["↑↓ move"]
         if self._list_hidden:
             parts.append("PgUp/PgDn scroll")
-        parts.extend(("←→ scroll line", "Esc close"))
+        parts.extend(("←→ scroll line", self._places.hint, "Esc close"))
         return " · ".join(parts)
 
     @property
@@ -246,9 +250,11 @@ class MessagePathsScreen(Screen):
         exactly when there is more than one arrival to move between, also when the list
         window hides no arrivals.
         """
-        from .tui.fkeys import default_lane
+        from .tui.fkeys import FPair, default_lane
 
-        return default_lane(nav=len(self._arrivals) > 1)
+        lane = list(default_lane(nav=len(self._arrivals) > 1))
+        lane[0] = FPair(self._places.chip, PLACES_ACTION)
+        return tuple(lane)
 
     def handle(self, action: str, data: str = "") -> None:
         """Move the highlight, move the selected line to the side, or close the dialog."""
@@ -280,6 +286,8 @@ class MessagePathsScreen(Screen):
             self._hshift = max(0, self._hshift - _HSTEP)
         elif action == "right":
             self._hshift = min(self._hmax, self._hshift + _HSTEP)
+        elif action == PLACES_ACTION:
+            self._places.flip()
         elif action in ("escape", "enter"):
             self.resolve(None)
 
@@ -440,7 +448,10 @@ class MessagePathsScreen(Screen):
             self_name=self._self_name,
             hash_as_name=True,
         ).hops
-        return PathLine([self._origin_hop(), *relays, self._far_hop()]).text()
+        line = PathLine([self._origin_hop(), *relays, self._far_hop()])
+        if self._places.on:
+            line = placed(line, places_of_session(), node_of(self._resolve))
+        return line.text()
 
     def _far_hop(self) -> PathHop:
         """The node at the end of the path: the addressee of the message, not always our node.

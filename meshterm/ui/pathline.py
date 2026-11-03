@@ -649,6 +649,17 @@ class PathLine:
 
     # --- the three shapes ---------------------------------------------------------
 
+    def with_hops(self, hops: Sequence[PathHop]) -> PathLine:
+        """The same line, drawn the same way, with other hops (refer to ``ui.placemode``)."""
+        return PathLine(
+            hops,
+            mode=self._mode,
+            separator=self._separator,
+            empty=self._empty,
+            from_origin=self._from_origin,
+            to_destination=self._to_destination,
+        )
+
     def text(self) -> Text:
         """The full one-line rendering. For overflow, the caller decides for each surface.
 

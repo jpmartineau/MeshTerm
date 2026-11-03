@@ -340,3 +340,28 @@ def test_no_answer_makes_the_node_wait(tmp_path: Path, monkeypatch: pytest.Monke
     _run(service.step())
     assert len(calls) == 1  # the second step does not ask again at once
     assert service.get("aaaaaaaaaaaa") is None
+
+
+# -- place mode ---------------------------------------------------------------
+
+
+def test_place_mode_changes_names_to_places(tmp_path: Path) -> None:
+    from meshterm.services.trace_runner import make_node_resolver
+    from meshterm.ui.pathline import PathHop, path_line
+    from meshterm.ui.placemode import PlaceToggle, node_of, placed
+
+    service, repo = _service(tmp_path)
+    repo.save_node_place("3daaaaaaaaaa", 45.0, -73.0, Place("Villeray", "Montréal", "tiles"))
+    resolve = make_node_resolver(None, {"3daaaaaaaaaa": "VE2XYZ", "a1bbbbbbbbbb": "RAK-1W"})
+    line = path_line([None, "3d", "a1", "ff"], resolve)
+    hops = placed(line, service, node_of(resolve)).hops
+    assert [h.label for h in hops[1:]] == ["Villeray", "(RAK-1W)", "ff"]
+    assert hops[1].key == "3d"  # the hop keeps its key, so it keeps its colour
+    assert hops[0] == line.hops[0]  # our own end does not change
+    assert placed(line, None).hops == line.hops
+    lone = PathHop("Bob", key="3daaaaaaaaaa")  # a full key prefix needs no resolver
+    assert placed(line.with_hops([lone]), service).hops[0].label == "Villeray"
+    toggle = PlaceToggle()
+    assert (toggle.hint, toggle.chip) == ("^N places", "Places")
+    toggle.flip()
+    assert (toggle.hint, toggle.chip) == ("^N names", "Names")

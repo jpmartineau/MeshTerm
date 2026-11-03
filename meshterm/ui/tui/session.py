@@ -110,6 +110,10 @@ _CTRL_LETTER_CHORDS: dict[str, str] = {
     # has no binding for it.
     "k": "lock",
     "l": "locate",
+    # ^N changes the path lines of a path screen between the node names and the places of
+    # the nodes (refer to meshterm.ui.placemode). N for names. No terminal or multiplexer
+    # takes it in raw mode.
+    "n": "places",
     # ^O opens the node page of the author of the selected message. The raw mode of
     # prompt_toolkit clears IEXTEN, so a terminal on macOS or BSD does not take ^O to
     # discard output.

@@ -77,28 +77,40 @@ def make_node_resolver(
     # paint (for each hop, each row, and each frame). ``entries`` does not change during
     # the life of this closure. Thus the resolver scans each different label exactly one
     # time.
-    memo: dict[str, str | None] = {}
+    memo: dict[str, tuple[str | None, str | None]] = {}
 
-    def resolve(label: str | None) -> str | None:
-        if not label:
-            return label
+    def match(label: str) -> tuple[str | None, str | None]:
+        """The name and the 12-hex node id of the first entry that matches a label."""
         if label in memo:
             return memo[label]
         needle = label.lower().removeprefix("0x")
-        result = label
+        result: tuple[str | None, str | None] = (label, None)
         for name, pub, prefix in entries:
             # The hash is a prefix of the key of the node. Match it against the full
             # public key, or against the stored prefix (which can be shorter) in either
             # direction.
             if pub and pub.startswith(needle):
-                result = name
+                result = (name, pub[:12])
                 break
             if prefix and (prefix.startswith(needle) or needle.startswith(prefix)):
-                result = name
+                result = (name, prefix[:12])
                 break
         memo[label] = result
         return result
 
+    def resolve(label: str | None) -> str | None:
+        return label if not label else match(label)[0]
+
+    def node_of(label: str | None) -> str | None:
+        """The node id of the node that ``resolve`` named for this label, or ``None``.
+
+        Place mode reads it (refer to :mod:`meshterm.ui.placemode`), so the place of a hop
+        is the place of the same node whose name the hop shows, also when two nodes share
+        a one-byte hash.
+        """
+        return None if not label else match(label)[1]
+
+    resolve.node_of = node_of  # type: ignore[attr-defined]
     return resolve
 
 

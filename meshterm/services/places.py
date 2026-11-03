@@ -130,6 +130,20 @@ def ask_nominatim(base_url: str, lat: float, lon: float) -> object | None:
         return None
 
 
+#: The service of the session, for a screen that has no context to reach it through (refer
+#: to :func:`current`).
+_CURRENT: PlaceService | None = None
+
+
+def current() -> PlaceService | None:
+    """The place service of the session, or ``None`` before a context made one.
+
+    A path screen gets only its display data, not the context. Place mode reads the places
+    through this function, the same as ``preferences.current()``.
+    """
+    return _CURRENT
+
+
 class PlaceService:
     """The places of the nodes: a read side from memory, and a background job that finds them."""
 
@@ -140,6 +154,8 @@ class PlaceService:
             ctx: The shared application context (the repository, the stores, the
                 preferences, and the tile source).
         """
+        global _CURRENT
+        _CURRENT = self
         self._ctx = ctx
         self._found: dict[str, tuple[Place, float, float]] | None = None
         self._revision = 0
