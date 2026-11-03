@@ -12,7 +12,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 23
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -172,6 +172,21 @@ CREATE TABLE IF NOT EXISTS messages (
                                   --   (created_at is the sender's clock); NULL outbound/old
     waited      INTEGER NOT NULL DEFAULT 0  -- inbound: it came out of the companion's queue
                                   --   at connect, so it arrived some time before received_at
+);
+
+-- The place of a node: the named area nearest its location (refer to meshterm.core.places).
+-- It is derived data, found from the map tiles or from Nominatim, and stored so that each
+-- location is looked up one time only. The node moves past MOVE_KM, and it is found again.
+-- Both parts NULL is a stored "the source answered, and there is no place here".
+CREATE TABLE IF NOT EXISTS node_places (
+    node      TEXT PRIMARY KEY,   -- 12-hex canonical id (as observations.node)
+    lat       REAL NOT NULL,      -- the location that the place was found for
+    lon       REAL NOT NULL,
+    fine      TEXT,               -- the most precise name: a neighbourhood, a village, a peak
+    coarse    TEXT,               -- the town or city that holds it, or NULL
+    peak      INTEGER NOT NULL DEFAULT 0,  -- fine is a peak near its summit
+    source    TEXT NOT NULL,      -- 'tiles' or 'nominatim'
+    found_at  TEXT NOT NULL       -- UTC ISO-8601
 );
 
 CREATE INDEX IF NOT EXISTS idx_traces_run ON traces(run_id);

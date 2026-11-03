@@ -82,6 +82,8 @@ them instead of hand-rolling:
 | path | an ordered hop spec you compose or force (`a1,3d,…`) |
 | route | the concrete node sequence a trace walked or will walk |
 | via | prefix for a packet/message's relay chain |
+| location | the coordinates a node advertises (latitude, longitude) — `Set location`, the location preview, ^L locate |
+| place | the named area nearest a node's location: a neighbourhood, a village, a peak (`core/places.py`, `services/places.py`). Read as *fine, coarse* (`Villeray, Montréal`); a village, town, city or peak stands alone; a path chip shows the fine part. Found from the map tiles, then Nominatim (`place_source`); a place the user typed wins. Never "location name" |
 | region | a named area a repeater relays floods for (`region put yul`); shown bare, never `#yul` — the `#` belongs to key derivation only |
 | scope | the region a flood is limited to — a packet's, a channel's send scope, the device's default scope. A direct packet has none. MeshCore's sense and the only one: the menu's This node / Managed nodes / This app sections name *whose* a setting is, never a "scope" |
 | unscoped | a plain flood, relayed by any repeater that allows the wildcard `*` |

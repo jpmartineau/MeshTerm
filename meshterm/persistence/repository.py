@@ -29,6 +29,7 @@ from ..core.models import (
     TxLevelResult,
     utcnow,
 )
+from ..core.places import Place
 from ..core.regions import SCOPED_ROUTES, raw_scope_body
 from ..core.secrets import loggable
 from . import db
@@ -2729,6 +2730,81 @@ class Repository:
         self._conn.execute(
             "INSERT OR REPLACE INTO app_state(key, value) VALUES ('map_view', ?)",
             (json.dumps({"lat": lat, "lon": lon, "zoom": zoom}),),
+        )
+        self._conn.commit()
+
+    # -- places -----------------------------------------------------------------
+
+    def node_locations(self, *, since: str | None = None) -> dict[str, tuple[float, float, str]]:
+        """The newest location that each node advertised.
+
+        The background job of :mod:`meshterm.services.places` reads it to find the nodes
+        whose place it must find. With ``since``, the query reads only the newer rows, by
+        the ``observed_at`` index. Thus a job that asks each minute pays only for the rows
+        that arrived in that minute.
+
+        Args:
+            since: Read only the observations after this UTC ISO-8601 stamp.
+
+        Returns:
+            For each node: ``(lat, lon, observed_at)`` of its newest located observation.
+        """
+        sql = (
+            "SELECT node, lat, lon, observed_at FROM observations "
+            "WHERE node IS NOT NULL AND lat IS NOT NULL AND lon IS NOT NULL AND kind != 'packet'"
+        )
+        params: list[Any] = []
+        if since is not None:
+            sql += " AND observed_at > ?"
+            params.append(since)
+        newest: dict[str, tuple[float, float, str]] = {}
+        for row in self._conn.execute(sql, params):
+            old = newest.get(row["node"])
+            if old is None or row["observed_at"] >= old[2]:
+                newest[row["node"]] = (row["lat"], row["lon"], row["observed_at"])
+        return newest
+
+    def node_places(self) -> dict[str, tuple[Place, float, float]]:
+        """Each stored place, with the location that it was found for.
+
+        Returns:
+            For each node id: ``(place, lat, lon)``.
+        """
+        rows = self._conn.execute(
+            "SELECT node, lat, lon, fine, coarse, peak, source FROM node_places"
+        ).fetchall()
+        return {
+            row["node"]: (
+                Place(row["fine"], row["coarse"], row["source"], peak=bool(row["peak"])),
+                row["lat"],
+                row["lon"],
+            )
+            for row in rows
+        }
+
+    def save_node_place(self, node: str, lat: float, lon: float, place: Place) -> None:
+        """Store the place of a node, found for this location (it replaces an older one).
+
+        Args:
+            node: The 12-hex id of the node.
+            lat: The latitude that the place was found for.
+            lon: The longitude that the place was found for.
+            place: The place (an empty place is a stored "nothing here").
+        """
+        self._conn.execute(
+            "INSERT OR REPLACE INTO node_places "
+            "(node, lat, lon, fine, coarse, peak, source, found_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                node,
+                lat,
+                lon,
+                place.fine,
+                place.coarse,
+                int(place.peak),
+                place.source,
+                utcnow().isoformat(),
+            ),
         )
         self._conn.commit()
 

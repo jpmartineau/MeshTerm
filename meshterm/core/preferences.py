@@ -154,6 +154,15 @@ class PrefSpec:
 #: sees, not the mechanism: an age is how long ago, and a timestamp is when.
 _CLI_TIME_CHOICES: dict[str, str] = {"relative": "ages", "absolute": "timestamps"}
 
+#: The sources of the place of a node (refer to :mod:`meshterm.services.places`). With
+#: ``tiles_nominatim``, the map tiles give the first answer at once, and Nominatim corrects it
+#: later, when MeshTerm is online, because only Nominatim knows the boundaries of a place.
+_PLACE_SOURCE_CHOICES: dict[str, str] = {
+    "tiles_nominatim": "tiles, then Nominatim",
+    "tiles": "map tiles",
+    "nominatim": "Nominatim",
+}
+
 #: The choices for the silence rule. They come from the ring of the Watchtower itself, so
 #: that the two lists always agree.
 _SILENCE_CHOICES: dict[int, str] = {
@@ -395,6 +404,23 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         value_type="str",
         default="https://tiles.openfreemap.org/planet",
         relaunch=True,
+    ),
+    PrefSpec(
+        key="place_source",
+        label="Place names",
+        help="Where the place of a node comes from",
+        group="Map",
+        value_type="enum",
+        default="tiles_nominatim",
+        choices=_PLACE_SOURCE_CHOICES,
+    ),
+    PrefSpec(
+        key="nominatim_url",
+        label="Nominatim",
+        help="The server that finds places by their boundaries",
+        group="Map",
+        value_type="str",
+        default="https://nominatim.openstreetmap.org",
     ),
     # --- History kept ------------------------------------------------------------
     PrefSpec(

@@ -184,6 +184,8 @@ and in quoted text.
 | route | The sequence of nodes that a trace went through or will go through | |
 | hop | One node in a path or a route | |
 | via | The prefix for the relay chain of a packet or a message | |
+| location | The coordinates (latitude and longitude) that a node advertises | coordinates (alone) |
+| place | The named area nearest the location of a node: a neighbourhood, a village, a town, or a peak. It has a fine part and a coarse part (`Villeray, Montréal`) | location name, locality |
 | region | A named area for which a repeater relays floods (`region put yul`). Shown without `#` | |
 | scope | The region to which a flood is limited | |
 | unscoped | A flood that each repeater relays when it permits the wildcard `*` | |

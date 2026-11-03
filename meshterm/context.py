@@ -24,6 +24,7 @@ from .core.courier_store import CourierStore
 from .core.device_store import DeviceStore
 from .core.discovery import DiscoveredDevice, discover_devices
 from .core.mute_store import MuteStore
+from .core.place_store import PlaceStore
 from .core.preferences import PREFERENCES_FILENAME, Preferences, report_dropped
 from .core.preferences import install as install_preferences
 from .core.region_store import RegionStore
@@ -46,6 +47,7 @@ if TYPE_CHECKING:
     from .services.device_state import DeviceState
     from .services.event_hub import EventHub
     from .services.monitor_service import MonitorService
+    from .services.places import PlaceService
     from .services.rooms import RoomService
     from .services.watchtower import WatchtowerService
     from .ui.surface import Ui
@@ -101,6 +103,9 @@ class AppContext:
         room_store: The store for the rooms that this machine joined: the password of each
             room and the access that it granted (if the caller does not inject it, the
             default is ``<config_dir>/rooms.json``).
+        place_store: The store for the places that the user typed for nodes. A typed place
+            wins over a found place (if the caller does not inject it, the default is
+            ``<config_dir>/places.json``).
         mock: Whether the context uses the simulator device.
         demo: Whether the simulator is the demo world of ``--demo``
             (:mod:`meshterm.demo`), which implies ``mock``.
@@ -145,6 +150,7 @@ class AppContext:
     settings_store: SettingsStore | None = None
     contact_store: ContactStore | None = None
     room_store: RoomStore | None = None
+    place_store: PlaceStore | None = None
     profile: DeviceProfile | None = None
     mock: bool = False
     demo: bool = False
@@ -189,6 +195,7 @@ class AppContext:
     _clock_sync: ClockSync | None = field(default=None, init=False, repr=False)
     _courier: CourierService | None = field(default=None, init=False, repr=False)
     _battery: BatteryService | None = field(default=None, init=False, repr=False)
+    _places: PlaceService | None = field(default=None, init=False, repr=False)
     _devstate: DeviceState | None = field(default=None, init=False, repr=False)
     _basemap_source: BasemapSource | None = field(default=None, init=False, repr=False)
     _ui: Ui | None = field(default=None, init=False, repr=False)
@@ -225,6 +232,8 @@ class AppContext:
             self.contact_store = ContactStore(self.settings.config_dir / "contacts.json")
         if self.room_store is None:
             self.room_store = RoomStore(self.settings.config_dir / "rooms.json")
+        if self.place_store is None:
+            self.place_store = PlaceStore(self.settings.config_dir / "places.json")
 
     @property
     def profile_name(self) -> str | None:
@@ -480,6 +489,20 @@ class AppContext:
 
             self._courier = CourierService(self)
         return self._courier
+
+    @property
+    def places(self) -> PlaceService:
+        """Return the places of the nodes, and create the service at first use.
+
+        A screen reads a place from it at each paint (:meth:`PlaceService.get`). The
+        interactive session starts its background job with the other always-on services.
+        A scripted CLI run only reads the stored places, and never starts the job.
+        """
+        if self._places is None:
+            from .services.places import PlaceService
+
+            self._places = PlaceService(self)
+        return self._places
 
     @property
     def battery(self) -> BatteryService:
@@ -1047,6 +1070,8 @@ class AppContext:
             await self._courier.aclose()
         if self._battery is not None:
             await self._battery.aclose()
+        if self._places is not None:
+            await self._places.aclose()
         if self._watchtower is not None:
             await self._watchtower.aclose()
         if self._clock_sync is not None:

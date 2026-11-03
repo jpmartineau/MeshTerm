@@ -164,6 +164,11 @@ _CA_BUNDLES = (
 )
 
 
+def tls_context() -> ssl.SSLContext | None:
+    """The TLS context for each HTTPS request of MeshTerm (refer to :func:`_tls_context`)."""
+    return _tls_context()
+
+
 @lru_cache(maxsize=1)
 def _tls_context() -> ssl.SSLContext | None:
     """The TLS context for tile downloads, with a CA bundle if the default has none.
@@ -443,6 +448,29 @@ class BasemapSource:
                 return None
             self._memo.move_to_end((z, x, y))
             return hit[0]
+
+    def raw_tile(self, z: int, x: int, y: int) -> bytes | None:
+        """The raw ``.pbf`` bytes of a tile, from the cache or the network. This method blocks.
+
+        This method is for a reader of layers that the map does not draw: the places of the
+        nodes read ``place`` and ``mountain_peak`` (refer to
+        :mod:`meshterm.services.places`). The cache keeps whole tiles, so a tile that the
+        map downloaded already has these layers, and a tile that this method downloads is
+        ready for the map. A download goes through :meth:`_build`, so it obeys the same
+        rule: only bytes that decode are written.
+
+        Returns:
+            The bytes, or ``None`` when the tile is not available (offline and not cached,
+            or a tile that the source answered as empty).
+        """
+        path = self._tile_path(z, x, y)
+        cached = self._read_cached(path)
+        if cached is not None:
+            return cached
+        if (z, x, y) in self._blank:
+            return None
+        self._build(z, x, y)
+        return self._read_cached(path)
 
     def warm(self, z: int, x: int, y: int) -> None:
         """Make a tile fast to load later: download, decode, and write it, but hold nothing.
