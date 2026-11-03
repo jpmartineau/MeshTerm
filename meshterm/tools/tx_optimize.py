@@ -49,7 +49,7 @@ class TxOptimizeTool(Tool):
     title = "TX optimize"
     icon = "📶"
     help = "Tune a remote node's TX power for a target"
-    category = "Other nodes"
+    category = "Managed nodes"
     order = 20  # the same as Repeater admin: a remote radio, changed over the mesh
 
     async def prompt_params(self, ctx: AppContext) -> dict[str, Any] | None:

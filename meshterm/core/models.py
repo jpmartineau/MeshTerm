@@ -308,6 +308,35 @@ def advert_time(last_advert: object) -> datetime | None:
     return when
 
 
+def advert_gate(last_advert: object) -> datetime | None:
+    """The stored advert time of a contact when it is in the future, or ``None``.
+
+    This is the other half of :func:`advert_time`. That function refuses a time in the
+    future as a fact about *when we heard* the node. This function keeps it, because it is
+    a fact about the *device*. MeshCore's ``onAdvertRecv`` drops each advert whose time is
+    not newer than the stored one, as a possible replay. Thus a node whose clock was once
+    ahead, and was then set correctly, is not heard again until the real time passes the
+    stored time. That can take months.
+
+    Args:
+        last_advert: The raw ``last_advert`` field from a contact payload.
+
+    Returns:
+        The stored time, when it is more than :func:`clock_tolerance_s` ahead of our clock.
+    """
+    try:
+        seconds = int(last_advert)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if seconds <= 0:
+        return None
+    try:
+        when = datetime.fromtimestamp(seconds, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
+    return when if when > utcnow() + timedelta(seconds=clock_tolerance_s()) else None
+
+
 @dataclass(slots=True)
 class Contact:
     """A node that the connected companion knows.
@@ -329,6 +358,11 @@ class Contact:
             means that the firmware thinks that the contact is a direct neighbour (a
             zero-hop route). ``None`` means that the device learned no route (or that the
             transport did not report one).
+        adverts_refused_until: The advert time that the device stores for this contact,
+            when that time is in the future (refer to :func:`advert_gate`). The firmware
+            refuses each advert that is not newer than the stored one, as a replay. Thus,
+            after the owner corrects a clock that was ahead, the device drops each new
+            advert of the node until this time. ``None`` when nothing is refused.
     """
 
     name: str
@@ -339,6 +373,7 @@ class Contact:
     lat: float | None = None
     lon: float | None = None
     route_hops: tuple[str, ...] | None = None
+    adverts_refused_until: datetime | None = None
 
     @property
     def has_location(self) -> bool:

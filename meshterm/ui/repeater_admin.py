@@ -1081,6 +1081,31 @@ async def _simple_action(
     await ctx.ui.session.message_dialog(body, title=title)
 
 
+async def sync_clock(ctx: AppContext, node: Contact) -> None:
+    """Log in to a managed node and set its clock from ours, from outside the admin page.
+
+    This is the ``Sync clock`` row of the admin page, for the node page and the Clock drift
+    page. A managed node has its password stored, so the login asks nothing. The confirm,
+    the login, and the reply are those of the admin page.
+
+    Args:
+        ctx: The shared application context (the interactive menu must be running).
+        node: The repeater or room server.
+    """
+    device = await ctx.device()
+    if not await _login(ctx, device, node):
+        return
+    await _simple_action(
+        ctx,
+        device,
+        node,
+        "clock sync",
+        title="Sync clock",
+        prompt=f"Set {node.name}'s clock from this companion's time?",
+        commit="Sync",
+    )
+
+
 async def _change_password(ctx: AppContext, device: Device, node: Contact) -> None:
     """Change the admin password of the node (and remember the new password if it succeeds)."""
     new = await ctx.ui.text(

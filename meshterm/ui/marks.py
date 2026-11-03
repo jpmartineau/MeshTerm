@@ -61,6 +61,14 @@ MASK_MARK = "•"
 #: see.
 LOCK_ICON = "🔒"
 
+#: The mark of a **managed node**: a node whose admin password MeshTerm stores (JP,
+#: 2026-11-02). It is the ``🔑`` of a credential key in the icon lexicon, because the stored
+#: password is what makes the node one that the user manages. It is in the same column as
+#: the padlock in the Contacts list, before the type glyph, and on the node page next to
+#: the type. :func:`~meshterm.ui.theme.glyph` gives the ``*`` of a masked secret on the
+#: PicoCalc. A node that is not managed draws nothing, for the same reason as the padlock.
+MANAGED_ICON = "🔑"
+
 #: Sentinels that name the endpoints of a path on the route graph. ``\x00`` never occurs
 #: in a node hash, so the sentinels can share the namespace of node ids and not collide
 #: with an id.

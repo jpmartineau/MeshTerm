@@ -32,7 +32,7 @@ instead, because the plain face can change between releases.
   - [The mesh around you](#the-mesh-around-you)
   - [Messaging](#messaging)
   - [Tracing](#tracing)
-  - [Other nodes](#other-nodes)
+  - [Managed nodes](#managed-nodes)
   - [MeshTerm itself](#meshterm-itself)
 - [Recipes](#recipes)
 - [What has no command](#what-has-no-command)
@@ -1681,7 +1681,7 @@ node stays at its original power.
 
 ---
 
-### Other nodes
+### Managed nodes
 
 #### `meshterm repeater-admin`
 

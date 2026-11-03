@@ -150,19 +150,20 @@ async def clock_rows(ctx: AppContext) -> list[ClockRow]:
         managed = admin is not None and admin.get(contact) is not None
         rows.append(ClockRow(offset, name, key, contact.node_type, managed, contact))
 
-    # The managed nodes that sent no sample in the window: the newest offset from all the
-    # history, or none.
+    # The managed nodes, and the contacts whose adverts the device refuses, that sent no
+    # sample in the window: the newest offset from all the history, or none.
     listed = {r.offset.who for r in rows if r.offset is not None and r.offset.keyed}
-    for contact in contacts if admin is not None else ():
+    for contact in contacts:
         node_id = (contact.public_key or contact.key_prefix or "").lower().removeprefix("0x")[:12]
         if not node_id or node_id in listed or node_id == self_id:
             continue
-        if admin.get(contact) is None:
+        managed = admin is not None and admin.get(contact) is not None
+        if not managed and contact.adverts_refused_until is None:
             continue
         older = node_offset(ctx.repo, node_id, name=contact.name, key_of=key_of)
         key = contact.public_key or contact.key_prefix
         rows.append(
-            ClockRow(older, contact.name, key, contact.node_type, True, contact, current=False)
+            ClockRow(older, contact.name, key, contact.node_type, managed, contact, current=False)
         )
     return rows
 

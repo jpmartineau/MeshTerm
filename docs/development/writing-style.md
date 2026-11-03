@@ -171,6 +171,7 @@ and in quoted text.
 | contact | A node that your device knows. It is **discovered** (heard, not added) or **added** (in the contact list, and you can send messages to it). Each contact is a node. Not each node is a contact | |
 | our node | The node of the companion that MeshTerm is connected to. On the screen, it is "you" (★) | own node, self node, local node |
 | companion | A node that a program (such as MeshTerm) controls through USB, Bluetooth, or TCP | |
+| managed node | A node whose admin password MeshTerm stores, so that the user can log in to it with no prompt. It has the `🔑` mark | remembered admin, administered node |
 | device | The companion that MeshTerm is connected to (the `Device` class) | radio (for the companion) |
 | handheld | A small computer that runs MeshTerm on its own screen: the PicoCalc, the Cardputer Zero, or the uConsole | device (for the computer), on-device |
 | radio | The LoRa radio in a node | |

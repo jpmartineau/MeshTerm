@@ -205,7 +205,7 @@ def test_main_menu_sections_answer_the_menus_own_question() -> None:
         "Watch": ["dashboard", "livefeed", "watchtower", "clocks", "timemachine"],
         "Explore": ["map", "walk", "trace", "trace-path", "records"],
         "This node": ["info", "config", "advert"],
-        "Other nodes": ["repeater-admin", "tx-optimize"],
+        "Managed nodes": ["repeater-admin", "tx-optimize"],
         "This app": [
             "preferences",
             "diagnostics",

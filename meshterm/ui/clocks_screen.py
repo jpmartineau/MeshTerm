@@ -2,13 +2,17 @@
 """The Clock drift page: how far the clock of each node is from ours.
 
 The page reads the clock samples of the last ``clock_report_days`` (refer to
-:mod:`~meshterm.services.clock_offsets`) and shows them in four sections:
+:mod:`~meshterm.services.clock_offsets`) and shows them in these sections:
 
 * **Managed nodes** (the nodes whose admin password MeshTerm stores) come first, each one
   always, also when its clock is correct, because these are the clocks that the user can
   set (JP, 2026-11-03). A managed node with no sample in the window shows its newest offset
   from all the history, or ``no sample``. A repeater sends no message, so its adverts are
   its only samples, and a new install has none yet.
+* **Adverts refused**: the contacts whose adverts the device drops, because their clocks
+  were once ahead (refer to
+  :attr:`~meshterm.core.models.Contact.adverts_refused_until`), with the date until which
+  it drops them. The node page of each one has the repair.
 * **All clocks**: a histogram of the offsets, in log steps on two sides. The clocks behind
   ours are at the top, the clocks in sync in the centre, and the clocks ahead at the
   bottom (JP, 2026-11-02). A clock can be wrong by seconds or by years, so one linear axis
@@ -288,6 +292,27 @@ def _row_text(row: ClockRow, tolerance_s: float, width: int) -> Text:
     return text
 
 
+def _refused_header(width: int) -> Text:
+    """The header line of the refused adverts: ``NAME`` and ``UNTIL``."""
+    text = Text(" " * (_POINTER_W + _MARK_W), style="muted", no_wrap=True, overflow="ellipsis")
+    text.append(fit_cells("NAME", _name_w(width - _POINTER_W)))
+    text.append("  " + fit_cells("UNTIL", _OFFSET_W + 2 + _AGE_W, align="right"))
+    return text
+
+
+def _refused_text(row: ClockRow, width: int) -> Text:
+    """One contact whose adverts the device refuses: its name, and the date in warn."""
+    assert row.contact is not None and row.contact.adverts_refused_until is not None
+    glyph, glyph_style = NODE_GLYPHS.get(row.node_type, DEFAULT_GLYPH)
+    text = Text(no_wrap=True, overflow="ellipsis")
+    text.append(f"{glyph} ", style=glyph_style)
+    hue = name_style(row.name, row.key) if row.name else "node.unknown"
+    text.append(fit_cells(row.label, _name_w(width)), style=hue)
+    until = f"{row.contact.adverts_refused_until.astimezone():%Y-%m-%d}"
+    text.append("  " + fit_cells(until, _OFFSET_W + 2 + _AGE_W, align="right"), style="warn")
+    return text
+
+
 def _name_line(row: ClockRow, tolerance_s: float, width: int) -> Text:
     """One sender with no key: page text under the row column, in the unknown grey."""
     text = Text(" " * (_POINTER_W + _MARK_W), no_wrap=True, overflow="ellipsis")
@@ -332,6 +357,17 @@ def clock_drift_screen(rows: Sequence[ClockRow], *, tolerance_s: float) -> Selec
         items.append(section_heading("Managed nodes"))
         items.append(Separator(_node_header))
         items += node_rows(managed)
+
+    # The contacts whose adverts the device refuses, because their clocks were once ahead
+    # (refer to Contact.adverts_refused_until). Their node page has the repair.
+    refused = sorted(
+        (r for r in rows if r.contact is not None and r.contact.adverts_refused_until),
+        key=lambda r: r.label.casefold(),
+    )
+    if refused:
+        items.append(section_heading("Adverts refused"))
+        items.append(Separator(_refused_header))
+        items += [Choice(lambda w, r=r: _refused_text(r, w), r.contact) for r in refused]
 
     counted = histogram(rows, tolerance_s)
     peak = max((count for _step, count in counted), default=0) or 1

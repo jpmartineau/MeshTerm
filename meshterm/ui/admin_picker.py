@@ -3,8 +3,9 @@
 
 The tools that administer remote nodes over the mesh share this picker: TX optimize and
 the repeater admin screen. Thus "select the node to manage" reads the same everywhere.
-The nodes that have credentials are first in the list, in their own 🔑 section. These are
-the nodes that the user administered before, so they are the most probable selections.
+The nodes that have credentials are first in the list, in their own section: the *managed
+nodes*, each with the ``🔑`` of :data:`~meshterm.ui.marks.MANAGED_ICON`. These are the nodes
+that the user administered before, so they are the most probable selections.
 Repeaters and room servers follow, then all the other nodes. Each section is in order of
 how recently the node was heard. MeshTerm offers each contact that has a public key,
 because a password is a fact about the *user* and not about the node.
@@ -46,7 +47,11 @@ def admin_picker_rows(ctx: AppContext, contacts: list[Contact]) -> tuple[list, l
         offer (those that have a key). Both are empty when MeshTerm can offer nothing.
         The caller shows a note about this and does not open a list.
     """
+    from rich.cells import cell_len
+
+    from .marks import MANAGED_ICON
     from .menus import section_heading
+    from .theme import glyph as platform_glyph
     from .theme import name_style
     from .tui import Choice
     from .widgets import DEFAULT_GLYPH, NODE_GLYPHS
@@ -54,6 +59,12 @@ def admin_picker_rows(ctx: AppContext, contacts: list[Contact]) -> tuple[list, l
     candidates = [c for c in contacts if (c.public_key or c.key_prefix).strip()]
     if not candidates:
         return [], candidates
+    remembered = [c for c in candidates if ctx.admin_store.get(c) is not None]
+    # The mark column, as in the Contacts list: the key of a managed node, or blanks of the
+    # same width, so that each type mark stays in one column. No cells when no node is
+    # managed.
+    key_mark = platform_glyph(MANAGED_ICON)
+    mark_w = cell_len(key_mark) + 1 if remembered else 0
 
     def row(contact: Contact) -> Choice:
         # The type mark keeps its own fixed hue. The *name* takes the hue that comes from
@@ -62,6 +73,8 @@ def admin_picker_rows(ctx: AppContext, contacts: list[Contact]) -> tuple[list, l
         # type too.)
         glyph, glyph_style = NODE_GLYPHS.get(contact.node_type, DEFAULT_GLYPH)
         label = Text()
+        if mark_w:
+            label.append(f"{key_mark} " if contact in remembered else " " * mark_w)
         label.append(f"{glyph} ", style=glyph_style)
         label.append(
             contact.name,
@@ -72,7 +85,6 @@ def admin_picker_rows(ctx: AppContext, contacts: list[Contact]) -> tuple[list, l
     def recency(contact: Contact) -> float:
         return -(contact.last_seen.timestamp() if contact.last_seen else 0.0)
 
-    remembered = [c for c in candidates if ctx.admin_store.get(c) is not None]
     infrastructure = [
         c
         for c in candidates
@@ -82,7 +94,7 @@ def admin_picker_rows(ctx: AppContext, contacts: list[Contact]) -> tuple[list, l
 
     items: list = []
     if remembered:
-        items.append(section_heading("Remembered admins"))
+        items.append(section_heading("Managed nodes"))
         items.extend(row(c) for c in sorted(remembered, key=recency))
     if infrastructure:
         items.append(section_heading("Repeaters & rooms"))

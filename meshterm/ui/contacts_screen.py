@@ -119,6 +119,7 @@ class ContactsScreen(ContactListScreen):
         locked: frozenset[str] = frozenset(),
         locator: Locator | None = None,
         can_lock: bool = False,
+        managed: frozenset[str] = frozenset(),
     ) -> None:
         """Create the contacts screen over contact data that MeshTerm already got.
 
@@ -145,11 +146,15 @@ class ContactsScreen(ContactListScreen):
                 :class:`~meshterm.ui.map_screen.Locator`). With ``None``, ^L does nothing.
             can_lock: Whether the caller can store a lock, for ^K. With ``False``, ^K does
                 nothing.
+            managed: The full keys (lowercase hex) of the managed nodes: the contacts whose
+                admin password MeshTerm stores. Each of those rows has the ``🔑`` in its
+                mark column (refer to :data:`~meshterm.ui.marks.MANAGED_ICON`).
         """
         self._self_name, self._self_key = self_name, self_key
         self._locator = locator
         self._can_lock = can_lock
         self._locked = locked
+        self._managed = managed
         self._contacts, self._counts = contacts, counts
         rows = self._contact_rows_for(locked)
         # The maintenance actions close the list, after each contact, for each sort. First
@@ -211,6 +216,7 @@ class ContactsScreen(ContactListScreen):
                     last_seen=c.last_seen,
                     count=contact_packets(c, self._counts),
                     locked=(c.public_key or "").lower().removeprefix("0x") in locked,
+                    managed=(c.public_key or "").lower().removeprefix("0x") in self._managed,
                 )
             )
         return rows
@@ -360,6 +366,7 @@ async def open_contacts(
             locked=_locked_keys(ctx, self_key),
             locator=locator,
             can_lock=_can_lock(ctx, self_key),
+            managed=managed_keys(ctx, contacts),
         )
 
     screen = build()
@@ -443,6 +450,26 @@ def _toggle_lock(ctx: AppContext, self_key: str, contact: Contact) -> None:
     store = ctx.contact_store
     dev_pub = self_key.lower().removeprefix("0x")
     store.set_locked(dev_pub, contact, not store.is_locked(dev_pub, contact.public_key))
+
+
+def managed_keys(ctx: AppContext, contacts: list[Contact]) -> frozenset[str]:
+    """The full keys of the managed nodes among ``contacts``: those with a stored admin password.
+
+    Args:
+        ctx: The shared application context. Its ``admin_store`` holds the passwords.
+        contacts: The contacts to examine.
+
+    Returns:
+        The keys in lowercase hex. Empty when the context has no admin store.
+    """
+    store = getattr(ctx, "admin_store", None)
+    if store is None:
+        return frozenset()
+    return frozenset(
+        (c.public_key or "").lower().removeprefix("0x")
+        for c in contacts
+        if c.public_key and store.get(c) is not None
+    )
 
 
 def _locked_keys(ctx: AppContext, self_key: str) -> frozenset[str]:

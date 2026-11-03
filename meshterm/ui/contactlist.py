@@ -38,7 +38,7 @@ from typing import Any
 from rich.cells import cell_len
 from rich.text import Text
 
-from .marks import LOCK_ICON, SELF_MARK
+from .marks import LOCK_ICON, MANAGED_ICON, SELF_MARK
 from .menus import fit_cells
 from .theme import glyph, name_style
 from .tui.select import Choice, SelectScreen, Separator
@@ -135,26 +135,29 @@ TRACE_LANES: tuple[ContactLane, ...] = (TRACED_LANE, HEARD_LANE, PKTS_LANE)
 ARCHIVED_LANES: tuple[ContactLane, ...] = (ARCHIVED_LANE,)
 
 
-def _lock_lane_width(rows: list[ContactRow]) -> int:
-    """The width of the lock column in cells: the platform padlock and its gap, or ``0``.
+def _row_marks(row: ContactRow) -> str:
+    """The marks of a row before its type glyph: the padlock, then the key of a managed node."""
+    return (glyph(LOCK_ICON) if row.locked else "") + (glyph(MANAGED_ICON) if row.managed else "")
 
-    The column is on the left of the type glyph. It is there only while a row is locked, so
-    a list with no locks uses no cells for it. On the 53 cells of the PicoCalc, those cells
-    are for a name.
+
+def _lock_lane_width(rows: list[ContactRow]) -> int:
+    """The width of the mark column in cells: the widest marks of a row and a gap, or ``0``.
+
+    The column is on the left of the type glyph. It holds the padlock of a locked contact
+    and the key of a managed node (:func:`_row_marks`). It is there only while a row has a
+    mark, so a list with no marks uses no cells for it. On the 53 cells of the PicoCalc,
+    those cells are for a name.
     """
-    if not any(row.locked for row in rows):
-        return 0
-    return cell_len(glyph(LOCK_ICON)) + 1
+    widest = max((cell_len(_row_marks(row)) for row in rows), default=0)
+    return widest + 1 if widest else 0
 
 
 def _lock_cell(row: ContactRow, lock_w: int) -> str:
-    """The lock column of a row: the padlock and its gap when locked, or else blanks."""
+    """The mark column of a row: its marks and the gap, or else blanks."""
     if not lock_w:
         return ""
-    if not row.locked:
-        return " " * lock_w
-    mark = glyph(LOCK_ICON)
-    return mark + " " * (lock_w - cell_len(mark))
+    marks = _row_marks(row)
+    return marks + " " * (lock_w - cell_len(marks))
 
 
 #: The muted ``(you)`` tag on the lane of our node (refer to :func:`_lane`). Its width is part
@@ -251,6 +254,8 @@ class ContactRow:
         locked: Whether the contact is locked, so that it cannot be archived. A padlock
             then starts the row, on the left of the type glyph. ``False`` draws nothing
             there.
+        managed: Whether the contact is a managed node: MeshTerm stores its admin
+            password. The ``🔑`` then goes in the same column, after a padlock.
         you: Whether this is our node. Our node gets the ``★`` marker, the pure-white
             ``you`` name style with a muted ``(you)`` tag, and faint ``—`` heard and packet
             lanes (MeshTerm never hears our node). Its row is pinned above the sorted
@@ -266,6 +271,7 @@ class ContactRow:
     last_traced: datetime | None = None
     archived_at: datetime | None = None
     locked: bool = False
+    managed: bool = False
     you: bool = False
 
 

@@ -49,7 +49,7 @@ class RegionsTool(Tool):
     title = "Regions"
     icon = "🔖"
     help = "Ask a repeater which regions it relays floods for"
-    category = "Other nodes"
+    category = "Managed nodes"
     order = 20
     menu_visible = False  # the menu asks from the repeater's node page
 

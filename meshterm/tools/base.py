@@ -223,11 +223,13 @@ _REGISTRY: dict[str, Tool] = {}
 #: features for each day, and the list from which you select a recipient). Then come Watch
 #: (what the mesh does, what it did, and what to get notifications about) and Explore
 #: (where the nodes are, how they get to each other, and the boards that score the walks).
-#: Then come the two owners of a setting: This node (the radio in your hand) and Other
-#: nodes (the radio of another person, over the mesh).
+#: Then come the two owners of a setting: This node (the radio in your hand) and Managed
+#: nodes (the radios that you administer over the mesh). The managed
+#: section was "Other nodes" until 2026-11-03: its tools log in with an admin password, and
+#: a node whose password MeshTerm stores is a *managed node* everywhere else in the app.
 #:
 #: This app ends the list as the third and last *owner*, after the radio in your hand and
-#: the radio of another person over the mesh: it is the program in front of you. It holds
+#: the radios that you manage over the mesh: it is the program in front of you. It holds
 #: the one item that changes how MeshTerm behaves (Preferences), and the four pages that
 #: say what MeshTerm is. These are questions that no activity above can hold, and that
 #: nothing on the mesh can answer. This app is last because the user who has nothing more
@@ -238,7 +240,7 @@ _CATEGORY_ORDER = [
     "Watch",
     "Explore",
     "This node",
-    "Other nodes",
+    "Managed nodes",
     "This app",
 ]
 

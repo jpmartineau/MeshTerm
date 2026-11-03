@@ -239,6 +239,9 @@ def _contacts(cols: int, rows: int) -> Screen:
         archived=12,
         locked=frozenset({"aa" * 32}),
         can_lock=True,
+        # The locked contact is also a managed node: the mark column then holds the
+        # padlock and the key, its widest form, on each platform.
+        managed=frozenset({"aa" * 32}),
     )
     screen.handle("down")
     return screen

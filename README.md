@@ -281,8 +281,8 @@ Three sections name an activity. **Message** has chat, channels, the courier out
 contacts. **Watch** has the dashboard, the live feed, the watchtower, the clock drift
 report, and the time machine.
 **Explore** has the map, the mesh walk, tracing, and the trophy case. The other three
-sections name the owner. **This node** is the radio in your hand. **Other nodes** is the
-someone else's radio, which you reach over the mesh. **This app** is MeshTerm itself, with
+sections name the owner. **This node** is the radio in your hand. **Managed nodes** are
+the radios that you administer over the mesh. **This app** is MeshTerm itself, with
 the preferences, the diagnostics, and the written pages.
 
 Almost all of these have a mirror `meshterm` subcommand. The same registry builds the menu

@@ -6,8 +6,8 @@ for the scripted half.
 
 The main menu asks one question: "What would you like to do?" It has six sections. The first
 three sections name an action: Message, Watch, and Explore. The last three sections name
-whose setting it is. "This node" is the radio in your hand. "Other nodes" are radios of
-other persons, which you reach over the mesh. "This app" is the program in front of you.
+whose setting it is. "This node" is the radio in your hand. "Managed nodes" are the radios
+that you administer over the mesh. "This app" is the program in front of you.
 
 This page lists each interactive screen with its scripted equivalent, where one exists.
 
@@ -51,7 +51,7 @@ This page lists each interactive screen with its scripted equivalent, where one 
 | **📡 Send advert** | Announce this node to the mesh with a zero-hop advert or a flood advert. You can also share the contact card of this node as a QR code. | `meshterm config advert` / `config share` |
 | **🔌 Devices** | This is not a menu screen. You select the companion on the startup splash. The splash lists the serial companions and the Bluetooth LE companions. If only one companion is present, MeshTerm selects it. You can add a network (TCP) companion with host:port. MeshTerm remembers the last good default. If the link drops, MeshTerm detects it at once and offers to reconnect. `meshterm devices` lists what discovery finds. | `meshterm devices` |
 
-## 🗼 Other nodes: the radio of another person, over the mesh
+## 🗼 Managed nodes: the radios that you administer over the mesh
 
 | Feature | What it does | Scripted |
 | --- | --- | --- |

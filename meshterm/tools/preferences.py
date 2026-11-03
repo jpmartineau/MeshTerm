@@ -14,7 +14,7 @@ for eleven changes that the page staged, and for one ``preferences set``.
 This tool is the tool of the app, not of the device, on purpose. It reads nothing from the
 companion, it transmits nothing, and it works with no device connected. For this reason,
 it is the first row of the **This app** section (the third owner, after this node and
-other nodes), and it is not next to Device config.
+the managed nodes), and it is not next to Device config.
 """
 
 from __future__ import annotations

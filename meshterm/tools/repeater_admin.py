@@ -42,7 +42,7 @@ class RepeaterAdminTool(Tool):
     title = "Repeater admin"
     icon = "🗼"
     help = "Run a remote repeater — settings and actions"
-    category = "Other nodes"
+    category = "Managed nodes"
     order = 10  # the remote equivalent of the local config tools
 
     async def prompt_params(self, ctx: AppContext) -> dict[str, Any] | None:

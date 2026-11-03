@@ -1,0 +1,178 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Managed nodes and refused adverts: the marks, the section, and the advert gate repair.
+
+A managed node is a node whose admin password MeshTerm stores. It has the ``🔑`` mark in
+each list of nodes. A contact whose stored advert time is in the future is a node that the
+device no longer hears, and the node page can lower that time.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import timedelta
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from rich.cells import cell_len
+
+from meshterm.core.admin_store import AdminStore
+from meshterm.core.connection import ContactNotOnDeviceError, MeshCoreDevice, MockDevice
+from meshterm.core.models import (
+    CLOCK_TOLERANCE_S,
+    NODE_TYPE_REPEATER,
+    Contact,
+    advert_gate,
+    utcnow,
+)
+from meshterm.services.clock_offsets import ClockOffset
+from meshterm.ui.clocks_screen import ClockRow, clock_drift_screen
+from meshterm.ui.contactlist import ContactRow, _lock_cell, _lock_lane_width
+from meshterm.ui.marks import LOCK_ICON, MANAGED_ICON
+from meshterm.ui.theme import glyph
+from tests.conftest import plain
+
+KEY = "ab" * 32
+
+
+def _stamp(delta: timedelta) -> int:
+    return int((utcnow() + delta).timestamp())
+
+
+# -- the advert gate ------------------------------------------------------------------------
+
+
+def test_only_a_stored_time_past_the_tolerance_closes_the_gate() -> None:
+    """A time far in the future is a closed gate. A near or past time, or none, is not."""
+    far = advert_gate(_stamp(timedelta(days=90)))
+    assert far is not None and far > utcnow() + timedelta(days=89)
+    assert advert_gate(_stamp(timedelta(seconds=CLOCK_TOLERANCE_S // 2))) is None
+    assert advert_gate(_stamp(timedelta(days=-1))) is None
+    assert advert_gate(0) is None
+    assert advert_gate("garbage") is None
+
+
+def test_the_simulator_opens_the_gate_once() -> None:
+    """The first call lowers the time. A second has nothing to do. An unknown key raises."""
+    device = MockDevice()
+    gated = Contact(
+        name="Gated",
+        public_key=KEY,
+        key_prefix=KEY[:12],
+        adverts_refused_until=utcnow() + timedelta(days=30),
+    )
+    asyncio.run(device.add_contact(gated))
+    assert asyncio.run(device.accept_adverts_again(gated)) is True
+    assert asyncio.run(device.accept_adverts_again(gated)) is False
+    with pytest.raises(ContactNotOnDeviceError):
+        asyncio.run(device.accept_adverts_again(Contact(name="Nobody", public_key="cd" * 32)))
+
+
+class _Commands:
+    """A stand-in for the command set of the library: one stored record, and the writes."""
+
+    def __init__(self, record: dict) -> None:
+        self.record = record
+        self.written: list[dict] = []
+
+    async def get_contact_by_key(self, pubkey: bytes):  # noqa: ANN201
+        assert pubkey.hex() == self.record["public_key"]
+        return SimpleNamespace(payload=dict(self.record), is_error=lambda: False)
+
+    async def add_contact(self, record: dict):  # noqa: ANN201
+        self.written.append(record)
+        return SimpleNamespace(payload={}, is_error=lambda: False)
+
+
+def test_the_device_writes_back_only_a_lower_advert_time() -> None:
+    """The record goes back as the device has it, with only a lower advert time.
+
+    The flags, the path, the name, and the position do not change. The time goes to our
+    clock less the tolerance, and never to zero.
+    """
+    record = {
+        "public_key": KEY,
+        "type": NODE_TYPE_REPEATER,
+        "flags": 1,
+        "out_path_len": 2,
+        "out_path_hash_mode": 0,
+        "out_path": "3d27",
+        "adv_name": "Hilltop",
+        "last_advert": _stamp(timedelta(days=200)),
+        "adv_lat": 45.5,
+        "adv_lon": -73.6,
+    }
+    commands = _Commands(record)
+    device = MeshCoreDevice(port="mock")
+    device._mc = SimpleNamespace(commands=commands)
+    assert asyncio.run(device.accept_adverts_again(Contact(name="Hilltop", public_key=KEY)))
+    (written,) = commands.written
+    now = int(utcnow().timestamp())
+    assert now - CLOCK_TOLERANCE_S - 5 <= written["last_advert"] <= now - CLOCK_TOLERANCE_S + 5
+    assert {k: v for k, v in written.items() if k != "last_advert"} == {
+        k: v for k, v in record.items() if k != "last_advert"
+    }
+
+    # A stored time that is already in the past changes nothing.
+    commands.record = {**record, "last_advert": now - 3600}
+    commands.written.clear()
+    assert (
+        asyncio.run(device.accept_adverts_again(Contact(name="Hilltop", public_key=KEY))) is False
+    )
+    assert commands.written == []
+
+
+# -- the marks ------------------------------------------------------------------------------
+
+
+def test_the_mark_column_holds_the_padlock_and_the_key() -> None:
+    """A managed node has the key in the mark column. A locked and managed one has both."""
+    rows = [
+        ContactRow(value=1, name="Plain"),
+        ContactRow(value=2, name="Managed", managed=True),
+        ContactRow(value=3, name="Both", locked=True, managed=True),
+    ]
+    width = _lock_lane_width(rows)
+    assert _lock_cell(rows[0], width).strip() == ""
+    assert _lock_cell(rows[1], width).strip() == glyph(MANAGED_ICON)
+    assert _lock_cell(rows[2], width).strip() == glyph(LOCK_ICON) + glyph(MANAGED_ICON)
+    assert _lock_lane_width(rows[:1]) == 0  # no marks, no cells
+
+
+def test_the_admin_picker_lists_managed_nodes_first_with_the_key(tmp_path: Path) -> None:
+    """The first section of the picker is "Managed nodes", and its rows have the key."""
+    from meshterm.ui.admin_picker import admin_picker_rows
+    from meshterm.ui.tui import Choice
+
+    store = AdminStore(tmp_path / "admin.json")
+    managed = Contact(name="Hilltop", public_key=KEY, node_type=NODE_TYPE_REPEATER)
+    other = Contact(name="Valley", public_key="cd" * 32, node_type=NODE_TYPE_REPEATER)
+    store.remember(managed, "secret")
+    items, _ = admin_picker_rows(SimpleNamespace(admin_store=store), [other, managed])
+    lines = [str(item.text(80) if isinstance(item, Choice) else item.text(80)) for item in items]
+    text = "\n".join(lines)
+    assert text.index("Managed nodes") < text.index("Hilltop") < text.index("Valley")
+    hilltop = next(line for line in lines if "Hilltop" in line)
+    valley = next(line for line in lines if "Valley" in line)
+    assert hilltop.startswith(glyph(MANAGED_ICON))
+    # One column for the names, in cells: the key is one character but two cells wide.
+    assert cell_len(valley[: valley.index("Valley")]) == cell_len(
+        hilltop[: hilltop.index("Hilltop")]
+    )
+
+
+# -- the Clock drift page -------------------------------------------------------------------
+
+
+def test_the_page_lists_the_contacts_whose_adverts_are_refused() -> None:
+    """A section after the managed nodes names each one, with the date in warn."""
+    until = utcnow() + timedelta(days=60)
+    gated = Contact(name="Gated", public_key=KEY, adverts_refused_until=until)
+    offset = ClockOffset(KEY[:12], True, 2.0, 3, utcnow())
+    screen = clock_drift_screen(
+        [ClockRow(offset, "Gated", KEY, None, False, gated)], tolerance_s=CLOCK_TOLERANCE_S
+    )
+    text = plain("\n".join(screen.render_body(72)))
+    assert "Adverts refused" in text
+    assert f"{until.astimezone():%Y-%m-%d}" in text
+    assert text.index("Adverts refused") < text.index("All clocks")

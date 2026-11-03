@@ -49,7 +49,9 @@ from .models import (
     RoomAccess,
     RoomLogin,
     TraceResult,
+    advert_gate,
     advert_time,
+    clock_tolerance_s,
     utcnow,
 )
 from .privatekey import normalize as normalize_key
@@ -1327,6 +1329,33 @@ class Device(ABC):
                 remove the contact from what MeshTerm remembers, and tell the user.
             DeviceCommandError: If the contact has no public key for the address, or the
                 device rejected the removal for any other reason.
+        """
+
+    @abstractmethod
+    async def accept_adverts_again(self, node: Contact) -> bool:
+        """Lower the stored advert time of a contact, so that the device hears its adverts again.
+
+        The firmware drops each advert that is not newer than the advert time that it stores
+        for the contact (a replay check). When a clock that was ahead is set correctly, the
+        stored time stays in the future, and the device ignores the node until the real
+        time passes it (refer to :attr:`~meshterm.core.models.Contact.adverts_refused_until`).
+        This method reads the contact record from the device, and writes it back with the
+        stored time lowered to our clock less the clock tolerance. Only that field changes:
+        the flags, the learned path, the name, and the position go back as the device has
+        them. The time is never zero, so the device still refuses a replay of an older
+        advert.
+
+        Args:
+            node: The contact. It must have a full public key.
+
+        Returns:
+            ``True`` when the method wrote the record. ``False`` when the stored time was not
+            in the future, so that there was nothing to change.
+
+        Raises:
+            ContactNotOnDeviceError: If the device has no contact with that key.
+            DeviceCommandError: If the contact has no full key, or the device refused the
+                write.
         """
 
     @abstractmethod
@@ -3353,6 +3382,7 @@ class MeshCoreDevice(Device):
                     lat=lat,
                     lon=lon,
                     route_hops=_contact_route(info),
+                    adverts_refused_until=advert_gate(info.get("last_advert")),
                 )
             )
         return contacts
@@ -3405,6 +3435,49 @@ class MeshCoreDevice(Device):
             raise DeviceCommandError(
                 f"couldn't remove {node.name} from the device: {reject_reason(result)}"
             )
+
+    async def accept_adverts_again(self, node: Contact) -> bool:  # noqa: D102 - inherited docstring
+        mc = self._require()
+        pub = self._node_pubkey(node)  # raises DeviceCommandError if it has no key
+        if len(pub) != 64:
+            raise DeviceCommandError(f"{node.name} is known only by a key prefix")
+        record = await self._contact_record(mc, pub)
+        if record is None:
+            raise ContactNotOnDeviceError(node)
+        lowered = int(utcnow().timestamp()) - clock_tolerance_s()
+        if int(record.get("last_advert") or 0) <= lowered:
+            return False
+        # A new read of the record, written back with only the advert time changed. The
+        # command of the firmware writes each field of the frame into the stored contact
+        # (``updateContactFromFrame``). Thus a field that MeshTerm made up (a flood route,
+        # zero flags) would erase what the device learned.
+        record = {**record, "last_advert": lowered}
+        result = await mc.commands.add_contact(record)
+        if result is None or getattr(result, "is_error", lambda: False)():
+            raise DeviceCommandError(
+                f"couldn't change the advert time of {node.name}: {reject_reason(result)}"
+            )
+        return True
+
+    async def _contact_record(self, mc, pub: str) -> dict | None:  # noqa: ANN001
+        """The raw contact record that the device has for a full key, or ``None``.
+
+        The one-contact read comes first (``CMD_GET_CONTACT_BY_KEY``). A firmware that does
+        not have that command gets the full table read instead, which is slower but sure.
+        """
+        try:
+            event = await mc.commands.get_contact_by_key(bytes.fromhex(pub))
+        except Exception:  # noqa: BLE001 - an older library or firmware: read the table
+            event = None
+        payload = dict(getattr(event, "payload", None) or {}) if event is not None else {}
+        if event is not None and not getattr(event, "is_error", lambda: False)() and payload:
+            if str(payload.get("public_key", "")).lower() == pub:
+                return payload
+        table = await self._contacts_payload(mc)
+        for info in table.values():
+            if str((info or {}).get("public_key", "")).lower() == pub:
+                return dict(info)
+        return None
 
     async def get_tx_power(self) -> int | None:  # noqa: D102 - inherited docstring
         info = await self.get_self_info()
@@ -4932,6 +5005,17 @@ class MockDevice(Device):
         if key not in {self._mock_key(c) for c in self._contacts}:
             raise ContactNotOnDeviceError(node)
         self._contacts = [c for c in self._contacts if self._mock_key(c) != key]
+
+    async def accept_adverts_again(self, node: Contact) -> bool:  # noqa: D102 - inherited docstring
+        await asyncio.sleep(0)
+        key = self._mock_key(node)
+        for i, contact in enumerate(self._contacts):
+            if self._mock_key(contact) == key:
+                if contact.adverts_refused_until is None:
+                    return False
+                self._contacts[i] = replace(contact, adverts_refused_until=None)
+                return True
+        raise ContactNotOnDeviceError(node)
 
     async def get_tx_power(self) -> int | None:  # noqa: D102 - inherited docstring
         return self._tx_power

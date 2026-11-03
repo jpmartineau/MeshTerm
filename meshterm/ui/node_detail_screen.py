@@ -111,12 +111,12 @@ from rich.text import Text
 
 from ..core.connection import ContactNotOnDeviceError, DeviceCommandError
 from ..core.geo import haversine_km, usable_fix
-from ..core.models import NODE_TYPE_LABELS, NODE_TYPE_REPEATER, Contact, utcnow
+from ..core.models import NODE_TYPE_LABELS, NODE_TYPE_REPEATER, NODE_TYPE_ROOM, Contact, utcnow
 from ..platforms import Platform, on_platform
 from ..services.clock_offsets import node_offset
 from . import menus
 from .mapcanvas import RGB
-from .marks import SELF_MARK
+from .marks import MANAGED_ICON, SELF_MARK
 from .minimap import MiniMap
 from .pathgraph import (
     DST_NODE,
@@ -139,6 +139,7 @@ from .pathline import (
     hops_atom,
     with_action_mark,
 )
+from .theme import glyph as platform_glyph
 from .theme import mark_rgb, name_style, snr_style
 from .tui.render import crop_cells, render_hanging, render_lines, render_to_ansi
 from .tui.screen import CANCEL, ListWindow, Screen
@@ -1512,6 +1513,13 @@ async def open_node_detail(
         header.append("   your node", style="muted")
     elif type_label:
         header.append(f"   {type_label}", style="muted")
+    # A managed node: MeshTerm stores its admin password. The key says so next to the type,
+    # the same mark as in the Contacts list.
+    admin_store = getattr(ctx, "admin_store", None)
+    managed = not you and contact is not None and admin_store is not None
+    managed = managed and admin_store.get(contact) is not None
+    if managed:
+        header.append(f"   {platform_glyph(MANAGED_ICON)} managed", style="muted")
 
     # -- the observed topology: the suggested best path, and the routes to draw.
     target_hash = key.lower().removeprefix("0x")
@@ -1557,14 +1565,21 @@ async def open_node_detail(
         signal = _signal_row(hn)
         if signal is not None:
             info_rows.append(("signal", signal))
-        clock = _clock_row(
+        clock_offset = _clock_offset(
             ctx,
             node_id,
             name,
             make_name_key_resolver(contacts, stored_names, heard=named_at),
         )
-        if clock is not None:
-            info_rows.append(("clock", clock))
+        if clock_offset is not None:
+            info_rows.append(
+                ("clock", _clock_text(clock_offset, ctx.preferences.clock_tolerance_s))
+            )
+        refused = contact.adverts_refused_until if contact is not None else None
+        if refused is not None:
+            # The device drops each advert of the node until this date (refer to
+            # ``Contact.adverts_refused_until``). The row says why the node looks silent.
+            info_rows.append(("adverts", _refused_text(refused)))
     if lat is not None and lon is not None:
         info_rows.append(("where", _range_text(lat, lon, self_lat, self_lon)))
     # The regions of a repeater: what it was last heard to relay, from the region store (its
@@ -1654,6 +1669,16 @@ async def open_node_detail(
         # It acts immediately (one anonymous request, one transmission), so no "…" at the
         # end.
         info_actions.append(_Action("regions", "🔖", "", "Ask which regions it carries"))
+    # A managed repeater or room server can have its clock set from here: its password is
+    # stored, so the login asks nothing. The action is offered whatever the offset, because
+    # an unknown offset is a reason to set the clock too.
+    if managed and node_type in (NODE_TYPE_REPEATER, NODE_TYPE_ROOM):
+        info_actions.append(_Action("clock", "🕒", "", "Sync its clock…"))
+    # The device refuses each advert of this node until a date in the future. The repair
+    # writes the record back with that date lowered (refer to
+    # ``Device.accept_adverts_again``). It writes to the device, so it confirms first.
+    if refused is not None and not you and contact is not None and contact.public_key:
+        info_actions.append(_Action("adverts", "📡", "warn", "Accept its adverts again…"))
     # -- contact management: the last group of the page, and the only actions that end the
     # visit. None of them shows when the caller opened the page to look, not to act (refer
     # to ``manage``), except the lock when the caller lets the page lock (refer to
@@ -1756,6 +1781,19 @@ async def open_node_detail(
                     await open_timemachine_self(ctx)
                 else:
                     await open_timemachine_node(ctx, node_id, label)
+            elif action == "clock":
+                from .repeater_admin import sync_clock
+
+                assert contact is not None  # offered only for a managed contact
+                await sync_clock(ctx, contact)
+            elif action == "adverts":
+                assert contact is not None  # offered only for a contact with a full key
+                if await _accept_adverts(ctx, contact, label):
+                    base_actions = [a for a in base_actions if a.key != "adverts"]
+                    screen.replace_info_actions(management(locked))
+                    screen.replace_info_row(
+                        "adverts", Text("accepted again — the next advert updates it", "ok")
+                    )
             elif action == "restore":
                 # A restore writes the contact back, and it ends the visit for the same reason
                 # as a delete. The page was opened from the Archived list, and the row that
@@ -2076,6 +2114,52 @@ async def _remove_contact(ctx: AppContext, contact: Contact, self_key: str, labe
     return True
 
 
+async def _accept_adverts(ctx: AppContext, contact: Contact, label: str) -> bool:
+    """Confirm, then make the device hear the adverts of this contact again.
+
+    The device refuses each advert that is not newer than the advert time that it stores.
+    That time is in the future when the clock of the node was once ahead (refer to
+    :meth:`~meshterm.core.connection.Device.accept_adverts_again`). The write changes only
+    that time, but it writes to the device, so the confirm is amber.
+
+    Args:
+        ctx: The shared application context (interactive menu).
+        contact: The contact, with a full key.
+        label: The name of the node on the page.
+
+    Returns:
+        ``True`` when the device has the lower time now (or had nothing to lower).
+        ``False`` when the user cancelled or the write failed. A failure is shown.
+    """
+    from .surface import TuiUi
+
+    assert isinstance(ctx.ui, TuiUi)  # open_node_detail makes sure of this
+    session = ctx.ui.session
+    if not await ctx.ui.dialog(
+        f"This device ignores {label}'s adverts, because its clock was once ahead. "
+        "Lower the stored advert time so its next advert updates its name, position, "
+        "and path? Older adverts stay refused.",
+        [("Cancel", False), ("Accept", True)],
+        title="Accept adverts",
+        default=1,
+        danger=True,
+    ):
+        return False
+    device = await ctx.device()
+    try:
+        await device.accept_adverts_again(contact)
+    except Exception as exc:  # noqa: BLE001 - a refused write is reported, not raised
+        ctx.log.debug("contacts: advert time not lowered for %s: %s", contact.name, exc)
+        await session.message_dialog(
+            Text(f"✗ couldn't change {label}'s advert time — {exc}", style="err"),
+            title="Accept adverts",
+        )
+        return False
+    # The table of the device changed. The next read shows the lower time.
+    ctx.devstate.invalidate_contacts()
+    return True
+
+
 #: Why a repeater may not answer the regions request, in the words that the page uses.
 _REGIONS_REACH = "it answers only a neighbour, or over a known route"
 
@@ -2183,28 +2267,39 @@ def _signal_row(hn) -> Text | None:  # noqa: ANN001 - Optional[HeardNode]
     return text if text.plain else None
 
 
-def _clock_row(ctx, node_id: str, name: str | None, key_of) -> Text | None:  # noqa: ANN001
-    """How far the clock of the node is from ours, or ``None`` when no packet told it.
+def _clock_offset(ctx, node_id: str, name: str | None, key_of):  # noqa: ANN001, ANN202
+    """The clock offset of the node, or ``None`` when no packet told it.
 
-    The offset is in ``warn`` when it is past the ``clock_tolerance_s`` preference, so that
-    a node whose times are wrong is visible on its own page. The muted aside says how old
-    the newest sample is (refer to :mod:`~meshterm.services.clock_offsets`).
+    Refer to :mod:`~meshterm.services.clock_offsets`. A failed read gives ``None``: the page
+    is useful without the clock line.
     """
     if not node_id:
         return None
     try:
-        offset = node_offset(ctx.repo, node_id, name=name, key_of=key_of)
+        return node_offset(ctx.repo, node_id, name=name, key_of=key_of)
     except Exception:  # noqa: BLE001 - the page is useful without the clock line
         return None
-    if offset is None:
-        return None
-    tolerance = ctx.preferences.clock_tolerance_s
+
+
+def _clock_text(offset, tolerance_s: float) -> Text:  # noqa: ANN001 - a ClockOffset
+    """The value of the ``clock`` row: how far the clock is from ours, and how old that is.
+
+    The offset is in ``warn`` when it is past the ``clock_tolerance_s`` preference, so that
+    a node whose times are wrong is visible on its own page.
+    """
     text = Text()
-    if offset.out_of_sync(tolerance):
+    if offset.out_of_sync(tolerance_s):
         text.append(format_offset(offset.offset_s), style="warn")
     else:
         text.append("in sync")
     text.append(f"  ·  {format_ago(age_seconds(offset.last_at))}", style="muted")
+    return text
+
+
+def _refused_text(until: datetime) -> Text:
+    """The value of the ``adverts`` row: the date until which the device refuses them."""
+    text = Text(f"refused until {until.astimezone():%Y-%m-%d}", style="warn")
+    text.append("  ·  its clock was ahead", style="muted")
     return text
 
 
