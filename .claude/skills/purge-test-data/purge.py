@@ -96,6 +96,16 @@ def purge(db: Path, *, dry_run: bool) -> dict[str, int]:
     mock_nbr = [nid for nid, rep, ngh in nbr if _mock_hash(rep) or _mock_hash(ngh)]
     delete("neighbour_reports", f"id IN ({','.join(map(str, mock_nbr)) or '0'})")
 
+    # The places that the place finder stored for mock nodes (schema 23 and later).
+    has_places = cur.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'node_places'"
+    ).fetchone()
+    if has_places:
+        place_rows = cur.execute("SELECT node FROM node_places").fetchall()
+        mock_places = [node for (node,) in place_rows if _mock_hash(node)]
+        marks = ",".join("?" for _ in mock_places) or "''"
+        delete("node_places", f"node IN ({marks})", tuple(mock_places))
+
     # Runs that now hold nothing and were mock-shaped to begin with: trace runs on
     # mock targets/specs. Background monitor/chat run rows are left alone — they
     # are session bookkeeping shared with real use, and empty ones are harmless.

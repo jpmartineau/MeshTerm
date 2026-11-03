@@ -77,6 +77,7 @@ class _Map:
 
 
 def test_a_neighbourhood_gets_the_city_that_holds_it() -> None:
+    """A neighbourhood is the fine part, and the city near it is the coarse part."""
     world = _Map()
     world.add("place", "neighbourhood", "Villeray", _north(0.5))
     world.add("place", "city", "Montréal", _north(-6.0), rank=3)
@@ -87,6 +88,7 @@ def test_a_neighbourhood_gets_the_city_that_holds_it() -> None:
 
 
 def test_the_most_specific_area_wins_over_a_nearer_borough() -> None:
+    """The most specific area in its radius wins over a nearer borough."""
     world = _Map()
     world.add("place", "suburb", "Villeray–Saint-Michel–Parc-Extension", _north(0.2))
     world.add("place", "neighbourhood", "Villeray", _north(1.0))
@@ -104,6 +106,7 @@ def test_a_large_city_wins_over_a_nearer_small_one() -> None:
 
 
 def test_a_peak_near_the_summit_wins() -> None:
+    """A peak within its radius of the node is the place."""
     world = _Map()
     world.add("mountain_peak", "peak", "Mont-Royal", _north(0.2))
     world.add("place", "neighbourhood", "Villeray", _north(0.5))
@@ -113,6 +116,7 @@ def test_a_peak_near_the_summit_wins() -> None:
 
 
 def test_a_peak_past_its_radius_does_not_win() -> None:
+    """A peak past its radius does not win over a neighbourhood."""
     world = _Map()
     world.add("mountain_peak", "peak", "Mont-Royal", _north(0.6))
     world.add("place", "neighbourhood", "Villeray", _north(0.5))
@@ -121,6 +125,7 @@ def test_a_peak_past_its_radius_does_not_win() -> None:
 
 
 def test_a_village_stands_alone_and_needs_no_fine_tiles() -> None:
+    """A village is the place alone, and a node in the country loads only z11 tiles."""
     world = _Map()
     world.add("place", "village", "Val-David", _north(1.5))
     place = place_from_tiles(_LAT, _LON, world.load)
@@ -129,18 +134,21 @@ def test_a_village_stands_alone_and_needs_no_fine_tiles() -> None:
 
 
 def test_a_node_far_from_all_places_gets_the_nearest_settlement() -> None:
+    """A node far from all places gets the nearest town, also past the z11 reach."""
     world = _Map()
     world.add("place", "town", "Mont-Laurier", _north(30.0))
     assert place_from_tiles(_LAT, _LON, world.load).fine == "Mont-Laurier"
 
 
 def test_no_place_near_is_an_empty_answer() -> None:
+    """Tiles with no place near give an empty place, which MeshTerm stores."""
     place = place_from_tiles(_LAT, _LON, _Map().load)
     assert place is not None and place.empty
     assert place.label == "" and place.short == ""
 
 
 def test_a_missing_home_tile_is_no_answer() -> None:
+    """When the tile that holds the node has no answer, the result is no answer."""
     world = _Map()
     world.add("place", "village", "Val-David", _north(1.5))
     wx, wy = lonlat_to_world(_LAT, _LON, 11)
@@ -149,31 +157,37 @@ def test_a_missing_home_tile_is_no_answer() -> None:
 
 
 def test_a_bad_location_is_no_answer() -> None:
+    """A location that is not a real fix gets no place."""
     assert place_from_tiles(0.0, 0.0, _Map().load) is None
     assert place_from_tiles(-97.0, -1042.0, _Map().load) is None
 
 
 def test_a_label_names_a_city_one_time() -> None:
+    """A place whose two parts are the same city shows the name one time."""
     assert Place("Montréal", "Montréal", SOURCE_TILES).label == "Montréal"
     assert Place(None, "Laval", SOURCE_TILES).short == "Laval"
 
 
 def test_moved_is_past_half_a_km() -> None:
+    """A node must move more than half a km before MeshTerm finds its place again."""
     assert not moved(_LAT, _LON, *_north(0.4))
     assert moved(_LAT, _LON, *_north(0.6))
 
 
 def test_nominatim_gives_fine_and_coarse() -> None:
+    """Nominatim gives the neighbourhood and the city."""
     doc = {"address": {"neighbourhood": "Villeray", "suburb": "VSP", "city": "Montréal"}}
     assert place_from_nominatim(doc) == Place("Villeray", "Montréal", SOURCE_NOMINATIM)
 
 
 def test_nominatim_town_alone() -> None:
+    """A Nominatim answer with only a village gives the village alone."""
     doc = {"address": {"village": "Val-David", "county": "Les Laurentides"}}
     assert place_from_nominatim(doc) == Place("Val-David", None, SOURCE_NOMINATIM)
 
 
 def test_nominatim_error_is_an_empty_answer_and_junk_is_none() -> None:
+    """A Nominatim error is an empty answer, and a document that is not an answer is none."""
     assert place_from_nominatim({"error": "Unable to geocode"}).empty
     assert place_from_nominatim(None) is None
     assert place_from_nominatim({"nothing": 1}) is None
@@ -183,6 +197,7 @@ def test_nominatim_error_is_an_empty_answer_and_junk_is_none() -> None:
 
 
 def test_a_typed_place_is_kept_and_cleared(tmp_path: Path) -> None:
+    """A typed place stays in the file, and blank text clears it."""
     path = tmp_path / "places.json"
     store = PlaceStore(path)
     store.set("A1B2C3D4E5F6AABB", "Toit du stade", when=100)
@@ -192,6 +207,7 @@ def test_a_typed_place_is_kept_and_cleared(tmp_path: Path) -> None:
 
 
 def test_a_field_no_record_knows_is_gone_at_the_next_write(tmp_path: Path) -> None:
+    """The store writes from its records, so an unknown field is removed."""
     path = tmp_path / "places.json"
     path.write_text(
         json.dumps({"places": {"a1b2c3d4e5f6": {"name": "X", "set_at": 1, "old": 2}}}),
@@ -213,6 +229,7 @@ def _heard(repo: Repository, node: str, lat: float, lon: float, minutes_ago: int
 
 
 def test_node_locations_gives_the_newest(tmp_path: Path) -> None:
+    """Each node gets its newest location, and ``since`` reads only newer rows."""
     repo = Repository(tmp_path / "p.db")
     _heard(repo, "aaaaaaaaaaaa", 45.0, -73.0, minutes_ago=30)
     _heard(repo, "aaaaaaaaaaaa", 46.0, -74.0, minutes_ago=5)
@@ -224,6 +241,7 @@ def test_node_locations_gives_the_newest(tmp_path: Path) -> None:
 
 
 def test_a_stored_place_reads_back(tmp_path: Path) -> None:
+    """A stored place, also an empty one, reads back the same."""
     repo = Repository(tmp_path / "p.db")
     repo.save_node_place("aaaaaaaaaaaa", 45.0, -73.0, Place("Mont-Royal", None, "tiles", True))
     repo.save_node_place("bbbbbbbbbbbb", 46.0, -74.0, Place(None, None, "nominatim"))
@@ -251,6 +269,7 @@ def _run(coro):  # noqa: ANN001, ANN202 - a small helper for the async steps
 
 
 def test_a_typed_place_wins_and_an_empty_place_is_none(tmp_path: Path) -> None:
+    """A typed place wins over a found place, and an empty found place is none."""
     service, repo = _service(tmp_path)
     repo.save_node_place("aaaaaaaaaaaa", 45.0, -73.0, Place("Villeray", "Montréal", "tiles"))
     repo.save_node_place("bbbbbbbbbbbb", 45.0, -73.0, Place(None, None, "tiles"))
@@ -265,6 +284,7 @@ def test_a_typed_place_wins_and_an_empty_place_is_none(tmp_path: Path) -> None:
 def test_the_job_uses_the_tiles_then_nominatim(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The job asks the tiles first, then Nominatim one time for each location."""
     service, repo = _service(tmp_path)
     _heard(repo, "aaaaaaaaaaaa", _LAT, _LON, minutes_ago=1)
     world = _Map()
@@ -289,6 +309,7 @@ def test_the_job_uses_the_tiles_then_nominatim(
 
 
 def test_tiles_only_never_asks_nominatim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With the tiles source, the job never asks Nominatim."""
     service, repo = _service(tmp_path, source="tiles")
     _heard(repo, "aaaaaaaaaaaa", _LAT, _LON, minutes_ago=1)
     world = _Map()
@@ -304,6 +325,7 @@ def test_tiles_only_never_asks_nominatim(tmp_path: Path, monkeypatch: pytest.Mon
 def test_a_peak_stays_when_nominatim_could_correct(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Nominatim does not replace a peak that the tiles found."""
     service, repo = _service(tmp_path)
     _heard(repo, "aaaaaaaaaaaa", _LAT, _LON, minutes_ago=1)
     repo.save_node_place("aaaaaaaaaaaa", _LAT, _LON, Place("Mont-Royal", None, "tiles", True))
@@ -314,6 +336,7 @@ def test_a_peak_stays_when_nominatim_could_correct(
 
 
 def test_a_node_that_moved_is_found_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A node that moved past half a km gets a new place."""
     service, repo = _service(tmp_path, source="tiles")
     repo.save_node_place("aaaaaaaaaaaa", *_north(-5.0), Place("Old", None, "tiles"))
     _heard(repo, "aaaaaaaaaaaa", _LAT, _LON, minutes_ago=1)
@@ -326,6 +349,7 @@ def test_a_node_that_moved_is_found_again(tmp_path: Path, monkeypatch: pytest.Mo
 
 
 def test_no_answer_makes_the_node_wait(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A node that got no answer waits before the job asks again."""
     service, repo = _service(tmp_path, source="tiles")
     _heard(repo, "aaaaaaaaaaaa", _LAT, _LON, minutes_ago=1)
     calls: list[int] = []
@@ -346,6 +370,7 @@ def test_no_answer_makes_the_node_wait(tmp_path: Path, monkeypatch: pytest.Monke
 
 
 def test_place_mode_changes_names_to_places(tmp_path: Path) -> None:
+    """Place mode changes node names to places and keeps the key, our end, and hashes."""
     from meshterm.services.trace_runner import make_node_resolver
     from meshterm.ui.pathline import PathHop, path_line
     from meshterm.ui.placemode import PlaceToggle, node_of, placed
