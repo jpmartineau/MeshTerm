@@ -54,8 +54,8 @@ class ClocksTool(Tool):
 
         tolerance = ctx.preferences.clock_tolerance_s
         rows = await clock_rows(ctx)
-        off = sum(1 for r in rows if r.offset.out_of_sync(tolerance))
-        summary = {"senders": len(rows), "out_of_sync": off}
+        off = sum(1 for r in rows if r.current and r.out_of_sync(tolerance))
+        summary = {"senders": sum(1 for r in rows if r.current), "out_of_sync": off}
         if isinstance(ctx.ui, TuiUi):
             await _open_page(ctx, rows, tolerance)
             return ToolResult(summary=summary)
@@ -86,11 +86,15 @@ class ClocksTool(Tool):
 
 
 async def clock_rows(ctx: AppContext) -> list[ClockRow]:
-    """One row for each sender with a clock sample in the window of ``clock_report_days``.
+    """One row for each sender with a clock sample in the window, and for each managed node.
 
     A keyed row gets the contact of the device when there is one, and else a contact made
     from the stored history, so that Enter can open its node page. Our own node is not a
     row: MeshTerm sets the clock of the companion itself when it connects.
+
+    Each managed node is a row, also with no sample in the window (JP, 2026-11-03). Its
+    offset is then the newest from all the history, which is not *current*, or ``None``
+    when the node never sent a sample.
 
     Args:
         ctx: The shared application context.
@@ -98,7 +102,7 @@ async def clock_rows(ctx: AppContext) -> list[ClockRow]:
     Returns:
         The rows, in no specific order.
     """
-    from ..services.clock_offsets import offsets, window_samples
+    from ..services.clock_offsets import node_offset, offsets, window_samples
     from ..services.trace_runner import make_name_key_resolver
     from ..ui.clocks_screen import ClockRow
 
@@ -145,6 +149,21 @@ async def clock_rows(ctx: AppContext) -> list[ClockRow]:
         key = contact.public_key or contact.key_prefix
         managed = admin is not None and admin.get(contact) is not None
         rows.append(ClockRow(offset, name, key, contact.node_type, managed, contact))
+
+    # The managed nodes that sent no sample in the window: the newest offset from all the
+    # history, or none.
+    listed = {r.offset.who for r in rows if r.offset is not None and r.offset.keyed}
+    for contact in contacts if admin is not None else ():
+        node_id = (contact.public_key or contact.key_prefix or "").lower().removeprefix("0x")[:12]
+        if not node_id or node_id in listed or node_id == self_id:
+            continue
+        if admin.get(contact) is None:
+            continue
+        older = node_offset(ctx.repo, node_id, name=contact.name, key_of=key_of)
+        key = contact.public_key or contact.key_prefix
+        rows.append(
+            ClockRow(older, contact.name, key, contact.node_type, True, contact, current=False)
+        )
     return rows
 
 
@@ -173,7 +192,9 @@ def _listing(rows: list[ClockRow], tolerance: float, prefix_bytes: int = 0) -> L
 
     ``OFFSET`` is the offset in words (``3h 12m behind``, or ``in sync`` within the
     tolerance). The document gives ``offset_s``, signed, a positive value for a clock
-    ahead of ours. A sender with no key has only its name, and ``keyed`` is false.
+    ahead of ours. A sender with no key has only its name, and ``keyed`` is false. A managed
+    node that never sent a sample is a row too, last: ``no sample``, and ``null`` in the
+    document.
 
     Args:
         rows: The senders.
@@ -185,27 +206,35 @@ def _listing(rows: list[ClockRow], tolerance: float, prefix_bytes: int = 0) -> L
     from ..ui.report import Column, Lane, Listing
     from ..ui.widgets import format_offset
 
-    def words(seconds: float) -> str:
+    def words(seconds: float | None) -> str:
+        if seconds is None:
+            return "no sample"
         return "in sync" if abs(seconds) <= tolerance else format_offset(seconds)
 
+    def order(row: ClockRow) -> tuple:
+        return (row.offset is None, -abs(row.offset.offset_s) if row.offset else 0, row.label)
+
     table = []
-    for row in sorted(rows, key=lambda r: -abs(r.offset.offset_s)):
+    for row in sorted(rows, key=order):
+        offset = row.offset
+        keyed = offset is None or offset.keyed
         key = (row.contact.public_key or "").lower() if row.contact else ""
-        known = key or (row.offset.who if row.offset.keyed else "")
+        known = key or (offset.who if offset is not None and keyed else "")
+        known = known or ((row.contact.key_prefix or "").lower() if row.contact else "")
         table.append(
             {
                 "node": fields.NodeRef(
-                    name=row.name or (None if row.offset.keyed else row.offset.who),
+                    name=row.name or (None if keyed else row.label),
                     key=key or None,
                     hash=known[: prefix_bytes * 2] or None,
                     type=NODE_TYPE_LABELS.get(row.node_type),
                 ),
-                "offset_s": round(row.offset.offset_s),
-                "samples": row.offset.samples,
-                "last_sample_at": row.offset.last_at,
-                "out_of_sync": row.offset.out_of_sync(tolerance),
+                "offset_s": round(offset.offset_s) if offset is not None else None,
+                "samples": offset.samples if offset is not None else 0,
+                "last_sample_at": offset.last_at if offset is not None else None,
+                "out_of_sync": row.out_of_sync(tolerance),
                 "managed": row.managed,
-                "keyed": row.offset.keyed,
+                "keyed": keyed,
             }
         )
     return Listing(
@@ -218,7 +247,7 @@ def _listing(rows: list[ClockRow], tolerance: float, prefix_bytes: int = 0) -> L
                 json=lambda v: v,
             ),
             fields.integer("samples", "SAMPLES"),
-            fields.when("last_sample_at", "LAST"),
+            fields.when("last_sample_at", "LAST", absent="never"),
             fields.hidden("out_of_sync"),
             fields.flag("managed", "MANAGED"),
             fields.hidden("keyed"),

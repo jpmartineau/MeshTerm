@@ -1793,6 +1793,9 @@ def _clock_drift(cols: int, rows: int) -> Screen:
         row("Raphael's T-Deck", "34" * 32, 2 * 3600),
         row("Bob", "", -900, keyed=False),
     ]
+    # A managed node that never sent a sample: its row says so, in the same lanes.
+    quiet = Contact(name="New Repeater", public_key="56" * 32, node_type=NODE_TYPE_REPEATER)
+    rows_.append(ClockRow(None, quiet.name, quiet.public_key, NODE_TYPE_REPEATER, True, quiet))
     return clock_drift_screen(rows_, tolerance_s=300)
 
 

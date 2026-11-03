@@ -92,6 +92,32 @@ def test_the_page_lists_managed_nodes_first_then_the_clocks_out_of_sync() -> Non
     assert "15m behind" in text
 
 
+def test_managed_nodes_come_first_with_a_header_and_no_sample_rows() -> None:
+    """The managed section is the first one, and a managed node with no sample is listed.
+
+    Each table has a header line under its heading. An older offset of a managed node does
+    not count in the histogram or the title, because it is not from the window.
+    """
+    from meshterm.services.clock_offsets import ClockOffset
+
+    old = ClockOffset("ab" * 6, True, -7200, 2, utcnow() - timedelta(days=30))
+    stale = ClockRow(
+        old, "Old", "ab" * 32, None, True, Contact(name="Old", public_key="ab" * 32), current=False
+    )
+    never = ClockRow(None, "New", "cd" * 32, None, True, Contact(name="New", public_key="cd" * 32))
+    screen = clock_drift_screen([stale, never, _row("Slow", -3 * 3600)], tolerance_s=TOLERANCE)
+    assert screen.title == "Clock drift · 1 nodes · 1 out of sync"
+    lines = plain("\n".join(screen.render_body(72))).splitlines()
+    assert lines[0].strip() == "── Managed nodes ──"
+    assert lines[1].split() == ["NAME", "OFFSET", "LAST"]
+    assert any("New" in line and "no sample" in line for line in lines)
+    assert any("Old" in line and "2h behind" in line and "4w" in line for line in lines)
+    text = "\n".join(lines)
+    assert text.index("Managed nodes") < text.index("All clocks") < text.index("Out of sync")
+    counted = dict((b.label, n) for b, n in histogram([stale, never], TOLERANCE))
+    assert sum(counted.values()) == 0
+
+
 def test_a_page_with_nothing_out_of_sync_says_so() -> None:
     """The Out of sync section always has its heading, and an empty state when it is empty."""
     screen = clock_drift_screen([_row("Fine", 20)], tolerance_s=TOLERANCE)
@@ -145,12 +171,19 @@ def test_clock_rows_name_their_nodes_and_mark_the_managed_ones(tmp_path: Path) -
                 )
             )
         )
+    quiet = Contact(name="Quiet", public_key="ef" * 32, node_type=NODE_TYPE_REPEATER)
     admin = AdminStore(tmp_path / "admin.json")
     admin.remember(repeater, "secret")
-    rows = asyncio.run(clock_rows(_Ctx(repo, [repeater], admin)))
-    by_name = {r.name or r.offset.who: r for r in rows}
+    admin.remember(quiet, "secret")
+    rows = asyncio.run(clock_rows(_Ctx(repo, [repeater, quiet], admin)))
+    by_name = {r.label: r for r in rows}
     assert by_name["Hilltop"].managed and by_name["Hilltop"].contact is repeater
     stranger = by_name["cd" * 6]
     assert not stranger.managed and stranger.contact is not None  # a page to open
     assert stranger.contact.key_prefix == "cd" * 6
+    # A managed node that never sent a sample still has its row, with no offset.
+    assert by_name["Quiet"].managed and by_name["Quiet"].offset is None
+    assert not by_name["Quiet"].current
+    listing = _listing(rows, TOLERANCE)
+    assert listing.rows[-1]["offset_s"] is None and listing.rows[-1]["managed"]
     repo.close()

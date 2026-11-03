@@ -1079,14 +1079,19 @@ by default). `LAST` is the age of the newest sample. `MANAGED` is `yes` when Mes
 stores the admin password of the node. A channel sender whose name matches no single key
 has only its name, with no `TYPE` and no `HASH`.
 
+Each managed node is a row, also when it sent no sample in the window. Its offset is then
+the newest from all the history, and `LAST` shows how old that sample is. A managed node
+that never sent a sample is last, with `no sample` and a `LAST` of `never`. A repeater
+sends no message, so its adverts are its only samples.
+
 **`--json`** is an array of rows.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `node` | object | The `node` shape. A sender with no key has only `name`. |
-| `offset_s` | integer | The offset in seconds. A positive value is a clock ahead of this computer. |
-| `samples` | integer | The number of samples in the window. |
-| `last_sample_at` | timestamp | When MeshTerm heard the newest sample. |
+| `offset_s` | integer \| null | The offset in seconds. A positive value is a clock ahead of this computer. `null` for a managed node that never sent a sample. |
+| `samples` | integer | The number of samples. `0` for a managed node that never sent one. |
+| `last_sample_at` | timestamp \| null | When MeshTerm heard the newest sample. `null` is the `never` of the plain face. |
 | `out_of_sync` | boolean | **JSON only.** `true` when the offset is past `clock_tolerance_s`. It is the `in sync` of the plain face, inverted. |
 | `managed` | boolean | `true` when MeshTerm stores the admin password of the node. |
 | `keyed` | boolean | **JSON only.** `false` for a channel sender that has only a name. |
