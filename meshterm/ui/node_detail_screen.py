@@ -141,6 +141,8 @@ from .pathline import (
     hops_atom,
     with_action_mark,
 )
+from .placemode import ACTION as PLACES_ACTION
+from .placemode import NodeOf, PlaceToggle, node_of, placed, places_of_session
 from .theme import glyph as platform_glyph
 from .theme import mark_rgb, name_style, snr_style
 from .tui.render import crop_cells, render_hanging, render_lines, render_to_ansi
@@ -328,12 +330,15 @@ class _Route:
         context: The line that hangs under ``path``: the hop count, then the bottleneck
             SNR, the sample count, and a ``★ best`` or ``device route`` tag when the route
             has them. The hop count is always there, so this line is never empty.
+        line: The same path line before it became text. With it, place mode (^N) can name
+            the hops by their places. ``None`` means that the route has no place mode.
     """
 
     draw: tuple[str, ...]
     spec: str
     path: Text
     context: Text
+    line: PathLine | None = None
 
 
 @dataclass(slots=True)
@@ -382,6 +387,8 @@ class _RoutesView:
         legend: Whether to draw the node-type legend below the graph (a relay with a known
             type was shown).
         note: The muted line shown instead of a graph when there is no evidence.
+        find: Gives the node id for the hash of a hop (:func:`~meshterm.ui.placemode.node_of`
+            of the resolver), for place mode. ``None`` when the resolver cannot tell.
     """
 
     routes: list[_Route] = field(default_factory=list)
@@ -390,6 +397,7 @@ class _RoutesView:
     label_rgb_of: LabelRgbOf | None = None
     legend: bool = False
     note: str = ""
+    find: NodeOf | None = None
 
 
 @dataclass(slots=True)
@@ -446,10 +454,15 @@ class NodeDetailScreen(Screen):
 
         The pager works only when the route list is really in a list window. On the Info tab,
         and on a node whose routes all fit, the keys move nothing.
+
+        F1 is the place mode of the path lines (^N). It has a chip only while the Routes tab
+        shows a path line that place mode can change.
         """
         from .tui.fkeys import FPair, default_lane
 
         lane = list(default_lane(nav=self._list_hidden))
+        if self._places_available():
+            lane[0] = FPair(self._places.chip, PLACES_ACTION)
         if len(self._tabs) >= 2:
             nxt = self._tabs[(self._tab_index + 1) % len(self._tabs)]
             lane[2] = FPair(nxt.name, "tab")
@@ -573,6 +586,8 @@ class NodeDetailScreen(Screen):
         #: The last render width. With it, the footer hint can tell whether the path line of
         #: the highlighted route really overflows (nothing overflows before the first paint).
         self._last_width = 0
+        #: ^N: the path lines of the Routes tab show the node names, or the places.
+        self._places = PlaceToggle()
 
     # --- input -----------------------------------------------------------------
 
@@ -600,8 +615,23 @@ class NodeDetailScreen(Screen):
             parts.append("←→ scroll")
         elif self._key_overflows():
             parts.append("←→ scroll key")
+        if self._places_available():
+            parts.append(self._places.hint)
         parts.append("Esc back")
         return " · ".join(parts)
+
+    def _places_available(self) -> bool:
+        """Whether ^N acts: the Routes tab is open and a route has a path line to change."""
+        tab = self._tabs[self._tab_index] if self._tabs else None
+        if tab is None or tab.kind != "routes" or self._routes is None:
+            return False
+        return any(route.line is not None for route in self._routes.routes)
+
+    def _route_path(self, route: _Route) -> Text:
+        """The path line of a route as text: with its places while place mode is on."""
+        if self._places.on and route.line is not None and self._routes is not None:
+            return placed(route.line, places_of_session(), self._routes.find).text()
+        return route.path
 
     def _selected_route_overflows(self) -> bool:
         """Whether the highlighted path line is too wide for the content lane of the list.
@@ -623,7 +653,7 @@ class NodeDetailScreen(Screen):
         # The `…` at the end is chrome outside the lane (pathline.with_action_mark), so it
         # is not part of what must fit. A route exactly as wide as its lane does not scroll,
         # and the mark is the thing that is not shown.
-        return cell_len(routes[self._row_index].path.plain) > avail
+        return cell_len(self._route_path(routes[self._row_index]).plain) > avail
 
     def _on_info_tab(self) -> bool:
         """Whether the Info tab fills the stage (thus its key lane is visible)."""
@@ -751,6 +781,9 @@ class NodeDetailScreen(Screen):
                 else:
                     assert isinstance(payload, _Action)
                     self.resolve(payload.key)
+        elif action == PLACES_ACTION:
+            if self._places_available():
+                self._places.flip()
         elif action == "tab":
             self._switch_tab(1)
         elif action == "shift_tab":
@@ -1158,7 +1191,7 @@ class NodeDetailScreen(Screen):
         indent = _ROUTE_INDENT
         avail = max(1, width - indent)
         pointer = Text("❯ " if selected else "  ", style="cursor" if selected else "")
-        marked = route.path
+        marked = self._route_path(route)
         if selected and self._hshift:
             total = cell_len(marked.plain)
             # A scrolled row gave one cell to its left mark, so its last visible part has
@@ -2520,6 +2553,27 @@ def _route_line(
     each route has a length. Before, a row whose second line came and went with the
     evidence made the list one row taller when the highlight moved.
     """
+    line = _route_path_line(
+        node_label,
+        name_key,
+        hops_out,
+        resolve=resolve,
+        node_known=node_known,
+        hash_bytes=hash_bytes,
+    )
+    return line.text(), _route_context(hops_out, tag, weakest, samples)
+
+
+def _route_path_line(
+    node_label: str,
+    name_key: str,
+    hops_out: tuple[str, ...],
+    *,
+    resolve,  # noqa: ANN001 - NodeResolver, with no strict type, like the graph callbacks
+    node_known: bool,
+    hash_bytes: int,
+) -> PathLine:
+    """The path line of one route, from the contact to our node (refer to :func:`_route_line`)."""
     hash_bytes = max(hash_bytes, 1)  # an unknown mode still must have a real width to slice
 
     def hop_of(hop: str) -> PathHop:
@@ -2528,7 +2582,7 @@ def _route_line(
             return PathHop(named, key=hop)
         return PathHop(_hop_hash(hop, hop, hash_bytes))  # unknown: its hash, in the grey
 
-    path = PathLine(
+    return PathLine(
         [
             PathHop(node_label, key=name_key)
             if node_known and name_key
@@ -2536,8 +2590,13 @@ def _route_line(
             *(hop_of(hop) for hop in reversed(hops_out)),
             PathHop(SELF_GLYPH, you=True),
         ]
-    ).text()
+    )
 
+
+def _route_context(
+    hops_out: tuple[str, ...], tag: str, weakest: float | None, samples: int
+) -> Text:
+    """The line of context under one route (refer to :func:`_route_line`)."""
     atoms: list[Text] = [hops_atom(len(hops_out))]
     if weakest is not None:
         snr = Text("weakest ", style="muted")
@@ -2554,7 +2613,7 @@ def _route_line(
         if i:
             context.append("  ·  ", style="muted")
         context.append_text(atom)
-    return path, context
+    return context
 
 
 def _cluster_presentation(members: tuple[str, ...], type_of) -> _Cluster:  # noqa: ANN001
@@ -2711,19 +2770,23 @@ def _routes_view(
     routes: list[_Route] = []
     for hops_out, tag, weakest, samples in entries:
         spec = render_forced_spec(hops_out, target_hash, width_bytes) if target_hash else ""
-        path, context = _route_line(
+        line = _route_path_line(
             node_label,
             name_key,
             hops_out,
-            tag,
-            weakest,
-            samples,
             resolve=resolve,
             node_known=node_known,
-            self_name=self_name,
             hash_bytes=hash_bytes,
         )
-        routes.append(_Route(draw=tuple(reversed(hops_out)), spec=spec, path=path, context=context))
+        routes.append(
+            _Route(
+                draw=tuple(reversed(hops_out)),
+                spec=spec,
+                path=line.text(),
+                context=_route_context(hops_out, tag, weakest, samples),
+                line=line,
+            )
+        )
 
     # The legend explains the marks of the relays with a known type. Thus the real types of
     # the members decide it, before the contraction folds the members of a dense cluster
@@ -2777,6 +2840,7 @@ def _routes_view(
         label_of=label_of,
         label_rgb_of=cluster_label_rgb_of,
         legend=legend,
+        find=node_of(resolve),
     )
 
 

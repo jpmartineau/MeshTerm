@@ -66,6 +66,8 @@ from .marks import SELF_MARK, UNKNOWN_MARK
 from .menus import SEP_COMPACT, SEP_ROOMY
 from .pathgraph import PathLayer, render_path_graph, revisited_hops
 from .pathline import PathHop, PathLine, hops_atom, path_line
+from .placemode import ACTION as PLACES_ACTION
+from .placemode import PlaceToggle, node_of, placed, placed_hops, places_of_session
 from .theme import glyph, name_style, snr_style
 from .trace_screen import snr_bar
 from .tui.render import render_lines, render_to_ansi
@@ -430,6 +432,10 @@ class PacketViewer(Screen):
 
     grow_only = True
 
+    #: The hint sheds these atoms first (refer to :func:`~meshterm.ui.tui.frame.fit_hint`).
+    #: The user finds the paging keys without the hint, but nothing else shows ^N.
+    spare_hint_atoms = ("Home/End ends", "PgUp/PgDn scroll")
+
     @property
     def picocalc_lyra_lane(self):
         """The shared pager over the body, with the jumps named for their destinations.
@@ -445,10 +451,15 @@ class PacketViewer(Screen):
         pin also when the list holds one packet (as the ``Top`` chip of the feed does, on
         the screen under this dialog). When the dialog opens over a single packet of a
         snapshot, all four chips are dim at the same time.
+
+        F1 is the place mode of the path lines (^N). It has a chip only while the shown
+        packet has a path line or a hop chip to change.
         """
         from .tui.fkeys import FPair, default_lane
 
         lane = list(default_lane(nav=self.content_overflows))
+        if self._places_available():
+            lane[0] = FPair(self._places.chip, PLACES_ACTION)
         many = len(self._entries) > 1 or self._can_pin
         lane[3] = FPair(
             "Page ↓", "pagedown", "Oldest", "end", enabled=self.content_overflows, opp_enabled=many
@@ -540,6 +551,8 @@ class PacketViewer(Screen):
         self._key_of = key_of
         self._scope_of: ScopeOf = scope_of or unnamed_scope
         self._message_scope = message_scope
+        #: ^N: the path line and the hop chips show the node names, or the places.
+        self._places = PlaceToggle()
         #: Whether the viewer is on the pin: the stop above the newest packet, which
         #: holds the top position instead of a packet. It means that ``_index == 0``. The
         #: pin is a mode on the newest entry, so all the code that reads the viewer (the
@@ -578,8 +591,37 @@ class PacketViewer(Screen):
             atoms = []
         if len(self._entries) > 1 or self._can_pin:
             atoms += ["PgUp/PgDn scroll", "Home/End ends"]
+        if self._places_available():
+            atoms.append(self._places.hint)
         atoms.append("Esc close")
         self.footer_hint = " · ".join(atoms)
+
+    def _places_available(self) -> bool:
+        """Whether ^N acts: the shown packet has a path line or a named hop chip."""
+        if not self._entries:
+            return False
+        entry = self._entries[self._index]
+        raw = entry.raw if isinstance(entry.raw, dict) else {}
+        if entry.kind == "packet" and any((entry.path or "").split(",")):
+            return True
+        if (entry.node or entry.name) and node_label(entry, self._resolve, self._self_name)[
+            1
+        ] not in (
+            "muted",
+            "you",
+        ):
+            return True
+        for end in (raw.get("dest_hash"), raw.get("src_key") or raw.get("src_hash")):
+            named = self._resolve(end) if end else ""
+            if named and named != end and named != self._self_name:
+                return True
+        return False
+
+    def _place_hop(self, hop: PathHop) -> PathHop:
+        """The hop with its place for a label, while place mode is on."""
+        if not self._places.on:
+            return hop
+        return placed_hops([hop], places_of_session(), node_of(self._resolve))[0]
 
     @property
     def _can_pin(self) -> bool:
@@ -678,6 +720,10 @@ class PacketViewer(Screen):
             self.scroll_pages(-1)
         elif action in ("pagedown", "space"):
             self.scroll_pages(1)
+        elif action == PLACES_ACTION:
+            if self._places_available():
+                self._places.flip()
+                self._update_footer()
         elif action in ("escape", "enter"):
             self.resolve(None)
 
@@ -761,9 +807,9 @@ class PacketViewer(Screen):
         # moment before. The store caches the lookup, so a request at each paint costs a
         # dict hit.
         # The card is also a function of whether the frame is short, because a short
-        # frame removes the node-type legend.
+        # frame removes the node-type legend. It is also a function of place mode (^N).
         short = short_frame(self._scroll_viewport)
-        key = (id(entry), width, age_minute, self._entry_scope(entry), short)
+        key = (id(entry), width, age_minute, self._entry_scope(entry), short, self._places.on)
         cached = self._body_cache.get(key)
         if cached is not None:
             self._body_cache.move_to_end(key)
@@ -852,7 +898,7 @@ class PacketViewer(Screen):
                 # The node that sent the packet is the origin of its route. Thus it is a chip
                 # that closes on the point, and the ``via`` row continues that route.
                 hop = PathHop(label, you=True) if style == "you" else PathHop(label, key=entry.node)
-                who.append_text(hop_chip(hop, role=ORIGIN))
+                who.append_text(hop_chip(self._place_hop(hop), role=ORIGIN))
             if entry.node and label != entry.node:
                 who.append("  ")
                 who.append_text(highlighted_hash(entry.node, self._prefix_bytes))
@@ -997,7 +1043,7 @@ class PacketViewer(Screen):
         says that the route continues past the chip. A flat end claims that the first relay
         was the origin.
         """
-        return path_line(
+        line = path_line(
             (entry.path or "").split(","),
             self._resolve,
             prefix_bytes=self._prefix_bytes,
@@ -1006,6 +1052,9 @@ class PacketViewer(Screen):
             from_origin=False,
             to_destination=False,
         )
+        if self._places.on:
+            line = placed(line, places_of_session(), node_of(self._resolve))
+        return line
 
     @staticmethod
     def _empty_via(entry: PacketEntry) -> str:
@@ -1212,7 +1261,7 @@ class PacketViewer(Screen):
         if known:
             ours = bool(self._self_name and named == self._self_name)
             hop = PathHop(named, you=True) if ours else PathHop(named, key=value)
-            text.append_text(hop_chip(hop, role=role))
+            text.append_text(hop_chip(self._place_hop(hop), role=role))
             text.append("  ")
         text.append_text(highlighted_hash(value, self._prefix_bytes or 1, known=known))
         return text

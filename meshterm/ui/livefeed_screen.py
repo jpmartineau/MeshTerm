@@ -96,6 +96,8 @@ from .packet_viewer import (
     unnamed_scope,
 )
 from .pathline import SELF_GLYPH, PathHop, cut_to
+from .placemode import ACTION as PLACES_ACTION
+from .placemode import PlaceToggle, node_of, placed_hops, places_of_session
 from .theme import name_style, snr_style
 from .tui.render import crop_cells, render_to_ansi
 from .tui.screen import ListWindow, Screen
@@ -288,6 +290,11 @@ class LiveFeedScreen(Screen):
 
     floating = False
 
+    #: The hint sheds this atom first when it is too wide (refer to
+    #: :func:`~meshterm.ui.tui.frame.fit_hint`). The user can try the arrow keys on a row
+    #: that is too wide, but nothing else shows ^N.
+    spare_hint_atoms = ("←→ scroll line",)
+
     @property
     def picocalc_lyra_lane(self):
         """The shared lane, which stays dim until there are packets to move through.
@@ -302,10 +309,16 @@ class LiveFeedScreen(Screen):
 
         An empty feed has no cursor and no place to move to. Thus all four chips are dim
         until the first packet arrives.
-        """
-        from .tui.fkeys import default_lane
 
-        return default_lane(nav=bool(self._feed))
+        F1 is the place mode of the route chips (^N). It has a chip only while the feed
+        holds a row that draws such a chip.
+        """
+        from .tui.fkeys import FPair, default_lane
+
+        lane = list(default_lane(nav=bool(self._feed)))
+        if self._places_available():
+            lane[0] = FPair(self._places.chip, PLACES_ACTION)
+        return lane
 
     def __init__(
         self,
@@ -399,6 +412,8 @@ class LiveFeedScreen(Screen):
         #: range.
         self._hshift = 0
         self._hmax = 0
+        #: ^N: the route chips of the subject lane show the node names, or the places.
+        self._places = PlaceToggle()
 
     # --- live feed -----------------------------------------------------------------
 
@@ -457,10 +472,39 @@ class LiveFeedScreen(Screen):
         This is the same rule ("advertise a key only where it acts") that the ``hscroll``
         hint of the select list follows.
         """
-        base = "↑↓ PgUp/PgDn Home/End move · Enter open · Esc back"
+        atoms = ["↑↓ PgUp/PgDn Home/End move"]
         if self._selected is not None and self._hmax > 0:
-            return "↑↓ PgUp/PgDn Home/End move · ←→ scroll line · Enter open · Esc back"
-        return base
+            atoms.append("←→ scroll line")
+        atoms.append("Enter open")
+        if self._places_available():
+            atoms.append(self._places.hint)
+        atoms.append("Esc back")
+        return " · ".join(atoms)
+
+    def _places_available(self) -> bool:
+        """Whether ^N acts: a row of the feed draws its subject as a route chip pair."""
+        return any(self._has_endpoints(entry) for entry in self._feed)
+
+    def _has_endpoints(self, entry: PacketEntry) -> bool:
+        """Whether the subject of the row is the two endpoints of an addressed packet.
+
+        The tests follow the order of :meth:`_feed_subject`. A packet that names a node, a
+        message, and a channel packet each have another subject. Also, one of the two
+        endpoints must have a name, because only a name is a chip that ^N can change.
+        """
+        raw = entry.raw if isinstance(entry.raw, dict) else {}
+        if not raw.get("dest_hash") or not (raw.get("src_key") or raw.get("src_hash")):
+            return False
+        if entry.kind == "message" or raw.get("payload_typename") in CHANNEL_CLASSES:
+            return False
+        if node_label(entry, self._resolve, self._self_name)[0] != "?":
+            return False
+        ends = (raw.get("dest_hash"), raw.get("src_key") or raw.get("src_hash"))
+        names = (self._resolve(end) for end in ends)
+        return any(
+            name and name != end and name != self._self_name
+            for name, end in zip(names, ends, strict=True)
+        )
 
     def handle(self, action: str, data: str = "") -> None:
         """Move the cursor, commit the row that it is on, scroll a row, or leave."""
@@ -487,6 +531,10 @@ class LiveFeedScreen(Screen):
             self._select_stop(0)
         elif action in ("end", "ctrl_end"):
             self._select_stop(len(self._feed))
+        elif action == PLACES_ACTION:
+            if self._places_available():
+                self._places.flip()
+                self._session.invalidate()
         elif action == "left":
             self._scroll_line(-_HSCROLL_STEP)
         elif action == "right":
@@ -921,7 +969,10 @@ class LiveFeedScreen(Screen):
         if name and name == self._self_name:
             return PathHop(SELF_GLYPH, you=True)
         if name and name != value:
-            return PathHop(name, key=value)
+            hop = PathHop(name, key=value)
+            if self._places.on:
+                hop = placed_hops([hop], places_of_session(), node_of(self._resolve))[0]
+            return hop
         return PathHop(short, key=value, lit_bytes=ENDPOINT_HASH_BYTES)
 
     @staticmethod

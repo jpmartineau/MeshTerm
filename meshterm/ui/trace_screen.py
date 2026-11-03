@@ -127,6 +127,8 @@ from .pathline import (
     hops_atom,
     path_line,
 )
+from .placemode import ACTION as PLACES_ACTION
+from .placemode import PlaceToggle, node_of, placed, places_of_session
 from .theme import snr_style
 from .tui.render import crop_cells, render_lines, render_to_ansi
 from .tui.screen import Screen
@@ -262,6 +264,12 @@ def _slid(line: Text, shift: int, width: int) -> Text:
     if right:
         out.append_text(cut_mark(line, shift + window - 1, ELIDE_TAIL))
     return out
+
+
+def _is_hash(hop: PathHop) -> bool:
+    """Whether a hop shows its hash and no name: place mode keeps such a hop as it is."""
+    key = (hop.key or "").lower().removeprefix("0x")
+    return hop.label.lower().removeprefix("0x") == key
 
 
 def _note(text: str, indent: int, *, style: str = "faint") -> Text:
@@ -438,6 +446,25 @@ class TraceScreen(Screen):
 
     floating = False
 
+    #: The hint sheds this atom first when it is too wide (refer to
+    #: :func:`~meshterm.ui.tui.frame.fit_hint`). The user finds the paging keys without
+    #: the hint, but nothing else shows ^N.
+    spare_hint_atoms = ("PgUp/PgDn scroll",)
+
+    @property
+    def picocalc_lyra_lane(self):
+        """The shared lane, with the place mode of the route lines on F1.
+
+        F1 is the ^N chip. It has a chip only while a route line is on the page that has
+        a named hop (refer to :meth:`_places_available`).
+        """
+        from .tui.fkeys import DEFAULT_LANE, FPair
+
+        lane = list(DEFAULT_LANE)
+        if self._places_available():
+            lane[0] = FPair(self._places.chip, PLACES_ACTION)
+        return lane
+
     def __init__(
         self,
         target: str,
@@ -590,6 +617,8 @@ class TraceScreen(Screen):
         #: the footer.
         self._hshift = 0
         self._hop_pan = 0
+        #: ^N: the route lines show the node names, or the places.
+        self._places = PlaceToggle()
 
     # --- state -----------------------------------------------------------------
 
@@ -602,7 +631,29 @@ class TraceScreen(Screen):
                 return f"tracing {done}/{total}… · PgUp/PgDn scroll · Esc back"
             return "tracing… · PgUp/PgDn scroll · Esc back"
         slide = " · ←→ scroll" if self._hop_pan else ""
-        return f"↑↓ actions{slide} · Enter run · PgUp/PgDn scroll · Esc back"
+        places = f" · {self._places.hint}" if self._places_available() else ""
+        return f"↑↓ actions{slide} · Enter run · PgUp/PgDn scroll{places} · Esc back"
+
+    def _places_available(self) -> bool:
+        """Whether ^N acts: the route lane shows a line with a named hop.
+
+        The hop lines of the results come from the walked route. Thus the route lane,
+        which draws the same hops, decides it for both.
+        """
+        current = next((t for t in reversed(self._traces) if t.success), None)
+        shown = self._shown_route(current)
+        if shown is None:
+            return False
+        return any(
+            hop.key and hop.label and not hop.you and not hop.gap and not _is_hash(hop)
+            for hop in shown[0].hops
+        )
+
+    def _placed(self, line: PathLine) -> PathLine:
+        """The path line with its places for the node names, while place mode is on."""
+        if self._places.on:
+            return placed(line, places_of_session(), node_of(self._resolve))
+        return line
 
     def start_trace(self) -> None:
         """Start a trace run in the background (does nothing while a run is in progress)."""
@@ -776,6 +827,9 @@ class TraceScreen(Screen):
             self._pin_cursor = False
             step = _HSCROLL_STEP if action == "right" else -_HSCROLL_STEP
             self._hshift = max(0, min(self._hop_pan, self._hshift + step))
+        elif action == PLACES_ACTION:
+            if self._places_available():
+                self._places.flip()
         elif action == "enter":
             self._commit_action()
         elif action == "up":
@@ -966,7 +1020,7 @@ class TraceScreen(Screen):
         it changes. A *running* trace does not use the cache at all, because its log row
         has the live spinner glyph.
         """
-        key = (self._traces_rev, self._status, width, self._hshift)
+        key = (self._traces_rev, self._status, width, self._hshift, self._places.on)
         if not self._running and self._tail_memo is not None and self._tail_memo[0] == key:
             return self._tail_memo[1]
         lines: list[str] = []
@@ -983,7 +1037,10 @@ class TraceScreen(Screen):
         if not self._running:
             # The key is the shift at which the rows were drawn, which _hop_lines can
             # clamp. Thus the next paint finds it.
-            self._tail_memo = ((self._traces_rev, self._status, width, self._hshift), lines)
+            self._tail_memo = (
+                (self._traces_rev, self._status, width, self._hshift, self._places.on),
+                lines,
+            )
         return lines
 
     def cursor_line(self) -> int | None:
@@ -1060,38 +1117,45 @@ class TraceScreen(Screen):
             continuations already have the indent of the lane.
         """
         indent = len(_ROUTE_LANE)
-        if current is not None:
-            route = route_path(
-                current,
-                self._device_label,
-                self._resolve,
-                self._device_hash,
-                bare_self=True,
-                show_hash=False,
-            )
-            return route.wrapped(width, indent=indent)
-        planned = self._planned_route()
-        if planned is not None:
-            lines = planned.wrapped(width, indent=indent)
-            if self._effective_spec()[1] and self._auto_source:
-                lines.append(_note(f"(auto · {self._auto_source})", indent))
-            return lines
-        if self._previous is not None:
-            route = route_path(
-                self._previous,
-                self._device_label,
-                self._resolve,
-                self._device_hash,
-                bare_self=True,
-                show_hash=False,
-            )
-            lines = route.wrapped(width, indent=indent)
-            stamp = self._previous.timestamp.astimezone().strftime("%b %d %H:%M")
-            lines.append(_note(f"(previous · {stamp})", indent))
+        shown = self._shown_route(current)
+        if shown is not None:
+            route, note = shown
+            lines = self._placed(route).wrapped(width, indent=indent)
+            if note:
+                lines.append(_note(note, indent))
             return lines
         if self._mode == "path":
             return [Text("none — compose a path to walk", style="muted")]
         return [Text("unknown — press Enter to trace", style="muted")]
+
+    def _shown_route(self, current: TraceResult | None) -> tuple[PathLine, str] | None:
+        """The path line of the route lane, and the note under it (``""`` for none).
+
+        The order is the order that :meth:`_route_value` explains: the live route, the
+        planned route, the previous route. The result is ``None`` when there is no route to
+        show. The line is not changed by place mode (refer to :meth:`_placed`).
+        """
+        if current is not None:
+            return self._walked_route(current), ""
+        planned = self._planned_route()
+        if planned is not None:
+            auto = self._effective_spec()[1] and self._auto_source
+            return planned, f"(auto · {self._auto_source})" if auto else ""
+        if self._previous is not None:
+            stamp = self._previous.timestamp.astimezone().strftime("%b %d %H:%M")
+            return self._walked_route(self._previous), f"(previous · {stamp})"
+        return None
+
+    def _walked_route(self, result: TraceResult) -> PathLine:
+        """The route that a trace walked, with bare ends and no hashes after the names."""
+        return route_path(
+            result,
+            self._device_label,
+            self._resolve,
+            self._device_hash,
+            bare_self=True,
+            show_hash=False,
+        )
 
     def _effective_spec(self) -> tuple[str, bool]:
         """The wire spec that the next Trace walks, and whether automatic resolution gave it.
@@ -1361,15 +1425,17 @@ class TraceScreen(Screen):
             None if not node or node == self._device_label else node
             for node in (agg.origin, agg.destination)
         ]
-        return path_line(
-            ends,
-            self._resolve,
-            prefix_bytes=hash_bytes or 8,
-            self_name=self._device_label,
-            hash_bytes=hash_bytes,
-            bare_self=True,
-            from_origin=from_origin,
-            to_destination=to_destination,
+        return self._placed(
+            path_line(
+                ends,
+                self._resolve,
+                prefix_bytes=hash_bytes or 8,
+                self_name=self._device_label,
+                hash_bytes=hash_bytes,
+                bare_self=True,
+                from_origin=from_origin,
+                to_destination=to_destination,
+            )
         ).text()
 
     def _trace_log(self) -> RenderableType:
