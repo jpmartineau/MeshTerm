@@ -15,10 +15,9 @@ The page reads the clock samples of the last ``clock_report_days`` (refer to
   user can set (JP, 2026-11-03). A managed node with no sample in the window shows its
   newest offset from all the history, or ``no sample``. A repeater sends no message, so
   its adverts are its only samples, and a new install has none yet.
-  When a managed repeater or room server is out of sync, or has no sample, the section
-  ends on ``Sync their clocks…``: one confirm, then each clock in turn, with the
-  transmit cooldown between the nodes (refer to
-  :func:`~meshterm.ui.repeater_admin.sync_clocks`).
+  When a managed node is a repeater or a room server, the section ends on ``Sync their
+  clocks…``, whatever the offsets: one confirm, then each clock in turn, with the transmit
+  cooldown between the nodes (refer to :func:`~meshterm.ui.repeater_admin.sync_clocks`).
 * **Out of sync**: each other node past the tolerance, the largest offset first. Enter
   opens the node page.
 * **Senders with no key**: the channel senders whose name resolves to no single key. Their
@@ -377,11 +376,12 @@ def clock_drift_screen(rows: Sequence[ClockRow], *, tolerance_s: float) -> Selec
         items.append(Separator(_node_header))
         items += node_rows(managed)
         # The bulk action ends the section, as the maintenance rows end the Contacts list.
-        # It shows only when a clock needs it. It is a list of its own, with its own icon
+        # It shows for each page with a managed repeater or room server, whatever the
+        # offsets, because an offset can be old. It is a list of its own, with its own icon
         # column, so a blank seam goes on each side of it: the node rows above and below
         # have one-cell type marks, and its clock is two cells. The heading that follows
         # adds no second blank line under a blank one.
-        due = clocks_to_sync(rows, tolerance_s)
+        due = clocks_to_sync(rows)
         if due:
             label = marked_label("🕒", "Sync their clocks…", "")
             label.append(f"  ·  {len(due)} {'node' if len(due) == 1 else 'nodes'}", "muted")
@@ -415,16 +415,16 @@ def clock_drift_screen(rows: Sequence[ClockRow], *, tolerance_s: float) -> Selec
     return SelectScreen(title, items, footer_hint=_HINT)
 
 
-def clocks_to_sync(rows: Sequence[ClockRow], tolerance_s: float) -> list[Contact]:
+def clocks_to_sync(rows: Sequence[ClockRow]) -> list[Contact]:
     """The managed nodes whose clocks the bulk ``Sync their clocks…`` sets.
 
-    Only a repeater or a room server has the ``clock sync`` command. Of those, the ones
-    whose clock is out of sync, or not known (no sample): a correct clock needs no
-    transmission.
+    Each managed repeater and room server, whatever its offset (JP, 2026-11-03): only these
+    have the ``clock sync`` command. An offset that looks correct can be old. A repeater
+    with no battery and no clock source starts again from its build date at each power
+    cycle, and the page knows only when its next advert arrives.
 
     Args:
         rows: The rows of the page.
-        tolerance_s: The ``clock_tolerance_s`` preference.
 
     Returns:
         The contacts, in the order of the page.
@@ -435,5 +435,4 @@ def clocks_to_sync(rows: Sequence[ClockRow], tolerance_s: float) -> list[Contact
         if r.managed
         and r.contact is not None
         and r.node_type in (NODE_TYPE_REPEATER, NODE_TYPE_ROOM)
-        and (r.offset is None or r.out_of_sync(tolerance_s))
     ]

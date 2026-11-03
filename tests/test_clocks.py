@@ -202,10 +202,12 @@ def _managed(name: str, offset_s: float | None, node_type: int | None = NODE_TYP
     return ClockRow(offset, name, key, node_type, True, contact)
 
 
-def test_the_bulk_row_ends_the_managed_section_when_a_clock_needs_it() -> None:
-    """A repeater out of sync and one with no sample are due. A correct clock is not.
+def test_the_bulk_row_ends_the_managed_section_for_each_repeater_and_room() -> None:
+    """Each managed repeater and room server is due, also with a correct clock.
 
-    A managed companion has no ``clock sync`` command, so it is never due.
+    A repeater with no battery loses its time at each power cycle, and the page learns it
+    only at its next advert. A managed companion has no ``clock sync`` command, so it is
+    never due, and a page with only managed companions has no bulk row.
     """
     from meshterm.ui.clocks_screen import SYNC_ALL, clocks_to_sync
 
@@ -215,15 +217,17 @@ def test_the_bulk_row_ends_the_managed_section_when_a_clock_needs_it() -> None:
         _managed("Unknown", None),
         _managed("Phone", -7200, node_type=None),
     ]
-    assert [c.name for c in clocks_to_sync(rows, TOLERANCE)] == ["Behind", "Unknown"]
+    assert [c.name for c in clocks_to_sync(rows)] == ["Behind", "Fine", "Unknown"]
     screen = clock_drift_screen(rows, tolerance_s=TOLERANCE)
     text = plain("\n".join(screen.render_body(72)))
-    assert "Sync their clocks…  ·  2 nodes" in text
+    assert "Sync their clocks…  ·  3 nodes" in text
     assert text.index("Sync their clocks") < text.index("Out of sync")
     assert any(getattr(item, "value", None) == SYNC_ALL for item in screen._items)
 
     in_sync = clock_drift_screen([_managed("Fine", 10)], tolerance_s=TOLERANCE)
-    assert "Sync their clocks" not in plain("\n".join(in_sync.render_body(72)))
+    assert "Sync their clocks…  ·  1 node" in plain("\n".join(in_sync.render_body(72)))
+    phones = clock_drift_screen([_managed("Phone", -7200, node_type=None)], tolerance_s=TOLERANCE)
+    assert "Sync their clocks" not in plain("\n".join(phones.render_body(72)))
 
 
 class _Ui:

@@ -187,7 +187,7 @@ async def _open_page(ctx: AppContext, rows: list[ClockRow], tolerance: float) ->
             if chosen == SYNC_ALL:
                 # The page stays as it is: an offset changes only when a new advert of the
                 # node arrives, so there is nothing to draw again now.
-                await sync_clocks(ctx, clocks_to_sync(rows, tolerance))
+                await sync_clocks(ctx, clocks_to_sync(rows))
                 continue
             # The page opens to look. The verbs that manage a contact belong to the
             # Contacts list, and this page is not that list.
