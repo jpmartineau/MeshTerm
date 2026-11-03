@@ -191,6 +191,25 @@ NODES: tuple[Node, ...] = (
 #: Each node of the world by name, our node included.
 BY_NAME: dict[str, Node] = {node.name: node for node in (SELF, *NODES)}
 
+#: The nodes whose clocks are wrong, and by how much (seconds, a positive value is ahead).
+#: Each other clock is correct. These are the usual faults of a real mesh: a repeater that
+#: lost its time at a reboot and starts from its build date, a tracker that was never set,
+#: and two phones set to the wrong time zone. The adverts carry these times, so the Clock
+#: drift page and the node pages have something to show (refer to
+#: :mod:`~meshterm.services.clock_offsets`).
+CLOCK_OFFSET_S: dict[str, float] = {
+    "Île-Bizard": -(2 * 365 + 40) * 86400.0,
+    "Wio Tracker": -(3 * 86400.0 + 7 * 3600.0),
+    "Steve K.": -5 * 3600.0,
+    "Gabriel": 3600.0 + 25 * 60.0,
+}
+
+
+def clock_offset_s(name: str) -> float:
+    """How far the clock of the node with this name is from the real time, in seconds."""
+    return CLOCK_OFFSET_S.get(name, 0.0)
+
+
 #: The repeaters, in the order of :data:`NODES`.
 REPEATERS: tuple[Node, ...] = tuple(node for node in NODES if node.is_repeater)
 

@@ -1,0 +1,156 @@
+# SPDX-License-Identifier: Apache-2.0
+"""The Clock drift page and the ``clocks`` command: the histogram, the sections, the rows."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from datetime import timedelta
+from pathlib import Path
+
+from meshterm.core.admin_store import AdminStore
+from meshterm.core.models import NODE_TYPE_REPEATER, ChatMessage, Contact, Message, utcnow
+from meshterm.core.preferences import Preferences
+from meshterm.persistence.repository import Repository
+from meshterm.services.clock_offsets import ClockOffset
+from meshterm.tools.clocks import _listing, clock_rows
+from meshterm.ui.clocks_screen import (
+    ClockRow,
+    buckets,
+    clock_drift_screen,
+    histogram,
+    own_clock_note,
+)
+from tests.conftest import plain
+
+TOLERANCE = 300
+
+
+def _row(name: str, offset_s: float, *, managed: bool = False, keyed: bool = True) -> ClockRow:
+    key = (name.encode().hex() * 32)[:64]
+    who = key[:12] if keyed else name
+    offset = ClockOffset(who, keyed, offset_s, 3, utcnow() - timedelta(minutes=5))
+    contact = Contact(name=name, public_key=key) if keyed else None
+    return ClockRow(offset, name, key if keyed else None, None, managed, contact)
+
+
+def test_the_steps_run_from_behind_through_in_sync_to_ahead() -> None:
+    """The centre step is the tolerance. Each step past it is an hour, a day, a year."""
+    labels = [b.label for b in buckets(TOLERANCE)]
+    assert labels == [
+        "> 1y behind",
+        "1d-1y behind",
+        "1h-1d behind",
+        "5m-1h behind",
+        "in sync ≤5m",
+        "5m-1h ahead",
+        "1h-1d ahead",
+        "1d-1y ahead",
+        "> 1y ahead",
+    ]
+    # A tolerance of two hours leaves no step between it and the hour.
+    wide = [b.label for b in buckets(7200)]
+    assert wide[2:5] == ["2h-1d behind", "in sync ≤2h", "2h-1d ahead"]
+
+
+def test_each_offset_falls_in_exactly_one_step() -> None:
+    """The edges belong to one step each, so no sender counts twice or not at all."""
+    rows = [_row(f"n{i}", s) for i, s in enumerate((-300, 300, -3600, 3600, 0, -4e8, 4e8))]
+    counted = dict((b.label, n) for b, n in histogram(rows, TOLERANCE))
+    assert sum(counted.values()) == len(rows)
+    assert counted["in sync ≤5m"] == 3  # -300, 0, and 300
+    assert counted["5m-1h behind"] == 1 and counted["5m-1h ahead"] == 1
+    assert counted["> 1y behind"] == 1 and counted["> 1y ahead"] == 1
+
+
+def test_most_clocks_ahead_blame_our_own_clock() -> None:
+    """When most keyed clocks agree against ours, the fault is probably ours."""
+    agree = [_row(f"n{i}", 2 * 3600 + i) for i in range(6)]
+    note = own_clock_note(agree, TOLERANCE)
+    assert note is not None and "2h ahead of this computer" in note
+    mixed = [_row(f"n{i}", (-1) ** i * 7200) for i in range(6)]
+    assert own_clock_note(mixed, TOLERANCE) is None
+    assert own_clock_note(agree[:3], TOLERANCE) is None  # too few to judge
+
+
+def test_the_page_lists_managed_nodes_first_then_the_clocks_out_of_sync() -> None:
+    """A managed node is listed also in sync. An other node is listed only out of sync."""
+    rows = [
+        _row("Hilltop", 10, managed=True),
+        _row("Fine", 20),
+        _row("Slow", -3 * 3600),
+        _row("Worse", -9 * 86400),
+        _row("Bob", -900, keyed=False),
+    ]
+    screen = clock_drift_screen(rows, tolerance_s=TOLERANCE)
+    assert screen.title == "Clock drift · 5 nodes · 3 out of sync"
+    text = plain("\n".join(screen.render_body(72)))
+    order = [text.index(s) for s in ("Managed nodes", "Hilltop", "Out of sync", "Worse", "Slow")]
+    assert order == sorted(order), "managed first, then the largest offset first"
+    assert "Fine" not in text
+    assert text.index("Senders with no key") < text.index("Bob")
+    assert "15m behind" in text
+
+
+def test_a_page_with_nothing_out_of_sync_says_so() -> None:
+    """The Out of sync section always has its heading, and an empty state when it is empty."""
+    screen = clock_drift_screen([_row("Fine", 20)], tolerance_s=TOLERANCE)
+    assert "no other clock is out of sync" in plain("\n".join(screen.render_body(72)))
+
+
+def test_the_cli_listing_gives_signed_seconds_and_words() -> None:
+    """The plain face says how far and which way. The document gives signed seconds."""
+    listing = _listing([_row("Fine", 20), _row("Slow", -3 * 3600, managed=True)], TOLERANCE)
+    first, second = listing.rows
+    assert first["offset_s"] == -10800 and first["out_of_sync"] and first["managed"]
+    assert second["offset_s"] == 20 and not second["out_of_sync"]
+    lane = next(c for c in listing.columns if c.key == "offset_s").lanes[0]
+    assert lane.render(first["offset_s"]) == "3h behind"
+    assert lane.render(second["offset_s"]) == "in sync"
+
+
+class _DevState:
+    def __init__(self, contacts: list[Contact]) -> None:
+        self._contacts = contacts
+
+    async def contacts(self) -> list[Contact]:
+        return self._contacts
+
+    async def self_info(self) -> dict:
+        return {"public_key": "99" * 32}
+
+
+class _Ctx:
+    def __init__(self, repo: Repository, contacts: list[Contact], admin: AdminStore) -> None:
+        self.repo = repo
+        self.devstate = _DevState(contacts)
+        self.preferences = Preferences()
+        self.admin_store = admin
+        self.log = logging.getLogger("test.clocks")
+
+
+def test_clock_rows_name_their_nodes_and_mark_the_managed_ones(tmp_path: Path) -> None:
+    """A DM sender that is a contact gets its contact. A managed one is marked."""
+    repo = Repository(tmp_path / "clocks.db")
+    now = utcnow()
+    repeater = Contact(name="Hilltop", public_key="ab" * 32, node_type=NODE_TYPE_REPEATER)
+    for sender in (repeater.public_key[:12], "cd" * 6):
+        repo.record_chat_message(
+            ChatMessage.from_message(
+                Message(
+                    text="hi",
+                    sender=sender,
+                    sender_timestamp=now - timedelta(hours=2),
+                    received_at=now,
+                )
+            )
+        )
+    admin = AdminStore(tmp_path / "admin.json")
+    admin.remember(repeater, "secret")
+    rows = asyncio.run(clock_rows(_Ctx(repo, [repeater], admin)))
+    by_name = {r.name or r.offset.who: r for r in rows}
+    assert by_name["Hilltop"].managed and by_name["Hilltop"].contact is repeater
+    stranger = by_name["cd" * 6]
+    assert not stranger.managed and stranger.contact is not None  # a page to open
+    assert stranger.contact.key_prefix == "cd" * 6
+    repo.close()

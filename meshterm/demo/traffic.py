@@ -48,6 +48,7 @@ from .world import (
     Copy,
     Node,
     best_route,
+    clock_offset_s,
     flood,
     link_snr,
     loss_chance,
@@ -556,8 +557,23 @@ def traffic(start_s: float, end_s: float, seed: str) -> list[Heard]:
 
 
 def stamp(heard: list[Heard], now: datetime) -> list[Heard]:
-    """Give each observation in ``heard`` its time, from ``now`` and its offset."""
+    """Give each observation in ``heard`` its time, from ``now`` and its offset.
+
+    An advert packet also gets its own time, as its node wrote it: the time of the
+    reception, moved by the clock offset of that node (refer to
+    :data:`~meshterm.demo.world.CLOCK_OFFSET_S`).
+    """
     for item in heard:
-        if item.observation is not None:
-            item.observation.observed_at = now + timedelta(seconds=item.offset_s)
+        obs = item.observation
+        if obs is None:
+            continue
+        obs.observed_at = now + timedelta(seconds=item.offset_s)
+        raw = obs.raw
+        if (
+            obs.kind == "packet"
+            and isinstance(raw, dict)
+            and raw.get("payload_typename") == "ADVERT"
+        ):
+            sent = obs.observed_at + timedelta(seconds=clock_offset_s(obs.name or ""))
+            raw["adv_timestamp"] = int(sent.timestamp())
     return heard

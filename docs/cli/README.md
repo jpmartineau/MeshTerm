@@ -1052,6 +1052,47 @@ correct.
 
 The command returns `5` and `[]` when no records match.
 
+#### `meshterm clocks`
+
+How far the clock of each node is from the clock of this computer. The command reads the
+database. It needs no device and never transmits. A node with a wrong clock puts wrong
+times on its adverts and messages, and only its owner can set the clock. This listing
+tells you which owners to tell.
+
+Each advert, direct message, and channel message that MeshTerm heard is a clock sample:
+the time that the sender wrote, minus the time when MeshTerm heard it. The offset of a node
+is the median of its three newest samples. The listing has each sender with a sample in
+the last `clock_report_days` (a preference, 7 by default), the largest offset first.
+
+```console
+$ meshterm --demo clocks
+NAME             TYPE         HASH          OFFSET  SAMPLES  LAST  MANAGED
+Île-Bizard       repeater     3cc49c  2y 5w behind       16    3h  no
+Wio Tracker      companion    a09028  3d 7h behind       32    1d  no
+Steve K.         companion    220c44     5h behind       38   24m  no
+Gabriel          companion    7fc6ea  1h 24m ahead       40   21m  no
+Chloé L.         companion    c9d961       in sync       48    9h  no
+```
+
+`OFFSET` is `in sync` when the offset is within the `clock_tolerance_s` preference (300 s
+by default). `LAST` is the age of the newest sample. `MANAGED` is `yes` when MeshTerm
+stores the admin password of the node. A channel sender whose name matches no single key
+has only its name, with no `TYPE` and no `HASH`.
+
+**`--json`** is an array of rows.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `node` | object | The `node` shape. A sender with no key has only `name`. |
+| `offset_s` | integer | The offset in seconds. A positive value is a clock ahead of this computer. |
+| `samples` | integer | The number of samples in the window. |
+| `last_sample_at` | timestamp | When MeshTerm heard the newest sample. |
+| `out_of_sync` | boolean | **JSON only.** `true` when the offset is past `clock_tolerance_s`. It is the `in sync` of the plain face, inverted. |
+| `managed` | boolean | `true` when MeshTerm stores the admin password of the node. |
+| `keyed` | boolean | **JSON only.** `false` for a channel sender that has only a name. |
+
+The command returns `5` and `[]` when the window has no sample.
+
 ---
 
 ### Messaging

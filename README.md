@@ -278,7 +278,8 @@ error message that MeshTerm gives.
 
 The menu asks one question: *what would you like to do?* It gives the answer in two halves.
 Three sections name an activity. **Message** has chat, channels, the courier outbox, and
-contacts. **Watch** has the dashboard, the live feed, the watchtower, and the time machine.
+contacts. **Watch** has the dashboard, the live feed, the watchtower, the clock drift
+report, and the time machine.
 **Explore** has the map, the mesh walk, tracing, and the trophy case. The other three
 sections name the owner. **This node** is the radio in your hand. **Other nodes** is the
 someone else's radio, which you reach over the mesh. **This app** is MeshTerm itself, with

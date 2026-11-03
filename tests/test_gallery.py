@@ -1764,8 +1764,41 @@ def _links_qr(cols: int, rows: int) -> Screen:
     )
 
 
+def _clock_drift(cols: int, rows: int) -> Screen:
+    """The Clock drift page in its fullest form: a managed node, nodes out of sync, a name.
+
+    The offsets cover each side of the histogram, the longest offset text (``11h 59m
+    behind``), and a long name, so that the lanes meet the edge on each platform.
+    """
+    from datetime import timedelta
+
+    from meshterm.core.models import NODE_TYPE_CHAT, NODE_TYPE_REPEATER
+    from meshterm.services.clock_offsets import ClockOffset
+    from meshterm.ui.clocks_screen import ClockRow, clock_drift_screen
+
+    now = utcnow()
+
+    def row(name, key, offset_s, *, node_type=NODE_TYPE_CHAT, managed=False, keyed=True):  # noqa: ANN001, ANN202
+        who = key[:12] if keyed else name
+        offset = ClockOffset(who, keyed, offset_s, 6, now - timedelta(minutes=40))
+        contact = Contact(name=name, public_key=key, node_type=node_type) if keyed else None
+        return ClockRow(offset, name, key if keyed else None, node_type, managed, contact)
+
+    rows_ = [
+        row("Hilltop-Repeater", _HUB_KEY, 12, node_type=NODE_TYPE_REPEATER, managed=True),
+        row("A Rather Long Repeater Name For Width", "ab" * 32, -(11 * 3600 + 59 * 60)),
+        row("klkdeck", "cd" * 32, -(4 * 86400 + 6 * 3600)),
+        row("NONAME", "ef" * 32, -(3 * 365 * 86400)),
+        row("JRTx", "12" * 32, 54),
+        row("Raphael's T-Deck", "34" * 32, 2 * 3600),
+        row("Bob", "", -900, keyed=False),
+    ]
+    return clock_drift_screen(rows_, tolerance_s=300)
+
+
 _ENTRIES: list[_Entry] = [
     _Entry("dashboard", _dashboard),
+    _Entry("clock_drift", _clock_drift),
     _Entry("dashboard-scoped", _dashboard_scoped),
     _Entry("contacts", _contacts),
     _Entry("archive_ladder", _archive_ladder),

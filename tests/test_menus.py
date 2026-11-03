@@ -202,7 +202,7 @@ def test_main_menu_sections_answer_the_menus_own_question() -> None:
     assert list(sections) == _CATEGORY_ORDER  # all_tools already sorts them in this order
     assert sections == {
         "Message": ["chat", "channels", "rooms", "courier", "contacts"],
-        "Watch": ["dashboard", "livefeed", "watchtower", "timemachine"],
+        "Watch": ["dashboard", "livefeed", "watchtower", "clocks", "timemachine"],
         "Explore": ["map", "walk", "trace", "trace-path", "records"],
         "This node": ["info", "config", "advert"],
         "Other nodes": ["repeater-admin", "tx-optimize"],

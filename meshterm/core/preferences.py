@@ -536,6 +536,19 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         unit="s",
     ),
     PrefSpec(
+        key="clock_report_days",
+        label="Clock report",
+        help="How many days of packets the Clock drift page reads",
+        group="Display",
+        value_type="int",
+        # A week: long enough to hear each repeater advert a few times, and short enough
+        # that a clock that its owner set last month no longer counts against the node.
+        default=7,
+        minimum=1,
+        maximum=365,
+        unit="days",
+    ),
+    PrefSpec(
         key="section_spacing_min_rows",
         label="Section spacing",
         help="A blank line between sections and between chat authors",
