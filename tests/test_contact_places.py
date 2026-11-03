@@ -256,10 +256,10 @@ def _archived_names(screen: ContactListScreen) -> list[str]:
 
 
 def test_archived_list_has_the_place_column_before_the_key() -> None:
-    """The Archived list reads NAME, ARCHIVED, PLACE, KEY, and shows each full label."""
+    """The Archived list reads NAME, PLACE, ARCHIVED, KEY, and shows each full label."""
     screen = _archived()
     header = next(line for line in _lines(screen, 200) if "NAME" in line)
-    labels = [header.index(label) for label in ("NAME", "ARCHIVED", "PLACE", "KEY")]
+    labels = [header.index(label) for label in ("NAME", "PLACE", "ARCHIVED", "KEY")]
     assert labels == sorted(labels)
     alice = _row(screen, 200, "Alice")
     assert "Villeray, Montréal" in alice
@@ -267,9 +267,9 @@ def test_archived_list_has_the_place_column_before_the_key() -> None:
 
 
 def test_archived_list_sorts_by_place() -> None:
-    """Ctrl+→ reaches the place column. Places run A to Z, and a node with none runs last."""
+    """Ctrl+← reaches the place column. Places run A to Z, and a node with none runs last."""
     screen = _archived(sort="archived")
-    screen.handle("ctrl_right")
+    screen.handle("ctrl_left")
     assert screen._sort.column == "place"  # noqa: SLF001
     assert _archived_names(screen) == ["Bob", "Alice", "Carl"]
     screen.handle("ctrl_down")

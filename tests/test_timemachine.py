@@ -719,8 +719,8 @@ def test_a_list_draws_exactly_the_lanes_it_declares() -> None:
     """The set of lanes decides everything: the header, the row, and the widths read the same tuple.
 
     The test checks three sets in one run, because none of them must be a special case. The
-    ordinary list, the extra ``TRACED`` of the Trace picker, and the ``NAME · ARCHIVED ·
-    KEY`` of the Archived list all come from the same two builders.
+    ordinary list, the extra ``TRACED`` of the Trace picker, and the ``NAME · PLACE ·
+    ARCHIVED · KEY`` of the Archived list all come from the same two builders.
     """
     from meshterm.ui.contactlist import (
         ARCHIVED_LANES,

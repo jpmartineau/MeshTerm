@@ -4,7 +4,7 @@
 An archive sweep (refer to :mod:`~meshterm.ui.sweep_screen`) removes a contact from the
 *device*, which is the scarce resource, and keeps the contact here in full. This screen is
 where those contacts are. It has the same sortable and filterable lane layout as the
-Contacts list, with its own lane set (``NAME · ARCHIVED · PLACE · KEY``,
+Contacts list, with its own lane set (``NAME · PLACE · ARCHIVED · KEY``,
 :data:`~meshterm.ui.contactlist.ARCHIVED_LANES`) and its own sort ring over exactly those
 four columns. The rest is the same as on the Contacts list: the ``PLACE`` lane comes from
 the place service and fills in while the list is open, the filter matches a place, and no

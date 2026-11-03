@@ -19,7 +19,7 @@ starts with the name and ends with the key. These two lanes are what a contact *
 flexible widths are built around them. Each list declares the middle lanes that it wants as
 a tuple of :class:`ContactLane` (:data:`DEFAULT_LANES` for ``NAME · HEARD · PKTS · KEY``,
 :data:`TRACE_LANES` for the extra ``TRACED`` of the Trace picker, :data:`ARCHIVED_LANES` for
-the ``ARCHIVED`` and ``PLACE`` of the Archived list).
+the ``PLACE`` and ``ARCHIVED`` of the Archived list).
 
 A lane has its own sort ring id, header label, width, and the way to read its value from a
 row. Thus to add a lane is a declaration, not a branch: the header, the row builder, the
@@ -136,7 +136,7 @@ PKTS_LANE = ContactLane("packets", "PKTS", 5, "count", kind="count")
 #: How long ago the node was last traced: the extra lane of the Trace-target picker.
 TRACED_LANE = ContactLane("traced", "TRACED", 6, "last_traced")
 
-#: How long ago the contact was archived and removed from the device: the first lane of the
+#: How long ago the contact was archived and removed from the device: the last lane of the
 #: Archived list. It is drawn exactly as ``HEARD`` is, with the recency heat. It is the same
 #: question (how long ago did this occur) about a different event. A visual language of its
 #: own is a second grammar that the user must learn, with no benefit.
@@ -144,7 +144,8 @@ ARCHIVED_LANE = ContactLane("archived", "ARCHIVED", 8, "archived_at")
 
 #: The place of the node: the named area nearest its location (refer to
 #: :class:`~meshterm.core.places.Place`). It is text, so the list sizes it to its widest value.
-#: It is the last lane, so it is immediately before the key.
+#: On the Contacts screen it is the last lane, so it is immediately before the key. On the
+#: Archived list it is the first lane, after the name (JP, 2026-11-03).
 PLACE_LANE = ContactLane("place", "PLACE", 5, "place", kind="text")
 
 #: The middle lanes of the usual contact list: ``NAME · HEARD · PKTS · KEY``.
@@ -156,11 +157,11 @@ CONTACTS_LANES: tuple[ContactLane, ...] = (HEARD_LANE, PKTS_LANE, PLACE_LANE)
 #: The middle lanes of the Trace-target picker, which puts ``TRACED`` before the usual two.
 TRACE_LANES: tuple[ContactLane, ...] = (TRACED_LANE, HEARD_LANE, PKTS_LANE)
 
-#: The middle lanes of the Archived list: ``NAME · ARCHIVED · PLACE · KEY``. There is no
+#: The middle lanes of the Archived list: ``NAME · PLACE · ARCHIVED · KEY``. There is no
 #: ``HEARD`` and no ``PKTS``. An archived contact is not on the device, so this screen is not
-#: about what the contact still transmits. It is about when the contact left, and where it
-#: is. The ``PLACE`` lane is the same as on the Contacts screen, immediately before the key.
-ARCHIVED_LANES: tuple[ContactLane, ...] = (ARCHIVED_LANE, PLACE_LANE)
+#: about what the contact still transmits. It is about where the contact is, and when it
+#: left. The ``PLACE`` lane is the same as on the Contacts screen.
+ARCHIVED_LANES: tuple[ContactLane, ...] = (PLACE_LANE, ARCHIVED_LANE)
 
 
 def _row_marks(row: ContactRow) -> str:
@@ -228,17 +229,17 @@ TRACE_SORT_OPENS_ASCENDING: dict[str, bool] = {
     "hash": True,
 }
 
-#: The sort ring of the Archived list: ``NAME · ARCHIVED · PLACE · KEY``, the same as
+#: The sort ring of the Archived list: ``NAME · PLACE · ARCHIVED · KEY``, the same as
 #: :data:`ARCHIVED_LANES`. ``archived`` opens *ascending* on the age of the lane, so the
 #: most recently archived contacts come first. This screen answers the question "what did
 #: that sweep just take?", and the answer must be at the top of the screen. ``place`` sorts
 #: as on the Contacts screen (refer to
 #: :data:`~meshterm.ui.widgets.CONTACTS_SORT_OPENS_ASCENDING`).
-ARCHIVED_SORT_COLUMNS: tuple[str, ...] = ("name", "archived", "place", "hash")
+ARCHIVED_SORT_COLUMNS: tuple[str, ...] = ("name", "place", "archived", "hash")
 ARCHIVED_SORT_OPENS_ASCENDING: dict[str, bool] = {
     "name": True,
-    "archived": True,
     "place": True,
+    "archived": True,
     "hash": True,
 }
 
@@ -584,8 +585,8 @@ class ContactListScreen(SelectScreen):
     other rows in the active sort order. ``lanes`` selects the set: :data:`DEFAULT_LANES`
     for the usual ``NAME · HEARD · PKTS · KEY``, :data:`TRACE_LANES` for the extra
     ``TRACED`` of the Trace picker, and :data:`ARCHIVED_LANES` for the
-    ``NAME · ARCHIVED · KEY`` of the Archived list. Give the set a ``sort`` whose ring
-    covers it.
+    ``NAME · PLACE · ARCHIVED · KEY`` of the Archived list. Give the set a ``sort`` whose
+    ring covers it.
 
     The lanes stay at the left. The name lane has the width of its widest name (not of the
     terminal). Thus the columns do not move when the window becomes wider, and the free

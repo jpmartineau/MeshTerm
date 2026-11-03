@@ -27,10 +27,11 @@ candidate, because it is not in the contact table of the device.
 
 MeshTerm never hides what a sweep took. **View archived contacts** is directly under the
 archive action. It opens the archived list (refer to :mod:`~meshterm.ui.archived_screen`).
-This is its own screen, with the same lane layout, sorted on its own ``NAME · ARCHIVED ·
-KEY`` columns. It is a screen and not a section at the end of this screen, because it is a
-different list with different columns. An archived contact has no live heard age or packet
-count that is worth a lane. What it does have, the time that it left, has no column here.
+This is its own screen, with the same lane layout, sorted on its own ``NAME · PLACE ·
+ARCHIVED · KEY`` columns. It is a screen and not a section at the end of this screen,
+because it is a different list with different columns. An archived contact has no live
+heard age or packet count that is worth a lane. What it does have, the time that it left,
+has no column here.
 
 To remove *one* named contact for good belongs to that contact and not to the list. It is
 the last action on the Node detail page of the contact, where the user already looks at
