@@ -74,7 +74,7 @@ them instead of hand-rolling:
 | Term | Meaning |
 |---|---|
 | node | any device on the mesh — a radio broadcasting packets; roles: companion, repeater, room server, sensor. The umbrella term |
-| managed node | a node whose admin password MeshTerm stores (`admin_store`) — the user can log in to it without a prompt. Marked `🔑` (`marks.MANAGED_ICON`, `*` on the PicoCalc) beside the type mark in the Contacts list, the admin picker, and the node page header; listed first on the Clock drift page. The menu section of the admin tools is **Managed nodes** (JP, 2026-11-03; it was "Other nodes") |
+| managed node | a node whose admin password MeshTerm stores (`admin_store`) — the user can log in to it without a prompt. Marked `🔑` (`marks.MANAGED_ICON`, `*` on the PicoCalc) beside the type mark in the Contacts list, the admin picker, and the node page header; the first list on the Clock drift page, under its histogram. The menu section of the admin tools is **Managed nodes** (JP, 2026-11-03; it was "Other nodes") |
 | contact | a node your device knows: **discovered** (heard broadcasting, not yet added) or **added** (in the contact list, messageable). Every contact is a node; not every node is a contact |
 | heard | received from ("last heard", "first heard") — never "seen" in UX text |
 | key | the full fixed-length value — a node's public key, a channel secret |

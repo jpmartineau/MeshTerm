@@ -93,10 +93,11 @@ def test_the_page_lists_managed_nodes_first_then_the_clocks_out_of_sync() -> Non
 
 
 def test_managed_nodes_come_first_with_a_header_and_no_sample_rows() -> None:
-    """The managed section is the first one, and a managed node with no sample is listed.
+    """The histogram is on top, the managed nodes are the first list, and each is listed.
 
-    Each table has a header line under its heading. An older offset of a managed node does
-    not count in the histogram or the title, because it is not from the window.
+    A managed node with no sample is listed too. Each table has a header line under its
+    heading. An older offset of a managed node does not count in the histogram or the
+    title, because it is not from the window.
     """
     from meshterm.services.clock_offsets import ClockOffset
 
@@ -108,12 +109,14 @@ def test_managed_nodes_come_first_with_a_header_and_no_sample_rows() -> None:
     screen = clock_drift_screen([stale, never, _row("Slow", -3 * 3600)], tolerance_s=TOLERANCE)
     assert screen.title == "Clock drift · 1 nodes · 1 out of sync"
     lines = plain("\n".join(screen.render_body(72))).splitlines()
-    assert lines[0].strip() == "── Managed nodes ──"
-    assert lines[1].split() == ["NAME", "OFFSET", "LAST"]
+    assert lines[0].strip() == "── All clocks ──"
+    assert lines[1].split() == ["OFFSET", "#"]
+    managed_at = next(i for i, line in enumerate(lines) if line.strip() == "── Managed nodes ──")
+    assert lines[managed_at + 1].split() == ["NAME", "OFFSET", "LAST"]
     assert any("New" in line and "no sample" in line for line in lines)
     assert any("Old" in line and "2h behind" in line and "4w" in line for line in lines)
     text = "\n".join(lines)
-    assert text.index("Managed nodes") < text.index("All clocks") < text.index("Out of sync")
+    assert text.index("All clocks") < text.index("Managed nodes") < text.index("Out of sync")
     counted = dict((b.label, n) for b, n in histogram([stale, never], TOLERANCE))
     assert sum(counted.values()) == 0
 

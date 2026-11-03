@@ -4,20 +4,21 @@
 The page reads the clock samples of the last ``clock_report_days`` (refer to
 :mod:`~meshterm.services.clock_offsets`) and shows them in these sections:
 
-* **Managed nodes** (the nodes whose admin password MeshTerm stores) come first, each one
-  always, also when its clock is correct, because these are the clocks that the user can
-  set (JP, 2026-11-03). A managed node with no sample in the window shows its newest offset
-  from all the history, or ``no sample``. A repeater sends no message, so its adverts are
-  its only samples, and a new install has none yet.
+* **All clocks** is on top (JP, 2026-11-03): a histogram of the offsets, in log steps on
+  two sides. The clocks behind ours are at the top, the clocks in sync in the centre, and
+  the clocks ahead at the bottom (JP, 2026-11-02). A clock can be wrong by seconds or by
+  years, so one linear axis cannot show the two. The centre row is as wide as the
+  ``clock_tolerance_s`` preference. Each bar is a
+  :func:`~meshterm.ui.braillechart.meter`, the only bar of the app.
+* **Managed nodes** (the nodes whose admin password MeshTerm stores) are the first list,
+  each one always, also when its clock is correct, because these are the clocks that the
+  user can set (JP, 2026-11-03). A managed node with no sample in the window shows its
+  newest offset from all the history, or ``no sample``. A repeater sends no message, so
+  its adverts are its only samples, and a new install has none yet.
 * **Adverts refused**: the contacts whose adverts the device drops, because their clocks
   were once ahead (refer to
   :attr:`~meshterm.core.models.Contact.adverts_refused_until`), with the date until which
   it drops them. The node page of each one has the repair.
-* **All clocks**: a histogram of the offsets, in log steps on two sides. The clocks behind
-  ours are at the top, the clocks in sync in the centre, and the clocks ahead at the
-  bottom (JP, 2026-11-02). A clock can be wrong by seconds or by years, so one linear axis
-  cannot show the two. The centre row is as wide as the ``clock_tolerance_s`` preference.
-  Each bar is a :func:`~meshterm.ui.braillechart.meter`, the only bar of the app.
 * **Out of sync**: each other node past the tolerance, the largest offset first. Enter
   opens the node page.
 * **Senders with no key**: the channel senders whose name resolves to no single key. Their
@@ -352,6 +353,15 @@ def clock_drift_screen(rows: Sequence[ClockRow], *, tolerance_s: float) -> Selec
     def node_rows(group: Sequence[ClockRow]) -> list:
         return [Choice(lambda w, r=r: _row_text(r, tolerance_s, w), r.contact) for r in group]
 
+    # The histogram is on top: the shape of all the clocks, before the lists of single
+    # nodes (JP, 2026-11-03).
+    counted = histogram(rows, tolerance_s)
+    peak = max((count for _step, count in counted), default=0) or 1
+    items.append(section_heading("All clocks"))
+    items.append(Separator(lambda _w: _histogram_header(peak)))
+    for step, count in counted:
+        items.append(Separator(lambda w, s=step, c=count: _bar_row(s, c, peak, w)))
+
     managed = _by_size([r for r in rows if r.managed and r.contact is not None])
     if managed:
         items.append(section_heading("Managed nodes"))
@@ -368,13 +378,6 @@ def clock_drift_screen(rows: Sequence[ClockRow], *, tolerance_s: float) -> Selec
         items.append(section_heading("Adverts refused"))
         items.append(Separator(_refused_header))
         items += [Choice(lambda w, r=r: _refused_text(r, w), r.contact) for r in refused]
-
-    counted = histogram(rows, tolerance_s)
-    peak = max((count for _step, count in counted), default=0) or 1
-    items.append(section_heading("All clocks"))
-    items.append(Separator(lambda _w: _histogram_header(peak)))
-    for step, count in counted:
-        items.append(Separator(lambda w, s=step, c=count: _bar_row(s, c, peak, w)))
 
     others = _by_size([r for r in off if not r.managed and r.contact is not None])
     items.append(section_heading("Out of sync"))

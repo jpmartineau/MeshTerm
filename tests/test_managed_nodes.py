@@ -175,4 +175,4 @@ def test_the_page_lists_the_contacts_whose_adverts_are_refused() -> None:
     text = plain("\n".join(screen.render_body(72)))
     assert "Adverts refused" in text
     assert f"{until.astimezone():%Y-%m-%d}" in text
-    assert text.index("Adverts refused") < text.index("All clocks")
+    assert text.index("All clocks") < text.index("Adverts refused")
