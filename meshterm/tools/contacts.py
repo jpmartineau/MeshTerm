@@ -76,14 +76,16 @@ class ContactsTool(Tool):
         sort_name = str(params.get("sort") or "heard")
 
         # In the menu, give the list to the interactive screen, so that the Ctrl+arrows sort
-        # it again while it is open. Their ring goes through the four columns of the shared
-        # contact list (also the hash). On the scripted CLI, print the plain listing one
+        # it again while it is open. Their ring goes through the five columns of the Contacts
+        # list (also the place and the hash). On the scripted CLI, print the plain listing one
         # time, in the requested order.
         if isinstance(ctx.ui, TuiUi):
-            from ..ui.contactlist import SORT_COLUMNS, SORT_OPENS_ASCENDING
+            from ..ui.contactlist import CONTACTS_SORT_COLUMNS, CONTACTS_SORT_OPENS_ASCENDING
             from ..ui.contacts_screen import open_contacts
 
-            sort = ContactsSort.from_name(sort_name, SORT_COLUMNS, SORT_OPENS_ASCENDING)
+            sort = ContactsSort.from_name(
+                sort_name, CONTACTS_SORT_COLUMNS, CONTACTS_SORT_OPENS_ASCENDING
+            )
             await open_contacts(ctx, self_name, self_key, contacts, prefix_bytes, counts, sort)
             return ToolResult(summary={"contacts": len(contacts)})
 

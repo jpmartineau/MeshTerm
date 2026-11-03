@@ -271,6 +271,11 @@ class Separator:
             row: its first two cells are the pointer column, which does not move while the
             rest slides. :func:`~meshterm.ui.menus.column_header` already indents it in this
             way.
+        hscroll_from: The cells after the pointer column that stay still while the header
+            pans (only for a header that pans). A table whose rows pin a head block
+            (:attr:`Choice.hscroll_from`) gives its header the same count. Thus the labels
+            of the pinned lanes stay over their cells. With ``0``, the default, only the
+            pointer column stays.
     """
 
     title: str | Text | Callable[[int], str | Text]
@@ -279,6 +284,7 @@ class Separator:
     heading: bool = False
     spaced: bool = False
     pans: bool = False
+    hscroll_from: int = 0
 
     def text(self, width: int) -> str | Text:
         """The content of the row at ``width`` cells. This method resolves a width-aware title."""
@@ -878,7 +884,7 @@ class SelectScreen(Screen):
                     # Its fullest form, slid with the rows, with its pointer column held
                     # still. It is one line, however wide, because its labels must stay above
                     # their lanes.
-                    slid = self._scroll_window(content, _POINTER, width)
+                    slid = self._scroll_window(content, _POINTER + item.hscroll_from, width)
                     drawn = [render_to_ansi(slid, width, no_wrap=True)]
                     if item.pinned:
                         self._pinned_header = (len(lines), drawn[0])
@@ -1021,7 +1027,7 @@ class SelectScreen(Screen):
                 continue
             if isinstance(item, Separator):
                 cells = cell_len(_plain(item.text(_UNBOUNDED)))
-                limit = max(limit, tail(cells, _POINTER, width))
+                limit = max(limit, tail(cells, _POINTER + item.hscroll_from, width))
             else:
                 cells = cell_len(_plain(item.scroll_text(avail)))
                 limit = max(limit, tail(cells, item.hscroll_from, avail))

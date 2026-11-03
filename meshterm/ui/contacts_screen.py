@@ -2,11 +2,13 @@
 """The interactive Contacts screen: the contacts of the device in the shared sortable list.
 
 This screen shows the contact table of the companion with the presentation of the Time
-Machine picker. It has the same aligned ``NAME · HEARD · PKTS · KEY`` lanes, with our node
-pinned first. It has the same Ctrl+arrow sort (now with the key column) and the same
-type-to-filter. Thus the whole app has one contact list, for each source of data (refer to
-:mod:`~meshterm.ui.contactlist`). Enter opens the full-screen Node detail page of the
-highlighted node (:mod:`~meshterm.ui.node_detail_screen`). That page shows the identity of
+Machine picker. It has the same aligned ``NAME · HEARD · PKTS · PLACE · KEY`` lanes, with our
+node pinned first. It has the same Ctrl+arrow sort (now with the place and key columns) and
+the same type-to-filter. The filter also matches the place of a node. The list cuts no value:
+a row that is wider than the terminal pans with ←→. Thus the whole app has one contact list,
+for each source of data (refer to :mod:`~meshterm.ui.contactlist`). Enter opens the
+full-screen Node detail page of the highlighted node
+(:mod:`~meshterm.ui.node_detail_screen`). That page shows the identity of
 the node, a preview of its location, the routes that MeshTerm observed to it, and the ways
 to go further (trace, map, Time Machine). When the user backs out of that page, the list is
 as it was. ^L opens the map on the highlighted node, when it has a location. ^K locks the
@@ -44,7 +46,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .archived_screen import open_archived
-from .contactlist import ContactListScreen, ContactRow
+from .contactlist import CONTACTS_LANES, ContactListScreen, ContactRow
 from .menus import icon_lane, marked_label, splice_if_room
 from .sweep_screen import archive_contacts
 from .tui import Choice, KeyRequest, Separator
@@ -54,6 +56,7 @@ from .widgets import ContactsSort, contact_packets
 if TYPE_CHECKING:
     from ..context import AppContext
     from ..core.models import Contact
+    from ..services.places import PlaceService
     from .map_render import MapMarker
     from .map_screen import Locator
 
@@ -84,6 +87,12 @@ class ContactsScreen(ContactListScreen):
     resolves one with the highlighted contact, so that :func:`open_contacts` toggles its
     lock. The shared list handles the sort, the filter, and the navigation.
     """
+
+    #: The hint sheds this atom first when it is too wide (refer to
+    #: :func:`~meshterm.ui.tui.frame.fit_hint`). The ``Left`` and ``Right`` keys are the
+    #: first thing that a user tries on a row that runs past the edge, and the other atoms
+    #: name keys that nothing else shows.
+    spare_hint_atoms = ("←→ scroll",)
 
     @property
     def picocalc_lyra_lane(self):
@@ -120,6 +129,7 @@ class ContactsScreen(ContactListScreen):
         locator: Locator | None = None,
         can_lock: bool = False,
         managed: frozenset[str] = frozenset(),
+        places: PlaceService | None = None,
     ) -> None:
         """Create the contacts screen over contact data that MeshTerm already got.
 
@@ -149,8 +159,13 @@ class ContactsScreen(ContactListScreen):
             managed: The full keys (lowercase hex) of the managed nodes: the contacts whose
                 admin password MeshTerm stores. Each of those rows has the ``🔑`` in its
                 mark column (refer to :data:`~meshterm.ui.marks.MANAGED_ICON`).
+            places: The places of the nodes, for the ``PLACE`` lane and for the filter. With
+                ``None``, the lane shows a faint ``—`` in each row. The screen draws the
+                rows again when a place changes (refer to :meth:`render_body`).
         """
         self._self_name, self._self_key = self_name, self_key
+        self._places = places
+        self._place_rev = places.revision if places is not None else 0
         self._locator = locator
         self._can_lock = can_lock
         self._locked = locked
@@ -197,13 +212,23 @@ class ContactsScreen(ContactListScreen):
             sort=sort,
             tail=tail,
             key_hint=lambda value: "^L map" if self._marker_of(value) is not None else "",
+            lanes=CONTACTS_LANES,
+            pan=True,
         )
         if archived:
             self.short_title = f"Contacts · {known} + {archived}"
 
     def _contact_rows_for(self, locked: frozenset[str]) -> list[ContactRow]:
         """Our node, then each contact. ``locked`` shows which contacts are locked."""
-        rows = [ContactRow(value=YOU, name=self._self_name, key=self._self_key, you=True)]
+        rows = [
+            ContactRow(
+                value=YOU,
+                name=self._self_name,
+                key=self._self_key,
+                you=True,
+                place=self._place_of(self._self_key),
+            )
+        ]
         for c in self._contacts:
             rows.append(
                 ContactRow(
@@ -215,11 +240,32 @@ class ContactsScreen(ContactListScreen):
                     node_type=c.node_type,
                     last_seen=c.last_seen,
                     count=contact_packets(c, self._counts),
+                    place=self._place_of(c.public_key or c.key_prefix),
                     locked=(c.public_key or "").lower().removeprefix("0x") in locked,
                     managed=(c.public_key or "").lower().removeprefix("0x") in self._managed,
                 )
             )
         return rows
+
+    def _place_of(self, key: str | None) -> str | None:
+        """The full label of the place of a node, or ``None`` when MeshTerm knows none."""
+        if self._places is None or not key:
+            return None
+        place = self._places.get(key)
+        return (place.label or None) if place is not None else None
+
+    def render_body(self, width: int) -> list[str]:
+        """Draw the list. First read the places again if the finder or the user changed one.
+
+        The finder works in the background, and a place can arrive while this screen is open.
+        The service counts its changes, so the screen reads again only after a change. The
+        highlight, the sort, the filter, and the pan stay (refer to
+        :meth:`~meshterm.ui.contactlist.ContactListScreen.update_rows`).
+        """
+        if self._places is not None and self._places.revision != self._place_rev:
+            self._place_rev = self._places.revision
+            self.update_rows(self._contact_rows_for(self._locked))
+        return super().render_body(width)
 
     def _marker_of(self, value: object) -> MapMarker | None:
         """The marker of the node of a row value, or ``None`` (a tail row, or no location)."""
@@ -367,6 +413,7 @@ async def open_contacts(
             locator=locator,
             can_lock=_can_lock(ctx, self_key),
             managed=managed_keys(ctx, contacts),
+            places=getattr(ctx, "places", None),
         )
 
     screen = build()

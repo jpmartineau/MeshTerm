@@ -219,6 +219,19 @@ def _dashboard_scoped(cols: int, rows: int) -> Screen:
     return screen
 
 
+class _GalleryPlaces:
+    """A stand-in for the place service: Alice is in a named area, and the rest are not."""
+
+    revision = 0
+
+    def get(self, node):  # noqa: ANN001, ANN202 - the shape of PlaceService.get
+        from meshterm.core.places import SOURCE_TILES, Place
+
+        return (
+            Place("Villeray", "Montréal", SOURCE_TILES) if (node or "").startswith("aaaa") else None
+        )
+
+
 def _contacts(cols: int, rows: int) -> Screen:
     sort = ContactsSort.from_name("name", SORT_COLUMNS, SORT_OPENS_ASCENDING)
     contacts = [
@@ -242,6 +255,8 @@ def _contacts(cols: int, rows: int) -> Screen:
         # The locked contact is also a managed node: the mark column then holds the
         # padlock and the key, its widest form, on each platform.
         managed=frozenset({"aa" * 32}),
+        # A place with an accent and a coarse part, the widest form of the PLACE lane.
+        places=_GalleryPlaces(),
     )
     screen.handle("down")
     return screen
@@ -1929,8 +1944,10 @@ _PREEXISTING_REGULAR_OVERFLOW: set[str] = set()
 #: The hint line removes atoms to fit (``frame.fitted_footer``), so the test measures the
 #: hint that the footer draws, and checks that it keeps its way out. Each entry names its
 #: decision. ``courier_outbox``: JP, 2026-10-22, "bring the filter back, tough luck if it
-#: doesn't fit in the footer".
-_SHEDS_ITS_HINT: set[str] = {"courier_outbox"}
+#: doesn't fit in the footer". ``contacts``: the list cuts no value, so its hint gains
+#: ``←→ scroll`` while the highlighted row runs past the edge, and the atom is the first to
+#: go when the footer is full (``ContactsScreen.spare_hint_atoms``).
+_SHEDS_ITS_HINT: set[str] = {"courier_outbox", "contacts"}
 
 
 #: The specimens by name, for a test that needs one entry and not the whole sweep.
