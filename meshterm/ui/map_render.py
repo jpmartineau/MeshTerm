@@ -347,7 +347,7 @@ def render_map(
         markers: The mesh nodes to put on top.
         max_labels: The maximum number of basemap labels to place, to keep the map
             readable.
-        find: A live node-name filter. Markers whose label contains it (case-insensitive)
+        find: A live node filter. Markers whose label or place contains it (case-insensitive)
             draw with bright white labels, and the other markers dim to context with no
             label. When it is empty, each node draws normally.
         ghost: Ground from an earlier raster to put down first, reprojected onto this
@@ -796,7 +796,7 @@ def _draw_nodes(
         ix, iy = int(round(x)), int(round(y))
         if not (0 <= ix < viewport.dot_w and 0 <= iy < viewport.dot_h):
             continue
-        matched = not needle or needle in marker.label.casefold()
+        matched = marker.matches(needle)
         placed.append((marker, ix, iy, matched))
 
     # Matches draw after (over) the dimmed nodes that do not match, at any rank. Thus the

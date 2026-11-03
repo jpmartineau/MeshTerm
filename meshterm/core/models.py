@@ -411,6 +411,9 @@ class MapMarker:
         key: The key of the node in hex (the longest form that the caller has). The hue
             of the label comes from this key. ``None`` leaves the label in the muted grey
             for a node with no key.
+        place: The full label of the place of the node (``Villeray, Montréal``), or ``""``
+            when the caller has none. The map does not draw it. The find filter of the map
+            matches it, in the same way as it matches the label.
     """
 
     label: str
@@ -420,6 +423,16 @@ class MapMarker:
     is_self: bool = False
     detail: str = ""
     key: str | None = None
+    place: str = ""
+
+    def matches(self, needle: str) -> bool:
+        """Whether the find filter ``needle`` matches the label or the place of this node.
+
+        Args:
+            needle: The text that the user typed, already case-folded. An empty ``needle``
+                matches each node.
+        """
+        return not needle or needle in self.label.casefold() or needle in self.place.casefold()
 
     def _rank(self) -> int:
         """Draw order: our node above the repeaters, and the repeaters above leaf nodes."""

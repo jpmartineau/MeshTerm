@@ -33,6 +33,7 @@ a blank grid. The map still works, but it has no streets.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import math
 from collections import OrderedDict
 from collections.abc import Callable
@@ -51,6 +52,7 @@ from .tui.screen import Screen
 
 if TYPE_CHECKING:
     from ..context import AppContext
+    from ..core.places import Place
 
 #: The fraction of the viewport that one (coarse) pan key press moves.
 _PAN_STEP = 0.30
@@ -704,7 +706,7 @@ class MapScreen(Screen):
         needle = self._filter.strip().casefold()
         if not needle:
             return self._markers
-        return [m for m in self._markers if needle in m.label.casefold()]
+        return [m for m in self._markers if m.matches(needle)]
 
     def _title(self, vp: Viewport) -> str:
         """A compact status title: the zoom, the node count (or the find matches), and the scale.
@@ -1462,6 +1464,26 @@ def basemap_source(ctx: AppContext) -> BasemapSource:
     return ctx.basemap_source
 
 
+def with_places(
+    markers: list[MapMarker], place_of: Callable[[str | None], Place | None]
+) -> list[MapMarker]:
+    """Return copies of ``markers`` that carry the place of each node (the find filter reads it).
+
+    Args:
+        markers: The located nodes. The function does not change them.
+        place_of: Gives the place of a key or a key prefix, or ``None`` (for example,
+            :meth:`~meshterm.services.places.PlaceService.get`).
+
+    Returns:
+        The new markers, in the same order. A node with no place has an empty ``place``.
+    """
+    out = []
+    for marker in markers:
+        place = place_of(marker.key) if marker.key else None
+        out.append(dataclasses.replace(marker, place=(place.label if place else "")))
+    return out
+
+
 async def open_map(
     ctx: AppContext,
     markers: list[MapMarker],
@@ -1499,6 +1521,9 @@ async def open_map(
     if not isinstance(ctx.ui, TuiUi):  # pragma: no cover - guarded by the menu-only caller
         raise RuntimeError("the interactive map is only available in the menu")
     session = ctx.ui.session
+    # The find filter also matches the place of a node. The places are read now, so that a
+    # place that the finder stored since the caller made the markers is in the filter.
+    markers = with_places(markers, ctx.places.get)
     source = basemap_source(ctx)
     # Resolve the tile template and zoom in a worker thread, so the UI thread never blocks.
     max_zoom = await asyncio.to_thread(lambda: source.max_zoom)

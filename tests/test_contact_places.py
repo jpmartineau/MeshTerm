@@ -300,3 +300,56 @@ def test_plain_face_has_a_place_column_before_key() -> None:
     assert "Villeray, Montréal" in alice
     assert alice.index("Villeray") < alice.index(_ALICE)
     assert carl.split()[-2] == "-" and carl.split()[-1] == _CARL
+
+
+# -- part 4: the map filter -----------------------------------------------------------
+
+
+def test_marker_matches_its_label_or_its_place() -> None:
+    """The find filter of the map matches the label or the place, in any case."""
+    from meshterm.core.models import MapMarker
+
+    marker = MapMarker("Alice", 45.5, -73.6, place="Villeray, Montréal")
+    assert marker.matches("")
+    assert marker.matches("ali")
+    assert marker.matches("villeray")
+    assert marker.matches("montréal")
+    assert not marker.matches("verdun")
+    assert not MapMarker("Alice", 45.5, -73.6).matches("villeray")
+
+
+def test_with_places_stamps_a_copy_of_each_marker() -> None:
+    """``with_places`` reads the place of each key, and does not change the given markers."""
+    from meshterm.core.models import MapMarker
+    from meshterm.ui.map_screen import with_places
+
+    original = [
+        MapMarker("Alice", 45.5, -73.6, key=_ALICE),
+        MapMarker("Carl", 45.6, -73.7, key=_CARL),
+        MapMarker("Nokey", 45.7, -73.8),
+    ]
+    stamped = with_places(original, _places().get)
+    assert [m.place for m in stamped] == ["Villeray, Montréal", "", ""]
+    assert [m.place for m in original] == ["", "", ""]
+    assert [m.label for m in stamped] == ["Alice", "Carl", "Nokey"]
+
+
+def test_map_find_matches_a_place() -> None:
+    """Typed text narrows the map to the nodes whose place matches it."""
+    from meshterm.core.models import MapMarker
+    from meshterm.ui.map_screen import MapScreen, with_places
+    from tests.test_map import _StubSession, _StubSource
+
+    markers = with_places(
+        [
+            MapMarker("Alice", 45.5, -73.6, key=_ALICE),
+            MapMarker("Bob", 45.6, -73.7, key=_BOB),
+            MapMarker("Carl", 45.7, -73.8, key=_CARL),
+        ],
+        _places().get,
+    )
+    screen = MapScreen(_StubSession(80, 24), markers, _StubSource(), 14)
+    screen.render_body(80)  # the first paint makes the viewport that a key needs
+    for char in "villeray":
+        screen.handle("text", char)
+    assert [m.label for m in screen._matches()] == ["Alice"]  # noqa: SLF001
