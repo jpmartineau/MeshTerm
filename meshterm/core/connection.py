@@ -1359,6 +1359,27 @@ class Device(ABC):
         """
 
     @abstractmethod
+    async def reset_room_sync(self, node: Contact) -> None:
+        """Make the next login to a room ask for all its posts again.
+
+        At a login, the device sends the time of the newest post that it got from the room
+        (``sync_since``), and the room sends only the posts after that time. When the clock
+        of the room goes back, its new posts are all older than that time, and the room
+        never sends them. The device sets ``sync_since`` to zero only for a *new* contact,
+        and no command changes it for a contact that it has. Thus this method reads the
+        contact record, removes the contact, and adds the same record back: the same
+        flags, path, name, position, and advert time, with ``sync_since`` at zero.
+
+        Args:
+            node: The room server. It must have a full public key.
+
+        Raises:
+            ContactNotOnDeviceError: If the device has no contact with that key.
+            DeviceCommandError: If the device refused the removal, or the add. After a
+                failed add the contact is not on the device. The message says so.
+        """
+
+    @abstractmethod
     async def get_tx_power(self) -> int | None:
         """Return the current TX power level, or ``None`` if it is not known."""
 
@@ -3459,6 +3480,35 @@ class MeshCoreDevice(Device):
             )
         return True
 
+    async def reset_room_sync(self, node: Contact) -> None:  # noqa: D102 - inherited docstring
+        mc = self._require()
+        pub = self._node_pubkey(node)  # raises DeviceCommandError if it has no key
+        if len(pub) != 64:
+            raise DeviceCommandError(f"{node.name} is known only by a key prefix")
+        record = await self._contact_record(mc, pub)
+        if record is None:
+            raise ContactNotOnDeviceError(node)
+        result = await mc.commands.remove_contact(pub)
+        if result is not None and getattr(result, "is_error", lambda: False)():
+            if error_code(result) == _ERR_NOT_FOUND:
+                raise ContactNotOnDeviceError(node)
+            raise DeviceCommandError(
+                f"couldn't remove {node.name} from the device: {reject_reason(result)}"
+            )
+        # The same record goes back, as a new contact: the firmware gives a new contact a
+        # ``sync_since`` of zero. Two tries, because the contact is off the device between
+        # the two commands, and a lost reply must not leave it there.
+        reason = ""
+        for _attempt in range(2):
+            result = await mc.commands.add_contact(dict(record))
+            if result is not None and not getattr(result, "is_error", lambda: False)():
+                return
+            reason = reject_reason(result)
+        raise DeviceCommandError(
+            f"{node.name} was removed from the device but couldn't be added back ({reason}). "
+            "MeshTerm still remembers it: add it again from the Contacts list."
+        )
+
     async def _contact_record(self, mc, pub: str) -> dict | None:  # noqa: ANN001
         """The raw contact record that the device has for a full key, or ``None``.
 
@@ -5016,6 +5066,14 @@ class MockDevice(Device):
                 self._contacts[i] = replace(contact, adverts_refused_until=None)
                 return True
         raise ContactNotOnDeviceError(node)
+
+    async def reset_room_sync(self, node: Contact) -> None:  # noqa: D102 - inherited docstring
+        await asyncio.sleep(0)
+        # The simulator keeps no sync time. It refuses only a contact that it does not have,
+        # as the firmware does.
+        key = self._mock_key(node)
+        if key not in {self._mock_key(c) for c in self._contacts}:
+            raise ContactNotOnDeviceError(node)
 
     async def get_tx_power(self) -> int | None:  # noqa: D102 - inherited docstring
         return self._tx_power

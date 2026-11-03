@@ -27,10 +27,11 @@ from __future__ import annotations
 import statistics
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from ..core.channels import split_channel_sender
+from ..core.models import utcnow
 
 if TYPE_CHECKING:
     from ..persistence.repository import Repository
@@ -154,6 +155,33 @@ def window_samples(
         elif peer:
             samples.append(ClockSample(peer.lower()[:12], True, sent, arrived))
     return samples
+
+
+def room_posts_blocked(
+    newest_post: datetime | None, offset: ClockOffset | None, tolerance_s: float
+) -> bool:
+    """Whether a room can no longer send us its new posts, because its clock went back.
+
+    A room stamps each post with its own clock. The companion asks for the posts newer than
+    the newest one that it got (its ``sync_since``), and the room sends only those
+    (``post_timestamp > sync_since`` in the room firmware). When the clock of the room goes
+    back, for example after a reboot with no clock source, each new post is older than
+    that time, and the room never sends it. The room keeps its posts only in memory, so a
+    reboot also loses the old ones.
+
+    Args:
+        newest_post: The newest post time that we stored for the room (its clock).
+        offset: The clock offset of the room now, from its adverts and replies.
+        tolerance_s: The ``clock_tolerance_s`` preference.
+
+    Returns:
+        ``True`` when the newest post is later than the clock of the room now, by more than
+        the tolerance. ``False`` when that is not so, or when a value is not known.
+    """
+    if newest_post is None or offset is None:
+        return False
+    room_now = utcnow() + timedelta(seconds=offset.offset_s)
+    return newest_post > room_now + timedelta(seconds=tolerance_s)
 
 
 def node_offset(

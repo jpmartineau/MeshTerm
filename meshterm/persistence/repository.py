@@ -2418,6 +2418,27 @@ class Repository:
                 samples.append((bool(row["is_channel"]), row["peer"], row["text"], sent, arrived))
         return samples
 
+    def newest_room_post(self, peer: str) -> datetime | None:
+        """The time of the newest post that a room sent us, by the clock of the room.
+
+        The companion asks a room for each post newer than the newest post that it got, and
+        that time is close to this one (both are the highest post time seen). Thus, when the
+        clock of the room goes back past this time, the room never sends us its new posts
+        (refer to :func:`~meshterm.services.clock_offsets.room_posts_blocked`).
+
+        Args:
+            peer: The key prefix of the room, as :meth:`record_chat_message` stores it.
+
+        Returns:
+            The newest post time, or ``None`` when the room sent no post.
+        """
+        row = self._conn.execute(
+            "SELECT MAX(created_at) AS newest FROM messages "
+            "WHERE is_channel = 0 AND outbound = 0 AND author IS NOT NULL AND peer = ?",
+            ((peer or "").lower(),),
+        ).fetchone()
+        return _as_when(row["newest"] if row else None)
+
     def direct_message_bounds(
         self, peer: str | None, when: datetime, *, outbound: bool
     ) -> tuple[datetime | None, datetime | None]:

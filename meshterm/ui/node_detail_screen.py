@@ -113,7 +113,7 @@ from ..core.connection import ContactNotOnDeviceError, DeviceCommandError
 from ..core.geo import haversine_km, usable_fix
 from ..core.models import NODE_TYPE_LABELS, NODE_TYPE_REPEATER, NODE_TYPE_ROOM, Contact, utcnow
 from ..platforms import Platform, on_platform
-from ..services.clock_offsets import node_offset
+from ..services.clock_offsets import node_offset, room_posts_blocked
 from . import menus
 from .mapcanvas import RGB
 from .marks import MANAGED_ICON, SELF_MARK
@@ -1543,6 +1543,8 @@ async def open_node_detail(
     # -- the info block (the identity, how the node was heard, and where it is). The routes
     # go into the Routes tab.
     info_rows: list[tuple[str, Text]] = []
+    # Whether a room sends us no new post, because its clock went back (set below).
+    room_blocked = False
     if key:
         info_rows.append(("key", highlighted_hash(key, prefix_bytes, known=bool(name))))
     else:
@@ -1580,6 +1582,13 @@ async def open_node_detail(
             # The device drops each advert of the node until this date (refer to
             # ``Contact.adverts_refused_until``). The row says why the node looks silent.
             info_rows.append(("adverts", _refused_text(refused)))
+        # A room whose clock went back past its newest post sends us no new post (refer to
+        # ``room_posts_blocked``). The row says why the board looks quiet.
+        if node_type == NODE_TYPE_ROOM and node_id:
+            newest_post = ctx.repo.newest_room_post(node_id)
+            if room_posts_blocked(newest_post, clock_offset, ctx.preferences.clock_tolerance_s):
+                room_blocked = True
+                info_rows.append(("posts", _blocked_text(newest_post)))
     if lat is not None and lon is not None:
         info_rows.append(("where", _range_text(lat, lon, self_lat, self_lon)))
     # The regions of a repeater: what it was last heard to relay, from the region store (its
@@ -1679,6 +1688,10 @@ async def open_node_detail(
     # ``Device.accept_adverts_again``). It writes to the device, so it confirms first.
     if refused is not None and not you and contact is not None and contact.public_key:
         info_actions.append(_Action("adverts", "📡", "warn", "Accept its adverts again…"))
+    # The room sends no new post (refer to ``room_blocked``). The repair adds the contact back
+    # with a sync time of zero, then logs in again (refer to ``Device.reset_room_sync``).
+    if room_blocked and contact is not None and contact.public_key:
+        info_actions.append(_Action("resync", "📌", "warn", "Ask for all its posts again…"))
     # -- contact management: the last group of the page, and the only actions that end the
     # visit. None of them shows when the caller opened the page to look, not to act (refer
     # to ``manage``), except the lock when the caller lets the page lock (refer to
@@ -1793,6 +1806,14 @@ async def open_node_detail(
                     screen.replace_info_actions(management(locked))
                     screen.replace_info_row(
                         "adverts", Text("accepted again — the next advert updates it", "ok")
+                    )
+            elif action == "resync":
+                assert contact is not None  # offered only for a room with a full key
+                if await _resync_room(ctx, contact, label):
+                    base_actions = [a for a in base_actions if a.key != "resync"]
+                    screen.replace_info_actions(management(locked))
+                    screen.replace_info_row(
+                        "posts", Text("asked again — the room sends what it still has", "ok")
                     )
             elif action == "restore":
                 # A restore writes the contact back, and it ends the visit for the same reason
@@ -2160,6 +2181,71 @@ async def _accept_adverts(ctx: AppContext, contact: Contact, label: str) -> bool
     return True
 
 
+async def _resync_room(ctx: AppContext, contact: Contact, label: str) -> bool:
+    """Confirm, reset the post sync of a room on the device, then log in to the room again.
+
+    The room sends only the posts after the sync time that the device gives at a login.
+    After its clock went back, each new post is older than that time (refer to
+    :func:`~meshterm.services.clock_offsets.room_posts_blocked`). The device resets the
+    time only for a new contact, so the repair removes the contact and adds the same
+    record back (:meth:`~meshterm.core.connection.Device.reset_room_sync`). Then a login
+    with the stored password asks for each post that the room still has. The room keeps
+    its posts only in memory, so a reboot lost the older ones. The chat drops the posts
+    that it already has.
+
+    Args:
+        ctx: The shared application context (interactive menu).
+        contact: The room server, with a full key.
+        label: The name of the room on the page.
+
+    Returns:
+        ``True`` when the device has the reset sync time. ``False`` when the user cancelled
+        or the device refused. A failure is shown.
+    """
+    from ..core.models import LoginResult
+    from .surface import TuiUi
+
+    assert isinstance(ctx.ui, TuiUi)  # open_node_detail makes sure of this
+    session = ctx.ui.session
+    if not await ctx.ui.dialog(
+        f"{label}'s clock went back, so it sends no post newer than the ones you have. "
+        "Remove it from this device and add it back with the same settings, then log in "
+        "again to get every post it still has?",
+        [("Cancel", False), ("Ask again", True)],
+        title="Room posts",
+        default=1,
+        danger=True,
+    ):
+        return False
+    device = await ctx.device()
+    try:
+        await device.reset_room_sync(contact)
+    except Exception as exc:  # noqa: BLE001 - a refused write is reported, not raised
+        ctx.log.warning("rooms: sync reset failed for %s: %s", contact.name, exc)
+        await session.message_dialog(Text(f"✗ {exc}", style="err"), title="Room posts")
+        return False
+    ctx.devstate.invalidate_contacts()
+    password = ctx.rooms.password(contact)
+    if password is None:
+        await session.message_dialog(
+            Text(f"Log in to {label} from Rooms to get its posts.", style="warn"),
+            title="Room posts",
+        )
+        return True
+    try:
+        async with ctx.ui.busy_overlay():
+            login = await ctx.rooms.login(contact, password)
+    except Exception as exc:  # noqa: BLE001 - the reset is done. Only the login failed
+        ctx.log.warning("rooms: login after the sync reset failed for %s: %s", contact.name, exc)
+        login = None
+    if login is None or login.result is not LoginResult.ACCEPTED:
+        await session.message_dialog(
+            Text(f"No login yet — open {label} in Rooms to log in and get its posts.", "warn"),
+            title="Room posts",
+        )
+    return True
+
+
 #: Why a repeater may not answer the regions request, in the words that the page uses.
 _REGIONS_REACH = "it answers only a neighbour, or over a known route"
 
@@ -2293,6 +2379,14 @@ def _clock_text(offset, tolerance_s: float) -> Text:  # noqa: ANN001 - a ClockOf
     else:
         text.append("in sync")
     text.append(f"  ·  {format_ago(age_seconds(offset.last_at))}", style="muted")
+    return text
+
+
+def _blocked_text(newest_post: datetime | None) -> Text:
+    """The value of the ``posts`` row of a room whose clock went back past its newest post."""
+    text = Text("blocked — its clock went back", style="warn")
+    if newest_post is not None:
+        text.append(f"  ·  newest {newest_post.astimezone():%Y-%m-%d %H:%M}", style="muted")
     return text
 
 
