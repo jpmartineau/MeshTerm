@@ -93,8 +93,12 @@ class ContactsTool(Tool):
 
         sort = ContactsSort.from_name(sort_name)
         # The CLI reads the stored places only. It never starts the job that finds them.
+        places = getattr(ctx, "places", None)
         listing = _listing(
-            ordered_contacts(contacts, counts, sort), counts, prefix_bytes, ctx.places.get
+            ordered_contacts(contacts, counts, sort),
+            counts,
+            prefix_bytes,
+            places.get if places is not None else None,
         )
         return ToolResult(
             summary={"contacts": len(contacts)},
