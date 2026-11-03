@@ -1253,6 +1253,41 @@ def test_sweep_screen_opens_armed_and_idle_on_sweep() -> None:
     assert ran == [True]
 
 
+def test_sweep_screen_places_change_the_route_line(monkeypatch: pytest.MonkeyPatch) -> None:
+    """^N flips the route line between the node names and the places of the nodes."""
+    from meshterm.core.places import Place
+    from meshterm.services import places
+
+    class _Places:
+        def get(self, node: str | None) -> Place:
+            return Place("Villeray", None, "tiles")
+
+    monkeypatch.setattr(places, "_CURRENT", _Places())
+    session = _FakeSession()
+    screen = TxSweepScreen(
+        admin_label="Repeater",
+        target_label="Alice",
+        admin_key="aa" * 32,
+        target_key="bb" * 32,
+        device_label="us",
+        device_hash="00" * 32,
+        resolve=lambda h: h,
+        session=session,
+        tx_min=12,
+        tx_max=28,
+        step=3,
+        samples=3,
+        run_sweep=lambda: None,
+        apply_winner=lambda: None,
+    )
+    assert "^N places" in screen.footer_hint and "Villeray" not in _plain(screen.render_body(100))
+    screen.handle("places")
+    assert "^N names" in screen.footer_hint and "Villeray" in _plain(screen.render_body(100))
+    assert screen.picocalc_lyra_lane[0].label == "Names"
+    screen.handle("places")
+    assert "Villeray" not in _plain(screen.render_body(100))
+
+
 def test_sweep_screen_quotes_the_transmission_budget() -> None:
     """The worst case on the Sweep row follows the window, the step, and the samples."""
     screen, _ = _sweep_screen()

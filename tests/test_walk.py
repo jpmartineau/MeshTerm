@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+import pytest
+
 from meshterm.core.models import Contact, utcnow
 from meshterm.services.topology import MeshTopology
 from meshterm.ui.pathline import (
@@ -372,6 +374,30 @@ def test_walk_trail_names_carry_their_node_hues() -> None:
     )
 
 
+def test_walk_places_change_the_trail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """^N flips the trail between the node names and the places, and the lane shows the chip."""
+    from meshterm.core.places import Place
+    from meshterm.services import places
+
+    class _Places:
+        def get(self, node: str | None) -> Place:
+            return Place("Villeray", None, "tiles")
+
+    monkeypatch.setattr(places, "_CURRENT", _Places())
+    screen = _screen(_topo())
+    assert "^N" not in screen.footer_hint  # the trail is only our node: ^N has no effect
+    screen._trail = [screen._topo.self_id, screen._topo.canonical(Hub.public_key)]
+    assert "^N places" in screen.footer_hint and len(screen.footer_hint) <= 72
+    assert "Hilltop-Repeater" in screen._trail_text(80).plain
+    screen.handle("places")
+    assert "^N names" in screen.footer_hint
+    assert screen.picocalc_lyra_lane[0].label == "Names"
+    plain = screen._trail_text(80).plain
+    assert "Villeray" in plain and "Hilltop-Repeater" not in plain
+    screen.handle("places")
+    assert "Hilltop-Repeater" in screen._trail_text(80).plain
+
+
 def test_walk_locate_refocuses_us_and_home_end_walk_the_list() -> None:
     """^L resets the walk to our own node from anywhere. Home and End go to the ends of the list."""
     # A hub with spokes from one of our neighbours: a focus away from us, with a list to move in.
@@ -441,12 +467,13 @@ def test_walk_fkey_lane_gives_you_its_own_slot_over_the_pagers_ends() -> None:
     lane = screen.picocalc_lyra_lane
 
     assert [pair.label if pair else None for pair in lane] == [
-        None,
+        "Places",  # ^N, dim while the trail is only our node
         None,
         "You",
         "Page ↓",
         "Page ↑",
     ]
+    assert not lane[0].enabled
     assert PICOCALC_LYRA_DECK.action_for(lane, 3) == "locate"
     assert lane[2].opp_label == ""  # nothing is the opposite of going home
     # Also, the Shift bank of the pager has the same meaning as on each other screen: the

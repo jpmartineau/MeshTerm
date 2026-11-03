@@ -555,11 +555,55 @@ def test_record_footer_names_only_what_each_tab_answers() -> None:
     assert "PgUp/PgDn scroll" in screen.footer_hint
     screen.handle("tab")
     screen.note_metrics(10, 24)
-    assert screen.footer_hint == "Tab/⇧Tab switch · Enter select · Esc back"
+    assert screen.footer_hint == "Tab/⇧Tab switch · Enter select · ^N places · Esc back"
     screen.handle("tab")
     assert screen.footer_hint == "Tab/⇧Tab switch · Esc back"
     screen.handle("down")  # inert on the Area tab
     assert screen._index == 0
+
+
+class _FakePlaces:
+    """The places of the session: every node is in Villeray."""
+
+    def get(self, node: str | None):  # noqa: ANN201
+        from meshterm.core.places import Place
+
+        return Place("Villeray", None, "tiles")
+
+
+def test_record_route_tab_places_change_the_route_line(monkeypatch: pytest.MonkeyPatch) -> None:
+    """^N flips the route line between the node names and the places of the nodes."""
+    from meshterm.services import places
+
+    monkeypatch.setattr(places, "_CURRENT", _FakePlaces())
+    screen = _dialog(_record(), shape=_loop_shape())
+    assert "^N" not in screen.footer_hint  # the Info tab has no path line without a leg
+    assert not screen.picocalc_lyra_lane[0].enabled
+    screen.handle("tab")
+    assert "^N places" in screen.footer_hint and len(screen.footer_hint) <= 72
+    assert screen.picocalc_lyra_lane[0].enabled
+    assert "Hilltop-Repeater" in _plain(screen.render_body(60))
+    screen.handle("places")
+    assert "^N names" in screen.footer_hint and screen.picocalc_lyra_lane[0].label == "Names"
+    route = _plain(screen.render_body(60))
+    assert "Villeray" in route and "Hilltop-Repeater" not in route
+    screen.handle("places")
+    assert "Hilltop-Repeater" in _plain(screen.render_body(60))
+    screen.handle("tab")  # the Area tab has no path line: its lane slot is empty
+    assert screen.picocalc_lyra_lane[0] is None
+
+
+def test_record_info_tab_places_change_the_longest_leg(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The longest leg of the Info tab is a path line too, so ^N changes it."""
+    from meshterm.services import places
+
+    monkeypatch.setattr(places, "_CURRENT", _FakePlaces())
+    record = _record(stats={**_record().stats, "leg_km": 2.0, "leg_link": (HUB_ID, FAR_ID)})
+    screen = _dialog(record)
+    assert "^N places" in screen.footer_hint
+    screen.handle("places")
+    info = _plain(screen.render_body(60))
+    assert "Villeray" in info and "Hilltop-Repeater" not in info
 
 
 def test_record_dialog_scrolls_free_of_the_action_cursor() -> None:
@@ -938,6 +982,73 @@ async def test_browser_cuts_every_row_the_way_it_cuts_the_highlighted_one(tui_ct
         # …and runs on past the lane. It does not close on a second endpoint that was saved.
         assert all(row.rstrip().endswith("…") for row in walks), walks
         browser.resolve(None)  # the Esc key
+        await task
+    finally:
+        if not task.done():
+            task.cancel()
+
+
+async def test_the_board_places_change_the_walk_of_each_row(
+    tui_ctx, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """^N builds the rows again with the places of the nodes, and the highlight stays."""
+    from meshterm.core.models import Observation
+    from meshterm.services import places
+
+    monkeypatch.setattr(places, "_CURRENT", _FakePlaces())
+    ctx = tui_ctx
+    session = ctx.ui.session
+    run = ctx.repo.start_run("monitor", {})
+    ctx.repo.record_observation(run, Observation(node=HUB_ID, kind="advert", name="Hilltop"))
+    ctx.repo.record_discovery(
+        "grand_tour",
+        1,
+        "3d,f2",
+        (HUB_ID, FAR_ID),
+        score=2.0,
+        stats={"hop_count": 2, "distinct_nodes": 2},
+        app_version="0.1.0",
+    )
+
+    def walk(browser) -> str:  # noqa: ANN001
+        return next(
+            choice.label.plain
+            for choice in browser._choices()
+            if isinstance(choice.value, tuple) and choice.value[0] == "open"
+        )
+
+    task = asyncio.ensure_future(open_records(ctx))
+    try:
+        browser = await _step_until(lambda: _trophy_case(session))
+        assert browser is not None
+        assert "^N places" in browser.footer_hint and "Hilltop" in walk(browser)
+        assert browser.picocalc_lyra_lane[2].label == "Places"
+        browser.handle("down")
+        browser.handle("places")
+        assert "^N names" in browser.footer_hint and browser.picocalc_lyra_lane[2].label == "Names"
+        assert "Villeray" in walk(browser) and "Hilltop" not in walk(browser)
+        assert browser._current_choice().value[0] == "del_cat"  # the highlight stays on its row
+        browser.handle("places")
+        assert "Hilltop" in walk(browser)
+        browser.handle("escape")
+        await task
+    finally:
+        if not task.done():
+            task.cancel()
+
+
+async def test_an_empty_board_has_no_places_key(tui_ctx) -> None:
+    """With no record, no row has a path line, so the hint and the lane do not offer ^N."""
+    ctx = tui_ctx
+    session = ctx.ui.session
+    task = asyncio.ensure_future(open_records(ctx))
+    try:
+        browser = await _step_until(lambda: _trophy_case(session))
+        assert browser is not None
+        assert "^N" not in browser.footer_hint
+        assert browser.picocalc_lyra_lane[2] is None
+        browser.handle("places")  # nothing to change
+        browser.handle("escape")
         await task
     finally:
         if not task.done():

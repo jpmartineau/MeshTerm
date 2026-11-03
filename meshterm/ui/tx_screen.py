@@ -51,6 +51,8 @@ from ..services import trace_runner, tx_optimizer
 from ..services.topology import build_topology, render_custom_spec
 from .menus import icon_lane, icon_mark
 from .pathline import SELF_GLYPH, PathHop, PathLine, cut_to, path_line
+from .placemode import ACTION as PLACES_ACTION
+from .placemode import PlaceToggle, node_of, placed, places_of_session
 from .theme import name_style, snr_style
 from .trace_screen import TracingDialog, collapse_trace_width, snr_bar
 from .tui.render import render_lines, render_to_ansi
@@ -167,6 +169,8 @@ class TxSweepScreen(Screen):
         self._device_label = device_label
         self._device_hash = device_hash
         self._resolve = resolve
+        #: ^N: the path lines show the node names, or the places of the nodes.
+        self._places = PlaceToggle()
         self._session = session
         self._run_sweep = run_sweep
         self._apply_winner = apply_winner
@@ -215,8 +219,23 @@ class TxSweepScreen(Screen):
     def footer_hint(self) -> str:  # type: ignore[override]
         """The footer keys. They change when a sweep is in flight."""
         if self.running:
-            return "sweeping… · PgUp/PgDn scroll · Esc back"
-        return "↑↓ actions · Enter run · PgUp/PgDn scroll · Esc back"
+            return f"sweeping… · PgUp/PgDn scroll · {self._places.hint} · Esc back"
+        return f"↑↓ actions · Enter run · PgUp/PgDn scroll · {self._places.hint} · Esc back"
+
+    @property
+    def picocalc_lyra_lane(self):
+        """The shared pager on F4/F5, and the ^N change of the path lines on F1."""
+        from .tui.fkeys import FPair, default_lane
+
+        lane = list(default_lane())
+        lane[0] = FPair(self._places.chip, PLACES_ACTION)
+        return lane
+
+    def _placed(self, line: PathLine) -> PathLine:
+        """The path line, with each node name changed to its place while ^N has that choice."""
+        if not self._places.on:
+            return line
+        return placed(line, places_of_session(), node_of(self._resolve))
 
     def _can_apply(self) -> bool:
         """Whether Apply is offered: the sweep finished, it has a winner, and it is not applied."""
@@ -305,6 +324,8 @@ class TxSweepScreen(Screen):
         """Move the highlight of the actions, commit the selected action, scroll, or leave."""
         if action == "enter":
             self._commit_action()
+        elif action == PLACES_ACTION:
+            self._places.flip()
         elif action == "up":
             # Both ends clamp and do not wrap. This is the rule of the whole app for the
             # highlight of a row. A highlight that jumps from one end to the other takes
@@ -414,11 +435,13 @@ class TxSweepScreen(Screen):
                 # in the word before them.
                 text.append("Route — via ")
                 text.append_text(
-                    path_line(
-                        list(self.route_hops),
-                        self._resolve,
-                        from_origin=False,
-                        to_destination=False,
+                    self._placed(
+                        path_line(
+                            list(self.route_hops),
+                            self._resolve,
+                            from_origin=False,
+                            to_destination=False,
+                        )
                     ).text()
                 )
             else:
@@ -463,7 +486,7 @@ class TxSweepScreen(Screen):
             (self._target_label, name_style(self._target_label, self._target_key)),
         )
         lines = [render_to_ansi(tuning, width, no_wrap=True)]
-        route = self._route_line().wrapped(width, indent=9)
+        route = self._placed(self._route_line()).wrapped(width, indent=9)
         first = Text("route    ", style="muted")
         first.append_text(route[0])
         lines.append(render_to_ansi(first, width, no_wrap=True))

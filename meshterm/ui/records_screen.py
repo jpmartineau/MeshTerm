@@ -50,12 +50,16 @@ from ..persistence.repository import DiscoveredPath
 from ..services import trace_runner
 from ..services.records import CATEGORIES, CATEGORY_BY_ID, Category, local_xy
 from .mapcanvas import RGB, MapCanvas
-from .menus import fit_cells, icon_lane, marked_label, section_heading
+from .menus import HINT_CELLS, fit_cells, icon_lane, marked_label, section_heading
 from .pathgraph import PathLayer, render_path_graph
-from .pathline import path_line
+from .pathline import PathLine, path_line
+from .placemode import ACTION as PLACES_ACTION
+from .placemode import PlaceToggle, node_of, placed, places_of_session
 from .theme import glyph, name_style, snr_style
+from .tui.frame import fit_hint
 from .tui.render import render_hanging, render_lines, render_to_ansi
 from .tui.screen import Screen
+from .tui.select import SelectScreen, splice_hint
 from .widgets import (
     NodeResolver,
     TypeOf,
@@ -319,6 +323,8 @@ class RecordScreen(Screen):
         self._record = record
         self._category = category
         self._resolve = resolve
+        #: ^N: the path lines show the node names, or the places of the nodes.
+        self._places = PlaceToggle()
         self._device_label = device_label
         self._device_hash = device_hash
         self._far_label = far_label
@@ -373,8 +379,24 @@ class RecordScreen(Screen):
         from .tui.fkeys import FPair, default_lane
 
         lane = list(default_lane(nav=self._tab != _TAB_AREA and self.content_overflows))
+        if self._tab != _TAB_AREA:  # the Area tab has no path line, so the slot stays empty
+            lane[0] = FPair(self._places.chip, PLACES_ACTION, enabled=self._has_path_line)
         lane[2] = FPair(self._tabs[(self._tab_index + 1) % len(self._tabs)], "tab")
         return lane
+
+    @property
+    def _has_path_line(self) -> bool:
+        """Whether the active tab draws a path line: the route, or the longest leg of Info."""
+        if self._tab == _TAB_ROUTE:
+            return True
+        link = self._record.stats.get("leg_link") if self._tab == _TAB_INFO else None
+        return bool(link) and len(link) == 2
+
+    def _placed(self, line: PathLine) -> PathLine:
+        """The path line, with each node name changed to its place while ^N has that choice."""
+        if not self._places.on:
+            return line
+        return placed(line, places_of_session(), node_of(self._resolve))
 
     @property
     def footer_hint(self) -> str:  # type: ignore[override]
@@ -392,8 +414,14 @@ class RecordScreen(Screen):
             parts.append("PgUp/PgDn scroll")
         if actions:
             parts.append("Enter select")
+        if self._has_path_line:
+            parts.append(self._places.hint)
         parts.append("Esc back")
-        return " · ".join(parts)
+        return fit_hint(" · ".join(parts), HINT_CELLS, shed_first=self.spare_hint_atoms)
+
+    #: The scroll atom goes first when ^N makes the hint longer than the limit. The user
+    #: finds PgUp and PgDn without help.
+    spare_hint_atoms = ("PgUp/PgDn scroll",)
 
     def _switch_tab(self, delta: int) -> None:
         """Change the active tab: its page opens at the top, with the highlight on row one."""
@@ -417,6 +445,10 @@ class RecordScreen(Screen):
             self.resolve(None)
         elif self._tab == _TAB_AREA:
             return
+        elif action == PLACES_ACTION:
+            # Both caches hold the finished path lines, so they must be built again.
+            self._places.flip()
+            self._info_cache = self._route_cache = None
         elif action == "up":
             self._follow = True
             # The two ends clamp, they do not wrap. This is the rule of the app for a
@@ -572,13 +604,15 @@ class RecordScreen(Screen):
                 # leg that starts or ends at home is the most usual type of leg.
                 value.append("  ")
                 value.append_text(
-                    path_line(
-                        list(link),
-                        self._resolve,
-                        self_name=self._device_label,
-                        bare_self=True,
-                        dim_self=False,
-                        show_hash=False,
+                    self._placed(
+                        path_line(
+                            list(link),
+                            self._resolve,
+                            self_name=self._device_label,
+                            bare_self=True,
+                            dim_self=False,
+                            show_hash=False,
+                        )
                     ).text()
                 )
             lanes.append(self._lane("longest leg", value))
@@ -777,16 +811,18 @@ class RecordScreen(Screen):
         # star at the two ends, and the legend under it says that the star is "you". The
         # stars keep the ``you`` white, because nothing about a walk that is already done is
         # ours to compose.
-        route = path_line(
-            [None, *record.route, None],
-            self._resolve,
-            prefix_bytes=record.width_bytes,
-            self_name=self._device_label,
-            show_hash=True,
-            hash_bytes=record.width_bytes,
-            device_hash=self._device_hash,
-            bare_self=True,
-            dim_self=False,
+        route = self._placed(
+            path_line(
+                [None, *record.route, None],
+                self._resolve,
+                prefix_bytes=record.width_bytes,
+                self_name=self._device_label,
+                show_hash=True,
+                hash_bytes=record.width_bytes,
+                device_hash=self._device_hash,
+                bare_self=True,
+                dim_self=False,
+            )
         )
         lines.extend(render_to_ansi(line, width, no_wrap=True) for line in route.wrapped(width))
         return lines
@@ -868,6 +904,64 @@ def node_geo_lookup(
     return lookup
 
 
+class TrophyBoard(SelectScreen):
+    """The select list of the Trophy case, with ^N for the places of the nodes in each walk.
+
+    Each row of the list has a path line. ^N builds the rows again, through ``rebuild``, with
+    the node names or with the places of the nodes. The list keeps the highlight, because
+    :meth:`~meshterm.ui.tui.select.SelectScreen.replace_items` finds the row again by its
+    value. A list with no record has no path line, so ^N and its hint are not there.
+    """
+
+    def __init__(
+        self,
+        title: str,
+        items: list,
+        *,
+        rebuild: Callable[[bool], list],
+        has_paths: bool,
+        **kwargs,  # noqa: ANN003 - the arguments of SelectScreen
+    ) -> None:
+        """Build the list.
+
+        Args:
+            title: The heading in the border.
+            items: The rows, with the node names in the path lines.
+            rebuild: Gives the rows again for the choice of ^N (``True`` is the places).
+            has_paths: Whether any row has a path line.
+            **kwargs: The other arguments of :class:`~meshterm.ui.tui.select.SelectScreen`.
+        """
+        super().__init__(title, items, **kwargs)
+        self._rebuild = rebuild
+        self._has_paths = has_paths
+        #: ^N: the path lines show the node names, or the places of the nodes.
+        self._places = PlaceToggle()
+
+    @property
+    def footer_hint(self) -> str:  # type: ignore[override]
+        """The hint of the list, with the ^N atom before Esc when a row has a path line."""
+        hint = super().footer_hint
+        return splice_hint(hint, self._places.hint) if self._has_paths else hint
+
+    @property
+    def picocalc_lyra_lane(self):
+        """The lane of the list, with the ^N change of the path lines on F3."""
+        from .tui.fkeys import FPair
+
+        lane = list(super().picocalc_lyra_lane)
+        if self._has_paths:
+            lane[2] = FPair(self._places.chip, PLACES_ACTION)
+        return lane
+
+    def handle(self, action: str, data: str = "") -> None:
+        """Change the path lines on ^N. Any other key is for the list."""
+        if action != PLACES_ACTION:
+            super().handle(action, data)
+        elif self._has_paths:
+            self._places.flip()
+            self.replace_items(self._rebuild(self._places.on))
+
+
 async def open_records(ctx: AppContext) -> dict:
     """Open the Trophy case browser and run it until the user leaves it.
 
@@ -889,7 +983,7 @@ async def open_records(ctx: AppContext) -> dict:
     """
     from .surface import TuiUi
     from .trace_screen import open_trace_path
-    from .tui import CANCEL, Choice, SelectScreen, Separator
+    from .tui import CANCEL, Choice, Separator
 
     if not isinstance(ctx.ui, TuiUi):  # pragma: no cover - the menu caller prevents this
         raise RuntimeError("the Trophy case screen is only available in the menu")
@@ -1034,7 +1128,7 @@ async def open_records(ctx: AppContext) -> dict:
         row.append("  ")
         return row
 
-    def browser_row(lanes: Text, record: DiscoveredPath) -> Text:
+    def browser_row(lanes: Text, record: DiscoveredPath, *, places_on: bool = False) -> Text:
         """One record row: its fixed lanes (:func:`browser_lanes`), then the full walk.
 
         The walk draws on the only path widget, with the two ends bare
@@ -1060,6 +1154,9 @@ async def open_records(ctx: AppContext) -> dict:
         user in the board, and gives the walk no cells that it does not already get. Thus a
         selected row and a row that is not selected are different in only one thing: the
         shift.
+
+        With ``places_on`` (^N), each node name in the walk is changed to the place of the
+        node.
         """
         row = lanes.copy()
         walk = path_line(
@@ -1071,6 +1168,8 @@ async def open_records(ctx: AppContext) -> dict:
             bare_self=True,
             dim_self=False,
         )
+        if places_on:
+            walk = placed(walk, places_of_session(), node_of(resolve))
         row.append_text(walk.text())
         return row
 
@@ -1110,7 +1209,8 @@ async def open_records(ctx: AppContext) -> dict:
         ):
             ctx.repo.delete_discoveries(category.id)
 
-    while True:
+    def board_items(places_on: bool, total: int) -> list:
+        """The rows of the Trophy case: each board, then the delete rows (when records exist)."""
         items: list = []
         for category in CATEGORIES:
             items.extend(describe(category))
@@ -1135,16 +1235,15 @@ async def open_records(ctx: AppContext) -> dict:
                         # A finished line, not a callable that knows the width. The row does
                         # not fit itself to a width, so the list cuts each row (highlighted or
                         # not) in the same way (refer to browser_row). Records are frozen, so
-                        # the line is composed once each time the screen opens, not at each
-                        # paint.
-                        title=browser_row(lanes, record),
+                        # the line is composed once each time the screen opens or ^N changes
+                        # it, not at each paint.
+                        title=browser_row(lanes, record, places_on=places_on),
                         value=("open", category, rank, record),
                         # ←→ slide only the walk. The lanes in front of it do not move
                         # (browser_row).
                         hscroll_from=lanes.cell_len,
                     )
                 )
-        total = len(ctx.repo.discoveries())
         if total:
             items.append(Separator(" "))
             items.append(
@@ -1159,11 +1258,18 @@ async def open_records(ctx: AppContext) -> dict:
                     value=("del_all", None, 0, None),
                 )
             )
-        browser = SelectScreen(
+        return items
+
+    while True:
+        total = len(ctx.repo.discoveries())
+        items = board_items(False, total)
+        browser = TrophyBoard(
             "Trophy case",
             items,
             footer_hint="↑↓ move · Enter open · Esc back",
             hscroll=True,  # a long walk slides under ←→, and is not cut at the edge
+            rebuild=lambda places_on, total=total: board_items(places_on, total),
+            has_paths=total > 0,
         )
         # A place, not a question: the trophy case is the page of the tool itself. Thus it
         # fills the frame from each entry point. From the menu, it is the only screen, and

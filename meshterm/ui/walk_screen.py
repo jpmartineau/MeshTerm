@@ -75,8 +75,10 @@ from ..platforms import get_platform
 from ..services.topology import Link, MeshTopology
 from .mapcanvas import RGB, MapCanvas, parse_hex
 from .marks import SELF_MARK, UNKNOWN_MARK
-from .menus import fit_cells
+from .menus import HINT_CELLS, fit_cells
 from .pathline import ELIDE_HEAD, ELIDE_TAIL, SELF_GLYPH, PathHop, PathLine, cut_mark
+from .placemode import ACTION as PLACES_ACTION
+from .placemode import PlaceToggle, placed_hops, places_of_session
 from .theme import mark_rgb, name_style, snr_style
 from .trace_screen import snr_bar
 from .tui.render import crop_cells, query_line, render_to_ansi
@@ -264,6 +266,7 @@ class WalkScreen(Screen):
         from .tui.fkeys import FPair, default_lane
 
         lane = list(default_lane(nav=len(self._rows()) > 1))
+        lane[0] = FPair(self._places.chip, PLACES_ACTION, enabled=len(self._trail) > 1)
         lane[2] = FPair("You", "locate", enabled=len(self._trail) > 1 or bool(self._filter))
         return lane
 
@@ -310,6 +313,8 @@ class WalkScreen(Screen):
         #: ``((width, trail) → the furthest that can scroll)``, set at render (refer to
         #: :meth:`_trail_max_scroll`). Thus a key press can clamp itself without a width.
         self._trail_fit: tuple[tuple, int] | None = None
+        #: ^N: the trail shows the node names, or the places of the nodes.
+        self._places = PlaceToggle()
         #: The width of the last render of the trail, for that same clamp.
         self._trail_width = 0
         #: The index of the highlighted row in the current list (neighbours or matches).
@@ -453,8 +458,17 @@ class WalkScreen(Screen):
         atoms += ["Enter focus", "⌫ back", "^L you"]
         if not scrolls:
             atoms.append("type to find")
+        if len(self._trail) > 1:
+            atoms.append(self._places.hint)  # the trail has a node that has a place
         atoms.append("Esc back")
-        return " · ".join(atoms)
+        from .tui.frame import fit_hint
+
+        return fit_hint(" · ".join(atoms), HINT_CELLS, shed_first=self.spare_hint_atoms)
+
+    #: The atoms that go first when ^N makes the hint longer than the limit. The find teaches
+    #: itself at the first letter. A trail that scrolls has no find atom, so the ⌫ atom goes
+    #: then. The user finds ⌫ without help.
+    spare_hint_atoms = ("type to find", "⌫ back")
 
     def handle(self, action: str, data: str = "") -> None:
         """Move the highlight, walk, step back, find, or close.
@@ -464,6 +478,10 @@ class WalkScreen(Screen):
         not a position in this list. Refer to :attr:`picocalc_lyra_lane`.
         """
         rows = self._rows()
+        if action == PLACES_ACTION:
+            self._places.flip()
+            self._trail_scroll = 0  # the trail changes its length, so the focus shows again
+            return
         if action == "escape":
             if self._filter:
                 self._filter = ""
@@ -680,9 +698,7 @@ class WalkScreen(Screen):
         move from there.
         """
         self._trail_width = width
-        full = PathLine(
-            [self._trail_hop(node) for node in self._trail], separator=_TRAIL_SEP
-        ).text()
+        full = PathLine(self._trail_hops(), separator=_TRAIL_SEP).text()
         total = full.cell_len
         # The scroll is clamped before the fit is read. Thus, when a line fits its width
         # again (a wider terminal, a step back), no slide stays behind a complete line.
@@ -718,17 +734,23 @@ class WalkScreen(Screen):
         The result is cached on ``(width, trail)``: it costs a render, and the answer
         changes only when the walk or the terminal changes.
         """
-        key = (width, tuple(self._trail))
+        key = (width, tuple(self._trail), self._places.on)
         if self._trail_fit is not None and self._trail_fit[0] == key:
             return self._trail_fit[1]
-        hops = [self._trail_hop(node) for node in self._trail]
-        total = PathLine(hops, separator=_TRAIL_SEP).text().cell_len
+        total = PathLine(self._trail_hops(), separator=_TRAIL_SEP).text().cell_len
         limit = 0
         if total > width:
             steps = -(-(total - (width - 1)) // _HSCROLL_STEP)
             limit = steps * _HSCROLL_STEP
         self._trail_fit = (key, limit)
         return limit
+
+    def _trail_hops(self) -> list[PathHop]:
+        """The hops of the trail, with the places of the nodes while ^N has that choice."""
+        hops = [self._trail_hop(node) for node in self._trail]
+        if self._places.on:
+            hops = placed_hops(hops, places_of_session())
+        return hops
 
     def _trail_hop(self, node: str) -> PathHop:
         """One walked step as a path hop: its display name in the colour of its identity.

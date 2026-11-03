@@ -83,8 +83,12 @@ from ..services.topology import (
     render_custom_spec,
     render_forced_spec,
 )
+from .menus import HINT_CELLS
 from .pathline import PathLine, cut_to, path_line
+from .placemode import ACTION as PLACES_ACTION
+from .placemode import PlaceToggle, node_of, placed, places_of_session
 from .theme import snr_style
+from .tui.frame import fit_hint
 from .tui.render import query_line, render_lines, render_to_ansi
 from .tui.screen import ListWindow, Screen
 from .widgets import NodeResolver, age_seconds, format_age, identity_label, path_text
@@ -172,9 +176,31 @@ class PathComposerScreen(Screen):
         press will do. This is the filter rule for all the app: the map, the mesh walk, and
         each select list show the same.
         """
-        if not self._entry:
-            return self._HINT
-        return self._HINT.replace("Esc cancel", "Esc clear")
+        hint = self._HINT
+        if self._places_apply:
+            hint = hint.replace("Esc cancel", f"{self._places.hint} · Esc cancel")
+        if self._entry:
+            hint = hint.replace("Esc cancel", "Esc clear")
+        return fit_hint(hint, HINT_CELLS, shed_first=self.spare_hint_atoms)
+
+    #: The atom that goes first when ^N makes the hint longer than the limit: Backspace
+    #: removes a hop without a hint, as it does in each text field.
+    spare_hint_atoms = ("⌫ remove",)
+
+    @property
+    def picocalc_lyra_lane(self):
+        """The shared pager, and the ^N change of the route preview on F1 when it can change."""
+        from .tui.fkeys import FPair
+
+        lane = list(super().picocalc_lyra_lane)
+        if self._places_apply:
+            lane[0] = FPair(self._places.chip, PLACES_ACTION)
+        return lane
+
+    @property
+    def _places_apply(self) -> bool:
+        """Whether the route preview has a node that ^N can change: a hop or the target."""
+        return bool(self._hops) or self._mirrored
 
     def __init__(
         self,
@@ -234,6 +260,8 @@ class PathComposerScreen(Screen):
         self._device_hash = (device_hash or "").lower().removeprefix("0x")
         self._topology = topology
         self._resolve = resolve
+        #: ^N: the route preview shows the node names, or the places of the nodes.
+        self._places = PlaceToggle()
         #: The resolved names to show, by node id (refer to :meth:`_resolve_entry`).
         self._names: dict[str, str] = {}
         #: The graph ids that are the same node as each node (refer to :meth:`_aliases`).
@@ -557,7 +585,7 @@ class PathComposerScreen(Screen):
             entries.append(self._path_entry(self._target_id))
             entries.extend(self._path_entry(hop) for hop in reversed(self._hops))
         entries.append(None)
-        return path_line(
+        line = path_line(
             entries,
             self._resolve_entry,
             prefix_bytes=self._width_bytes,
@@ -570,6 +598,9 @@ class PathComposerScreen(Screen):
             # is rendered-hop index k + 1.
             cursor=self._cursor + 1,
         )
+        if self._places.on:
+            line = placed(line, places_of_session(), node_of(self._resolve))
+        return line
 
     def _suggestion_text(self, suggestion) -> Text:  # noqa: ANN001
         """One suggestion row: the node, then the evidence of its link."""
@@ -765,6 +796,8 @@ class PathComposerScreen(Screen):
             self._index = 0
         elif action == "enter":
             self._commit_row()
+        elif action == PLACES_ACTION:
+            self._places.flip()
         elif action == "backspace":
             if self._entry:
                 self._entry = self._entry[:-1]

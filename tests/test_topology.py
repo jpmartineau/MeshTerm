@@ -501,6 +501,30 @@ def test_composer_suggests_from_tail_and_appends_on_enter() -> None:
     assert all(s.node != "f2c24f54551e" for s in screen._suggestions())
 
 
+def test_composer_places_change_the_route_preview(monkeypatch: pytest.MonkeyPatch) -> None:
+    """^N flips the route preview between the node names and the places of the nodes."""
+    from meshterm.core.places import Place
+    from meshterm.services import places
+
+    class _Places:
+        def get(self, node: str | None) -> Place:
+            return Place("Villeray", None, "tiles")
+
+    monkeypatch.setattr(places, "_CURRENT", _Places())
+    screen = _composer(_topo(), hops=["3d63c6429436"])
+    assert "^N places" in screen.footer_hint and len(screen.footer_hint) <= 72
+    assert "Far" in _rows_plain(screen) and "Villeray" not in _rows_plain(screen)
+    screen.handle("places")
+    assert "^N names" in screen.footer_hint and len(screen.footer_hint) <= 72
+    body = _rows_plain(screen)
+    assert "Villeray" in body and "Far" not in screen._route_preview().text().plain
+    assert screen.picocalc_lyra_lane[0].label == "Names"
+    screen.handle("places")
+    assert "Far" in screen._route_preview().text().plain
+    # A path with no hop and no target has nothing for ^N to change, so no hint shows it.
+    assert "^N" not in _composer(_topo(), target=False).footer_hint
+
+
 def test_composer_windows_rows_under_the_pinned_route_preview() -> None:
     """A short dialog shows a window of the rows. The route preview and highlight stay visible."""
     import re
