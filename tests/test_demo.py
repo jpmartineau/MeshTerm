@@ -94,6 +94,35 @@ def test_a_tuned_repeater_is_heard_best_at_its_best_power() -> None:
     assert not far or max(far) < min(best)
 
 
+def test_each_located_node_has_a_place_that_the_job_keeps(tmp_path: Path) -> None:
+    """Each node that shares its location has its place, and the job asks for nothing.
+
+    The video and the screenshots show the places at once, and the demo sends no request.
+    """
+    import logging
+    from types import SimpleNamespace
+
+    from meshterm.core.place_store import PlaceStore
+    from meshterm.core.preferences import Preferences
+    from meshterm.services.places import PlaceService
+
+    located = {node.name for node in (world.SELF, *world.NODES) if node.shares_location}
+    assert set(world.PLACES) == located
+    repo = _seed(tmp_path / "p.db", utcnow())
+    ctx = SimpleNamespace(
+        repo=repo,
+        place_store=PlaceStore(tmp_path / "places.json"),
+        preferences=Preferences(),
+        log=logging.getLogger("test"),
+    )
+    service = PlaceService(ctx)  # type: ignore[arg-type]
+    for name, place in world.PLACES.items():
+        node = world.node(name)
+        assert service.get(node.public_key) == place
+        service._locations[node.node_id] = (node.lat, node.lon)  # noqa: SLF001
+        assert service._step_for(node.node_id) is None  # noqa: SLF001
+
+
 def test_prepare_writes_a_home(tmp_path: Path) -> None:
     """The demo home gets a database and the stores of the joined room and the alerts."""
     home = tmp_path / "demo"

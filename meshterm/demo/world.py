@@ -37,6 +37,7 @@ from ..core.models import (
     NODE_TYPE_ROOM,
     NODE_TYPE_SENSOR,
 )
+from ..core.places import SOURCE_NOMINATIM, SOURCE_TILES, Place
 
 # --------------------------------------------------------------------------- the nodes
 
@@ -208,6 +209,58 @@ CLOCK_OFFSET_S: dict[str, float] = {
 def clock_offset_s(name: str) -> float:
     """How far the clock of the node with this name is from the real time, in seconds."""
     return CLOCK_OFFSET_S.get(name, 0.0)
+
+
+_TILES, _NOMINATIM = SOURCE_TILES, SOURCE_NOMINATIM
+
+#: The place of each node that shares its location, as the place finder found it on
+#: 2026-11-03: the map tiles, then Nominatim (refer to :mod:`meshterm.services.places`).
+#: The history stores them (refer to :mod:`meshterm.demo.history`). Thus the demo shows
+#: the places at once, the place job sends no request, and each run shows the same places.
+#: A node that does not share its location has no place, as on a real mesh. The finder
+#: gave a peak only to Mont-St-Hilaire. The Mont-Royal repeater is 317 m from the summit,
+#: and a peak counts only within :data:`~meshterm.core.places.PEAK_RADIUS_KM`.
+PLACES: dict[str, Place] = {
+    "Alex Base": Place("La Petite-Patrie", "Montréal", _NOMINATIM),
+    "Mont-Royal": Place("Ville-Marie", "Montréal", _NOMINATIM),
+    "Oratoire": Place("Côte-des-Neiges–Notre-Dame-de-Grâce", "Montréal", _NOMINATIM),
+    "Centre-Ville": Place("Ville-Marie", "Montréal", _NOMINATIM),
+    "Stade-Olympique": Place("Maisonneuve", "Montréal", _NOMINATIM),
+    "Ahuntsic": Place("Ahuntsic", "Montréal", _NOMINATIM),
+    "Laval-Chomedey": Place("Chomedey", "Laval", _NOMINATIM),
+    "Verdun-Quai": Place("Verdun", "Montréal", _NOMINATIM),
+    "Lachine": Place("Lachine", "Montréal", _NOMINATIM),
+    "Pointe-Claire": Place("Pointe-Claire", None, _NOMINATIM),
+    "Île-Bizard": Place("Le Pain de Sucre", "Montréal", _NOMINATIM),
+    "Longueuil": Place("Vieux-Longueuil", "Longueuil", _NOMINATIM),
+    "Brossard": Place("Brossard", None, _NOMINATIM),
+    "Mont-St-Bruno": Place("Saint-Bruno-de-Montarville", None, _NOMINATIM),
+    "Mont-St-Hilaire": Place("Central Hill", None, _TILES, peak=True),
+    "Villeray": Place("Villeray", "Montréal", _NOMINATIM),
+    "Rosemont": Place("La Petite-Patrie", "Montréal", _NOMINATIM),
+    "MTL BBS": Place("Le Plateau-Mont-Royal", "Montréal", _NOMINATIM),
+    "Café Mesh": Place("Mile-End", "Montréal", _NOMINATIM),
+    "Verdun Weather": Place("Verdun", "Montréal", _NOMINATIM),
+    "Beaver Lake": Place("Ville-Marie", "Montréal", _NOMINATIM),
+    "River Gauge": Place("Ville-Marie", "Montréal", _NOMINATIM),
+    "Marie-Ève": Place("Le Plateau-Mont-Royal", "Montréal", _NOMINATIM),
+    "Jean-Seb": Place("Ahuntsic", "Montréal", _NOMINATIM),
+    "Félix": Place("Hochelaga-Maisonneuve", "Montréal", _NOMINATIM),
+    "Dave-Lachine": Place("Lachine", "Montréal", _NOMINATIM),
+    "Kim-NDG": Place("Côte-des-Neiges–Notre-Dame-de-Grâce", "Montréal", _NOMINATIM),
+    "Noor": Place("Côte-des-Neiges", "Montréal", _NOMINATIM),
+    "Chloé L.": Place("Outremont", "Montréal", _NOMINATIM),
+    "Sam Verdun": Place("Verdun", "Montréal", _NOMINATIM),
+    "Steve K.": Place("Vieux-Longueuil", "Longueuil", _NOMINATIM),
+    "Olivier.T": Place("Rosemont", "Montréal", _NOMINATIM),
+    "Raphaël": Place("Chomedey", "Laval", _NOMINATIM),
+    "Ana Brossard": Place("Brossard", None, _NOMINATIM),
+    "Tomás": Place("Pointe-Claire", None, _NOMINATIM),
+    "Mathilde": Place("Saint-Henri", "Montréal", _NOMINATIM),
+    "Gabriel": Place("Beloeil", None, _NOMINATIM),
+    "T1000-E": Place("Laval-des-Rapides", "Laval", _NOMINATIM),
+    "Wio Tracker": Place("Verdun", "Montréal", _NOMINATIM),
+}
 
 
 #: The repeaters, in the order of :data:`NODES`.

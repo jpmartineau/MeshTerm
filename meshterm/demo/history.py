@@ -11,7 +11,8 @@ the companion of our node would have stored after months on the mesh of Montréa
   message can be found again,
 * the traces that our node ran (:data:`~meshterm.demo.script.TRACES`), each try in the
   link model, and the records that the walks set in the trophy case,
-* the neighbour tables of the repeaters that our node administers.
+* the neighbour tables of the repeaters that our node administers,
+* the place of each node that shares its location (:data:`~meshterm.demo.world.PLACES`).
 
 Each time comes from ``now`` and a fixed age, and each random value comes from a fixed
 seed. Thus two runs give the same database, with only the times moved to the new now.
@@ -68,7 +69,19 @@ def seed(repo: Repository, now: datetime) -> None:
         repo.record_chat_message(message)
     _store_traces(repo, now, rng)
     _store_neighbours(repo, now, rng)
+    _store_places(repo)
     repo.set_map_view(*MAP_VIEW)
+
+
+def _store_places(repo: Repository) -> None:
+    """Store the place of each node, at the location of the node, as the place job does.
+
+    The places are final (a Nominatim answer, or a peak from the tiles). Thus the place job
+    of the demo sends no request.
+    """
+    for name, place in world.PLACES.items():
+        node = world.node(name)
+        repo.save_node_place(node.node_id, node.lat, node.lon, place)
 
 
 def _store_observations(repo: Repository, now: datetime, observations: list[Observation]) -> None:
