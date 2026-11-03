@@ -88,6 +88,7 @@ from .menus import (
     section_heading,
     splice_if_room,
 )
+from .placemode import places_of_session
 from .theme import name_style
 from .tui import Choice, SelectScreen, Separator
 from .tui.screen import CANCEL
@@ -178,12 +179,20 @@ def _heard_cell(scored: ScoredContact) -> tuple[str, str]:
     return format_age(secs), _recency_style(secs)
 
 
-def _hops_cell(scored: ScoredContact) -> tuple[str, str]:
-    """The distance lane: ``direct`` for a neighbour, or else the mean hop count of its packets."""
-    hops = scored.signals.hops
-    if hops is None:
+def _place_cell(scored: ScoredContact) -> tuple[str, str]:
+    """The place lane: the full label of the place of the node, or a faint ``—``.
+
+    The value is the same as in the ``PLACE`` lane of the Contacts list, in the same plain
+    text. The place comes from the place service of the session (refer to
+    :func:`~meshterm.ui.placemode.places_of_session`).
+    """
+    places = places_of_session()
+    contact = scored.contact
+    key = contact.public_key or contact.key_prefix
+    place = places.get(key) if places is not None and key else None
+    if place is None or not place.label:
         return "—", "faint"
-    return ("direct" if hops < 0.5 else f"{hops:g}"), "muted"
+    return place.label, ""
 
 
 @dataclass(frozen=True)
@@ -196,26 +205,30 @@ class _Evidence:
     lane, or change the order of the lanes, in one place.
 
     Attributes:
-        label: The header word. It is right-aligned above its lane, where its digits will be.
+        label: The header word. It has the alignment of its values. Thus the word of a
+            count is right-aligned above its lane, where its digits will be.
         read: The value of the contact for this lane, as ``(text, style)``.
+        align: ``right`` for a number, and ``left`` for a text such as a place.
     """
 
     label: str
     read: Callable[[ScoredContact], tuple[str, str]]
+    align: str = "right"
 
 
 #: The evidence lanes of the preview, from left to right. ``HEARD`` and ``PKTS`` are first,
 #: in the order of the Contacts list and drawn in its format. The user came from that list,
-#: and these are the two lanes that the user already read there. ``MSGS`` and ``HOPS`` come
-#: next. The sweep adds these two lanes, and they are almost always empty in a list of
-#: candidates (a contact that you sent messages to is almost never weak enough for the
-#: sweep). Thus a terminal that is too narrow for the full row cuts the least useful end
-#: first, and ``←→`` brings it back.
+#: and these are the two lanes that the user already read there. ``PLACE`` is last, as near
+#: the end of the row as on the Contacts list. It tells where a node is whose name says
+#: nothing. It is the widest lane, so a terminal that is too narrow for the full row cuts
+#: it first, and ``←→`` brings it back. The lanes ``MSGS`` and ``HOPS`` were here before
+#: (JP, 2026-11-03: replaced with ``PLACE``). They were almost always empty in a list of
+#: candidates, because a contact that you sent messages to is almost never weak enough for
+#: the sweep. The scores still use these two signals.
 _EVIDENCE: tuple[_Evidence, ...] = (
     _Evidence("HEARD", _heard_cell),
     _Evidence("PKTS", lambda scored: _count_cell(scored.signals.packets)),
-    _Evidence("MSGS", lambda scored: _count_cell(scored.signals.dm_total)),
-    _Evidence("HOPS", _hops_cell),
+    _Evidence("PLACE", _place_cell, align="left"),
 )
 
 
@@ -236,9 +249,9 @@ def _lane_widths(victims: list[ScoredContact]) -> tuple[int, ...]:
 def _preview_header(widths: tuple[int, ...], width: int) -> str:
     """The preview's pinned column header: the name lane, then one word for each evidence lane.
 
-    Each word is right-aligned in its lane, above values that are also right-aligned. Thus a
-    header is where its digits will be, not to the left of them. The Contacts list puts the
-    headers of the same two lanes in the same way.
+    Each word has the alignment of the values below it. The word of a count is right-aligned,
+    where its digits will be, not to the left of them. The word ``PLACE`` is on the left, as
+    its text is. The Contacts list puts the headers of the same lanes in the same way.
 
     One word for each lane is the purpose of this layout. Before, one ``WHY IT RANKS LOW``
     header was above three lanes, and it could not name any of them. A lane held the *n*-th
@@ -251,7 +264,8 @@ def _preview_header(widths: tuple[int, ...], width: int) -> str:
     lanes = [Lane("NAME", _NAME_W)]
     last = len(_EVIDENCE) - 1
     for index, (lane, lane_w) in enumerate(zip(_EVIDENCE, widths, strict=True)):
-        lanes.append(Lane(f"{lane.label:>{lane_w}}", 0 if index == last else lane_w + _GAP))
+        word = fit_cells(lane.label, lane_w, align=lane.align)
+        lanes.append(Lane(word, 0 if index == last else lane_w + _GAP))
     # Start after the pointer and the type mark, so ``NAME`` is above the name, not the glyph.
     return column_header(lanes, width, indent=2 + _MARK_W)
 
@@ -274,8 +288,9 @@ def _victim_row(scored: ScoredContact, widths: tuple[int, ...]) -> Text:
     stranger broadcast in its advert. It is the only value on this screen that can be
     anything.
 
-    Each other lane is right-aligned in its measured width and has its own style: the heard
-    age has its recency heat, a tally is muted, and an absent value is a faint ``—``. The row
+    Each other lane has the alignment of its values in its measured width (a count on the
+    right, the place on the left), and its own style: the heard age has its recency heat, a
+    tally is muted, the place is plain text, and an absent value is a faint ``—``. The row
     starts as an unstyled :class:`~rich.text.Text`, not with the style of the name, because
     Rich merges a base style into each span. On a base style in the hue of a node, a faint
     ``—`` is faint, and in the colour of that node.
@@ -293,7 +308,7 @@ def _victim_row(scored: ScoredContact, widths: tuple[int, ...]) -> Text:
     last = len(_EVIDENCE) - 1
     for index, (lane, lane_w) in enumerate(zip(_EVIDENCE, widths, strict=True)):
         value, style = lane.read(scored)
-        row.append(fit_cells(value, lane_w, align="right"), style=style)
+        row.append(fit_cells(value, lane_w, align=lane.align), style=style)
         if index != last:
             row.append(" " * _GAP)
     return row

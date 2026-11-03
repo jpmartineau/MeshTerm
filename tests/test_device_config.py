@@ -510,7 +510,7 @@ async def test_archive_sweeps_under_a_progress_bar_and_reports_in_a_dialog() -> 
     # The evidence has one lane for each kind. It is never a score, and it is not a
     # percentile now: the row shows what MeshTerm measured, and the order of the list is the
     # ranking.
-    lanes = ["NAME", "HEARD", "PKTS", "MSGS", "HOPS"]
+    lanes = ["NAME", "HEARD", "PKTS", "PLACE"]
     assert [body.index(word) for word in lanes] == sorted(body.index(word) for word in lanes)
     assert all(v.name in body for v in victims)
     preview.handle("enter")

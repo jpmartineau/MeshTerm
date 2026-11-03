@@ -295,6 +295,29 @@ def test_archived_list_cuts_no_value() -> None:
     assert all(choice.pans for choice in screen._choices())  # noqa: SLF001
 
 
+def test_sweep_preview_has_a_place_lane_and_no_msgs_or_hops(monkeypatch) -> None:  # noqa: ANN001
+    """The preview of a sweep reads NAME, HEARD, PKTS, PLACE, with each place in full."""
+    from meshterm.core.contact_score import ContactSignals, ScoredContact
+    from meshterm.ui import sweep_screen
+
+    monkeypatch.setattr(sweep_screen, "places_of_session", _places)
+
+    def scored(name: str, key: str) -> ScoredContact:
+        contact = Contact(name=name, public_key=key, key_prefix=key[:12])
+        signals = ContactSignals(node=key[:12], packets=3, dm_total=4, hops=2.0)
+        return ScoredContact(contact=contact, signals=signals, score=1.0, percentile=1)
+
+    victims = [scored("Alice", _ALICE), scored("Carl", _CARL)]
+    widths = sweep_screen._lane_widths(victims)  # noqa: SLF001
+    header = sweep_screen._preview_header(widths, 200).split()  # noqa: SLF001
+    assert header == ["NAME", "HEARD", "PKTS", "PLACE"]
+    alice, carl = (sweep_screen._victim_row(v, widths).plain for v in victims)  # noqa: SLF001
+    assert alice.rstrip().endswith("Villeray, Montréal")
+    # The place is on the left of its lane: the dash of Carl starts where the place of Alice
+    # starts.
+    assert carl.index("—") == alice.index("Villeray")
+
+
 # -- part 2: the filter ---------------------------------------------------------------
 
 
