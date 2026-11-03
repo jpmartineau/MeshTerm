@@ -308,6 +308,31 @@ def test_the_job_uses_the_tiles_then_nominatim(
     assert len(asked) == 1  # one answer for each location: never asked again
 
 
+def test_the_job_finds_the_place_of_an_archived_contact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An archived contact is not on the device, but the store keeps its location."""
+    from meshterm.core.contact_store import ContactStore
+    from meshterm.core.models import Contact
+
+    service, _repo = _service(tmp_path, source="tiles")
+    device = "dd" * 32
+    store = ContactStore(tmp_path / "contacts.json")
+    gone = Contact(name="Gone", public_key="cc" * 32, lat=_LAT, lon=_LON)
+    store.remember_all(device, [gone])
+    store.archive(device, gone, when=1_700_000_000)
+    service._ctx.contact_store = store
+    service._ctx.devstate = SimpleNamespace(
+        peek_contacts=lambda: [], peek_self_info=lambda: {"public_key": device}
+    )
+    world = _Map()
+    world.add("place", "village", "Val-David", _north(1.0))
+    monkeypatch.setattr(service, "_load_tile", world.load)
+    service._scan_after = 0.0
+    _run(service.step())
+    assert service.get("cc" * 32).fine == "Val-David"
+
+
 def test_tiles_only_never_asks_nominatim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """With the tiles source, the job never asks Nominatim."""
     service, repo = _service(tmp_path, source="tiles")

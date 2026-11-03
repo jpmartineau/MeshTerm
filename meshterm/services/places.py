@@ -292,7 +292,9 @@ class PlaceService:
         The heard adverts give most locations. The contact table of the device adds the
         nodes that advertised before MeshTerm listened, and the self-info adds our node.
         Both come from the cache of the device state, never from the device: the job never
-        sends a command.
+        sends a command. The contact store adds the archived contacts of the device. They
+        are not on the device now, but the store keeps their last location, and the
+        Archived list shows their place.
         """
         fresh = self._ctx.repo.node_locations(since=self._since)
         for node, (lat, lon, stamp) in fresh.items():
@@ -307,8 +309,14 @@ class PlaceService:
             ident = (contact.public_key or contact.key_prefix or "").lower().removeprefix("0x")
             self._locate(ident[:12], contact.lat, contact.lon, newer=False)
         info = devstate.peek_self_info() or {}
-        ident = str(info.get("public_key") or "").lower().removeprefix("0x")[:12]
-        self._locate(ident, info.get("adv_lat"), info.get("adv_lon"), newer=True)
+        self_key = str(info.get("public_key") or "").lower().removeprefix("0x")
+        self._locate(self_key[:12], info.get("adv_lat"), info.get("adv_lon"), newer=True)
+        store = getattr(self._ctx, "contact_store", None)
+        if store is not None and self_key:
+            for remembered in store.archived(self_key):
+                self._locate(
+                    _norm(remembered.public_key), remembered.lat, remembered.lon, newer=False
+                )
 
     def _locate(self, node: str, lat: object, lon: object, *, newer: bool) -> None:
         """Add a location that did not come from the heard adverts.
