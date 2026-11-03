@@ -170,8 +170,9 @@ async def clock_rows(ctx: AppContext) -> list[ClockRow]:
 
 async def _open_page(ctx: AppContext, rows: list[ClockRow], tolerance: float) -> None:
     """Run the Clock drift page. Enter opens the node page, and Esc comes back to the row."""
-    from ..ui.clocks_screen import clock_drift_screen
+    from ..ui.clocks_screen import SYNC_ALL, clock_drift_screen, clocks_to_sync
     from ..ui.node_detail_screen import open_node_detail
+    from ..ui.repeater_admin import sync_clocks
     from ..ui.surface import TuiUi
     from ..ui.tui.screen import CANCEL
 
@@ -183,6 +184,11 @@ async def _open_page(ctx: AppContext, rows: list[ClockRow], tolerance: float) ->
             chosen = await visit.result()
             if chosen is CANCEL or chosen is None:
                 return
+            if chosen == SYNC_ALL:
+                # The page stays as it is: an offset changes only when a new advert of the
+                # node arrives, so there is nothing to draw again now.
+                await sync_clocks(ctx, clocks_to_sync(rows, tolerance))
+                continue
             # The page opens to look. The verbs that manage a contact belong to the
             # Contacts list, and this page is not that list.
             await open_node_detail(ctx, chosen, manage=False)

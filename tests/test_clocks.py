@@ -190,3 +190,102 @@ def test_clock_rows_name_their_nodes_and_mark_the_managed_ones(tmp_path: Path) -
     listing = _listing(rows, TOLERANCE)
     assert listing.rows[-1]["offset_s"] is None and listing.rows[-1]["managed"]
     repo.close()
+
+
+# -- the bulk clock sync ----------------------------------------------------------------------
+
+
+def _managed(name: str, offset_s: float | None, node_type: int | None = NODE_TYPE_REPEATER):  # noqa: ANN202
+    key = (name.encode().hex() * 32)[:64]
+    contact = Contact(name=name, public_key=key, node_type=node_type)
+    offset = None if offset_s is None else ClockOffset(key[:12], True, offset_s, 3, utcnow())
+    return ClockRow(offset, name, key, node_type, True, contact)
+
+
+def test_the_bulk_row_ends_the_managed_section_when_a_clock_needs_it() -> None:
+    """A repeater out of sync and one with no sample are due. A correct clock is not.
+
+    A managed companion has no ``clock sync`` command, so it is never due.
+    """
+    from meshterm.ui.clocks_screen import SYNC_ALL, clocks_to_sync
+
+    rows = [
+        _managed("Fine", 10),
+        _managed("Behind", -7200),
+        _managed("Unknown", None),
+        _managed("Phone", -7200, node_type=None),
+    ]
+    assert [c.name for c in clocks_to_sync(rows, TOLERANCE)] == ["Behind", "Unknown"]
+    screen = clock_drift_screen(rows, tolerance_s=TOLERANCE)
+    text = plain("\n".join(screen.render_body(72)))
+    assert "Sync their clocks…  ·  2 nodes" in text
+    assert text.index("Sync their clocks") < text.index("Out of sync")
+    assert any(getattr(item, "value", None) == SYNC_ALL for item in screen._items)
+
+    in_sync = clock_drift_screen([_managed("Fine", 10)], tolerance_s=TOLERANCE)
+    assert "Sync their clocks" not in plain("\n".join(in_sync.render_body(72)))
+
+
+class _Ui:
+    """The UI of the bulk sync: the confirm, the busy overlay, and the summary."""
+
+    def __init__(self) -> None:
+        self.summary = None
+        self.session = self
+
+    async def dialog(self, prompt, buttons, **kw):  # noqa: ANN001, ANN003, ANN201
+        return "go"
+
+    def busy_overlay(self):  # noqa: ANN201
+        return _AsyncNull()
+
+    async def message_dialog(self, body, **kw):  # noqa: ANN001, ANN003, ANN201
+        self.summary = body.plain
+
+
+class _AsyncNull:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *exc) -> None:  # noqa: ANN002
+        return None
+
+
+class _Device:
+    """Two nodes: one accepts the login and the command, one never answers the login."""
+
+    def __init__(self) -> None:
+        self.commands: list[str] = []
+
+    async def admin_login(self, node, password):  # noqa: ANN001, ANN201
+        from meshterm.core.models import LoginResult
+
+        return LoginResult.ACCEPTED if node.name == "Behind" else LoginResult.NO_REPLY
+
+    async def send_remote_command(self, node, command, timeout):  # noqa: ANN001, ANN201
+        self.commands.append(f"{node.name}: {command}")
+        return "OK - clock set"
+
+
+def test_the_bulk_sync_sets_each_clock_and_sums_up(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    """One confirm, then each node in turn. The summary names each result."""
+    from meshterm.core import transmit_gate
+    from meshterm.ui.repeater_admin import sync_clocks
+
+    monkeypatch.setattr(transmit_gate, "remaining", lambda **kw: 0.0)  # no countdown here
+    behind, silent = _managed("Behind", -7200).contact, _managed("Silent", None).contact
+    admin = AdminStore(tmp_path / "admin.json")
+    admin.remember(behind, "secret")
+    admin.remember(silent, "secret")
+    device = _Device()
+    ui = _Ui()
+
+    async def get_device():  # noqa: ANN202
+        return device
+
+    ctx = type("Ctx", (), {"ui": ui, "admin_store": admin, "device": staticmethod(get_device)})
+    asyncio.run(sync_clocks(ctx, [behind, silent]))
+    assert device.commands == ["Behind: clock sync"]  # no command after a silent login
+    assert "✓ Behind" in ui.summary and "OK - clock set" in ui.summary
+    assert "✗ Silent" in ui.summary and "no reply to the login" in ui.summary
+    assert admin.get(silent) == "secret"  # a silence keeps the password

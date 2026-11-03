@@ -15,15 +15,19 @@ The page reads the clock samples of the last ``clock_report_days`` (refer to
   user can set (JP, 2026-11-03). A managed node with no sample in the window shows its
   newest offset from all the history, or ``no sample``. A repeater sends no message, so
   its adverts are its only samples, and a new install has none yet.
-* **Adverts refused**: the contacts whose adverts the device drops, because their clocks
-  were once ahead (refer to
-  :attr:`~meshterm.core.models.Contact.adverts_refused_until`), with the date until which
-  it drops them. The node page of each one has the repair.
+  When a managed repeater or room server is out of sync, or has no sample, the section
+  ends on ``Sync their clocks…``: one confirm, then each clock in turn, with the
+  transmit cooldown between the nodes (refer to
+  :func:`~meshterm.ui.repeater_admin.sync_clocks`).
 * **Out of sync**: each other node past the tolerance, the largest offset first. Enter
   opens the node page.
 * **Senders with no key**: the channel senders whose name resolves to no single key. Their
   samples count in the histogram, and their names are page text in the grey of an unknown
   node. There is no node page to open for a name.
+* **Adverts refused**, last (JP, 2026-11-03): the contacts whose adverts the device drops,
+  because their clocks were once ahead (refer to
+  :attr:`~meshterm.core.models.Contact.adverts_refused_until`), with the date until which
+  it drops them. The node page of each one has the repair.
 
 Each section has a header line under its heading, which pins with the heading while the
 section scrolls. When most clocks are off in the same direction, the fault is probably
@@ -39,9 +43,10 @@ from typing import TYPE_CHECKING
 
 from rich.text import Text
 
+from ..core.models import NODE_TYPE_REPEATER, NODE_TYPE_ROOM
 from ..services.clock_offsets import ClockOffset
 from .braillechart import meter
-from .menus import fit_cells, section_heading
+from .menus import fit_cells, marked_label, section_heading
 from .theme import name_style
 from .tui import Choice, Separator
 from .tui.select import SelectScreen
@@ -73,6 +78,10 @@ _OWN_CLOCK_MIN_NODES = 5
 
 #: The share of the keyed nodes that must be off in one direction to blame our clock.
 _OWN_CLOCK_SHARE = 0.6
+
+#: The value of the bulk ``Sync their clocks…`` row of the Managed nodes section. Each
+#: other row resolves with its contact.
+SYNC_ALL = "sync-all"
 
 #: The footer hint. Enter opens the node page of the highlighted row.
 _HINT = "↑↓ move · Enter open · type to filter · Esc back"
@@ -367,17 +376,16 @@ def clock_drift_screen(rows: Sequence[ClockRow], *, tolerance_s: float) -> Selec
         items.append(section_heading("Managed nodes"))
         items.append(Separator(_node_header))
         items += node_rows(managed)
-
-    # The contacts whose adverts the device refuses, because their clocks were once ahead
-    # (refer to Contact.adverts_refused_until). Their node page has the repair.
-    refused = sorted(
-        (r for r in rows if r.contact is not None and r.contact.adverts_refused_until),
-        key=lambda r: r.label.casefold(),
-    )
-    if refused:
-        items.append(section_heading("Adverts refused"))
-        items.append(Separator(_refused_header))
-        items += [Choice(lambda w, r=r: _refused_text(r, w), r.contact) for r in refused]
+        # The bulk action ends the section, as the maintenance rows end the Contacts list.
+        # It shows only when a clock needs it. It is a list of its own, with its own icon
+        # column, so a blank seam goes on each side of it: the node rows above and below
+        # have one-cell type marks, and its clock is two cells. The heading that follows
+        # adds no second blank line under a blank one.
+        due = clocks_to_sync(rows, tolerance_s)
+        if due:
+            label = marked_label("🕒", "Sync their clocks…", "")
+            label.append(f"  ·  {len(due)} {'node' if len(due) == 1 else 'nodes'}", "muted")
+            items += [Separator(" "), Choice(title=label, value=SYNC_ALL), Separator(" ")]
 
     others = _by_size([r for r in off if not r.managed and r.contact is not None])
     items.append(section_heading("Out of sync"))
@@ -392,4 +400,40 @@ def clock_drift_screen(rows: Sequence[ClockRow], *, tolerance_s: float) -> Selec
         items.append(section_heading("Senders with no key"))
         items.append(Separator(_node_header))
         items += [Separator(lambda w, r=r: _name_line(r, tolerance_s, w)) for r in nameless]
+
+    # The contacts whose adverts the device refuses, because their clocks were once ahead
+    # (refer to Contact.adverts_refused_until). Their node page has the repair. Last on the
+    # page (JP, 2026-11-03): a rare state of the device, not a reading of the clocks.
+    refused = sorted(
+        (r for r in rows if r.contact is not None and r.contact.adverts_refused_until),
+        key=lambda r: r.label.casefold(),
+    )
+    if refused:
+        items.append(section_heading("Adverts refused"))
+        items.append(Separator(_refused_header))
+        items += [Choice(lambda w, r=r: _refused_text(r, w), r.contact) for r in refused]
     return SelectScreen(title, items, footer_hint=_HINT)
+
+
+def clocks_to_sync(rows: Sequence[ClockRow], tolerance_s: float) -> list[Contact]:
+    """The managed nodes whose clocks the bulk ``Sync their clocks…`` sets.
+
+    Only a repeater or a room server has the ``clock sync`` command. Of those, the ones
+    whose clock is out of sync, or not known (no sample): a correct clock needs no
+    transmission.
+
+    Args:
+        rows: The rows of the page.
+        tolerance_s: The ``clock_tolerance_s`` preference.
+
+    Returns:
+        The contacts, in the order of the page.
+    """
+    return [
+        r.contact
+        for r in _by_size(rows)
+        if r.managed
+        and r.contact is not None
+        and r.node_type in (NODE_TYPE_REPEATER, NODE_TYPE_ROOM)
+        and (r.offset is None or r.out_of_sync(tolerance_s))
+    ]

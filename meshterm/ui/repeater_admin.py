@@ -1106,6 +1106,92 @@ async def sync_clock(ctx: AppContext, node: Contact) -> None:
     )
 
 
+async def sync_clocks(ctx: AppContext, nodes: list[Contact]) -> None:
+    """Set the clocks of several managed nodes from ours, one node at a time.
+
+    This is the bulk ``Sync their clocks…`` of the Clock drift page. One confirm for the
+    whole list, then for each node a login with its stored password and the ``clock sync``
+    command. MeshTerm never sends a burst: before each node it waits for the transmit
+    cooldown (refer to :func:`~meshterm.ui.cooldown.wait_for_cooldown`), whose countdown the
+    user can cancel. A cancel stops the run, and the summary says which nodes got their
+    clocks.
+
+    Args:
+        ctx: The shared application context (the interactive menu must be running).
+        nodes: The managed repeaters and room servers to set.
+    """
+    from .cooldown import wait_for_cooldown
+
+    if not nodes:
+        return
+    names = ", ".join(node.name for node in nodes)
+    choice = await ctx.ui.dialog(
+        f"Set the clocks of {len(nodes)} managed nodes from this companion's time? "
+        f"MeshTerm logs in to each one and sends one command, with a pause between "
+        f"transmissions. ({names})",
+        [("Cancel", None), ("Sync", "go")],
+        title="Sync clocks",
+        default=1,
+    )
+    if choice != "go":
+        return
+    device = await ctx.device()
+    results: list[tuple[Contact, bool, str]] = []
+    for node in nodes:
+        # One wait for each node, before its login. The login and the command are one
+        # exchange with one node, as on the admin page, and the command marks the
+        # transmit clock that the wait of the next node reads.
+        if not await wait_for_cooldown(ctx, action=f"Sync clock — {node.name}"):
+            break
+        ok, reason = await _quiet_login(ctx, device, node)
+        if ok:
+            async with ctx.ui.busy_overlay():
+                reply = await device.send_remote_command(
+                    node, "clock sync", timeout=_REPLY_TIMEOUT_S
+                )
+            if reply is None:
+                ok, reason = False, "no reply — the command may still have landed"
+            else:
+                ok, reason = not reply_is_error(reply), reply.strip()
+        results.append((node, ok, reason))
+    body = Text()
+    for node, ok, reason in results:
+        if body.plain:
+            body.append("\n")
+        body.append("✓ " if ok else "✗ ", style="ok" if ok else "err")
+        body.append(node.name)
+        body.append(f"  ·  {reason}", style="muted")
+    skipped = len(nodes) - len(results)
+    if skipped:
+        body.append(f"\n{skipped} not done: the run was cancelled", style="warn")
+    await ctx.ui.session.message_dialog(body, title="Sync clocks")
+
+
+async def _quiet_login(ctx: AppContext, device: Device, node: Contact) -> tuple[bool, str]:
+    """Log in to a managed node with its stored password, with no dialog.
+
+    The bulk sync reports each failure in one summary, not one dialog for each node. The
+    password rules are those of :func:`_login`: a refused password is forgotten, and a
+    silence keeps it.
+
+    Returns:
+        ``(True, "")`` when the session opened, else ``(False, the reason)``.
+    """
+    from ..core.models import LoginResult
+
+    password = ctx.admin_store.get(node)
+    if password is None:
+        return False, "no stored password"
+    async with ctx.ui.busy_overlay():
+        outcome = await device.admin_login(node, password)
+    ctx.admin_store.record(node, password, outcome)
+    if outcome is LoginResult.REFUSED:
+        return False, "the login was refused; the saved password was cleared"
+    if not outcome:
+        return False, "no reply to the login"
+    return True, ""
+
+
 async def _change_password(ctx: AppContext, device: Device, node: Contact) -> None:
     """Change the admin password of the node (and remember the new password if it succeeds)."""
     new = await ctx.ui.text(
