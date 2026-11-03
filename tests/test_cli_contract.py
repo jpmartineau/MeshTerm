@@ -52,7 +52,7 @@ _PATH_SPEC = re.compile(r"[0-9a-f]+(?:,[0-9a-f]+)*")
 #: must find in each. Each command runs against only the mock companion or the database.
 _LISTINGS: list[tuple[str, list[str], list[str]]] = [
     # (command, arguments, headings or keys the output must carry)
-    ("contacts", [], ["NAME", "TYPE", "HEARD", "PKTS", "HASH", "LOCATION", "KEY"]),
+    ("contacts", [], ["NAME", "TYPE", "HEARD", "PKTS", "HASH", "LOCATION", "PLACE", "KEY"]),
     ("info", [], ["name", "public_key", "role"]),
     ("config", ["show"], ["name", "radio_freq", "tx_power"]),
     ("preferences", ["show"], ["PREFERENCE", "VALUE", "DEFAULT", "DESCRIPTION"]),
@@ -382,7 +382,16 @@ def test_contacts_names_every_node_bare_and_ages_every_time(run) -> None:  # noq
     user who wants them.
     """
     header, *records = result_lines(run("contacts"))
-    assert header.split() == ["NAME", "TYPE", "HEARD", "PKTS", "HASH", "LOCATION", "KEY"]
+    assert header.split() == [
+        "NAME",
+        "TYPE",
+        "HEARD",
+        "PKTS",
+        "HASH",
+        "LOCATION",
+        "PLACE",
+        "KEY",
+    ]
     assert records, "the simulator always has contacts"
     # Read the lane at the position of its heading. Do not count words, because a value can
     # have a space (the `Lakeside BBS` of the simulator is a `room server`). The alignment,

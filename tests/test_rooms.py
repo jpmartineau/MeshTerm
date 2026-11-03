@@ -1443,6 +1443,7 @@ def test_chat_history_reads_a_room_by_author(cli) -> None:  # noqa: ANN001
         "key": None,
         "hash": STRANGER_KEY,
         "type": None,
+        "place": None,
         "self": False,
     }
 

@@ -189,11 +189,11 @@ Numeric columns align to the right.
 
 ```console
 $ meshterm contacts
-NAME            TYPE      HEARD  PKTS  HASH  LOCATION            KEY
-Observer-Bot    node         7m     -  c3    45.48800,-73.58100  c3d4e5f600000000000000000000000000000000000000000000000000000000
-Local-Repeater  repeater     7m     -  b2    45.47680,-73.59900  b2c3d4e500000000000000000000000000000000000000000000000000000000
-Yagi-Repeater   repeater     7m     -  a1    45.50190,-73.56740  a1b2c3d400000000000000000000000000000000000000000000000000000000
-Alice           node         7m     -  d4    -                   d4e5f6a700000000000000000000000000000000000000000000000000000000
+NAME            TYPE      HEARD  PKTS  HASH  LOCATION            PLACE  KEY
+Observer-Bot    node         7m     -  c3    45.48800,-73.58100  -      c3d4e5f600000000000000000000000000000000000000000000000000000000
+Local-Repeater  repeater     7m     -  b2    45.47680,-73.59900  -      b2c3d4e500000000000000000000000000000000000000000000000000000000
+Yagi-Repeater   repeater     7m     -  a1    45.50190,-73.56740  -      a1b2c3d400000000000000000000000000000000000000000000000000000000
+Alice           node         7m     -  d4    -                   -      d4e5f6a700000000000000000000000000000000000000000000000000000000
 ```
 
 Names are not in quotation marks. Quotation marks would give a script a delimiter, and
@@ -212,11 +212,11 @@ the second:
 
 ```console
 $ meshterm --absolute contacts
-NAME            TYPE                           HEARD  PKTS  HASH  LOCATION            KEY
-Observer-Bot    companion  2026-09-08T04:30:50-04:00     -  c3    45.48800,-73.58100  c3d4e5f600000000000000000000000000000000000000000000000000000000
-Local-Repeater  repeater   2026-09-08T04:30:49-04:00     -  b2    45.47680,-73.59900  b2c3d4e500000000000000000000000000000000000000000000000000000000
-Yagi-Repeater   repeater   2026-09-08T04:30:49-04:00     -  a1    45.50190,-73.56740  a1b2c3d400000000000000000000000000000000000000000000000000000000
-Alice           companion  2026-09-08T04:30:48-04:00     -  d4    -                   d4e5f6a700000000000000000000000000000000000000000000000000000000
+NAME            TYPE                           HEARD  PKTS  HASH  LOCATION            PLACE  KEY
+Observer-Bot    companion  2026-09-08T04:30:50-04:00     -  c3    45.48800,-73.58100  -      c3d4e5f600000000000000000000000000000000000000000000000000000000
+Local-Repeater  repeater   2026-09-08T04:30:49-04:00     -  b2    45.47680,-73.59900  -      b2c3d4e500000000000000000000000000000000000000000000000000000000
+Yagi-Repeater   repeater   2026-09-08T04:30:49-04:00     -  a1    45.50190,-73.56740  -      a1b2c3d400000000000000000000000000000000000000000000000000000000
+Alice           companion  2026-09-08T04:30:48-04:00     -  d4    -                   -      d4e5f6a700000000000000000000000000000000000000000000000000000000
 ```
 
 The flag **overrides a preference**. It is not a second switch that works beside the
@@ -403,11 +403,11 @@ interactive session cannot emit a document.
 This section defines each shape one time. The tables for each command below use the names
 and do not repeat the definitions.
 
-**`node`** is the identity of a mesh participant, and nothing else. All five keys are
+**`node`** is the identity of a mesh participant, and nothing else. All six keys are
 always present.
 
 ```json
-{"name":"Yagi-Repeater","key":"a1b2c3d400000000000000000000000000000000000000000000000000000000","hash":"a1","type":"repeater","self":false}
+{"name":"Yagi-Repeater","key":"a1b2c3d400000000000000000000000000000000000000000000000000000000","hash":"a1","type":"repeater","place":"Villeray, Montréal","self":false}
 ```
 
 | Field | Type | Meaning |
@@ -416,6 +416,7 @@ always present.
 | `key` | string \| null | The full public key, in lowercase hex, 64 characters. `null` when MeshTerm heard only a hash. |
 | `hash` | string \| null | The short id that comes from the key. Its width is the width that the command used to address the node. It is never a `key` that is cut short. |
 | `type` | string \| null | `"companion"` \| `"repeater"` \| `"room server"` \| `"sensor"` \| `null`. |
+| `place` | string or null | The full label of the place of the node, the named area nearest its location (`Villeray, Montréal`). `null` when MeshTerm knows no place. The command reads the stored places only. |
 | `self` | boolean | `true` for our node. This is what the star of the menu shows. The plain face deliberately does not show it. |
 
 Reception facts belong to the **row** and not to the node. These facts are when MeshTerm
@@ -897,11 +898,11 @@ The contacts that your device knows.
 
 ```console
 $ meshterm contacts --sort name
-NAME            TYPE       HEARD  PKTS  HASH  LOCATION            KEY
-Alice           companion     7m     -  d4    -                   d4e5f6a700000000000000000000000000000000000000000000000000000000
-Local-Repeater  repeater      7m     -  b2    45.47680,-73.59900  b2c3d4e500000000000000000000000000000000000000000000000000000000
-Observer-Bot    companion     7m     -  c3    45.48800,-73.58100  c3d4e5f600000000000000000000000000000000000000000000000000000000
-Yagi-Repeater   repeater      7m     -  a1    45.50190,-73.56740  a1b2c3d400000000000000000000000000000000000000000000000000000000
+NAME            TYPE       HEARD  PKTS  HASH  LOCATION            PLACE  KEY
+Alice           companion     7m     -  d4    -                   -      d4e5f6a700000000000000000000000000000000000000000000000000000000
+Local-Repeater  repeater      7m     -  b2    45.47680,-73.59900  -      b2c3d4e500000000000000000000000000000000000000000000000000000000
+Observer-Bot    companion     7m     -  c3    45.48800,-73.58100  -      c3d4e5f600000000000000000000000000000000000000000000000000000000
+Yagi-Repeater   repeater      7m     -  a1    45.50190,-73.56740  -      a1b2c3d400000000000000000000000000000000000000000000000000000000
 ```
 
 `TYPE` is the node's advertised role in words: `companion`, `repeater`, `room server`,

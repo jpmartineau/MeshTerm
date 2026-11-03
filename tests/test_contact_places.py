@@ -242,3 +242,61 @@ def test_filter_matches_the_coarse_part_of_the_place() -> None:
     _type(screen, "bob")
     shown = "\n".join(_lines(screen, 200))
     assert "Bob" in shown and "Alice" not in shown
+
+
+# -- part 3: the CLI and the machine object -------------------------------------------
+
+
+def _cli_contacts(place_of):  # noqa: ANN001, ANN202 - a lookup function or None
+    from meshterm.tools.contacts import _listing
+
+    contacts = [
+        Contact(name="Alice", public_key=_ALICE, key_prefix=_ALICE[:12]),
+        Contact(name="Carl", public_key=_CARL, key_prefix=_CARL[:12]),
+    ]
+    return _listing(contacts, {}, 1, place_of)
+
+
+def _render(face, listing):  # noqa: ANN001, ANN202 - the renderer class
+    import io
+
+    from meshterm.ui import script
+
+    buffer = io.StringIO()
+    face(script.console(buffer)).render((listing,))
+    return buffer.getvalue()
+
+
+def test_node_object_has_a_place_key_that_is_null_when_unknown() -> None:
+    """The machine object of a node has six keys. ``place`` is the label, or ``null``."""
+    import json
+
+    from meshterm.ui.renderers import JsonRenderer
+
+    docs = json.loads(_render(JsonRenderer, _cli_contacts(_places().get)))
+    alice, carl = (d["node"] for d in docs)
+    assert list(alice) == ["name", "key", "hash", "type", "place", "self"]
+    assert alice["place"] == "Villeray, Montréal"
+    assert carl["place"] is None
+
+
+def test_contacts_without_a_lookup_gives_null_places() -> None:
+    """A listing built with no place lookup still has the key, with ``null``."""
+    import json
+
+    from meshterm.ui.renderers import JsonRenderer
+
+    docs = json.loads(_render(JsonRenderer, _cli_contacts(None)))
+    assert [d["node"]["place"] for d in docs] == [None, None]
+
+
+def test_plain_face_has_a_place_column_before_key() -> None:
+    """The PLACE column sits just before KEY, shows the label, and uses ``-`` when unknown."""
+    from meshterm.ui.renderers import PlainRenderer
+
+    header, alice, carl = _render(PlainRenderer, _cli_contacts(_places().get)).splitlines()
+    labels = header.split()
+    assert labels.index("PLACE") == labels.index("KEY") - 1
+    assert "Villeray, Montréal" in alice
+    assert alice.index("Villeray") < alice.index(_ALICE)
+    assert carl.split()[-2] == "-" and carl.split()[-1] == _CARL

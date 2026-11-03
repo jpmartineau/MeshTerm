@@ -96,6 +96,7 @@ def test_a_node_is_one_object_however_many_columns_it_is_worth() -> None:
         "key": "d4" * 32,
         "hash": "d4",
         "type": "node",
+        "place": None,
         "self": False,
     }
 

@@ -8,6 +8,7 @@ The CLI prints only the contact list, because our node is not a contact.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import typer
@@ -19,6 +20,7 @@ from .base import Tool, ToolResult, register
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..core.models import Contact
+    from ..core.places import Place
     from ..ui.report import Listing
 
 
@@ -90,7 +92,10 @@ class ContactsTool(Tool):
             return ToolResult(summary={"contacts": len(contacts)})
 
         sort = ContactsSort.from_name(sort_name)
-        listing = _listing(ordered_contacts(contacts, counts, sort), counts, prefix_bytes)
+        # The CLI reads the stored places only. It never starts the job that finds them.
+        listing = _listing(
+            ordered_contacts(contacts, counts, sort), counts, prefix_bytes, ctx.places.get
+        )
         return ToolResult(
             summary={"contacts": len(contacts)},
             report=(listing,),
@@ -122,12 +127,18 @@ class ContactsTool(Tool):
             run_tool_command(self, {"sort": sort})
 
 
-def _listing(contacts: list[Contact], counts: dict[str, int], prefix_bytes: int) -> Listing:
+def _listing(
+    contacts: list[Contact],
+    counts: dict[str, int],
+    prefix_bytes: int,
+    place_of: Callable[[str], Place | None] | None = None,
+) -> Listing:
     """The contact list, stated one time for the two faces.
 
     ``TYPE`` is the advertised role of the node, in words. The menu draws a coloured glyph
     there, but a monochrome ``▲`` must have a legend, and the CLI has no legends.
     ``HEARD`` is a relative age, because the user opens this listing to ask "recently?".
+    ``PLACE`` is the named area nearest the location of the node. It is just before ``KEY``.
     ``HASH`` is the token that ``--path`` and ``--to`` accept. Before, the user had to cut
     it out of ``KEY`` by hand. ``LOCATION`` is a fact that the model always had, but no
     column had space for it. ``KEY`` stays full and last. Thus it goes off the right side
@@ -140,6 +151,8 @@ def _listing(contacts: list[Contact], counts: dict[str, int], prefix_bytes: int)
         prefix_bytes: The path hash width of the device. Because of it, ``HASH`` is the
             token by which a forced path addresses this node, not a random part of the
             key.
+        place_of: Gives the stored place of a key, or ``None``. ``PLACE`` is the label of
+            that place, and it is ``null`` in the document when there is none.
 
     Returns:
         The listing.
@@ -151,6 +164,7 @@ def _listing(contacts: list[Contact], counts: dict[str, int], prefix_bytes: int)
     rows = []
     for contact in contacts:
         key = (contact.public_key or "").lower()
+        place = place_of(key or contact.key_prefix) if place_of else None
         rows.append(
             {
                 "node": fields.NodeRef(
@@ -158,6 +172,7 @@ def _listing(contacts: list[Contact], counts: dict[str, int], prefix_bytes: int)
                     key=key or None,
                     hash=(key or contact.key_prefix.lower())[: prefix_bytes * 2] or None,
                     type=NODE_TYPE_LABELS.get(contact.node_type),
+                    place=(place.label or None) if place else None,
                 ),
                 "heard_at": contact.last_seen,
                 "packets": contact_packets(contact, counts),
@@ -171,14 +186,21 @@ def _listing(contacts: list[Contact], counts: dict[str, int], prefix_bytes: int)
         columns=(
             fields.node(
                 "node",
-                lanes=(("name", "NAME"), ("type", "TYPE"), ("hash", "HASH"), ("key", "KEY")),
+                lanes=(
+                    ("name", "NAME"),
+                    ("type", "TYPE"),
+                    ("hash", "HASH"),
+                    ("place", "PLACE"),
+                    ("key", "KEY"),
+                ),
             ),
             fields.when("heard_at", "HEARD", absent="never"),
             fields.integer("packets", "PKTS"),
             fields.position(),
         ),
         rows=rows,
-        # The four lanes of the node are not together. What the user looks for (who, what,
-        # how recently, how much) comes first, and the two long hex fields go to the right.
-        order=("NAME", "TYPE", "HEARD", "PKTS", "HASH", "LOCATION", "KEY"),
+        # The five lanes of the node are not together. What the user looks for (who, what,
+        # how recently, how much) comes first, and the long fields go to the right. PLACE is
+        # just before KEY, the same as in the menu.
+        order=("NAME", "TYPE", "HEARD", "PKTS", "HASH", "LOCATION", "PLACE", "KEY"),
     )

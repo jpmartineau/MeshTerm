@@ -63,6 +63,9 @@ class NodeRef:
             its own choice.
         type: The advertised role, in the words of the lexicon (``node``, ``repeater``,
             ``room``, ``sensor``). It is ``None`` if the advert did not give it.
+        place: The full label of the place of the node (``Villeray, Montréal``), the named
+            area nearest its location. It is ``None`` if MeshTerm knows no place. A listing
+            that has no use for it leaves it out, and the machine face then gives ``null``.
         is_self: Whether this is our node. The plain face draws it like any other hop, on
             purpose. "You already know who this is" is true for the person at the prompt.
             It is not true for the person who reads the file afterwards. The machine face
@@ -73,6 +76,7 @@ class NodeRef:
     key: str | None = None
     hash: str | None = None
     type: str | None = None
+    place: str | None = None
     is_self: bool = False
 
 
@@ -146,6 +150,7 @@ def node_json(ref: NodeRef | None) -> dict[str, Any] | None:
         "key": (ref.key or None) and ref.key.lower(),
         "hash": (ref.hash or None) and ref.hash.lower(),
         "type": ref.type or None,
+        "place": ref.place or None,
         "self": ref.is_self,
     }
 
@@ -174,7 +179,7 @@ def channel_json(channel: ChannelRef | None) -> dict[str, Any] | None:
 # -- the constructors ------------------------------------------------------------------
 
 #: How each plain lane of a node makes its cell. A listing selects the lanes that it has
-#: room for. The machine object has the same five keys in each case.
+#: room for. The machine object has the same six keys in each case.
 _NODE_LANES = {
     "name": lambda ref: script.name(ref.name if ref else None),
     # The word, not a glyph. A `▲` with no colour needs a legend, and the CLI has no
@@ -182,17 +187,19 @@ _NODE_LANES = {
     "type": lambda ref: ref.type if ref and ref.type else "unknown",
     "hash": lambda ref: ((ref.hash or "").lower() if ref else "") or script.NONE,
     "key": lambda ref: ((ref.key or "").lower() if ref else "") or script.NONE,
+    # The label as it is, with its comma and spaces. The plain face escapes the cell.
+    "place": lambda ref: script.name(ref.place if ref else None),
 }
 
 
 def node(key: str = "node", *, lanes: Sequence[tuple[str, str]] = (("name", "NAME"),)) -> Column:
-    """One node: the shared object with five keys, and the plain lanes that fit.
+    """One node: the shared object with six keys, and the plain lanes that fit.
 
     Args:
         key: The machine key. It is also the key at which the row holds its
             :class:`NodeRef`.
         lanes: ``(part, header)`` pairs that name the plain columns to draw, in order. The
-            parts are ``name``, ``type``, ``hash``, and ``key``. A listing that has one
+            parts are ``name``, ``type``, ``hash``, ``key``, and ``place``. A listing that has one
             column to use draws the name. A table of hops draws the hash, because the hash
             joins the table to the route line above it.
 

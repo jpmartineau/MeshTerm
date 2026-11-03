@@ -691,7 +691,7 @@ the whole answer in a dialect nobody else could reuse.
   the caller named the key) and the acknowledgement, through `shape=SILENT`.
 - `ui/fields.py` — **the shared shapes, one constructor per concept**: `node`, `channel`,
   `position`, `route`, `spec`, `when`, `instant`, `snr`, `flag`, `free`. A listing that
-  mentions a node asks for `fields.node`, so every document speaks the same five-key object
+  mentions a node asks for `fields.node`, so every document speaks the same six-key object
   and every listing names its lanes the same way — by construction, not by review.
   `fields.node` is the one that earns the design: **one machine key expands to as many
   plain columns as the surface has room for**, four in `contacts` and one in a hop table.
