@@ -101,6 +101,7 @@ import asyncio
 import math
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from itertools import pairwise
@@ -112,6 +113,7 @@ from rich.text import Text
 from ..core.connection import ContactNotOnDeviceError, DeviceCommandError
 from ..core.geo import haversine_km, usable_fix
 from ..core.models import NODE_TYPE_LABELS, NODE_TYPE_REPEATER, NODE_TYPE_ROOM, Contact, utcnow
+from ..core.places import SOURCE_USER
 from ..platforms import Platform, on_platform
 from ..services.clock_offsets import node_offset, room_posts_blocked
 from . import menus
@@ -489,6 +491,7 @@ class NodeDetailScreen(Screen):
         info_actions: list[_Action] | None = None,
         trace_action: _Action | None = None,
         mark: Text | None = None,
+        place_row: Callable[[], Text | None] | None = None,
     ) -> None:
         """Build the page for display data that is already resolved.
 
@@ -518,6 +521,9 @@ class NodeDetailScreen(Screen):
             trace_action: The ``Trace — auto route …`` action of the Routes tab, or
                 ``None``. It is shown only when there are no routes to list. When routes
                 are listed, Enter on a route row starts the trace.
+            place_row: Gives the value of the ``place`` vital, or ``None`` when there is no
+                place. The page asks at each paint, because the place finder can answer
+                after the page opened (refer to :mod:`meshterm.services.places`).
         """
         super().__init__()
         self.title = title
@@ -527,6 +533,7 @@ class NodeDetailScreen(Screen):
         self._compact = False
         self._header = header
         self._info_rows = info_rows
+        self._place_row = place_row
         self._tabs = tabs
         self._minimap = minimap
         self._map_caption = map_caption
@@ -686,6 +693,22 @@ class NodeDetailScreen(Screen):
                 return
         self._info_rows.append((label, value))
 
+    def _sync_place(self) -> None:
+        """Put the current place into the vitals: above ``where``, or gone when unknown."""
+        if self._place_row is None:
+            return
+        value = self._place_row()
+        labels = [label for label, _value in self._info_rows]
+        if "place" in labels:
+            index = labels.index("place")
+            if value is None:
+                del self._info_rows[index]
+            else:
+                self._info_rows[index] = ("place", value)
+        elif value is not None:
+            index = labels.index("where") if "where" in labels else len(labels)
+            self._info_rows.insert(index, ("place", value))
+
     def replace_info_actions(self, actions: list[_Action]) -> None:
         """Replace the action rows of the Info tab in place, with the highlight on the same row.
 
@@ -843,6 +866,7 @@ class NodeDetailScreen(Screen):
         """
         viewport = self._scroll_viewport
         self._last_width = width
+        self._sync_place()
         focus = self._focusables()
         if focus:
             self._row_index %= len(focus)
@@ -1212,6 +1236,32 @@ def _bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> str:
     x = math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl)
     deg = (math.degrees(math.atan2(y, x)) + 360) % 360
     return _COMPASS[round(deg / 45) % 8]
+
+
+def _place_text(label: str, *, typed: bool) -> Text:
+    """The value of the ``place`` vital: the place, and ``· typed`` for a place the user typed."""
+    text = Text(label)
+    if typed:
+        text.append("  ·  typed", style="muted")
+    return text
+
+
+async def _set_place(ctx: AppContext, node_id: str, label: str) -> None:
+    """Ask for the place of a node, and keep it. A blank answer clears the typed place.
+
+    The prompt offers the typed place as its default, so a small change does not need the
+    full text again. Esc keeps the place as it was.
+    """
+    places = ctx.places
+    typed = await ctx.ui.session.text(
+        f"Place — {label}",
+        prompt="Place of the node (blank to use the found place):",
+        default=places.typed(node_id) or "",
+        floating=True,
+    )
+    if typed is None:
+        return
+    places.set_typed(node_id, typed)
 
 
 def _range_text(lat: float, lon: float, self_lat: float | None, self_lon: float | None) -> Text:
@@ -1589,6 +1639,19 @@ async def open_node_detail(
             if room_posts_blocked(newest_post, clock_offset, ctx.preferences.clock_tolerance_s):
                 room_blocked = True
                 info_rows.append(("posts", _blocked_text(newest_post)))
+    # The place: read at each paint (refer to ``NodeDetailScreen._sync_place``), because the
+    # place finder can answer after the page opened. The page puts the node first in its
+    # queue, because the user looks at it now.
+    places = getattr(ctx, "places", None)
+    if places is not None and node_id and lat is not None and lon is not None:
+        places.want_at(node_id, lat, lon)
+
+    def place_row() -> Text | None:
+        place = places.get(node_id) if places is not None and node_id else None
+        if place is None:
+            return None
+        return _place_text(place.label, typed=place.source == SOURCE_USER)
+
     if lat is not None and lon is not None:
         info_rows.append(("where", _range_text(lat, lon, self_lat, self_lon)))
     # The regions of a repeater: what it was last heard to relay, from the region store (its
@@ -1674,6 +1737,10 @@ async def open_node_detail(
     full_key = key.lower().removeprefix("0x")
     if len(full_key) == 64 and is_path_hash(full_key):
         info_actions.append(_Action("share", "📱", "", "Share contact — QR / link"))
+    # The user can type a place for each node: a place that the user knows better than the
+    # map (a roof, a tower), or a place for a node with no location at all.
+    if places is not None and node_id:
+        info_actions.append(_Action("place", "✎", "", "Set place…"))
     if asks_regions:
         # It acts immediately (one anonymous request, one transmission), so no "…" at the
         # end.
@@ -1755,6 +1822,7 @@ async def open_node_detail(
         info_actions=info_actions,
         trace_action=trace_action,
         mark=mark,
+        place_row=place_row,
     )
     async with session.stay(screen) as visit:
         while True:
@@ -1782,6 +1850,9 @@ async def open_node_detail(
                     )
             elif action == "share":
                 await show_contact_card(ctx, label, full_key, adv_type)
+            elif action == "place":
+                assert places is not None  # offered only then
+                await _set_place(ctx, node_id, label)
             elif action == "regions":
                 assert contact is not None and region_store is not None  # offered only then
                 failed = await _ask_regions(ctx, contact, node_id, label, routed=routed)

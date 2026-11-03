@@ -1521,3 +1521,20 @@ def test_contact_pages_read_and_write_the_lock_of_a_live_contact(tmp_path) -> No
 
     assert ContactPages(SimpleNamespace(contact_store=store), [alice]).can_lock is False  # type: ignore[arg-type]
     assert ContactPages(None, [alice], self_key=dev).can_lock is False  # type: ignore[arg-type]
+
+
+def test_the_place_row_follows_the_finder_above_where() -> None:
+    """The page reads the place at each paint: it appears when found, above ``where``."""
+    found: list[Text | None] = [None]
+    screen = _screen(
+        info_rows=[("heard", Text("5m ago")), ("where", Text("45.5440, -73.6150"))],
+        place_row=lambda: found[0],
+    )
+    screen.note_viewport(30)
+    assert "place" not in _plain(screen.render_body(72))
+    found[0] = Text("Villeray, Montréal")
+    body = _plain(screen.render_body(72))
+    assert "Villeray, Montréal" in body
+    assert body.index("place") < body.index("where")
+    found[0] = None
+    assert "Villeray" not in _plain(screen.render_body(72))
