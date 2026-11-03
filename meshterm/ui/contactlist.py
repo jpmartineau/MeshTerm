@@ -360,8 +360,11 @@ def _header(
         # A label aligned to the right, above a value aligned to the right. Thus the header
         # of a narrow field is where its digits will be (``PKTS`` above a 5-cell count), not
         # to the left of them. A text lane is the other way: on the left, as its values are.
+        # Its label is not padded, so the triangle comes directly after the word, as for
+        # ``NAME``. A padded label put the triangle at the far end of a wide lane, where the
+        # user did not see it, or past the edge of the screen.
         if lane.kind == "text":
-            column(header, _pad_cells(lane.label, lane.width), lane.column, lane.width)
+            column(header, lane.label, lane.column, lane.width)
         else:
             column(header, f"{lane.label:>{lane.width}}", lane.column, lane.width)
     column(header, "KEY", "hash", 3, last=True)

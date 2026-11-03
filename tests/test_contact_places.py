@@ -8,6 +8,7 @@ that no database and no network are necessary.
 
 from __future__ import annotations
 
+import dataclasses
 import re
 
 from rich.cells import cell_len
@@ -175,6 +176,22 @@ def test_place_is_sortable() -> None:
     assert _names(screen) == ["Homestead", "Bob", "Alice", "Carl"]
     screen.handle("ctrl_down")
     assert _names(screen) == ["Homestead", "Carl", "Alice", "Bob"]
+
+
+def test_place_sort_triangle_is_next_to_the_label() -> None:
+    """The triangle comes directly after ``PLACE``, not at the far end of the wide lane.
+
+    The sort must not move a column: ``KEY`` stays above the keys in both states.
+    """
+    from meshterm.ui.contactlist import _GAP, _header
+
+    lanes = (dataclasses.replace(PLACE_LANE, width=30),)
+    for sort in ("place", "name"):
+        header = _header(10, _sort(sort), lanes).plain
+        if sort == "place":
+            assert "PLACE ▲" in header
+        # The pointer and the type glyph (4), the name lane, the place lane, each with its gap.
+        assert header.index("KEY") == 4 + (10 + _GAP) + (30 + _GAP)
 
 
 def test_ctrl_arrows_reach_the_place_column() -> None:
