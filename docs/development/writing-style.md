@@ -196,7 +196,8 @@ and in quoted text.
 | message | A text message, direct or on a channel | |
 | sender time | The time that a message or an advert carries, from the clock of the node that sent it. It is a claim, and a node with a wrong clock makes it false | timestamp (alone) |
 | arrival time | Our clock when MeshTerm got a received message from the companion (`received_at`) | receive time |
-| clock offset | The sender time minus the arrival time. A positive offset is a clock ahead of ours | skew, drift (for this) |
+| clock offset | The sender time minus the arrival time. A positive offset is a clock ahead of ours. The offset of a node is the median of its three newest clock samples | skew, drift (for this) |
+| clock sample | One packet that gives a clock offset: an advert, a direct message, or a channel message, with its sender time and our time | |
 | corrected time | The arrival time that the screen shows in place of a wrong sender time, with the `?` mark | |
 | send | MeshTerm gives a message, a packet, or a command to the device | emit |
 | transmit | A radio puts a packet on the air | |

@@ -12,7 +12,7 @@ import sqlite3
 import statistics
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -83,8 +83,8 @@ _INSERT_OBSERVATION = (
     "INSERT INTO observations "
     "(run_id, node, public_key, name, kind, node_type, snr, rssi, lat, lon, path, "
     "observed_at, chan_hash, cipher_mac, crypted, payload_typename, dest, src, tag, "
-    "trace_snrs, route, transport_code, scope_body) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "trace_snrs, route, transport_code, scope_body, sent_at) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 
 #: The SQL form of :attr:`~meshterm.core.models.ChatMessage.arrived_at`: the best time on
@@ -175,6 +175,16 @@ def _as_when(iso: Any) -> datetime | None:
         return None
     try:
         return datetime.fromisoformat(str(iso))
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_int_or_none(value: Any) -> int | None:
+    """Read a whole number from a raw payload, or return ``None`` when it is not one."""
+    if isinstance(value, bool):
+        return None
+    try:
+        return int(value)
     except (TypeError, ValueError):
         return None
 
@@ -1168,6 +1178,18 @@ class Repository:
         transport_code = raw.get("transport_code") if route in SCOPED_ROUTES else None
         body = raw_scope_body(raw) if route == "TC_FLOOD" and transport_code else None
         scope_body = body.hex() if body is not None else None
+        # The own time of an advert, by the clock of its sender. With ``observed_at`` (our
+        # clock), it gives the clock offset of the node (refer to
+        # :mod:`~meshterm.services.clock_offsets`). Zero is a clock that was never set,
+        # which is a reading too, but not a time: it stays NULL.
+        sent_at = None
+        if typename == "ADVERT":
+            stamp = _as_int_or_none(raw.get("adv_timestamp"))
+            if stamp:
+                try:
+                    sent_at = datetime.fromtimestamp(stamp, tz=timezone.utc).isoformat()
+                except (OverflowError, OSError, ValueError):
+                    sent_at = None
         return (
             run_id,
             obs.node,
@@ -1192,6 +1214,7 @@ class Repository:
             route,
             transport_code,
             scope_body,
+            sent_at,
         )
 
     def observation_count(self) -> int:
@@ -2317,6 +2340,83 @@ class Repository:
             "WHERE is_channel = 0 AND outbound = 0 AND peer IS NOT NULL GROUP BY peer"
         ).fetchall()
         return {row["peer"]: datetime.fromisoformat(row["last"]) for row in rows}
+
+    def advert_clock_samples(
+        self, *, since: datetime | None = None, node: str | None = None
+    ) -> list[tuple[str, datetime, datetime]]:
+        """The adverts that carry their own time: one clock sample for each.
+
+        Args:
+            since: Only the adverts heard at this time or later.
+            node: Only the adverts of this node (its 12-hex id).
+
+        Returns:
+            ``(node, sent_at, observed_at)`` for each advert, oldest first. ``sent_at`` is
+            the clock of the node, and ``observed_at`` is ours.
+        """
+        sql = "SELECT node, sent_at, observed_at FROM observations WHERE sent_at IS NOT NULL"
+        args: list[Any] = []
+        if node is not None:
+            sql += " AND node = ?"
+            args.append(node.lower()[:12])
+        if since is not None:
+            sql += " AND observed_at >= ?"
+            args.append(since.isoformat())
+        samples = []
+        for row in self._conn.execute(sql + " ORDER BY observed_at", args):
+            sent, heard = _as_when(row["sent_at"]), _as_when(row["observed_at"])
+            if row["node"] and sent is not None and heard is not None:
+                samples.append((row["node"], sent, heard))
+        return samples
+
+    def message_clock_samples(
+        self,
+        *,
+        since: datetime | None = None,
+        peer: str | None = None,
+        sender: str | None = None,
+    ) -> list[tuple[bool, str | None, str, datetime, datetime]]:
+        """The received messages with a known arrival time: one clock sample for each.
+
+        A message from the queue of the companion (``waited``) is not a sample, because its
+        arrival time is not known. A room post is not a sample either: its time is when its
+        author posted it, not when the room sent it. Our own messages have no sender clock.
+
+        Args:
+            since: Only the messages that arrived at this time or later.
+            peer: Only the direct messages of this key prefix (either one can be the
+                longer one).
+            sender: Only the channel messages whose ``Name: `` prefix is this name.
+
+        Returns:
+            ``(is_channel, peer, text, created_at, received_at)`` for each message, oldest
+            first. ``created_at`` is the sender time, and ``received_at`` is ours.
+        """
+        sql = (
+            "SELECT is_channel, peer, text, created_at, received_at FROM messages "
+            "WHERE outbound = 0 AND received_at IS NOT NULL AND waited = 0 AND author IS NULL"
+        )
+        args: list[Any] = []
+        if since is not None:
+            sql += " AND received_at >= ?"
+            args.append(since.isoformat())
+        if peer is not None:
+            key = peer.lower()
+            sql += (
+                " AND is_channel = 0 AND peer IS NOT NULL"
+                " AND (? LIKE peer || '%' OR peer LIKE ? || '%')"
+            )
+            args += [key, key]
+        if sender is not None:
+            prefix = f"{sender}:"
+            sql += " AND is_channel = 1 AND substr(text, 1, ?) = ?"
+            args += [len(prefix), prefix]
+        samples = []
+        for row in self._conn.execute(sql + " ORDER BY received_at", args):
+            sent, arrived = _as_when(row["created_at"]), _as_when(row["received_at"])
+            if sent is not None and arrived is not None:
+                samples.append((bool(row["is_channel"]), row["peer"], row["text"], sent, arrived))
+        return samples
 
     def direct_message_bounds(
         self, peer: str | None, when: datetime, *, outbound: bool

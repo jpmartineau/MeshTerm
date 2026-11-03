@@ -201,7 +201,141 @@ def test_the_migration_adds_the_columns_and_leaves_old_rows_alone(tmp_path: Path
     migrated = db.connect(path)
     row = migrated.execute("SELECT received_at, waited FROM messages").fetchone()
     assert row["received_at"] is None and row["waited"] == 0
+    observation_cols = {r["name"] for r in migrated.execute("PRAGMA table_info(observations)")}
+    assert "sent_at" in observation_cols
     migrated.close()
+
+
+# -- the clock offset of a node -------------------------------------------------------------
+
+NODE = "c0ffee123456"
+
+
+def _advert(repo: Repository, run: int, node_key: str, sent, heard) -> None:  # noqa: ANN001
+    """An ADVERT packet in the RX log: the time of its node, and our time of reception."""
+    from meshterm.core.models import Observation
+
+    raw = {
+        "payload_typename": "ADVERT",
+        "adv_key": node_key,
+        "adv_timestamp": int(sent.timestamp()),
+    }
+    repo.record_observation(
+        run,
+        Observation(node=node_key[:12], kind="packet", path="", observed_at=heard, raw=raw),
+    )
+
+
+def test_an_advert_keeps_its_own_time(tmp_path: Path) -> None:
+    """The RX log gives the advert time. Other packets and a time of zero store nothing."""
+    from meshterm.core.models import Observation
+
+    repo = Repository(tmp_path / "obs.db")
+    run = repo.start_run("monitor", {}, None)
+    now = utcnow().replace(microsecond=0)
+    _advert(repo, run, NODE + "00" * 26, now - timedelta(hours=2), now)
+    never_set = {"payload_typename": "ADVERT", "adv_key": "ab" * 32, "adv_timestamp": 0}
+    repo.record_observation(
+        run, Observation(node="ab" * 6, kind="packet", path="", observed_at=now, raw=never_set)
+    )
+    (sample,) = repo.advert_clock_samples()
+    assert sample == (NODE, now - timedelta(hours=2), now)
+    repo.close()
+
+
+def test_the_offset_is_the_median_of_the_newest_three() -> None:
+    """One wrong sample has no effect, and the old samples do not count."""
+    from meshterm.services.clock_offsets import ClockSample, offsets
+
+    now = utcnow()
+
+    def sample(minutes_ago: int, offset_s: float) -> ClockSample:
+        arrived = now - timedelta(minutes=minutes_ago)
+        return ClockSample(NODE, True, arrived + timedelta(seconds=offset_s), arrived)
+
+    # Old samples a day behind, then the clock was set: two good samples and one glitch.
+    found = offsets(
+        [sample(90, -86400), sample(80, -86400), sample(30, 4), sample(20, 9000), sample(10, 6)]
+    )
+    (offset,) = found
+    assert offset.offset_s == 6
+    assert offset.samples == 5
+    assert offset.last_at == now - timedelta(minutes=10)
+    assert not offset.out_of_sync(TOLERANCE)
+
+
+def test_a_channel_sender_counts_for_its_node_or_under_its_name(tmp_path: Path) -> None:
+    """A name with one key gives samples to that node. Another name keeps its own samples."""
+    from meshterm.services.clock_offsets import offsets, window_samples
+
+    repo = Repository(tmp_path / "chat.db")
+    run = repo.start_run("monitor", {}, None)
+    now = utcnow().replace(microsecond=0)
+    _advert(
+        repo, run, NODE + "00" * 26, now - timedelta(hours=3, minutes=5), now - timedelta(minutes=5)
+    )
+    for text in ("Bob: hi", "Stranger: hello"):
+        repo.record_chat_message(
+            ChatMessage.from_message(
+                Message(
+                    text=text,
+                    channel=0,
+                    is_channel=True,
+                    sender_timestamp=now - timedelta(hours=3),
+                    received_at=now,
+                ),
+                channel_id="c",
+            )
+        )
+    keys = {"bob": NODE + "00" * 26}
+    samples = window_samples(repo, since=None, key_of=lambda name: keys.get(name.casefold()))
+    found = {(o.who, o.keyed): o for o in offsets(samples)}
+    assert found[(NODE, True)].samples == 2  # the advert and the channel message
+    assert found[(NODE, True)].offset_s == -3 * 3600
+    assert found[("Stranger", False)].samples == 1
+    repo.close()
+
+
+def test_the_node_offset_joins_adverts_dms_and_its_channel_messages(tmp_path: Path) -> None:
+    """The node page reads all the history of one node.
+
+    Its channel messages count only when its name resolves to it: another node can use
+    the same name.
+    """
+    from meshterm.services.clock_offsets import node_offset
+
+    repo = Repository(tmp_path / "chat.db")
+    run = repo.start_run("monitor", {}, None)
+    now = utcnow().replace(microsecond=0)
+    _advert(repo, run, NODE + "00" * 26, now - timedelta(days=2), now - timedelta(hours=1))
+    repo.record_chat_message(
+        ChatMessage.from_message(
+            Message(
+                text="hi", sender=NODE, sender_timestamp=now - timedelta(days=2), received_at=now
+            )
+        )
+    )
+    repo.record_chat_message(
+        ChatMessage.from_message(
+            Message(
+                text="Bob: on the channel",
+                channel=0,
+                is_channel=True,
+                sender_timestamp=now - timedelta(days=2),
+                received_at=now,
+            ),
+            channel_id="c",
+        )
+    )
+    mine = node_offset(repo, NODE, name="Bob", key_of=lambda _name: NODE + "00" * 26)
+    assert mine is not None and mine.samples == 3
+    assert mine.out_of_sync(TOLERANCE)
+    assert format_offset(mine.offset_s) == "2d behind"
+
+    other = node_offset(repo, NODE, name="Bob", key_of=lambda _name: "ab" * 32)
+    assert other is not None and other.samples == 2  # the name belongs to another key
+    assert node_offset(repo, "ab" * 6) is None
+    repo.close()
 
 
 # -- the packet log -------------------------------------------------------------------------

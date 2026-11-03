@@ -12,7 +12,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -143,8 +143,10 @@ CREATE TABLE IF NOT EXISTS observations (
     trace_snrs  TEXT,             -- TRACE rows: comma-separated per-hop SNR readings (dB)
     route       TEXT,             -- 'packet' rows: FLOOD/DIRECT/… — what `path` MEANS here
     transport_code TEXT,          -- scoped (TC_*) rows: the 4-byte transport-codes field (hex)
-    scope_body  TEXT              -- TC_FLOOD rows: payload type byte + payload (hex), the
+    scope_body  TEXT,             -- TC_FLOOD rows: payload type byte + payload (hex), the
                                   --   HMAC input a region name is resolved against
+    sent_at     TEXT              -- ADVERT packet rows: the advert's own time, by the
+                                  --   sender's clock (observed_at is ours)
 );
 
 -- One chat message, sent or received, on a channel or with a contact. Unlike the other
@@ -411,6 +413,22 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # before (refer to Repository._ARRIVED_AT).
         conn.execute("ALTER TABLE messages ADD COLUMN received_at TEXT")
         conn.execute("ALTER TABLE messages ADD COLUMN waited INTEGER NOT NULL DEFAULT 0")
+    # The report of clock offsets reads the received messages of a time window by their
+    # arrival time.
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_received_at ON messages(received_at)")
+    if "sent_at" not in observation_cols:
+        # v21 -> v22: the own time of an advert. An advert carries the clock of its sender,
+        # and ``observed_at`` is our clock when we heard it. The difference is the clock
+        # offset of that node (refer to meshterm.services.clock_offsets). Only the RX log
+        # gives the time of an advert, so only ADVERT packet rows have it. Older rows have
+        # NULL: the raw packet was never stored, so nothing can bring the time back.
+        conn.execute("ALTER TABLE observations ADD COLUMN sent_at TEXT")
+    # Only the rows with an advert time, by node and then by time: the offset of one node
+    # reads its newest few, and the report reads a time window.
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_observations_sent ON observations(node, observed_at) "
+        "WHERE sent_at IS NOT NULL"
+    )
 
     stored = conn.execute("SELECT value FROM schema_meta WHERE key = 'version'").fetchone()
     if stored is not None and int(stored["value"]) < 19:

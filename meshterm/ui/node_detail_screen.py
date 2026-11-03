@@ -113,6 +113,7 @@ from ..core.connection import ContactNotOnDeviceError, DeviceCommandError
 from ..core.geo import haversine_km, usable_fix
 from ..core.models import NODE_TYPE_LABELS, NODE_TYPE_REPEATER, Contact, utcnow
 from ..platforms import Platform, on_platform
+from ..services.clock_offsets import node_offset
 from . import menus
 from .mapcanvas import RGB
 from .marks import SELF_MARK
@@ -147,6 +148,7 @@ from .widgets import (
     _recency_style,
     age_seconds,
     format_ago,
+    format_offset,
     highlighted_hash,
     node_type_legend,
     short_frame,
@@ -1555,6 +1557,14 @@ async def open_node_detail(
         signal = _signal_row(hn)
         if signal is not None:
             info_rows.append(("signal", signal))
+        clock = _clock_row(
+            ctx,
+            node_id,
+            name,
+            make_name_key_resolver(contacts, stored_names, heard=named_at),
+        )
+        if clock is not None:
+            info_rows.append(("clock", clock))
     if lat is not None and lon is not None:
         info_rows.append(("where", _range_text(lat, lon, self_lat, self_lon)))
     # The regions of a repeater: what it was last heard to relay, from the region store (its
@@ -2171,6 +2181,31 @@ def _signal_row(hn) -> Text | None:  # noqa: ANN001 - Optional[HeardNode]
             text.append("  ·  ", style="muted")
         text.append(f"RSSI {hn.last_rssi:.0f} dBm", style="muted")
     return text if text.plain else None
+
+
+def _clock_row(ctx, node_id: str, name: str | None, key_of) -> Text | None:  # noqa: ANN001
+    """How far the clock of the node is from ours, or ``None`` when no packet told it.
+
+    The offset is in ``warn`` when it is past the ``clock_tolerance_s`` preference, so that
+    a node whose times are wrong is visible on its own page. The muted aside says how old
+    the newest sample is (refer to :mod:`~meshterm.services.clock_offsets`).
+    """
+    if not node_id:
+        return None
+    try:
+        offset = node_offset(ctx.repo, node_id, name=name, key_of=key_of)
+    except Exception:  # noqa: BLE001 - the page is useful without the clock line
+        return None
+    if offset is None:
+        return None
+    tolerance = ctx.preferences.clock_tolerance_s
+    text = Text()
+    if offset.out_of_sync(tolerance):
+        text.append(format_offset(offset.offset_s), style="warn")
+    else:
+        text.append("in sync")
+    text.append(f"  ·  {format_ago(age_seconds(offset.last_at))}", style="muted")
+    return text
 
 
 def _hop_hash(key: str | None, fallback: str, hash_bytes: int) -> str:
