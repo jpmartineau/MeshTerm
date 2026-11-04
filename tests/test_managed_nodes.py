@@ -161,6 +161,95 @@ def test_the_admin_picker_lists_managed_nodes_first_with_the_key(tmp_path: Path)
     )
 
 
+def test_only_a_managed_row_of_the_picker_takes_delete(tmp_path: Path) -> None:
+    """Delete forgets a stored password, so it acts only where a password is stored."""
+    from meshterm.ui.admin_picker import admin_picker_rows
+    from meshterm.ui.tui import Choice
+
+    store = AdminStore(tmp_path / "admin.json")
+    managed = Contact(name="Hilltop", public_key=KEY, node_type=NODE_TYPE_REPEATER)
+    other = Contact(name="Valley", public_key="cd" * 32, node_type=NODE_TYPE_REPEATER)
+    store.remember(managed, "secret")
+    items, _ = admin_picker_rows(SimpleNamespace(admin_store=store), [other, managed])
+
+    deletable = {row.value: row.deletable for row in items if isinstance(row, Choice)}
+    assert deletable == {"Hilltop": True, "Valley": False}
+
+
+async def _picker_top(session, title: str):  # noqa: ANN001, ANN202
+    """The picker once it is the top screen, or ``None``."""
+    from meshterm.ui.tui import SelectScreen
+
+    for _ in range(200):
+        top = session.top
+        if isinstance(top, SelectScreen) and top.title == title:
+            return top
+        await asyncio.sleep(0)
+    return None
+
+
+async def _dialog_top(session):  # noqa: ANN001, ANN202
+    """The button dialog once it is the top screen, or ``None``."""
+    from meshterm.ui.tui.prompt import ButtonDialog
+
+    for _ in range(200):
+        if isinstance(session.top, ButtonDialog):
+            return session.top
+        await asyncio.sleep(0)
+    return None
+
+
+@pytest.mark.parametrize("confirmed", [True, False])
+async def test_delete_in_the_admin_picker_forgets_the_password(
+    tmp_path: Path, confirmed: bool
+) -> None:
+    """GitHub issue 28: the user changed a password and had no way to clear the stored one.
+
+    Delete on a managed node asks first (amber, Cancel or Forget). Forget removes the
+    password, and the same list refreshes in place: the node leaves the managed section,
+    the highlight stays on it, and the list stays open. Cancel changes nothing.
+    """
+    from meshterm.ui.admin_picker import FORGET_HINT, pick_admin_node
+    from meshterm.ui.surface import TuiUi
+    from meshterm.ui.tui import CANCEL
+    from meshterm.ui.tui.session import TuiSession
+
+    store = AdminStore(tmp_path / "admin.json")
+    managed = Contact(name="Hilltop", public_key=KEY, node_type=NODE_TYPE_REPEATER)
+    other = Contact(name="Valley", public_key="cd" * 32, node_type=NODE_TYPE_REPEATER)
+    store.remember(managed, "secret")
+    ctx = SimpleNamespace(ui=TuiUi(TuiSession()), admin_store=store)
+    session = ctx.ui.session
+
+    task = asyncio.ensure_future(pick_admin_node(ctx, [other, managed], title="Pick", prompt=""))
+    try:
+        box = await _picker_top(session, "Pick")
+        assert box is not None
+        assert box._current_choice().value == "Hilltop"
+        assert FORGET_HINT in box.footer_hint
+        box.handle("delete")
+
+        confirm = await _dialog_top(session)
+        assert confirm is not None, "Delete asks before it forgets"
+        assert [label for label, _ in confirm._buttons] == ["Cancel", "Forget"]
+        assert confirm.title == "Forget password — Hilltop"
+        confirm.resolve(confirmed)
+
+        again = await _picker_top(session, "Pick")
+        assert again is box, "the same list, refreshed in place"
+        current = box._current_choice()
+        assert current.value == "Hilltop", "the highlight follows the node"
+        assert current.deletable is (not confirmed)
+        box.resolve(CANCEL)
+        assert await task is None
+    finally:
+        if not task.done():
+            task.cancel()
+
+    assert (store.get(managed) is None) is confirmed
+    assert session._stack == []
+
+
 # -- the Clock drift page -------------------------------------------------------------------
 
 

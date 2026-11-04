@@ -374,6 +374,68 @@ def test_turn_page_drops_the_filter_and_highlights_the_named_row() -> None:
     assert screen._current_choice().value == "a", "no default: the first row"
 
 
+def test_a_turned_page_brings_its_own_delete_key() -> None:
+    """A page that removes nothing has no ``Del`` atom, also after a page that had one."""
+    screen = SelectScreen(
+        "Link — step 1 of 2",
+        [Choice("alpha", "a", deletable=True)],
+        delete_hint="Del forget",
+    )
+    assert "Del forget" in screen.footer_hint
+
+    screen.turn_page([Choice("beta", "b")], title="Link — step 2 of 2")
+    assert "Del" not in screen.footer_hint
+
+    screen.turn_page(
+        [Choice("alpha", "a", deletable=True)], title="Link — step 1 of 2", delete_hint="Del forget"
+    )
+    assert "Del forget" in screen.footer_hint
+
+
+async def test_delete_on_a_wizard_page_refreshes_the_page_and_answers_nothing() -> None:
+    """Delete is not an answer: the page stays, with the rows that ``on_delete`` returns."""
+    from meshterm.ui.menus import WizardPage, run_wizard
+    from meshterm.ui.tui.session import TuiSession
+
+    removed: list = []
+
+    async def on_delete(value):  # noqa: ANN001, ANN202
+        removed.append(value)
+        return [Choice("alpha", "a"), Choice("beta", "b")]
+
+    def first(values: list) -> WizardPage:
+        return WizardPage(
+            "Link — step 1 of 2",
+            [Choice("alpha", "a", deletable=True), Choice("beta", "b")],
+            delete_hint="Del forget",
+            on_delete=on_delete,
+        )
+
+    session = TuiSession()
+    run = asyncio.ensure_future(run_wizard(session, [first]))
+    try:
+        for _ in range(200):
+            if isinstance(session.top, SelectScreen):
+                break
+            await asyncio.sleep(0)
+        box = session.top
+        box.handle("delete")
+        for _ in range(200):
+            if removed:
+                break
+            await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert removed == ["a"]
+        assert not run.done(), "the page is still asking"
+        assert session.top is box
+        assert box._current_choice().value == "a" and not box._current_choice().deletable
+        box.resolve("b")
+        assert await asyncio.wait_for(run, timeout=2) == ["b"]
+    finally:
+        if not run.done():
+            run.cancel()
+
+
 # --- a wizard is a stepped chain in one box ------------------------------------
 
 

@@ -523,7 +523,15 @@ class SelectScreen(Screen):
                 self._index = i
                 return
 
-    def turn_page(self, items: list, *, title: str, prompt: str = "", default: Any = None) -> None:
+    def turn_page(
+        self,
+        items: list,
+        *,
+        title: str,
+        prompt: str = "",
+        default: Any = None,
+        delete_hint: str = "",
+    ) -> None:
         """Show a different list in the same box: the next or previous page of a stepped dialog.
 
         This is the other way that the rows of a list change while the user looks at them.
@@ -538,6 +546,8 @@ class SelectScreen(Screen):
         - The highlight goes to ``default`` or to the first row. (A page that the user turns
           back to offers its previous answer, exactly as a step of
           :func:`~meshterm.ui.menus.run_steps` does.)
+        - The Delete key is the key of the new page. A page that removes nothing gets no
+          ``Del`` atom and no ``Delete`` chip on the F-key lane.
 
         Args:
             items: The rows of the new page, in the order to show.
@@ -545,7 +555,10 @@ class SelectScreen(Screen):
                 is.
             prompt: The instruction above the rows, or ``""`` for none.
             default: The choice value to highlight, if it is present.
+            delete_hint: The ``Del`` atom of the new page (refer to the argument of the
+                same name of :class:`SelectScreen`), or ``""`` for none.
         """
+        self._delete_hint = delete_hint
         self._items = items
         if self._hscroll_auto:
             self._hscroll = any(getattr(item, "hscroll_from", 0) > 0 for item in items)

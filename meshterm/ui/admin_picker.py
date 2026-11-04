@@ -15,6 +15,11 @@ It is drawn as a box, and it is gone when the user answers it. It is never a scr
 stack under the page of the tool, where Esc would land. It was once kept pushed as a hub
 for the whole visit. Then, when the user left the admin page, Esc landed on the list from
 which the user selected the node. This looked like two places where there is one.
+
+Delete on a managed node forgets its password, after a confirm (``Del forget``). This is
+the one place in the menu where the user can make MeshTerm forget an admin password. A
+stock node does not answer a wrong password, so MeshTerm cannot find out by itself that a
+stored password is stale (GitHub issue 28, and refer to :mod:`meshterm.ui.admin_login`).
 """
 
 from __future__ import annotations
@@ -28,6 +33,9 @@ from ..core.models import NODE_TYPE_REPEATER, NODE_TYPE_ROOM, Contact
 if TYPE_CHECKING:
     from ..context import AppContext
 
+#: The footer atom of the Delete key on a managed node.
+FORGET_HINT = "Del forget"
+
 
 def admin_picker_rows(ctx: AppContext, contacts: list[Contact]) -> tuple[list, list[Contact]]:
     """Build the grouped rows of the admin-node picker and the contacts that they map to.
@@ -36,6 +44,8 @@ def admin_picker_rows(ctx: AppContext, contacts: list[Contact]) -> tuple[list, l
     list. :func:`pick_admin_node` runs these rows as a one-shot dialog. TX optimize turns
     them as the first page of its dialog with steps. Each row has ``value = contact.name``,
     so a name that the user selects (or a ``default``) resolves through ``candidates``.
+    The rows of the managed nodes are :attr:`~meshterm.ui.tui.select.Choice.deletable`:
+    Delete on one of them forgets its password (refer to :func:`forget_row`).
 
     Args:
         ctx: The shared application context (for the admin store, which sorts the
@@ -56,7 +66,7 @@ def admin_picker_rows(ctx: AppContext, contacts: list[Contact]) -> tuple[list, l
     from .tui import Choice
     from .widgets import DEFAULT_GLYPH, NODE_GLYPHS
 
-    candidates = [c for c in contacts if (c.public_key or c.key_prefix).strip()]
+    candidates = _candidates(contacts)
     if not candidates:
         return [], candidates
     remembered = [c for c in candidates if ctx.admin_store.get(c) is not None]
@@ -80,7 +90,7 @@ def admin_picker_rows(ctx: AppContext, contacts: list[Contact]) -> tuple[list, l
             contact.name,
             style=name_style(contact.name, contact.public_key or contact.key_prefix),
         )
-        return Choice(title=label, value=contact.name)
+        return Choice(title=label, value=contact.name, deletable=contact in remembered)
 
     def recency(contact: Contact) -> float:
         return -(contact.last_seen.timestamp() if contact.last_seen else 0.0)
@@ -137,20 +147,86 @@ async def pick_admin_node(
         await _note_nothing_to_pick(ctx, title)
         return None
 
-    choice = await ctx.ui.select(
+    from .tui import CANCEL, SelectScreen
+    from .tui.select import DeleteRequest
+
+    screen = SelectScreen(
         title,
         items,
         prompt=prompt,
         default=default.name if default is not None else None,
-        floating=True,
+        delete_hint=FORGET_HINT,
     )
-    return _resolve(candidates, choice)
+    # The box stays pushed while the user forgets passwords in it, so the confirm floats
+    # over the list, and the list refreshes in place. It is popped before the caller
+    # gets the node, as a one-shot dialog is.
+    async with ctx.ui.session.stay(screen, dialog=True) as visit:
+        while True:
+            choice = await visit.result()
+            if isinstance(choice, DeleteRequest):
+                rows = await forget_row(ctx, contacts, choice.value)
+                if rows is not None:
+                    screen.replace_items(rows)
+                continue
+            return None if choice is CANCEL else _resolve(candidates, choice)
+
+
+async def forget_password(ctx: AppContext, node: Contact) -> bool:
+    """Ask for a confirmation, then forget the stored admin password of ``node``.
+
+    The confirm is amber, as the confirm to forget a room is: the next login asks for the
+    password again, and a user who does not know it any more cannot log in.
+
+    Args:
+        ctx: The shared application context (for the dialog and the admin store).
+        node: The managed node.
+
+    Returns:
+        ``True`` when MeshTerm forgot the password.
+    """
+    if not await ctx.ui.dialog(
+        f"Forget the admin password of {node.name}? The next login asks for it again.",
+        [("Cancel", False), ("Forget", True)],
+        title=f"Forget password — {node.name}",
+        default=1,
+        danger=True,
+    ):
+        return False
+    ctx.admin_store.forget(node)
+    return True
+
+
+async def forget_row(ctx: AppContext, contacts: list[Contact], value: Any) -> list | None:
+    """Forget the password of the node on a picker row, and return the new rows.
+
+    This is what Delete does on a row of :func:`admin_picker_rows`, in each list that
+    shows those rows (:func:`pick_admin_node`, and the first page of the TX optimize
+    dialog). The node moves out of the managed section, so the caller replaces the rows.
+
+    Args:
+        ctx: The shared application context.
+        contacts: The contacts that the rows were built from.
+        value: The value of the row (the name of the contact).
+
+    Returns:
+        The new rows, or ``None`` when nothing changed (the user cancelled, or the row
+        names no node).
+    """
+    node = _resolve(_candidates(contacts), value)
+    if node is None or not await forget_password(ctx, node):
+        return None
+    return admin_picker_rows(ctx, contacts)[0]
 
 
 async def _note_nothing_to_pick(ctx: AppContext, title: str) -> None:
     """Say that no node can be offered, and show this. MeshTerm opens no list."""
     ctx.ui.note("[err]no contacts with a key — receive an advert first[/err]")
     await ctx.ui.present(title=title)
+
+
+def _candidates(contacts: list[Contact]) -> list[Contact]:
+    """The contacts that the picker can offer: those that have a key."""
+    return [c for c in contacts if (c.public_key or c.key_prefix).strip()]
 
 
 def _resolve(candidates: list[Contact], choice: Any) -> Contact | None:

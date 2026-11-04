@@ -128,7 +128,7 @@ class TxOptimizeTool(Tool):
         Returns:
             A :class:`ToolResult` that repeats the stored summary of the sweep.
         """
-        from ..ui.admin_picker import admin_picker_rows
+        from ..ui.admin_picker import FORGET_HINT, admin_picker_rows, forget_row
         from ..ui.menus import WizardPage, run_wizard
         from ..ui.surface import TuiUi
         from ..ui.tx_screen import open_tx_optimize
@@ -149,12 +149,23 @@ class TxOptimizeTool(Tool):
         def admin_of(values: list) -> Contact:
             return next(c for c in candidates if c.name == values[0])
 
+        async def forget(value: Any) -> list | None:
+            nonlocal items
+            rows = await forget_row(ctx, contacts, value)
+            if rows is not None:
+                items = rows  # so that a turn back to this page shows the change
+            return rows
+
         def node_page(values: list) -> WizardPage:
+            # Delete on a managed node forgets its password, as in the picker of
+            # repeater admin (refer to :func:`~meshterm.ui.admin_picker.forget_row`).
             return WizardPage(
                 title="TX optimize — node to tune · step 1 of 2",
                 items=items,
                 prompt="Whose transmit power gets tuned (you need its admin password):",
                 default=values[0],
+                delete_hint=FORGET_HINT,
+                on_delete=forget,
             )
 
         def target_page(values: list) -> WizardPage | Any:

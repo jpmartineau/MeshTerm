@@ -577,12 +577,21 @@ class WizardPage:
         default: The value to highlight. When the user comes back to a step, the step
             gives its previous answer here. :func:`run_steps` uses the same convention for
             its steps.
+        delete_hint: The ``Del`` atom of the page, for rows marked
+            :attr:`~meshterm.ui.tui.select.Choice.deletable`. Empty for a page that removes
+            nothing.
+        on_delete: What Delete does on a row of this page. It gets the value of the row
+            and returns the new rows of the page, or ``None`` when nothing changed (for
+            example, the user cancelled a confirm). The page stays open in both cases,
+            because a removal is not an answer to the question of the page.
     """
 
     title: str
     items: list
     prompt: str = ""
     default: Any = None
+    delete_hint: str = ""
+    on_delete: Callable[[Any], Awaitable[list | None]] | None = None
 
 
 async def run_wizard(
@@ -625,16 +634,31 @@ async def run_wizard(
     """
     from .tui import SelectScreen
     from .tui.screen import CANCEL
+    from .tui.select import DeleteRequest
 
     values: list = [None] * len(pages)
     index = 0
     step = pages[0](values)
     if not isinstance(step, WizardPage):
         raise TypeError("the first step of a wizard must be a WizardPage")
-    screen = SelectScreen(step.title, step.items, prompt=step.prompt, default=step.default)
+    screen = SelectScreen(
+        step.title,
+        step.items,
+        prompt=step.prompt,
+        default=step.default,
+        delete_hint=step.delete_hint,
+    )
     async with session.stay(screen, dialog=True) as visit:
         while True:
             answer = await visit.result() if isinstance(step, WizardPage) else await step
+            if isinstance(answer, DeleteRequest):
+                # A removal on the page, not an answer: the page refreshes in place, and the
+                # highlight follows its row.
+                if isinstance(step, WizardPage) and step.on_delete is not None:
+                    items = await step.on_delete(answer.value)
+                    if items is not None:
+                        screen.replace_items(items)
+                continue
             if answer is CANCEL or answer is None:
                 index -= 1
                 if index < 0:
@@ -649,7 +673,11 @@ async def run_wizard(
             step = pages[index](values)
             if isinstance(step, WizardPage):
                 screen.turn_page(
-                    step.items, title=step.title, prompt=step.prompt, default=step.default
+                    step.items,
+                    title=step.title,
+                    prompt=step.prompt,
+                    default=step.default,
+                    delete_hint=step.delete_hint,
                 )
 
 
