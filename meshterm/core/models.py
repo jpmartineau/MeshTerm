@@ -82,6 +82,11 @@ class LoginResult(Enum):
     tells nothing about the password: the node may be asleep or out of range, or the reply
     may be lost on its way back. Thus the credential must stay after a silence.
 
+    But a stock repeater or room server never refuses. It sends no reply at all for a
+    wrong password. Thus a password that the owner changed also comes back as silence, and
+    the menu offers the user a new password when a stored one gets no reply (refer to
+    :mod:`meshterm.ui.admin_login`).
+
     The value is truthy only when the session opened. Thus the old idiom
     ``if not await device.admin_login(...)`` still means "we are not logged in". The code
     tells the two failures apart by identity. Thus each call site must say which failure
@@ -90,10 +95,11 @@ class LoginResult(Enum):
 
     #: The node accepted the password. An admin session is open.
     ACCEPTED = "accepted"
-    #: The node answered and said no. The stored password is wrong. Forget it.
+    #: The node answered and said no. The stored password is wrong. Forget it. Only
+    #: firmware other than stock MeshCore gives this result.
     REFUSED = "refused"
-    #: No reply came back. The node is out of range or asleep, or the reply was lost. Keep
-    #: the password.
+    #: No reply came back. The node is out of range or asleep, the reply was lost, or the
+    #: password is wrong (a stock node does not answer a wrong password). Keep the password.
     NO_REPLY = "no_reply"
 
     def __bool__(self) -> bool:

@@ -541,13 +541,20 @@ async def _setup_link(optimal_remote_tx: int = 20):
 
 
 async def test_admin_login_rejects_wrong_password() -> None:
-    """The device refuses a wrong admin password, and the node stays closed to tuning."""
+    """A wrong admin password opens nothing, and the node stays closed to tuning.
+
+    A stock node does not answer a wrong password, so the simulator gives no reply. A node
+    whose firmware refuses (``_refusing``) says no.
+    """
     from meshterm.core.connection import LoginResult
 
     device = MockDevice(admin_password="secret")
     await device.connect()
     admin = (await device.get_contacts())[0]
 
+    silent = await device.admin_login(admin, "nope")
+    assert silent is LoginResult.NO_REPLY and not silent
+    device._refusing.add(admin.name)
     refused = await device.admin_login(admin, "nope")
     assert refused is LoginResult.REFUSED and not refused
     with pytest.raises(DeviceCommandError):

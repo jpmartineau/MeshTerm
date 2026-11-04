@@ -6,10 +6,15 @@ password of that repeater. The login returned ``False``. Each caller read ``Fals
 "wrong password", and MeshTerm deleted the credential for a node that never answered.
 
 Two faults caused this. First, the ``meshcore`` library function ``send_login_sync`` waits
-for ``LOGIN_SUCCESS`` and for nothing else. The firmware does send a refusal (a
-``LOGIN_FAILED`` frame), but the function times out on it in the same way as on silence,
-and returns the same ``None``. Second, the credential policy was in five places, at the
-call sites.
+for ``LOGIN_SUCCESS`` and for nothing else. The companion does send a refusal (a
+``LOGIN_FAILED`` frame) when a node says no, but the function times out on it in the same
+way as on silence, and returns the same ``None``. Second, the credential policy was in five
+places, at the call sites.
+
+A stock repeater never says no: it sends no reply for a wrong password. Thus a password
+that the owner changed is also a silence, and the menu offers a new password when a stored
+one gets no reply (GitHub issue 28). The simulator does the same, and only a node in its
+``_refusing`` set refuses.
 
 Now the device listens for the refusal frame itself and returns a three-way
 :class:`~meshterm.core.models.LoginResult`. One method,
@@ -420,6 +425,23 @@ def test_a_known_short_route_never_buys_less_patience_than_no_route_at_all() -> 
 # --- the simulator gives the same three results ---------------------------------------
 
 
+async def test_the_simulator_answers_a_wrong_password_as_stock_firmware_does() -> None:
+    """A stock repeater sends nothing for a wrong password. Only a ``_refusing`` node says no.
+
+    The simulator once refused a wrong password. Thus ``--mock`` and the tests never walked
+    the path of GitHub issue 28: a password that the owner changed, which comes back as
+    silence on a real mesh.
+    """
+    device = MockDevice(admin_password="secret")
+    await device.connect()
+    node = (await device.get_contacts())[0]
+
+    assert await device.admin_login(node, "wrong") is LoginResult.NO_REPLY
+    device._refusing.add(node.name)
+    assert await device.admin_login(node, "wrong") is LoginResult.REFUSED
+    assert await device.admin_login(node, "secret") is LoginResult.ACCEPTED
+
+
 async def test_the_simulator_can_model_a_node_that_is_simply_down() -> None:
     """``--mock`` must be able to follow the path of a down repeater, or nobody sees the dialog."""
     device = MockDevice(admin_password="secret")
@@ -450,12 +472,18 @@ def ctx(tmp_path: Path):
     context.repo.close()
 
 
-async def _mock_node(ctx, *, down: bool) -> Contact:  # noqa: ANN001
-    """The simulated repeater, unreachable if ``down`` is true, with a stored password."""
+async def _mock_node(ctx, *, down: bool, refusing: bool = False) -> Contact:  # noqa: ANN001
+    """The simulated repeater, with a stored password.
+
+    It is unreachable if ``down`` is true. If ``refusing`` is true, it refuses a wrong
+    password, as firmware other than stock MeshCore can. Else it does not answer one.
+    """
     device = await ctx.device()
     node = next(c for c in await device.get_contacts() if c.name == "Yagi-Repeater")
     if down:
         device._unreachable.add(node.name)
+    if refusing:
+        device._refusing.add(node.name)
     ctx.admin_store.remember(node, "admin")
     return node
 
@@ -517,7 +545,7 @@ async def test_the_scripted_tool_clears_the_password_the_node_rejected(ctx) -> N
     """The other half: a node that is reachable and says no has a bad password."""
     from meshterm.tools.repeater_admin import RepeaterAdminTool
 
-    node = await _mock_node(ctx, down=False)
+    node = await _mock_node(ctx, down=False, refusing=True)
     ctx.admin_store.remember(node, "not-the-password")
 
     with pytest.raises(DeviceCommandError, match="wrong password"):
@@ -542,7 +570,7 @@ async def test_the_tx_optimizer_clears_the_password_the_node_rejected(ctx) -> No
     """The optimizer also forgets a password that the node refused."""
     from meshterm.tools.tx_optimize import TxOptimizeTool
 
-    node = await _mock_node(ctx, down=False)
+    node = await _mock_node(ctx, down=False, refusing=True)
     ctx.admin_store.remember(node, "not-the-password")
 
     with pytest.raises(DeviceCommandError, match="wrong password"):
@@ -620,7 +648,7 @@ async def test_the_admin_flow_says_no_reply_and_keeps_the_password(ctx) -> None:
 
 async def test_the_admin_flow_still_clears_a_password_the_node_rejected(ctx) -> None:  # noqa: ANN001
     """This behaviour was always correct. The test makes sure that it stays correct."""
-    node = await _mock_node(ctx, down=False)
+    node = await _mock_node(ctx, down=False, refusing=True)
     ctx.admin_store.remember(node, "not-the-password")
 
     ok, shown = await _run_login(ctx, node)
@@ -751,6 +779,35 @@ def test_a_refusal_message_starts_its_sentences_with_a_capital() -> None:
 
     assert typed.endswith("(wrong password?). Try again to enter a new one.")
     assert saved.endswith("The saved password was cleared; try again to enter a new one.")
+
+
+async def test_the_admin_flow_replaces_a_changed_password_on_the_simulator(ctx) -> None:  # noqa: ANN001
+    """GitHub issue 28 from end to end: the owner changed the password with a serial console.
+
+    The stored password gets silence from the simulated repeater, as from a real one. The
+    user selects "New password…", types the new password, and the repeater accepts it.
+    """
+    from meshterm.ui.repeater_admin import _login
+    from meshterm.ui.surface import TuiUi
+    from meshterm.ui.tui.prompt import ButtonDialog, TextScreen
+    from meshterm.ui.tui.session import TuiSession
+
+    node = await _mock_node(ctx, down=False)
+    ctx.admin_store.remember(node, "before-the-change")
+    ctx.ui = TuiUi(TuiSession())
+    task = asyncio.ensure_future(_login(ctx, await ctx.device(), node))
+    try:
+        offer = await _top(ctx, ButtonDialog)
+        assert offer is not None and "password changed" in str(offer._prompt)
+        offer.resolve(True)
+        (await _top(ctx, TextScreen)).resolve("admin")
+        ok = await task
+    finally:
+        if not task.done():
+            task.cancel()
+
+    assert ok is True
+    assert ctx.admin_store.get(node) == "admin"
 
 
 # --- no call site decides this locally again --------------------------------------------

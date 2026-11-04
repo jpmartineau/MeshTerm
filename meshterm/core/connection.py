@@ -1408,7 +1408,10 @@ class Device(ABC):
             ``if not await device.admin_login(...)``. A caller that acts on the failure
             must tell :attr:`~LoginResult.REFUSED` (the node said no: the password is
             wrong) from :attr:`~LoginResult.NO_REPLY` (nothing came back: the password is
-            not proved correct, and not proved wrong).
+            not proved correct, and not proved wrong). A stock repeater or room server
+            never says no: it does not answer a wrong password. Thus a wrong password
+            is usually :attr:`~LoginResult.NO_REPLY` (refer to
+            :mod:`meshterm.ui.admin_login`).
         """
 
     @abstractmethod
@@ -3616,10 +3619,12 @@ class MeshCoreDevice(Device):
         # ``send_login_sync`` waits for LOGIN_SUCCESS and *only* LOGIN_SUCCESS, and it does
         # not start to wait until its own send has returned. Thus:
         #
-        # * It never waits for a refusal. (The firmware does send a refusal, as a
-        #   LOGIN_FAILED frame that the library parses and dispatches like any other
-        #   event.) The refusal times out exactly like a node that MeshTerm cannot reach.
-        #   Both types of failure came back as the same ``None``.
+        # * It never waits for a refusal. (The companion sends a refusal as a LOGIN_FAILED
+        #   frame, which the library parses and dispatches like any other event. The
+        #   companion sends it when a reply arrives that is not "OK". A stock repeater
+        #   sends no reply at all for a wrong password, but other firmware can refuse.)
+        #   The refusal times out exactly like a node that MeshTerm cannot reach. Both
+        #   types of failure came back as the same ``None``.
         # * A worse case, for a node that MeshTerm can reach with no problem: the send
         #   itself blocks until a MSG_SENT arrives. The library correlates that
         #   acknowledgement only by its event type. Thus a scheduled advert, a telemetry
@@ -4904,6 +4909,11 @@ class MockDevice(Device):
         # down. There, a login comes back NO_REPLY, and the remembered credential must
         # survive it.
         self._unreachable: set[str] = set()
+        # Nodes that answer a wrong password with a refusal. A stock repeater sends no reply
+        # for a wrong password (``handleLoginReq`` returns 0), so a wrong password gets
+        # NO_REPLY from the simulator by default, as on a real mesh (GitHub issue 28). Put
+        # the name of a contact here to walk the path of firmware that refuses.
+        self._refusing: set[str] = set()
         self._remote_tx: dict[str, int] = {}
         self._default_remote_tx = 20
         # The settings of each simulated repeater, as its CLI shows them. MeshTerm fills
@@ -5146,7 +5156,9 @@ class MockDevice(Device):
         if node.name in self._unreachable:
             return LoginResult.NO_REPLY  # simulates a node that is down or out of range
         if password != self._admin_password:
-            return LoginResult.REFUSED
+            # Stock firmware sends nothing for a wrong password, so the simulator does the
+            # same. A node in ``_refusing`` runs firmware that says no.
+            return LoginResult.REFUSED if node.name in self._refusing else LoginResult.NO_REPLY
         self._admin_sessions.add(self._mock_key(node))
         return LoginResult.ACCEPTED
 

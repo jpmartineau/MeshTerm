@@ -152,6 +152,11 @@ class AdminStore:
         down at that time, MeshTerm deleted its password. The node sent nothing at all, and
         MeshTerm read that silence as a refusal.
 
+        A stock node never refuses: it does not answer a wrong password. Thus a password
+        that the owner changed also stays here after its silence. The caller then offers a
+        new password, which replaces this one when the node accepts it (refer to
+        :mod:`meshterm.ui.admin_login`).
+
         The callers still write their own messages (the sweep says "sweep again", the CLI
         says "re-run"), but no caller makes this decision.
 
