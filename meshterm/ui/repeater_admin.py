@@ -325,54 +325,21 @@ async def open_repeater_admin(ctx: AppContext) -> dict[str, Any] | None:
 async def _login(ctx: AppContext, device: Device, node: Contact) -> bool:
     """Log in to ``node``: with a remembered password silently, or else one floating prompt.
 
-    MeshTerm remembers a password that works. It forgets a rejected password, so that the
-    next try asks for a new one (the convention for remote admin in all the app). But it
-    forgets only a rejected password. A node that never answered said nothing about the
-    password, so when there is no answer, MeshTerm keeps the password. Before, if the user
-    administered a repeater that was down at that time, MeshTerm erased its credential.
+    The flow is the shared admin login of the menu (refer to
+    :func:`~meshterm.ui.admin_login.log_in`). MeshTerm remembers a password that works and
+    forgets a refused one. A node that never answered said nothing about the password, so
+    MeshTerm keeps the password and offers to replace it. Before, if the user administered
+    a repeater that was down at that time, MeshTerm erased its credential.
     """
-    from ..core.models import LoginResult
+    from .admin_login import log_in
 
-    session = ctx.ui.session
-    password = ctx.admin_store.get(node)
-    prompted = password is None
-    if password is None:
-        password = await session.text(
-            f"Admin password for {node.name}",
-            prompt="The node ignores admin commands without a login.",
-            password=True,
-            # The picker dialog is closed now, so this prompt is the only screen on the stack.
-            # The flag keeps it a box over a blank base, not a full-frame prompt.
-            floating=True,
-        )
-        if not password:
-            return False
-    async with ctx.ui.busy_overlay():
-        outcome = await device.admin_login(node, password)
-    ctx.admin_store.record(node, password, outcome)
-    if outcome is LoginResult.REFUSED:
-        await session.message_dialog(
-            Text(
-                f"{node.name!r} rejected the admin login (wrong password?). "
-                + ("" if prompted else "The saved password was cleared; ")
-                + "try again to enter a new one.",
-                style="err",
-            ),
-            title="Admin login",
-        )
-        return False
-    if not outcome:
-        await session.message_dialog(
-            Text(
-                f"No reply from {node.name} — it may be out of reach, asleep, or busy. "
-                + ("" if prompted else "The saved password was kept; ")
-                + "try again when it answers.",
-                style="warn",
-            ),
-            title="Admin login",
-        )
-        return False
-    return True
+    return await log_in(
+        ctx,
+        device,
+        node,
+        why="The node ignores admin commands without a login.",
+        again="try again",
+    )
 
 
 async def _admin_session(ctx: AppContext, device: Device, node: Contact) -> dict[str, Any]:
@@ -1206,7 +1173,9 @@ async def _quiet_login(ctx: AppContext, device: Device, node: Contact) -> tuple[
     if outcome is LoginResult.REFUSED:
         return False, "login refused; the saved password was cleared"
     if not outcome:
-        return False, "no reply to the login"
+        # A stock node does not answer a wrong password, so a changed password also ends
+        # here (refer to :mod:`meshterm.ui.admin_login`).
+        return False, "no reply to the login — out of reach, or its password changed"
     return True, ""
 
 

@@ -1736,6 +1736,7 @@ async def _open_session(ctx: AppContext, target: str | None, *, initial_spec: st
     )
     from ..services.path_probe import ProbeCandidate, ProbeOutcome, probe_paths
     from ..services.topology import MeshTopology, build_topology, collapse_width, is_path_hash
+    from .admin_login import ask_password, no_reply_text, offer_new_password, refused_text
     from .path_composer import FetchNeighbours, PathComposerScreen
     from .surface import TuiUi
     from .tui import CANCEL, Choice, SelectScreen, Separator
@@ -1878,7 +1879,9 @@ async def _open_session(ctx: AppContext, target: str | None, *, initial_spec: st
             title="No destination hash",
         )
 
-    async def fetch_neighbours_via(repeater: Contact, repeater_id: str) -> bool:
+    async def fetch_neighbours_via(
+        repeater: Contact, repeater_id: str, *, ask: bool = False
+    ) -> bool:
         """Log in to a repeater, get its neighbour table, and store the snapshot.
 
         The fetch action of the composer comes here. The password comes from the admin
@@ -1887,20 +1890,28 @@ async def _open_session(ctx: AppContext, target: str | None, *, initial_spec: st
         spinner dialog with Abort. Each outcome closes its own ``runs`` row. A refused
         login also forgets the stored password, so the next attempt asks again.
 
+        A stock repeater does not answer a wrong password. Thus, when a stored password
+        gets no reply, the function offers a new password, as the shared login of the menu
+        does (refer to :mod:`meshterm.ui.admin_login`). If the user accepts, the function
+        runs again with ``ask``.
+
         Args:
             repeater: The repeater contact to query (it has the public key).
             repeater_id: Its canonical id, the key under which the snapshot is stored.
+            ask: Ask for a password, also when one is stored. The stored password stays
+                until the typed one works.
 
         Returns:
             ``True`` when new neighbour links were stored (the caller must build the
             topology again). ``False`` on a cancel, a failure, or an empty table.
         """
-        password = ctx.admin_store.get(repeater)
+        password = None if ask else ctx.admin_store.get(repeater)
+        saved = password is not None
+        # Set when a stored password got no reply: then a new password is offered.
+        stale = False
         if password is None:
-            password = await session.text(
-                f"Admin password for {repeater.name}",
-                prompt="The repeater ignores neighbour requests without an admin login.",
-                password=True,
+            password = await ask_password(
+                ctx, repeater, why="The repeater ignores neighbour requests without an admin login."
             )
             if not password:
                 return False
@@ -1917,18 +1928,14 @@ async def _open_session(ctx: AppContext, target: str | None, *, initial_spec: st
         dialog.status = f"logging in to {repeater.name}…"
 
         async def work() -> list[NeighbourInfo]:
+            nonlocal stale
             outcome = await device.admin_login(repeater, password)
             ctx.admin_store.record(repeater, password, outcome)
             if outcome is LoginResult.REFUSED:
-                raise DeviceAuthenticationError(
-                    f"{repeater.name!r} rejected the admin login (wrong password?). "
-                    "The saved password was cleared; retry to enter a new one."
-                )
+                raise DeviceAuthenticationError(refused_text(repeater, saved=saved, again="retry"))
             if not outcome:
-                raise DeviceCommandError(
-                    f"No reply from {repeater.name} — it may be out of reach, asleep, or "
-                    "busy. The saved password was kept; retry when it answers."
-                )
+                stale = saved
+                raise DeviceCommandError(no_reply_text(repeater, again="retry"))
             dialog.status = "fetching the neighbour table…"
             session.invalidate()
             return await device.fetch_neighbours(repeater)
@@ -1970,6 +1977,10 @@ async def _open_session(ctx: AppContext, target: str | None, *, initial_spec: st
             # ``work`` and AdminStore.record). Thus an exception here is only a message
             # to show.
             ctx.repo.finish_run(run_id, "error", {"error": str(error) or type(error).__name__})
+            if stale:
+                if await offer_new_password(ctx, repeater):
+                    return await fetch_neighbours_via(repeater, repeater_id, ask=True)
+                return False
             await session.message_dialog(Text(str(error), style="err"), title="Fetch neighbours")
             return False
         ctx.repo.record_neighbours(run_id, repeater_id, entries)

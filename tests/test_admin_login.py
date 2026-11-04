@@ -524,12 +524,13 @@ async def _step_until(predicate, *, limit: int = 200):
     return value
 
 
-async def _run_login(ctx, node):  # noqa: ANN001
+async def _run_login(ctx, node, *, answer: object = "ok"):  # noqa: ANN001
     """Run ``ui.repeater_admin._login`` to its end, and read and close its dialog.
 
     Returns the result of the flow and the words that it showed on the screen. Both are
     important. What happens to the password is one half of the fix. The other half is that
-    the flow does not tell the user that a password was wrong when it was not.
+    the flow does not tell the user that a password was wrong when it was not. ``answer``
+    is the value of the button that the test presses.
     """
     from meshterm.ui.repeater_admin import _login
     from meshterm.ui.surface import TuiUi
@@ -553,7 +554,7 @@ async def _run_login(ctx, node):  # noqa: ANN001
         if dialog is not None:
             prompt = dialog._prompt
             shown = prompt.plain if hasattr(prompt, "plain") else str(prompt)
-            dialog.resolve("ok")
+            dialog.resolve(answer)
         return await task, shown
     finally:
         if not task.done():
@@ -561,14 +562,18 @@ async def _run_login(ctx, node):  # noqa: ANN001
 
 
 async def test_the_admin_flow_says_no_reply_and_keeps_the_password(ctx) -> None:  # noqa: ANN001
-    """The screen that JP was on. It must not report a wrong password, and must not clear it."""
+    """The screen that JP was on. It must not report a refusal, and must not clear the password.
+
+    The dialog offers a new password, because a stock node does not answer a wrong
+    password either. Cancel leaves the stored password as it was.
+    """
     node = await _mock_node(ctx, down=True)
 
-    ok, shown = await _run_login(ctx, node)
+    ok, shown = await _run_login(ctx, node, answer=False)
 
     assert ok is False
     assert "No reply" in shown and "kept" in shown
-    assert "wrong password" not in shown
+    assert "rejected" not in shown
     assert ctx.admin_store.get(node) == "admin"
 
 
@@ -582,6 +587,129 @@ async def test_the_admin_flow_still_clears_a_password_the_node_rejected(ctx) -> 
     assert ok is False
     assert "wrong password" in shown and "cleared" in shown
     assert ctx.admin_store.get(node) is None
+
+
+class _StockNode:
+    """A device whose node answers only its current password, as stock firmware does.
+
+    A wrong password gets no reply, never a refusal (GitHub issue 28). ``tried`` lists the
+    passwords in the order of the logins.
+    """
+
+    def __init__(self, password: str) -> None:
+        self.password = password
+        self.tried: list[str] = []
+
+    async def admin_login(self, node: Contact, password: str) -> LoginResult:  # noqa: ARG002
+        self.tried.append(password)
+        await asyncio.sleep(0)
+        return LoginResult.ACCEPTED if password == self.password else LoginResult.NO_REPLY
+
+
+async def _top(ctx, kind):  # noqa: ANN001, ANN202
+    """The top screen of the session once it is a ``kind``, or ``None``."""
+    session = ctx.ui.session
+    return await _step_until(lambda: session.top if isinstance(session.top, kind) else None)
+
+
+async def test_a_changed_password_is_offered_and_replaced(ctx) -> None:  # noqa: ANN001
+    """The owner changed the password. The stored one gets silence, and the user types the new one.
+
+    Before, the flow showed "No reply" and kept the old password, and each later visit
+    tried the old password again with no prompt. The user had no way to type the new one.
+    """
+    from meshterm.ui.admin_login import log_in
+    from meshterm.ui.surface import TuiUi
+    from meshterm.ui.tui.prompt import ButtonDialog, TextScreen
+    from meshterm.ui.tui.session import TuiSession
+
+    ctx.ui = TuiUi(TuiSession())
+    ctx.admin_store.remember(_NODE, "old")
+    device = _StockNode("new")
+    task = asyncio.ensure_future(log_in(ctx, device, _NODE, why="Log in.", again="try again"))
+    try:
+        offer = await _top(ctx, ButtonDialog)
+        assert offer is not None, "a silence after a stored password offers a choice"
+        assert [label for label, _ in offer._buttons] == ["Cancel", "New password…"]
+        assert offer._index == 1, "New password… is the default"
+        offer.resolve(True)
+        prompt = await _top(ctx, TextScreen)
+        assert prompt is not None, "the choice opens the password prompt"
+        prompt.resolve("new")
+        ok = await task
+    finally:
+        if not task.done():
+            task.cancel()
+
+    assert ok is True
+    assert device.tried == ["old", "new"]
+    assert ctx.admin_store.get(_NODE) == "new"
+
+
+async def test_a_new_password_that_also_gets_no_reply_keeps_the_old_one(ctx) -> None:  # noqa: ANN001
+    """The node can be down after all. A typed password replaces the stored one only if it works."""
+    from meshterm.ui.admin_login import log_in
+    from meshterm.ui.surface import TuiUi
+    from meshterm.ui.tui.prompt import ButtonDialog, TextScreen
+    from meshterm.ui.tui.session import TuiSession
+
+    ctx.ui = TuiUi(TuiSession())
+    ctx.admin_store.remember(_NODE, "old")
+    device = _StockNode("unknown")
+    task = asyncio.ensure_future(log_in(ctx, device, _NODE, why="Log in.", again="try again"))
+    try:
+        (await _top(ctx, ButtonDialog)).resolve(True)
+        (await _top(ctx, TextScreen)).resolve("typo")
+        notice = await _top(ctx, ButtonDialog)
+        assert notice is not None
+        shown = notice._prompt.plain
+        assert "No reply" in shown and "wrong password" in shown
+        assert "Try again to enter it again." in shown
+        notice.resolve("ok")
+        ok = await task
+    finally:
+        if not task.done():
+            task.cancel()
+
+    assert ok is False
+    assert device.tried == ["old", "typo"]
+    assert ctx.admin_store.get(_NODE) == "old"
+
+
+async def test_a_typed_password_with_no_reply_asks_nothing_more(ctx) -> None:  # noqa: ANN001
+    """With no stored password, there is nothing to replace. The flow explains and stops."""
+    from meshterm.ui.admin_login import log_in
+    from meshterm.ui.surface import TuiUi
+    from meshterm.ui.tui.prompt import ButtonDialog, TextScreen
+    from meshterm.ui.tui.session import TuiSession
+
+    ctx.ui = TuiUi(TuiSession())
+    device = _StockNode("unknown")
+    task = asyncio.ensure_future(log_in(ctx, device, _NODE, why="Log in.", again="sweep again"))
+    try:
+        (await _top(ctx, TextScreen)).resolve("typo")
+        notice = await _top(ctx, ButtonDialog)
+        assert [label for label, _ in notice._buttons] == ["OK"]
+        assert "Sweep again to enter it again." in notice._prompt.plain
+        notice.resolve("ok")
+        ok = await task
+    finally:
+        if not task.done():
+            task.cancel()
+
+    assert ok is False
+    assert ctx.admin_store.get(_NODE) is None
+
+
+def test_a_refusal_message_starts_its_sentences_with_a_capital() -> None:
+    """A typed password has nothing to clear. The message once read "(wrong password?). try"."""
+    from meshterm.ui.admin_login import refused_text
+
+    typed = refused_text(_NODE, saved=False, again="try again")
+    saved = refused_text(_NODE, saved=True, again="try again")
+
+    assert typed.endswith("(wrong password?). Try again to enter a new one.")
+    assert saved.endswith("The saved password was cleared; try again to enter a new one.")
 
 
 # --- no call site decides this locally again --------------------------------------------

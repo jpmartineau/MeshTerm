@@ -46,7 +46,7 @@ from rich.table import Table
 from rich.text import Text
 
 from ..core.connection import REMOTE_TX_MAX, REMOTE_TX_MIN
-from ..core.models import Contact, LoginResult, TraceResult, TxLevelResult, TxOptResult
+from ..core.models import Contact, TraceResult, TxLevelResult, TxOptResult
 from ..services import trace_runner, tx_optimizer
 from ..services.topology import build_topology, render_custom_spec
 from .menus import icon_lane, icon_mark
@@ -657,6 +657,7 @@ async def open_tx_optimize(
         RuntimeError: If the caller calls it outside the interactive menu (there is no
             full-screen session).
     """
+    from .admin_login import log_in
     from .path_composer import AUTO_SPEC, PathComposerScreen
     from .surface import TuiUi
     from .tui import CANCEL, Choice, SelectScreen
@@ -850,44 +851,22 @@ async def open_tx_optimize(
         nonlocal logged_in
         if logged_in:
             return True
-        password = ctx.admin_store.get(admin_node)
-        if password is None:
-            password = await session.text(
-                f"Admin password for {admin_node.name}",
-                prompt="The repeater ignores tuning commands without an admin login.",
-                password=True,
-            )
-            if not password:
-                return False
-        async with ctx.ui.busy_overlay():
-            outcome = await device.admin_login(admin_node, password)
-        ctx.admin_store.record(admin_node, password, outcome)
-        if outcome is LoginResult.REFUSED:
+
+        def show_login() -> None:
             screen.login_text = login_text()
-            await session.message_dialog(
-                Text(
-                    f"{admin_node.name!r} rejected the admin login (wrong password?). "
-                    "The saved password was cleared; sweep again to enter a new one.",
-                    style="err",
-                ),
-                title="Admin login",
-            )
-            return False
-        if not outcome:
-            # No reply is not a denial. The password stays for the next attempt.
-            screen.login_text = login_text()
-            await session.message_dialog(
-                Text(
-                    f"No reply from {admin_node.name} — it may be out of reach, asleep, "
-                    "or busy. The saved password was kept; sweep again when it answers.",
-                    style="warn",
-                ),
-                title="Admin login",
-            )
-            return False
-        logged_in = True
-        screen.login_text = login_text()
-        return True
+
+        # The shared login of the menu. It offers a new password when the stored one gets
+        # no reply (refer to :mod:`meshterm.ui.admin_login`).
+        logged_in = await log_in(
+            ctx,
+            device,
+            admin_node,
+            why="The repeater ignores tuning commands without an admin login.",
+            again="sweep again",
+            on_record=show_login,
+        )
+        show_login()
+        return logged_in
 
     async def apply_dialog() -> None:
         """Offer the winner in a floating dialog. If the user selects Apply, write it."""
