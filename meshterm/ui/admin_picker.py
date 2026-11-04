@@ -16,10 +16,12 @@ stack under the page of the tool, where Esc would land. It was once kept pushed 
 for the whole visit. Then, when the user left the admin page, Esc landed on the list from
 which the user selected the node. This looked like two places where there is one.
 
-Delete on a managed node forgets its password, after a confirm (``Del forget``). This is
-the one place in the menu where the user can make MeshTerm forget an admin password. A
-stock node does not answer a wrong password, so MeshTerm cannot find out by itself that a
-stored password is stale (GitHub issue 28, and refer to :mod:`meshterm.ui.admin_login`).
+Delete on a managed node forgets its password, after a confirm (``Del forget``). The
+``Forget passwords`` row of the menu forgets all of them, after a typed confirm (refer to
+:func:`confirm_forget_all`). These are the two places in the menu where the user can make
+MeshTerm forget an admin password. A stock node does not answer a wrong password, so
+MeshTerm cannot find out by itself that a stored password is stale (GitHub issue 28, and
+refer to :mod:`meshterm.ui.admin_login`).
 """
 
 from __future__ import annotations
@@ -35,6 +37,13 @@ if TYPE_CHECKING:
 
 #: The footer atom of the Delete key on a managed node.
 FORGET_HINT = "Del forget"
+
+#: The word that the user types to forget all the stored admin passwords.
+FORGET_ALL_WORD = "FORGET"
+
+#: The most node names that the confirm to forget all the passwords shows. It counts the
+#: other nodes.
+_NAMES_SHOWN = 5
 
 
 def admin_picker_rows(ctx: AppContext, contacts: list[Contact]) -> tuple[list, list[Contact]]:
@@ -216,6 +225,47 @@ async def forget_row(ctx: AppContext, contacts: list[Contact], value: Any) -> li
     if node is None or not await forget_password(ctx, node):
         return None
     return admin_picker_rows(ctx, contacts)[0]
+
+
+async def confirm_forget_all(ctx: AppContext, *, title: str) -> bool:
+    """Ask the user to type a word before MeshTerm forgets all the stored admin passwords.
+
+    This is a bulk deletion that the user cannot undo, so the confirm is the red typed
+    confirm, not a button dialog. It names the nodes, because the store also holds the
+    password of a node that the device does not know any more, and no list shows that
+    node. When the store holds no password, the function says so, and asks nothing.
+
+    Args:
+        ctx: The shared application context (for the dialogs and the admin store).
+        title: The title of the dialogs (the name of the menu row).
+
+    Returns:
+        ``True`` when the user typed the word. Then the caller forgets the passwords.
+    """
+    stored = ctx.admin_store.credentials()
+    if not stored:
+        await ctx.ui.session.message_dialog(
+            Text("no saved admin passwords — MeshTerm saves one when a login works", "muted"),
+            title=title,
+        )
+        return False
+    names = [c.label or c.key[:12] for c in stored]
+    if len(names) > _NAMES_SHOWN:
+        names = [*names[:_NAMES_SHOWN], f"{len(names) - _NAMES_SHOWN} more"]
+    if len(stored) == 1:
+        warning = (
+            f"This forgets the saved admin password of {names[0]}. "
+            "The next login asks for it again."
+        )
+    else:
+        listed = (
+            " and ".join(names) if len(names) == 2 else f"{', '.join(names[:-1])}, and {names[-1]}"
+        )
+        warning = (
+            f"This forgets the saved admin passwords of {len(stored)} managed nodes: "
+            f"{listed}. Each next login asks for the password again."
+        )
+    return await ctx.ui.typed_confirm(warning, FORGET_ALL_WORD, title=title)
 
 
 async def _note_nothing_to_pick(ctx: AppContext, title: str) -> None:

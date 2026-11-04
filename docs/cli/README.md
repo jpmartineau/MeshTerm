@@ -1771,6 +1771,42 @@ is known to be something other than a repeater.
 
 `regions` never holds the wildcard `*`. That is `unscoped`, because it names no region.
 
+#### `meshterm forget-admin-passwords`
+
+Forget all the admin passwords that MeshTerm remembers.
+
+```
+meshterm forget-admin-passwords --yes
+```
+
+| Option | What it does |
+| --- | --- |
+| `--yes` | **Required.** Confirm the deletion. Without it, the command is a usage error (`2`) and forgets nothing. |
+
+```console
+$ meshterm forget-admin-passwords --yes
+NAME           LAST_LOGIN  KEY
+Yagi-Repeater          2d  a1b2c3d400000000000000000000000000000000000000000000000000000000
+```
+
+The command lists the nodes whose passwords it forgot, with the time of the last good
+login to each node. It also forgets the password of a node that is not a contact any more.
+After this command, a login to each node needs its password again: give it with
+`--password`, or type it in the prompt of the menu. You cannot undo this command. The
+command sends nothing, and it works with no device connected. It returns `5` when MeshTerm
+remembered no password.
+
+To forget the password of one node, press Del on that node in the node picker of the menu.
+
+**`--json`** is an array, with one object for each node:
+
+```json
+[{"node":{"name":"Yagi-Repeater","key":"a1b2c3d400000000000000000000000000000000000000000000000000000000","hash":null,"type":null,"place":null,"self":false},"last_login_at":"2026-11-02T06:51:52Z"}]
+```
+
+`hash`, `type`, and `place` are `null`, because MeshTerm keeps only the name and the key
+of a node with its password.
+
 ---
 
 ### MeshTerm itself

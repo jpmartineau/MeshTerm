@@ -581,8 +581,16 @@ def test_a_failure_says_so_on_stderr_and_never_on_stdout(run) -> None:  # noqa: 
         ("config", "import-key", "00" * 32),
         ("channels", "clear", "1"),
         ("preferences", "reset"),
+        ("forget-admin-passwords",),
     ],
-    ids=["reboot", "factory-reset", "import-key", "channels-clear", "preferences-reset"],
+    ids=[
+        "reboot",
+        "factory-reset",
+        "import-key",
+        "channels-clear",
+        "preferences-reset",
+        "forget-admin-passwords",
+    ],
 )
 def test_a_destructive_command_without_yes_is_a_silent_usage_error(run, args) -> None:  # noqa: ANN001
     """A missing confirmation is a bad argument, and the message goes where errors go.
@@ -595,6 +603,30 @@ def test_a_destructive_command_without_yes_is_a_silent_usage_error(run, args) ->
     assert result.exit_code == exitcodes.USAGE
     assert result.stdout == ""
     assert "--yes" in result.stderr
+
+
+def test_forget_admin_passwords_lists_what_it_forgot_and_exits_5_on_nothing(
+    run, tmp_path: Path
+) -> None:  # noqa: ANN001
+    """GitHub issue 28: one command forgets all the stored admin passwords.
+
+    The answer is the list of the nodes that it forgot, and the ✓ goes to stderr. A second
+    run finds nothing, so it exits with ``5`` and its document is the empty array.
+    """
+    assert run("repeater-admin", "Yagi-Repeater", "ver", "--password", "admin").exit_code == 0
+    assert (tmp_path / "home" / "admin.json").read_text(encoding="utf-8").strip() != "{}"
+
+    result = run("forget-admin-passwords", "--yes")
+    assert result.exit_code == exitcodes.OK, result.output
+    header, row = result_lines(result)
+    assert header.split() == ["NAME", "LAST_LOGIN", "KEY"]
+    assert row.split()[:2] == ["Yagi-Repeater", "now"]
+    assert "forgot 1 admin password" in result.stderr
+    assert json.loads((tmp_path / "home" / "admin.json").read_text(encoding="utf-8")) == {}
+
+    again = run("--json", "forget-admin-passwords", "--yes")
+    assert again.exit_code == exitcodes.NO_RESULT
+    assert json.loads(again.stdout) == []
 
 
 def test_import_key_reads_a_file_and_keeps_the_key_out_of_the_run_log(run, tmp_path: Path) -> None:  # noqa: ANN001

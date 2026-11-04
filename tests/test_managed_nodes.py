@@ -250,6 +250,110 @@ async def test_delete_in_the_admin_picker_forgets_the_password(
     assert session._stack == []
 
 
+def test_forget_all_empties_the_store_and_returns_what_it_held(tmp_path: Path) -> None:
+    """It also forgets a password whose node the device does not know any more."""
+    store = AdminStore(tmp_path / "admin.json")
+    assert store.forget_all() == []
+    assert not (tmp_path / "admin.json").exists(), "nothing to forget writes nothing"
+
+    store.remember(Contact(name="Hilltop", public_key=KEY), "one")
+    store.remember(Contact(name="Valley", public_key="cd" * 32), "two")
+    forgotten = store.forget_all()
+
+    assert sorted(c.label for c in forgotten) == ["Hilltop", "Valley"]
+    assert store.credentials() == []
+
+
+async def _typed_top(session):  # noqa: ANN001, ANN202
+    """The typed confirm once it is the top screen, or ``None``."""
+    from meshterm.ui.tui.prompt import TypedConfirmDialog
+
+    for _ in range(200):
+        if isinstance(session.top, TypedConfirmDialog):
+            return session.top
+        await asyncio.sleep(0)
+    return None
+
+
+@pytest.mark.parametrize("typed", [True, False])
+async def test_forget_passwords_asks_for_the_typed_word_and_names_the_nodes(
+    tmp_path: Path, typed: bool
+) -> None:
+    """GitHub issue 28: one step forgets all the passwords, behind the red typed confirm.
+
+    The confirm names each node, also a node that is not a contact any more, because no
+    list shows that node. Esc keeps all the passwords.
+    """
+    from meshterm.tools.forget_passwords import ForgetPasswordsTool
+    from meshterm.ui.surface import TuiUi
+    from meshterm.ui.tui import CANCEL
+    from meshterm.ui.tui.session import TuiSession
+
+    store = AdminStore(tmp_path / "admin.json")
+    for name, key in (("Hilltop", KEY), ("Valley", "cd" * 32), ("Ridge", "ef" * 32)):
+        store.remember(Contact(name=name, public_key=key), "secret")
+    ctx = SimpleNamespace(ui=TuiUi(TuiSession()), admin_store=store)
+    tool = ForgetPasswordsTool()
+
+    task = asyncio.ensure_future(tool.prompt_params(ctx))
+    try:
+        confirm = await _typed_top(ctx.ui.session)
+        assert confirm is not None, "a bulk deletion asks for the typed word"
+        assert confirm.title == tool.title
+        assert "3 managed nodes: Hilltop, Valley, and Ridge" in confirm._warning
+        confirm.resolve(True if typed else CANCEL)
+        params = await task
+    finally:
+        if not task.done():
+            task.cancel()
+
+    if not typed:
+        assert params is None
+        assert len(store.credentials()) == 3
+        return
+    result = await tool.run(ctx, params)
+    assert store.credentials() == []
+    assert result.summary == {"forgotten": 3}
+    assert "forgot" in result.message
+    assert result.report is None, "the menu path has no report"
+
+
+async def test_forget_passwords_with_nothing_stored_says_so_and_asks_nothing(
+    tmp_path: Path,
+) -> None:
+    """An empty store gets the empty state in a message dialog, and no typed confirm."""
+    from meshterm.tools.forget_passwords import ForgetPasswordsTool
+    from meshterm.ui.surface import TuiUi
+    from meshterm.ui.tui.session import TuiSession
+
+    ctx = SimpleNamespace(ui=TuiUi(TuiSession()), admin_store=AdminStore(tmp_path / "a.json"))
+    task = asyncio.ensure_future(ForgetPasswordsTool().prompt_params(ctx))
+    try:
+        note = await _dialog_top(ctx.ui.session)
+        assert note is not None
+        assert "no saved admin passwords" in note._prompt.plain
+        assert [label for label, _ in note._buttons] == ["OK"]
+        note.resolve("ok")
+        assert await task is None
+    finally:
+        if not task.done():
+            task.cancel()
+
+
+def test_forget_passwords_is_a_managed_nodes_row_that_keeps_the_title_column() -> None:
+    """The row floats its dialogs over the menu, and its title is no wider than the widest.
+
+    A wider title moves the description of each row of the menu to the right.
+    """
+    from meshterm.tools import all_tools, get_tool
+
+    tool = get_tool("forget-admin-passwords")
+    assert tool is not None and tool.menu_visible and tool.popup
+    assert tool.category == "Managed nodes"
+    others = [t for t in all_tools() if t.menu_visible and t is not tool]
+    assert len(tool.title) <= max(len(t.title or t.name) for t in others)
+
+
 # -- the Clock drift page -------------------------------------------------------------------
 
 
