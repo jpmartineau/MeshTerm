@@ -224,9 +224,13 @@ class TxOptimizeTool(Tool):
             DeviceCommandError: If the node refused the login. MeshTerm then forgets the
                 stored password, because it is known to be bad, and the next run asks
                 again. Also if the node never answered. Then the password is not tested,
-                and MeshTerm keeps it.
+                and MeshTerm keeps it. A stock node does not answer a wrong password, so
+                the error tells the user to give a changed password with ``--password``.
         """
+        from ..ui.admin_login import no_reply_error
+
         device = await ctx.device()
+        saved = not params.get("password") and ctx.admin_store.get(admin_node) is not None
         password = await self._resolve_password(ctx, admin_node, params)
         outcome = await device.admin_login(admin_node, password)
         ctx.admin_store.record(admin_node, password, outcome)
@@ -236,10 +240,7 @@ class TxOptimizeTool(Tool):
                 "The saved password was cleared; re-run to enter a new one."
             )
         if not outcome:
-            raise DeviceCommandError(
-                f"{admin_node.name!r} did not answer the admin login — it may be out of "
-                "reach or asleep. The saved password was kept; re-run when it answers."
-            )
+            raise DeviceCommandError(no_reply_error(admin_node.name, saved=saved, again="re-run"))
 
     # -- scripted (CLI) ---------------------------------------------------------------
 

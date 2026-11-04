@@ -20,6 +20,9 @@ Thus, when a stored password gets no reply, the flow asks the user: ``Cancel``, 
 ``New password…``. The second button opens the password prompt. The new password
 replaces the stored one only when the node accepts it. Thus a node that is down keeps its
 password, and a node whose password changed gets the new one in one step.
+
+The CLI cannot ask. Its error for the same silence says how to give the new password
+(:func:`no_reply_error`).
 """
 
 from __future__ import annotations
@@ -97,6 +100,31 @@ def no_reply_text(node: Contact, *, again: str) -> str:
         f"No reply from {node.name} — it may be out of reach, asleep, or busy, or the "
         f"password is wrong: a node does not answer a wrong password. "
         f"{again.capitalize()} to enter it again."
+    )
+
+
+def no_reply_error(name: str, *, saved: bool, again: str) -> str:
+    """The error of a CLI command whose admin login got no reply.
+
+    A scripted run cannot offer a new password, so the error says how to give one. A
+    password that the node accepts replaces the stored one, so ``--password`` with the new
+    password repairs a stale password in one run.
+
+    Args:
+        name: The name of the node.
+        saved: The password came from the admin store. Then the store kept it, and a
+            changed password is a probable cause.
+        again: The words for a new run (``"run again"``, ``"re-run"``).
+    """
+    lead = f"{name!r} did not answer the admin login — it may be out of reach, asleep, or busy"
+    if saved:
+        return (
+            f"{lead}, or its password changed: a node does not answer a wrong password. "
+            f"The saved password was kept; if the password changed, {again} with --password."
+        )
+    return (
+        f"{lead}, or the password is wrong: a node does not answer a wrong password. "
+        "Any saved password was kept."
     )
 
 

@@ -28,6 +28,7 @@ from ..context import AppContext
 from ..core import exitcodes
 from ..core.connection import DeviceCommandError
 from ..core.models import NODE_TYPE_LABELS, Contact, LoginResult
+from ..ui.admin_login import no_reply_error
 from .base import Tool, ToolResult, register
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -84,6 +85,7 @@ class RepeaterAdminTool(Tool):
         if node is None:
             raise typer.BadParameter(f"unknown contact: {name!r}")
 
+        saved = not params.get("password")
         password = params.get("password") or ctx.admin_store.get(node)
         if not password:
             raise typer.BadParameter(
@@ -97,10 +99,7 @@ class RepeaterAdminTool(Tool):
                 f"admin login to {name!r} failed (wrong password?). The saved password was cleared."
             )
         if not outcome:
-            raise DeviceCommandError(
-                f"{name!r} did not answer the admin login — it may be out of reach, "
-                "asleep, or busy. Any saved password was kept; try again when it answers."
-            )
+            raise DeviceCommandError(no_reply_error(name, saved=saved, again="run again"))
 
         command = str(params["command"])
         ctx.remote_store.append_history(node, command)

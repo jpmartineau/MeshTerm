@@ -1676,7 +1676,10 @@ row has no column here, because `optimal_tx_dbm` names the winner.
 
 If no password is available and MeshTerm cannot ask for one, this is a **usage error**
 (`2`), and nothing was transmitted. If the node refuses the password, this is a device
-error (`4`), and MeshTerm clears the saved password. The command returns `5` when no
+error (`4`), and MeshTerm clears the saved password. A stock node does not answer a wrong
+password. Thus, if the owner of the node changed its password, the login gets no reply, and
+the command fails with `4`. Then give the new password one time with `--password`: a
+password that the node accepts replaces the saved one. The command returns `5` when no
 trace reached the target at any level. In this case MeshTerm measured nothing, and the
 node stays at its original power.
 
@@ -1708,9 +1711,12 @@ with the echoed prompt. A node that does not answer is not a failure, because th
 can have arrived. But there is nothing to report, so the command returns `5`.
 
 MeshTerm logs in automatically with the remembered password. To store a password, run
-the interactive flow one time, or give `--password`. If the node refuses the login,
-MeshTerm clears the saved password, and the command fails with `4`. The node answered,
-and the answer was no. A password that is **absent**, and a node name that no contact
+the interactive flow one time, or give `--password`. A password that the node accepts
+replaces the remembered one. A stock node does not answer a wrong password. Thus, after the
+owner of the node changes its password, the login gets no reply, and the command fails with
+`4`. Then give the new password one time with `--password`. If the node refuses the login
+(firmware other than stock MeshCore can do this), MeshTerm clears the saved password, and
+the command fails with `4`. A password that is **absent**, and a node name that no contact
 matches, are usage errors (`2`). In both cases nothing was transmitted. This is the line
 between these errors and the errors `3` and `4`.
 

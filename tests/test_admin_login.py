@@ -472,6 +472,47 @@ async def test_the_scripted_tool_keeps_the_password_when_the_node_is_down(ctx) -
     assert ctx.admin_store.get(node) == "admin"
 
 
+async def test_the_scripted_tool_says_how_to_give_a_changed_password(ctx) -> None:  # noqa: ANN001
+    """A script cannot get a "New password…" offer, so the error names ``--password``."""
+    from meshterm.tools.repeater_admin import RepeaterAdminTool
+
+    node = await _mock_node(ctx, down=True)
+
+    with pytest.raises(DeviceCommandError) as raised:
+        await RepeaterAdminTool().run(ctx, {"node": node.name, "command": "get tx"})
+
+    message = str(raised.value)
+    assert "its password changed" in message
+    assert "if the password changed, run again with --password" in message
+
+
+async def test_an_explicit_password_with_no_reply_names_no_flag(ctx) -> None:  # noqa: ANN001
+    """The user already gave ``--password``. The error says that it can be wrong, and no more."""
+    from meshterm.tools.repeater_admin import RepeaterAdminTool
+
+    node = await _mock_node(ctx, down=True)
+
+    with pytest.raises(DeviceCommandError) as raised:
+        await RepeaterAdminTool().run(
+            ctx, {"node": node.name, "command": "get tx", "password": "typed"}
+        )
+
+    message = str(raised.value)
+    assert "the password is wrong" in message and "Any saved password was kept." in message
+    assert "--password" not in message
+    assert ctx.admin_store.get(node) == "admin"
+
+
+async def test_the_tx_optimizer_says_how_to_give_a_changed_password(ctx) -> None:  # noqa: ANN001
+    """The same advice from the other scripted login, in its own words for a new run."""
+    from meshterm.tools.tx_optimize import TxOptimizeTool
+
+    node = await _mock_node(ctx, down=True)
+
+    with pytest.raises(DeviceCommandError, match="re-run with --password"):
+        await TxOptimizeTool()._login(ctx, node, {})
+
+
 async def test_the_scripted_tool_clears_the_password_the_node_rejected(ctx) -> None:  # noqa: ANN001
     """The other half: a node that is reachable and says no has a bad password."""
     from meshterm.tools.repeater_admin import RepeaterAdminTool
