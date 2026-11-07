@@ -1187,6 +1187,15 @@ def test_split_channel_sender_extracts_name_prefix() -> None:
     assert split_channel_sender("14:30 standup") == (None, "14:30 standup")
 
 
+def test_split_channel_sender_accepts_a_long_node_name() -> None:
+    """A 21-character name (YUL-H7H-SiO-C-Heltec1) once fell outside the 20-character limit."""
+    from meshterm.core.channels import MENTION, split_channel_sender
+
+    name = "YUL-H7H-SiO-C-Heltec1"
+    assert split_channel_sender(f"{name}: Salut all!") == (name, "Salut all!")
+    assert MENTION.search(f"@[{name}] bon matin!").group(1) == name
+
+
 def test_channel_transcript_groups_by_sender() -> None:
     """Channel messages in a row from the same sender share one header. The body has no prefix."""
     from datetime import datetime, timezone

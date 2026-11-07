@@ -34,18 +34,24 @@ from urllib.parse import parse_qs, quote, urlsplit
 # module from the sys.modules dict. Both functions bind the names one time for each call,
 # not one time for each candidate channel. Thus the reception path pays almost nothing.
 
+#: The longest node name that a sender or a mention can carry, in characters. A MeshCore node
+#: keeps its name in a 32-byte field, and a name such as ``YUL-H7H-SiO-C-Heltec1`` has 21
+#: characters. A limit of 20 left that sender with no name and no key.
+MAX_SENDER_NAME = 32
+
 #: Matches the ``Name: message`` convention that channel senders use to identify themselves
-#: (the protocol has no sender field). The name is 1–20 characters that are not colons, and
-#: ``": "`` must follow it. This rule is strict enough that it does not match ``http://…``
-#: or ``note:x``.
-SENDER_PREFIX = re.compile(r"^([^\s:][^:]{0,19}):[ \t]+(.*)$", re.DOTALL)
+#: (the protocol has no sender field). The name is 1 to :data:`MAX_SENDER_NAME` characters
+#: that are not colons, and ``": "`` must follow it. This rule is strict enough that it
+#: does not match ``http://…`` or ``note:x``.
+SENDER_PREFIX = re.compile(rf"^([^\s:][^:]{{0,{MAX_SENDER_NAME - 1}}}):[ \t]+(.*)$", re.DOTALL)
 
 #: Matches an ``@[Name]`` mention token, which the reply flow puts into the compose line in
 #: advance. A transcript renders each token as a bare ``@Name`` in the hue of that sender,
 #: and does not show the brackets. The history face of the CLI also takes out the same
 #: names. Thus the token is defined here, with the remainder of the message-body parsing, and
-#: not in one of the two renderers. The name is 1–20 characters that are not ``]``.
-MENTION = re.compile(r"@\[([^\]]{1,20})\]")
+#: not in one of the two renderers. The name is 1 to :data:`MAX_SENDER_NAME` characters that
+#: are not ``]``.
+MENTION = re.compile(rf"@\[([^\]]{{1,{MAX_SENDER_NAME}}})\]")
 
 
 def split_channel_sender(text: str) -> tuple[str | None, str]:

@@ -18,6 +18,7 @@ from dataclasses import replace
 
 from rich.text import Text
 
+from ..core.channels import MAX_SENDER_NAME
 from .pathline import PathHop
 from .tui.prompt import LineEditor
 from .widgets import DESTINATION, hop_chip
@@ -25,7 +26,7 @@ from .widgets import DESTINATION, hop_chip
 #: A complete mention in the compose line. It is :data:`~meshterm.core.channels.MENTION`
 #: with one more rule: the name has no ``[``. Thus an ``@[`` that the user types in front
 #: of a chip does not join the chip into one long token, and the chip stays as it is.
-ATOM = re.compile(r"@\[([^\[\]]{1,20})\]")
+ATOM = re.compile(rf"@\[([^\[\]]{{1,{MAX_SENDER_NAME}}})\]")
 
 #: The actions that move the cursor to the left. A cursor that one of them puts inside a
 #: chip goes to the start of the chip. Each other action puts it at the end.
