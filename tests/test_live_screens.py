@@ -553,7 +553,12 @@ async def test_compose_seeds_from_the_visible_route_not_the_empty_spec() -> None
 
 
 async def test_trace_screen_explore_adopts_a_scenario_path() -> None:
-    """If the user commits Explore paths, the flow runs. An adopted path sets the spec."""
+    """If the user commits Explore paths, the flow runs. An adopted path sets the spec.
+
+    An adopted path also moves the highlight to Trace, the same as the composer, so a
+    plain Enter walks it (GitHub #29). A cancelled explorer leaves the highlight where it
+    was.
+    """
 
     async def adopt(current: str):  # noqa: ANN001
         return "3d63,f2c2"
@@ -561,17 +566,21 @@ async def test_trace_screen_explore_adopts_a_scenario_path() -> None:
     screen, _ = _trace_screen(explore=adopt)
     for _ in range(3):
         screen.handle("up")  # Trace → Sample count → Path width → Explore paths
+    assert screen._actions[screen._index] == "explore"
     screen.handle("enter")
     await asyncio.sleep(0)
     assert screen._path_spec == "3d63,f2c2"
+    assert screen._actions[screen._index] == "trace"
 
     async def keep(current: str):  # noqa: ANN001
         return None
 
     screen._explore = keep
-    screen.handle("enter")  # the highlight is still on Explore paths
+    screen._index = screen._actions.index("explore")
+    screen.handle("enter")
     await asyncio.sleep(0)
     assert screen._path_spec == "3d63,f2c2"  # None leaves the spec untouched
+    assert screen._actions[screen._index] == "explore"
 
 
 async def test_trace_screen_action_labels_share_one_column() -> None:
@@ -733,7 +742,8 @@ async def test_composer_commit_parks_the_cursor_on_trace() -> None:
     await asyncio.sleep(0)
     assert screen._actions[screen._index] == "trace"
 
-    # Only the composer moves the highlight: the width flow keeps it where it is.
+    # Only the composer and the explorer move the highlight: the width flow keeps it where
+    # it is.
     async def width(current):  # noqa: ANN001
         return "3d63,f2c2,3d63"
 
@@ -993,13 +1003,21 @@ def test_trace_log_section_hidden_until_there_is_something_to_log() -> None:
 
 
 async def test_trace_screen_path_mode_gates_trace_and_drops_explore() -> None:
-    """Path mode has no Explore row, and Trace does nothing until a path exists."""
+    """Path mode has no Explore row, and Trace does nothing until a path exists.
+
+    With no path, the highlight starts on Compose path, because Trace cannot act
+    (GitHub #29). Enter then opens the composer.
+    """
     screen, _ = _trace_screen(mode="path")
     body = _plain(screen.render_body(100))
     assert "Explore paths" not in body
     assert "Trace — compose a path first" in body
     assert "none — compose a path" in body
-    screen.handle("enter")  # the highlight starts on Trace, but there is nothing to walk
+    assert screen._actions[screen._index] == "compose"
+    for _ in screen._actions:
+        screen.handle("down")  # down to Trace, the last action row (the end clamps)
+    assert screen._actions[screen._index] == "trace"
+    screen.handle("enter")  # there is nothing to walk
     assert not screen._running and screen._worker is None
     screen._path_spec = "3d,f2"
     assert "Trace — one transmission" in _plain(screen.render_body(100))

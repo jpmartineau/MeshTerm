@@ -702,8 +702,9 @@ def test_composer_use_row_names_the_action_not_the_path() -> None:
 async def test_composer_commits_spec_auto_and_cancel() -> None:
     """Use resolves the spec with its mirrored return leg. Auto resolves empty. Esc cancels.
 
-    Only the Esc key leaves. The action group ends at Auto, so End goes to the last row that
-    does something. It does not go to a row that only presses Esc for the user.
+    Only the Esc key leaves. The action group ends at Use, after Auto (JP, 2026-11-07), so
+    End goes to the row that leaves with the path. It does not go to a row that only
+    presses Esc for the user.
     """
     import asyncio
 
@@ -711,14 +712,14 @@ async def test_composer_commits_spec_auto_and_cancel() -> None:
 
     screen = _composer(_topo(trace_paths=walks), hops=["3d63c6429436"])
     screen.future = asyncio.get_running_loop().create_future()
-    screen.handle("end")  # jump to the last action row (Auto)…
-    screen.handle("up")  # …up to "Use this path"
+    screen.handle("end")  # "Use this path" closes the group
     screen.handle("enter")
     assert screen.future.result() == "3d,f2,3d"
 
     auto = _composer(_topo(trace_paths=walks))
     auto.future = asyncio.get_running_loop().create_future()
-    auto.handle("end")  # "Auto — let the device route" closes the group
+    auto.handle("end")  # jump to the last action row (Use)…
+    auto.handle("up")  # …up to "Auto — let the device route"
     auto.handle("enter")
     assert auto.future.result() == AUTO_SPEC
 

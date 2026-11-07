@@ -44,7 +44,8 @@ it to. An action list controls the screen: ↑/↓ select a row, and Enter runs 
   probe all of them: one measured trace for each candidate, stored as
   ``path_candidates`` rows and ranked by reliability first. Then MeshTerm offers the
   winner for adoption. The evidence proposes, the measurement decides, and the user
-  makes the choice.
+  makes the choice. When the user adopts a route, the highlight moves to Trace, the
+  same as after the composer.
 * **Path width** opens a small dialog, where the user selects the path-hash width for
   each hop: 1, 2, or 4 bytes. A forced hop is addressed by this number of bytes from
   the start of its key. The first value is the routing width of the device. When the
@@ -57,8 +58,9 @@ it to. An action list controls the screen: ↑/↓ select a row, and Enter runs 
   nodes that send traffic in bursts. The tracing dialog counts the traces as the replies
   arrive.
 * **Trace** runs the selected number of traces. The highlight starts on this row, thus
-  Enter alone traces. While the traces are in progress, a floating *tracing* dialog
-  (spinner, progress, Abort) is over the screen. The replies go into the log behind
+  Enter alone traces. A path walk with no path has nothing to trace, so there the
+  highlight starts on Compose path. While the traces are in progress, a floating
+  *tracing* dialog (spinner, progress, Abort) is over the screen. The replies go into the log behind
   the dialog. Esc in the dialog cancels the run, but the screen stays open, and MeshTerm
   keeps the traces that it already stored. The screen adds each trace of the session to
   its medians. A walk can cross a link two times in the same direction. Before such a
@@ -437,8 +439,9 @@ class TraceScreen(Screen):
     screen was new.
 
     ↑/↓ move the highlight over the action rows, and Enter runs the selected row. The
-    highlight starts on Trace, so Enter alone traces. The results (the medians for each
-    hop and the trace log) come after the actions on the page. ↓ on the last action
+    highlight starts on Trace, so Enter alone traces. (A path walk with no path starts
+    on Compose path instead, because Trace cannot act there.) The results (the medians
+    for each hop and the trace log) come after the actions on the page. ↓ on the last action
     edge-scrolls into the results, and PgUp/PgDn/Home/End move the full screen. Esc
     leaves the screen and cancels a trace in progress. MeshTerm keeps the traces that it
     already stored.
@@ -605,11 +608,15 @@ class TraceScreen(Screen):
         # then Explore (target mode) or Reverse (path mode). Explore must have a
         # destination for which it ranks candidates, so path mode does not have it.
         # Only a path walk is asymmetric enough to turn end for end, so only path mode
-        # offers Reverse. The highlight starts on Trace in the two modes.
+        # offers Reverse. The highlight starts on the first row that can act. Trace can
+        # act in target mode (with no path, the device routes), and in path mode when a
+        # path is available. A path walk with no path has nothing to trace, so there the
+        # highlight starts on Compose (GitHub #29: Enter then opens the composer).
         actions = ["compose", "explore"] if mode == "target" else ["compose", "reverse"]
         actions += ["width", "samples", "trace"]
         self._actions: tuple[str, ...] = tuple(actions)
-        self._index = self._actions.index("trace")
+        ready = mode == "target" or bool(self._effective_spec()[0])
+        self._index = self._actions.index("trace" if ready else "compose")
         self._pin_cursor = False  # pin the viewport only while ↑/↓ are in use
         #: How far ←→ slid the paths of the hops (in cells), and how far they can slide:
         #: the tail of the widest path, as the last paint measured it. It is 0 while the
@@ -886,7 +893,9 @@ class TraceScreen(Screen):
         elif key == "reverse":
             self._reverse_path()
         elif key == "explore" and self._explore is not None:
-            self._open_flow(self._explore)
+            # The same as Compose: when the user adopts a route, the highlight moves to
+            # Trace, so Enter walks it (GitHub #29).
+            self._open_flow(self._explore, focus_trace=True)
 
     def _open_flow(
         self, flow: PathFlow, seed: str | None = None, focus_trace: bool = False
@@ -908,9 +917,9 @@ class TraceScreen(Screen):
                 becomes pinned, exactly as if the user adopted it by hand.
             focus_trace: Whether a confirmed flow (any resolution that is not
                 ``None``, also the unchanged spec) moves the highlight of the action
-                list to Trace. The composer uses this when it returns, so that Enter
-                walks the path that the user built. When the user leaves with Esc,
-                the highlight stays where it was.
+                list to Trace. The composer and the explorer use this when they return,
+                so that Enter walks the path that the user built or adopted. When the
+                user leaves with Esc, the highlight stays where it was.
         """
         if self._dialog_open or self._running:
             return
@@ -1076,7 +1085,7 @@ class TraceScreen(Screen):
             n = self._sample_count()
             _icon(text, "#", "accent")
             text.append(f"Sample count — {n} trace{'s' if n != 1 else ''}")
-        else:  # trace: the row on which the highlight starts
+        else:  # trace: the row on which the highlight starts, when a path is available
             _icon(text, "▶", "ok")
             if self._mode == "path" and not self._effective_spec()[0]:
                 text.append("Trace — compose a path first", style="muted")

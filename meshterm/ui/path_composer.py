@@ -47,7 +47,8 @@ rows and actions):
   composer has no more evidence. The dialog resolves with :class:`FetchNeighbours`. Then
   the owning flow gets the table, refreshes the topology, and opens the composer again in
   the same state (the hops and the slot stay the same).
-* Enter on **Use this path** returns the composed spec. Esc cancels with no change.
+* Enter on **Use this path** returns the composed spec. It is the last row (after Auto),
+  so End goes to it. Esc cancels with no change.
 * A walk that goes over a link two times in the same direction shows a yellow ⚠ note
   below the preview. A trace can still walk it, but it is no longer a *trail*, so the
   trophy case will ignore it (the no-cheat rule, refer to
@@ -104,7 +105,7 @@ _MAX_SUGGESTIONS = 12
 
 #: The sentinels of the action rows (different from the suggestion rows, which hold node
 #: ids). There is no cancel sentinel: Esc is the way to leave. A row that only did what
-#: Esc does cost one more highlight stop above the "Use this path" row.
+#: Esc does cost one more highlight stop in the action group.
 _USE = "use"
 _AUTO = "auto"
 
@@ -452,9 +453,11 @@ class PathComposerScreen(Screen):
         # repeater.
         if self._anchor() in self._fetch_nodes:
             rows.append(("fetch", self._anchor()))
-        rows.append(("action", _USE))
+        # Use is the last row, so End goes to it, and the user leaves with the path
+        # (JP, 2026-11-07). Auto comes before it.
         if self._mirrored:  # a path walk has no target for the device to route to
             rows.append(("action", _AUTO))
+        rows.append(("action", _USE))
         return rows
 
     def _spec(self) -> str:
