@@ -201,6 +201,52 @@ def test_neighbour_reports_feed_the_graph_as_fetched_evidence() -> None:
     assert "f2c24f54551e" in suggested and "beefbeef" in suggested
 
 
+# --- the direction of a reading -----------------------------------------------------
+
+
+def test_trace_readings_keep_the_direction_that_measured_them() -> None:
+    """Each hop of a trace measured the packet from the hop before it. The link keeps that."""
+    topo = _topo(trace_paths=[_traced(("3d", 12.5), ("f2", -5.5), ("3d", -6.5), (None, 11.75))])
+    us, hub, far = topo.self_id, "3d63c6429436", "f2c24f54551e"
+    assert topo.readings(us, hub) == [12.5]  # the hub heard our node
+    assert topo.readings(hub, us) == [11.75]  # our node heard the hub
+    assert topo.readings(hub, far) == [-5.5]
+    assert topo.readings(far, hub) == [-6.5]
+    assert sorted(topo.link(us, hub).snrs) == [11.75, 12.5]  # the pool is unchanged
+
+
+def test_packet_readings_are_what_our_node_heard() -> None:
+    """A received packet is a reading of the last relay toward our node, never the reverse."""
+    packet = PacketPath(when=utcnow(), origin="27d4396a2967", snr=8.0, hops=["3d63c6429436"])
+    topo = _topo(packet_paths=[packet])
+    assert topo.readings("3d63c6429436", topo.self_id) == [8.0]
+    assert topo.readings(topo.self_id, "3d63c6429436") == []
+    assert topo.readings(topo.self_id, "f2c24f54551e") == []  # no link at all
+
+
+def test_neighbour_report_readings_are_what_the_repeater_heard() -> None:
+    """A neighbour table holds the SNR that the repeater measured from each neighbour."""
+    reported = [NeighbourLink(when=utcnow(), repeater="3d63c6429436", neighbour="f2c2", snr=7.0)]
+    topo = _topo(neighbour_links=reported)
+    assert topo.readings("f2c24f54551e", "3d63c6429436") == [7.0]
+    assert topo.readings("3d63c6429436", "f2c24f54551e") == []
+
+
+def test_coalesce_keeps_the_direction_of_the_readings_of_a_stub() -> None:
+    """When a bare hop folds into its wide id, its readings keep the end that measured them."""
+    twin = Contact(name="Twin", public_key="27e4" + "0" * 60)
+    walks = [
+        _traced(("27", 5.0), ("f2", -3.0), ("27", -3.5), (None, 6.0)),
+        _traced(("27d4", 7.0), ("f2", -4.0), ("27d4", -4.5), (None, 8.0)),
+    ]
+    topo = _topo(trace_paths=walks, contacts=[REPEATER, FAR, LEAF, twin])
+    us, leaf, far = topo.self_id, "27d4396a2967", "f2c24f54551e"
+    assert sorted(topo.readings(us, leaf)) == [5.0, 7.0]
+    assert sorted(topo.readings(leaf, us)) == [6.0, 8.0]
+    assert sorted(topo.readings(leaf, far)) == [-4.0, -3.0]
+    assert sorted(topo.readings(far, leaf)) == [-4.5, -3.5]
+
+
 # --- suggestions and scenarios ----------------------------------------------------
 
 

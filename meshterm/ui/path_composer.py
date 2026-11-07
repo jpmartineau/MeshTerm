@@ -370,7 +370,15 @@ class PathComposerScreen(Screen):
         """
         node = one.node if len(one.node) >= len(other.node) else other.node
         stamps = [link.last_seen for link in (one.link, other.link) if link.last_seen is not None]
-        ends = sorted((self._anchor(), node))
+        anchor = self._anchor()
+        ends = sorted((anchor, node))
+        # Each reading keeps its direction. A reading that an alias of the suggested node
+        # measured is the node's own. Each other reading is the anchor's.
+        heard: dict[str, list[float]] = {}
+        for link in (one.link, other.link):
+            for end, snrs in link.heard_at.items():
+                key = node if self._same_node(end, node) else anchor
+                heard.setdefault(key, []).extend(snrs)
         return HopSuggestion(
             node=node,
             link=Link(
@@ -380,6 +388,7 @@ class PathComposerScreen(Screen):
                 snrs=[*one.link.snrs, *other.link.snrs],
                 last_seen=max(stamps) if stamps else None,
                 sources=one.link.sources | other.link.sources,
+                heard_at=heard,
             ),
             strength=max(one.strength, other.strength),
         )

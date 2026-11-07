@@ -192,6 +192,12 @@ class Link:
         last_seen: The time when the link was most recently observed.
         sources: The evidence classes that observed it (``trace``, ``route``,
             ``packet``, ``neighbour``).
+        heard_at: The same SNR readings, divided by the endpoint that measured them. The
+            key is the id of the node that received. Its list holds what that node
+            measured on the packets from the other end. A radio link is not symmetric:
+            a repeater that we hear well can hear our node badly. ``snrs`` pools the two
+            directions for the ranking, and this field keeps them apart, so that a caller
+            can ask about one direction (refer to :meth:`MeshTopology.readings`).
     """
 
     a: str
@@ -200,11 +206,24 @@ class Link:
     snrs: list[float] = field(default_factory=list)
     last_seen: datetime | None = None
     sources: set[str] = field(default_factory=set)
+    heard_at: dict[str, list[float]] = field(default_factory=dict)
 
     @property
     def median_snr(self) -> float | None:
         """The median SNR (dB) of the readings of the link, or ``None`` if there are none."""
         return statistics.median(self.snrs) if self.snrs else None
+
+    def heard_by(self, node: str) -> list[float]:
+        """The SNR readings that ``node`` measured on this link, from the other end.
+
+        Args:
+            node: The id of one endpoint of the link.
+
+        Returns:
+            The readings in dB, oldest first. The list is empty when ``node`` never
+            measured the other end, also when the other end measured ``node`` many times.
+        """
+        return self.heard_at.get(node, [])
 
     def strength(self, now: datetime | None = None) -> float:
         """Score the observed reliability of the link, for the ranking (higher is stronger).
@@ -414,7 +433,10 @@ class MeshTopology:
             nodes: The walked sequence, with the endpoints, in order.
             snrs: Optional SNR readings for each link, aligned with the links
                 (``snrs[i]`` is for the ``nodes[i] → nodes[i+1]`` link, measured at
-                arrival).
+                arrival). Thus ``nodes[i+1]`` measured it, and the reading goes into the
+                direction of the link that ends at that node (refer to
+                :attr:`Link.heard_at`). A caller with a reading that the *first* node of
+                a pair measured must give the pair in the reverse order.
             when: When the walk was observed (this sets the recency of each touched link).
             source: The evidence class tag (``trace``, ``route``, ``packet``,
                 ``neighbour``).
@@ -433,6 +455,7 @@ class MeshTopology:
             snr = snrs[i] if snrs and i < len(snrs) else None
             if snr is not None:
                 link.snrs.append(snr)
+                link.heard_at.setdefault(b, []).append(snr)
             if when is not None and (link.last_seen is None or when > link.last_seen):
                 link.last_seen = when
 
@@ -692,6 +715,9 @@ class MeshTopology:
             if far == dst:  # a src→dst link (src is a prefix of dst) becomes a self-loop
                 continue
             new_key = (dst, far) if dst < far else (far, dst)
+            # The readings that src measured become the readings of dst, the node that
+            # src is. The readings that far measured keep their key.
+            heard = {(dst if node == src else node): snrs for node, snrs in link.heard_at.items()}
             existing = self._links.get(new_key)
             if existing is None:
                 self._links[new_key] = Link(
@@ -701,11 +727,14 @@ class MeshTopology:
                     snrs=list(link.snrs),
                     last_seen=link.last_seen,
                     sources=set(link.sources),
+                    heard_at={node: list(snrs) for node, snrs in heard.items()},
                 )
             else:
                 existing.samples += link.samples
                 existing.snrs.extend(link.snrs)
                 existing.sources |= link.sources
+                for node, snrs in heard.items():
+                    existing.heard_at.setdefault(node, []).extend(snrs)
                 if link.last_seen is not None and (
                     existing.last_seen is None or link.last_seen > existing.last_seen
                 ):
@@ -733,6 +762,28 @@ class MeshTopology:
     def link(self, a: str, b: str) -> Link | None:
         """The evidence for the undirected link between ``a`` and ``b``, if there is any."""
         return self._links.get((a, b) if a < b else (b, a))
+
+    def readings(self, sender: str, receiver: str) -> list[float]:
+        """The SNR readings of one direction of a link: what ``receiver`` measured from ``sender``.
+
+        The ranking pools the two directions of a link (refer to :class:`Link`). This
+        method keeps them apart. For the link from our node to a repeater, ``readings(us,
+        repeater)`` is how well the repeater hears our node. Only a trace gives these
+        readings, because the first hop of a trace reports the SNR at which it received
+        our packet. ``readings(repeater, us)`` is how well our node hears the repeater:
+        each packet that the repeater relayed to us, and the last hop of each trace that
+        came home through it.
+
+        Args:
+            sender: The canonical id of the node that transmitted.
+            receiver: The canonical id of the node that measured.
+
+        Returns:
+            The readings in dB. The list is empty when there is no link, or when no
+            reading in that direction exists.
+        """
+        link = self.link(sender, receiver)
+        return list(link.heard_by(receiver)) if link is not None else []
 
     def next_hops(self, tail: str, *, exclude: frozenset[str] = frozenset()) -> list[HopSuggestion]:
         """Suggest the nodes that ``tail`` can reach, with the strongest observed link first.
@@ -1084,8 +1135,10 @@ def build_topology(
         topo.add_walk(nodes, snrs=snrs, when=packet.when, source="packet")
 
     for reported in neighbour_links:
+        # The repeater measured the SNR when it received from its neighbour. add_walk
+        # gives a reading to the second node of a pair, so the neighbour goes first.
         topo.add_walk(
-            [topo.canonical(reported.repeater), topo.canonical(reported.neighbour)],
+            [topo.canonical(reported.neighbour), topo.canonical(reported.repeater)],
             snrs=[reported.snr],
             when=reported.when,
             source="neighbour",
