@@ -51,6 +51,7 @@ _STORES = (
     "adverts.json",
     "devices.json",
     "places.json",
+    "outbound.json",
 )
 
 

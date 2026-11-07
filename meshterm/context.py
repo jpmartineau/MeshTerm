@@ -24,6 +24,7 @@ from .core.courier_store import CourierStore
 from .core.device_store import DeviceStore
 from .core.discovery import DiscoveredDevice, discover_devices
 from .core.mute_store import MuteStore
+from .core.outbound_store import OutboundStore
 from .core.place_store import PlaceStore
 from .core.preferences import PREFERENCES_FILENAME, Preferences, report_dropped
 from .core.preferences import install as install_preferences
@@ -106,6 +107,9 @@ class AppContext:
         place_store: The store for the places that the user typed for nodes. A typed place
             wins over a found place (if the caller does not inject it, the default is
             ``<config_dir>/places.json``).
+        outbound_store: The store for the outbound paths: the sites of this computer, the
+            active site, and the fixed devices (if the caller does not inject it, the
+            default is ``<config_dir>/outbound.json``).
         mock: Whether the context uses the simulator device.
         demo: Whether the simulator is the demo world of ``--demo``
             (:mod:`meshterm.demo`), which implies ``mock``.
@@ -151,6 +155,7 @@ class AppContext:
     contact_store: ContactStore | None = None
     room_store: RoomStore | None = None
     place_store: PlaceStore | None = None
+    outbound_store: OutboundStore | None = None
     profile: DeviceProfile | None = None
     mock: bool = False
     demo: bool = False
@@ -234,6 +239,8 @@ class AppContext:
             self.room_store = RoomStore(self.settings.config_dir / "rooms.json")
         if self.place_store is None:
             self.place_store = PlaceStore(self.settings.config_dir / "places.json")
+        if self.outbound_store is None:
+            self.outbound_store = OutboundStore(self.settings.config_dir / "outbound.json")
 
     @property
     def profile_name(self) -> str | None:
