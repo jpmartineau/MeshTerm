@@ -107,13 +107,14 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from rich.cells import cell_len
 from rich.console import Group, RenderableType
 from rich.text import Text
 
-from ..core.models import PATH_TRACE_TARGET, HopAggregate, TraceResult, TraceStats
+from ..core.models import PATH_TRACE_TARGET, HopAggregate, TraceResult, TraceStats, utcnow
 from ..services import trace_runner
 from ..services.records import first_repeated_edge
 from ..services.topology import render_forced_spec
@@ -1584,6 +1585,47 @@ def _best_observed(topo: Any, target_hash: str) -> tuple[tuple[str, ...], str] |
     return scenario.hops, source
 
 
+def _best_outbound(
+    topo: Any,
+    target_hash: str,
+    outbound: tuple[tuple[str, ...], ...],
+    silent_before: datetime,
+    choice: Any,
+) -> tuple[tuple[str, ...], str] | None:
+    """The best route to ``target_hash`` through an outbound path of the user, if one exists.
+
+    The ranking is :meth:`~meshterm.services.topology.MeshTopology.outbound_scenarios`:
+    the best score from the link after the path, the order of the user in a near tie, and
+    no path whose first hop went silent. The source line names the path and where the list
+    came from (``outbound path 1 · Foulab · 3× · −7 dB``).
+
+    Args:
+        topo: The newly built evidence graph.
+        target_hash: The hex hash of the target (any width ≥ 1 byte).
+        outbound: The outbound paths that apply, as canonical ids.
+        silent_before: The time before which a first hop counts as silent.
+        choice: The :class:`~meshterm.core.outbound_store.OutboundChoice` that gave the
+            paths, for the name of the site or the fixed device.
+
+    Returns:
+        ``(outbound_hops, provenance)``, or ``None`` when no outbound path reaches the
+        target.
+    """
+    target_id = topo.canonical(target_hash) or target_hash[:12]
+    found = topo.outbound_scenarios(target_id, outbound, silent_before=silent_before)
+    if not found:
+        return None
+    best = found[0]
+    source = f"outbound path {best.rank}"
+    if choice is not None and choice.name:
+        source += f" · {choice.name}"
+    if best.samples:
+        source += f" · {best.samples}×"
+    if best.weakest_snr is not None:
+        source += f" · {best.weakest_snr:+.0f} dB"
+    return best.hops, source
+
+
 def _scenario_path(
     scenario: Any,
     topo: Any,
@@ -1637,7 +1679,9 @@ def _scenario_detail(scenario: Any) -> Text:
     ``unobserved`` when the evidence graph has no information about the route yet.
     """
     atoms: list[Text] = [hops_atom(len(scenario.hops))]
-    if scenario.source == "device":
+    if scenario.source in ("device", "outbound"):
+        # An outbound route is a claim about where its first hops came from, the same as
+        # the device route: the user named them (refer to MeshTopology.outbound_scenarios).
         atoms.append(Text(scenario.label, style="accent"))
     if scenario.weakest_snr is not None:
         snr = Text("weakest ", style="muted")
@@ -1834,18 +1878,42 @@ async def _open_session(ctx: AppContext, target: str | None, *, initial_spec: st
     # that the device learned, when it really has one. If not, the outbound leg of the
     # last successful stored walk (the route that the screen shows). If not, the bare
     # destination: a direct attempt, which says clearly that it is one.
+    #
+    # The outbound paths of the user come before all of these, with one exception: a
+    # device route that starts with one of them. The firmware learns its route from floods
+    # that our node received, and a radio link is not symmetric (refer to
+    # meshterm.core.outbound_store).
+    # To make hop hashes canonical, only the contact index is necessary. Thus an *empty*
+    # graph does it. The full evidence build of fresh_topology() (stored traces, packet
+    # paths, neighbour tables) is necessary only for a suggestion from the evidence.
+    ident = MeshTopology(device_hash or "local", contacts)
+    store = getattr(ctx, "outbound_store", None)
+    choice = store.lookup(device_hash) if store is not None else None
+    outbound = (
+        tuple(tuple(ident.canonical(h) or h for h in path) for path in choice.paths)
+        if choice is not None
+        else ()
+    )
+    silent_before = utcnow() - timedelta(hours=ctx.preferences.outbound_silent_hours)
     device_route: tuple[str, ...] | None = None
     if target_contact is not None and target_contact.route_hops is not None:
-        # To make hop hashes canonical, only the contact index is necessary. Thus an
-        # *empty* graph does it. The full evidence build of fresh_topology() (stored
-        # traces, packet paths, neighbour tables) is not necessary, because this
-        # branch does not read it.
-        ident = MeshTopology(device_hash or "local", contacts)
         device_route = tuple(ident.canonical(h) or h for h in target_contact.route_hops)
+    device_first = device_route is not None and (
+        not outbound or any(device_route[: len(path)] == path for path in outbound)
+    )
     auto_hops: tuple[str, ...] | None = None
     auto_source = ""
     if target_hash is not None:
-        if device_route is not None:
+        through = (
+            None
+            if device_first or not outbound
+            else _best_outbound(fresh_topology(), target_hash, outbound, silent_before, choice)
+        )
+        if device_first:
+            auto_hops, auto_source = device_route, "device route"
+        elif through is not None:
+            auto_hops, auto_source = through
+        elif device_route is not None:
             auto_hops, auto_source = device_route, "device route"
         elif (observed := _best_observed(fresh_topology(), target_hash)) is not None:
             # The firmware has no route, but the evidence of the recorder gives one: the
@@ -2062,6 +2130,7 @@ async def _open_session(ctx: AppContext, target: str | None, *, initial_spec: st
                 cursor=seed_cursor,
                 fetch_nodes=frozenset(fetchable),
                 resolve=resolve,  # name a hop that the topology left ambiguous, as we do
+                outbound_paths=outbound,  # the user's ways out lead the first slot
             )
             result = await session.run_screen(screen)
             if result is CANCEL:
@@ -2291,7 +2360,9 @@ async def _open_session(ctx: AppContext, target: str | None, *, initial_spec: st
             return None
         topo = fresh_topology()
         target_id = topo.canonical(target_hash) or target_hash[:12]
-        scenarios = topo.scenarios(target_id, device_route=device_route)
+        scenarios = topo.scenarios(
+            target_id, device_route=device_route, outbound=outbound, silent_before=silent_before
+        )
         if not scenarios:
             await session.message_dialog(
                 Text(

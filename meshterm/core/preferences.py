@@ -261,6 +261,17 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         # connection. Refer to :mod:`meshterm.services.clock_sync`.
         default=False,
     ),
+    PrefSpec(
+        key="suggest_site",
+        label="Suggest a site",
+        help="Offer the site whose outbound paths your radio hears",
+        group="Device",
+        value_type="bool",
+        # On: the offer only asks, and it says what it heard. It never changes the active
+        # site by itself. Its dialog has a choice that sets this preference off. Refer to
+        # meshterm.services.site_suggest.
+        default=True,
+    ),
     # --- Sending -----------------------------------------------------------------
     PrefSpec(
         key="trace_cooldown_s",
@@ -330,6 +341,21 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         minimum=1,
         maximum=1440,
         unit="min",
+    ),
+    PrefSpec(
+        key="outbound_silent_hours",
+        label="Silent path",
+        help="Skip an outbound path whose first hop is this quiet",
+        group="Sending",
+        value_type="int",
+        # A repeater that relayed nothing that our node heard for a day is probably off, or
+        # out of reach from where the radio is now. A route through it fails, so the route
+        # suggestions skip it. A first hop with no evidence at all is not silent: it is
+        # unknown, and the user named it. Refer to meshterm.services.topology.
+        default=24,
+        minimum=1,
+        maximum=720,
+        unit="h",
     ),
     # --- TX optimize -------------------------------------------------------------
     PrefSpec(

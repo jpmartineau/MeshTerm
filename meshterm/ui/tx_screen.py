@@ -723,6 +723,12 @@ async def open_tx_optimize(
             neighbour_links=ctx.repo.neighbour_links(),
         )
         admin_id = topo.canonical(admin_hash) or admin_hash[:12]
+        # The user's ways out lead the first slot, as on the trace screens.
+        store = getattr(ctx, "outbound_store", None)
+        choice = store.lookup(device_hash) if store is not None else None
+        outbound = tuple(
+            tuple(topo.canonical(h) or h for h in path) for path in (choice.paths if choice else ())
+        )
         composer = PathComposerScreen(
             device_label=device_label,
             device_hash=device_hash,
@@ -733,6 +739,7 @@ async def open_tx_optimize(
             target_label=admin_node.name,
             hops=[topo.canonical(h) or h for h in screen.route_hops],
             resolve=resolve,  # name a hop that the topology left ambiguous, as we do
+            outbound_paths=outbound,
         )
         result = await session.run_screen(composer)
         if result is CANCEL or not isinstance(result, str):

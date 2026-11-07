@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from .services.monitor_service import MonitorService
     from .services.places import PlaceService
     from .services.rooms import RoomService
+    from .services.site_suggest import SiteSuggester
     from .services.watchtower import WatchtowerService
     from .ui.surface import Ui
 
@@ -201,6 +202,7 @@ class AppContext:
     _courier: CourierService | None = field(default=None, init=False, repr=False)
     _battery: BatteryService | None = field(default=None, init=False, repr=False)
     _places: PlaceService | None = field(default=None, init=False, repr=False)
+    _site_suggest: SiteSuggester | None = field(default=None, init=False, repr=False)
     _devstate: DeviceState | None = field(default=None, init=False, repr=False)
     _basemap_source: BasemapSource | None = field(default=None, init=False, repr=False)
     _ui: Ui | None = field(default=None, init=False, repr=False)
@@ -510,6 +512,20 @@ class AppContext:
 
             self._places = PlaceService(self)
         return self._places
+
+    @property
+    def site_suggest(self) -> SiteSuggester:
+        """Return the site suggestion of the session, and create it at first use.
+
+        The property creates it idle. The interactive session starts it with the other
+        always-on services. It only listens, and the menu asks the user. Scripted CLI runs
+        never start it.
+        """
+        if self._site_suggest is None:
+            from .services.site_suggest import SiteSuggester
+
+            self._site_suggest = SiteSuggester(self)
+        return self._site_suggest
 
     @property
     def battery(self) -> BatteryService:
@@ -1079,6 +1095,8 @@ class AppContext:
             await self._battery.aclose()
         if self._places is not None:
             await self._places.aclose()
+        if self._site_suggest is not None:
+            await self._site_suggest.aclose()
         if self._watchtower is not None:
             await self._watchtower.aclose()
         if self._clock_sync is not None:

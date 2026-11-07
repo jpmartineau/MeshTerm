@@ -1622,6 +1622,49 @@ $ meshterm trace-path --path "a1,d4" --json | jq -r '.edges | min_by(.snr_db) | 
 a1 -> d4  2.0 dB
 ```
 
+#### `meshterm outbound`
+
+Show and change the outbound paths: the ways out of your node that the trace features
+start their routes on. A path is a spec, the same as `--path` (`3d63,f2c2`), from your
+node outward. Each site of this computer has its own paths, and one site is active. A
+fixed device keeps its own paths, and the active site does not apply to it.
+
+| Command | What it does |
+| --- | --- |
+| `outbound` or `outbound show` | The paths that apply to the connected device now, and where they come from. |
+| `outbound sites` | Each site, whether it is active, and its paths. |
+| `outbound use SITE` | Make a site active. `outbound use --none` makes no site active. |
+| `outbound set SITE PATH…` | Make a site, or replace its paths, in your order. When no site is active, the new site becomes active. |
+| `outbound remove SITE --yes` | Delete a site and its paths. |
+| `outbound fix [PATH…]` | Give the connected device its own paths. With no path, it starts with the paths of the active site. |
+| `outbound unfix --yes` | The connected device follows the active site again. |
+
+```console
+$ meshterm outbound set Home 3d63c6429436 27d4,f2c2
+✓ site Home: 2 outbound path(s)
+$ meshterm outbound sites
+SITE    ACTIVE  PATHS
+Home    yes     3d63c6429436 27d4,f2c2
+Foulab  no      a100
+$ meshterm outbound
+SOURCE  site
+NAME    Home
+
+RANK  PATH          HOPS
+   1  3d63c6429436  3d63c6429436
+   2  27d4,f2c2     27d4 → f2c2
+```
+
+`sites`, `use`, `set`, and `remove` do not open the device. `show`, `fix`, and `unfix`
+open it, because the fixed devices are known by their public key. `show` returns `5` when
+no list applies. `sites` returns `5` when there is no site. A path with a node two times,
+or a hop that is not whole bytes of hex, is a usage error (`2`).
+
+**`--json`** gives `show` as one object, `{"source": …, "name": …, "paths": [{"rank": …,
+"path": …, "hops": […]}]}`. `source` is `site`, `device`, or `null`. `sites` is an array of
+`{"site", "active", "paths"}`. Each change prints the object that it wrote, for example
+`{"active": "Foulab"}`.
+
 #### `meshterm tx-optimize`
 
 Sweep the transmit power of a remote node against a target. Then select the lowest level

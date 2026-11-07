@@ -103,7 +103,7 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from itertools import pairwise
 from typing import TYPE_CHECKING
 
@@ -1618,9 +1618,33 @@ async def open_node_detail(
     if not you and contact is not None and contact.route_hops is not None:
         device_route = tuple(topo.canonical(h) or h for h in contact.route_hops)
     canonical_target = (topo.canonical(target_hash) or target_hash[:12]) if target_hash else None
-    suggested = topo.suggested(canonical_target) if canonical_target else None
+    # The outbound paths of the user lead the suggestions, as on the trace screen (refer to
+    # MeshTopology.scenarios). A stub context of a test has no store, and gets none.
+    outbound_store = getattr(ctx, "outbound_store", None)
+    choice = outbound_store.lookup(self_key or None) if outbound_store is not None else None
+    outbound = (
+        tuple(tuple(topo.canonical(h) or h for h in path) for path in choice.paths)
+        if choice is not None
+        else ()
+    )
+    prefs = getattr(ctx, "preferences", None)
+    silent_before = (
+        utcnow() - timedelta(hours=prefs.outbound_silent_hours) if prefs is not None else None
+    )
+    suggested = (
+        topo.suggested(canonical_target, outbound=outbound, silent_before=silent_before)
+        if canonical_target
+        else None
+    )
     scenarios = (
-        topo.scenarios(canonical_target, device_route=device_route) if canonical_target else []
+        topo.scenarios(
+            canonical_target,
+            device_route=device_route,
+            outbound=outbound,
+            silent_before=silent_before,
+        )
+        if canonical_target
+        else []
     )
 
     # -- the info block (the identity, how the node was heard, and where it is). The routes
@@ -2727,7 +2751,7 @@ def _routes_view(
         return _RoutesView(note="no key to route to")
     has_evidence = (
         device_route is not None
-        or any(s.source == "observed" for s in scenarios)
+        or any(s.source in ("observed", "outbound") for s in scenarios)
         or topo.link(topo.self_id, canonical_target) is not None
     )
     if not has_evidence:
@@ -2764,6 +2788,11 @@ def _routes_view(
             add(best_hops, "best", None, 0)
     if device_route is not None:
         add(device_route, "device", None, 0)
+    # Each route through an outbound path of the user: the user named the way out, so the
+    # route gets a line also where the evidence is thin.
+    for scenario in scenarios:
+        if scenario.source == "outbound":
+            add(scenario.hops, "", scenario.weakest_snr, scenario.samples)
     for scenario in _good_alternatives(topo, scenarios, canonical_target):
         add(scenario.hops, "", scenario.weakest_snr, scenario.samples)
 

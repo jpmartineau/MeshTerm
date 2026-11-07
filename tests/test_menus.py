@@ -182,8 +182,9 @@ def test_main_menu_sections_answer_the_menus_own_question() -> None:
     The menu asks "What would you like to do?". Thus the groups are by verb and not by
     subject. The address book is with the features that send messages from it. The recorded
     history is with the live views, because it is their past tense. The two walks are with
-    the topology that they walk over. A setting goes in the section that says whose it is:
-    this radio, the radio of another node over the mesh, or MeshTerm itself.
+    the topology that they walk over. The outbound paths are with the two trace tools that
+    start their routes on them. A setting goes in the section that says whose it is: this
+    radio, the radio of another node over the mesh, or MeshTerm itself.
 
     This app is the last of these three sections, and this is the reason that it sorts last.
     It holds the preferences that change the program, the diagnostics that state what the
@@ -203,7 +204,7 @@ def test_main_menu_sections_answer_the_menus_own_question() -> None:
     assert sections == {
         "Message": ["chat", "channels", "rooms", "courier", "contacts"],
         "Watch": ["dashboard", "livefeed", "watchtower", "clocks", "timemachine"],
-        "Explore": ["map", "walk", "trace", "trace-path", "records"],
+        "Explore": ["map", "walk", "trace", "trace-path", "outbound", "records"],
         "This node": ["info", "config", "advert"],
         "Managed nodes": ["repeater-admin", "tx-optimize", "forget-admin-passwords"],
         "This app": [

@@ -39,6 +39,7 @@ import bisect
 import heapq
 import math
 import statistics
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from itertools import chain, pairwise
@@ -72,6 +73,17 @@ _HOP_PENALTY = 0.35
 #: suggested route can go (the boomerang of the trace goes through each hop two times).
 _MAX_SCENARIOS = 5
 _MAX_SCENARIO_HOPS = 5
+
+#: How close two outbound routes must score to be a tie, as a fraction of the higher score.
+#: In a tie, the outbound path that the user put first wins (refer to
+#: :meth:`MeshTopology.outbound_scenarios`). A strength is a noisy estimate, so a small
+#: difference must not override the knowledge of the user.
+_NEAR_TIE = 0.15
+
+#: The strength that a route gets for a part that the user vouches for: a target that is a
+#: hop of an outbound path. No link of the route is left to score, and the user trusts
+#: each link of the path. Thus the route ranks above each route that the evidence scores.
+_TRUSTED_STRENGTH = 1e6
 
 #: The test that an ambiguous short hash must pass before it merges into one of the nodes
 #: that it can name (refer to :meth:`MeshTopology._corroborated_owner`). The first value is
@@ -225,7 +237,7 @@ class Link:
         """
         return self.heard_at.get(node, [])
 
-    def strength(self, now: datetime | None = None) -> float:
+    def strength(self, now: datetime | None = None, *, snrs: list[float] | None = None) -> float:
         """Score the observed reliability of the link, for the ranking (higher is stronger).
 
         Three factors multiply:
@@ -241,6 +253,10 @@ class Link:
 
         Args:
             now: The reference time for recency (the default is the current time).
+            snrs: The readings for the quality factor, in place of the pooled readings of
+                the two directions. The graph gives the readings of one direction here for
+                the first link of a route out of our node (refer to
+                :meth:`MeshTopology.outward_strength`).
 
         Returns:
             The strength score of the link, ``> 0``.
@@ -251,7 +267,7 @@ class Link:
         if self.last_seen is not None and getattr(self.last_seen, "tzinfo", None):
             age_days = max(0.0, (now - self.last_seen).total_seconds() / 86400.0)
             recency = 0.5 ** (age_days / _EVIDENCE_HALF_LIFE_DAYS)
-        snr = self.median_snr
+        snr = self.median_snr if snrs is None else (statistics.median(snrs) if snrs else None)
         quality = 1.0
         if snr is not None:
             span = _SNR_CEIL_DB - _SNR_FLOOR_DB
@@ -291,8 +307,8 @@ class PathScenario:
         label: A short description for the user, of where the route came from.
         hops: The canonical ids of the intermediate repeaters, in order from our node
             outward, without the two endpoints (empty means to trace the target directly).
-        source: The evidence class that proposed the route (``device``, ``direct``,
-            ``observed``).
+        source: The evidence class that proposed the route (``device``, ``outbound``,
+            ``direct``, ``observed``).
         score: The ranking score (higher first): the strength of the weakest link of the
             path, with a penalty for the hop count. Direct and device scenarios with no
             observed evidence score 0.
@@ -300,6 +316,8 @@ class PathScenario:
             is the bottleneck that the trace will probably measure.
         samples: The total of the readings on the links of the route (an approximate
             measure of confidence).
+        rank: For an ``outbound`` scenario, the place of its outbound path in the list of
+            the user, from 1. It is 0 for each other source.
     """
 
     label: str
@@ -308,6 +326,7 @@ class PathScenario:
     score: float
     weakest_snr: float | None = None
     samples: int = 0
+    rank: int = 0
 
     def spec(self, target_hash: str, width_bytes: int) -> str:
         """Render the scenario as a forced-path spec, with the return leg.
@@ -363,7 +382,7 @@ class MeshTopology:
         # target two times when a screen opens (suggested() and scenarios() both run the
         # search). The search is the most costly part of an open that uses the topology.
         self._graph_version = 0
-        self._routes_memo: dict[tuple[str, int, int], list[tuple[str, ...]]] = {}
+        self._routes_memo: dict[tuple, list[tuple[str, ...]]] = {}
 
     # --- identity ----------------------------------------------------------------
 
@@ -763,6 +782,31 @@ class MeshTopology:
         """The evidence for the undirected link between ``a`` and ``b``, if there is any."""
         return self._links.get((a, b) if a < b else (b, a))
 
+    def outward_strength(self, a: str, b: str, link: Link) -> float:
+        """The strength of ``link`` for a packet that goes from ``a`` to ``b``.
+
+        A link that leaves our node is scored from what the far end measured from our node
+        (the first hop of a trace reports it), when such readings exist. The pooled readings
+        are mostly what our node *heard*: each received packet adds one, and only a trace
+        adds a reading of the other direction. A repeater that our node hears well can
+        hear our node badly, and a route out of our node depends on the second fact. Each
+        other link keeps its pooled strength: the graph knows both directions of those
+        links only from the same few traces.
+
+        Args:
+            a: The canonical id of the node that transmits.
+            b: The canonical id of the node that receives.
+            link: The link between them.
+
+        Returns:
+            The strength score of the link, in that direction.
+        """
+        if a == self.self_id:
+            outward = link.heard_by(b)
+            if outward:
+                return link.strength(self._now, snrs=outward)
+        return link.strength(self._now)
+
     def readings(self, sender: str, receiver: str) -> list[float]:
         """The SNR readings of one direction of a link: what ``receiver`` measured from ``sender``.
 
@@ -807,21 +851,32 @@ class MeshTopology:
             other = b if a == tail else a if b == tail else None
             if other is None or other in exclude:
                 continue
-            out.append(HopSuggestion(node=other, link=link, strength=link.strength(self._now)))
+            strength = self.outward_strength(tail, other, link)
+            out.append(HopSuggestion(node=other, link=link, strength=strength))
         out.sort(key=lambda s: (-s.strength, s.node))
         return out
 
     def scenarios(
-        self, target: str, *, device_route: tuple[str, ...] | None = None
+        self,
+        target: str,
+        *,
+        device_route: tuple[str, ...] | None = None,
+        outbound: Sequence[tuple[str, ...]] = (),
+        silent_before: datetime | None = None,
     ) -> list[PathScenario]:
         """Rank the candidate outbound routes to ``target``.
 
-        Three families, without duplicates, in this order of priority:
+        Four families, without duplicates, in this order of priority:
 
         1. **device**: the route that the firmware itself learned from received floods
            (the route that an auto-routed trace walks), when the caller supplies one.
-        2. **direct**: no repeaters at all. MeshTerm always offers it as the baseline.
-        3. **observed**: the strongest simple paths through the evidence graph (the score
+        2. **outbound**: one route through each outbound path of the user (refer to
+           :meth:`outbound_scenarios`). When the user has outbound paths and the device
+           route does not start with one of them, this family comes first. The firmware
+           learns its route from floods that our node *received*, and a radio link is not
+           symmetric. The user knows the way out, and the received floods do not.
+        3. **direct**: no repeaters at all. MeshTerm always offers it as the baseline.
+        4. **observed**: the strongest simple paths through the evidence graph (the score
            is the weakest link, with a penalty for each hop). This family gives the paths
            that the device never learned, but that the data supports.
 
@@ -834,12 +889,18 @@ class MeshTopology:
             target: The canonical id of the target.
             device_route: The learned route of the firmware (canonical intermediate
                 hops), if the contact has one.
+            outbound: The outbound paths of the user, in order, as canonical ids.
+            silent_before: Skip an outbound path whose first hop was last heard before
+                this time (refer to :meth:`outbound_scenarios`).
 
         Returns:
             Scenarios ranked with the best evidence first. The device route, when there
-            is one, is always first, whatever its score, because it is what "auto" does.
+            is one, is first, whatever its score, because it is what "auto" does. The one
+            exception is a device route that does not start with an outbound path of the
+            user: then the outbound routes are first.
         """
-        seen: set[tuple[str, ...]] = set()
+        first = self.outbound_scenarios(target, outbound, silent_before=silent_before)
+        seen: set[tuple[str, ...]] = {s.hops for s in first}
         out: list[PathScenario] = []
 
         def add(label: str, hops: tuple[str, ...], source: str) -> None:
@@ -858,22 +919,133 @@ class MeshTopology:
                 )
             )
 
+        device: list[PathScenario] = []
         if device_route is not None:
-            add("device route", device_route, "device")
+            if device_route in seen:  # the device learned one of the outbound routes
+                device = [s for s in first if s.hops == device_route]
+                first = [s for s in first if s.hops != device_route]
+            else:
+                add("device route", device_route, "device")
+                device = [s for s in out if s.source == "device"]
+                out = [s for s in out if s.source != "device"]
         add("direct", (), "direct")
         for hops in self._best_routes(target, k=_MAX_SCENARIOS):
             add("observed path", hops, "observed")
 
         # Rank the observed evidence, but keep the device route pinned at the top. It is
-        # the reference point for the comparison of each alternative.
-        head = [s for s in out if s.source == "device"]
-        rest = sorted(
-            (s for s in out if s.source != "device"),
-            key=lambda s: (-s.score, len(s.hops)),
+        # the reference point for the comparison of each alternative. The outbound routes
+        # go in front of a device route that starts on a path the user did not name.
+        rest = sorted(out, key=lambda s: (-s.score, len(s.hops)))
+        starts_outbound = bool(device) and any(
+            device[0].hops[: len(path)] == path for path in outbound
         )
-        return (head + rest)[:_MAX_SCENARIOS]
+        head = device + first if (starts_outbound or not first) else first + device
+        return (head + rest)[: max(_MAX_SCENARIOS, len(head))]
 
-    def suggested(self, target: str) -> PathScenario | None:
+    def outbound_scenarios(
+        self,
+        target: str,
+        outbound: Sequence[tuple[str, ...]],
+        *,
+        silent_before: datetime | None = None,
+    ) -> list[PathScenario]:
+        """One route to ``target`` through each outbound path of the user, the best first.
+
+        The route through an outbound path is the path, then the cheapest continuation
+        from its last hop to the target (a node of the path is never used again). When
+        the target is a hop of the path, the route is the part of the path before it.
+
+        The score is the weakest link of the continuation only, with the penalty for each
+        hop of the full route. The user vouches for the links of the outbound path, and
+        the evidence for these links is mostly what our node *heard*, which says little
+        about how well a repeater hears our node. A route that ends inside its path has no
+        link to score, and gets :data:`_TRUSTED_STRENGTH`.
+
+        The best score is first. When two scores are within :data:`_NEAR_TIE`, the path
+        that the user put first wins. A path whose first hop was last heard before
+        ``silent_before`` is skipped: that repeater is probably off, or out of reach from
+        here. A first hop with no evidence at all is not silent, because nothing says so.
+
+        Args:
+            target: The canonical id of the target.
+            outbound: The outbound paths, in the order of the user, as canonical ids.
+            silent_before: The time before which a first hop counts as silent, or
+                ``None`` to keep each path.
+
+        Returns:
+            The scenarios (source ``outbound``, with the rank of their path), the best
+            first. A path that cannot reach the target is not in the list.
+        """
+        found: list[PathScenario] = []
+        for rank, path in enumerate(outbound, start=1):
+            if not path or self.self_id in path:
+                continue
+            first_link = self.link(self.self_id, path[0])
+            if (
+                silent_before is not None
+                and first_link is not None
+                and first_link.last_seen is not None
+                and getattr(first_link.last_seen, "tzinfo", None) is not None
+                and first_link.last_seen < silent_before
+            ):
+                continue
+            if target in path:
+                hops = path[: path.index(target)]
+                score = _TRUSTED_STRENGTH / (1.0 + _HOP_PENALTY * len(hops))
+                found.append(
+                    PathScenario(f"outbound path {rank}", hops, "outbound", score, rank=rank)
+                )
+                continue
+            # The search gives its candidates by cost, and the score is the weakest link.
+            # The two orders differ (one weak direct link costs less than two strong links),
+            # so the best continuation is the best score among a few candidates.
+            best: PathScenario | None = None
+            for tail in self._best_routes(
+                target,
+                k=_MAX_SCENARIOS,
+                source=path[-1],
+                banned=frozenset({self.self_id, *path[:-1]}),
+                max_hops=_MAX_SCENARIO_HOPS - len(path),
+            ):
+                hops = (*path, *tail)
+                strength, weakest, samples = self._weakest([path[-1], *tail, target])
+                score = strength / (1.0 + _HOP_PENALTY * len(hops))
+                if best is None or score > best.score:
+                    best = PathScenario(
+                        label=f"outbound path {rank}",
+                        hops=hops,
+                        source="outbound",
+                        score=score,
+                        weakest_snr=weakest,
+                        samples=samples,
+                        rank=rank,
+                    )
+            if best is not None:
+                found.append(best)
+        found.sort(key=lambda s: -s.score)
+        # A near tie goes to the path that the user put first. The list is short (one
+        # entry for each outbound path), so a bubble pass is enough.
+        moved = True
+        while moved:
+            moved = False
+            for i in range(len(found) - 1):
+                ahead, behind = found[i], found[i + 1]
+                if behind.rank < ahead.rank and behind.score * (1.0 + _NEAR_TIE) >= ahead.score:
+                    found[i], found[i + 1] = behind, ahead
+                    moved = True
+        unique: list[PathScenario] = []
+        for scenario in found:
+            if all(scenario.hops != kept.hops for kept in unique):
+                unique.append(scenario)
+        return unique
+
+    def suggested(
+        self,
+        target: str,
+        *,
+        outbound: Sequence[tuple[str, ...]] = (),
+        silent_before: datetime | None = None,
+    ) -> PathScenario | None:
         """The one best outbound route to ``target`` that has evidence, if one exists.
 
         This is the answer from the data to "what is the best way to reach this node?".
@@ -888,14 +1060,24 @@ class MeshTopology:
         For a node that the evidence can only reach directly (or not at all), the method
         returns ``None``. Thus the caller keeps the default that it uses otherwise.
 
+        When the user has outbound paths, the best route through one of them comes first
+        (refer to :meth:`outbound_scenarios`). The user knows the way out of our node,
+        and the evidence about it is mostly what our node heard.
+
         Args:
             target: The canonical id of the target.
+            outbound: The outbound paths of the user, in order, as canonical ids.
+            silent_before: Skip an outbound path whose first hop was last heard before
+                this time.
 
         Returns:
-            The best observed :class:`PathScenario` (always with at least one intermediate
-            hop, and a positive score from evidence), or ``None`` when the observations
-            support nothing better than a direct route.
+            The best outbound :class:`PathScenario`, else the best observed one (always
+            with at least one intermediate hop, and a positive score from evidence), or
+            ``None`` when nothing is better than a direct route.
         """
+        through = self.outbound_scenarios(target, outbound, silent_before=silent_before)
+        if through:
+            return through[0]
         for scenario in self.scenarios(target):
             if scenario.source == "observed" and scenario.hops and scenario.score > 0:
                 return scenario
@@ -918,7 +1100,19 @@ class MeshTopology:
         Returns:
             ``(score, weakest_median_snr, total_samples)``.
         """
-        chain = [self.self_id, *hops, target]
+        strength, weakest_snr, samples = self._weakest([self.self_id, *hops, target])
+        return strength / (1.0 + _HOP_PENALTY * len(hops)), weakest_snr, samples
+
+    def _weakest(self, chain: list[str]) -> tuple[float, float | None, int]:
+        """The weakest link of a chain of nodes: its strength, the lowest SNR, the readings.
+
+        Args:
+            chain: The canonical ids of the nodes, in order.
+
+        Returns:
+            ``(weakest_strength, weakest_median_snr, total_samples)``. The strength is 0
+            when a link of the chain has no evidence.
+        """
         weakest_strength: float | None = None
         weakest_snr: float | None = None
         samples = 0
@@ -926,17 +1120,24 @@ class MeshTopology:
             link = self.link(a, b)
             if link is None:
                 return 0.0, None, samples
-            strength = link.strength(self._now)
+            strength = self.outward_strength(a, b, link)
             samples += link.samples
             if weakest_strength is None or strength < weakest_strength:
                 weakest_strength = strength
             snr = link.median_snr
             if snr is not None and (weakest_snr is None or snr < weakest_snr):
                 weakest_snr = snr
-        score = (weakest_strength or 0.0) / (1.0 + _HOP_PENALTY * len(hops))
-        return score, weakest_snr, samples
+        return weakest_strength or 0.0, weakest_snr, samples
 
-    def _best_routes(self, target: str, *, k: int) -> list[tuple[str, ...]]:
+    def _best_routes(
+        self,
+        target: str,
+        *,
+        k: int,
+        source: str | None = None,
+        banned: frozenset[str] = frozenset(),
+        max_hops: int = _MAX_SCENARIO_HOPS,
+    ) -> list[tuple[str, ...]]:
         """Find up to ``k`` strong simple paths from our node to ``target``, lowest cost first.
 
         This is Yen's k-shortest-loopless-paths over the evidence graph. Each link costs
@@ -962,6 +1163,11 @@ class MeshTopology:
         Args:
             target: The canonical id of the destination.
             k: The maximum number of routes to return.
+            source: The canonical id where the routes start. The default is our node. An
+                outbound route continues from the last hop of its outbound path with it.
+            banned: The ids that a route must not go through (the hops of an outbound
+                path before ``source``, and our node).
+            max_hops: The most intermediate hops that a route can have.
 
         Returns:
             The intermediate-hop tuples of the routes that the method found (without the
@@ -969,15 +1175,21 @@ class MeshTopology:
             version (refer to ``_routes_memo``). Callers must use the list as read-only,
             and they do (both consumers only iterate it).
         """
-        memo_key = (target, k, self._graph_version)
+        start = self.self_id if source is None else source
+        memo_key = (target, k, self._graph_version, start, banned, max_hops)
         memoized = self._routes_memo.get(memo_key)
         if memoized is not None:
             return memoized
         neighbors: dict[str, list[tuple[str, float]]] = {}
         for (a, b), link in self._links.items():
-            cost = 1.0 / max(link.strength(self._now), 1e-6) + _HOP_PENALTY
-            neighbors.setdefault(a, []).append((b, cost))
-            neighbors.setdefault(b, []).append((a, cost))
+            # Each direction has its own cost: a link out of our node is scored from what
+            # the far end measured from us (refer to outward_strength).
+            neighbors.setdefault(a, []).append(
+                (b, 1.0 / max(self.outward_strength(a, b, link), 1e-6) + _HOP_PENALTY)
+            )
+            neighbors.setdefault(b, []).append(
+                (a, 1.0 / max(self.outward_strength(b, a, link), 1e-6) + _HOP_PENALTY)
+            )
 
         def shortest(
             source: str, banned_nodes: set[str], banned_edges: set[tuple[str, str]]
@@ -995,7 +1207,7 @@ class MeshTopology:
                 if u == target:
                     break
                 for v, cost in neighbors.get(u, ()):
-                    if v in banned_nodes or (u, v) in banned_edges:
+                    if v in banned_nodes or v in banned or (u, v) in banned_edges:
                         continue
                     nd = d + cost
                     if nd < dist.get(v, math.inf):
@@ -1016,8 +1228,8 @@ class MeshTopology:
                 total += min((c for v, c in neighbors.get(a, ()) if v == b), default=math.inf)
             return total
 
-        first = shortest(self.self_id, set(), set())
-        if first is None or len(first[1]) - 2 > _MAX_SCENARIO_HOPS:
+        first = shortest(start, set(), set())
+        if first is None or len(first[1]) - 2 > max_hops:
             self._routes_memo[memo_key] = []
             return []
         accepted: list[list[str]] = [first[1]]
@@ -1044,7 +1256,7 @@ class MeshTopology:
                 if spur_result is None:
                     continue
                 full = root[:-1] + spur_result[1]
-                if len(full) - 2 > _MAX_SCENARIO_HOPS:
+                if len(full) - 2 > max_hops:
                     continue
                 key = tuple(full)
                 if key in seen:

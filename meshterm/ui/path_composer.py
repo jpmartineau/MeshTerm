@@ -23,6 +23,12 @@ node can hear it.)
   dims) only the last step back to our node. The preview starts as ``★ → + → ★`` only.
   There is no "Auto" action, because with no destination, the device has nothing to
   route to.
+* **Outbound mode** (the Outbound paths pages, ``outbound=True``): the user composes an
+  outbound path, the way out of our node into the mesh (refer to
+  :mod:`meshterm.core.outbound_store`). It has no target and no return. The preview is
+  ``★ → hop → …`` and its end is open, because the route goes on from there. A node can
+  be in the path only one time. The composer returns the canonical ids of the hops, at
+  full width, because a stored path must not depend on the path-hash width of a session.
 
 Interaction, which follows the pattern of the reorder screen (a highlight that moves over
 rows and actions):
@@ -39,6 +45,10 @@ rows and actions):
 * Typed text filters the suggestions by name or by hash. When the typed text is hex with
   an even length, a row appears that adds it as a custom hop. Thus the user can force a
   node that MeshTerm never observed (or a bare hash from another tool) into the route.
+* While the insertion slot is at our node, the outbound paths of the user (refer to
+  :mod:`meshterm.core.outbound_store`) come first, in the order of the user, before the
+  suggestions. Enter on one inserts all of its hops. The user knows which way out of our
+  node works, and the evidence of the graph is mostly what our node heard.
 * Backspace (⌫) removes the filter text first. When the filter is empty, it removes the
   hop to the left of the slot.
 * When the slot is after a repeater for which we have admin credentials, a "Fetch
@@ -217,6 +227,8 @@ class PathComposerScreen(Screen):
         cursor: int | None = None,
         fetch_nodes: frozenset[str] = frozenset(),
         resolve: NodeResolver = identity_label,
+        outbound: bool = False,
+        outbound_paths: tuple[tuple[str, ...], ...] = (),
     ) -> None:
         """Build the composer.
 
@@ -224,7 +236,8 @@ class PathComposerScreen(Screen):
         suggestions do not include the target (the path turns at it implicitly), and the
         returned spec adds the target and the mirrored return at its end. With no target,
         the composer is in path mode: the user composes the full walk by hand, and the
-        composer returns it exactly.
+        composer returns it exactly. ``outbound`` selects outbound mode, which also has no
+        target.
 
         Args:
             device_label: The name of our node, at the start and at the end of the route
@@ -251,9 +264,19 @@ class PathComposerScreen(Screen):
                 names a hop that the topology cannot name (refer to
                 :meth:`_resolve_entry`). Thus the composer shows the same names as the
                 screen that opened it.
+            outbound: Compose an outbound path: no target, no return, and the canonical
+                ids of the hops as the result (refer to the module docstring).
+            outbound_paths: The outbound paths that apply now, in the order of the user,
+                as canonical ids. They lead the rows while the insertion slot is at our
+                node. Outbound mode ignores them, because it composes such a path.
         """
         super().__init__()
-        self.title = f"Compose path — {target_label}" if target_label else "Compose path"
+        if outbound:
+            self.title = "Compose outbound path"
+        else:
+            self.title = f"Compose path — {target_label}" if target_label else "Compose path"
+        self._outbound = outbound and target_id is None
+        self._outbound_paths = () if outbound else tuple(p for p in outbound_paths if p)
         self._target_id = target_id
         self._target_hash = (target_hash or "").lower().removeprefix("0x")
         self._target_label = target_label
@@ -416,6 +439,8 @@ class PathComposerScreen(Screen):
         """
         if self._mirrored:
             exclude = frozenset({self._topology.self_id, self._target_id, *self._hops})
+        elif self._outbound:  # a node can be in an outbound path only one time
+            exclude = frozenset({self._topology.self_id, *self._hops})
         else:
             after = self._hops[self._cursor] if self._cursor < len(self._hops) else None
             exclude = frozenset(
@@ -444,6 +469,22 @@ class PathComposerScreen(Screen):
             ]
         return merged[:_MAX_SUGGESTIONS]
 
+    def _usable_outbound(self) -> list[tuple[int, tuple[str, ...]]]:
+        """The outbound paths to offer now, each with its rank: only at our node, unfiltered.
+
+        A path is offered only where it can go: while the insertion slot is at our node,
+        with no typed entry, and when none of its nodes is already in the route or is the
+        target.
+        """
+        if self._cursor or self._entry or not self._outbound_paths:
+            return []
+        taken = {*self._hops, self._target_id} if self._target_id else set(self._hops)
+        return [
+            (rank, path)
+            for rank, path in enumerate(self._outbound_paths, start=1)
+            if not taken & set(path)
+        ]
+
     def _custom_hex(self) -> str | None:
         """The typed entry as a hex hop that the user can add, or ``None`` if it is not one."""
         needle = self._entry.strip().lower().removeprefix("0x")
@@ -455,6 +496,7 @@ class PathComposerScreen(Screen):
         custom = self._custom_hex()
         if custom:
             rows.append(("custom", custom))
+        rows.extend(("outbound", entry) for entry in self._usable_outbound())
         rows.extend(("hop", s) for s in self._suggestions())
         # When the slot is after a repeater for which we have credentials, its live
         # neighbour table is one key press away. The row goes with the suggestions,
@@ -479,6 +521,8 @@ class PathComposerScreen(Screen):
         """
         if self._mirrored:
             return render_forced_spec(tuple(self._hops), self._target_hash, self._width_bytes)
+        if self._outbound:  # the stored form: each hop at its full width
+            return ",".join(self._hops)
         return render_custom_spec(tuple(self._hops), self._width_bytes)
 
     def _walk_nodes(self) -> list[str]:
@@ -596,6 +640,23 @@ class PathComposerScreen(Screen):
         if self._mirrored:
             entries.append(self._path_entry(self._target_id))
             entries.extend(self._path_entry(hop) for hop in reversed(self._hops))
+        if self._outbound:
+            # An outbound path has no way home: the route goes on from its last hop. Thus
+            # the line ends open (refer to ``to_destination`` of PathLine).
+            line = path_line(
+                entries,
+                self._resolve_entry,
+                prefix_bytes=self._width_bytes,
+                self_name=self._device_label,
+                hash_bytes=self._width_bytes,
+                device_hash=self._device_hash or None,
+                bare_self=True,
+                cursor=self._cursor + 1,
+                to_destination=False,
+            )
+            if self._places.on:
+                line = placed(line, places_of_session(), node_of(self._resolve))
+            return line
         entries.append(None)
         line = path_line(
             entries,
@@ -639,6 +700,14 @@ class PathComposerScreen(Screen):
             return text
         if kind == "hop":
             return self._suggestion_text(payload)
+        if kind == "outbound":
+            rank, path = payload  # type: ignore[misc]
+            text = Text(f"outbound path {rank}  ", style="accent")
+            for i, hop in enumerate(path):
+                if i:
+                    text.append(" → ", style="muted")
+                text.append_text(self._node_text(hop))
+            return text
         if kind == "fetch":
             text = Text("⇣ Fetch neighbours from ", style="")
             text.append_text(self._node_text(str(payload)))  # named like each other row
@@ -696,7 +765,8 @@ class PathComposerScreen(Screen):
         else:
             heading = Text("Next hop from ", style="muted")
             heading.append_text(self._node_text(self._anchor()))
-            heading.append(" — strongest first", style="muted")
+            first = "your paths first" if self._usable_outbound() else "strongest first"
+            heading.append(f" — {first}", style="muted")
             lines.extend(render_lines(heading, width))
 
         # Each entry of the list window is one rendered line, tagged with its row index
@@ -772,6 +842,9 @@ class PathComposerScreen(Screen):
             self._insert_hop(str(payload))
         elif kind == "hop":
             self._insert_hop(payload.node)  # type: ignore[union-attr]
+        elif kind == "outbound":
+            for hop in payload[1]:  # type: ignore[index]
+                self._insert_hop(hop)
         elif kind == "fetch":
             self.resolve(FetchNeighbours(node=str(payload)))
         elif payload == _USE:

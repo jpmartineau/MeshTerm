@@ -849,6 +849,18 @@ async def _menu_loop(ctx: AppContext, session: TuiSession) -> None:
     )
     session.set_root(menu)
     loop = asyncio.get_running_loop()
+
+    def offer_site_now() -> None:
+        """Ask about a suggested site at once, but only over the main menu.
+
+        The suggestion arrives while the user does something. Over a screen, it waits for
+        the next round of the menu, so that it never interrupts a screen.
+        """
+        if session.top is menu:
+            session.run_detached(_offer_pending_site(ctx))
+
+    if getattr(ctx, "site_suggest", None) is not None:
+        ctx.site_suggest.on_ready = offer_site_now
     while True:
         try:
             await _menu_round(ctx, session, menu, tools, loop)
@@ -859,6 +871,16 @@ async def _menu_loop(ctx: AppContext, session: TuiSession) -> None:
             # popped itself. The only remaining step is to disarm and paint the menu that
             # the user asked for.
             session.unwound()
+
+
+async def _offer_pending_site(ctx: AppContext) -> None:
+    """Ask the user about the site that the radio seems to be at, if a suggestion waits."""
+    service = getattr(ctx, "site_suggest", None)  # a stub context of a test has none
+    suggestion = service.take() if service is not None else None
+    if suggestion is not None:
+        from .outbound_screen import offer_site
+
+        await offer_site(ctx, suggestion)
 
 
 class _Quit(Exception):
@@ -901,6 +923,7 @@ async def _menu_round(
     session.push(menu)
     ran_over_menu = False
     try:
+        await _offer_pending_site(ctx)  # a suggestion that waited for the menu
         selection = await menu.future
         # The Quit row asks first, in a dialog over the menu (which is still pushed). Cancel
         # ends the round and paints the menu again, and its highlight is still on the row.
@@ -1089,6 +1112,9 @@ async def _resume_monitor(ctx: AppContext) -> Exception | None:
     # The place finder reads only stored locations and the network (tiles, Nominatim), never
     # the device. Its first read waits some seconds, so it does not slow the start.
     await ctx.places.start()
+    # The site suggestion only counts what the hub hears, and the menu asks the user. It
+    # never opens the device (refer to meshterm.services.site_suggest).
+    await ctx.site_suggest.start()
     if not ctx.settings.connect_on_start:
         return None
     failure: Exception | None = None

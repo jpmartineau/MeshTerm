@@ -1292,6 +1292,80 @@ def _path_composer(cols: int, rows: int) -> Screen:
     )
 
 
+def _outbound_env():  # noqa: ANN202 - a private type of the module under test
+    """The session values of the Outbound paths pages: two nodes, and one trace through both."""
+    from meshterm.persistence.repository import TracedPath
+    from meshterm.services.outbound import DeviceIdentity
+    from meshterm.ui.outbound_screen import _Env
+
+    hub = Contact(name="Hilltop-Repeater", public_key=_HUB_KEY, key_prefix="3d63c6429436")
+    far = Contact(name="Alice", public_key=_FAR_KEY, key_prefix="f2c24f54551e")
+    self_key = "aaaaaaaaaaaa" + "0" * 52
+    walk = TracedPath(when=utcnow(), hops=[("3d", 9.5), ("f2", -4.0), ("3d", -3.5), (None, 11.0)])
+    topo = build_topology(
+        self_id=self_key,
+        contacts=[hub, far],
+        trace_paths=[walk] * 1200,  # a count of four digits, the widest that the lane draws
+        packet_paths=[],
+        neighbour_links=[],
+    )
+    return _Env(DeviceIdentity(self_key, "Homestead"), [hub, far], topo, 1)
+
+
+def _outbound_store():  # noqa: ANN202
+    """Two sites (one with a name of the longest length) and a fixed device."""
+    from meshterm.core.outbound_store import OutboundStore
+
+    store = OutboundStore(Path(tempfile.mkdtemp(prefix="meshterm-gallery-outbound-")) / "o.json")
+    store.put_site("Home", [("3d63c6429436",), ("3d63c6429436", "f2c24f54551e", "9a9a")])
+    store.put_site("A-site-named-24-chars-xx", [("f2c24f54551e",)])
+    store.set_active("Home")
+    store.fix_device("bb" * 32, "Rooftop-Companion-Unit", [("3d63c6429436",)])
+    return store
+
+
+def _outbound_page(cols: int, rows: int) -> Screen:
+    """The Outbound paths page: sites, the active mark, and a fixed device."""
+    from meshterm.ui.outbound_screen import _PAGE_HINT, _page
+
+    title, prompt, items = _page(_outbound_store(), _outbound_env())
+    return SelectScreen(title, items, prompt=prompt, footer_hint=_PAGE_HINT, filterable=False)
+
+
+def _outbound_site(cols: int, rows: int) -> Screen:
+    """The page of the active site with staged changes: paths, evidence, actions, Apply."""
+    from meshterm.ui.outbound_screen import (
+        _EDIT_HINT,
+        _editor_items,
+        _site_actions,
+        _site_summary,
+    )
+
+    store = _outbound_store()
+    paths = store.site("Home").paths
+    return SelectScreen(
+        "Site — Home",
+        _editor_items(_outbound_env(), paths, _site_actions(store, "Home"), 2),
+        prompt=_site_summary(store, "Home", paths),
+        footer_hint=_EDIT_HINT,
+        filterable=False,
+        delete_hint="Del remove",
+    )
+
+
+def _outbound_composer(cols: int, rows: int) -> Screen:
+    """The composer in outbound mode: an open path of two hops."""
+    env = _outbound_env()
+    return PathComposerScreen(
+        device_label="Homestead",
+        device_hash=env.identity.key,
+        topology=env.topology,
+        width_bytes=1,
+        hops=["3d63c6429436", "f2c24f54551e"],
+        outbound=True,
+    )
+
+
 class _CourierStubDevice:
     async def get_contacts(self) -> list:
         return []
@@ -1878,6 +1952,9 @@ _ENTRIES: list[_Entry] = [
     _Entry("message_paths_sent_scope", _message_paths_sent_scope),
     _Entry("remote_cli", _remote_cli),
     _Entry("path_composer", _path_composer),
+    _Entry("outbound_composer", _outbound_composer),
+    _Entry("outbound_page", _outbound_page),
+    _Entry("outbound_site", _outbound_site),
     _Entry("courier_outbox", _courier_outbox),
     _Entry("record_dialog", _record_dialog),
     _Entry("record_route", _record_route),
