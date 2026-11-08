@@ -19,10 +19,13 @@ from meshterm.core.channels import channel_hash, derive_secret
 from meshterm.core.models import ChatMessage, Observation, utcnow
 from meshterm.persistence.repository import Repository
 from meshterm.services.message_paths import (
+    Arrival,
+    TraceWalk,
     channel_arrivals,
     collapse,
     direct_arrivals,
     distinct_paths,
+    trace_walk,
 )
 
 SECRET = derive_secret("#general")
@@ -410,3 +413,53 @@ def test_collapse_keeps_a_routed_path_apart_from_the_same_hops_flooded(tmp_path:
     )
     assert len(folded) == 2, "a route travelled is not a route intended"
     assert [a.routed for a in folded] == [False, True]
+
+
+# -- trace_walk: the route of an arrival, walked from our node --------------------------
+
+
+def test_a_received_message_is_traced_back_to_its_sender() -> None:
+    """The relays reversed, out to the sender, and the trace turns back there."""
+    arrival = Arrival(when=utcnow(), hops=("aa", "bb", "cc"), snr=1.0)
+    walk = trace_walk(arrival, outbound=False, origin_key="5e", far_key=None)
+    assert walk == TraceWalk("5e", ("cc", "bb", "aa"))
+
+
+def test_a_sender_with_no_key_is_traced_to_the_first_relay_and_back() -> None:
+    """With no key for the sender, the trace turns back at the first relay."""
+    arrival = Arrival(when=utcnow(), hops=("aa", "bb", "cc"), snr=1.0)
+    walk = trace_walk(arrival, outbound=False, origin_key=None, far_key=None)
+    assert walk == TraceWalk(None, ("cc", "bb", "aa", "bb", "cc"))
+    direct = Arrival(when=utcnow(), hops=(), snr=1.0)
+    assert trace_walk(direct, outbound=False, origin_key=None, far_key=None) is None
+    # A sender that we heard direct and that has a key: a trace with no relays.
+    assert trace_walk(direct, outbound=False, origin_key="5e", far_key=None) == TraceWalk("5e", ())
+
+
+def test_a_sent_direct_message_is_traced_out_to_its_recipient() -> None:
+    """Our send walks its relays in order, then turns back at the recipient."""
+    arrival = Arrival(when=utcnow(), hops=("aa", "bb"), snr=1.0)
+    walk = trace_walk(arrival, outbound=True, origin_key=None, far_key="77")
+    assert walk == TraceWalk("77", ("aa", "bb"))
+
+
+def test_a_sent_channel_message_walks_its_loop_again() -> None:
+    """Our broadcast came back to our node, so its relays are the full walk."""
+    arrival = Arrival(when=utcnow(), hops=("aa", "bb"), snr=1.0)
+    assert trace_walk(arrival, outbound=True, origin_key=None, far_key=None) == TraceWalk(
+        None, ("aa", "bb")
+    )
+
+
+def test_a_direct_routed_copy_gives_no_trace() -> None:
+    """The hops of a routed copy are what it still had to walk, so no trace starts there."""
+    routed = Arrival(when=utcnow(), hops=("bb",), snr=1.0, routed=True)
+    consumed = Arrival(when=utcnow(), hops=(), snr=1.0, routed=True)
+    for arrival in (routed, consumed):
+        assert trace_walk(arrival, outbound=True, origin_key=None, far_key="77") is None
+        assert trace_walk(arrival, outbound=False, origin_key="5e", far_key=None) is None
+    # History from before MeshTerm kept the route type reads as a flood, as the dialog draws it.
+    old = Arrival(when=utcnow(), hops=("aa",), snr=1.0, routed=None)
+    assert trace_walk(old, outbound=False, origin_key="5e", far_key=None) == TraceWalk(
+        "5e", ("aa",)
+    )

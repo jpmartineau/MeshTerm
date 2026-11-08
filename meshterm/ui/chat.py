@@ -65,6 +65,7 @@ from .widgets import (
 
 if TYPE_CHECKING:
     from ..context import AppContext
+    from ..services.message_paths import TraceWalk
     from .map_render import MapMarker
     from .map_screen import Locator
     from .node_detail_screen import ContactPages
@@ -2100,6 +2101,57 @@ def _sent_scope_line(ctx: AppContext, message: ChatMessage, *, relayed: bool) ->
     return line
 
 
+async def _trace_walk(
+    ctx: AppContext,
+    walk: TraceWalk,
+    *,
+    contacts: list[Contact],
+    label: str | None,
+) -> None:
+    """Open the trace screen armed on the walk of one arrival, and run it until the user leaves.
+
+    The screen opens idle, armed on the route. Nothing transmits until the user starts a
+    trace there. A walk with a target opens *Trace target*. The spec is the leg out to the
+    target, the target, and the mirror of the leg back
+    (:func:`~meshterm.services.topology.render_forced_spec`). A walk with no target opens
+    *Trace path* on the walk as given. The width of each hop is the routing width of the
+    device, collapsed to what a trace can encode, the same as the trace screen uses.
+
+    Args:
+        ctx: The shared application context.
+        walk: The walk of the arrival (refer to
+            :func:`~meshterm.services.message_paths.trace_walk`).
+        contacts: The contacts of the device. A target that is a contact opens under the
+            name of that contact, the same as from its node page. Thus the history of its
+            traces stays in one place.
+        label: The name of the target node, for a target that is not a contact.
+    """
+    from ..services.topology import render_custom_spec, render_forced_spec
+    from .trace_screen import collapse_trace_width, open_trace, open_trace_path
+
+    try:
+        width = collapse_trace_width(int(await ctx.devstate.path_hash_mode()))
+    except Exception:  # noqa: BLE001 - an optional read. The 1-byte default always works.
+        width = 1
+    if walk.target is None:
+        await open_trace_path(ctx, render_custom_spec(walk.hops, width))
+        return
+    key = walk.target.lower()
+
+    def holds(contact: Contact) -> bool:
+        # A key prefix and a full key name the same node, in either order.
+        own = (contact.public_key or contact.key_prefix or "").lower()
+        return bool(own) and (own.startswith(key) or key.startswith(own))
+
+    contact = next((c for c in contacts if holds(c)), None)
+    await open_trace(
+        ctx,
+        contact.name if contact is not None else key,
+        initial_spec=render_forced_spec(walk.hops, key, width),
+        label=label,
+    )
+
+
 async def _make_paths_presenter(
     ctx: AppContext,
     conversation: Conversation,
@@ -2123,16 +2175,22 @@ async def _make_paths_presenter(
         conversation: The conversation that the chat screen opens.
         device: The connected device (the caller already awaited it).
 
+    The window stays pushed while the user traces a route from it (Enter on an arrival).
+    The trace screen opens above it, and Esc from the trace comes back to the same window,
+    with its highlight.
+
     Returns:
         An async callable that shows the paths of one message in a floating window.
     """
     from ..services import trace_runner
     from ..services.message_paths import (
+        Arrival,
         channel_arrivals,
         collapse,
         direct_arrivals,
         distinct_paths,
         message_scope,
+        trace_walk,
     )
     from .message_paths_screen import MessagePathsScreen
 
@@ -2158,6 +2216,7 @@ async def _make_paths_presenter(
             secret = None
 
     async def present(message: ChatMessage) -> None:
+        peer_key: str | None = None
         if conversation.is_channel and secret:
             arrivals = channel_arrivals(
                 ctx.repo, message, channel_name=conversation.label, secret=secret
@@ -2224,22 +2283,49 @@ async def _make_paths_presenter(
             source, _body = split_channel_sender(message.text)
         else:
             source = conversation.label
-        await session.run_screen(
-            MessagePathsScreen(
-                message,
-                arrivals,
-                matched=matched,
-                resolve=resolve,
-                prefix_bytes=prefix_bytes,
-                self_name=self_name,
-                summary=summary,
-                source=source or None,
-                destination=destination or None,
-                type_of=type_of,
-                key_of=key_of,
-                scope=message_scope(arrivals, ctx.region_store.scope_of),
-                sent_scope=_sent_scope_line(ctx, message, relayed=bool(arrivals)),
+        # The keys of the two ends, for a trace of a route (refer to trace_walk). The peer
+        # of a direct chat is the recipient of our sends and the sender of what we receive.
+        # A channel message names its sender only by name, and the key comes from that name.
+        if message.outbound:
+            origin_key = None
+            far_key = None if conversation.is_channel else peer_key
+        elif conversation.is_channel:
+            origin_key = key_of(source) if source else None
+            far_key = None
+        else:
+            origin_key, far_key = peer_key, None
+
+        def walk_of(arrival: Arrival) -> TraceWalk | None:
+            return trace_walk(
+                arrival, outbound=message.outbound, origin_key=origin_key, far_key=far_key
             )
+
+        screen = MessagePathsScreen(
+            message,
+            arrivals,
+            matched=matched,
+            resolve=resolve,
+            prefix_bytes=prefix_bytes,
+            self_name=self_name,
+            summary=summary,
+            source=source or None,
+            destination=destination or None,
+            type_of=type_of,
+            key_of=key_of,
+            scope=message_scope(arrivals, ctx.region_store.scope_of),
+            sent_scope=_sent_scope_line(ctx, message, relayed=bool(arrivals)),
+            can_trace=lambda arrival: walk_of(arrival) is not None,
         )
+        # A hub, not a one-time dialog: each Enter traces one route above the window, and
+        # the window stays with its highlight for the next one.
+        async with session.stay(screen) as visit:
+            while True:
+                chosen = await visit.result()
+                if not isinstance(chosen, Arrival):
+                    return
+                walk = walk_of(chosen)
+                if walk is not None:
+                    label = destination if message.outbound else source
+                    await _trace_walk(ctx, walk, contacts=contacts, label=label or None)
 
     return present

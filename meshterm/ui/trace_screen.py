@@ -1763,7 +1763,9 @@ def _scenario_detail(scenario: Any) -> Text:
     return detail
 
 
-async def open_trace(ctx: AppContext, target: str, *, initial_spec: str = "") -> int:
+async def open_trace(
+    ctx: AppContext, target: str, *, initial_spec: str = "", label: str | None = None
+) -> int:
     """Open the live *Trace target* screen for ``target``, and run it until the user leaves.
 
     This is the symmetric feature: can I reach this node? Routes turn at the target and
@@ -1779,6 +1781,9 @@ async def open_trace(ctx: AppContext, target: str, *, initial_spec: str = "") ->
             suggested best path, so that the trace opens ready to walk that path. Empty
             (the default) opens on the automatic route (learned by the device, best
             observed, last trace, or direct, refer to :func:`_open_session`).
+        label: The name that the screen shows for a target that is not a contact (the
+            Message paths dialog gives the name of the sender with its key). ``None``
+            shows the target as given. A contact always shows its own name.
 
     Returns:
         The number of traces that ran while the screen was open.
@@ -1786,7 +1791,7 @@ async def open_trace(ctx: AppContext, target: str, *, initial_spec: str = "") ->
     Raises:
         RuntimeError: If called outside the interactive menu (no full-screen session).
     """
-    return await _open_session(ctx, target, initial_spec=initial_spec)
+    return await _open_session(ctx, target, initial_spec=initial_spec, label=label)
 
 
 async def open_trace_path(ctx: AppContext, spec: str = "") -> int:
@@ -1814,7 +1819,9 @@ async def open_trace_path(ctx: AppContext, spec: str = "") -> int:
     return await _open_session(ctx, None, initial_spec=spec)
 
 
-async def _open_session(ctx: AppContext, target: str | None, *, initial_spec: str = "") -> int:
+async def _open_session(
+    ctx: AppContext, target: str | None, *, initial_spec: str = "", label: str | None = None
+) -> int:
     """Connect and run one live trace session (the two features share this code).
 
     This function connects the screen to the radio, the database, and the
@@ -1835,8 +1842,11 @@ async def _open_session(ctx: AppContext, target: str | None, *, initial_spec: st
             a path walk with no target.
         initial_spec: A forced path (hex hops separated by commas) on which the path
             screen opens armed, instead of idle on the history. *Trace this path* in the
-            trophy case gives it. Ignored in target mode (only path walks arm on a bare
-            spec).
+            trophy case gives it. In target mode, it arms only when the target can be
+            addressed (a contact or a hex key), because a forced path must turn at a real
+            hash. The Node detail screen and the Message paths dialog give it there.
+        label: The name to show for a target that is not a contact. ``None`` shows the
+            target as given.
 
     Returns:
         The number of traces that ran while the screen was open.
@@ -1917,7 +1927,7 @@ async def _open_session(ctx: AppContext, target: str | None, *, initial_spec: st
             .removeprefix("0x")
         )
         target_hash = raw_hash if is_path_hash(raw_hash) else None
-        target_label = target_contact.name if target_contact else target
+        target_label = target_contact.name if target_contact else (label or target)
 
     def fresh_topology() -> MeshTopology:
         """Build the evidence graph from all the data that is stored now and on the device."""

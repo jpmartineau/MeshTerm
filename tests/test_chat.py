@@ -3716,3 +3716,69 @@ def test_chat_reply_hint_with_every_key_of_a_selection_fits_in_72_cells() -> Non
     assert cell_len(hint) <= 72
     for atom in ("Enter reply", "^P paths", "^U QR", "^L map", "^O author", "Esc cancel"):
         assert atom in hint
+
+
+# -- Message paths: Enter traces a route ------------------------------------------------
+
+
+def _trace_ctx(mode: int = 0):  # noqa: ANN202
+    """A context with only what the trace opener reads: the path-hash mode of the device."""
+    from types import SimpleNamespace
+
+    async def path_hash_mode() -> int:
+        return mode
+
+    return SimpleNamespace(devstate=SimpleNamespace(path_hash_mode=path_hash_mode))
+
+
+def _capture_traces(monkeypatch) -> list:  # noqa: ANN001
+    """Replace the two trace openers. Each call is recorded, and nothing opens."""
+    import meshterm.ui.trace_screen as trace_screen
+
+    calls: list = []
+
+    async def open_trace(ctx, target, *, initial_spec="", label=None):  # noqa: ANN001, ANN202
+        calls.append(("target", target, initial_spec, label))
+        return 0
+
+    async def open_trace_path(ctx, spec=""):  # noqa: ANN001, ANN202
+        calls.append(("path", spec))
+        return 0
+
+    monkeypatch.setattr(trace_screen, "open_trace", open_trace)
+    monkeypatch.setattr(trace_screen, "open_trace_path", open_trace_path)
+    return calls
+
+
+def test_a_traced_route_opens_trace_target_under_the_contacts_name(monkeypatch) -> None:  # noqa: ANN001
+    """A contact opens under its own name, armed on the leg, the contact, and the mirror."""
+    from meshterm.services.message_paths import TraceWalk
+    from meshterm.ui.chat import _trace_walk
+
+    calls = _capture_traces(monkeypatch)
+    alice = Contact(name="Alice", public_key="d4e5f6a7" + "0" * 56, key_prefix="d4e5f6a7")
+    walk = TraceWalk("d4e5f6a7", ("cc", "bb"))
+    asyncio.run(_trace_walk(_trace_ctx(), walk, contacts=[alice], label="Alice"))
+    assert calls == [("target", "Alice", "cc,bb,d4,bb,cc", "Alice")]
+
+
+def test_a_traced_route_to_a_stranger_opens_on_its_key_with_its_name(monkeypatch) -> None:  # noqa: ANN001
+    """A sender that is not a contact opens on its key, and the screen shows its name."""
+    from meshterm.services.message_paths import TraceWalk
+    from meshterm.ui.chat import _trace_walk
+
+    calls = _capture_traces(monkeypatch)
+    walk = TraceWalk("A3A3A3A3", ("cc",))
+    asyncio.run(_trace_walk(_trace_ctx(), walk, contacts=[], label="bob_caribou"))
+    assert calls == [("target", "a3a3a3a3", "cc,a3,cc", "bob_caribou")]
+
+
+def test_a_walk_with_no_target_opens_trace_path(monkeypatch) -> None:  # noqa: ANN001
+    """A channel message that came back to our node walks its relays again in Trace path."""
+    from meshterm.services.message_paths import TraceWalk
+    from meshterm.ui.chat import _trace_walk
+
+    calls = _capture_traces(monkeypatch)
+    walk = TraceWalk(None, ("aabb", "ccdd"))
+    asyncio.run(_trace_walk(_trace_ctx(mode=1), walk, contacts=[], label=None))
+    assert calls == [("path", "aabb,ccdd")]

@@ -470,3 +470,72 @@ def message_scope(
 def distinct_paths(arrivals: list[Arrival]) -> int:
     """The number of distinct relay paths that a set of arrivals covers."""
     return len({a.hops for a in arrivals})
+
+
+@dataclass(frozen=True, slots=True)
+class TraceWalk:
+    """The trace that walks the route of one arrival again, from our node.
+
+    Attributes:
+        target: The key of the node at which the trace turns back home (a *Trace target*
+            session), or ``None`` for a walk with no target (a *Trace path* session).
+        hops: With a target: the leg from our node out to the target, without the two
+            ends. The trace comes back on the mirror of this leg. With no target: the full
+            walk, which ends at a node that our node heard.
+    """
+
+    target: str | None
+    hops: tuple[str, ...]
+
+
+def trace_walk(
+    arrival: Arrival,
+    *,
+    outbound: bool,
+    origin_key: str | None,
+    far_key: str | None,
+) -> TraceWalk | None:
+    """The trace that walks the route of an arrival, as the Message paths dialog draws it.
+
+    The dialog draws each arrival as a route from the origin of the message, through its
+    relays, to the node that the message was addressed to. A trace always starts at our
+    node. Thus it walks that same route from our end:
+
+    * **A message that our node sent** starts at our node. The trace walks the relays in
+      the same order. A direct message goes on to its recipient, and the trace turns back
+      there (``far_key``). A channel message came back to our node, and the relays are the
+      full walk: the last relay is a node that our node heard.
+    * **A message that our node received** ends at our node. The trace walks the relays
+      in the reverse order, back to the sender (``origin_key``), and turns back there.
+      When no key names the sender, the trace turns back at the first relay, the last
+      node of the route that MeshTerm can address.
+
+    A direct-routed copy gives no trace. Its hops are the part of a route that the packet
+    still had to go through, not where it went. Thus a trace on them starts at a node that
+    our node possibly cannot reach.
+
+    Args:
+        arrival: The arrival whose route the trace walks.
+        outbound: Whether our node sent the message.
+        origin_key: The key (or a key prefix) of the sender of a received message, or
+            ``None`` when it is unknown.
+        far_key: The key (or a key prefix) of the recipient of a sent direct message, or
+            ``None`` for a channel message, which comes back to our node.
+
+    Returns:
+        The walk, or ``None`` when the arrival has no route that a trace can walk.
+    """
+    if arrival.routed or not arrival.route_known:
+        return None
+    hops = arrival.hops
+    if outbound:
+        if far_key:
+            return TraceWalk(far_key, hops)
+        return TraceWalk(None, hops) if hops else None
+    back = tuple(reversed(hops))
+    if origin_key:
+        return TraceWalk(origin_key, back)
+    if not hops:
+        return None
+    # Out to the first relay, and back on the same relays (refer to render_forced_spec).
+    return TraceWalk(None, back + hops[1:])

@@ -48,18 +48,31 @@ atom in the title (``Message paths · scope harbour``). The title states it one 
 the message, not for each arrival, because each copy carries the transport code of its
 sender unchanged (refer to :func:`~meshterm.services.message_paths.message_scope`).
 
+**Enter traces the selected route.** The dialog returns the selected arrival, and the
+caller opens a trace screen above the dialog, armed on the same route as walked from our
+node (:func:`~meshterm.services.message_paths.trace_walk`). A received message is traced
+back to its sender, and a sent direct message out to its recipient, in *Trace target*.
+Thus a trace that comes home can become the route of the radio to that contact, through
+the *Device route* row of that screen. A sent channel message is walked again in *Trace
+path*. The dialog stays pushed below the trace screen, with its highlight, and Esc from
+the trace comes back to it. A direct-routed copy has no route that a trace can walk, and
+then the hint does not show Enter.
+
 Nothing in this module transmits. Like the service below it, this dialog is a read-model
-over the packets that the radio already heard.
+over the packets that the radio already heard. The trace screen transmits only when the
+user starts a trace there.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from rich.text import Text
 
 from ..core.models import ChatMessage, clock_tolerance_s
 from ..services.message_paths import Arrival
+from .menus import HINT_CELLS
 from .pathgraph import PathLayer, render_path_graph, revisited_hops
 from .pathline import (
     ELIDE_HEAD,
@@ -75,6 +88,7 @@ from .pathline import (
 from .placemode import ACTION as PLACES_ACTION
 from .placemode import PlaceToggle, node_of, placed, places_of_session
 from .theme import snr_style
+from .tui.frame import fit_hint
 from .tui.render import crop_cells, render_lines, render_to_ansi
 from .tui.screen import ListWindow, Screen
 from .widgets import (
@@ -135,6 +149,7 @@ class MessagePathsScreen(Screen):
         key_of: NameKeyResolver | None = None,
         scope: Scope | None = None,
         sent_scope: Text | None = None,
+        can_trace: Callable[[Arrival], bool] | None = None,
     ) -> None:
         """Build the dialog for the matched arrivals of one message.
 
@@ -174,6 +189,9 @@ class MessagePathsScreen(Screen):
                 that the message was flooded under (``sent under scope yul``), and why
                 no node relayed it, when that is known. The dialog draws this line under
                 the summary. ``None`` draws nothing.
+            can_trace: Whether a trace can walk the route of an arrival. When it can,
+                Enter on that arrival resolves the dialog with it, and the caller opens
+                the trace. ``None`` offers no trace.
         """
         super().__init__()
         self.title = self.titled(scope)
@@ -191,6 +209,7 @@ class MessagePathsScreen(Screen):
         self._type_of = type_of
         self._key_of = key_of
         self._sent_scope = sent_scope
+        self._can_trace = can_trace
         self._index = 0
         #: The number of cells by which the selected row is moved left (set to zero each
         #: time ↑ or ↓ moves the highlight), and the maximum move, measured against the
@@ -226,20 +245,35 @@ class MessagePathsScreen(Screen):
 
     # --- input ---------------------------------------------------------------
 
+    #: The atoms that go first when the hint is longer than the limit. The pager atom goes
+    #: first, because ↑↓ already move through the same rows. The scroll of the line goes
+    #: next. ``Enter trace`` stays, because no other place says that a route can be traced.
+    spare_hint_atoms = ("PgUp/PgDn scroll", "←→ scroll line")
+
     @property
     def footer_hint(self) -> str:  # type: ignore[override]
         """The keys for the rows while there are rows. If there are no rows, only the close hint.
 
-        The paging atom shows only while the list window hides arrivals. This is the rule of
-        the whole app: a hint never shows a key that does nothing.
+        The paging atom shows only while the list window hides arrivals, and ``Enter trace``
+        only while a trace can walk the selected route. This is the rule of the whole app: a
+        hint never shows a key that does nothing.
         """
         if not self._arrivals:
             return "Esc close"
         parts = ["↑↓ move"]
         if self._list_hidden:
             parts.append("PgUp/PgDn scroll")
-        parts.extend(("←→ scroll line", self._places.hint, "Esc close"))
-        return " · ".join(parts)
+        parts.append("←→ scroll line")
+        if self._traceable():
+            parts.append("Enter trace")
+        parts.extend((self._places.hint, "Esc close"))
+        return fit_hint(" · ".join(parts), HINT_CELLS, shed_first=self.spare_hint_atoms)
+
+    def _traceable(self) -> bool:
+        """Whether Enter can trace the route of the selected arrival."""
+        if self._can_trace is None or not self._arrivals:
+            return False
+        return self._can_trace(self._arrivals[self._index])
 
     @property
     def picocalc_lyra_lane(self):
@@ -257,7 +291,7 @@ class MessagePathsScreen(Screen):
         return tuple(lane)
 
     def handle(self, action: str, data: str = "") -> None:
-        """Move the highlight, move the selected line to the side, or close the dialog."""
+        """Move the highlight, move the selected line to the side, trace it, or close the dialog."""
         rows = len(self._arrivals)
         # Both ends clamp. The highlight does not go around to the other end, because the
         # arrivals scroll in a list window (refer to ListWindow). If the highlight jumps
@@ -288,7 +322,12 @@ class MessagePathsScreen(Screen):
             self._hshift = min(self._hmax, self._hshift + _HSTEP)
         elif action == PLACES_ACTION:
             self._places.flip()
-        elif action in ("escape", "enter"):
+        elif action == "enter":
+            # The caller opens the trace above the dialog, and the dialog stays. Enter on a
+            # route that a trace cannot walk does nothing, and the hint does not show it.
+            if self._traceable():
+                self.resolve(self._arrivals[self._index])
+        elif action == "escape":
             self.resolve(None)
 
     def cursor_line(self) -> int | None:

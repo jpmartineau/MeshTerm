@@ -453,3 +453,68 @@ def test_the_selection_clamps_at_both_ends() -> None:
     for _ in range(10):
         screen.handle("down")
     assert screen._index == 5
+
+
+# -- Enter traces the selected route ----------------------------------------------------
+
+
+class _Fut:
+    """A minimal replacement for a future, so that the dialog can resolve with no event loop."""
+
+    def __init__(self) -> None:
+        self.value: object = None
+        self._done = False
+
+    def done(self) -> bool:
+        return self._done
+
+    def set_result(self, value: object) -> None:
+        self.value = value
+        self._done = True
+
+
+def test_enter_returns_the_selected_arrival_for_the_trace() -> None:
+    """Enter resolves the dialog with the highlighted arrival, and the caller traces it."""
+    arrivals = _arrivals()
+    screen = _screen(arrivals, can_trace=lambda arrival: True)
+    screen.future = _Fut()
+    screen.handle("down")
+    screen.handle("enter")
+    assert screen.future.done()
+    assert screen.future.value is arrivals[1]
+
+
+def test_enter_does_nothing_on_a_route_that_no_trace_can_walk() -> None:
+    """A row with no trace keeps the dialog open, and its hint does not show Enter."""
+    arrivals = _arrivals()
+    screen = _screen(arrivals, can_trace=lambda arrival: arrival is arrivals[0])
+    screen.render_body(72)
+    assert "Enter trace" in screen.footer_hint
+    screen.handle("down")
+    assert "Enter trace" not in screen.footer_hint
+    screen.future = _Fut()
+    screen.handle("enter")
+    assert not screen.future.done()
+    screen.handle("escape")
+    assert screen.future.done() and screen.future.value is None
+
+
+def test_a_dialog_with_no_trace_offers_no_enter() -> None:
+    """The dialog opened with no trace (``can_trace`` is ``None``) does not show Enter."""
+    screen = _screen(_arrivals())
+    screen.render_body(72)
+    assert "Enter" not in screen.footer_hint
+    screen.future = _Fut()
+    screen.handle("enter")
+    assert not screen.future.done()
+
+
+def test_the_trace_hint_fits_by_shedding_the_pager_first() -> None:
+    """With paging and the trace, the hint is too long. The pager atom goes, Enter stays."""
+    screen = _screen(_many(12), can_trace=lambda arrival: True)
+    screen.note_viewport(24)
+    screen.render_body(72)
+    hint = screen.footer_hint
+    assert len(hint) <= 72
+    assert "Enter trace" in hint and hint.endswith("Esc close")
+    assert "PgUp/PgDn" not in hint

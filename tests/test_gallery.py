@@ -1201,6 +1201,8 @@ def _message_paths(cols: int, rows: int) -> Screen:
         self_name="Homestead",
         summary="heard twice",
         source="Alice",
+        # As the chat opens it: Enter traces the selected route (the hint shows it).
+        can_trace=lambda arrival: True,
     )
 
 
