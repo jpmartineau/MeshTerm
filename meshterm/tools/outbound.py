@@ -36,6 +36,7 @@ import typer
 from ..context import AppContext
 from ..core import exitcodes
 from ..core.outbound_store import OutboundPath, clean_path
+from ..services.device_routes import report_notice
 from .base import Tool, ToolResult, register
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -100,7 +101,13 @@ class OutboundTool(Tool):
                 raise typer.BadParameter(
                     f"no site is named {name!r}; see `meshterm outbound sites`"
                 )
-            store.set_active(name)
+            # The device routes follow the site when a radio is connected. Otherwise the
+            # next connection of the menu reconciles them (refer to
+            # meshterm.services.device_routes).
+            routes = await ctx.routes.change_site(name)
+            notice = report_notice(routes) if routes is not None else ""
+            if notice:
+                ctx.ui.ack(f"[ok]✓[/ok] {notice}")
             active = store.active_site()
             shown = active.name if active else None
             return _ack(

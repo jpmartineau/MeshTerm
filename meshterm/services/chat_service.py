@@ -585,6 +585,16 @@ class ChatService:
             The stored outbound :class:`ChatMessage`. Its ``acked`` shows whether a
             delivery acknowledgement arrived in the wait, until now.
         """
+        # With the ``auto_route`` preference on, the radio gets the suggested route first,
+        # when it has no route or a route from another site (refer to
+        # meshterm.services.device_routes). The write is local. The message is still the
+        # only transmission, and a failed write never stops it.
+        routes = getattr(self._ctx, "routes", None)
+        if routes is not None and self._ctx.preferences.auto_route:
+            try:
+                await routes.prepare_message(contact)
+            except Exception as exc:  # noqa: BLE001 - the message goes out anyway
+                self._ctx.log.warning("couldn't set the route to %s first: %s", contact.name, exc)
         acked, codes, flood = await self._deliver_direct(contact, text)
         chat = ChatMessage(
             text=text,

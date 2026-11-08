@@ -22,6 +22,20 @@ computer, not to the radio, and this store keeps them in two forms:
 :meth:`OutboundStore.lookup` gives the list that applies to a device, in this order: the
 list of the fixed device, then the list of the active site, then no list.
 
+Each site and each fixed device also holds **device routes** for single contacts (refer to
+:meth:`~meshterm.core.connection.Device.set_route`). A device route is the route that the
+radio uses to send to one contact. It depends on where the radio is, as an outbound path
+does. Two maps hold them:
+
+* **Kept routes.** The user chose the route and told MeshTerm to keep it. MeshTerm writes it
+  back to the radio each time that the radio replaces it. :meth:`OutboundStore.route_owner`
+  gives the record that holds the kept routes of a device, in the order of the lookup above.
+  With no fixed device and no active site, no record holds them.
+* **Saved routes** (sites only). These are routes that the radio learned at a site. When the
+  user changes site, MeshTerm saves them here and clears them from the radio, because their
+  first hops are out of reach at the new site. When the user comes back, MeshTerm writes
+  them to the radio again.
+
 The file is ``<config_dir>/outbound.json``, global machine state, the same as the other
 JSON stores. It is intentionally outside the SQLite database, which can be different for
 each run. The file is read into typed records (:class:`Site`, :class:`FixedDevice`) and
@@ -41,6 +55,11 @@ from .atomicwrite import write_atomically
 #: One outbound path: the hops in order from our node outward. Each hop is lowercase hex,
 #: usually the 12-digit key prefix of the node, or a shorter hash that the user typed.
 OutboundPath = tuple[str, ...]
+
+#: One device route: the relays from our node to one contact, in order outward. Each hop is
+#: as in :data:`OutboundPath`. Unlike an outbound path, a device route can be empty: no
+#: relay, because the contact is a neighbour.
+RoutePath = tuple[str, ...]
 
 #: The source of a lookup when the list comes from a fixed device.
 SOURCE_DEVICE = "device"
@@ -93,6 +112,40 @@ def clean_path(value: object) -> OutboundPath | None:
     return hops  # type: ignore[return-value] - the check above removed each None
 
 
+def clean_route(value: object) -> RoutePath | None:
+    """A device route as the store keeps it, or ``None`` when the value is not one.
+
+    The rules are those of :func:`clean_path`, but a route can have no hops.
+
+    Args:
+        value: The raw route: a list of hops, or a comma-separated spec (``""`` for none).
+
+    Returns:
+        The route as a tuple of hops, or ``None``.
+    """
+    if isinstance(value, str):
+        value = [part for part in value.split(",") if part.strip()]
+    if isinstance(value, list | tuple) and not value:
+        return ()
+    return clean_path(value)
+
+
+def _clean_routes(raw: object) -> dict[str, RoutePath]:
+    """The valid device routes of a file entry, with the contact key of each as the key."""
+    routes: dict[str, RoutePath] = {}
+    for key, entry in raw.items() if isinstance(raw, dict) else ():
+        contact = clean_hop(key)
+        route = clean_route(entry)
+        if contact is not None and route is not None:
+            routes[contact] = route
+    return routes
+
+
+def _routes_json(routes: dict[str, RoutePath]) -> dict[str, list[str]]:
+    """The device routes as written."""
+    return {key: list(route) for key, route in routes.items()}
+
+
 def _clean_paths(raw: object) -> list[OutboundPath]:
     """The valid outbound paths of a file entry, in order, without duplicates."""
     paths: list[OutboundPath] = []
@@ -111,10 +164,15 @@ class Site:
         name: The name that the user gave the site (``Home``, ``Foulab``). Names are
             unique without regard to case.
         paths: The outbound paths, the preferred path first.
+        kept: The kept device routes at this site, with the contact key as the key.
+        saved: The device routes that the radio learned at this site, which MeshTerm saved
+            when the user changed site. The contact key is the key.
     """
 
     name: str
     paths: list[OutboundPath] = field(default_factory=list)
+    kept: dict[str, RoutePath] = field(default_factory=dict)
+    saved: dict[str, RoutePath] = field(default_factory=dict)
 
     #: The fields that this record held before. It must never hold them again with a
     #: different meaning (refer to :data:`meshterm.core.preferences.RETIRED` for the
@@ -129,11 +187,21 @@ class Site:
         name = str(raw.get("name") or "").strip()
         if not name:
             return None
-        return cls(name=name, paths=_clean_paths(raw.get("paths")))
+        return cls(
+            name=name,
+            paths=_clean_paths(raw.get("paths")),
+            kept=_clean_routes(raw.get("kept")),
+            saved=_clean_routes(raw.get("saved")),
+        )
 
     def to_json(self) -> dict:
         """The site as written: its own fields only."""
-        return {"name": self.name, "paths": [list(path) for path in self.paths]}
+        return {
+            "name": self.name,
+            "paths": [list(path) for path in self.paths],
+            "kept": _routes_json(self.kept),
+            "saved": _routes_json(self.saved),
+        }
 
 
 @dataclass(slots=True)
@@ -144,10 +212,12 @@ class FixedDevice:
         name: The name of the companion when the user fixed it. The list of fixed devices
             shows it, because a public key means nothing to the user.
         paths: The outbound paths, the preferred path first.
+        kept: The kept device routes of this companion, with the contact key as the key.
     """
 
     name: str
     paths: list[OutboundPath] = field(default_factory=list)
+    kept: dict[str, RoutePath] = field(default_factory=dict)
 
     #: The fields that this record held before. There are none yet (refer to
     #: :attr:`Site.RETIRED`).
@@ -157,11 +227,19 @@ class FixedDevice:
     def read(cls, raw: object) -> FixedDevice:
         """Build a fixed device from one file entry, with only the fields that it knows."""
         record = raw if isinstance(raw, dict) else {}
-        return cls(name=str(record.get("name") or ""), paths=_clean_paths(record.get("paths")))
+        return cls(
+            name=str(record.get("name") or ""),
+            paths=_clean_paths(record.get("paths")),
+            kept=_clean_routes(record.get("kept")),
+        )
 
     def to_json(self) -> dict:
         """The fixed device as written: its own fields only."""
-        return {"name": self.name, "paths": [list(path) for path in self.paths]}
+        return {
+            "name": self.name,
+            "paths": [list(path) for path in self.paths],
+            "kept": _routes_json(self.kept),
+        }
 
 
 @dataclass(slots=True)
@@ -230,6 +308,24 @@ class OutboundChoice:
     paths: tuple[OutboundPath, ...] = ()
     source: str = ""
     name: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class RouteOwner:
+    """The record that holds the kept device routes of one device.
+
+    Attributes:
+        source: :data:`SOURCE_DEVICE` for a fixed device, :data:`SOURCE_SITE` for the
+            active site.
+        name: The name of the site, or the name of the fixed device.
+    """
+
+    source: str
+    name: str
+
+
+class NoRouteOwnerError(LookupError):
+    """No record can keep a device route: the device is not fixed, and no site is active."""
 
 
 def _find(sites: list[Site], name: str) -> Site | None:
@@ -326,6 +422,9 @@ class OutboundStore:
         if clash is not None and clash is not current:
             raise ValueError(f"a site named {clash.name} already exists")
         site = Site(name=name, paths=_clean_paths([list(path) for path in paths]))
+        if current is not None:
+            # A rename or a new list of paths keeps the device routes of the site.
+            site.kept, site.saved = current.kept, current.saved
         if current is None:
             records.sites.append(site)
         else:
@@ -382,6 +481,8 @@ class OutboundStore:
             raise ValueError(f"not a device key: {device_key!r}")
         records = self._load()
         device = FixedDevice(name=name.strip(), paths=_clean_paths([list(p) for p in paths]))
+        if key in records.devices:
+            device.kept = records.devices[key].kept  # a new list of paths keeps the routes
         records.devices[key] = device
         self._write(records)
         return device
@@ -424,3 +525,105 @@ class OutboundStore:
         if site is not None:
             return OutboundChoice(tuple(site.paths), SOURCE_SITE, site.name)
         return OutboundChoice()
+
+    # -- device routes --------------------------------------------------------------
+
+    def _owner_record(
+        self, records: _OutboundFile, device_key: str | None
+    ) -> tuple[RouteOwner, Site | FixedDevice] | None:
+        """The record that holds the kept routes of a device, in the order of the lookup."""
+        key = clean_hop(device_key) if device_key else None
+        device = records.devices.get(key) if key else None
+        if device is not None:
+            return RouteOwner(SOURCE_DEVICE, device.name), device
+        site = _find(records.sites, records.active or "")
+        if site is not None:
+            return RouteOwner(SOURCE_SITE, site.name), site
+        return None
+
+    def route_owner(self, device_key: str | None) -> RouteOwner | None:
+        """The record that holds the kept routes of a device, or ``None`` when none can.
+
+        The order is that of :meth:`lookup`: the fixed device, then the active site.
+        """
+        found = self._owner_record(self._load(), device_key)
+        return found[0] if found is not None else None
+
+    def kept_routes(self, device_key: str | None) -> dict[str, RoutePath]:
+        """The kept device routes that apply to a device, with the contact key as the key."""
+        found = self._owner_record(self._load(), device_key)
+        return dict(found[1].kept) if found is not None else {}
+
+    def kept_route(self, device_key: str | None, contact_key: str) -> RoutePath | None:
+        """The kept device route to one contact, or ``None`` when the user keeps none."""
+        key = clean_hop(contact_key)
+        return self.kept_routes(device_key).get(key) if key else None
+
+    def keep_route(self, device_key: str | None, contact_key: str, route: RoutePath) -> RouteOwner:
+        """Keep a device route to one contact, in the record that applies to the device.
+
+        Args:
+            device_key: The public key of the companion, or ``None``.
+            contact_key: The public key of the contact.
+            route: The relays, in order outward. An empty route means no relay.
+
+        Returns:
+            The record that keeps the route.
+
+        Raises:
+            NoRouteOwnerError: If the device is not fixed and no site is active.
+            ValueError: If the contact key or the route is not valid.
+        """
+        key = clean_hop(contact_key)
+        clean = clean_route(list(route))
+        if key is None or clean is None:
+            raise ValueError(f"not a device route: {contact_key!r} {route!r}")
+        records = self._load()
+        found = self._owner_record(records, device_key)
+        if found is None:
+            raise NoRouteOwnerError(contact_key)
+        found[1].kept[key] = clean
+        self._write(records)
+        return found[0]
+
+    def unkeep_route(self, device_key: str | None, contact_key: str) -> bool:
+        """Stop keeping the device route to one contact.
+
+        Returns:
+            Whether a kept route was removed.
+        """
+        key = clean_hop(contact_key)
+        records = self._load()
+        found = self._owner_record(records, device_key)
+        if key is None or found is None or found[1].kept.pop(key, None) is None:
+            return False
+        self._write(records)
+        return True
+
+    def saved_routes(self, site_name: str) -> dict[str, RoutePath]:
+        """The device routes saved for a site, with the contact key as the key."""
+        site = _find(self._load().sites, site_name)
+        return dict(site.saved) if site is not None else {}
+
+    def save_routes(self, site_name: str, routes: dict[str, RoutePath]) -> None:
+        """Add device routes to the saved routes of a site. A newer route replaces an older.
+
+        Raises:
+            KeyError: If no site has that name.
+        """
+        records = self._load()
+        site = _find(records.sites, site_name)
+        if site is None:
+            raise KeyError(site_name)
+        site.saved.update(_clean_routes({key: list(route) for key, route in routes.items()}))
+        self._write(records)
+
+    def take_saved(self, site_name: str) -> dict[str, RoutePath]:
+        """Remove and return the saved device routes of a site (empty for no such site)."""
+        records = self._load()
+        site = _find(records.sites, site_name)
+        if site is None or not site.saved:
+            return {}
+        taken, site.saved = site.saved, {}
+        self._write(records)
+        return taken

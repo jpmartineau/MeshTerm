@@ -397,6 +397,30 @@ class Contact:
         return is_room(self.node_type)
 
 
+#: The most bytes that the route of one contact can have in the firmware (``MAX_PATH_SIZE``).
+#: The hop limit is this number divided by the bytes of each hash.
+ROUTE_MAX_BYTES = 64
+
+
+@dataclass(frozen=True, slots=True)
+class DiscoveredRoute:
+    """The two routes that one path discovery found between our node and a contact.
+
+    A path discovery is one flood request. The first copy that reached the contact
+    traveled on :attr:`out_hops`, and the first copy of the answer that reached us traveled
+    on :attr:`in_hops`. A radio link is not symmetric, so the two routes can be different.
+
+    Attributes:
+        out_hops: The route from our node to the contact: one hex hash for each relay, in
+            order from us outward. An empty tuple means no relay (a neighbour).
+        in_hops: The route from the contact to our node: one hex hash for each relay, in
+            order from the contact toward us.
+    """
+
+    out_hops: tuple[str, ...]
+    in_hops: tuple[str, ...]
+
+
 @dataclass(slots=True)
 class MapMarker:
     """One mesh node to put on the map.

@@ -357,6 +357,18 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         maximum=720,
         unit="h",
     ),
+    PrefSpec(
+        key="auto_route",
+        label="Auto route",
+        help="Before a DM, set the suggested route if the radio has none",
+        group="Sending",
+        value_type="bool",
+        # Off: the suggested route comes from evidence, and a wrong one loses the message,
+        # where a flood finds a way. On, MeshTerm sets it before a direct message when the
+        # radio has no route, or a route that starts on another site's first hop. A kept
+        # route is never changed. Refer to meshterm.services.device_routes.
+        default=False,
+    ),
     # --- TX optimize -------------------------------------------------------------
     PrefSpec(
         key="tx_opt_min",

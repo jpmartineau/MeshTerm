@@ -38,6 +38,23 @@ class EventKind(str, Enum):
     OBSERVATION = "observation"
     MESSAGE = "message"
     ACK = "ack"
+    ROUTE = "route"
+
+
+@dataclass(frozen=True, slots=True)
+class RouteChange:
+    """The radio replaced its device route to one contact.
+
+    The companion tells the app each time that a path return gives it a new route. It does
+    not tell the app about a route that the app writes itself (refer to
+    :meth:`~meshterm.core.connection.Device.set_route`). Thus each event is a route that
+    the radio learned.
+
+    Attributes:
+        public_key: The public key of the contact, in lowercase hex.
+    """
+
+    public_key: str
 
 
 @dataclass(slots=True)
@@ -75,6 +92,16 @@ class MeshEvent:
     def ack(self) -> Ack | None:
         """The carried :class:`Ack`, or ``None`` if this event is not an acknowledgement."""
         return self.payload if isinstance(self.payload, Ack) else None
+
+    @property
+    def route(self) -> RouteChange | None:
+        """The carried :class:`RouteChange`, or ``None`` if this event is not a route change."""
+        return self.payload if isinstance(self.payload, RouteChange) else None
+
+    @classmethod
+    def route_event(cls, change: RouteChange) -> MeshEvent:
+        """Wrap a :class:`RouteChange` as an :attr:`EventKind.ROUTE` event."""
+        return cls(kind=EventKind.ROUTE, payload=change)
 
     @classmethod
     def observation_event(cls, obs: Observation) -> MeshEvent:

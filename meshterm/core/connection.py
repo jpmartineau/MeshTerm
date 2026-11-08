@@ -32,15 +32,17 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from . import transmit_gate
 from .channels import CHANNEL_SLOT_PROBE_CAP
-from .events import MeshEvent
+from .events import MeshEvent, RouteChange
 from .frames import frame_addressing, trace_link_snrs
 from .models import (
     NODE_TYPE_CHAT,
     NODE_TYPE_REPEATER,
     NODE_TYPE_ROOM,
+    ROUTE_MAX_BYTES,
     Ack,
     Contact,
     Delivery,
+    DiscoveredRoute,
     Hop,
     LoginResult,
     Message,
@@ -1456,6 +1458,58 @@ class Device(ABC):
         Raises:
             ContactNotOnDeviceError: If the radio has no contact for the node.
             DeviceCommandError: If the radio refused for any other reason.
+        """
+
+    @abstractmethod
+    async def set_route(self, node: Contact, hops: tuple[str, ...]) -> tuple[str, ...]:
+        """Write the device route to ``node``, so that the radio sends to it on these hops.
+
+        The radio holds one route for each contact. It uses the route for each direct
+        message, login, request, and admin command to the contact. The radio replaces the
+        route each time that a path return gives it a new one. Thus a route that this method
+        writes stays only until the radio learns another one. The action is local (nothing
+        is transmitted).
+
+        The firmware writes a contact as one full record (the name, the flags, the location,
+        and the route). Thus the implementation reads the record that the radio has now,
+        and changes only the route in it. A record from an older read can contain old
+        values, and the write would put them back.
+
+        Each hop goes into the radio at the hash width that the radio uses now (its path
+        hash mode). A hop longer than the width is cut to the width.
+
+        Args:
+            node: The contact whose route to write.
+            hops: The relays, in order from us outward, as hex hashes or key prefixes. An
+                empty tuple means no relay: the radio sends direct to a neighbour.
+
+        Returns:
+            The hops as the radio holds them now, at its hash width.
+
+        Raises:
+            ContactNotOnDeviceError: If the radio has no contact for the node.
+            DeviceCommandError: If a hop is shorter than the hash width, if the route is
+                too long for the radio, or if the radio refused the write.
+        """
+
+    @abstractmethod
+    async def discover_route(self, node: Contact) -> DiscoveredRoute | None:
+        """Send one path discovery to ``node``, and get the route in each direction.
+
+        A path discovery is one flood request to the contact. The answer tells the route
+        on which the first copy reached the contact, and the route on which the first copy
+        of the answer came back. The radio does not change its device route for this
+        request. Thus the user can examine the routes before using one.
+
+        Args:
+            node: The contact to ask.
+
+        Returns:
+            The two routes, or ``None`` when no answer came before the timeout.
+
+        Raises:
+            ContactNotOnDeviceError: If the radio has no contact for the node.
+            DeviceCommandError: If the radio refused to send the request.
         """
 
     @abstractmethod
@@ -3589,6 +3643,79 @@ class MeshCoreDevice(Device):
                 f"couldn't reset the route to {node.name}: {reject_reason(result)}"
             )
 
+    async def set_route(  # noqa: D102 - inherited docstring
+        self, node: Contact, hops: tuple[str, ...]
+    ) -> tuple[str, ...]:
+        mc = self._require()
+        pub = self._node_pubkey(node)  # raises DeviceCommandError if it has no key
+        if len(pub) != 64:
+            raise DeviceCommandError(f"{node.name} is known only by a key prefix")
+        mode = max(int(await self.get_path_hash_mode()), 0)
+        route = route_at_width(hops, mode + 1, name=node.name)
+        # A new read of the record, written back with only the route changed. The firmware
+        # writes each field of the frame into the stored contact, so an older record would
+        # put old values back (refer to accept_adverts_again).
+        record = await self._contact_record(mc, pub)
+        if record is None:
+            raise ContactNotOnDeviceError(node)
+        result = await mc.commands.change_contact_path(record, "".join(route), path_hash_mode=mode)
+        if result is None or getattr(result, "is_error", lambda: False)():
+            if error_code(result) == _ERR_NOT_FOUND:
+                raise ContactNotOnDeviceError(node)
+            raise DeviceCommandError(
+                f"couldn't set the route to {node.name}: {reject_reason(result)}"
+            )
+        _log.debug("device route to %s set to %s", node.name, ",".join(route) or "no relays")
+        return route
+
+    async def discover_route(  # noqa: D102 - inherited docstring
+        self, node: Contact
+    ) -> DiscoveredRoute | None:
+        transmit_gate.mark()
+        from meshcore import EventType
+
+        mc = self._require()
+        pub = self._node_pubkey(node)
+        loop = asyncio.get_running_loop()
+        answer: asyncio.Future = loop.create_future()
+
+        def on_answer(event) -> None:  # noqa: ANN001 - meshcore Event
+            payload = getattr(event, "payload", None) or {}
+            if str(payload.get("pubkey_pre") or "").lower() == pub[:12] and not answer.done():
+                answer.set_result(payload)
+
+        # Listen before the send, as for a login: the answer of a neighbour can arrive
+        # before the send returns.
+        subscription = mc.subscribe(EventType.PATH_RESPONSE, on_answer)
+        try:
+            send = getattr(mc.commands, "_send_path_discovery_raw", None)
+            async with self.transmitting():
+                if send is not None:
+                    result = await send(bytes.fromhex(pub))
+                else:  # pragma: no cover - an older library build
+                    result = await mc.commands.send_path_discovery(bytes.fromhex(pub))
+            if result is None or getattr(result, "is_error", lambda: False)():
+                if error_code(result) == _ERR_NOT_FOUND:
+                    raise ContactNotOnDeviceError(node)
+                raise DeviceCommandError(
+                    f"couldn't send a path discovery to {node.name}: {reject_reason(result)}"
+                )
+            # The request is a flood, and the answer is a flood. The wait is the same as
+            # for a direct message sent by flood (refer to :meth:`send_direct_message`).
+            payload = getattr(result, "payload", None) or {}
+            suggested = float(payload.get("suggested_timeout") or 0) / 1000.0
+            budget = suggested * 1.25 + trace_timeout(0)
+            try:
+                found = await asyncio.wait_for(asyncio.shield(answer), budget)
+            except asyncio.TimeoutError:
+                _log.debug("path discovery to %s: no answer in %.1fs", node.name, budget)
+                return None
+        finally:
+            subscription.unsubscribe()
+        return DiscoveredRoute(
+            out_hops=_discovered_hops(found, "out"), in_hops=_discovered_hops(found, "in")
+        )
+
     async def _login(self, node: Contact, password: str, *, what: str) -> _LoginExchange:
         """Run one login exchange with a remote node, and report how it ended.
 
@@ -4170,6 +4297,17 @@ class MeshCoreDevice(Device):
         etype = getattr(EventType, "ACK", None)
         if etype is not None:
             subs.append(subscribe(etype, ack_handler))
+
+        # The radio says when a path return replaced its device route to a contact.
+        def route_handler(event) -> None:  # noqa: ANN001
+            payload = getattr(event, "payload", None) or {}
+            key = str(payload.get("public_key") or "").lower()
+            if key:
+                on_event(MeshEvent.route_event(RouteChange(key)))
+
+        etype = getattr(EventType, "PATH_UPDATE", None)
+        if etype is not None:
+            subs.append(subscribe(etype, route_handler))
         # Trace replies are not observations (the ``run_trace`` that sent the trace takes
         # them by tag). But a log line for each reply that arrives lets us diagnose a "no
         # reply". A reply logged here with no matching ``trace <tag>`` line means that the
@@ -5179,7 +5317,7 @@ class MockDevice(Device):
         if flood:
             # The answer to a flood brings a new route back with it, as on hardware.
             self._stale_routes.discard(room.name)
-            self._set_route(key, self._LEARNED_ROUTE)
+            self._set_route(key, self._LEARNED_ROUTE, learned=True)
         cfg = self._remote_config(room)
         if password == self._admin_password:
             access = RoomAccess.ADMIN
@@ -5208,11 +5346,45 @@ class MockDevice(Device):
     #: The route that the simulator "learns" from the answer to a flood: one hop, through Yagi.
     _LEARNED_ROUTE = ("a1b2c3d4",)
 
-    def _set_route(self, key: str, hops: tuple[str, ...] | None) -> None:
-        """Give the contact with ``key`` a learned route, or forget its route (``None``)."""
+    async def set_route(  # noqa: D102 - inherited docstring
+        self, node: Contact, hops: tuple[str, ...]
+    ) -> tuple[str, ...]:
+        await asyncio.sleep(0)
+        route = route_at_width(hops, self._path_hash_mode + 1, name=node.name)
+        key = self._mock_key(node)
+        if not any(self._mock_key(c) == key for c in self._contacts):
+            raise ContactNotOnDeviceError(node)
+        self._set_route(key, route)
+        return route
+
+    async def discover_route(  # noqa: D102 - inherited docstring
+        self, node: Contact
+    ) -> DiscoveredRoute | None:
+        transmit_gate.mark()
+        async with self.transmitting():
+            await asyncio.sleep(0)
+        key = self._mock_key(node)
+        if not any(self._mock_key(c) == key for c in self._contacts):
+            raise ContactNotOnDeviceError(node)
+        if node.name in self._unreachable:
+            return None
+        route = route_at_width(self._LEARNED_ROUTE, self._path_hash_mode + 1, name=node.name)
+        return DiscoveredRoute(out_hops=route, in_hops=tuple(reversed(route)))
+
+    def _set_route(self, key: str, hops: tuple[str, ...] | None, *, learned: bool = False) -> None:
+        """Give the contact with ``key`` a route, or forget its route (``None``).
+
+        A route that the simulated radio *learned* from the answer to a flood is pushed to
+        the listeners as a route change, as the companion pushes ``PATH_UPDATE``.
+        """
         self._contacts = [
             replace(c, route_hops=hops) if self._mock_key(c) == key else c for c in self._contacts
         ]
+        if learned:
+            held = next((c for c in self._contacts if self._mock_key(c) == key), None)
+            full = (held.public_key if held is not None else "") or key
+            for listener in list(self._listeners):
+                listener(MeshEvent.route_event(RouteChange(full.lower())))
 
     def _push_room(self, room: Contact) -> None:
         """Start the catch-up of a room: the posts after our newest post, oldest first.
@@ -6088,6 +6260,61 @@ def _as_int(value: object) -> int | None:
         return int(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
+
+
+def route_at_width(hops: Iterable[str], size: int, *, name: str = "") -> tuple[str, ...]:
+    """The hops of a device route at the hash width of the radio, ready to write.
+
+    Args:
+        hops: The relays, in order from us outward, as hex hashes or key prefixes.
+        size: The bytes of each hash in the radio (its path hash mode plus one).
+        name: The name of the contact, for the error text.
+
+    Returns:
+        Each hop cut to ``size`` bytes, in lowercase hex.
+
+    Raises:
+        DeviceCommandError: If a hop is not hex, if a hop is shorter than the width, or if
+            the route has more bytes than the radio can hold (:data:`ROUTE_MAX_BYTES`).
+    """
+    route: list[str] = []
+    for hop in hops:
+        text = str(hop).strip().lower().removeprefix("0x")
+        try:
+            bytes.fromhex(text)
+        except ValueError:
+            raise DeviceCommandError(f"{hop!r} is not a hop in hex") from None
+        if len(text) < size * 2:
+            raise DeviceCommandError(
+                f"hop {text} is shorter than the radio's {size}-byte path hash, so the "
+                f"route to {name or 'the contact'} can't name it"
+            )
+        route.append(text[: size * 2])
+    if len(route) * size > ROUTE_MAX_BYTES:
+        raise DeviceCommandError(
+            f"the route has {len(route)} hops, and the radio holds at most "
+            f"{ROUTE_MAX_BYTES // size} at its {size}-byte path hash"
+        )
+    return tuple(route)
+
+
+def _discovered_hops(payload: dict, which: str) -> tuple[str, ...]:
+    """One route of a path discovery answer, as one hex hash for each relay.
+
+    Args:
+        payload: The ``PATH_RESPONSE`` payload of the library.
+        which: ``"out"`` or ``"in"``.
+
+    Returns:
+        The relays in their order of travel, or an empty tuple for no relay (or for a
+        field that cannot be read).
+    """
+    count = _as_int(payload.get(f"{which}_path_len")) or 0
+    size = _as_int(payload.get(f"{which}_path_hash_len")) or 1
+    text = str(payload.get(f"{which}_path") or "").lower()
+    if count <= 0 or len(text) < count * size * 2:
+        return ()
+    return tuple(text[i * size * 2 : (i + 1) * size * 2] for i in range(count))
 
 
 def _contact_route(info: dict) -> tuple[str, ...] | None:

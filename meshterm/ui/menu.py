@@ -1115,6 +1115,10 @@ async def _resume_monitor(ctx: AppContext) -> Exception | None:
     # The site suggestion only counts what the hub hears, and the menu asks the user. It
     # never opens the device (refer to meshterm.services.site_suggest).
     await ctx.site_suggest.start()
+    # The device routes listen for the route changes of the radio, and reconcile at each
+    # connection. They write to the radio only what the user keeps or saved for a site
+    # (refer to meshterm.services.device_routes). Nothing is transmitted.
+    await ctx.routes.start()
     if not ctx.settings.connect_on_start:
         return None
     failure: Exception | None = None

@@ -40,7 +40,9 @@ from ..core.outbound_store import (
     OutboundStore,
     clean_path,
 )
+from ..persistence.logging import get_logger
 from ..services import trace_runner
+from ..services.device_routes import report_notice
 from ..services.outbound import (
     DeviceIdentity,
     FirstLink,
@@ -159,7 +161,7 @@ async def manage_outbound(ctx: AppContext) -> None:
                 if name is not None:
                     store.put_site(name, [])
                     if store.active_site() is None:
-                        store.set_active(name)  # the first site is where the user is
+                        await switch_site(ctx, name)  # the first site is where the user is
                     await _site_page(ctx, env, name)
             elif choice == _FIX and env.identity.key:
                 active = store.active_site()
@@ -298,9 +300,9 @@ async def _site_page(ctx: AppContext, env: _Env, name: str) -> None:
     async def act(value: Any) -> bool:
         """Run one action of the site. Return ``True`` when the page must close."""
         if value == _USE:
-            store.set_active(state["name"])
+            await switch_site(ctx, state["name"])
         elif value == _UNUSE:
-            store.set_active(None)
+            await switch_site(ctx, None)
         elif value == _RENAME:
             new = await _ask_site_name(ctx, current=state["name"])
             if new is not None and new != state["name"]:
@@ -644,6 +646,33 @@ async def _path_actions(ctx: AppContext, env: _Env, staged: list[OutboundPath], 
     return 0
 
 
+async def switch_site(ctx: AppContext, name: str | None) -> None:
+    """Make a site active (or none), let the device routes follow, and say what changed.
+
+    The routes that the radio learned at the old site are saved for it and cleared, and the
+    routes saved for the new site come back (refer to
+    :meth:`~meshterm.services.device_routes.RouteKeeper.change_site`). Each step can be
+    undone by a change back, so nothing asks first. A notice says what changed, and only
+    when something changed.
+    """
+    try:
+        report = await ctx.routes.change_site(name)
+    except KeyError:
+        return  # the site was deleted while the page was open
+    except Exception as exc:  # noqa: BLE001 - the site changed. Only the routes did not follow
+        get_logger().warning("couldn't make the device routes follow the site: %s", exc)
+        await ctx.ui.dialog(
+            f"The site changed, but the radio refused a route change: {exc}",
+            [("OK", None)],
+            title="Device routes",
+            default=0,
+        )
+        return
+    notice = report_notice(report) if report is not None else ""
+    if notice:
+        await ctx.ui.dialog(f"{notice}.", [("OK", None)], title="Device routes", default=0)
+
+
 async def offer_site(ctx: AppContext, suggestion: SiteSuggestion) -> None:
     """Ask the user to use the site whose way out the radio hears, and say why.
 
@@ -677,7 +706,7 @@ async def offer_site(ctx: AppContext, suggestion: SiteSuggestion) -> None:
         default=2,
     )
     if answer == "use":
-        store.set_active(site.name)
+        await switch_site(ctx, site.name)
     elif answer == "never":
         ctx.preferences.set("suggest_site", False)
         ctx.preferences.save()

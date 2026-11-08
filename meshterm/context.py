@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from .services.chat_service import ChatService
     from .services.clock_sync import ClockSync
     from .services.courier import CourierService
+    from .services.device_routes import RouteKeeper
     from .services.device_state import DeviceState
     from .services.event_hub import EventHub
     from .services.monitor_service import MonitorService
@@ -203,6 +204,7 @@ class AppContext:
     _battery: BatteryService | None = field(default=None, init=False, repr=False)
     _places: PlaceService | None = field(default=None, init=False, repr=False)
     _site_suggest: SiteSuggester | None = field(default=None, init=False, repr=False)
+    _routes: RouteKeeper | None = field(default=None, init=False, repr=False)
     _devstate: DeviceState | None = field(default=None, init=False, repr=False)
     _basemap_source: BasemapSource | None = field(default=None, init=False, repr=False)
     _ui: Ui | None = field(default=None, init=False, repr=False)
@@ -526,6 +528,21 @@ class AppContext:
 
             self._site_suggest = SiteSuggester(self)
         return self._site_suggest
+
+    @property
+    def routes(self) -> RouteKeeper:
+        """Return the device-route service of the session, and create it at first use.
+
+        The actions (forget, set, keep) work at once. The interactive session also starts
+        the service with the other always-on services. Then it writes kept routes back when
+        the radio replaces them, and reconciles the routes at each connection (refer to
+        :mod:`meshterm.services.device_routes`). Scripted CLI runs never start it.
+        """
+        if self._routes is None:
+            from .services.device_routes import RouteKeeper
+
+            self._routes = RouteKeeper(self)
+        return self._routes
 
     @property
     def battery(self) -> BatteryService:
@@ -947,6 +964,8 @@ class AppContext:
         await self._reconcile_channels()
         if self._device is not None:
             self.clock_sync.on_connected(self._device)
+        if self._device is not None and self._routes is not None:
+            self._routes.on_connected(self._device)
 
     async def _reconcile_channels(self) -> None:
         """Replay the remembered channels that the device does not report.
@@ -1097,6 +1116,8 @@ class AppContext:
             await self._places.aclose()
         if self._site_suggest is not None:
             await self._site_suggest.aclose()
+        if self._routes is not None:
+            await self._routes.aclose()
         if self._watchtower is not None:
             await self._watchtower.aclose()
         if self._clock_sync is not None:

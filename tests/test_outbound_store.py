@@ -125,8 +125,8 @@ def test_the_file_is_written_from_the_records(tmp_path: Path) -> None:
     written = json.loads(path.read_text(encoding="utf-8"))
     assert written == {
         "active": "Home",
-        "sites": [{"name": "Home", "paths": [["3d63"]]}],
-        "devices": {DEVICE: {"name": "Roof", "paths": [["3d"]]}},
+        "sites": [{"name": "Home", "paths": [["3d63"]], "kept": {}, "saved": {}}],
+        "devices": {DEVICE: {"name": "Roof", "paths": [["3d"]], "kept": {}}},
     }
 
 
